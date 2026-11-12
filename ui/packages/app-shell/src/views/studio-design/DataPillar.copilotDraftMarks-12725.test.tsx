@@ -18,12 +18,23 @@
  *    neither does a published object with no draft.
  *
  * The rail holds the REAL registered `ObjectFieldInspector`.
+ *
+ * objectstack#32610 — the same marks after a copilot write that lands while
+ * the field is open: the pillar re-reads the open object on the assistant
+ * bus's pulse (`emitMetadataRefresh`, sent by `ChatPane` as the copilot's
+ * drafted result lands and as its undo finishes). Pinned:
+ *  - the open field properties re-read: the chip, the copilot's help text,
+ *    and a field the same draft added is on the Form canvas, the rail open;
+ *  - a re-read that no longer has the open field closes its properties;
+ *  - CONTROL: a pulse while the buffer's save is in flight is held, not
+ *    dropped, and replaces nothing until that save lands; a pulse re-reads
+ *    the open object only, never another one in the rail.
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const objectDef = {
@@ -42,7 +53,14 @@ let draftEnvelope: Record<string, unknown> | null = null;
 
 const mockClient = {
   save: vi.fn(async () => ({})),
-  list: vi.fn(async (type: string) => (type === 'object' ? [{ name: 'showcase_task', label: 'Task' }] : [])),
+  list: vi.fn(async (type: string) =>
+    type === 'object'
+      ? [
+          { name: 'showcase_task', label: 'Task' },
+          { name: 'showcase_project', label: 'Project' },
+        ]
+      : [],
+  ),
   listDrafts: vi.fn(async () => []),
   // objectstack#29793 — the stored draft is the layered read's `draft` layer.
   layered: vi.fn(async () => ({ effective: objectDef, code: objectDef, draft: draftEnvelope?.item ?? null })),
@@ -73,6 +91,7 @@ import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emp
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
 import { t, tFormat } from '../metadata-admin/i18n';
+import { emitMetadataRefresh } from '../../assistant/assistantBus';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -82,7 +101,10 @@ registerMetadataInspector('object', ObjectFieldInspector);
 beforeEach(() => {
   draftEnvelope = null;
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 const L = (key: string) => t(key, 'en-US');
 
@@ -162,5 +184,107 @@ describe('Data pillar field properties — the copilot’s draft marks (objectui
     const rail = await openRail('Renewals', 'renewal_count');
     expect(within(rail).queryByTestId('studio-draft-chip')).toBeNull();
     expect(within(rail).queryByTestId('studio-draft-source')).toBeNull();
+  });
+});
+
+/** The copilot's tool wrote this draft server-side: help text on Renewals and a new field. */
+function serveCopilotDraft() {
+  draftEnvelope = {
+    type: 'object',
+    name: 'showcase_task',
+    item: {
+      ...objectDef,
+      fields: {
+        ...objectDef.fields,
+        renewal_count: { ...objectDef.fields.renewal_count, inlineHelpText: 'Counts each renewal' },
+        impact_scope: { name: 'impact_scope', label: 'Impact scope', type: 'text' },
+      },
+      _draft: true,
+    },
+    version: 'v2',
+    draftChanges: [
+      { path: ['fields', 'renewal_count', 'inlineHelpText'], by: 'copilot', actor: 'usr_1', at: minutesAgo(0) },
+      { path: ['fields', 'impact_scope'], by: 'copilot', actor: 'usr_1', at: minutesAgo(0) },
+    ],
+  };
+}
+
+/** The pulse `ChatPane` sends as the copilot's drafted result lands (or its undo finishes). */
+async function copilotPulse() {
+  await act(async () => {
+    emitMetadataRefresh();
+  });
+}
+
+const draftReadsOf = (name: string) =>
+  (mockClient.getDraft.mock.calls as unknown as Array<[string, string]>).filter(([type, n]) => type === 'object' && n === name).length;
+
+describe('Data pillar field properties — a copilot write while the field is open (objectstack#32610)', () => {
+  it('the open field properties and the Form canvas re-read on the pulse, the rail still open', async () => {
+    const rail = await openRail('Renewals', 'renewal_count');
+    expect(within(rail).queryByTestId('studio-draft-chip')).toBeNull();
+    expect(screen.queryByText('Impact scope')).toBeNull();
+    const before = draftReadsOf('showcase_task');
+
+    serveCopilotDraft();
+    await copilotPulse();
+
+    await waitFor(() => expect(within(screen.getByTestId('data-field-inspector')).getByTestId('studio-draft-chip')).toBeInTheDocument());
+    const open = screen.getByTestId('data-field-inspector');
+    expect(within(open).getByDisplayValue('renewal_count')).toBeInTheDocument();
+    expect(within(open).getByDisplayValue('Counts each renewal')).toBeInTheDocument();
+    expect(await screen.findByText('Impact scope')).toBeInTheDocument();
+    expect(draftReadsOf('showcase_task')).toBe(before + 1);
+  });
+
+  it('a re-read that no longer has the open field closes its properties', async () => {
+    serveCopilotDraft();
+    await openRail('Impact scope', 'impact_scope');
+
+    // The undo discarded the draft: the object is back to its published fields.
+    draftEnvelope = null;
+    await copilotPulse();
+
+    await waitFor(() => expect(screen.queryByText('Impact scope')).toBeNull());
+    expect(screen.queryByTestId('data-field-inspector')).toBeNull();
+  });
+
+  it('CONTROL: a pulse during an unsent save is held — nothing is replaced until the save lands, then it is re-read', async () => {
+    const rail = await openRail('Renewals', 'renewal_count');
+    let landSave: (value: unknown) => void = () => {};
+    mockClient.save.mockImplementationOnce(() => new Promise((resolve) => (landSave = resolve)));
+    const label = within(rail).getByTestId('field-label-input');
+    fireEvent.change(label, { target: { value: 'Renewal total' } });
+    fireEvent.blur(label);
+    await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 8000 });
+    const before = draftReadsOf('showcase_task');
+
+    serveCopilotDraft();
+    await copilotPulse();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    // Held: no re-read, and the author's edit is what the rail shows.
+    expect(draftReadsOf('showcase_task')).toBe(before);
+    expect(within(screen.getByTestId('data-field-inspector')).getByTestId('field-label-input')).toHaveValue('Renewal total');
+    expect(screen.queryByText('Impact scope')).toBeNull();
+
+    // The author's save lands: the held pulse is released, not dropped.
+    await act(async () => {
+      landSave({});
+    });
+    await waitFor(() => expect(draftReadsOf('showcase_task')).toBe(before + 1), { timeout: 8000 });
+    expect(await screen.findByText('Impact scope')).toBeInTheDocument();
+  });
+
+  it('CONTROL: a pulse re-reads the open object only, never another one in the rail', async () => {
+    await openRail('Renewals', 'renewal_count');
+    const before = draftReadsOf('showcase_task');
+
+    serveCopilotDraft();
+    await copilotPulse();
+
+    await waitFor(() => expect(draftReadsOf('showcase_task')).toBe(before + 1));
+    expect(draftReadsOf('showcase_project')).toBe(0);
   });
 });

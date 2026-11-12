@@ -27,7 +27,9 @@
  *    of the base's view (ADR-0146 D2);
  *  - objectstack#30859: a pending draft served translated (zh-CN) is edited
  *    and saved as stored, with the author's labels; one whose stored copy the
- *    layers do not serve installs no buffer and is shown.
+ *    layers do not serve installs no buffer and is shown;
+ *  - objectstack#32610: a draft of the view the in-tab copilot writes is
+ *    re-read on the assistant bus's pulse, so the canvas shows its sections.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -35,7 +37,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Module scope as well as in the `vi.mock` factory below: the cold transform is paid
 // during collection, which no test or hook timeout clocks (AGENTS.md, flaky-test discipline).
 import '@object-ui/components';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -155,6 +157,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
+import { emitMetadataRefresh } from '../../assistant/assistantBus';
 
 const FORM = t('engine.studio.data.tab.form', 'en');
 const SECTION_NAME = t('engine.studio.designer.group.nameLabel', 'en');
@@ -344,5 +347,29 @@ describe('a pending form view draft is edited as stored, not as served (objectst
     );
     expect(sectionTitles()).not.toContain('基本信息');
     expect(saves().some(([ty]) => ty === 'view')).toBe(false);
+  });
+});
+
+describe('the Form tab follows a form view draft the copilot writes (objectstack#32610)', () => {
+  it('the view is re-read on the pulse, and the canvas shows the sections the draft holds', async () => {
+    serveObject([defaultViewItem()]);
+    await openForm();
+    await waitFor(() => expect(sectionTitles()).toEqual(['Basic info', 'Money details']));
+    const viewDraftReads = () =>
+      (mockClient.getDraft.mock.calls as unknown as Array<[string, string]>).filter(
+        ([type, name]) => type === 'view' && name === `${OBJECT}.form`,
+      ).length;
+    const before = viewDraftReads();
+
+    // The copilot's tool stored a draft of the view with one more section.
+    const drafted = defaultViewItem();
+    drafted.config.sections.push({ name: 'risk', label: 'Risk review', fields: ['notes'] });
+    srv.drafts.set(`${OBJECT}.form`, { served: drafted, stored: drafted });
+    await act(async () => {
+      emitMetadataRefresh();
+    });
+
+    await waitFor(() => expect(sectionTitles()).toEqual(['Basic info', 'Money details', 'Risk review']));
+    expect(viewDraftReads()).toBe(before + 1);
   });
 });
