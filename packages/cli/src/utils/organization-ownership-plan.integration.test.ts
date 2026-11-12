@@ -13,6 +13,20 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// Paid at collection, never inside a clocked test body: the plan's source
+// reaches each of these through a dynamic `import()` (via `unmanaged-tables.ts`
+// → `migrate/duplicates.ts` → `schema-migrate.ts`), and this package resolves
+// them through `dist/`, so a first call would transform the dependency's whole
+// module graph while a `testTimeout` runs (`check:test-source-alias`). This
+// decides only WHERE the load is paid.
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/metadata-protocol';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
 import {
   buildOrganizationOwnershipPlan,
   ceremonyDialectOf,
@@ -401,5 +415,33 @@ describe('ADR-0131 D10 preflight — the control: it writes nothing', () => {
     expect({ bytes: digest(), dump: dump() }).toEqual(before);
     expect(statements.length).toBeGreaterThan(20);
     expect(statements.filter((s) => !/^SELECT\b/.test(s.trim()))).toEqual([]);
+  });
+});
+
+/**
+ * [#32540, ruling C4] `@objectstack/metadata`'s `DatabaseLoader` keeps a row
+ * per binding of one package's action name, the bound object in
+ * `bundle_member` (NULL: object-less). The ceremony reads the column as a
+ * generic part of the overlay key, never as a locale: one package's `digest`
+ * on o1, on o2 and object-less are three keys, not a reported duplicate; a
+ * second row of one binding still is one. (`stored-package-references.ts`'s
+ * pair-member walk reads `ITEM_KEY_DISCRIMINATORS` types only, so never an
+ * action row; its package-less walk carries the column as a finding's label.)
+ */
+describe('[#32540] an action\'s bindings, its object in `bundle_member`, are distinct overlay keys', () => {
+  it('one package\'s action on o1, o2 and object-less is no duplicate; a second o1 row is one', async () => {
+    const duplicates = async () =>
+      table(await plan('isolated'), 'sys_metadata').categories.find((c) => c.id === 'environment-overlay-duplicates')?.groups;
+    db.exec(`ALTER TABLE sys_metadata ADD COLUMN bundle_member TEXT;
+      UPDATE sys_metadata SET bundle_member = 'en-US' WHERE id = 'md_2';
+      UPDATE sys_metadata SET bundle_member = 'fr-FR' WHERE id = 'md_3';
+      INSERT INTO sys_metadata (id, organization_id, type, name, state, package_id, bundle_member) VALUES
+        ('act_o1', NULL, 'action', 'digest', 'active', 'com.acme.alpha', 'o1'),
+        ('act_o2', NULL, 'action', 'digest', 'active', 'com.acme.alpha', 'o2'),
+        ('act_global', NULL, 'action', 'digest', 'active', 'com.acme.alpha', NULL);`);
+    expect(await duplicates()).toBe(0);
+    db.exec(`INSERT INTO sys_metadata (id, organization_id, type, name, state, package_id, bundle_member)
+      VALUES ('act_o1_again', NULL, 'action', 'digest', 'active', 'com.acme.alpha', 'o1');`);
+    expect(await duplicates()).toBe(1);
   });
 });

@@ -229,6 +229,15 @@ export function operationMessageTranslationKey(messageKey: string): string {
  *     caller cannot read, or reads only partially masked, is not named to
  *     them). When any refused field fails either test,
  *     `field_edit_denied_opaque` is used and no field is named.
+ *
+ * `field_label_quoted` and `field_label_list_separator` are not sentences: they
+ * are the locale's rules for spelling that `{{fields}}` list. Each label is
+ * rendered through `field_label_quoted` (`{{label}}` is the one placeholder)
+ * and the quoted labels are joined with `field_label_list_separator`. They
+ * live here, beside the sentence they fill, so a locale added to this catalog
+ * carries its list rules in the same edit — the every-locale-defines-every-key
+ * test refuses a locale that omits them — and so they resolve by the same
+ * ladder as the sentence, a deployment's `errors.<key>` override included.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
@@ -256,6 +265,8 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'You do not have permission to edit {{fields}}. Undo those changes and try again, or contact your administrator if you need access.',
     field_edit_denied_opaque:
       'You do not have permission to edit one or more of the fields you changed. Undo those changes and try again, or contact your administrator if you need access.',
+    field_label_quoted: '“{{label}}”',
+    field_label_list_separator: ', ',
     delete_restricted:
       'This {{object}} is still referenced by {{count}} {{dependentObject}} record(s) through “{{field}}”. Delete or reassign them first.',
     delete_restricted_required:
@@ -278,6 +289,8 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     record_queue_assign_denied: '您无权在该队列中创建记录，请将队列留空或选择您所属的队列，或联系管理员。',
     field_edit_denied: '您无权编辑{{fields}}，请撤销这些修改后重试，或联系管理员。',
     field_edit_denied_opaque: '您无权编辑所修改的部分字段，请撤销这些修改后重试，或联系管理员。',
+    field_label_quoted: '「{{label}}」',
+    field_label_list_separator: '、',
     delete_restricted:
       '该{{object}}正被 {{count}} 条{{dependentObject}}记录通过「{{field}}」引用，请先删除或改派这些记录。',
     delete_restricted_required:
@@ -311,6 +324,8 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       '{{fields}}を編集する権限がありません。その変更を取り消して再試行するか、管理者にお問い合わせください。',
     field_edit_denied_opaque:
       '変更した項目の一部を編集する権限がありません。その変更を取り消して再試行するか、管理者にお問い合わせください。',
+    field_label_quoted: '「{{label}}」',
+    field_label_list_separator: '、',
     delete_restricted:
       'この{{object}}は {{count}} 件の{{dependentObject}}レコードから「{{field}}」で参照されています。先にそれらを削除するか、参照先を変更してください。',
     delete_restricted_required:
@@ -345,6 +360,8 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'No tiene permiso para editar {{fields}}. Deshaga esos cambios e inténtelo de nuevo, o póngase en contacto con su administrador si necesita acceso.',
     field_edit_denied_opaque:
       'No tiene permiso para editar uno o varios de los campos que ha modificado. Deshaga esos cambios e inténtelo de nuevo, o póngase en contacto con su administrador si necesita acceso.',
+    field_label_quoted: '«{{label}}»',
+    field_label_list_separator: ', ',
     delete_restricted:
       '{{count}} registro(s) de {{dependentObject}} todavía hacen referencia a este {{object}} mediante «{{field}}». Elimínelos o reasígnelos primero.',
     delete_restricted_required:
