@@ -366,7 +366,11 @@ describe('#32183 — a disable moves no binding: R8–R11 ask every holder', () 
         for (const name of [TWO_HOLDERS, REVERSED]) {
             expect([name, automation.flowHolder(name)]).toMatchObject([name, { status: 'resolved', holder: { kind: 'package', packageId: A } }]);
             expect([name, automation.durableFlowHolder(name)?.status]).toEqual([name, 'refused']);
+            // [main #32302 merged in] The credential save door's stamp is the
+            // served holder's package, as its refusal is the served refusal.
+            expect([name, automation.flowHolderPackage(name)]).toEqual([name, A]);
         }
+        expect(automation.flowHolderPackage(PARKED)).toBeNull();
         expect(servedConnector('parked_api', null)?.status).toBe('not-found');
         expect(servedConnector('parked_api', null, { includeDisabledPackages: true }))
             .toMatchObject({ status: 'resolved', holder: { kind: 'package', packageId: D } });
