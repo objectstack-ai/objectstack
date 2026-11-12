@@ -32,6 +32,9 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
+// The pillar reaches `@objectstack/lint`'s dynamic imports; their first load is
+// paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { I18nProvider, createI18n } from '@object-ui/i18n';
 // objectstack#29727 — the zh pins read the studio zh catalogue, which loads lazily.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
@@ -247,6 +250,25 @@ describe('objectstack#28573 — New similar on a read-only base permission set',
       tFormat('engine.studio.access.newSimilar.done', 'en', { name: COPY_NAME, package: CUSTOM_PKG }),
     );
     expect(strip).toHaveTextContent(NOTICE);
+  });
+
+  it("objectstack#32774 — clones the base's set by its package where the environment holds the name too", async () => {
+    // The published list the matrix reads its holder from serves two holders
+    // of the name: the environment's own set and the base's.
+    const list = clientImpl.list.getMockImplementation()!;
+    clientImpl.list.mockImplementation(async (type: string, opts: { packageId?: string } = {}) =>
+      type === 'permission' && !opts.packageId
+        ? [
+            { name: BASE_SET, label: 'Sales rep', _packageId: 'sys_metadata' },
+            { name: BASE_SET, label: 'Sales rep', _packageId: BASE_PKG },
+          ]
+        : list(type, opts),
+    );
+    renderAccess();
+    await fillAndCreate();
+    await waitFor(() => expect(calls).toHaveLength(1));
+    // CONTROL (the case above): one holder posts to the door by the name alone.
+    expect(calls[0]).toEqual({ url: `${DOOR}?package=${BASE_PKG}`, method: 'POST', body: { name: COPY_NAME, label: COPY_LABEL } });
   });
 
   for (const pkg of ['absent', null] as const) {

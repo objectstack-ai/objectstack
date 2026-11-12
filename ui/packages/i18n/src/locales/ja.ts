@@ -335,6 +335,10 @@ const ja = {
     registryRef: {
       loadFailed: "一覧を読み込めませんでした。名前を直接入力できます。",
       notFound: "{{name}}（見つかりません）",
+      holderPackage: "{{item}} · パッケージ {{package}}",
+      holderEnvironment: "{{item}} · この環境で定義",
+      holderUnresolved: "{{name}}（複数のパッケージが提供しており、パッケージが指定されていません）",
+      holderNeedsPackage: "このフォームでは権限セットを名前でのみ指定できます。同じ名前の権限セットを複数のパッケージが提供している場合、ここで選べるのはこの環境で定義されたものだけです。",
     },
     preferenceOption: {
       allTopics: "すべてのトピック（{{value}}）",
@@ -2295,6 +2299,7 @@ const ja = {
       dismiss: "チェックリストを非表示",
       showDone: "完了した項目を表示（{{done}}）",
       hideDone: "完了した項目を折りたたむ",
+      optional: "任意",
       set: "設定",
       change: "変更",
       view: "表示",
@@ -2725,6 +2730,7 @@ const ja = {
         invalidCredentials: "メールアドレスまたはパスワードが正しくありません。失敗が続くと、サインインはしばらく一時停止されます。パスワードをお忘れの場合は、リセットするとすぐにサインインできます。",
         invalidCredentialsNoMail: 'メールアドレスまたはパスワードが正しくありません。失敗が続くと、サインインはしばらく一時停止されます。パスワードをお忘れの場合は、管理者にリセットを依頼してください。',
         emailNotVerified: "サインインする前にメールアドレスを確認してください。",
+        accountDeactivated: "あなたのアカウントは所属する組織によって無効にされました。管理者にお問い合わせください。",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -3996,6 +4002,7 @@ const ja = {
       get_authoring_rules: "作成ルールを読む",
       get_metadata_schema: "メタデータの形式を調べる",
       get_package: "パッケージの情報を確認する",
+      get_record_history: "このレコードの履歴を読む",
       list_metadata: "既存のメタデータを一覧表示する",
       list_objects: "既存のオブジェクトを一覧表示する",
       list_packages: "既存のパッケージを一覧表示する",

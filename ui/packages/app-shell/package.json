@@ -71,7 +71,7 @@
   "scripts": {
     "build": "NODE_OPTIONS=--max-old-space-size=4096 tsc && node ../../scripts/check-dist-completeness.mjs",
     "test": "vitest run --root ../.. packages/app-shell/",
-    "type-check": "NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit && NODE_OPTIONS=--max-old-space-size=4096 tsc -p tsconfig.test.json",
+    "type-check": "NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit && NODE_OPTIONS=--max-old-space-size=8192 tsc -p tsconfig.test.json",
     "lint": "eslint ."
   },
   "dependencies": {

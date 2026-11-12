@@ -77,7 +77,7 @@ import {
     mutationEventMember,
     resolveBundleMemberSelector,
 } from './protocol-bundle-members.js';
-import { mutationEventPackage } from './protocol-mutation-package.js';
+import { mutationEventPackage, projectorEventPackage } from './protocol-mutation-package.js';
 import { compareAuditInstants, isoFromValidDate } from './protocol-version-tokens.js';
 import {
     clientFacingFailureCode,
@@ -1482,6 +1482,8 @@ export class ProtocolPackageCommitsFacet {
                             name: it.name,
                             state: 'deleted',
                             organizationId: null,
+                            // [#31698] The commit's row (ADR-0150 D4).
+                            ...projectorEventPackage(PLURAL_TO_SINGULAR[it.type] ?? it.type, commitPackageId),
                         });
                         host.emitMetadataMutation({
                             type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
@@ -1639,6 +1641,8 @@ export class ProtocolPackageCommitsFacet {
                         state: 'active',
                         organizationId: null,
                         body: restored.item.body,
+                        // [#31698] The row this restore wrote (ADR-0150 D4).
+                        ...projectorEventPackage(PLURAL_TO_SINGULAR[it.type] ?? it.type, restorePackageId),
                     });
                     // [#14179] The restore limb's half of the same repair: a
                     // revert is a live write, so it funnels through the ONE
@@ -2067,6 +2071,8 @@ export class ProtocolPackageCommitsFacet {
                 state: 'active',
                 organizationId: null,
                 body: result.item.body,
+                // [#31698] The row this rollback wrote (ADR-0150 D4).
+                ...projectorEventPackage(singularType, rollbackPackageId),
             });
             // [#14179] A rollback is a live write like any other (#4521, the
             // line the write-through above is made under) — so it announces
