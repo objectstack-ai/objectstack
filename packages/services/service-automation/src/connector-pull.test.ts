@@ -709,13 +709,16 @@ describe('[#32071] connector pull — a package caller reads the mapping from it
         expect(h.handler).not.toHaveBeenCalled();
     });
 
-    it('a disabled package\'s own mapping beside an enabled holder: its caller reads its own, withheld — 404 (no package: 409)', async () => {
+    it('a disabled package\'s own mapping beside an enabled holder: its caller reads its own, withheld — 404 (no package: the enabled holder\'s, #32183)', async () => {
         // The one refusal that becomes a miss (declared in the changeset):
         // the caller's own item is step 1, then withheld as disabled.
         const h = overRegistry((r) => { install(r, ALPHA); install(r, CALLER); ship(r, ALPHA); ship(r, CALLER); r.disablePackage(CALLER); });
-        expect(answerOf(await pullError(h)), 'no-package (Part A)').toBe('409 mapping_name_refused');
         expect(answerOf(await pullError(h, CALLER))).toBe('404 mapping_not_found');
         expect(h.handler).not.toHaveBeenCalled();
+        // [#32183] A disabled package holds no name, so the read naming no
+        // package has one holder: alpha's mapping (BASE f0f729e7: 409 naming both).
+        expect(answerOf(await pullError(h)), 'no-package').toBe('pulled');
+        expect(pathPulled(h)).toBe('alpha');
     });
 
     it('a disabled closure holder\'s mapping answers mapping_not_found, as the no-package read does', async () => {
@@ -735,16 +738,27 @@ describe('[#32071] connector pull — a package caller reads the mapping from it
         expect(answerOf(await pullError(h, CALLER))).toBe('404 mapping_not_found');
     });
 
-    it('CONTROL (#32183\'s class): a disabled holder beside an enabled one in the closure still counts — refused, as today', async () => {
+    it('[#32183] a disabled holder beside an enabled one in the closure holds no name: the enabled holder\'s mapping is pulled; re-enabled, refused naming both', async () => {
+        // BASE (main f0f729e7): the disabled holder still counted, so both the
+        // package caller and the read naming no package were refused 409
+        // naming both. The served holder set (`packageScopedHoldersOf`) now
+        // leaves it out, for this resolver as for every D3 door.
         const h = overRegistry((r) => {
             install(r, ALPHA); install(r, BETA); install(r, CALLER, [ALPHA, BETA]);
             ship(r, ALPHA); ship(r, BETA); r.disablePackage(ALPHA);
         });
-        expect(answerOf(await pullError(h)), 'no-package (main)').toBe('409 mapping_name_refused');
+        expect(answerOf(await pullError(h, CALLER))).toBe('pulled');
+        expect(pathPulled(h)).toBe('beta');
+        h.handler.mockClear();
+        expect(answerOf(await pullError(h)), 'no-package').toBe('pulled');
+        expect(pathPulled(h)).toBe('beta');
+        h.handler.mockClear();
+        h.registry.enablePackage(ALPHA);
         const err = await pullError(h, CALLER);
         expect(answerOf(err)).toBe('409 mapping_name_refused');
         expect(err?.message).toContain(ALPHA);
         expect(err?.message).toContain(BETA);
+        expect(answerOf(await pullError(h)), 'no-package').toBe('409 mapping_name_refused');
         expect(h.handler).not.toHaveBeenCalled();
     });
 

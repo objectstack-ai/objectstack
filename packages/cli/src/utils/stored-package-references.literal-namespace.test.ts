@@ -74,6 +74,36 @@ describe('the upgrade report names an installed package under an address-literal
   });
 });
 
+describe('#32183 — the stored-reference report judges every holder, as the backfills do', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+
+  // [contract review S2] Both registration orders.
+  it.each([['enabled first', [A, B]], ['disabled first', [B, A]]] as const)('a row naming a template two packages hold stays refused while one of them is disabled, naming both (%s)', async (_order, order) => {
+    for (const [id, namespace] of [[A, 'alpha'], [B, 'beta']]) registry.installPackage(manifest(id, namespace), 'marketplace');
+    for (const id of order) {
+      registry.registerItem('email_template', { name: 'shared_notice', label: 'n', subject: 'n', body: 'n', locale: 'en-US' }, 'name' as never, id);
+    }
+    registry.sealBareNameHolders();
+    registry.disablePackage(B);
+    vi.spyOn(registry, 'getObject').mockImplementation(((name: string) => (name === 'sys_email_template' ? { name } : undefined)) as never);
+    let asked = 0;
+    const engine = {
+      find: async (table: string) => (table === 'sys_email_template' && asked++ === 0
+        ? [{ id: 't1', name: 'shared_notice', package_id: null }]
+        : []),
+    } as never;
+
+    const answer = await collectStoredPackageReferences(engine, registry as unknown as StoredReferenceRegistry);
+    expect(answer.stored).toEqual([
+      expect.objectContaining({
+        d8: 'R20', table: 'sys_email_template', id: 't1', name: 'shared_notice', reason: 'ambiguous',
+        candidates: order.map((packageId) => expect.objectContaining({ packageId })),
+      }),
+    ]);
+  });
+});
+
 /**
  * [#31699 F2, the epic's ruling] A locale Studio added in an App's pair, which
  * two packages of the App both ship the template of, cannot say whose member
@@ -130,6 +160,15 @@ describe('[#31699 F2] the upgrade report lists a pair member row two holders cou
         { holder: 'package', packageId: Y, address: 'suitey/welcome' },
       ],
     }]);
+  });
+
+  it('[#32183] one of the two holders disabled: the row is still listed naming both (the report reads every holder)', async () => {
+    tpl(X);
+    tpl(Y);
+    pairRow();
+    registry.disablePackage(Y);
+    expect((await collectStoredPackageReferences(engine, carrying())).pairMembers.map((f) => f.candidates.map((c) => ('packageId' in c ? c.packageId : c.holder))))
+      .toEqual([[X, Y]]);
   });
 
   it('CONTROL: one holder of the pair, or a row that declares its base, is not listed', async () => {
@@ -206,6 +245,15 @@ describe('[#31699] the upgrade report lists a package-less row two holders could
     ]);
   });
 
+  it('[#32183] one of the two holders disabled: the package-less row is still listed naming both (the report reads every holder)', async () => {
+    tpl(X);
+    tpl(Y);
+    envRow('row_fr', 'email_template', 'welcome', 'fr-FR');
+    registry.disablePackage(Y);
+    expect((await collectStoredPackageReferences(engine, carrying())).packageLessRows.map((f) => f.candidates.map((c) => ('packageId' in c ? c.packageId : c.holder))))
+      .toEqual([[X, Y]]);
+  });
+
   it('[#32407] a narrowed type its readers do not read by package (`action`) is listed too', async () => {
     for (const id of [X, Y]) {
       registry.registerItem('action', { name: 'approve', label: 'Approve', type: 'url', target: 'https://example.com' }, 'name' as never, id);
@@ -219,6 +267,16 @@ describe('[#31699] the upgrade report lists a package-less row two holders could
         { holder: 'package', packageId: Y, address: 'betay/approve' },
       ],
     }]);
+  });
+
+  it('[#32183 × #32407] one of two holders of a narrowed type (`action`) disabled: the package-less row is still listed naming both', async () => {
+    for (const id of [X, Y]) {
+      registry.registerItem('action', { name: 'approve', label: 'Approve', type: 'url', target: 'https://example.com' }, 'name' as never, id);
+    }
+    envRow('row_act', 'action', 'approve');
+    registry.disablePackage(Y);
+    expect((await collectStoredPackageReferences(engine, carrying())).packageLessRows.map((f) => f.candidates.map((c) => ('packageId' in c ? c.packageId : c.holder))))
+      .toEqual([[X, Y]]);
   });
 
   it('CONTROL: one holder, or a row bound to a package, is not listed', async () => {
