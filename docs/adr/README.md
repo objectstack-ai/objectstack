@@ -6,19 +6,19 @@
 
 - **One registry per repository, numbers never reassigned, files never moved** (AGENTS.md Prime Directive 13). A reversed decision is a new ADR or an amended status line, never a quiet changeset. Before changing behaviour in territory an ADR governs, grep this index for the surface.
 - **The status line is the single fact.** Every record carries, right under its title, one line that starts `**Status**: ` followed by a keyword — `Partially implemented`, `Accepted`, `Proposed`, `Draft`, `Superseded`, `Withdrawn`, `Deferred`, `Implemented`, `Revised`, `Amended` — and any free prose after it (dates, implementation notes, amendments). This index is generated from that line by `scripts/adr-index.mjs`; a record whose line is missing or names no keyword is listed as **Unparsed** and reported, never guessed.
-- **Status hygiene.** A PR that lands an ADR's implementation flips that ADR's `**Status**:` line to `Accepted — implemented` with one line of evidence (key file + test), in the same PR. (The rule the retired `PRIORITIZATION.md` review carried; it lives here now.)
+- **Status hygiene.** A PR that lands an ADR's implementation leaves `docs/adr/**` untouched. After it merges, the landing seat files the status flip as its own `domain:skills` card, and that separate PR sets the ADR's `**Status**:` line to `Accepted — implemented` with one line of evidence (key file + test), citing the merge commit (ruling record 6797014134). (The rule the retired `PRIORITIZATION.md` review carried, as that ruling amended it; it lives here now.)
 - **Shared numbers are cited by stem.** Where two unrelated records carry one number, a bare `ADR-NNNN` is one of two; the unambiguous id is the record's filename stem prefixed `ADR-` (`ADR-0057-system-data-lifecycle-and-retention`), which `scripts/check-adr-anchors.mjs` resolves to that one record. Versions of one decision share a stem and add `.vN`; cite a version as `ADR-0006 v4` in prose or `ADR-0006-project-environment-split.v4` where a checker reads it.
 - **The ObjectUI registry (`ui/docs/adr/`) keeps its own sequence**, imported with the ui merge. Its numbers overlap this registry's and mean something else; this index lists them under the `ui-` prefix, and a citation of one is spelled `ObjectUI ADR-NNNN`, which the anchor checker recognises as another registry's.
 - **Decisions that draw the open/closed or commercial boundary live in `objectstack-ai/cloud`** and are cited from here as `cloud ADR-NNNN`, never as a bare number.
 
 ## Summary
 
-154 records under `docs/adr/` (149 numbers), 11 under `ui/docs/adr/` (listed separately below).
+155 records under `docs/adr/` (150 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
 | Accepted | 133 |
-| Proposed | 7 |
+| Proposed | 8 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **154** |
+| **Total** | **155** |
 
 ## Shared numbers
 
@@ -175,7 +175,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0103](./0103-managedby-write-policy-and-engine-write-guard.md) | `managedBy` write policy — split the overloaded `system` bucket, enforce engine-owned writes | Accepted — (D5 completed in v17 — see the #3355 addendum at the end: | 2026-07-19 | — | — |
 | [ADR-0104](./0104-field-runtime-value-shape-contract.md) | Field runtime value-shape as a first-class contract — spec-owned value schemas, typed action handlers, file-a… | Accepted — 2026-07-22 — staged per D4. D1 landed (#3429), D2 | 2026-07-22 | — | — |
 | [ADR-0105](./0105-group-tenancy-posture-and-first-class-org-scope.md) | Group Tenancy Posture — Organization Scope as a First-Class Authorization Dimension | Accepted — 2026-07-27; proposed 2026-07-25 — Phase 0/1 implemented (#3559)… | 2026-07-27 | — | — |
-| [ADR-0106](./0106-metadata-plane-fls-object-schema-masking.md) | Metadata-Plane Field-Level Security — Per-Caller Masking of Object Schemas | Accepted — 2026-07-27; implemented 2026-08-08 — #3682 | 2026-07-27 | — | — |
+| [ADR-0106](./0106-metadata-plane-fls-object-schema-masking.md) | Metadata-Plane Field-Level Security — Per-Caller Masking of Object Schemas | Accepted — 2026-07-27; implemented 2026-08-08 — #3682 · Amended (2026-11-1… | 2026-07-27 | — | — |
 | [ADR-0107](./0107-withdrawn-hook-body-write-set-static-gap.md) | Withdrawn — this number is retired and must not be reused | Withdrawn — 2026-07-28. This file is a tombstone, not a decision: nothing i… | 2026-07-28 | — | — |
 | [ADR-0108](./0108-membership-grade-is-not-a-capability-channel.md) | Membership Grade Is Not a Capability Channel — the `sysmember.role` Vocabulary Is Closed | Accepted — 2026-07-28 — implemented in the same PR: the two `role` selects… | 2026-07-28 | — | — |
 | [ADR-0109](./0109-ai-tool-authoring-model.md) | The AI tool authoring model — the default third-party path needs no tool records | Accepted — implemented (Phase 1) (2026-07-28; revised same day before acce… | 2026-07-28 | — | — |
@@ -220,6 +220,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md) | Behavioural metadata is addressed by (package, name) — objects keep the literal prefix; ADR-0028 re-opened fo… | Proposed — 2026-11-08. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-11-08 | ADR-0028 | — |
 | [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md) | An AI service account — a headless agent is a registered principal of its own, with its own keys and its own… | Proposed — 2026-11-08 — draft. `docs/adr/` is a Tier H governed surface: t… | 2026-11-08 | — | — |
 | [ADR-0152](./0152-scim-group-grants-only-an-ordinary-permission-set-through-a-per-connection-mapping.md) | A SCIM group grants only an ordinary permission set, through a per-connection mapping row a platform administ… | Accepted — implemented, 2026-11-08, recording the maintainer's ruling of 2… | 2026-11-08 | — | — |
+| [ADR-0153](./0153-one-way-sync-in-beside-federation.md) | One-way sync-in beside federation — a connector or a federated object, a warehouse table included, fills an o… | Proposed — 2026-11-10. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-11-10 | — | — |
 | [ADR-0154](./0154-audit-ledger-tamper-evidence-sealer-signed-checkpoints-amendments-verify.md) | The audit ledger is tamper-evident — an asynchronous sealer signs per-organization checkpoints, redaction and… | Proposed — 2026-11-10 — draft. This record declares; it implements nothing… | 2026-11-10 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
