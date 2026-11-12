@@ -945,6 +945,8 @@ const pt = {
     addGroup: "Adicionar campo de grupo",
     collapsedByDefault: "Recolhido por padrão",
     removeGroup: "Remover",
+    groupingUnstoredNotice: "Esta lista não pode ser agrupada por {{fields}}: o valor é calculado ao ser exibido e não é armazenado. A lista é exibida sem esse agrupamento.",
+    groupingUnstoredRemove: "Remover do agrupamento",
     inlineEditShort: "Edição em linha",
     inlineEditLabel: "Editar registros em linha (clique em uma célula para editar)",
   },

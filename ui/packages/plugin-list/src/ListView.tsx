@@ -17,6 +17,8 @@ import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './Lis
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
 import {
   ViewSettingsPopover,
+  groupFieldOptions,
+  type ViewSettingsField,
   type ViewSettingsRecordOpen,
   PHONE_POPOVER_GUTTER,
   PHONE_TOUCH_TARGET,
@@ -50,7 +52,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // (objectui#5134).
 import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
-import { platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
+import { isVirtualSearchField, platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
@@ -2357,7 +2359,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     }
     return fields.length > 0 ? { fields } : undefined;
   }, [schema.grouping, schema.groupBy, schema.groupBy2]);
-  const [groupingConfig, setGroupingConfig] = React.useState(initialGroupingConfig);
+  // The grouping the reader chose: what both Group editors show and edit, and
+  // what is compared with the view's own. What the list QUERIES with is
+  // `groupingConfig`, derived from it below.
+  const [chosenGroupingConfig, setGroupingConfig] = React.useState(initialGroupingConfig);
   const [showGroupPopover, setShowGroupPopover] = React.useState(false);
   // The one door a USER's grouping edit goes through, from both editors, so
   // the host hears of it (objectui#11860). The re-sync below sets the state
@@ -2377,6 +2382,57 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       setGroupingConfig(initialGroupingConfig);
     }
   }, [initialGroupingConfig]);
+
+  /**
+   * A reader's grouping the server refuses is not queried (objectstack#32631).
+   *
+   * The aggregate door refuses a group key naming a VIRTUAL field (a
+   * `formula`: computed on read, no stored column) with `400 INVALID_FIELD`,
+   * judged by the spec's `isVirtualSearchField`; this reads the same predicate
+   * over the same declaration. Neither Group editor offers such a field
+   * (`groupFieldOptions`), but a reader's grouping also arrives from where the
+   * host keeps it, a URL above all, and one that names such a field turned the
+   * whole list into the grid's load-error panel, kept there by the URL.
+   *
+   * So a level the READER added that names one is left out of the query, and
+   * the list says so above its rows (`list-grouping-unstored-notice`), with a
+   * button that writes the grouping without it back through `changeGrouping`.
+   * A level whose field the VIEW groups by (`viewDefaults.grouping`, else the
+   * schema's own) is queried as declared, and its refusal stays the error
+   * panel: that is a defect of the view's metadata, for its author to see.
+   * Nothing is judged before the object's declaration is read (`objectDef`);
+   * the list's own fetch waits for that read too.
+   *
+   * `groupingConfig` keeps the chosen value's identity whenever nothing is
+   * left out, and a reduced value is cached on the chosen value and the names
+   * left out, never on a memo identity (AGENTS.md #10): the fetch effect
+   * re-runs on it.
+   */
+  const declaredGroupingFieldNames = new Set(
+    ((viewDefaults && 'grouping' in viewDefaults ? viewDefaults.grouping : initialGroupingConfig)?.fields ?? [])
+      .map((level) => level.field),
+  );
+  const unstoredGroupingFields = (chosenGroupingConfig?.fields ?? [])
+    .map((level) => level.field)
+    .filter((field) => !declaredGroupingFieldNames.has(field)
+      && isVirtualSearchField(objectDef?.fields?.[field] as SearchFieldMeta | undefined));
+  const reducedGroupingRef = React.useRef<{
+    chosen: typeof chosenGroupingConfig;
+    key: string;
+    value: typeof chosenGroupingConfig;
+  } | null>(null);
+  let groupingConfig = chosenGroupingConfig;
+  if (chosenGroupingConfig && unstoredGroupingFields.length > 0) {
+    const key = JSON.stringify(unstoredGroupingFields);
+    const cached = reducedGroupingRef.current;
+    if (cached && cached.chosen === chosenGroupingConfig && cached.key === key) {
+      groupingConfig = cached.value;
+    } else {
+      const kept = chosenGroupingConfig.fields.filter((level) => !unstoredGroupingFields.includes(level.field));
+      groupingConfig = kept.length > 0 ? { ...chosenGroupingConfig, fields: kept } : undefined;
+      reducedGroupingRef.current = { chosen: chosenGroupingConfig, key, value: groupingConfig };
+    }
+  }
 
   /**
    * Does THIS surface page server-side, and where does its window start?
@@ -5829,15 +5885,22 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // or name, and every column a reader added) is listed under the label the
   // definition declares, the source the grid's header falls back to, rather
   // than under its machine name.
-  const allFields = React.useMemo(() => {
+  //
+  // objectstack#32631 — a field the object declares virtual (a `formula`)
+  // carries `groupable: false`: the server refuses it as a group key, so
+  // neither Group editor offers it (`groupFieldOptions`). Hide fields and Row
+  // color still list it.
+  const allFields = React.useMemo((): ViewSettingsField[] => {
     const definitionLabel = (name: string): string | undefined => {
       const label = objectDef?.fields?.[name]?.label;
       return typeof label === 'string' && label ? label : undefined;
     };
+    const groupability = (name: string): Pick<ViewSettingsField, 'groupable'> =>
+      isVirtualSearchField(objectDef?.fields?.[name] as SearchFieldMeta | undefined) ? { groupable: false } : {};
     return (Array.isArray(schema.columns) ? (schema.columns as any[]) : []).flatMap((f: any) => {
       if (typeof f === 'string') {
         if (!canReadField(perms, schema.objectName, f)) return [];
-        return [{ name: f, label: tFieldLabel(f, definitionLabel(f) || f) }];
+        return [{ name: f, label: tFieldLabel(f, definitionLabel(f) || f), ...groupability(f) }];
       }
       // `name` here is this popover's OWN key (it drives `hiddenFields`), which
       // is why it keeps that shape — but the value is the column identity, so
@@ -5846,7 +5909,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       // No resolvable identity → nothing to hide or show; it used to render a
       // checkbox keyed `undefined` that could never match a column.
       if (!name || !canReadField(perms, schema.objectName, name)) return [];
-      return [{ name, label: tFieldLabel(name, f.label || definitionLabel(name) || name) }];
+      return [{ name, label: tFieldLabel(name, f.label || definitionLabel(name) || name), ...groupability(name) }];
     });
   }, [schema.columns, tFieldLabel, perms, schema.objectName, objectDef]);
 
@@ -5957,7 +6020,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const displayDeviation = {
     layout: viewSwitcherOffered && !!schema.viewType && currentView !== schema.viewType,
     group: toolbarFlags.showGroup
-      && JSON.stringify(groupingConfig?.fields ?? []) !== JSON.stringify(initialGroupingConfig?.fields ?? []),
+      && JSON.stringify(chosenGroupingConfig?.fields ?? []) !== JSON.stringify(initialGroupingConfig?.fields ?? []),
     color: toolbarFlags.showColor && (rowColorConfig?.field ?? '') !== (schema.rowColor?.field ?? ''),
     hiddenFields: toolbarFlags.showHideFields && sortedNames(hiddenFields) !== sortedNames(viewDefaultHiddenFields),
     density: toolbarFlags.showDensity && (currentView === 'gallery'
@@ -5994,7 +6057,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     || appliedQueueSittingConditions.length > 0
   ) personalizationParts.push('filters');
   if (searchTerm.trim()) personalizationParts.push('search');
-  if (groupingKey(groupingConfig?.fields) !== groupingKey(viewGroupingFields)) personalizationParts.push('grouping');
+  if (groupingKey(chosenGroupingConfig?.fields) !== groupingKey(viewGroupingFields)) personalizationParts.push('grouping');
   if (displayDeviation.hiddenFields) personalizationParts.push('hiddenFields');
   if (displayDeviation.density && currentView !== 'gallery') personalizationParts.push('density');
   if (displayDeviation.layout) personalizationParts.push('layout');
@@ -6659,14 +6722,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 size="sm"
                 className={cn(
                   "hidden sm:inline-flex h-7 px-2 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
-                  groupingConfig && "text-foreground font-medium"
+                  chosenGroupingConfig && "text-foreground font-medium"
                 )}
               >
                 <Group className="h-3.5 w-3.5 mr-1.5" />
                 <span className="hidden sm:inline">{t('list.group')}</span>
-                {groupingConfig && groupingConfig.fields?.length > 0 && (
+                {chosenGroupingConfig && chosenGroupingConfig.fields?.length > 0 && (
                   <span className="ml-1 flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
-                    {groupingConfig.fields.length}
+                    {chosenGroupingConfig.fields.length}
                   </span>
                 )}
               </Button>
@@ -6675,7 +6738,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               <div className="space-y-2">
                 <div className="flex items-center justify-between border-b pb-2">
                   <h4 className="font-medium text-sm">{t('list.groupBy')}</h4>
-                  {groupingConfig && (
+                  {chosenGroupingConfig && (
                     <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => changeGrouping(undefined)} data-testid="clear-grouping">
                       {t('list.clear')}
                     </Button>
@@ -6683,8 +6746,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 </div>
                 <div data-testid="group-field-list">
                   <GroupingEditor
-                    value={groupingConfig as any}
-                    fieldOptions={allFields.map((f: any) => ({ value: f.name, label: f.label || f.name }))}
+                    value={chosenGroupingConfig as any}
+                    fieldOptions={groupFieldOptions(allFields)}
                     maxLevels={3}
                     labels={{
                       addGroup: t('list.addGroup', { defaultValue: 'Add group field' }),
@@ -6887,7 +6950,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               recordOpen={recordOpen}
               sort={sortInDisplay ? sortPanelBody : undefined}
               showGroup={toolbarFlags.showGroup}
-              groupingConfig={groupingConfig}
+              groupingConfig={chosenGroupingConfig}
               setGroupingConfig={changeGrouping}
               showColor={toolbarFlags.showColor}
               rowColorConfig={offeredRowColorConfig}
@@ -7200,6 +7263,38 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
 
       {/* Filters Panel - Removed as it is now in Popover */}
+
+      {/* objectstack#32631 — a level of the reader's grouping the server
+          refuses as a group key is left out of the query (see
+          `unstoredGroupingFields`); this line says so, and its button writes
+          the grouping without it, through the editors' own door. */}
+      {unstoredGroupingFields.length > 0 && (
+        <div
+          role="status"
+          data-testid="list-grouping-unstored-notice"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground"
+        >
+          <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            {t('list.groupingUnstoredNotice', {
+              fields: unstoredGroupingFields
+                .map((field) => allFields.find((f) => f.name === field)?.label
+                  || tFieldLabel(field, objectDef?.fields?.[field]?.label || field))
+                .join(', '),
+              defaultValue: 'This list cannot be grouped by {{fields}}: its value is calculated when shown, not stored. The list is shown without that grouping.',
+            })}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn('h-6 px-2 text-xs', PHONE_TOUCH_TARGET)}
+            data-testid="list-grouping-unstored-remove"
+            onClick={() => changeGrouping(groupingConfig)}
+          >
+            {t('list.groupingUnstoredRemove', { defaultValue: 'Remove from grouping' })}
+          </Button>
+        </div>
+      )}
 
       {/* View Content */}
       <div key={currentView} className="flex-1 min-h-0 bg-background relative overflow-hidden animate-in fade-in-0 duration-200">
