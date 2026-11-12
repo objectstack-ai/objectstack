@@ -2289,7 +2289,7 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
       const item = (await m.get(type, name, packageId)) as { label?: string } | undefined;
       return item?.label;
     } catch (e: any) {
-      return [e?.code, e?.status, e?.refusal?.reason, ...(e?.refusal?.candidates ?? []).map((c: any) => c.packageId).sort()];
+      return [e?.code, e?.status, e?.refusal?.reason, ...(e?.refusal?.candidates ?? []).map((c: any) => c.packageId ?? c.kind).sort()];
     }
   };
   const REFUSED = ['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', ALPHA, BETA];
@@ -2463,7 +2463,8 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
           // dropped ALPHA's item), and HOST's slot on a host declaring HOST
           // (the bare refusal named three packages and a read naming HOST
           // answered 'env').
-          expect([hostPackage, await answer(m, type, 'helper')]).toEqual([hostPackage, REFUSED]);
+          // [#32551] An action's bare refusal also names its package-less holder.
+          expect([hostPackage, await answer(m, type, 'helper')]).toEqual([hostPackage, type === 'action' ? [...REFUSED, 'environment'] : REFUSED]);
           expect([hostPackage, await answer(m, type, 'helper', ALPHA)]).toEqual([hostPackage, ALPHA]);
           expect([hostPackage, await answer(m, type, 'helper', BETA)]).toEqual([hostPackage, BETA]);
           expect([hostPackage, await answer(m, type, 'helper', HOST)]).toEqual([hostPackage, undefined]);
