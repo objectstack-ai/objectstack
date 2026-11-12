@@ -3027,6 +3027,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/protocol-cluster-signal-package.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-cluster-signal-package.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-cluster-signal-package.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/protocol-commit-history.test.ts",
       "verb": "delete",
       "pinned": 1

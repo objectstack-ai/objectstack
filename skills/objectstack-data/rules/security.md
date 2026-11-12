@@ -30,7 +30,6 @@ export const salesUser = definePermissionSet({
   members get nothing until an admin assigns each; no gate counts them. Its
   `systemPermissions` may name only app capabilities declared under `capabilities:`.
 - `tabPermissions` hides an app from the set's holders, never gates it: objectstack-ui → Navigation.
-- `enable.apiMethods` also restricts the HTTP surface.
 
 ## Assigning a permission set to a user
 
@@ -43,7 +42,10 @@ insert — never author it.
 
 ⚠️ **Never a record id** — a `permission_set` the security catalog does not hold
 is refused `400 VALIDATION_FAILED` (`reference_not_found`); none at all, `required`.
-One grant per user, set and organization: enforced by the `unique: 'organization'` index.
+One grant per `(user_id, permission_set, permission_set_package, organization_id)`; a guard
+index (none on `driver-memory`) holds grants naming no package to one per user, set and
+organization. Name `permission_set_package` on insert when two packages hold the name, or
+the grant is refused `409 RESOURCE_CONFLICT`, naming each holder.
 
 Assignment is one `POST /api/v1/data/sys_user_permission_set`. Only a tenant admin —
 or a delegated `adminScope` carrying `manageAssignments` for that set and user
@@ -95,8 +97,6 @@ Predicates are **canonical CEL** (ADR-0058): `field == current_user.<prop>`,
 `field == 'literal'`, `field in current_user.<array>`, comparisons (`>`/`<`/`>=`/`<=`),
 `&&`/`||`/`!`, and `== null` checks all lower to a pushdown filter. **No** cross-object
 traversal or subqueries — those are a compile error (ADR-0055), never silently dropped.
-The compiler resolves these
-`current_user.*` placeholders:
 
 | Placeholder | Resolves to |
 |:--|:--|
@@ -136,7 +136,6 @@ export default ObjectSchema.create({
 ```
 
 ```typescript
-// in a permission set
 rowLevelSecurity: [
   { name: 'portal_orders', object: 'order', operation: 'select', using: 'account in current_user.portal_account_ids' },
   // the person is a record: roster `employee` declares
@@ -207,7 +206,7 @@ A set's `fields` entry (`'OBJECT.FIELD': { readable, editable }`) may carry
 **Choose by who loses the edit — one mechanism per need, never both:**
 
 - Locked for **everyone** at that stage → a [validation rule](./validation.md)
-  on the object (`readonlyWhen` likewise strips the write for everyone).
+  on the object.
 - Locked for **some permission sets** only → `when` on the field entries of
   each set that loses the edit; the other sets keep their grant.
 
@@ -233,7 +232,7 @@ fields: {
 
 `maskingRule` is **live** (FieldMasker). Two more channels:
 
-**Encrypted-at-rest values — `type: 'secret'` (ADR-0100).** Ciphertext lives in
+**`type: 'secret'` (ADR-0100).** Ciphertext lives in
 `sys_secret`, only an opaque ref on the row.
 
 **Query a credential only for presence.** A `secret` / `password` column is
@@ -250,8 +249,8 @@ where: { api_key: { $null: false } }  // ObjectQL, hook `query.filter`
 filter: [{ field: 'api_key', operator: 'is_not_null' }]  // list view
 ```
 
-**Per-field access gating — `requiredPermissions` (ADR-0066 D3).** A field
-declaring `requiredPermissions` is **masked on read and denied on write** unless
+**Per-field access gating — `requiredPermissions` (ADR-0066 D3).** The field
+is **masked on read and denied on write** unless
 the caller holds ALL listed capabilities — strictest-wins
 over permission-set field grants.
 
