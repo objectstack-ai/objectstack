@@ -15,7 +15,7 @@
 
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { normaliseClientError } from '@object-ui/data-objectstack';
 import { AssignedUsersSection } from './AssignedUsersSection';
 
@@ -306,7 +306,10 @@ describe('AssignedUsersSection — one holder of a name more than one package ho
     expect(screen.getByText('Lead Lee')).toBeTruthy();
     expect(screen.queryByText('Crm Cora')).toBeNull();
     expect(screen.queryByText('Crm Lead Cy')).toBeNull();
-    expect(screen.queryByText('Bare Bo')).toBeNull();
+    // objectstack#32774 — the grant naming no package is no holder's: shown
+    // apart as unresolved, never among this holder's rows.
+    expect(within(screen.getByTestId('assigned-users-unresolved')).getByText('Bare Bo')).toBeTruthy();
+    expect(screen.getAllByText('Bare Bo')).toHaveLength(1);
     const grantQuery = mockAdapter.find.mock.calls.find(([o]) => o === 'sys_user_permission_set')?.[1];
     expect(grantQuery?.$filter).toEqual({ permission_set: 'sales_rep' });
   });

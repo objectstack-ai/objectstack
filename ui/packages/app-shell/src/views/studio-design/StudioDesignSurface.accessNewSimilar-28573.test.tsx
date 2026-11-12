@@ -249,6 +249,25 @@ describe('objectstack#28573 — New similar on a read-only base permission set',
     expect(strip).toHaveTextContent(NOTICE);
   });
 
+  it("objectstack#32774 — clones the base's set by its package where the environment holds the name too", async () => {
+    // The published list the matrix reads its holder from serves two holders
+    // of the name: the environment's own set and the base's.
+    const list = clientImpl.list.getMockImplementation()!;
+    clientImpl.list.mockImplementation(async (type: string, opts: { packageId?: string } = {}) =>
+      type === 'permission' && !opts.packageId
+        ? [
+            { name: BASE_SET, label: 'Sales rep', _packageId: 'sys_metadata' },
+            { name: BASE_SET, label: 'Sales rep', _packageId: BASE_PKG },
+          ]
+        : list(type, opts),
+    );
+    renderAccess();
+    await fillAndCreate();
+    await waitFor(() => expect(calls).toHaveLength(1));
+    // CONTROL (the case above): one holder posts to the door by the name alone.
+    expect(calls[0]).toEqual({ url: `${DOOR}?package=${BASE_PKG}`, method: 'POST', body: { name: COPY_NAME, label: COPY_LABEL } });
+  });
+
   for (const pkg of ['absent', null] as const) {
     it(`an answer whose package is ${pkg === null ? 'null' : 'absent'} opens nothing and says so`, async () => {
       doorAnswer = landedIn(pkg);
