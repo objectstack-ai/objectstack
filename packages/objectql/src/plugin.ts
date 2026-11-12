@@ -67,6 +67,7 @@ import {
   collectManifestPicklistNames,
   collectManifestPicklistReferences,
   describeDisagreeingPicklistReference,
+  describePicklistReferencesBrokenByInstall,
   describeUnresolvedPicklistReferences,
   picklistMetadataError,
   type PicklistMetadataError,
@@ -990,6 +991,19 @@ export class ObjectQLPlugin implements Plugin {
           });
           const refusal = describeUnresolvedPicklistReferences(unresolved, orphans);
           if (refusal) throw refusal;
+          // [ADR-0150 D3, #31700; epic seat ruling A, 6811306558] What the
+          // artifact does to the references ALREADY installed: a list it
+          // declares under a name another namespace's package holds may leave
+          // an installed extension of that list, or a field of a package
+          // depending on both, with no one list. Refused here, before any of
+          // it registers, never left for the next boot to refuse.
+          const broken = ql.registry.findPicklistReferencesBrokenBy(ordered);
+          const breaking = describePicklistReferencesBrokenByInstall(
+            ordered.map((manifest) => artifactPackageId(manifest)).filter((id): id is string => id !== undefined),
+            broken.references,
+            broken.extensions,
+          );
+          if (breaking) throw breaking;
         }
         // [#24400] The same seal for bound top-level actions: once the boot has
         // judged every target (`kernel:ready`, below), an artifact arriving

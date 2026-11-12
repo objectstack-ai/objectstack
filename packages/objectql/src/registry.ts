@@ -10471,6 +10471,76 @@ export class SchemaRegistry {
   }
 
   /**
+   * [ADR-0150 D3, #31700; epic seat ruling A, 6811306558] The picklist
+   * references and `picklistExtensions` ALREADY registered that resolve now
+   * and would resolve to no one list once `pendingManifests` (an artifact the
+   * install door is judging) were installed. The narrowing lets a package of
+   * another namespace declare a list name a package already holds, and the
+   * install door judges the artifact's own references; this judges what the
+   * artifact does to everyone else's, so an install that would leave an
+   * installed reference ambiguous is refused before anything of it registers,
+   * never discovered by the next cold boot (which refuses such a reference).
+   * Two ways it happens: an extension of a list one package held, judged
+   * caller-less, meets the artifact's list of the same name; and a package
+   * that depends on the holder and on the artifact's package meets both in
+   * its closure (an upgrade adding the list included).
+   *
+   * Judged as the boot audit judges: packaged contributors only, never an
+   * overlay or a tenant-authored body, each from the package that writes it.
+   * A contributor of a package the artifact brings is left out: the artifact
+   * replaces it, and its own references are judged as the artifact's. A
+   * reference that is refused already is not this install's doing, and is
+   * left out too.
+   */
+  findPicklistReferencesBrokenBy(pendingManifests: readonly unknown[]): {
+    references: UnresolvedPicklistReference[];
+    extensions: UnresolvedPicklistExtension[];
+  } {
+    const references: UnresolvedPicklistReference[] = [];
+    const extensions: UnresolvedPicklistExtension[] = [];
+    if (pendingManifests.length === 0) return { references, extensions };
+    const incoming = new Set(
+      pendingManifests.map((m) => artifactPackageId(m)).filter((id): id is string => id !== undefined),
+    );
+    const view = this.withPendingManifests(pendingManifests);
+    const verdicts = new Map<string, { before: boolean; after: PackageScopedResolution<PicklistItemLike> }>();
+    /** The verdict after the install, when the reference resolves now and would not then. */
+    const brokenVerdict = (name: string, caller: string | null) => {
+      const key = JSON.stringify([name, caller]);
+      let judged = verdicts.get(key);
+      if (!judged) {
+        const before = this.picklistReferenceVerdict(name, caller).status === 'resolved';
+        const after = before
+          ? resolvePackageScopedName<PicklistItemLike>(view, { type: 'picklist', name, callerPackageId: caller })
+          : ({ status: 'not-found' } as PackageScopedResolution<PicklistItemLike>);
+        verdicts.set(key, judged = { before, after });
+      }
+      return judged.before && judged.after.status !== 'resolved' ? judged.after : undefined;
+    };
+    for (const [fqn, contributors] of this.objectContributors) {
+      for (const contributor of contributors) {
+        if (contributor.ownership === 'overlay' || isTenantAuthored(contributor.definition)) continue;
+        if (contributor.packageId !== undefined && incoming.has(contributor.packageId)) continue;
+        for (const ref of collectPicklistReferences(fqn, contributor.definition, contributor.packageId)) {
+          const after = brokenVerdict(ref.picklist, ref.packageId ?? null);
+          if (after) references.push(after.status === 'refused' ? { ...ref, refusal: after.message } : ref);
+        }
+      }
+    }
+    for (const [target, byPackage] of this.picklistExtensionContributions) {
+      for (const entry of byPackage.values()) {
+        if (entry.packageId !== undefined && incoming.has(entry.packageId)) continue;
+        const after = brokenVerdict(target, null);
+        if (!after) continue;
+        extensions.push(after.status === 'refused'
+          ? { picklist: target, packageId: entry.packageId, refusal: after.message }
+          : { picklist: target, packageId: entry.packageId });
+      }
+    }
+    return { references, extensions };
+  }
+
+  /**
    * [ADR-0150 D3, child E6; #31700] The fields whose picklist reference
    * several packaged layers write (the object's owner and an extension of
    * it), each RESOLVING the name from its own package, but to DIFFERENT

@@ -511,4 +511,67 @@ describe('the narrowing — the picklist family holds one name per namespace (AD
       expect(registry.resolvePicklistOptions('p1', 'com.acme.alpha')?.map((o) => o.value)).toEqual(['alpha_one', 'extra']);
     });
   });
+
+  /**
+   * [epic seat ruling A, 6811306558] The install door judges what an artifact
+   * does to the references ALREADY installed: a list it declares under a name
+   * another namespace's package holds must not leave an installed extension,
+   * or a field of a package depending on both, with no one list. Refused
+   * before anything of it registers, naming each reference and both holders.
+   * BASE (this branch before the ruling): both installs below were admitted,
+   * the reference lost its options live, and the next cold boot was refused.
+   */
+  describe('the install door re-judges the references already installed (seat ruling A)', () => {
+    const extension = (id: string) => pkg(id, {}, { picklistExtensions: [{ extend: 'p1', options: [{ label: 'extra', value: 'extra' }] }] });
+    const fieldOn = (object: string) => ({ objects: [{ name: object, fields: { s: { name: 's', type: 'select', picklist: 'p1' } } }] });
+    const served = (registry: SchemaRegistry, object: string) =>
+      ((registry.getObject(object)?.fields?.s as { options?: Array<{ value: unknown }> } | undefined)?.options ?? []).map((o) => o.value);
+
+    it('an installed extension of a list one package holds: a second namespace\'s list of that name is refused, naming the extension and both holders', async () => {
+      const { registry, register } = await boot([pkg('com.acme.alpha', { picklist: ['p1'] }), extension('com.acme.gamma')]);
+      const err = await register(pkg('com.acme.beta', { picklist: ['p1'] }));
+      expect(err, 'the install was refused').toBeDefined();
+      expect(err!.message).toContain("Installing 'com.acme.beta' would leave a picklist reference already installed with no one list");
+      expect(err!.message).toContain("a `picklistExtensions` entry (package 'com.acme.gamma') extends picklist 'p1'");
+      expect(err!.message).toContain('package "com.acme.alpha"');
+      expect(err!.message).toContain('package "com.acme.beta"');
+      expect(err!.message).toContain('Nothing was installed');
+      expect(registry.getPackage('com.acme.beta'), 'nothing of it registered').toBeUndefined();
+      expect(registry.resolvePicklistOptions('p1', 'com.acme.alpha')?.map((o) => o.value)).toEqual(['alpha_one', 'extra']);
+      expect(registry.findOrphanPicklistExtensions()).toEqual([]);
+    });
+
+    it('a field of a package depending on both: an upgrade of one adding the list is refused, naming the field and both holders', async () => {
+      const q = pkg('com.acme.q', {}, { dependencies: { 'com.acme.alpha': '^1.0.0', 'com.acme.beta': '^1.0.0' }, ...fieldOn('q_item') });
+      const { registry, register } = await boot([pkg('com.acme.alpha', { picklist: ['p1'] }), pkg('com.acme.beta'), q]);
+      expect(served(registry, 'q_item')).toEqual(['alpha_one']);
+      const err = await register(pkg('com.acme.beta', { picklist: ['p1'] }, { version: '1.1.0' }));
+      expect(err, 'the upgrade was refused').toBeDefined();
+      expect(err!.message).toContain("field 'q_item.s' (package 'com.acme.q') references picklist 'p1'");
+      expect(err!.message).toContain('declared dependency closure of package "com.acme.q"');
+      expect(err!.message).toContain('package "com.acme.alpha"');
+      expect(err!.message).toContain('package "com.acme.beta"');
+      expect(registry.getPackage('com.acme.beta')?.manifest?.version, 'the installed version stays').toBe('1.0.0');
+      expect(registry.packageScopedHoldersOf('picklist', 'p1')).toEqual(['com.acme.alpha']);
+      expect(served(registry, 'q_item')).toEqual(['alpha_one']);
+      expect(registry.findUnresolvedPicklistReferences()).toEqual([]);
+    });
+
+    it('CONTROL — references the second list leaves resolved: the holder\'s own field, and a dependent of the holder alone; the install goes through', async () => {
+      const own = pkg('com.acme.alpha', { picklist: ['p1'] }, fieldOn('alpha_item'));
+      const dependent = pkg('com.acme.q', {}, { dependencies: { 'com.acme.alpha': '^1.0.0' }, ...fieldOn('q_item') });
+      const { registry, register } = await boot([own, dependent]);
+      expect(await register(pkg('com.acme.beta', { picklist: ['p1'] }))).toBeUndefined();
+      expect(registry.packageScopedHoldersOf('picklist', 'p1')).toEqual(['com.acme.alpha', 'com.acme.beta']);
+      expect(served(registry, 'alpha_item')).toEqual(['alpha_one']);
+      expect(served(registry, 'q_item')).toEqual(['alpha_one']);
+    });
+
+    it('CONTROL — an unrelated late install goes through beside an installed extension', async () => {
+      const { registry, register } = await boot([pkg('com.acme.alpha', { picklist: ['p1'] }), extension('com.acme.gamma')]);
+      expect(await register(pkg('com.acme.delta', { picklist: ['p2'], mapping: ['m2'] }))).toBeUndefined();
+      expect(registry.getPackage('com.acme.delta')).toBeDefined();
+      expect(registry.resolvePicklistOptions('p1', 'com.acme.alpha')?.map((o) => o.value)).toEqual(['alpha_one', 'extra']);
+    });
+  });
 });

@@ -220,6 +220,42 @@ export type UnresolvedPicklistReference = PicklistReference & { readonly refusal
 export type UnresolvedPicklistExtension = OrphanPicklistExtension & { readonly refusal?: string };
 
 /**
+ * [ADR-0150 D3, #31700; epic seat ruling A, 6811306558] The install door's
+ * refusal of an artifact that would leave references ALREADY installed with
+ * no one list (`SchemaRegistry.findPicklistReferencesBrokenBy`): every such
+ * field and extension, with the refusal it would meet (every holder named),
+ * and the fix. `undefined` when there is none.
+ */
+export function describePicklistReferencesBrokenByInstall(
+  incomingPackageIds: readonly string[],
+  references: readonly UnresolvedPicklistReference[],
+  extensions: readonly UnresolvedPicklistExtension[] = [],
+): PicklistMetadataError | undefined {
+  if (references.length === 0 && extensions.length === 0) return undefined;
+  const lines = [
+    ...references.map(
+      (r) => `field '${r.object}.${r.field}' (${describePackage(r.packageId)}) references picklist '${r.picklist}'`
+        + refusalSuffix(r.refusal),
+    ),
+    ...extensions.map(
+      (e) => `a \`picklistExtensions\` entry (${describePackage(e.packageId)}) extends picklist '${e.picklist}'`
+        + refusalSuffix(e.refusal),
+    ),
+  ];
+  const installing = incomingPackageIds.length > 0
+    ? incomingPackageIds.map((id) => `'${id}'`).join(', ')
+    : 'this artifact';
+  return picklistMetadataError(
+    `Installing ${installing} would leave ${lines.length === 1 ? 'a picklist reference' : `${lines.length} picklist references`} `
+    + `already installed with no one list: ${lines.join('; ')}. Each resolves to one list now; the list of the same `
+    + 'name this install declares would be a second holder it cannot choose between, so the field would lose its '
+    + 'options and the extension would add its options to nothing, and the next boot would refuse both. Nothing '
+    + 'was installed. Rename the list in the package being installed, or remove the reference or extension that '
+    + 'names it first.',
+  );
+}
+
+/**
  * [ADR-0150 D3, child E6; #31700] A field whose picklist reference two or more
  * packaged layers write (the object's owner and an extension of it), each
  * resolving the name — from its own package — to a DIFFERENT list. The field
