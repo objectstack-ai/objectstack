@@ -491,7 +491,7 @@ function bootRest(callerName: CallerName, opts: Boot = {}) {
  * 3,100 boots, and `bootRest`'s `registerRoutes()` was half the file's time.
  * Reuse changes no answer: neither transport keeps one between two GET reads
  * (`RestServer`'s per-request memo is keyed on the request object, and the
- * dispatcher's membership cache on an environment no read here names), and
+ * dispatcher judges environment membership afresh on every request), and
  * every protocol-double read clones its fixture. The blocks that assert on a
  * double's calls, or boot with options, still boot their own.
  */
