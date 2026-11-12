@@ -40,7 +40,12 @@ import type {
 import { bindEmailTemplateDoor, unbindEmailTemplateDoor } from './email-template-door.js';
 import { sweepStrandedOutbox, type OutboxSweepResult } from './outbox-sweep.js';
 import { readInternalHeadersJson } from './internal-header-readback.js';
-import { describeLiveMailTransport, mailDeliveryCopy, type LiveMailTransportStatus } from './live-transport-status.js';
+import {
+  describeLiveMailTransport,
+  mailDeliveryCopy,
+  type LiveMailTransportOrigin,
+  type LiveMailTransportStatus,
+} from './live-transport-status.js';
 import {
   EMAIL_LOG_OBJECTS,
   TENANT_EMAIL_OBJECT,
@@ -443,6 +448,14 @@ export class EmailServicePlugin implements Plugin {
   /** SMTP transport currently in use, if any — closed in dispose(). */
   private liveSmtp?: SmtpTransport;
   /**
+   * Where the transport this plugin last installed came from: the boot
+   * (`environment`: these options, so the stack's `email` block, `OS_EMAIL_*`
+   * or a host `transport`) or the `mail` namespace (`settings`). Kept with the
+   * transport it describes, so a transport installed by anything else reads as
+   * not stated ({@link liveTransportOrigin}).
+   */
+  private installedTransport?: { transport: IEmailTransport; origin: LiveMailTransportOrigin };
+  /**
    * The `mail` settings page's override of `options.queueDelivery`.
    * `undefined` means no operator has touched the toggle (the manifest
    * default still resolves it), so the constructor declaration stands —
@@ -530,6 +543,31 @@ export class EmailServicePlugin implements Plugin {
   }
 
   /**
+   * Where the LIVE transport came from, for the page's `live.provider`:
+   * the origin recorded when this plugin installed it, and `undefined` when
+   * the live transport is not the one it installed (a caller swapped it
+   * through `EmailService.setTransport`), since its origin is then unknown,
+   * or when a save could not replace it ({@link keepPreviousTransport}). A
+   * live LogTransport reads `none` whatever its origin: nothing delivers.
+   */
+  private liveTransportOrigin(): LiveMailTransportOrigin | undefined {
+    const installed = this.installedTransport;
+    if (!installed || !this.service) return undefined;
+    return this.service.options.transport === installed.transport ? installed.origin : undefined;
+  }
+
+  /**
+   * A settings apply that could not build what the `mail` namespace now
+   * resolves keeps the previous transport. One the boot installed is still
+   * `environment`; one an earlier save built is no longer what the namespace
+   * resolves, so `settings` would be stale and its origin is dropped: the
+   * page then states no provider until a save builds one again.
+   */
+  private keepPreviousTransport(): void {
+    if (this.installedTransport?.origin === 'settings') this.installedTransport = undefined;
+  }
+
+  /**
    * Materialise the constructor-configured transport.
    *
    * Deliberately propagates `makeTransport`'s throw (missing SMTP host,
@@ -604,6 +642,7 @@ export class EmailServicePlugin implements Plugin {
       );
     }
 
+    this.installedTransport = { transport, origin: 'environment' };
     this.service = new EmailService({
       transport,
       defaultFrom: this.namedSender(this.options.defaultFrom),
@@ -851,7 +890,9 @@ export class EmailServicePlugin implements Plugin {
           if (typeof settings.registerLiveStatus === 'function') {
             settings.registerLiveStatus('mail', async (input) => {
               await Promise.allSettled([...applying]);
-              return this.service ? describeLiveMailTransport(this.service, input?.locale) : undefined;
+              return this.service
+                ? describeLiveMailTransport(this.service, input?.locale, this.liveTransportOrigin())
+                : undefined;
             });
           }
 
@@ -1599,6 +1640,7 @@ export class EmailServicePlugin implements Plugin {
         // built one from OS_EMAIL_SMTP_* / providerOptions, in which case
         // SMTP mail IS being delivered and there is nothing to report.
         if (this.service.options.transport instanceof SmtpTransport) {
+          this.keepPreviousTransport();
           ctx.logger.info(
             'EmailServicePlugin: mail settings carry no SMTP host — keeping the SMTP transport configured '
             + 'at boot (OS_EMAIL_SMTP_HOST / providerOptions).',
@@ -1609,6 +1651,7 @@ export class EmailServicePlugin implements Plugin {
         const line = "EmailServicePlugin: provider='smtp' but no SMTP host is configured — the previous "
           + 'transport is kept and NO mail is delivered over SMTP. Fix: set Settings → Mail → Host '
           + '(or OS_MAIL_SMTP_HOST), or select another provider.';
+        this.keepPreviousTransport();
         if (selected) ctx.logger.error(line);
         else ctx.logger.info(`${line} (Mail has never been configured — this is the out-of-the-box state.)`);
         return;
@@ -1616,12 +1659,14 @@ export class EmailServicePlugin implements Plugin {
       try {
         const transport = this.buildSmtpTransport(smtp, ctx.logger);
         this.service.setTransport(transport);
+        this.installedTransport = { transport, origin: 'settings' };
         this.liveSmtp = transport;
         ctx.logger.info(
           `EmailServicePlugin: SMTP transport built from settings (host=${smtp.host}:${smtp.port ?? 587}, `
           + `tls=${smtp.secure !== false}, auth=${smtp.user ? 'yes' : 'no'}).`,
         );
       } catch (err: any) {
+        this.keepPreviousTransport();
         ctx.logger.error(
           "EmailServicePlugin: provider='smtp' selected but the SMTP transport could NOT be built — the "
           + 'previous transport is kept and NO mail is delivered over SMTP. Fix the SMTP settings and save '
@@ -1642,7 +1687,9 @@ export class EmailServicePlugin implements Plugin {
         ? undefined
         : describeLiveMailTransport(this.service).label;
       if (replaced) {
-        this.service.setTransport(new LogTransport(ctx.logger));
+        const transport = new LogTransport(ctx.logger);
+        this.service.setTransport(transport);
+        this.installedTransport = { transport, origin: 'settings' };
         this.liveSmtp = undefined;
       }
       ctx.logger.info(
@@ -1662,6 +1709,7 @@ export class EmailServicePlugin implements Plugin {
     // and the fix, no throw. Workspaces that saved `sendgrid` / `ses` while the
     // settings page still offered them arrive here on every boot (#5094).
     if (!isEmailTransportProvider(provider)) {
+      this.keepPreviousTransport();
       ctx.logger.error(
         `EmailServicePlugin: provider='${provider}' is not a provider this server can deliver with — the `
         + 'previous transport is kept and NO mail is delivered through it. Fix: '
@@ -1672,6 +1720,7 @@ export class EmailServicePlugin implements Plugin {
 
     const apiKey = typeof values.api_key === 'string' ? values.api_key : undefined;
     if (!apiKey) {
+      this.keepPreviousTransport();
       ctx.logger.error(
         `EmailServicePlugin: provider='${provider}' selected but api_key is empty — the previous transport `
         + 'is kept and NO mail is delivered through it. Fix: set Settings → Mail → API key.',
@@ -1686,9 +1735,11 @@ export class EmailServicePlugin implements Plugin {
         logger: ctx.logger,
       });
       this.service.setTransport(transport);
+      this.installedTransport = { transport, origin: 'settings' };
       this.liveSmtp = undefined;
       ctx.logger.info(`EmailServicePlugin: transport rebuilt from settings (provider=${provider}).`);
     } catch (err: any) {
+      this.keepPreviousTransport();
       ctx.logger.error(
         `EmailServicePlugin: provider='${provider}' selected but the transport could NOT be built — the `
         + 'previous transport is kept and NO mail is delivered through it. Cause: ' + (err?.message ?? err),
