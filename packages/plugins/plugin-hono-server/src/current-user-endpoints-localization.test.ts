@@ -130,6 +130,10 @@ function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, setti
      */
     const tables: Record<string, Row[]> = {
         sys_user: [{ id: USER, email: 'lang@example.com', locale: storedLocale }],
+        // [ADR-0093 D8.1, as amended] The caller's current membership in the
+        // organization its session names: under every tenancy posture the
+        // claim is kept only while one backs it.
+        sys_member: [{ id: 'mem_1', user_id: USER, organization_id: ORG, role: 'member' }],
         // The endpoint reads all three `localization` keys in ONE `$in` query,
         // so the table carries whichever of them the fixture configured — and
         // nothing for the rest. Each row is the caller's organization's: the

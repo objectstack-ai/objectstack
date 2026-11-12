@@ -42,8 +42,9 @@
  * The composition is handed the door's own way to reach the `tenancy`
  * service ({@link redeliverTenancyResolver}), as the data API's doors hand it
  * theirs, so the session's organization claim is vetted exactly as it is
- * there (maintainer ruling 2026-09-05, option B: on a walled posture a claim
- * no current membership backs is dropped, per request, on every door). The
+ * there (maintainer ruling 2026-09-05, option B: a claim no current
+ * membership backs is dropped, per request, on every door — under every
+ * tenancy posture, ADR-0093 D8.1 as amended). The
  * caller's grants and the context's `tenantId` are therefore resolved in the
  * organization the data API would resolve them in.
  *
