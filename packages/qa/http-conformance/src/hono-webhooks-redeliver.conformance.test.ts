@@ -87,9 +87,21 @@ class FixturePlugin implements Plugin {
             [SUBSCRIPTION, { id: SUBSCRIPTION, name: 'orders_hook', active: true }],
         ]);
         ctx.registerService('manifest', { register: () => {}, list: () => [] });
+        // [ADR-0093 D8.1, as amended] A person's data access requires a
+        // current membership in the organization, under every posture: the
+        // signed-in caller holds one in the organization its session names.
+        const memberships: ReadonlyArray<Record<string, string>> = [{ id: 'mem_u_1', user_id: 'u_1', organization_id: ORG_A, role: 'member' }];
         ctx.registerService('objectql', {
             registry: { listItems: () => [], getObject: () => undefined },
-            async find() { return []; },
+            async find(object: string, query?: any) {
+                if (object !== 'sys_member') return [];
+                const rows = memberships.filter((row) => Object.entries(query?.where ?? {}).every(([k, v]) => {
+                    // Scalar equality only: a combinator is refused, never read as a field name.
+                    if (k.startsWith('$')) throw new Error(`membership double: ${k} is not implemented`);
+                    return row[k] === v;
+                }));
+                return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
+            },
             async findOne(object: string, opts?: any) {
                 assertEngineFindOnePredicate(object, opts);
                 return subscriptions.get(opts?.where?.id) ?? null;
@@ -213,14 +225,34 @@ const redeliver = (body: unknown, auth: string | null = `u_1@${ORG_A}`): Request
     body: typeof body === 'string' ? body : JSON.stringify(body),
 });
 
-/** Headers a transport adds or drops on its own, independent of the route. */
-const TRANSPORT_HEADERS = new Set(['date', 'connection', 'keep-alive', 'content-length', 'transfer-encoding']);
+/**
+ * Headers a transport adds or drops on its own, independent of the route.
+ * `content-encoding` is one: `fetch` hands back the decoded body, and only the
+ * self-hosted server compresses (#32155).
+ */
+const TRANSPORT_HEADERS = new Set(['date', 'connection', 'keep-alive', 'content-length', 'transfer-encoding', 'content-encoding']);
 async function snapshot(res: Response) {
     return {
         status: res.status,
         headers: [...res.headers.entries()].filter(([k]) => !TRANSPORT_HEADERS.has(k)),
         body: await res.text(),
     };
+}
+
+/**
+ * A snapshot as compared ACROSS the two doors: the `accept-encoding` member of
+ * `Vary` is dropped, because only the self-hosted server negotiates an encoding
+ * (#32155). Every other `Vary` member is still compared, and a same-door
+ * comparison uses the snapshot as it is.
+ */
+function acrossDoors<T extends { headers: [string, string][] }>(s: T): T {
+    const headers: [string, string][] = [];
+    for (const [k, v] of s.headers) {
+        if (k !== 'vary') { headers.push([k, v]); continue; }
+        const kept = v.split(',').map((m) => m.trim()).filter((m) => m && m.toLowerCase() !== 'accept-encoding');
+        if (kept.length > 0) headers.push([k, kept.join(', ')]);
+    }
+    return { ...s, headers };
 }
 
 describe('[#22755] the hosted door reaches the real webhooks member through createHonoApp', () => {
@@ -279,7 +311,7 @@ describe('[#22755] every refusal — anonymous first — is the self-hosted moun
 
             expect(viaMount.status, label).toBe(status);
             expect(JSON.parse(viaMount.body), label).toMatchObject({ success: false, error: { code } });
-            expect(mask(viaDomain, hId), label).toEqual(mask(viaMount, sId));
+            expect(acrossDoors(mask(viaDomain, hId)), label).toEqual(acrossDoors(mask(viaMount, sId)));
         }
     }, 60_000);
 });

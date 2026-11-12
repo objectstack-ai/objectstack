@@ -82,7 +82,13 @@ const ROOT_READER = 'usr_root_reader';
 const MIDDLE_READER = 'usr_middle_reader';
 const LOCKED = 'usr_locked';
 const PLAIN = 'usr_plain';
-/** Delegation case (i): the agent is the floor-bound member, the delegator is not. */
+/**
+ * Delegation case (i): the agent is the floor-bound member, the delegator is
+ * not — a current member whose role (`admin` → `org_admin`) sits outside the
+ * members-only floor's `org_member` domain. A delegation needs the delegator's
+ * current membership in the organization under every posture (ADR-0093 D8.1,
+ * as amended), so "not floor-bound" is spelled by role, not by absence.
+ */
 const DELEGATOR_UNBOUND = 'usr_delegator_unbound';
 /** Delegation case (ii): the agent is not floor-bound, the delegator is. */
 const AGENT_UNBOUND = 'usr_agent_unbound';
@@ -231,18 +237,20 @@ beforeAll(async () => {
   // than failing closed. Each holds the manager's set through a stored direct
   // grant row owned by ORG — the organization the delegated request runs in, the only
   // one a grant row applies in (ADR-0131 D10: an organization-less row applies
-  // nowhere); only DELEGATOR_MEMBER is an organization member, so only it
-  // carries the floor.
+  // nowhere); both are organization members, and only DELEGATOR_MEMBER holds
+  // `org_member`, so only it carries the floor.
   await engine.insert('sys_user', [
-    { id: DELEGATOR_UNBOUND, name: 'Delegator, not a member', email: 'delegator-unbound@cbc.test' },
+    { id: DELEGATOR_UNBOUND, name: 'Delegator, outside the floor', email: 'delegator-unbound@cbc.test' },
     { id: DELEGATOR_MEMBER, name: 'Delegator, a member', email: 'delegator-member@cbc.test' },
   ], SYS);
   await engine.insert('sys_organization', [{ id: ORG, name: 'CBC', slug: 'cbc' }], SYS);
-  await engine.insert('sys_member', [{ id: 'mem_delegator', user_id: DELEGATOR_MEMBER, organization_id: ORG, role: 'member' }], SYS);
+  await engine.insert('sys_member', [
+    { id: 'mem_delegator', user_id: DELEGATOR_MEMBER, organization_id: ORG, role: 'member' },
+    { id: 'mem_delegator_unbound', user_id: DELEGATOR_UNBOUND, organization_id: ORG, role: 'admin' },
+  ], SYS);
   // Landed straight through the driver, so each row stores exactly the
-  // organization named here. DELEGATOR_UNBOUND's row is ORG's without a
-  // membership: under `single` the session's organization is kept without one,
-  // and no `sys_member` row means no `org_member` floor.
+  // organization named here. DELEGATOR_UNBOUND's membership role projects
+  // `org_admin`, not `org_member`, so no floor binds it.
   const grants = (engine as any).getDriver('sys_user_permission_set');
   for (const row of [
     { id: 'ups_unbound', user_id: DELEGATOR_UNBOUND, permission_set: MANAGER_SET.name, organization_id: ORG },

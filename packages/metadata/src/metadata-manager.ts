@@ -189,6 +189,18 @@ function isPackageMember(item: unknown, packageId: string): boolean {
  */
 function isRemovalTarget(loader: MetadataLoader): boolean {
   if (loader.contract.protocol === 'datasource:') return Boolean(loader.contract.capabilities.write);
+  return isNodeLocalRemovalTarget(loader);
+}
+
+/**
+ * [#32499] The node-local half of {@link isRemovalTarget}: the `memory:`
+ * loader that can delete (the artifact door's store), which every node of a
+ * cluster holds on its own. A cluster peer applies a removal it hears of
+ * here and nowhere else ({@link MetadataManager.attachClusterPubSub}): the
+ * shared `datasource:` store is the origin's to delete from, and a second
+ * delete by the peer could take out a row re-written in between.
+ */
+function isNodeLocalRemovalTarget(loader: MetadataLoader): boolean {
   return loader.contract.protocol === 'memory:' && typeof loader.delete === 'function';
 }
 
@@ -362,6 +374,11 @@ function generateEventUuid(): string {
  * `metadata:changed` payload that this shape was said to align with; it never
  * did, and that schema was retired (ADR-0087 entry
  * `metadata-changed-event-payload-retired`).
+ *
+ * [#32499] `removal` is the one addition, and it is an address too: it marks
+ * the `deleted` event of {@link MetadataManager.unregister} and carries the
+ * package that removal named, so a peer deletes its own in-memory copy of the
+ * item by the same key the origin deleted its copy by.
  */
 export interface ClusterMetadataChangedPayload {
   /** Origin nodeId — used for loopback suppression. */
@@ -370,6 +387,37 @@ export interface ClusterMetadataChangedPayload {
   type: string;
   /** The legacy watch event replayed verbatim on peer nodes. */
   event: MetadataWatchEvent;
+  /**
+   * [#32499] Present only on the `deleted` event `unregister()` announces: the
+   * origin removed `(type, event.name)` — one package's item of a type stored
+   * per `(package, name)` when `packageId` is set — and deleted its in-memory
+   * loaders' copy (the artifact door's store). A peer deletes its own
+   * in-memory copy by the same key, so the item stops answering on every
+   * node. Absent on every other event (a create or an update, a file or
+   * repository event, an origin that predates this field): there the peer
+   * keeps its in-memory copy, which no loader could restore once dropped.
+   */
+  removal?: ClusterMetadataRemoval;
+}
+
+/** [#32499] What {@link ClusterMetadataChangedPayload.removal} carries. */
+interface ClusterMetadataRemoval {
+  /** The package whose item the origin removed; absent for a removal by name. */
+  packageId?: string;
+}
+
+/**
+ * [#32499] The removal a received payload carries, or `undefined` when it
+ * carries none or carries one this node cannot read (a `packageId` that is
+ * not a string): a removal read wrongly would delete by name, wider than the
+ * origin did, so a malformed one is dropped, as a malformed payload is.
+ */
+function receivedRemovalOf(payload: ClusterMetadataChangedPayload): ClusterMetadataRemoval | undefined {
+  const removal: unknown = payload.removal;
+  if (removal === null || typeof removal !== 'object') return undefined;
+  const { packageId } = removal as { packageId?: unknown };
+  if (packageId === undefined) return {};
+  return typeof packageId === 'string' ? { packageId } : undefined;
 }
 
 /**
@@ -663,7 +711,8 @@ export class MetadataManager implements IMetadataService {
   //     can invalidate their caches.
   //   • A subscribed remote event first invalidates THIS node's caches
   //     (registry entry + listCache, via `invalidateForForeignWrite` —
-  //     #5109) and is then replayed into the local watch hub, so existing
+  //     #5109; a peer's removal also deletes THIS node's in-memory copy,
+  //     #32499) and is then replayed into the local watch hub, so existing
   //     consumers (ObjectQLPlugin, Studio HMR, …) see uniform behavior
   //     regardless of which node initiated the change — including when
   //     they answer the event by re-reading through `list()`.
@@ -1741,12 +1790,23 @@ export class MetadataManager implements IMetadataService {
    *    slot and the precedence above decides between them, as the bare-name
    *    map did;
    *  - an item that carries none, under a name no package holds, is the
-   *    environment's own (D1 bucket 4) and fills the environment's slot.
+   *    environment's own (D1 bucket 4) and fills the environment's slot;
+   *  - [#31700] an item that carries none, under a name TWO or more packages
+   *    hold here (packages of different namespaces, since the API narrowed to
+   *    one holder per namespace), is a customization of no one holder: none is
+   *    picked, so it fills the environment's slot. The store's write rule
+   *    puts the same row there ({@link storeWriteKey}: a package-less write of
+   *    a name two packages hold lands in the bare slot), so the index and the
+   *    store agree on what that row is.
    *
-   * While phase 1 keeps one package holder per `api` name, every slot holds
-   * what the bare-name map held, so the index answers what it answered. No
-   * name is resolved here: a request carries no caller package, and the
-   * matcher keys its routes by METHOD + path (bucket 1).
+   * Each holder keeps its own slot, so two namespaces' same-named APIs are
+   * both indexed. They cannot claim one route between them: the publish gate
+   * requires each path under `/api/v1/apps/<namespace>/`, so their paths
+   * differ by namespace. Only the environment's row can share a holder's
+   * METHOD + path, and the matcher's duplicate-claim rule decides that,
+   * announced at `error`. No name is resolved here: a request carries no
+   * caller package, and the matcher keys its routes by METHOD + path
+   * (bucket 1).
    */
   private async listForPackageScopedIndex(type: string): Promise<unknown[]> {
     // [#32246] Every item a loader stores, each with the package the loader
@@ -1861,9 +1921,12 @@ export class MetadataManager implements IMetadataService {
    * the `409` naming every holder, where the storage loop would have caught
    * each loader's own refusal as a failed delete and announced a removal that
    * never happened. Every loader's holders of the name are within this view,
-   * so a loader the removal deletes from does not refuse once it has passed —
-   * ⛔ except an object-bound action's slots, which the holder count does not
-   * read (the registry's own rule; a separate card).
+   * so a loader the removal deletes from does not refuse once it has passed.
+   * [#32352] That includes an action's object-bound slots: holders are counted
+   * by package over every slot of the name, as `DatabaseLoader`'s row key
+   * `(package, name)` counts them, so a name two packages hold on one object
+   * or on two is refused here rather than by the loader's `delete` after the
+   * registry had already dropped it and announced `deleted`.
    *
    * @throws {PackageScopedNameRefusedError} no package named, two or more
    *   packages holding the name in the registry or the loaders.
@@ -1941,6 +2004,8 @@ export class MetadataManager implements IMetadataService {
     });
 
     // Announce last, once the removal has landed everywhere (see register()).
+    // [#32499] The cluster fan-out marks it a removal, with the package it
+    // named, so each peer deletes its own in-memory copy by the same key.
     if (options?.notify !== false) {
       this.notifyWatchers(type, {
         type: 'deleted',
@@ -1949,7 +2014,7 @@ export class MetadataManager implements IMetadataService {
         path: '',
         data: undefined,
         timestamp: new Date().toISOString(),
-      });
+      }, packageId === undefined ? {} : { packageId });
     }
   }
 
@@ -3357,6 +3422,17 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * [#32488] The name of the loader {@link loadMany} read `item` — that very
+   * object — from; `undefined` for an object it did not hand out. The boot
+   * priming pass asks it so that, of two loaders' items stored under one
+   * identity once the host's package is stamped, the earlier loader's item
+   * keeps the entry (`MetadataPlugin`'s pass).
+   */
+  sourceLoaderOf(item: object): string | undefined {
+    return this.loadedFrom.get(item)?.contract.name;
+  }
+
+  /**
    * Load multiple metadata items from loaders.
    * Aggregates results from all loaders.
    */
@@ -3381,9 +3457,18 @@ export class MetadataManager implements IMetadataService {
             // protocol's own read binds a row), so a caller that registers it
             // back — the boot priming pass — fills that package's slot and its
             // member's row, never a package-less one.
+            // [#32458] An unbundled type stored per `(package, name)` (`api`,
+            // `agent`, `skill`, `action`, `permission`) keeps every body the
+            // loader's `loadMany` answers, a body its keyed read cannot name
+            // included, and stamps each one the loader holds for a package the
+            // same way ({@link withLoaderEntryPackages}): handed on unstamped,
+            // such a row filled the name's package-less slot, and with two
+            // holders its save inserted a package-less row.
             const items = PACKAGE_SLOTTED_STORE_TYPES.has(type) && isBundledStoreType(type) && typeof loader.loadManyKeyed === 'function'
                 ? (await loader.loadManyKeyed<T>(type, options)).map((entry) => withEntryPackage(entry))
-                : await loader.loadMany<T>(type, options);
+                : PACKAGE_SLOTTED_STORE_TYPES.has(type)
+                    ? await withLoaderEntryPackages(loader, type, await loader.loadMany<T>(type, options), options)
+                    : await loader.loadMany<T>(type, options);
             for (const item of items) {
                 const itemAny = item as any;
                 if (itemAny && typeof itemAny.name === 'string') {
@@ -3774,7 +3859,11 @@ export class MetadataManager implements IMetadataService {
     this.notifyWatchers(type, legacyEvent);
   }
 
-  protected notifyWatchers(type: string, event: MetadataWatchEvent) {
+  /**
+   * Wake this node's watchers, then fan the event out to cluster peers.
+   * `removal` is {@link unregister}'s alone ({@link ClusterMetadataChangedPayload.removal}).
+   */
+  protected notifyWatchers(type: string, event: MetadataWatchEvent, removal?: ClusterMetadataRemoval) {
     this.notifyWatchersLocal(type, event);
 
     // Cluster fan-out (`content/docs/kernel/cluster.mdx` §6.2, lane 1).
@@ -3784,6 +3873,7 @@ export class MetadataManager implements IMetadataService {
         originNode: this.clusterNodeId,
         type,
         event,
+        ...(removal ? { removal } : {}),
       };
       const key = `${type}:${(event as { name?: string }).name ?? ''}`;
       void this.clusterPubSub
@@ -3867,6 +3957,15 @@ export class MetadataManager implements IMetadataService {
         //     to defer for, while deferring it would leave a window between
         //     receipt and the next tick in which reads still answer stale.
         //     Any `await` in a request handler is enough to lose that race.
+        //
+        // [#32499] A removal deletes this node's in-memory copy first, as
+        // `unregister()` deletes from storage before it drops the registry:
+        // otherwise the dropped entry hands every read to that copy, and this
+        // node keeps serving what the origin removed. Started here, so an
+        // in-memory delete that runs no `await` (`MemoryLoader`) has landed
+        // before the invalidation below.
+        const removal = receivedRemovalOf(p);
+        if (removal && p.event.name) void this.removeNodeLocalCopies(p.type, p.event.name, removal.packageId);
         try {
           this.invalidateForForeignWrite(p.type, p.event.name);
         } catch (err) {
@@ -3895,6 +3994,37 @@ export class MetadataManager implements IMetadataService {
       channel: MetadataManager.CLUSTER_CHANNEL,
     });
     return () => this.detachClusterPubSub();
+  }
+
+  /**
+   * [#32499] The peer half of {@link unregister}'s storage step: delete a
+   * removal a cluster peer announced from this node's in-memory loaders
+   * ({@link isNodeLocalRemovalTarget}), by the key the origin deleted by
+   * ({@link deleteMetaItemFromLoader}). The shared `datasource:` store is
+   * left alone: the origin already deleted from it.
+   *
+   * The list cache is dropped again once every delete has settled, for a
+   * loader whose delete is really asynchronous and so lands after the
+   * receipt's own invalidation.
+   */
+  private async removeNodeLocalCopies(type: string, name: string, packageId?: string): Promise<void> {
+    let removed = false;
+    for (const loader of this.loaders.values()) {
+      if (!isNodeLocalRemovalTarget(loader)) continue;
+      removed = true;
+      try {
+        await this.deleteMetaItemFromLoader(loader, type, name, packageId);
+      } catch (error) {
+        this.logger.error(
+          `[MetadataManager] Loader \`${loader.contract.name}\` could NOT delete \`${type}/${name}\` that a cluster peer ` +
+            `removed — this node keeps serving the item from that loader while the node that removed it answers nothing. ` +
+            `Nothing looks broken on either node. Fix: re-issue the removal of \`${type}/${name}\` on this node.`,
+          error instanceof Error ? error : undefined,
+          { loader: loader.contract.name, type, name, packageId, error },
+        );
+      }
+    }
+    if (removed) this.invalidateListCache(type);
   }
 
   /**
@@ -4076,11 +4206,55 @@ export class MetadataManager implements IMetadataService {
 
 /**
  * [#31699 R4-B] A keyed entry's body, stamped with the entry's package when the
- * body names none itself; the body unchanged otherwise.
+ * body names none itself; the body unchanged otherwise. [#32458] The same stamp
+ * for an unbundled type stored per `(package, name)`, through
+ * {@link withLoaderEntryPackages}.
  */
 function withEntryPackage<T>(entry: MetadataKeyedItem<T>): T {
   const data = entry.data as unknown;
   if (entry.packageId === undefined || indexedItemPackageId(data) !== undefined) return entry.data;
   if (data === null || typeof data !== 'object' || Array.isArray(data)) return entry.data;
   return { ...(data as Record<string, unknown>), _packageId: entry.packageId } as T;
+}
+
+/**
+ * [#32458] `items`, the bodies `loader.loadMany` answered for an unbundled type
+ * stored per `(package, name)`, each stamped with the package the loader holds
+ * it for ({@link withEntryPackage}) when the body names none itself. The
+ * package is read off the loader's keyed entries, and only from a loader that
+ * holds items per package (`loadManySlots`): a body is stamped when its `name`
+ * is the key of exactly one keyed entry, that entry carries a package and its
+ * own body carries the entry's key as its `name`, and no other body `loadMany`
+ * answered carries that `name`. A body whose `name` is another row's key is
+ * never stamped with that row's package — a row's key and its body's `name`
+ * are two identities (#14205), and a save does not make them agree. Every body
+ * is kept, in `loadMany`'s order — a body the keyed read cannot
+ * name (a nested or extension-less file, a row whose `name` column is empty)
+ * is answered as before, unstamped. A loader that holds nothing per package is
+ * not read twice.
+ */
+async function withLoaderEntryPackages<T>(
+  loader: MetadataLoader,
+  type: string,
+  items: T[],
+  options?: MetadataLoadOptions,
+): Promise<T[]> {
+  if (typeof loader.loadManyKeyed !== 'function' || typeof loader.loadManySlots !== 'function') return items;
+  const nameOf = (body: unknown): unknown => (body as { name?: unknown } | null)?.name;
+  const packageOf = new Map<string, string | null>();
+  for (const entry of await loader.loadManyKeyed<T>(type, options)) {
+    const own = nameOf(entry.data) === entry.name ? entry.packageId ?? null : null;
+    packageOf.set(entry.name, packageOf.has(entry.name) ? null : own);
+  }
+  const bodiesNamed = new Map<string, number>();
+  for (const item of items) {
+    const name = nameOf(item);
+    if (typeof name === 'string') bodiesNamed.set(name, (bodiesNamed.get(name) ?? 0) + 1);
+  }
+  return items.map((item) => {
+    const name = nameOf(item);
+    if (typeof name !== 'string' || bodiesNamed.get(name) !== 1) return item;
+    const packageId = packageOf.get(name);
+    return packageId ? withEntryPackage({ name, data: item, packageId }) : item;
+  });
 }

@@ -28,6 +28,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// Paid at collection: the dispatcher reaches it through a dynamic import.
+import '@objectstack/metadata';
 
 import { ObjectKernel, isAuthzStoreUnavailableError } from '@objectstack/core';
 import { ApiErrorSchema, BaseResponseSchema } from '@objectstack/spec/api';
@@ -38,16 +40,26 @@ import { hashApiKey } from './security/api-key.js';
 
 const FUTURE = '2999-01-01T00:00:00Z';
 const RAW_EXMEMBER = 'osk_exmember_dispatcher_door';
+// [ADR-0093 D8.1, as amended] The membership rule reads no posture, so the
+// ex-member key is refused with or without one. The key whose refusal the
+// posture still gates is the organization-less one (`organization_required`):
+// it is what tells "no posture" apart from "a posture that could not be read".
+const RAW_ORGLESS = 'osk_orgless_dispatcher_door';
 
 function qlWith() {
     const tables: Record<string, any[]> = {
         // Stamped org_A; the owner's ONLY current membership is org_B.
         sys_api_key: [
             { id: 'k_ex', key: hashApiKey(RAW_EXMEMBER), revoked: false, user_id: 'u_exmember', active_organization_id: 'org_A', expires_at: FUTURE },
+            // No organization at all.
+            { id: 'k_orgless', key: hashApiKey(RAW_ORGLESS), revoked: false, user_id: 'u_orgless', expires_at: FUTURE },
         ],
-        sys_member: [{ user_id: 'u_exmember', organization_id: 'org_B' }],
+        sys_member: [
+            { user_id: 'u_exmember', organization_id: 'org_B' },
+            { user_id: 'u_orgless', organization_id: 'org_A' },
+        ],
         // The key's owner exists: an API key authenticates only as an owner who exists.
-        sys_user: [{ id: 'u_exmember' }],
+        sys_user: [{ id: 'u_exmember' }, { id: 'u_orgless' }],
         sys_user_permission_set: [], sys_permission_set: [],
         sys_position: [], sys_position_permission_set: [], sys_user_position: [],
     };
@@ -135,23 +147,27 @@ describe('[#13906 / 1A] HttpDispatcher.resolveRequestScope — the tenancy postu
         expect(context.executionContext).toBeUndefined();
     });
 
-    it('SUPPORTED, unchanged: tenancy NEVER registered → quiet `undefined` posture, the key is admitted (the no-tenancy composition)', async () => {
-        // No wall exists here, and an org-stamped key working is by design.
-        // This is the composition a careless repair breaks; it must be
-        // byte-for-byte what it was.
+    it('SUPPORTED, unchanged: tenancy NEVER registered → quiet `undefined` posture, no posture-conditional refusal (the no-tenancy composition)', async () => {
+        // No wall exists here, and an organization-less key working is by
+        // design. This is the composition a careless repair breaks.
+        const context = requestWith({ 'x-api-key': RAW_ORGLESS });
+        await dispatcherOn(kernelWith('unregistered')).resolveRequestScope(context, '/data/task');
+        expect(context.executionContext.userId).toBe('u_orgless');
+    });
+
+    it('[ADR-0093 D8.1, as amended] with tenancy never registered, a key its owner\'s membership no longer backs is refused all the same (guest)', async () => {
         const context = requestWith({ 'x-api-key': RAW_EXMEMBER });
         await dispatcherOn(kernelWith('unregistered')).resolveRequestScope(context, '/data/task');
-        expect(context.executionContext.userId).toBe('u_exmember');
-        expect(context.executionContext.tenantId).toBe('org_A');
+        expect(context.executionContext.userId).toBeUndefined();
     });
 
     it('THE COLLAPSE IS ENDED: "registered and failed" and "never registered" no longer answer alike on this wiring', async () => {
-        const failedCtx = requestWith({ 'x-api-key': RAW_EXMEMBER });
+        const failedCtx = requestWith({ 'x-api-key': RAW_ORGLESS });
         const failed: any = await rejectionOf(dispatcherOn(kernelWith('factory-throws')).resolveRequestScope(failedCtx, '/data/task'));
-        const absentCtx = requestWith({ 'x-api-key': RAW_EXMEMBER });
+        const absentCtx = requestWith({ 'x-api-key': RAW_ORGLESS });
         await dispatcherOn(kernelWith('unregistered')).resolveRequestScope(absentCtx, '/data/task');
         expect(isAuthzStoreUnavailableError(failed)).toBe(true);
-        expect(absentCtx.executionContext.userId).toBe('u_exmember');
+        expect(absentCtx.executionContext.userId).toBe('u_orgless');
     });
 
     it('[#24299] a plain engine fault on the `sys_api_key` read is the branded outage too — a key whose read failed is no "no key"', async () => {
@@ -253,6 +269,10 @@ describe('[#13906 / 1A] the outage reaches the transport envelope as 503 SERVICE
     // The 501 on the failed leg is the defect on the wire: byte-for-byte the
     // "never registered" answer, i.e. the ex-member was ADMITTED.
     //
+    // Since ADR-0093 D8.1 was amended the ex-member key is refused 401 on the
+    // "never registered" leg too (the membership rule reads no posture), so
+    // that leg's 501 is now driven with the organization-less key.
+    //
     // [#19543] Driven through `GET /automation/_status` since door ④ retired
     // the `GET /automation` flow list (the path is no longer mounted). The
     // seam this pins is route-independent — the tenancy verdict and the
@@ -285,9 +305,16 @@ describe('[#13906 / 1A] the outage reaches the transport envelope as 503 SERVICE
 
     it('THE COLLAPSE IS ENDED on the wire: never registered keeps its 501 (admitted, no automation service) — only the FAILED leg moved', async () => {
         const handlers = await mountOn(kernelWith('unregistered'));
-        const { status, body } = await drive(handlers[AUTOMATION], withKey);
+        const { status, body } = await drive(handlers[AUTOMATION], { headers: { 'x-api-key': RAW_ORGLESS }, query: {} });
         expect(status).toBe(501);
         expect(body?.error?.code).toBe('NOT_IMPLEMENTED');
+    });
+
+    it('[ADR-0093 D8.1, as amended] on the wire with tenancy never registered, the ex-member key is refused on the anonymous floor (401)', async () => {
+        const handlers = await mountOn(kernelWith('unregistered'));
+        const { status, body } = await drive(handlers[AUTOMATION], withKey);
+        expect(status).toBe(401);
+        expect(body?.error?.code).toBe('UNAUTHENTICATED');
     });
 
     it('CONTROL on the wire: with tenancy never registered the same door serves — the no-tenancy composition is untouched', async () => {

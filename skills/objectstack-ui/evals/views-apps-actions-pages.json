@@ -13,8 +13,8 @@
     },
     {
       "id": 2,
-      "prompt": "Build `src/apps/crm.app.ts`: a Sales group with Leads, Opportunities, the pipeline kanban, a 'My open deals' entry and the sales dashboard; an Approvals group that only shows when approvals are installed; and a second app for the support team.",
-      "expected_output": "`App.create({...})` with a `navigation` tree of `group` items: `type: 'object'` entries with `objectName`, a `viewName: 'pipeline_kanban'` shortcut, a bare `filters: { owner_id: '{current_user_id}', status: 'open' }` slice for 'My open deals' (no view authored for a one-off), `type: 'dashboard'` with `dashboardName`, and `requiresObject: 'sys_approval_request'` on the approvals item. Exactly one App per `type: 'app'` package: the support audience is a `requiredPermissions`-gated group inside it, not a second `App.create`. Registered under `defineStack({ apps })`.",
+      "prompt": "Build `src/apps/crm.app.ts`: a Sales group with Leads, Opportunities, the pipeline kanban, a 'My open deals' entry and the sales dashboard; an Approvals group that only shows when approvals are installed; and a second app for the support team, who work the same objects.",
+      "expected_output": "`App.create({...})` with a `navigation` tree of `group` items: `type: 'object'` entries with `objectName`, a `viewName: 'pipeline_kanban'` shortcut, a bare `filters: { owner_id: '{current_user_id}', status: 'open' }` slice for 'My open deals' (no view authored for a one-off), `type: 'dashboard'` with `dashboardName`, and `requiresObject: 'sys_approval_request'` on the approvals item. At most one app per package, so not a second `App.create` here: the support team shares this product and its objects, so it is a `requiredPermissions`-gated group inside the app. (A support product with objects of its own would carry its app in its own `type: 'module'` package of the suite.) Registered under `defineStack({ apps })`.",
       "files": [],
       "assertions": {
         "must_contain": ["App.create", "navigation", "objectName", "viewName", "filters", "requiresObject", "requiredPermissions"],
@@ -159,6 +159,16 @@
       "assertions": {
         "must_contain": ["preflight", "read: { url: '/api/v1/packages/${ctx.recordId}/upgrade-plan?version=${param.version}' }", "seed: [{ param: 'plan_token', path: 'token' }]"],
         "must_not_contain": ["headers:", "${result."]
+      }
+    },
+    {
+      "id": 17,
+      "prompt": "Our environment runs our `crm` app and the Service app (`service_desk`, from its own package). Sales reps must not see the Service app; service agents use it daily. The customer also asks that each position lands on its own app by default. What do we author?",
+      "expected_output": "`tabPermissions: { service_desk: 'hidden' }` (keyed by the app's `name`) on a permission set the sales position distributes. The app leaves the reps' Home tiles, App Switcher and `GET /api/v1/me/apps`. That is visibility, not access: the app's URL still opens, and any other value for it on another set a rep holds (`visible`, `default_on`, `default_off`) outranks `hidden`, so the set everyone holds must carry no `tabPermissions` entry for it. If reps must not open it at all, the Service app declares `requiredPermissions: ['service.access']` and the agents' permission set grants `systemPermissions: ['service.access']`; admins need that grant too. Not the app's own `hidden` flag, which takes it off the switcher for everyone. A per-position default app does not exist (an app's `isDefault` is global): say so, promise none.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["tabPermissions", "'hidden'", "requiredPermissions", "systemPermissions"],
+        "must_not_contain": ["hidden: true,", "hidden: true }"]
       }
     }
   ]

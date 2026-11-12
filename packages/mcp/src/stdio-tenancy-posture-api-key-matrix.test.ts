@@ -13,6 +13,11 @@
  * the key's `sys_api_key.active_organization_id` — the caller's own stored
  * claim, never vetted against current membership — became the request's tenant.
  *
+ * Since ADR-0093 D8.1 was amended, `organization_membership_ended` reads no
+ * posture: a key its owner's membership no longer backs is refused under every
+ * posture and with none. `organization_required` is the refusal that still
+ * reads one, so it is what this file's no-posture arms measure the seam with.
+ *
  * This transport is the sharpest of the census: it has no session path at all,
  * so the API-key admission is not one branch of its authorization, it IS its
  * authorization.
@@ -439,10 +444,14 @@ describe('[#15348] §2 — an ex-member\'s org-stamped key on the stdio door und
     await expect(h.start()).rejects.toThrow(/did not resolve to a valid identity/);
   });
 
-  it('NARROWNESS · `single` admits it — there is no wall to be walled out of', async () => {
+  it('[ADR-0093 D8.1, as amended] `single` refuses it too — a current membership is required under every posture', async () => {
     const h = await boot(RAW_EXMEMBER_KEY, { kind: 'posture', posture: 'single' });
+    await expect(h.start()).rejects.toThrow(/did not resolve to a valid identity/);
+  });
+
+  it('CONTROL · `single` admits the CURRENT member\'s key', async () => {
+    const h = await boot(RAW_MEMBER_KEY, { kind: 'posture', posture: 'single' });
     const { bridge } = await h.start();
-    // Admitted, and the read is what an unwalled deployment answers.
     expect((await readAll(bridge)).total).toBe(2);
   });
 });
@@ -507,21 +516,31 @@ describe('[#15348] §4 — a `tenancy` service that is registered and FAILS TO B
   });
 
   it('CONTRAST · a `tenancy` that was NEVER REGISTERED stays quiet — the supported no-tenancy composition', async () => {
-    // The other half of decision 1A, and simultaneously this file's permanent
-    // ABLATION: with no posture in play the ex-member's key is admitted again
-    // and reads `org_alpha`'s rows, which is the measured defect returning the
-    // moment the argument stops being supplied. It is CORRECT here — a kernel
-    // with no `tenancy` service enforces no organization wall — and it is what
-    // makes every refusal above attributable to the posture and nothing else.
-    const h = await boot(RAW_EXMEMBER_KEY, { kind: 'unregistered' });
+    // The other half of decision 1A: with no `tenancy` service the current
+    // member's key is admitted, reads and writes — no outage is invented.
+    const h = await boot(RAW_MEMBER_KEY, { kind: 'unregistered' });
     const { bridge } = await h.start();
     const res = await readAll(bridge);
     expect(res.total).toBe(2);
     expect(res.records.map((r) => r.id)).toEqual(['u_a1', 'u_a2']);
     await bridge.create(OBJECT, { name: 'w-nowall' });
     expect(h.fixture.store().filter((r) => r.name === 'w-nowall')[0]).toMatchObject({
-      organization_id: 'org_alpha', created_by: 'u_exmember',
+      organization_id: 'org_alpha', created_by: 'u_member',
     });
+  });
+
+  it('ABLATION · with no posture in play the organization-less key is admitted again — the refusal above is the posture\'s', async () => {
+    // This file's permanent ablation. Since ADR-0093 D8.1 was amended the
+    // membership rule reads no posture, so what the posture still decides is
+    // the org-less key's `organization_required` refusal (§3): refused under
+    // `isolated`, admitted when no `tenancy` service is registered.
+    const h = await boot(RAW_ORGLESS_KEY, { kind: 'unregistered' });
+    await expect(h.start()).resolves.toBeDefined();
+  });
+
+  it('[ADR-0093 D8.1, as amended] with no `tenancy` service, a key its owner\'s membership no longer backs is refused all the same', async () => {
+    const h = await boot(RAW_EXMEMBER_KEY, { kind: 'unregistered' });
+    await expect(h.start()).rejects.toThrow(/did not resolve to a valid identity/);
   });
 });
 
@@ -538,10 +557,13 @@ describe('[#15348] §4 — a `tenancy` service that is registered and FAILS TO B
 describe('[#15348] §5 — the posture and the membership are both re-read per call', () => {
   it('a wall that comes up AFTER the transport attaches refuses the next call', async () => {
     const service: LiveTenancy = { posture: 'single' };
-    const h = await boot(RAW_EXMEMBER_KEY, { kind: 'live', service });
+    // The organization-less key: its `organization_required` refusal is the
+    // one that reads the posture (ADR-0093 D8.1, as amended, made the
+    // membership rule posture-free).
+    const h = await boot(RAW_ORGLESS_KEY, { kind: 'live', service });
     // Boots: at start there is no wall, so the key is legitimately admitted.
     const { bridge } = await h.start();
-    expect((await readAll(bridge)).total).toBe(2);
+    await expect(bridge.query(OBJECT, {})).resolves.toBeDefined();
 
     // The multi-org runtime registers and the wall goes live.
     service.posture = 'isolated';
@@ -616,7 +638,7 @@ describe('[#17114] §6 — the classification is shared; the resolution is still
   it('a `getServiceAsync` that throws the branded rejection SYNCHRONOUSLY stays quiet — same answer as the rejected one', async () => {
     const branded = await rejectionValue({ kind: 'unregistered' });
     expect(isServiceNotRegisteredError(branded), 'fixture: the registry did not brand its miss').toBe(true);
-    const h = await bootWithHost(RAW_EXMEMBER_KEY, (kernel) => ({
+    const h = await bootWithHost(RAW_MEMBER_KEY, (kernel) => ({
       getService: <T>(name: string): T => kernel.getService<T>(name),
       getServiceAsync: () => { throw branded; },
     }));
@@ -645,7 +667,7 @@ describe('[#17114] §6 — the classification is shared; the resolution is still
     // `PluginLoader.getService`. Folding this leg onto the shared
     // classification would turn that one reportable fault into a 503 and break
     // every embedder on a `KernelBase`-shaped host. This arm reddens if it is.
-    const h = await bootWithHost(RAW_EXMEMBER_KEY, (kernel) => ({
+    const h = await bootWithHost(RAW_MEMBER_KEY, (kernel) => ({
       getService: <T>(name: string): T => kernel.getService<T>(name),
     }));
     const { bridge } = await h.start();

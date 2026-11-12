@@ -335,8 +335,19 @@ export type SecurityCatalogResolution =
   | {
       readonly status: 'refused';
       readonly reason: string;
+      /** Every candidate, each as one display string (`package "com.acme.crm"`) — what a report prints. */
       readonly candidates: readonly string[];
       readonly message: string;
+      /**
+       * [ADR-0150 D3/D5, #32164] The same candidates, structured, in the same
+       * order — what a door answers a `409 RESOURCE_CONFLICT` with
+       * (`candidates: [{ kind: 'package', packageId }]`, the shape `/actions`
+       * and the activation door's declaration types answer), so no caller
+       * parses a display string back into a package id. Every refusal
+       * {@link createSecurityCatalogReader} builds carries it; optional so a
+       * hand-made reader's refusal stays well-typed without it.
+       */
+      readonly holders?: readonly PackageScopedHolder[];
     };
 
 /** The catalog read. Its members answer the same question, so they never disagree. */
@@ -639,6 +650,7 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
         reason: outcome.reason,
         candidates: outcome.candidates.map(describePackageScopedHolder),
         message: outcome.message,
+        holders: outcome.candidates,
       };
     }
     if (outcome.status === 'resolved') {
@@ -680,6 +692,7 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       reason: refusal.reason,
       candidates: refusal.candidates.map(describePackageScopedHolder),
       message: packageScopedRefusalMessage(refusal),
+      holders: refusal.candidates,
     };
   };
 

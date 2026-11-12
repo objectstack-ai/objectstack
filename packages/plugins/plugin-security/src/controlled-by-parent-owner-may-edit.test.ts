@@ -182,10 +182,14 @@ beforeAll(async () => {
   await engine.insert('sys_organization', [{ id: ORG, name: 'OMD', slug: 'omd' }], SYS);
   // The delegator holds the requester's set through a stored direct grant row
   // owned by ORG, so the on-behalf-of link resolves to the same grants the
-  // owner holds — and NO `sys_member` row, so no ownership floor binds the
-  // delegator's pass: the only thing left to refuse a delegated update is the
-  // master gate, which is the pin (see the chain-middle-master suite for why
-  // the row lands straight through the driver).
+  // owner holds — and a membership whose role (`admin` → `org_admin`) sits
+  // outside the members-only floor's `org_member` domain (a delegation needs
+  // the delegator's current membership under every posture, ADR-0093 D8.1 as
+  // amended), so no ownership floor binds the delegator's pass: the only thing
+  // left to refuse a delegated update is the master gate, which is the pin (see
+  // the chain-middle-master suite for why the row lands straight through the
+  // driver).
+  await engine.insert('sys_member', [{ id: 'mem_delegator', user_id: DELEGATOR, organization_id: ORG, role: 'admin' }], SYS);
   await (engine as any).getDriver('sys_user_permission_set').create('sys_user_permission_set', {
     id: 'ups_delegator', user_id: DELEGATOR, permission_set: REQUESTER_SET.name, organization_id: ORG,
   });

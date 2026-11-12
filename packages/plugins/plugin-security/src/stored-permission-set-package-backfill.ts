@@ -67,6 +67,15 @@
  * differs from its `package_id`: with the suggesting package as the caller,
  * that is a set one of its declared dependencies holds. Every row reads equal
  * today; one that does not is reported, never rewritten.
+ *
+ * A bind the database or the write seam refuses as a unique violation — the
+ * row would be a second row of one key, a grant beside another of the same
+ * user, set and organization that already names the holder (#32164) — is
+ * reported by id (`duplicated`, at `warn`) and the row is left naming no
+ * package; the walk goes on, so one such row never stops every later row
+ * from being bound. Any other failed write still ends the run. A dry run asks
+ * the one-grant check's own predicate of each grant row it would bind, and
+ * reports a row the write would refuse as `duplicated`, not `bound`.
  */
 
 import {
@@ -76,7 +85,7 @@ import {
   type PackageScopedResolution,
 } from '@objectstack/core';
 import { packageResolutionClosure, type PackageClosureRegistry } from '@objectstack/metadata-core';
-import { keysetWalk } from '@objectstack/types';
+import { isUniqueViolationError, keysetWalk } from '@objectstack/types';
 
 /** One stored reference to a permission set (ADR-0150 D8). */
 export interface StoredPermissionSetReference {
@@ -112,6 +121,51 @@ export const STORED_PERMISSION_SET_REFERENCES: readonly StoredPermissionSetRefer
 
 /** The suggestion table, whose `package_id` the backfilled column is compared with. */
 const SUGGESTION_OBJECT = 'sys_audience_binding_suggestion';
+
+/** [#32164] The grant table (R1), and the columns its one-grant check reads. */
+export const GRANT_OBJECT = 'sys_user_permission_set';
+export const GRANT_HOLDER_COLUMN = 'user_id';
+export const GRANT_ORGANIZATION_COLUMN = 'organization_id';
+
+/** A non-blank string, trimmed, or a finite number as a string; anything else names nothing. */
+export const grantKeyOf = (value: unknown): string | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+};
+
+/** [#32164] The package holders of `name` the one-grant check reads: the registry's once sealed, none before. */
+export function sealedPackageHoldersOf(registry: unknown, name: string): readonly string[] {
+  if (!isPermissionSetHolderRegistry(registry) || (registry as { bareNameHoldersAreSealed?: unknown }).bareNameHoldersAreSealed !== true) return [];
+  return registry.packageScopedHoldersOf('permission', name, null) ?? [];
+}
+
+/** [#32164] The other grants (all but row `id`) of one user, set and organization, read as the system in `transaction`. */
+export async function otherGrantsOf(
+  engine: { find?: (object: string, query?: any) => Promise<unknown> },
+  reference: StoredPermissionSetReference,
+  grant: { user: string; name: string; organization: string; id: string | null },
+  transaction?: unknown,
+): Promise<Row[]> {
+  if (typeof engine.find !== 'function') return [];
+  const found = await engine.find(reference.object, {
+    where: { [GRANT_HOLDER_COLUMN]: grant.user, [reference.nameColumn]: grant.name, [GRANT_ORGANIZATION_COLUMN]: grant.organization },
+    fields: ['id', reference.packageColumn],
+    context: transaction === undefined ? SYSTEM_CTX : { ...SYSTEM_CTX, transaction },
+  });
+  return (Array.isArray(found) ? (found as Row[]) : []).filter((row) => grant.id === null || grantKeyOf(row.id) !== grant.id);
+}
+
+/**
+ * [#32164] Is a grant storing package `mine` beside `others` (the other grants of its user, set and organization) a
+ * second grant of one set, which the key before #32164 refused? Yes, unless the two name two DIFFERENT holders.
+ */
+export function isSecondGrant(others: readonly Row[], packageColumn: string, mine: unknown, holders: readonly string[]): boolean {
+  const own = grantKeyOf(mine);
+  return others.some((row) => {
+    const theirs = grantKeyOf(row[packageColumn]);
+    return !(own !== null && theirs !== null && own !== theirs && holders.includes(own) && holders.includes(theirs));
+  });
+}
 
 /**
  * [ADR-0150 D10] The operator's fix for a stored reference the rule refuses:
@@ -212,6 +266,13 @@ export interface StoredReferenceBackfillReport {
   readonly unpackaged: ReadonlyArray<ReferencedName & { readonly holder: 'environment' | 'platform' }>;
   /** Suggestion rows whose `permission_set_package` is not their `package_id` (R3 only); never rewritten. */
   readonly differs: ReadonlyArray<{ readonly id: string; readonly name: string; readonly packageId: string; readonly permissionSetPackage: string }>;
+  /**
+   * [#32164] Rows the bind would make a second row of one key (a grant of the
+   * same user, set and organization already names the holder): the write was
+   * refused as a unique violation, the row is left naming no package, and the
+   * walk goes on. Each is named by id, so an operator can review the pair.
+   */
+  readonly duplicated: ReadonlyArray<{ readonly id: string; readonly name: string; readonly packageId: string; readonly callerPackageId?: string | null }>;
 }
 
 /** The engine slice the backfill reads and writes through. */
@@ -243,6 +304,21 @@ const callerOf = (row: Row, callerColumn: string | undefined): string | null => 
   return typeof v === 'string' && v !== '' ? v : null;
 };
 
+/** [#32164] A dry run's reading of the write: would the one-grant check refuse binding grant `row` to `packageId`? */
+async function wouldBeSecondGrant(
+  engine: StoredReferenceBackfillEngine,
+  reference: StoredPermissionSetReference,
+  row: Row,
+  name: string,
+  packageId: string,
+): Promise<boolean> {
+  const user = grantKeyOf(row[GRANT_HOLDER_COLUMN]);
+  const organization = grantKeyOf(row[GRANT_ORGANIZATION_COLUMN]);
+  if (user === null || organization === null) return false;
+  const others = await otherGrantsOf(engine, reference, { user, name, organization, id: grantKeyOf(row.id) });
+  return isSecondGrant(others, reference.packageColumn, packageId, sealedPackageHoldersOf((engine as { registry?: unknown }).registry, name));
+}
+
 /**
  * Bind every row of `reference` whose package column is null to the one
  * package that holds its name (module doc). Reads by keyset page; writes only
@@ -258,9 +334,15 @@ export async function backfillStoredPermissionSetPackages(
   const ambiguous = new Map<string, ReferencedName & { reason: PackageScopedRefusalReason; candidates: readonly string[] }>();
   const unheld = new Map<string, ReferencedName>();
   const unpackaged = new Map<string, ReferencedName & { holder: 'environment' | 'platform' }>();
+  const duplicated: Array<{ id: string; name: string; packageId: string; callerPackageId?: string | null }> = [];
   const answers = new Map<string, StoredReferenceHolder>();
   const { object, nameColumn, packageColumn, callerColumn } = reference;
-  const fields = ['id', nameColumn, packageColumn, ...(callerColumn ? [callerColumn] : [])];
+  // A dry run of the grant table asks the one-grant check the write would meet (module doc).
+  const predictsSecondGrants = options?.dryRun === true && object === GRANT_OBJECT;
+  const fields = [
+    'id', nameColumn, packageColumn, ...(callerColumn ? [callerColumn] : []),
+    ...(predictsSecondGrants ? [GRANT_HOLDER_COLUMN, GRANT_ORGANIZATION_COLUMN] : []),
+  ];
   /** Who wrote the reference, as the report names it: absent for an environment row (R1). */
   const writer = (caller: string | null) => (callerColumn ? { callerPackageId: caller } : {});
 
@@ -290,10 +372,23 @@ export async function backfillStoredPermissionSetPackages(
       }
       switch (holder.kind) {
         case 'package': {
-          if (!options?.dryRun) {
-            await engine.update(object, { id, [packageColumn]: holder.packageId }, { context: SYSTEM_CTX });
-          }
           const packageId = holder.packageId;
+          if (predictsSecondGrants && (await wouldBeSecondGrant(engine, reference, row, name, packageId))) {
+            duplicated.push({ id: String(id), name, packageId, ...writer(caller) });
+            break;
+          }
+          if (!options?.dryRun) {
+            try {
+              await engine.update(object, { id, [packageColumn]: packageId }, { context: SYSTEM_CTX });
+            } catch (e: unknown) {
+              // [#32164] One row whose bind is a unique violation is reported
+              // and left as it stands; the walk goes on, so every other row is
+              // still bound (`duplicated`).
+              if (!isUniqueViolationError(e)) throw e;
+              duplicated.push({ id: String(id), name, packageId, ...writer(caller) });
+              break;
+            }
+          }
           tally(bound, key, () => ({ name, ...writer(caller), rows: 0, packageId }));
           break;
         }
@@ -322,6 +417,7 @@ export async function backfillStoredPermissionSetPackages(
     unheld: [...unheld.values()],
     unpackaged: [...unpackaged.values()],
     differs,
+    duplicated,
   };
 }
 
@@ -457,6 +553,15 @@ export function logStoredReferenceBackfill(report: StoredReferenceBackfillReport
         'holds, not the suggesting package itself; nothing is rewritten — ' +
         report.differs.map((d) => `'${d.name}' (suggested by ${d.packageId}, held by ${d.permissionSetPackage})`).join(', ') + '.',
       { differs: report.differs },
+    );
+  }
+  if (report.duplicated.length > 0) {
+    logger.warn(
+      `[security] ${at}: these rows were left naming no package, because binding each would make it a second row of one ` +
+        'key: another row already names the same holder for the same reference (for a grant: the same user, permission ' +
+        'set and organization). Review each pair and delete the row that should not stand — ' +
+        report.duplicated.map((d) => `row ${d.id}: '${d.name}'${typeof d.callerPackageId === 'string' ? ` as written by ${d.callerPackageId}` : ''} → ${d.packageId}`).join(', ') + '.',
+      { duplicated: report.duplicated },
     );
   }
 }
