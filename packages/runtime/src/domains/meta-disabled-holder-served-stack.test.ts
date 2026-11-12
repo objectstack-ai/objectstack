@@ -370,6 +370,10 @@ describe.each([
             expect([answer.status, codeOf(answer.body), door], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', door]);
             for (const id of [ROW_E, ROW_F]) expect(JSON.stringify(answer.body)).toContain(id);
             expect(JSON.stringify(answer.body)).not.toMatch(/(enabled|third) row/);
+            // [#32607, A1] The dispatcher's layered chain leaves the plain read's refusal to step 1c too: `/layers`
+            // leads with the writes' sentence, `/published` does not.
+            const message = String(answer.body?.error?.message ?? '');
+            expect([door, message.startsWith('Name the package this layered read is for')], message).toEqual([door, door === 'layers']);
         }
         // The execution face takes the same refusal.
         const protocol: any = booted.kernel.getService('protocol');
