@@ -64,6 +64,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { InterfacesPillar, StudioNavItemInspector } from './StudioDesignSurface';
+// The source loads `@objectstack/lint` with a function-body `import()`: paid
+// here, at collection, never inside a case's clocked window.
+import '@objectstack/lint';
 import { AppNavCanvas } from '../metadata-admin/previews/AppNavCanvas';
 import { t } from '../metadata-admin/i18n';
 import { listStudioCanvasPreviewTypes } from './studio-canvas-preview';
@@ -519,8 +522,8 @@ describe('StudioDesignSurface.navRailLabels-11862', () => {
     it('an entry that names no target reads as the untitled wording by its place, never its id', async () => {
       renderPillar();
       // objectui#12455 — its kind is known (it was born an object entry), so
-      // its tag says so.
-      const row = await screen.findByRole('button', { name: 'Item 3 Object' });
+      // its tag says so; and it is marked incomplete (`isIncompleteNavEntry`).
+      const row = await screen.findByRole('button', { name: 'Item 3 Object Incomplete' });
       expect(row).toBeDisabled();
       expect(row).not.toHaveTextContent('nav_item_7');
       expect(row).not.toHaveAttribute('title', 'nav_item_7');
