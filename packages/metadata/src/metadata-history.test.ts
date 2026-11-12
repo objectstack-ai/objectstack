@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { MetadataManager } from './metadata-manager.js';
 import { DatabaseLoader } from './loaders/database-loader.js';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
+import { SysMetadataHistoryObject } from '@objectstack/metadata-core';
 import { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
 
 describe('Metadata History', () => {
@@ -339,7 +340,9 @@ describe('history and rollback of a type stored per package (#32351)', () => {
       });
 
       it('a history row written before the column (package_id NULL) reads as before; by package, the package its body names', async () => {
-        await manager.getHistory(type, 'x'); // provisions both tables, writes nothing
+        // The table as the release before this one created it: no `package_id`.
+        const { package_id: _added, ...before } = SysMetadataHistoryObject.fields as Record<string, unknown>;
+        await driver.syncSchema('sys_metadata_history', { ...SysMetadataHistoryObject, fields: before } as never);
         const legacy = (version: number, data: Record<string, unknown>) => driver.create('sys_metadata_history', {
           id: `legacy_${version}`, event_seq: version, type, name: 'x', version, operation_type: 'update',
           metadata: JSON.stringify(data), checksum: `c${version}`, recorded_at: `2026-01-0${version}T00:00:00.000Z`,

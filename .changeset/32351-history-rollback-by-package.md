@@ -1,0 +1,22 @@
+---
+'@objectstack/metadata': patch
+'@objectstack/metadata-core': patch
+---
+
+fix(metadata)!: history, diff and rollback of a type stored per package address one package's row, and a removed package's version is no longer written into the remaining holder's row
+
+Clause-②: no (narrowing) — for a type stored per `(package, name)` (`api`, `agent`, `skill`, `action`, `email_template`, `permission`) read through `DatabaseLoader`: `MetadataManager.getHistory` / `diff` and `DatabaseLoader.queryHistory` / `getHistoryRecord` of a name two row slots hold, naming no package, answered every holder's versions and now answer `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming every holder); `MetadataManager.rollback` to the version of a package that holds no row of the name (one since removed) wrote that version's body into the remaining holder's row and now answers `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`, naming that package). A name one row slot holds, and every other type, answer as before.
+Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) no key of any authorable schema is added, removed or re-shaped. The one stored-shape change is a nullable `package_id` column on `sys_metadata_history`, which the history object's schema sync adds without rewriting any row; a row written before it reads exactly as it did, its package being the one its stored body names, as for a `sys_metadata` row. The two refusals answer a request without writing anything, so there is nothing for `objectstack migrate meta` to rewrite. -->
+
+**BREAKING** for a caller of `MetadataManager` (or `DatabaseLoader`) history on a database-backed loader that reads the history of a name two packages hold without naming a package, or that rolls back to a version of a package removed since. No first-party door reaches `DatabaseLoader` history today: the REST `/meta/:type/:name/history`, `/rollback` and `/diff` doors go through the protocol's own repository.
+
+ADR-0150 D3/D4: such a type keeps a row per package of a name, its versions numbered per name across those rows. Until now its history rows did not say whose row they were taken of, so a rollback by name could not tell which row a version belongs to.
+
+- **Each history row names its package.** `sys_metadata_history` gains a nullable `package_id` column. `DatabaseLoader` fills it on a save and a rollback of such a type with the package of the row written, including a package-less customization saved into a package's row (D4). It stays NULL for every other type, for a package-less row, and on every row `SysMetadataRepository` writes. The unique `(type, name, version)` is unchanged. Upgrade path: the boot's schema sync adds the column on every driver (`ALTER TABLE … ADD COLUMN package_id`, nullable, no default, no row rewritten). A row written before it is read as the package its stored body names (the `_packageId` stamp), else as no package.
+- **Name the package.** `getHistory(type, name, { packageId })`, `diff(type, name, v1, v2, { packageId })` and `rollback(type, name, version, { packageId })` on `MetadataManager`, and `queryHistory(…, { packageId })`, `getHistoryRecord(…, { packageId })` and `registerRollback(…, { packageId })` on `DatabaseLoader`, read or write that package's versions and row only. `total` and `hasMore` count that package's versions. Another package's version answers "not found". A rollback writes that package's row and leaves every other package's row untouched. A package that holds no row of the name is refused `409` (`not-held-by-qualifier`). The new options type is exported as `MetadataHistoryAddress`.
+- **Naming none.** One holder answers as before. Two or more row slots, two packages' or a package's beside the package-less row, are refused `409` naming every holder. The rollback was already refused this way.
+- **A version lands only in its own package's row.** A rollback to a version whose history row names another package is refused `409` naming that package, and nothing is written. Before, after package B's item was removed, `rollback(name, <B's version>)` wrote B's body into package A's row.
+
+FROM → TO for a caller: FROM `getHistory(type, name)` on a name two packages hold TO `getHistory(type, name, { packageId })` per package; FROM `rollback(type, name, v)` TO `rollback(type, name, v, { packageId })` naming the package whose version `v` is. A removed package's version cannot be restored into another package's row: reinstall that package, or save the body you want into the remaining package's item.
