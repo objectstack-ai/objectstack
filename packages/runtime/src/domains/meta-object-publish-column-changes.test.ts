@@ -22,9 +22,10 @@
  * in-place relax) are pinned at the driver door, on every live dialect, in
  * `driver-sql/src/sql-driver-published-column-changes.test.ts`. What this file
  * owns is the wiring: that the publish ASKS for the column half
- * (`ensureObjectStorage` → `syncObjectSchema(name, { applyPublishedColumnChanges:
- * true })`), and that the save still refuses the change the table does not
- * promise (`number` → `text`, the representative `field_type_change`).
+ * (`ensureObjectStorage` → the additive `syncObjectSchema(name)`, then
+ * `engine.applyPublishedColumnChanges(name)`), and that the save still refuses
+ * the change the table does not promise (`number` → `text`, the representative
+ * `field_type_change`).
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
