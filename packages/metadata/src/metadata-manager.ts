@@ -88,7 +88,6 @@ import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
   bundleEntryKey,
-  isBundledStoreType,
   keyIdentityOf,
   readStoreEntry,
   recordStoreWrite,
@@ -3370,7 +3369,11 @@ export class MetadataManager implements IMetadataService {
             // protocol's own read binds a row), so a caller that registers it
             // back — the boot priming pass — fills that package's slot and its
             // member's row, never a package-less one.
-            const items = PACKAGE_SLOTTED_STORE_TYPES.has(type) && isBundledStoreType(type) && typeof loader.loadManyKeyed === 'function'
+            // [#32458] Every type stored per `(package, name)`, bundled or not:
+            // an unbundled one (`agent`, `skill`, `action`, `api`, `permission`)
+            // handed on unstamped filled the name's package-less slot, and with
+            // two holders its save inserted a package-less row.
+            const items = PACKAGE_SLOTTED_STORE_TYPES.has(type) && typeof loader.loadManyKeyed === 'function'
                 ? (await loader.loadManyKeyed<T>(type, options)).map((entry) => withEntryPackage(entry))
                 : await loader.loadMany<T>(type, options);
             for (const item of items) {
