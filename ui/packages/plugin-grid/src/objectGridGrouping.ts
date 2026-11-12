@@ -380,11 +380,22 @@ export function useObjectGridGrouping({
   });
   // The rows in hand are the open groups' pages: what everything else that
   // reads `data` (column inference, the client export, selection) sees.
+  //
+  // Handed over once every open group's page has answered, never one group at
+  // a time (objectstack#32627): `data` is what the record-grained verdict
+  // probe asks about (`useRecordCrudVerdicts`), so a set that grew per answer
+  // cost one explain request per group and operation. While an answer is
+  // outstanding and rows are already in hand, the rows in hand stay; with none
+  // in hand (a first load, another grouping) the set is empty, as before. The
+  // rows on screen are each group's own page and do not wait.
   const serverLeafKeys = JSON.stringify(serverGroupLeaves.map((leaf) => leaf.key));
   useEffect(() => {
     if (!serverGroupedFetch) return;
     const keys = JSON.parse(serverLeafKeys) as string[];
-    setData(keys.flatMap((key) => groupRows.pages[key]?.rows ?? []));
+    const pages = keys.map((key) => groupRows.pages[key]);
+    const outstanding = pages.some((page) => !page || page.loading);
+    if (outstanding && pages.some((page) => (page?.rows.length ?? 0) > 0)) return;
+    setData(outstanding ? [] : pages.flatMap((page) => page?.rows ?? []));
   }, [serverGroupedFetch, serverLeafKeys, groupRows.pages]);
   // …and the match total is the QUERY's: the top-level group counts summed.
   const serverGroupTotal = serverGroupedFetch && groupHeaders.headers

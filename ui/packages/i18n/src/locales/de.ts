@@ -2728,6 +2728,7 @@ const de = {
         invalidCredentials: "Ungültige E-Mail oder Passwort. Nach mehreren fehlgeschlagenen Versuchen wird die Anmeldung für eine Weile pausiert. Passwort vergessen? Setzen Sie es zurück, um sich sofort anzumelden.",
         invalidCredentialsNoMail: 'Ungültige E-Mail oder Passwort. Nach mehreren fehlgeschlagenen Versuchen wird die Anmeldung für eine Weile pausiert. Passwort vergessen? Bitten Sie Ihre Administration, es zurückzusetzen.',
         emailNotVerified: "Bitte bestätigen Sie Ihre E-Mail-Adresse, bevor Sie sich anmelden.",
+        accountDeactivated: "Ihr Konto wurde von Ihrer Organisation deaktiviert. Wenden Sie sich an Ihren Administrator.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -3999,6 +4000,7 @@ const de = {
       get_authoring_rules: "Die Erstellungsregeln nachlesen",
       get_metadata_schema: "Das Metadatenformat nachlesen",
       get_package: "Das Paket ansehen",
+      get_record_history: "Den Verlauf des Datensatzes lesen",
       list_metadata: "Vorhandene Metadaten auflisten",
       list_objects: "Vorhandene Objekte auflisten",
       list_packages: "Vorhandene Pakete auflisten",
