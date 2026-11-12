@@ -475,7 +475,9 @@ describe('ADR-0130 D4 — the manifest service registers every other residual ty
       sharedWith: { type: 'position', value: 'acme_top_position' },
     },
     apps: {},
-    pages: {},
+    // A `home` page: a record page (the default type) that places no
+    // component is refused at parse.
+    pages: { type: 'home' },
     actions: { type: 'url', target: 'https://example.com' },
     hooks: { object: 'acme_case', events: ['beforeInsert'] },
     agents: { role: 'Triage', instructions: 'Triage cases.' },

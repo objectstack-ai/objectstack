@@ -171,3 +171,131 @@ export function assertFlowSystemIdentityWriteAllowed(opCtx: {
     { operation, object },
   );
 }
+
+/**
+ * [Ruling record 6787890900] App-authored automation's system elevation does
+ * not change or delete the rows of an append-only object.
+ *
+ * An object declared `managedBy: 'append-only'` is a ledger: its rows record
+ * what happened, and the platform service that owns the object writes them
+ * (the audit and activity writers, the mail log, the job runner, the approval
+ * engine). A flow that runs as system, a hook that runs as system and an
+ * action body are app-authored, and their elevation is the one the identity
+ * refusal above judges, read by the same predicate ({@link elevationSource}):
+ * `isSystem` AND (`flowRunId` OR the app-automation mark). The set is the live
+ * registry's `managedBy`, never a list of names, so an append-only object a
+ * plugin registers tomorrow is covered the day it registers.
+ *
+ * ## What is judged
+ *
+ * This check covers the update, transfer, delete, purge and restore of an
+ * append-only object's rows ({@link APPEND_ONLY_REFUSED_OPERATIONS}); an
+ * insert is not judged by it, and reads are not judged. As with the identity
+ * refusal, the operation is judged as the engine hands it to the middleware,
+ * at any depth: a write the automation's own write sets off under the same
+ * context is its write too.
+ *
+ * ## The reference clean-up leg (seat decision on the contract review)
+ *
+ * Deleting a record that a ledger row references makes the engine clear that
+ * reference on the ledger row (the `set_null` leg), under the deleting
+ * context and marked `__referentialFieldClear`. That leg is a change to an
+ * append-only object made under the automation's elevation, so it is refused,
+ * and the delete it serves is refused whole: nothing is written. The refusal
+ * then names the delete, not the ledger write the author never wrote, and its
+ * remedy is to keep the record rather than delete it.
+ *
+ * ## What is not
+ *
+ * The platform's own writers — the retention sweeper, the migrations and
+ * backfills, the audit seal, every service writing under a system context of
+ * its own — carry neither a run nor the mark, and pass as before.
+ *
+ * The answer is the standard catalog's `PERMISSION_DENIED` (403), the code
+ * and status the identity refusal answers with; no code is minted.
+ */
+export const APPEND_ONLY_REFUSED_OPERATIONS: ReadonlySet<string> = new Set([
+  'update',
+  'transfer',
+  'delete',
+  'purge',
+  'restore',
+]);
+
+/** The bucket {@link assertAppAutomationAppendOnlyWriteAllowed} reads. */
+const APPEND_ONLY_BUCKET = 'append-only';
+
+/**
+ * Refuse a change or a delete of an append-only object's rows from a system
+ * context a flow run opened, an app-authored hook elevated, or an action body
+ * runs under; return for every other operation.
+ *
+ * `schemaOf` is asked only once the context is such an elevation and the verb
+ * is judged, so the platform's own writes and every user's write cost no
+ * registry lookup. Called by the data middleware beside
+ * {@link assertFlowSystemIdentityWriteAllowed}, ahead of its `isSystem`
+ * bypass, so the refused write never reaches the engine's write path.
+ */
+export function assertAppAutomationAppendOnlyWriteAllowed(
+  opCtx: {
+    object?: unknown;
+    operation?: unknown;
+    context?: { isSystem?: unknown; flowRunId?: unknown } | null;
+  },
+  schemaOf: (object: string) => { managedBy?: unknown } | null | undefined,
+): void {
+  const source = elevationSource(opCtx?.context);
+  if (!source) return;
+  const operation = typeof opCtx.operation === 'string' ? opCtx.operation : '';
+  if (!APPEND_ONLY_REFUSED_OPERATIONS.has(operation)) return;
+  const object = typeof opCtx.object === 'string' ? opCtx.object : '';
+  if (!object || schemaOf(object)?.managedBy !== APPEND_ONLY_BUCKET) return;
+  const cleanup = referenceCleanupOf(opCtx);
+  if (cleanup) {
+    throw new PermissionDeniedError(
+      `[Security] Access denied: deleting ${cleanup.deleted ? `a '${cleanup.deleted}' record` : 'a record'} from ${SUBJECT[source]} is refused — ` +
+        `deleting this record would change a record in an append-only ledger that references it ` +
+        `('${object}'${cleanup.field ? `.${cleanup.field}` : ''}), and ${ELEVATION[source]} does not lift that. ` +
+        `${APPEND_ONLY_SCOPE} Keep the record, and retire it (for example by marking it inactive) instead of deleting it.`,
+      {
+        operation: 'delete',
+        ...(cleanup.deleted ? { object: cleanup.deleted } : {}),
+        referencingObject: object,
+        ...(cleanup.field ? { field: cleanup.field } : {}),
+        managedBy: APPEND_ONLY_BUCKET,
+      },
+    );
+  }
+  throw new PermissionDeniedError(
+    `[Security] Access denied: '${operation}' on '${object}' from ${SUBJECT[source]} is refused — ` +
+      `'${object}' is append-only (managedBy: 'append-only'): its rows are a record of what happened, written ` +
+      `by the platform service that owns it, and ${ELEVATION[source]} does not lift that. ` +
+      `${APPEND_ONLY_SCOPE} Keep a value the automation must change on an object of its own.`,
+    { operation, object, managedBy: APPEND_ONLY_BUCKET },
+  );
+}
+
+/** The rule's reach, stated in every answer it gives. */
+const APPEND_ONLY_SCOPE =
+  'This check covers the update, transfer, delete, purge and restore of an append-only object; an insert is not judged by it.';
+
+/**
+ * When the judged write is the engine's reference clean-up for a delete (an
+ * `update` marked `__referentialFieldClear`, the marker the data middleware
+ * already reads for that leg), the object whose delete it serves and the
+ * referencing field; `undefined` for every other write. The cause's ids never
+ * reach the answer.
+ */
+function referenceCleanupOf(opCtx: {
+  operation?: unknown;
+  context?: unknown;
+}): { deleted?: string; field?: string } | undefined {
+  if (opCtx.operation !== 'update') return undefined;
+  const context = opCtx.context as { __referentialFieldClear?: unknown; __referentialFieldClearCause?: unknown } | null | undefined;
+  if (context?.__referentialFieldClear !== true) return undefined;
+  const cause = (context.__referentialFieldClearCause ?? {}) as { object?: unknown; field?: unknown };
+  return {
+    ...(typeof cause.object === 'string' && cause.object ? { deleted: cause.object } : {}),
+    ...(typeof cause.field === 'string' && cause.field ? { field: cause.field } : {}),
+  };
+}
