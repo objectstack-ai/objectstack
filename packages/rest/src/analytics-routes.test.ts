@@ -903,6 +903,75 @@ describe('[#32292] POST /analytics/dataset/query — a refused name is judged ov
     expect(svc.queryDataset).not.toHaveBeenCalled();
   });
 
+  it('a holder whose own exact-qualifier read refuses is undetermined: 503 on every arm, for every caller, naming no holder and running nothing', async () => {
+    ship('sales', A);
+    ship('sales', B);
+    // A row of the name in the bare slot, beside both package holders.
+    registry.registerItem('dataset', {
+      name: 'sales', label: 'bare sales', object: 'bare_item',
+      dimensions: [{ name: 'region', field: 'region', type: 'string' }],
+      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+    }, 'name' as never);
+    for (const admitted of [[], ['alpha_item'], ['alpha_item', 'beta_item']]) {
+      for (const query of [{}, { callerPackage: P }, { package: C }]) {
+        const svc = service({ admitted });
+        const answer = await send(svc, query);
+        const where = `${JSON.stringify(admitted)} ${JSON.stringify(query)}: ${answer.text}`;
+        expect([answer.status, answer.code], where).toEqual([503, 'SERVICE_UNAVAILABLE']);
+        expect(answer.text, where).not.toContain(A);
+        expect(answer.text, where).not.toContain(B);
+        expect(svc.queryDataset, where).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it('a holder whose own address serves nothing is undetermined where it could move the answer: 503, nothing run', async () => {
+    ship('sales', A);
+    ship('sales', B);
+    // The exact-qualifier read of alpha comes back without an item.
+    const servesNothingFor = (hidden: string) => new Proxy(protocol, {
+      get(target, prop) {
+        if (prop === 'getMetaItem') {
+          return async (req: any) => (req?.packageId === hidden ? { item: undefined } : target.getMetaItem(req));
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const svc = service({ admitted: ['beta_item'] });
+    const { route } = buildServer(async () => svc, servesNothingFor(A));
+    const res = mockRes();
+    await route!.handler({ method: 'POST', params: {}, query: {}, headers: {}, body: { datasetName: 'sales', selection: { measures: ['revenue'] } } } as any, res);
+    const text = JSON.stringify(res.body);
+    expect([res.statusCode, res.body?.code ?? res.body?.error?.code], text).toEqual([503, 'SERVICE_UNAVAILABLE']);
+    expect(text).not.toContain(A);
+    expect(svc.queryDataset).not.toHaveBeenCalled();
+  });
+
+  it('a refusal one of whose candidates is the environment is answered as it is: admission is not asked', async () => {
+    registry.registerItem('dataset', {
+      name: 'sales', label: 'bare sales', object: 'bare_item',
+      dimensions: [{ name: 'region', field: 'region', type: 'string' }],
+      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+    }, 'name' as never);
+    const svc = service();
+    const answer = await send(svc, { package: A });
+    expect([answer.status, answer.code], answer.text).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(svc.admitDatasetCatalogEntry).not.toHaveBeenCalled();
+    expect(svc.queryDataset).not.toHaveBeenCalled();
+  });
+
+  it('a holder whose saved dataset does not parse counts for no caller: admitted to both objects, the other holder runs', async () => {
+    ship('sales', A);
+    registry.registerItem('dataset', { name: 'sales', label: 'beta sales', object: 'beta_item', measures: 'not-a-list' } as never, 'name' as never, B);
+    const svc = service({ admitted: ['alpha_item', 'beta_item'] });
+    const answer = await send(svc);
+    expect(answer.status, answer.text).toBe(200);
+    expect(answer.body.object).toBe('alpha_item');
+    expect(svc.queryDataset).toHaveBeenCalledTimes(1);
+    expect(answer.text).not.toContain(B);
+  });
+
   it('a service whose admission is not the plugin-wired set is not asked: the refusal names every holder, as before', async () => {
     ship('sales', A);
     ship('sales', B);

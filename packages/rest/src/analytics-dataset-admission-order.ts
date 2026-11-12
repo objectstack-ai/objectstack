@@ -9,8 +9,9 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
  * when the by-name read REFUSES a name, the door asks which of the refused
  * holders this caller is admitted to before it answers, as MCP `query_dataset`
  * does (epic ruling 6766102988, point 1: "The REST query door follows the same
- * order where it applies admission"). A holder the caller may not query does
- * not exist for it, so it is never a candidate and never named:
+ * order where it applies admission"). Once the door judges, a holder the caller
+ * may not query does not exist for it, so it is never a candidate and never
+ * named (the two arms that do not judge are at the end of this comment):
  *
  *  - ambiguity (`ambiguous-in-environment`, `ambiguous-in-closure`,
  *    `ambiguous-in-namespace`): none admitted answers what a missing name
@@ -20,7 +21,9 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
  *    nothing is ever picked; none admitted answers what a missing name
  *    answers, and otherwise the `409` names only the admitted holders;
  *  - a holder whose admission could not be judged may be one the caller can
- *    query: whenever it could change the answer, nothing runs (`503`).
+ *    query: whenever it could change the answer, nothing runs (`503`). That
+ *    includes a holder whose own exact-qualifier read refuses: its refusal is
+ *    kept inside this arm and never answered.
  *
  * ⛔ Only the refusal arm (seat ruling 6817809380, Q1 = A). A name the read
  * RESOLVES keeps its answer: a caller not admitted to the one holder (or to the
@@ -33,9 +36,11 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
  * that would run. An item that fails the dataset parse is refused for every
  * caller, so it is admitted to none (as `query_dataset` treats it).
  *
- * The door asks this only of a service whose admission is the plugin-wired set
- * (`hasPluginWiredAdmission`): a hand-built service's admission passes
- * everyone, so the original refusal, naming every holder, stands (`rethrow`).
+ * Two arms do not judge, and answer the original refusal, naming every holder
+ * (`rethrow`): a service whose admission is not the plugin-wired set
+ * (`hasPluginWiredAdmission`: a hand-built service's admission passes
+ * everyone), and a refusal one of whose candidates is the environment or the
+ * platform rather than a package.
  */
 export type DatasetRefusalAdmission =
     /** Ask nothing: the original refusal is the answer. */
@@ -72,9 +77,10 @@ const AMBIGUITY: ReadonlySet<PackageScopedRefusal['reason']> = new Set([
 
 /**
  * Judge `refusal`'s holders for the caller in `context`. `readHolder` is the
- * door's exact-qualifier read of one holder; a read that throws is a failed
- * read, which the door answers as it answers any (`503`), so it is left to
- * throw.
+ * door's exact-qualifier read of one holder. A `PackageScopedNameRefusedError`
+ * it throws (the door's read rethrows every refusal in that class) leaves that
+ * holder undetermined; any other throw is a failed read, which the door
+ * answers as it answers any (`503`), so it is left to throw.
  */
 export async function admitRefusedDatasetHolders(args: {
     readonly refusal: PackageScopedRefusal;
@@ -97,7 +103,21 @@ export async function admitRefusedDatasetHolders(args: {
     const admitted: Array<{ packageId: string; read: { item: unknown } }> = [];
     let unresolved = false;
     for (const packageId of packageIds) {
-        const read = await readHolder(packageId);
+        let read: { item?: unknown } | null | undefined;
+        try {
+            read = await readHolder(packageId);
+        } catch (readError) {
+            // The holder's own read refused its address: which item would run
+            // there is not known, so neither is the caller's admission to it.
+            // Undetermined, and the read's own refusal (its candidates
+            // included) never leaves this arm. Any other throw is a failed
+            // read, answered `503` by the door.
+            if (readError instanceof PackageScopedNameRefusedError) {
+                unresolved = true;
+                continue;
+            }
+            throw readError;
+        }
         const item = read?.item;
         // The holder's own address serving nothing is no fact about the caller.
         if (item === undefined || item === null) {
