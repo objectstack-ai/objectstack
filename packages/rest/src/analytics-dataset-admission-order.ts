@@ -69,6 +69,18 @@ function admissionServiceOf(svc: unknown): DatasetAdmissionService | undefined {
         : undefined;
 }
 
+/**
+ * A package-scoped refusal by class OR by shape (`code` `RESOURCE_CONFLICT` with
+ * a `refusal` whose `status` is `'refused'`), whatever its reason: the door's
+ * `isPackageScopedRefusal` predicate, so a refusal from another copy of
+ * `@objectstack/core` is caught here too.
+ */
+function isRefusal(e: unknown): boolean {
+    if (e instanceof PackageScopedNameRefusedError) return true;
+    const thrown = e as { code?: unknown; refusal?: { status?: unknown } } | null | undefined;
+    return thrown?.code === 'RESOURCE_CONFLICT' && thrown.refusal?.status === 'refused';
+}
+
 const AMBIGUITY: ReadonlySet<PackageScopedRefusal['reason']> = new Set([
     'ambiguous-in-environment',
     'ambiguous-in-closure',
@@ -77,10 +89,10 @@ const AMBIGUITY: ReadonlySet<PackageScopedRefusal['reason']> = new Set([
 
 /**
  * Judge `refusal`'s holders for the caller in `context`. `readHolder` is the
- * door's exact-qualifier read of one holder. A `PackageScopedNameRefusedError`
- * it throws (the door's read rethrows every refusal in that class) leaves that
- * holder undetermined; any other throw is a failed read, which the door
- * answers as it answers any (`503`), so it is left to throw.
+ * door's exact-qualifier read of one holder. A refusal it throws, of any
+ * reason and by class or by shape, leaves that holder undetermined; any other
+ * throw is a failed read, which the door answers as it answers any (`503`), so
+ * it is left to throw.
  */
 export async function admitRefusedDatasetHolders(args: {
     readonly refusal: PackageScopedRefusal;
@@ -112,7 +124,7 @@ export async function admitRefusedDatasetHolders(args: {
             // Undetermined, and the read's own refusal (its candidates
             // included) never leaves this arm. Any other throw is a failed
             // read, answered `503` by the door.
-            if (readError instanceof PackageScopedNameRefusedError) {
+            if (isRefusal(readError)) {
                 unresolved = true;
                 continue;
             }

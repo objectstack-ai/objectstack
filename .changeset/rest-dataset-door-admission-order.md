@@ -12,8 +12,11 @@ Moved answers, for a caller admitted to fewer holders than the name has (bare na
 - admitted to none: `409 RESOURCE_CONFLICT` naming every holder → `404 NOT_FOUND`, byte-equal to the answer for a name nothing holds;
 - two or more holders in contention and exactly one admitted: `409` → `200`, that holder's dataset runs;
 - otherwise: `409` naming every holder → `409` naming only the admitted holders;
-- a holder whose admission cannot be judged, its own read included, where it could change the answer: `409` naming every holder → `503 SERVICE_UNAVAILABLE`, nothing run, no holder named. This holds for every caller, one admitted to every holder included.
+- a holder whose admission cannot be judged, where it could change the answer: `409` naming every holder → `503 SERVICE_UNAVAILABLE`, nothing run, no holder named.
 
-Moved for every caller: a holder whose saved dataset does not parse counts for no caller, as in `query_dataset`. With two holders in contention and only one of them parsing, a caller admitted to that one gets `200` and it runs, where the answer was `409` naming both.
+Moved for every caller:
+
+- a holder whose own exact-qualifier read refuses cannot be judged for any caller, one admitted to every holder included, so the row above applies to it. Where every holder's own read refuses, `409` naming every holder → `503 SERVICE_UNAVAILABLE` for every caller, for as long as those reads refuse;
+- a holder whose saved dataset does not parse counts for no caller, as in `query_dataset`. Where two holders were in contention and only one parses, `409` naming both → `200` for a caller who may query the one that parses (it runs), and → `404 NOT_FOUND` for any other caller.
 
 Unchanged: a name the read resolves (one holder, the caller package's own or closure item, an exact `?package=` hit) keeps its answer, including `403` from the query's own read gates for a caller not admitted to it, and it never falls through to another package's dataset of the same name. Two refusals are not judged and still name every holder: one from a service whose admission is not the plugin-wired set, and one that names the environment or the platform as a candidate. No fix needed from callers.

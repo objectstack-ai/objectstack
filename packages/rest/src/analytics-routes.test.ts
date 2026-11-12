@@ -10,6 +10,7 @@ import '@objectstack/objectql';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
+import { admitRefusedDatasetHolders } from './analytics-dataset-admission-order.js';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -970,6 +971,86 @@ describe('[#32292] POST /analytics/dataset/query — a refused name is judged ov
     expect(answer.body.object).toBe('alpha_item');
     expect(svc.queryDataset).toHaveBeenCalledTimes(1);
     expect(answer.text).not.toContain(B);
+    // A caller who may not query the holder that parses gets what a missing
+    // name gets, whatever it may query of the one that does not.
+    const missing = await send(service(), {}, 'nowhere');
+    for (const admitted of [[], ['beta_item']]) {
+      const other = service({ admitted });
+      const hidden = await send(other);
+      expect([hidden.status, hidden.code], hidden.text).toEqual([404, 'NOT_FOUND']);
+      expect(hidden.text).toBe(missing.text.replace('nowhere', 'sales'));
+      expect(other.queryDataset).not.toHaveBeenCalled();
+    }
+  });
+
+  it('?package= naming a holder whose own address refuses: 503 for every caller, naming no holder and running nothing', async () => {
+    ship('sales', A);
+    ship('sales', B);
+    registry.registerItem('dataset', {
+      name: 'sales', label: 'bare sales', object: 'bare_item',
+      dimensions: [{ name: 'region', field: 'region', type: 'string' }],
+      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+    }, 'name' as never);
+    for (const admitted of [[], ['alpha_item'], ['alpha_item', 'beta_item']]) {
+      for (const holder of [A, B]) {
+        const svc = service({ admitted });
+        const answer = await send(svc, { package: holder });
+        const where = `${JSON.stringify(admitted)} ?package=${holder}: ${answer.text}`;
+        expect([answer.status, answer.code], where).toEqual([503, 'SERVICE_UNAVAILABLE']);
+        expect(answer.text, where).not.toContain(A);
+        expect(answer.text, where).not.toContain(B);
+        expect(svc.queryDataset, where).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it('a per-holder read\'s refusal of any reason, by class or by shape, is undetermined: 503, and its own candidates are never answered', async () => {
+    ship('sales', A);
+    ship('sales', B);
+    const refusalOf = (reason: string) => ({
+      status: 'refused' as const, reason, type: 'dataset', name: 'sales', callerPackageId: null,
+      candidates: [{ kind: 'package' as const, packageId: A }, { kind: 'package' as const, packageId: C }],
+    });
+    const throwers = [
+      () => ({ code: 'RESOURCE_CONFLICT', status: 409, message: 'refused', refusal: refusalOf('ambiguous-in-namespace') }),
+      () => new PackageScopedNameRefusedError({ ...refusalOf('not-held-by-qualifier'), message: 'refused' } as never),
+      () => new PackageScopedNameRefusedError({ ...refusalOf('ambiguous-in-closure'), message: 'refused' } as never),
+    ];
+    for (const thrown of throwers) {
+      const refusingFor = (holder: string) => new Proxy(protocol, {
+        get(target, prop) {
+          if (prop === 'getMetaItem') {
+            return async (req: any) => {
+              if (req?.packageId === holder) throw thrown();
+              return target.getMetaItem(req);
+            };
+          }
+          const value = Reflect.get(target, prop, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const svc = service({ admitted: ['beta_item'] });
+      const { route } = buildServer(async () => svc, refusingFor(A));
+      const res = mockRes();
+      await route!.handler({ method: 'POST', params: {}, query: {}, headers: {}, body: { datasetName: 'sales', selection: { measures: ['revenue'] } } } as any, res);
+      const text = JSON.stringify(res.body);
+      expect([res.statusCode, res.body?.code ?? res.body?.error?.code], text).toEqual([503, 'SERVICE_UNAVAILABLE']);
+      expect(text).not.toContain(A);
+      expect(text).not.toContain(C);
+      expect(svc.queryDataset).not.toHaveBeenCalled();
+    }
+    // The rule itself, handed a shaped refusal straight from its reader.
+    const judged = await admitRefusedDatasetHolders({
+      refusal: { status: 'refused', reason: 'ambiguous-in-environment', type: 'dataset', name: 'sales', callerPackageId: null,
+        candidates: [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }] } as never,
+      svc: service({ admitted: ['beta_item'] }),
+      context: {},
+      readHolder: async (holder) => {
+        if (holder === A) throw { code: 'RESOURCE_CONFLICT', refusal: refusalOf('ambiguous-in-namespace') };
+        return protocol.getMetaItem({ type: 'dataset', name: 'sales', packageId: holder } as never) as never;
+      },
+    });
+    expect(judged.kind).toBe('undetermined');
   });
 
   it('a service whose admission is not the plugin-wired set is not asked: the refusal names every holder, as before', async () => {

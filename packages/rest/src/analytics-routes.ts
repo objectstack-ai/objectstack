@@ -635,13 +635,16 @@ async function answerDatasetQuery(
                 //
                 // Unchanged: a read that succeeds without the name is the
                 // `404` below. [#32072] The resolver's refusal is not a
-                // failed read: it is rethrown as thrown, a declared
-                // `409 RESOURCE_CONFLICT` naming every candidate, which
-                // the catch below answers through its ADR-0112 arm. It is
-                // told apart by class OR by shape, the `/meta`
-                // dispatcher's predicate ({@link isPackageScopedRefusal}),
-                // so a refusal from another copy of `@objectstack/core`
-                // is still a 409 and never a 503.
+                // failed read: it is rethrown, always as this package's
+                // `PackageScopedNameRefusedError`. It is told apart by class
+                // OR by shape, the `/meta` dispatcher's predicate
+                // ({@link isPackageScopedRefusal}), so a refusal from another
+                // copy of `@objectstack/core` is never a 503. [#32292] What
+                // becomes of it is the caller's: the by-name read's refusal
+                // reaches the admission arm below, and a per-holder read's
+                // refusal stays inside that arm
+                // ({@link admitRefusedDatasetHolders}); neither is answered
+                // as it is unless that arm says `rethrow`.
                 try {
                     return await p.getMetaItem(datasetRequest);
                 } catch (readError) {

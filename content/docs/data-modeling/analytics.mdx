@@ -295,14 +295,16 @@ on `client.analytics.queryDataset(payload, { callerPackage })`,
 `client.meta.getItem(type, name, { callerPackage })`.
 
 When a name is refused this way and every holder the refusal names is a
-package, only the holders the caller may query count, on the bare read, on
-`?package=` and on `?callerPackage=` alike. A holder whose dataset the caller
-may not query is not named, and a holder whose saved dataset does not parse
-counts for no caller. With none left, the answer is the `404` a missing name
-gets. Where two holders were in contention and exactly
-one is left, that one runs. Otherwise the `409` names only the holders left. If
-whether the caller may query a holder cannot be judged, and it could change the
-answer, the route answers `503` and runs nothing. A name that resolves to one
+package, the analytics service the platform wires judges which holders the
+caller may query, and only those count, on the bare read, on `?package=` and on
+`?callerPackage=` alike. A holder whose dataset the caller may not query is not
+named, and a holder whose saved dataset does not parse counts for no caller.
+With none left, the answer is the `404` a missing name gets. Where two or more
+holders were in contention and exactly one is left, that one runs. Otherwise
+the `409` names only the holders left. If whether the caller may query a holder
+cannot be judged, and it could change the answer, the route answers `503` and
+runs nothing. A service built by hand, whose admission passes every caller, is
+not asked, so its refusal names every holder. A name that resolves to one
 dataset is unchanged: a caller who may not query it is refused by the query
 itself (`403`).
 
