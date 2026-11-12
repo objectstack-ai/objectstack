@@ -356,6 +356,42 @@
  * marker in each, and finds the marker in no line, row, summary or
  * annotation, nor in the opened plaintext.
  *
+ * ## The note — `advisory_note`, opened here, appended once and read back (`advisoryNoteAction`)
+ *
+ * The relay's key first: the private half (the repository secret the workflow
+ * hands the execute step for a note's stroke alone, `ADVISORY_NOTE_KEY_ENV`,
+ * read once and deleted from this process's environment) is judged against the
+ * committed public half (`advisoryNoteKeyFailure`); none, a null committed half
+ * or a pair made apart is a FAILED action before any request. Then the
+ * advisory's GET and `ADVISORY_NOTE_FENCES` on it — a 2xx, the advisory named,
+ * a state in `ADVISORY_NOTE_STATES` (never published or withdrawn), a
+ * description that is text or null; the open (`openAdvisoryNote`, bound to the
+ * request id, the action's index, the op and the id — anything else is
+ * `ADVISORY_NOTE_OPEN_FAILED`); every line of the opened section of at least
+ * `ADVISORY_NOTE_MASK_MIN_CHARS` handed to the runner's `::add-mask::`
+ * (`maskCommand`; the runner never echoes it); the section judged again
+ * (`advisoryNoteSectionFailure` — the seat's check is never trusted alone); a
+ * SECOND fenced GET immediately before the write, refused if the description
+ * changed since the first — the platform offers no conditional write on it;
+ * the cap, `ADVISORY_DESCRIPTION_MAX_CHARS` code points. Then ONE PATCH of
+ * `{ description }` — the text read, byte for byte, `ADVISORY_NOTE_SEPARATOR`
+ * and the section (`advisoryNoteDescription`) — and the read-back: the PATCH's
+ * answer, then a GET after it, each exactly that text (`advisoryNoteReadBack`;
+ * other text before the section is a raced write). A PATCH that threw is
+ * UNCONFIRMED and a read-back that fails is FAILED, each saying
+ * `ADVISORY_NOTE_NOT_RESENT`. Residual window: a write landing between the
+ * second GET and the PATCH is overwritten undetected (about one round trip);
+ * one after the PATCH is caught by the read-back.
+ *
+ * ⛔ What this path prints — the row, the log line, the step summary, the ONE
+ * notice — is the call, the status, the id, the state, byte counts and the
+ * section's HMAC-SHA256 under the seat's one-time digest key (never a bare
+ * digest a reader could test a guess against); a refusal quotes the platform
+ * only in `ADVISORY_PLATFORM_MESSAGES`. Never a byte of the note, the
+ * description or the key. The self-test serves both texts with a marker and
+ * finds it — as text, URI-encoded, hex or base64 — in no line, row, summary,
+ * annotation, pace line or real process's output.
+ *
  * ## The assignees and labels legs — `pr_create` with `assignees` / `labels`, the requests that read an earlier answer
  *
  * The op table spells each leg's path with a placeholder and `fromAnswer:

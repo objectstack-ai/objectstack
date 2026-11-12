@@ -315,7 +315,28 @@
  *     which binds the op in place of an advisory's id. Its plaintext is the
  *     padded listing (`ops.mjs`, "The one row that LISTS advisories"); the
  *     open stays byte for byte on it, and `--reveal` alone prints it with its
- *     padding trimmed (`advisoryListDisplay`), that op's display alone.
+ *     padding trimmed (`advisoryListDisplay`), that op's display alone;
+ *   - `advisory_note` travels the other way and has NO byte read-back here
+ *     either: the seat cannot read the advisory it appends to. This file reads
+ *     the note from the file `note_file` names, composes its section — the
+ *     file's first line, the seat's signature line, then this door's own UTC
+ *     stamp (`advisoryNoteStamp`; a typed one is refused), a blank line and the
+ *     rest (`advisoryNoteSection`, judged by `advisoryNoteSectionFailure`) —
+ *     draws a one-time digest key and seals both to the relay's COMMITTED half
+ *     (`ADVISORY_NOTE_RELAY_PUBLIC_KEY`) under the stroke's request id
+ *     (`armAdvisoryNotes`, before the packer and the dry-run exit). The action
+ *     leaves with `ghsa_id` and `sealed_note` alone; ⛔ the text never enters
+ *     the actions file, the payload or a line this file prints. A `sealed_note`
+ *     already in the file, or a missing, unreadable or unjudged note file, is
+ *     refused (exit 2); a file that passes while the committed half is null is
+ *     a prerequisite (exit 3), nothing sent. The executor reads the stored
+ *     description back byte for byte and says so in ONE notice — the section's
+ *     byte count and its HMAC-SHA256 under the digest key — which this file
+ *     confirms against what it sealed (`confirmRunAdvisoryNotes`), handed on as
+ *     `result.notes` and `--json`'s `advisory_notes`. Anything else — no
+ *     notice, two, another seal's, or no seal in this process — is
+ *     `unverified`, exit 6, ⛔ never re-sent: the run's PATCH was sent, so the
+ *     seat reads the advisory (`advisory_read`) first.
  *
  * ## The started run — the one outcome only the seat can name
  *
