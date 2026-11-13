@@ -32,6 +32,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 
@@ -266,12 +267,27 @@ describe('a stored row of a two-holder name at boot, beyond the webhook (#32692)
             expect(registry.listItems('dashboard').map((item) => (item as { label?: string }).label)).not.toContain('row:beta-custom');
         });
 
-        it(`CONTROL — permission (${first} first): a stray row keeps its reading (the first-registered holder's slot), as a stored fork of a permission set keeps its own ruling's disposition`, async () => {
+        it(`CONTROL — permission (${first} first): a stray row keeps its reading (the first-registered holder's slot, an order-dependent pick), pending the maintainer's ruling on a stored permission fork under two holders`, async () => {
             const body = (label: string) => ({ name: N, label, description: label });
             const { registry } = await boot('permission', order, (id) => body(`shipped:${id}`), [{ packageId: S, body: body('row:stray') }]);
             const label = (id: string) => (registry.getPackageScopedItem('permission', N, id) as { label?: string } | undefined)?.label;
             expect(label(order[0])).toBe('row:stray');
             expect(label(order[1])).toBe(`shipped:${order[1]}`);
+        });
+
+        it(`CONTROL — email_template (${first} first): a shared pair's undeclared row of a locale no holder ships keeps its bare-slot registration, as before`, async () => {
+            // The row-served exemption is load-bearing here: no artifact of
+            // the member exists, so the borrowed-envelope rule does not catch
+            // the row, and the pair rule would decline it.
+            const body = (label: string, locale: string) => ({ name: N, label, subject: label, body: label, locale });
+            const { registry } = await boot('email_template', order, (id) => body(`shipped:${id}`, 'en-US'),
+                [{ packageId: `${APP}.custom`, body: body('row:app-fr', 'fr-FR') }],
+                (registry) => {
+                    registry.installPackage({ id: APP, name: APP, version: '1.0.0', type: 'app', namespace: 'app' } as never, 'code');
+                    registry.installPackage({ id: `${APP}.custom`, name: `${APP}.custom`, version: '1.0.0', type: 'app', namespace: 'app_custom' } as never, 'code');
+                },
+                () => ({ type: 'module', dependencies: { [APP]: '^1.0.0' } }));
+            expect(registry.listItems('email_template').map((item) => (item as { label?: string }).label)).toContain('row:app-fr');
         });
 
         it(`CONTROL — dashboard (${first} first): a shared pair's undeclared row leaves each holder's exact read its own item`, async () => {
@@ -307,6 +323,16 @@ describe('a stored row of a two-holder name at boot, beyond the webhook (#32692)
             expect([label(D, 'fr-FR'), label(A, 'en-US'), label(B, 'en-US')]).toEqual(['row:dep-fr', `shipped:${A}`, `shipped:${B}`]);
         });
     }
+
+    it('every type the decline judges is sealed once a package ships the name, so the boot census names a declined row', () => {
+        // If one of these types ever opens environment overlays, the decline
+        // stops being reported by the census: give it a report of its own first.
+        const judged = ['action', 'hook', 'job', 'webhook', 'connector', 'sharing_rule', 'queue', 'assignment_rule',
+            'analytics_cube', 'picklist', 'api', 'tool', 'skill', 'agent'];
+        // The table the protocol's overlay allow-list is built from (`allowEnvironmentOverlay`).
+        const open = DEFAULT_METADATA_TYPE_REGISTRY.filter((entry) => entry.allowEnvironmentOverlay).map((entry) => entry.type);
+        expect(judged.filter((type) => open.includes(type))).toEqual([]);
+    });
 
     it('CONTROL — tool, one holder: a pair row declaring a package the pair does not customize keeps its reading (the one holder\'s)', async () => {
         const body = (label: string) => ({ name: N, label, description: label });
