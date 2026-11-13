@@ -129,6 +129,8 @@ import {
 } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { resolveObjectSortability } from '@objectstack/spec/api';
+// [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
+import { isAiReadExposed } from '@objectstack/spec/data';
 // [commit 4810dd628] The repo's ONE single-record 404 (#4435/#5138/#7867). Imported from
 // `@objectstack/core` rather than re-minted here or reached via
 // `@objectstack/metadata-protocol`'s re-export: this package already declares
@@ -1154,6 +1156,15 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       const objects = await bridge.listObjects();
       const { degraded, errors } = await diagnoseObjectListRead(metadataService);
       return { objects, degraded, errors };
+    },
+
+    // [#32442, ruling A] The read opt-in of a system object, judged by
+    // `isAiReadExposed` over its whole definition (the view the gates read,
+    // not the masked one discovery serves), as on the HTTP bridge. The read
+    // tools then read it through the engine as the principal, under every
+    // gate below, so this admits the object and nothing else.
+    async aiReadExposed(name: string): Promise<boolean> {
+      return isAiReadExposed(await objectView.getObject(name));
     },
 
     // [#25138] Answered from the listing `list_objects` serves

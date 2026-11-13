@@ -187,6 +187,7 @@ import {
  * public names are unchanged.
  */
 export { resolveServedFields } from './served-fields.js';
+import { omitSideCopyFromCopy, sideCopyColumnsOf } from './side-copy-columns.js';
 
 const ACTIVITY_OBJECT = 'sys_activity';
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -549,6 +550,18 @@ export async function redactActivityRows(
     if (!object) {
       stripValueBearing(row);
       continue;
+    }
+    // [#32442] Ahead of the served-fields answer, for every reader.
+    if (sideCopyColumnsOf(object).length > 0 && 'metadata' in row) {
+      // Stored as a JSON string; an already-parsed object is narrowed in place.
+      const inPlace = isRecord(row.metadata);
+      const copied = inPlace ? (row.metadata as Record<string, unknown>) : parseMetadata(row.metadata);
+      let dropped = false;
+      for (const side of ['old', 'new'] as const) {
+        const snapshot = copied?.[side];
+        if (isRecord(snapshot) && omitSideCopyFromCopy(object, snapshot)) dropped = true;
+      }
+      if (dropped && !inPlace) row.metadata = JSON.stringify(copied);
     }
     const answer = await servedFor(object);
     if (answer === undefined) continue;

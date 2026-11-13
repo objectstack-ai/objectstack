@@ -4021,9 +4021,11 @@ export async function refuseUngrantedDeclarativeUpdate(
  * (ADR-0066 D4) — a request the caller could send to that target directly.
  * Refusing it here put the generic data door's verdict in front of a door
  * that answers the question itself, and wrongly: approval decisions are
- * authorized by the approvals routes (a pending approver may decide), while a
- * member has no data-door read on `sys_approval_request` by design. So a
- * denied load no longer answers its own 404 ahead of the forward; the door
+ * authorized by the approvals routes (a pending approver may decide), while
+ * the data door may refuse the same caller the request row (a deployment whose
+ * member baseline does not name `sys_approval_request`; the shipped one does
+ * since #32442, ruling 6849636735). So a denied load no longer answers its own
+ * 404 ahead of the forward; the door
  * forwards and relays what the target answers. A load that names nothing and
  * a load that was filtered are the same answer to the target too, so this
  * opens no existence oracle the target does not already answer.

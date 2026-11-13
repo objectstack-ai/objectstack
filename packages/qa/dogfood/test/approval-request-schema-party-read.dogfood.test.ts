@@ -27,6 +27,17 @@
 //
 // The ablation (the declaration removed, the approver answered 404 again) is
 // run once by hand and cited in the PR, not kept as a file.
+//
+// Since #32442 (maintainer ruling 6849636735, 1B) the shipped member baseline
+// names `sys_approval_request` read-only, so the request's data side is no
+// longer closed to members: the object read check now admits every member, and
+// under ADR-0106 the request DEFINITION follows that read to every member,
+// projected by their own field security. Its rows stay the approvals request
+// read gate's participant set. `sys_approval_action` is unchanged: closed on
+// the data side, its definition served only through the delegate. So the
+// pins below read, for the request: every member is served the definition; a
+// member party to no request reads no row of it; the approver reads their own
+// request's row on the data door.
 
 import { describe, it, expect } from 'vitest';
 import { bootStack } from '@objectstack/verify';
@@ -192,27 +203,48 @@ describe('a party to an approval request is served the request definitions (deci
         expect(approverFields).not.toContain(WITHHELD);
         expect(Object.keys((await meta(submitter, REQUEST)).body?.item?.fields ?? {})).toContain(WITHHELD);
 
-        // ⭐ 2 — a member party to no request learns nothing new.
-        for (const object of [...DECLARED, SIBLING]) {
+        // ⭐ 2 — a member party to no request learns nothing new through the
+        // delegate: 404 on the action log and the undeclared sibling. The
+        // request definition reaches them by the member baseline's read
+        // (#32442, ruling 6849636735, 1B), projected by their own field
+        // security, with no row of it (⭐ 4).
+        for (const object of [ACTION, SIBLING]) {
           const read = await meta(stranger, object);
           expect(read.status, `stranger ${object}: ${read.text}`).toBe(404);
         }
+        const strangerRequest = await meta(stranger, REQUEST);
+        expect(strangerRequest.status, `stranger ${REQUEST}: ${strangerRequest.text}`).toBe(200);
+        expect(strangerRequest.body?.item?.name).toBe(REQUEST);
         const strangerList = await listed(stranger);
-        for (const object of DECLARED) expect(strangerList).not.toContain(object);
+        expect(strangerList).not.toContain(ACTION);
+        expect(strangerList).toContain(REQUEST);
 
         // ⭐ 3 — no other object moved: the approver's list is the stranger's
-        // plus exactly the two declared objects, and the undeclared sibling
-        // stays absent by name too.
-        expect(await listed(approver)).toEqual([...strangerList, ...DECLARED].sort());
+        // plus exactly the delegate-served action log, and the undeclared
+        // sibling stays absent by name too.
+        expect(await listed(approver)).toEqual([...strangerList, ACTION].sort());
         expect((await meta(approver, SIBLING)).status).toBe(404);
 
-        // ⭐ 4 — the rows are still closed to the approver on the data door.
-        for (const path of [`/data/${REQUEST}`, `/data/${REQUEST}/${request.id}`, `/data/${ACTION}`]) {
-          const res = await stack.apiAs(approver, 'GET', path);
+        // ⭐ 4 — the action log's rows are still closed to the approver on the
+        // data door; the request's rows are the participant set: the approver
+        // reads their own request, the stranger reads none.
+        {
+          const res = await stack.apiAs(approver, 'GET', `/data/${ACTION}`);
           const text = await res.text();
-          expect([403, 404], `approver ${path}: ${text}`).toContain(res.status);
+          expect([403, 404], `approver /data/${ACTION}: ${text}`).toContain(res.status);
           expect(text).not.toContain(String(request.id));
         }
+        const own = await stack.apiAs(approver, 'GET', `/data/${REQUEST}/${request.id}`);
+        expect(own.status, await own.clone().text()).toBe(200);
+        const strangerRows = await stack.apiAs(stranger, 'GET', `/data/${REQUEST}`);
+        const strangerRowsText = await strangerRows.text();
+        expect(strangerRows.status, strangerRowsText).toBe(200);
+        expect(strangerRowsText).not.toContain(String(request.id));
+        // By id: not found (the refusal names only the id the stranger sent).
+        const strangerById = await stack.apiAs(stranger, 'GET', `/data/${REQUEST}/${request.id}`);
+        const strangerByIdText = await strangerById.text();
+        expect(strangerById.status, strangerByIdText).toBe(404);
+        expect(strangerByIdText).not.toContain(String(request.record_id));
       } finally {
         await stack.stop();
       }
