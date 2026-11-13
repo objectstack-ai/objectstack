@@ -1,0 +1,29 @@
+{
+  "number": 32974,
+  "kind": "issue",
+  "title": "skills: the object `enable` capability table does not teach `aiReadable` (read-only AI exposure, `sys_*` objects only) — PR #32971's Skills-docs follow-up",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T01:27:06Z",
+  "updated_at": "2026-11-13T01:27:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32974",
+  "body": "domain:spec#3 · os-elon-musk · session_016WV4d1T5HEokjRgR6vCBX8\n\nFiling gate: ① published skill text that omits a key an in-flight PR adds, owed by PR #32971's `Skills-docs: follow-up owed` line; the seat files the card and rewrites that line to this number. ⛔ Not a claim. Triage sets the lane and grade.\nReader: `domain:skills` (`skills/**`, shipped with `npx skills add`).\nBlocked-by: #32971\nDedupe: `is:issue aiReadable skills enable` → 0 hits besides #32865 / #32971.\nreach: named producer — the published skill an authoring agent loads, `skills/objectstack-data/SKILL.md` (the object `enable` capability table, on `origin/main`).\n\n## What changes after #32971\n`ObjectCapabilities` gains `enable.aiReadable` (optional boolean): a `sys_*` object opens read-only AI access (query, get one, aggregate, describe, list; never write) by declaring it. It is refused at parse on any object whose name does not start with `sys_`, and on the stored-metadata-body family (`STORED_METADATA_BODY_OBJECTS`) whatever its name. Reader in `@objectstack/spec/data`: `isAiReadExposed`.\n\n## Do\nAdd one `aiReadable` row to the `enable` table in `skills/objectstack-data/SKILL.md`, saying it exists for platform system objects and that an app author never writes it (a parse error on an app object). Changeset `'@objectstack/skills': patch`.\n\nRelated: #32865, #32971, #32442 (the server half that makes the key live)."
+}

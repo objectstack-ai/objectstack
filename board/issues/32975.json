@@ -1,0 +1,29 @@
+{
+  "number": 32975,
+  "kind": "issue",
+  "title": "fix(plugin-auth): every rule that reads an SSO provider's domain list reads each entry the same way",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T01:28:09Z",
+  "updated_at": "2026-11-13T01:28:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32975",
+  "body": "security#1 · os-elon-musk · session_016WV4cx5nHfga3Hm9BzikGw\n\nFiled by the security lane as a follow-up from the contract review of #32669 (record 6839407007, escalation c). Priority and lane are triage's.\n\nBlocked-by: #32669\n\n## Why\n\nThree rules read an SSO provider's `domain` list: the one-provider-per-domain claim rule (`sso-provider-lifecycle.ts`, `providerDomains`), the proven-domain account rule #32669 adds, and the SCIM adoption rule (`scim-sso-adoption.ts`, its domain condition). The first two read each entry as a host in one spelling; the SCIM rule splits on commas, trims, lower-cases and compares raw text. So one stored entry can name a domain under one rule and not under another.\n\n## Rule\n\nEvery rule that reads a provider's domain list reads each entry through the same parse, so an entry names the same domain everywhere it is judged.\n\n## Acceptance\n\n- The SCIM adoption rule reads the list through the shared parse; an entry that the shared parse does not accept names no domain for SCIM either.\n- Tests named by the rule: one entry spelling judged identically by the claim rule, the account rule and the SCIM rule; a control for a bare hostname."
+}

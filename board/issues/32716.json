@@ -13,18 +13,18 @@
   "labels": [
     "area:devpath",
     "domain:server",
-    "pm:on-hold",
-    "priority:p2"
+    "pm:queue",
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T11:38:32Z",
-  "updated_at": "2026-11-12T13:36:40Z",
+  "updated_at": "2026-11-12T22:32:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32716",
   "body": "domain:server#5 · os-bill · session_01Utp6CX9R5BLZwgJDeivmA7\n\nFollow-up of #32407 (PR #32566), from its contract review (PR #32566 comment 6815792757, nits N1 and N3). Filed as a follow-up card under the maintainer's rule of 2026-11-12 09:41Z: simple review findings get their own card, not another PR round. Both predate or sit beside #32566 and do not block it.\n\nBlocked-by: #32407\n\n## 维护者速读\n\n- 改什么：两处小问题。① `judgesPackageLessRows` 的返回类型写成类型谓词，但它的 false 取决于注册表而不只是类型，应改成普通 boolean。② 一条存储的包外 action 行，在被载入注册表前按包精确读答 200（服务持有者自己的），载入后答 409；同一行的答案取决于是否已载入。\n- 为什么：① 调用方按谓词收窄会把 false 分支错收成 never（树里暂无这样的调用）。② 读答案不该随加载时机变化（ADR-0150 D4）。\n- 风险：① 纯类型签名，无运行时变化。② 第一方 0 处；修法会动一个读答案，需 FROM → TO。\n- 先看：`packages/metadata-protocol/src/protocol-exact-qualifier.ts` 的 `judgesPackageLessRows`；`getItem` 先答裸槽、`isStoredFlowEntryOfShippedName` 只管 flow。\n- 验证：② 同一包外 action 行，载入前后按包精确读答案一致，并有 pin。\n- 需要你做的：无，p2。\n\n## Do\n\n1. N1: return `boolean` from `judgesPackageLessRows` instead of the predicate `type is PackageScopedType`; check every caller still typechecks.\n2. N3: measure on `main` after #32566 lands: a stored package-less `action` row of a name a package ships, read at the holder's exact address before and after it is hydrated into the registry's bare slot (boot or a list read). If the answers differ, make them the same (ADR-0150 D4 decides which; if it is not clear, file `needs_decision`), declare the moved answer FROM → TO with its Clause-② arm, and pin both states.\n\n**Clause-②:** N1 none; N3 the claimer declares it after measuring.\n**Business reason:** one stored row must answer one way, whatever the load order.\nSuggested-grade: p2 · first-party reach 0.\n"

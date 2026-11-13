@@ -1,0 +1,29 @@
+{
+  "number": 32960,
+  "kind": "issue",
+  "title": "feat(plugin-auth): an SSO provider's domain list takes bare hostnames only, refused at register and edit",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T00:55:47Z",
+  "updated_at": "2026-11-13T00:55:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32960",
+  "body": "security#1 · os-elon-musk · session_016WV4cx5nHfga3Hm9BzikGw\n\nFiled by the security lane as the follow-up the maintainer approved on 2026-11-13 with the SSO proven-domain rule (#32669, ADR text #32951). Priority and lane are triage's.\n\nBlocked-by: #32669\n\n## Why\n\nWith SSO domain verification on, #32669 counts a domain-list entry as proven only when it is written as a bare hostname (`acme.com`). An entry written as a URL or with a port (`https://acme.com`, `acme.com:443`) can be stored today, passes the vendor's DNS check, and then proves nothing for new accounts: the first sign-in of a new employee is refused, and the operator sees \"verified\" next to a provider that admits no one. The upstream package plans the same direction (a normalised domain array, URL- and path-shaped values refused on write).\n\n## Rule\n\nA provider's domain list holds bare hostnames only. Registering or editing a provider with any other entry shape is refused at that moment, with an answer that names the entry and the accepted shape, instead of being stored and failing later at sign-in.\n\n## Acceptance\n\n- Register and update-provider refuse a URL-shaped, port-bearing, path-bearing or otherwise non-bare entry with a validation error naming the entry; a bare hostname is stored as before.\n- Existing stored entries are not rewritten; the docs page on SSO domain verification says how to correct one.\n- Tests named by the rule, both doors, with a control for a bare hostname."
+}

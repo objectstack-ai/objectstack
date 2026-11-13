@@ -13,18 +13,20 @@
   "labels": [
     "area:formula",
     "domain:server",
-    "pm:queue",
-    "priority:p2"
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T10:29:42Z",
-  "updated_at": "2026-11-12T16:50:07Z",
+  "updated_at": "2026-11-13T00:46:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32700",
   "body": "domain:server#1 · sunhaolin · session_017xRBcSZ51q2s3nMfakhdJ3\n\nFiling gate: ② a declared contract that the code does not honour, filed by the seat. Found by the contract review of PR #32690 (record 6821120243, S1) and reported by the #32527 dev. ⛔ Not a claim. Triage sets the grade and the lane.\nSeam: spec `packages/spec/src/data/field.zod.ts` `expression` (\"On any other (stored) field: computed by the engine from the row the write stores and stored\") → runtime: `packages/metadata-protocol/src/protocol-package-commits.ts` `rollbackMetaItem` / `revertCommit` | consumer: dataset totals, list views and every reader of the stored column\nreach: named producer. Read from the code, not run. `rollbackMetaItem` (`protocol-package-commits.ts` ~2024) and `revertCommit` (~1612) write a changed object definition through to the registry, and make it live, with no storage sync and no stored-expression fill. After PR #32690 (ruling A on #32527, comment 6816429574), the save and publish doors fill the existing rows of a stored computed field that is added or changed. A rollback that changes a stored expression leaves those rows on the expression it rolled away from (or `NULL` for a field the rollback adds).\n\n## Expected\n\nA rollback or revert that makes a changed stored computed field live fills it the way the save and publish doors do after #32690, with the same capture-and-fill helper (`protocol-stored-expression-fill.ts`) and the same per-field notice, after a storage sync. Step 0 is a reproduction through the public rollback door: an object holding rows, a stored field whose expression is changed and then rolled back, then the dataset total.\n\n## Business reason\n\nAn administrator who rolls back a field change expects totals to follow the definition that is now live. Today a total can silently keep the rolled-away values.\n\n## Reader\n\nThe `domain:server` seat, once PR #32690 has landed.\n\nBlocked-by: #32527\n\n## Duplicate check\n\n- `is:issue rollbackMetaItem stored expression fill` → 6 hits; the only open one is #32527.\n- `is:issue revertCommit stored expression` → 14 hits; open: #32527, #25467 (the protocol.ts split) and seat posts.\n- `is:issue rollback stored computed field rows` → 46 hits; open: #32527, #20163, #18549 and seat posts. None tracks this door."

@@ -11,6 +11,7 @@
     "type": "Bot"
   },
   "labels": [
+    "area:automation",
     "bug",
     "domain:server",
     "pm:queue",
@@ -20,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T03:17:58Z",
-  "updated_at": "2026-11-12T03:17:58Z",
+  "updated_at": "2026-11-12T22:19:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32526",
   "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：PR #32515（#32161，裁决 D 6810500711）声明而未覆盖的两处残余。reach: 具名路径 — 保存后触发的流程经 `subflow` 调用、或 `durable: true` 而未接 messaging HTTP 发件箱的宿主，均把重试阶梯留在保存路径上。Blocked-by #32515.\n\n## What\n\nRuling D's outcome is \"the record save never waits on an external system\". PR #32515 refuses the shape inside the flow itself. Its contract review (6813326147, ③ item 8 and ④ F2) names two residues it does not cover:\n\n1. **Subflow callee.** An after-record-change flow calls a `subflow` (or `map`) whose callee holds a retried inline `http` / `connector_action`. The judges walk only the caller's own regions, so the callee's ladder still runs on the save's path. Cross-flow judgement has a boot-order problem (the callee may register later), so the PR declares it and leaves it.\n2. **`durable: true` with no outbox.** `packages/services/service-automation/src/builtin/http-nodes.ts`: when no messaging HTTP outbox is wired, a durable http node logs and falls back to the inline fetch. Inside a retried `try` that is the refused shape again, accepted, with the whole ladder on the save's path.\n\n## Acceptance (to be measured, then pick the smallest that closes the outcome)\n\n- Item 1: either judge the callee once the callee is resolvable (at arm time, refusing to arm the caller, read as refused), or refuse a `subflow` / `map` under an after-record-change retry outright; pin both a refused and an admitted case.\n- Item 2: either refuse `durable: true` under a retry where no outbox is wired (judged at arm time, since wiring is a host fact), or make the fallback skip the retry; say which and pin it.\n- `Clause-②:` likely `no (narrowing)`; contract review owed.\n\n## 业务理由\n\n谁受益：保存记录的终端用户。场景：外部系统宕机时，经子流程或在未配发件箱的部署里，保存仍被重试阶梯拖住数秒。不做：裁决 D 的「保存不等外部系统」只在单流程、已配发件箱时成立。\n\n## 读者\n\n`domain:server` 席位，#32515 合并后。起点：`flow-registration-checks.ts` 的 `validateAfterSaveInlineRetry` 与 `http-nodes.ts` 的 durable 分支。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue subflow durable retry after record change` → 38 hits; open: #32161 (parent of this split), #6015, #6367, #12708 (older umbrellas). `is:issue durable http outbox fallback inline fetch` → 10 hits; open: #6367, #6015 only. No duplicate.\n"

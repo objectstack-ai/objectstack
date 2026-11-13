@@ -2,8 +2,8 @@
   "number": 32776,
   "kind": "issue",
   "title": "skills(objectstack-automation): teach the namespace-qualified inbound hook of a flow name two packages hold",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T16:35:51Z",
-  "updated_at": "2026-11-12T16:35:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T00:33:56Z",
+  "closed_at": "2026-11-13T00:33:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32776",
   "body": "coordinator#1 · huangyiirene · session_01J8VVAmYgf86vDvSwsNtaf7\n\nFiling gate: ③ 维护者直派. The maintainer's words, verbatim, answering this thread's question whether to file the skills line that #31696's rulings left without a carrier:\n\n> 立卡\n\nBusiness reason: since #32507 (merged 2026-11-12, closed #31696), two packages of different namespaces may each ship a flow of one name. For such a name the inbound hook the skill teaches, `POST /api/v1/automation/hooks/:flowName/:hookId`, answers `401 INVALID_SIGNATURE` to every post, whatever the signature, and its cause goes to the server log only. Each package's flow is reached only at its namespace-qualified hook, which no published skill names. An AI author or a sender integrating against such a flow follows the skill, gets an unexplained 401 forever, and has no way to find the address that works.\nReader: the `domain:skills` seat (vacant since 2026-11-11; the next seat picks it from `pm:queue`), editing `skills/objectstack-automation/SKILL.md`, section \"Inbound webhook (`api`) triggers\".\nDedupe (open AND closed): `is:issue \"inbound hook\" skill` (56 hits), `is:issue automation skill hook namespace` (148), `is:issue hooks namespace flowName skills` (9). None on point: #31696 (closed) is the parent whose rulings deferred this line; #32429 (open) edits `objectstack-platform`'s namespace literal list, not this skill; #30806 / #31527 are the epic. `git grep 'hooks/:n\\|hooks/_env'` over `skills/` and `content/docs/` on `main` 296e2ec8: 0 hits.\nClause-②: no. Changeset: `@objectstack/skills` patch.\nGrade: p1, inherited from the parent #31696 (the line was one of its deliverables, split out by seat rulings 6794435934 item 2 and 6794825287). The failure shape is a wall, not a tax: the 401 carries no cause, so the skill is the only place an agent could learn the qualified address.\n\n## 维护者速读\n\n#32507 落地后，两个不同命名空间的包可以各自发一个同名 flow。这种名字的裸入站 hook `/hooks/:flowName/:hookId` 对任何请求都回 `401 INVALID_SIGNATURE`，原因只写在服务端日志里；每个包的 flow 只能从带命名空间的 hook 进。技能现在只教了裸地址，客户的 agent 照着做会一直 401，也找不到能用的地址。这张卡在 `objectstack-automation` 技能的入站 webhook 一节补一行，并按席位裁定用同文件删重复文字来付 token，不抬 ratchet。\n\n## What to build\n\n1. In `skills/objectstack-automation/SKILL.md`, section \"Inbound webhook (`api`) triggers\" (the bullet list after the `config` table, around line 389 on `main` 296e2ec8), add one line teaching:\n   - for a flow name two packages hold, the bare hook above answers `401 INVALID_SIGNATURE` whatever the signature (its cause goes to the server log only);\n   - each holder's flow is reached at `POST /api/v1/automation/hooks/:namespace/:flowName/:hookId`, by its package's `manifest.namespace`; a flow no package ships, at `_env` in that position.\n   The first draft of this line exists on commit 775b07f19c (branch `claude/issue-31696-pr3-skills-inbound-hook`, later removed for budget); re-judge its wording against `main`, do not copy it blind.\n2. **Budget, per seat ruling 6794435934 item 2: no ratchet raise.** The file measures 6854 tokens against a ceiling of 6861 (headroom 7, `scripts/check-skills-token-ratchet.mjs`), and the draft line cost about 57. Pay for the line by deleting restatement in the same file, in the same diff. If no such restatement can be found, stop and report the gap; ⛔ do not raise the row and do not cut other teaching.\n3. Changeset: `@objectstack/skills` patch.\n\n## Acceptance\n\n- The line is true on `main` as read in the code, not in prose: `AutomationEngine.inboundHookSlot` (`packages/services/service-automation/src/engine.ts:5687`: the bare hook of a shared name is `refused`, a qualified one `served` only when the qualifier names one holder's package, `_env` the package-less slot) and `answerInboundHookSlot` (`packages/triggers/trigger-api/src/plugin.ts:162`: the refusal is the door's one 401, cause in the log). Pins: `flow-triggers-per-slot.test.ts`, `trigger-api/src/inbound-hook-member.test.ts`, `runtime/src/domains/automation-hooks.test.ts`.\n- The wording holds in every state: one holder (the bare hook still serves it; the line must not suggest otherwise), two holders, and a holder whose body was refused.\n- Every deleted restatement is named in the PR body with where its content still lives.\n- `skills/**` is Tier H: contract review at `CONTRACT_REVIEW_TIER`, then an approval from `GOVERNED_APPROVERS`."

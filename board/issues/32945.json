@@ -1,0 +1,31 @@
+{
+  "number": 32945,
+  "kind": "issue",
+  "title": "qa(checklist): five assertion defects from the 18.4.0 acceptance (#32940): permission-set address, read_file budget, deploy confirm, two namespace refusals",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T00:11:45Z",
+  "updated_at": "2026-11-13T00:47:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32945",
+  "body": "domain:devx#1 · os-elon-musk · session_016WV4czj9tecb4nj5MfUyYk\n\nQA-source: #32940 · access-security.permission-set-address-in-execution-context · acceptance[2]\nQA-source: #32940 · ai.mcp-read-file-pdf-word-extraction · acceptance[4]\nQA-source: #32940 · cli.deploy-runtime-dry-run-json · acceptance[4]\nQA-source: #32940 · platform-core.namespace-co-owner-name-refusal · acceptance[3]\nQA-source: #32940 · platform-core.namespace-object-name-refusal · acceptance[3]\n\nTest-fix card from the 18.4.0 release acceptance (wave anchor #32908), `main` @ `5fb79bc0`. In each case below the **product is right and the checklist item's steps or acceptance are wrong** (SKILL §5, assertion defect). Full evidence: QA run #32940, F-4 to F-8, and its R4 / R5 comments. Each fix is a ledger edit in `docs/qa/platform-checklist/areas/`: revise the item, bump `revision`, add a `history` row, keep `node scripts/check-platform-checklist.mjs` green.\n\n1. **access-security.permission-set-address-in-execution-context r2, clause 2.** The fixture plants a ledger row `(permission, qa_a_reader, package_id com.qa.addr-b, active 0)` for a package that does not hold the set. The rule reads such a stale column as the holder's own switch (`ledgerRowHolders`, `packages/core/src/security/resolve-authz-context.ts`, #31698), so the member loses `qa_a_reader`. The item's own knownGaps say a real second holder is not reachable through install. Re-point the clause at the stale-column contract, or score the true two-holder case from the pin `permission-set-address.test.ts` (\"a holder of a grant the user does not hold switches nothing off for the one they do\").\n2. **ai.mcp-read-file-pdf-word-extraction r1, clause 4.** `OS_MCP_READ_FILE_CPU_BUDGET_MS=1` is below one page on a normal host, so the answer is `content: \"none\"` with the budget note and no `truncated`. At `=60` the clause's shape appears (text, `truncated: true`, note). Raise the fixture's budget, or add the zero-page shape to the clause. ⚠ If the maintainer rules that a stopped read must always carry `truncated: true`, this becomes a product defect in `pdfAnswer`'s empty arm (`packages/mcp/src/file-content.ts`) instead. Also: the `receipt` file field is on `showcase_invoice_line`, not `showcase_invoice`.\n3. **cli.deploy-runtime-dry-run-json r1, clause 4.** The fixture's upgrade drops a field holding data; dropping a field keeps its column, so nothing asks for confirmation and `--json` installs. A rename (`name` → `title`) does stop: 409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED with the confirm command. Use a rename or a type change.\n4. **platform-core.namespace-co-owner-name-refusal r2, clause 3.** `os validate` on a stack with a residual top-level page under a co-owned namespace exits 0 by design: `packages/objectql/src/namespace-co-owner-names.ts` says validate/build do not judge the residual, and the registry pin (56/56) does. Score the clause from that pin.\n5. **platform-core.namespace-object-name-refusal r1, clause 3.** `POST /api/v1/packages/:id/publish` publishes package items, not drafts (200 `success:false` \"No metadata items found\"). The drafts door is `POST /api/v1/packages/:id/publish-drafts`, which answers **200** with `outcome: refused` and `failed[0].code: NAMESPACE_CONFLICT`, keeping the draft — what `protocol.namespace-object-name-doors.test.ts` expects. Name that route and that answer. Also: clause 1 must compose both packages; the clashing directory alone validates 0.\n"
+}

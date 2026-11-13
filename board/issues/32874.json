@@ -1,0 +1,32 @@
+{
+  "number": 32874,
+  "kind": "issue",
+  "title": "metadata-protocol: review nits of PR #32808 — the exact-address list envelope, stale envelope docblock, refusal wording for bases sharing a pair, import jobs and loose pins (follow-up of #32501)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "enhancement",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T22:30:40Z",
+  "updated_at": "2026-11-13T00:14:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32874",
+  "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32501 (PR #32808). Sources: PR #32808's contract reviews r1 (6836136864, N1 to N3) and r2 (6837692940, N7, N8), and the epic red-line read 6835343873. Review nits go to a follow-up card, not another round. Low priority; parked.\n\n## Owed\n\n1. **N1: the list scoped to an exact address still wears the first registered shipper's envelope.** `readFlattenedMetaItems` in `protocol-meta-list-reads.ts` (`envelopePackageId`, then `lookupArtifactItem`). Measured on PR #32808's head: `GET /meta/dashboard?package=A.custom` with B registered first lists A's override row under B's `_packageId` and `_provenance: package`; `GET /meta/dashboard?package=G` lists G's row under the first registered shipper's stamp, also when that shipper is disabled. After PR #32808 the list and the by-name read disagree at one address. Make the list follow the by-name read's rule, with FROM → TO and pins.\n2. **N2: stale prose.** The docblock of `envelopePackageId` still says one served body wears one envelope on both read doors; the ledger's `why` for the list site says the list shares the by-name read's rule. Fix both with N1.\n3. **N3: refusal wording.** The refusal at a pair two modules share says the name is held by 2 packages \"in the declared dependency closure of package APP.custom\". The modules are the bases that share the pair, not its dependency closure. The text predates PR #32808.\n4. **N7: the import jobs door has no pin.** `POST /data/OBJECT/import/jobs` is declared on a reading (same `prepareImportRequest` and mapping read as the sync door). Add a pin.\n5. **N8: three loose assertions.** The publish probes are pinned at `publishedItemReader`, not through `runBuildProbes` (\"the widget is reported not probed\" is not asserted). The REST qualified-path assertion in the import pins checks status and code, not that both modules are named. \"Already 409 with another package ahead\" is pinned for `?package=` on the dataset, import and `/meta` doors, not for the caller arm or the publish probes. Tighten each.\n\nRestart-when: the release that carries the epic #31527 release line is published (ruling 6824949405 on #31527)"
+}

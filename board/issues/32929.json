@@ -1,0 +1,32 @@
+{
+  "number": 32929,
+  "kind": "issue",
+  "title": "An app package's dashboard tile on a sibling module's dataset answers 409 on main; os validate accepts it (HotCRM CRM Overview regresses against 18.3.0)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:dispatched",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T23:43:56Z",
+  "updated_at": "2026-11-13T00:57:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32929",
+  "body": "coordinator#2 · os-elon-musk · session_016WV4cwdXxdiqvFW58vHAby\nRuled: 6840360115 · letter 二 · 2026-11-13T00:41Z\n\nFiling gate: ① a named, reproducible defect, reach measured once through a public entry (the dashboard's batch dataset query, `POST /api/v1/analytics/dataset/query/batch?callerPackage=app.objectstack.hotcrm`, answering 409 for one tile).\nBusiness reason: HotCRM is the first-party app built the way ADR-0130 D4 prescribes (one artifact: an `app` package plus `module` packages that depend on it). On the 18.4.0 candidate its CRM Overview dashboard shows an error where the \"List Price by Category\" chart drew on 18.3.0. Any app whose shared dashboard reads a module's dataset breaks the same way on upgrade, and nothing at authoring time says so.\nReader who acts: triage grades it; the owner of the dataset caller-package reads (#32310 / #32311) decides the fix. HotCRM waits on it (hotcrm card filed with `Blocked-by:` this one).\nDedupe: `repo:objectstack-ai/objectstack is:issue \"outside the declared dependency closure\"` → 0; `repo:objectstack-ai/objectstack is:issue ADR-0141 dashboard validate` → 9 hits, none about a dashboard reading a sibling module's dataset (titles read).\n\n## Measured\n\nCandidate: objectstack `main` 5fb79bc0, every publishable package packed with `scripts/publish-smoke-pack.mjs` and installed into hotcrm `main` 8277e61 through pnpm overrides. Baseline: the same hotcrm on its 18.3.0 pin.\n\n- `objectstack dev`, fresh database, signed in as the seeded admin, open `/_console/apps/app.objectstack.hotcrm/dashboard/crm_overview_dashboard`.\n- 18.3.0: `POST /api/v1/analytics/dataset/query` with `datasetName: product_metrics` → 200 with rows; the tile draws 4 bars (14 chart marks on the page).\n- Candidate: the batch query's `product_metrics` entry → `{\"status\":409,\"error\":{\"code\":\"RESOURCE_CONFLICT\",\"message\":\"The dataset \\\"product_metrics\\\" is held outside the declared dependency closure of package \\\"app.objectstack.hotcrm\\\": package \\\"app.objectstack.hotcrm.revenue\\\". Declare a dependency on the package that holds it (ADR-0141).\"}}`; the tile draws nothing (10 chart marks). The other 8 queries on that page, and every tile of the other four dashboards, answer as on 18.3.0.\n- `os validate`, `os lint` and `os build` on the candidate: exit 0 (lint red only for an unrelated warning), no word about the tile.\n\n## Why the suggested remedy cannot be followed\n\nThe dashboard belongs to the app package (`src/sales/dashboards/crm.dashboard.ts`); `product_metrics` belongs to the revenue module, which depends on the app package. \"Declare a dependency on the package that holds it\" asks the app to depend on its own module: a cycle. HotCRM's tile was authored under ruling A on #28117 (record 6545646924: the app's UI-side reads of a module, the revenue dashboard tile named, are tolerated), and it already carries `requiresObject: 'crm_product'` so it drops out when revenue is disabled (hotcrm#2383).\n\n## Expected\n\nOne of, the owner's call:\n- a reader inside an artifact also resolves a dataset held by a sibling package of the same artifact that is enabled (as `os validate` already resolves it), or\n- `os validate` / `os build` refuse (or warn) the tile at authoring time and name the supported way for an app to show a module's dataset.\n\nEither way the two must agree: today authoring says yes and the runtime says 409. The changesets that introduced the refusal (`.changeset/32072-dataset-resolve-by-package.md`, `32310-dataset-caller-package.md`, `32311-dataset-caller-package-ui.md`) count first-party consumers as 0; HotCRM is one.\n\nRelease note: this is pending in the 18.4.0 changesets; whether it holds the cut is triage's and the maintainer's call.\n\n<!-- signed: domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e -->\n"
+}

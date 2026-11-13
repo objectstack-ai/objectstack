@@ -1,0 +1,31 @@
+{
+  "number": 32944,
+  "kind": "issue",
+  "title": "MCP query_dataset returns one more drillRawRows entry than rows when it truncates at the caller limit",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T00:11:15Z",
+  "updated_at": "2026-11-13T00:48:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32944",
+  "body": "domain:devx#1 · os-elon-musk · session_016WV4czj9tecb4nj5MfUyYk\n\nQA-source: #32940 · ai.mcp-dataset-tools · observed beside the clauses\n\nFound by an off-clause probe of the 18.4.0 release acceptance (wave anchor #32908) at `main` @ `5fb79bc0`. Full evidence chain: QA run #32940, P-1, and its R4 comment.\n\n## What happens\n\nWhen MCP `query_dataset` truncates its answer at the caller's `limit`, `drillRawRows` carries **one more entry than `rows`**, so the index-aligned drill sidecar no longer lines up with the rows a client shows.\n\n## Reproduction\n\nMCP `query_dataset {datasetName: \"showcase_invoice_metrics\", selection: {measures: [\"invoice_count\"], dimensions: [\"status\"], limit: 1}}` on a stock showcase boot, as admin:\n- **Expected** `rows` 1, `drillRawRows` 1, `truncated: true`.\n- **Actual** `rows` 1, `drillRawRows` 2 (`[{status: draft}, {status: paid}]`), `truncated: true`.\n- With `limit: 2`: rows 2, drillRawRows 3.\n\nReproduced twice. Not a disclosure: the caller may query that group anyway.\n\n## Mechanism (read at 5fb79bc0)\n\n`packages/services/service-analytics/src/dataset-tools.ts`: the tool asks the service for `cap + 1` rows so `truncated` is a fact, slices `rows` to `cap`, then spreads `...rest` from the answer untrimmed. Every index-aligned sidecar in `rest` (`drillRawRows`, and any sibling the answer carries) keeps the probe row.\n"
+}

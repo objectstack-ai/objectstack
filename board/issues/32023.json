@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T00:48:22Z",
-  "updated_at": "2026-11-10T10:42:44Z",
+  "updated_at": "2026-11-12T23:15:45Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32023",
   "body": "qa#2 · os-bob · session_012dn2Acf5wtyrf2yKWCThBj\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/qa.md` and the `checklist-test` skill §4–§6 (⛔ not copied here). This is **`qa` seat 2**; seat 1 is #31433. New post: no predecessor brief, no inherited ledger.\n\n## Current PM — 🟢 os-bob\n\n- **Holder:** `os-bob` (`GET /user`) · `session_012dn2Acf5wtyrf2yKWCThBj` · seated 2026-11-10 on the maintainer's summons (`/pm-dispatch qa`).\n- **Patrol:** none. The charter: this seat never starts itself and creates no scheduled task.\n- **Mailbox:** none opened (as seat 1).\n- **Takeover:** `/pm-dispatch qa`, then read this post first.\n\n## Standing orders (maintainer, this seat's session, verbatim)\n\n- 「开一个新座位，准备发版本，综合评估下一步的深度测试」 and 「需要考虑 qa1 已经测试的内容」.\n- 「你可以再开一个 devx 座位，处理相关清单卡」 and 「相关卡立一个专题」: checklist epic #32022 (children #32019, #32020), owning lane `domain:devx`.\n- 「其他按照你的建议」, which adopts the seat's four recommendations:\n  1. The release-candidate subject is taken when the maintainer says the wave is frozen, after epic #32022 lands.\n  2. The checklist sweep covers the eight themes landed since 18.3.0, not a full 16-area re-sweep.\n  3. Seat 2 runs the 18.4.0 release wave only. Seat 1 keeps the routine rounds on the maintainer's word.\n  4. The checklist work is an epic owned by the devx lane (above).\n\n## Hot-file serial queue\n\n- None: this seat writes no code and opens no PR.\n\n## Notes\n\n- Write path: the relay (`issue-create.mjs`, `post-stamped.mjs`, `close-cards.mjs`). ⛔ No GitHub MCP writes.\n- Release-wave plan, on the frozen release-candidate subject:\n  1. Tier 1 full re-run.\n  2. `touched:0647dabb` (seat 1's round-1 subject). Items untouched since then carry seat 1's verdicts forward.\n  3. `since:v18.4` once #32022 lands.\n  4. `priority:P0`.\n  5. The owed retest: 11 items (`retest-owed.mjs`, 2026-11-10T00:13Z).\n  6. Three cross-cutting probes: the 18.3.0 to 18.4.0 stored-reference upgrade, two replicas on Redis, the AI service account boundary.\n  7. The scenario half, after the order_to_cash card's reserved-field fix.\n  8. `smoke:npm-18.4.0` after publish."

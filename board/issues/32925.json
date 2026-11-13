@@ -1,0 +1,31 @@
+{
+  "number": 32925,
+  "kind": "issue",
+  "title": "plugin-auth organization/delete: a host check called from the delete admission (after the mount gates, with the vendor's parsed organizationId), so a host need not pre-parse the body ahead of the IP allow-list",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T23:34:54Z",
+  "updated_at": "2026-11-12T23:59:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32925",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ② a contract seam, raised by the dev of cloud#4387 (cloud PR objectstack-ai/cloud#4436; reports on cloud#4387 6838343809 and 6839073525) and confirmed by that PR's contract reviews. The consumer is the cloud control plane. Under the maintainer's ruling there, it must refuse an organization delete while a subscription will charge again or environments remain.\n\n## 维护者速读\n\ncloud 要在「删除组织」前加自己的检查（订阅还在扣费、环境没清完就不让删）。框架目前没有给宿主留这样的挂点，所以 cloud 只能在框架处理之前自己解析请求，带来两个问题：\n- 解析方式得和框架完全一致，否则能被绕过（这次复审就发现了一个）；\n- 这个检查只能排在框架的 IP 白名单等安全检查前面。\n\n这张卡给框架的删除组织流程加一个宿主检查挂点，cloud 就能去掉自己那一层。\n\n## What happens\n\n`packages/plugins/plugin-auth/src/auth-plugin.ts` `registerAuthRoutes` registers the mount gates as `rawApp.use()` in one step on `kernel:ready`: the ADR-0069 D5 IP allow-list, the organization IP-list carrier (`runAtMountDoor`) and the one-account refusal. In the same step it registers the terminal `rawApp.all()` catch-all serving better-auth. Hono runs handlers in registration order, so a host middleware registered later never runs, and there is no seam between the gates and the catch-all. A host check on `organization/delete` therefore has to run ahead of those gates and re-read the request body itself. Cloud's guard now accepts only an exact `application/json` body, after the reviewed `formData` content-type bypass.\n\n## Expected\n\n`assertOrganizationDeletable` (or the delete admission that calls it) gains an optional host hook. The hook runs after the mount gates, receives the vendor's parsed `organizationId` and the session, and may refuse with a status and a body: code, message, userMessage and steps, like `DELETE_RESTRICTED`. A host then needs no body reader of its own, and its check runs only for requests the gates admitted.\n\n## Acceptance\n\nA test host registers the hook. It is called once per delete with the parsed id. Its refusal is answered unchanged, and nothing is deleted. A request refused by the IP allow-list never reaches it. With no hook registered, behaviour is unchanged.\n\nDedupe: `organization delete host hook`, `assertOrganizationDeletable`. No open issue."
+}

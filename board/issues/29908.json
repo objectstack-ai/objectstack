@@ -1,7 +1,7 @@
 {
   "number": 29908,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 6 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 6 — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -15,17 +15,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "huangyiirene"
+    "os-elon-musk"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T10:35:44Z",
-  "updated_at": "2026-11-11T17:39:52Z",
+  "updated_at": "2026-11-12T22:37:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 10,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29908",
-  "body": "domain:server#6 · huangyiirene · session_01J8VVAnTcb4cZVkPdhkPicW\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 6**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 5 is #28677 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-11T17:38Z (signed off).</sub>\n\n## Current PM\n\n⏳ vacant. Signed off by `huangyiirene` · `session_01J8VVAnTcb4cZVkPdhkPicW` (seated 2026-11-10T11:27Z), on the maintainer's 「当前任务处理完，合并后下班」. `check-handover.mjs` exited 0 before this body was written.\n\n## Handover ledger\n\n- **In flight:** none. No dev agent is running.\n- **Stay-behind:** none.\n- **Merged this shift:** #32237 (Fixes #32143), #32324 (Fixes #32167), #32253 (Fixes #32026), #32248 (Fixes #32123), #32356 (Part of #32164, P1), #32378 (Fixes #32055), #32413 (Fixes #32079), #32452 (Fixes #32393), #32454 (Fixes #32396).\n- **Released:**\n  - #32164 → `pm:queue`, p1. P1b PR #32357 is ACCEPTed on `1b83b672` but was kicked from the queue by a new `@objectstack/mcp` signature and NOT re-queued. Re-diagnose it first; the audit is on the PR. P2 #32306 waits on the live guard suites going green on `main`. Release 6802214706.\n  - #31696 → `pm:queue`, p1. Skills PR #32416 waits on a `GOVERNED_APPROVERS` approval. The closing part is not started. Release 6801591890.\n  - #32183 → `pm:queue`. It waits on #32214 (seat 7).\n  - #32155 → `needs-user-decision`. PR #32325 is held on a maintainer question. Release 6801614212.\n- **Decision box:** #32163 (seat recommends A), #32155.\n- **Security ledger:** #32055 item (publicly disclosed in 6788728988; labeled `security`; `security#1` notified through mailbox #31360; maintainer pushed). #32325's question is held in the maintainer's session and is not restated publicly.\n- **Filed this shift:** #32252, #32399, #32455, #32456, #32460.\n- **Maintainer, not cards:** the ADR-0067 D2 caveat (\"atomicity is a SQL-driver guarantee\") does not hold on remote Turso (from #32396). This is a Tier H ADR edit.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#6` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n\n## Notes\n\n- **Successor:** run `/pm-dispatch server` and read this post first.\n- **Patrol:** none (deleted). **Mailbox:** none (#32180 closed).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n"
+  "body": "domain:server#6 · os-elon-musk · session_016WV4cz8zK9vJDPeeVKJ4XP\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:server` seat 6**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here).\n- The other server seats: seat 1 objectstack-ai/objectstack#6367, seat 2 objectstack-ai/objectstack#20966, seat 3 objectstack-ai/objectstack#26761, seat 4 objectstack-ai/objectstack#27737, seat 5 objectstack-ai/objectstack#28677, seat 7 objectstack-ai/objectstack#32231. ⛔ This post is none of them.\n\n<sub>Refreshed 2026-11-12T22:06Z (patrol interval).</sub>\n\n## Current PM\n\n🟢 `os-elon-musk` · `session_016WV4cz8zK9vJDPeeVKJ4XP` (a thread of the os-elon-musk account's fleet project \"Objectstack server\"), seated by opening mark 6836513486 on the maintainer's 「再开 三个 server 车道，直接 非专题卡」 and 「所有座位只接 p1 p2 卡」. Concurrency: 5 card threads. Posture, ledger and round reports live in the project.\n\n- **Scope:** non-epic cards only, `priority:p1` / `priority:p2` only. Split with the two seats opened beside it (seat 5 and a new seat 8): this seat takes issue numbers `n mod 3 == 1`. The claim timestamp arbitrates.\n\n## Handover ledger\n\n- **Pointer:** the previous holder's clock-out brief 6802937500 and the previous body revision archive the earlier tenure. ⛔ Neither is restated here.\n- **In flight:** per the live `Claim:` comments naming `domain:server#6`.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** PR #32828. **Patrol:** `trig_01WAVn3xV9agodZS5QVxiQQu` · `33 */2 * * *` (every 2 h while cards are in flight: never a 60–70 min interval, per the maintainer's token rules of 2026-11-12T22:06Z; idle ⇒ 4–6 h fallback, waking on mailbox and PR events).\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n\n<!-- signed: domain:server#6 · os-elon-musk · session_016WV4cz8zK9vJDPeeVKJ4XP -->\n"
 }

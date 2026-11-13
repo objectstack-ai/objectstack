@@ -14,17 +14,17 @@
     "bug",
     "domain:server",
     "pm:queue",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T11:27:56Z",
-  "updated_at": "2026-11-12T15:08:34Z",
+  "updated_at": "2026-11-12T23:27:18Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32714",
   "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：#32517（PR #32687）契约审查 r1/r2 的非阻塞项。按 Bill「简单的问题后续单独立卡」从 PR 中拆出。Part of #31527 (ADR-0150)。Blocked-by #32517.\n\n## What\n\nPR #32687 keys bundled types per member in the in-memory registry and `MemoryLoader`, answers the package-less plural read per `(package, name)`, and narrows the fallback host's action doors. These loose ends were left for a separate PR; none changes a served answer:\n\n1. A second locale of a bundled item emits `added` where a rewrite would say `changed` (`packages/metadata/src/metadata-manager.ts` ~:1047); rule which is right and pin it.\n2. After a package takes over a package-less bundled item, a bare non-canonical member can be left orphaned (`packages/metadata/src/package-slotted-store.ts` ~:475); pin or clean it.\n3. `latestMemberOf` infers \"this is a view\" from \"no write was ever recorded\"; make it an explicit flag or pin the inference.\n4. Fallback host: `list_actions` / bare `run_action` (MCP) are declared in the changeset but unpinned; the two-packages-on-one-object case of the fallback activation and execution doors has no pin.\n5. Docs in the PR's own text: the caller table omits objectql `runGovernanceInventory`; a #32246 pin titled \"unchanged\" was rewritten (name the epic ruling in its title).\n\n## Acceptance\n\n- Pins for items 1–4, red under ablation where they guard a branch.\n- `Clause-②: no` unless item 1's ruling moves an answer (then declared FROM → TO).\n\n## 业务理由\n\n谁受益：维护元数据注册表与 action 门的开发者。场景：后续改动悄悄改了事件类型或回退宿主的 MCP 答案，没有测试会红。不做：已声明的答案和推断可被无声回退。\n\n## 读者\n\nserver 车道，PR #32687 合并后；起点上列文件与 PR #32687 的复审记录。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue latestMemberOf list_actions fallback` → 0 hits. #32689 (composed-stack activation 404→409) is separate. No duplicate.\n\n<!-- signed: domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G -->"

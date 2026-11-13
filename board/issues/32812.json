@@ -1,0 +1,34 @@
+{
+  "number": 32812,
+  "kind": "issue",
+  "title": "metadata: after a package-less write of an action name, the host package comes back as a phantom holder in the bare read (the boot pass's host stamp on a stored row; follow-up of #32791)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T20:45:21Z",
+  "updated_at": "2026-11-13T00:51:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32812",
+  "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32791 (PR #32802). Finding S2 of PR #32802's contract review (6835430791). The epic #31527 seat ruled it its own card on the release line, p1. Dispatch it after PR #32676 (card #32521) has merged, because the preferred fix touches that PR's boot-pass guard (D1).\n\n## What moves\n\nComposition of #32791 (one package `com.alpha.app` holds the action name in a stored row, a package-less stored row of the name is saved last, the host declares `com.host.app`). PR #32802 corrects the bare read right after the boot pass. After one package-less write it is wrong again:\n\n| Step after the boot pass | Before #32560 | `main` and PR #32802's head |\n|:--|:--|:--|\n| `register('action', 'helper', body)` with no package, then the bare read | the written body | `409 RESOURCE_CONFLICT` naming `com.host.app`, `com.alpha.app` and the environment |\n| `registerInMemory` of a package-less item, then the bare read | the item | the same `409` |\n\nIt fails closed (a refusal, no widening, no silent pick), but it names a holder that does not exist (ADR-0150 red line 2), and #32791's TO holds only for the state right after the boot pass.\n\n## Design direction (epic seat)\n\n- **Preferred (B):** at the boot priming pass, do not give the host's stamp to a package-less stored row. The phantom then never forms, and the bare read and bare removal agree again (PR #32802's review records that they disagree in this composition today).\n- **Alternative (A):** keep the stamp and correct the count at read time after writes too, as PR #32802 does for the boot state.\n\n## Owed\n\n1. Pick B unless measurement shows it moves another answer; say why if A is chosen.\n2. Pin both rows above red on `main` and green after, and the bare-removal agreement in the same composition.\n3. Re-measure the nine by-package types in the same composition; declare any moved answer FROM → TO.\n4. Changeset with the moved answers.\n\nRestart-when: none, this card is on the epic #31527 release line (ruling 6824949405 on #31527); dispatch after PR #32676 merges."
+}

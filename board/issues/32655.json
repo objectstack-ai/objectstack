@@ -2,8 +2,8 @@
   "number": 32655,
   "kind": "issue",
   "title": "spec: user-facing refusal and advisory text is in the request locale (userMessage locale rule, advisory user text field), per ruling C on #32440",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "area:i18n",
     "domain:spec",
-    "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T09:24:02Z",
-  "updated_at": "2026-11-12T17:33:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T22:28:59Z",
+  "closed_at": "2026-11-12T22:26:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32655",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nPart of #32654 (tracking). Layer 1 of 3: the contract. Filed by triage from #32654's scope. ⛔ Not a claim.\n\nRuling (maintainer, verbatim, quoted on #32654): 「32440 选C，32043 一起按C处理」 (option C of 6819513436: the server returns localized advisory text in the request's language, rule id unchanged).\n\n## Do\n\n1. In `packages/spec`: state that `ApiErrorSchema.userMessage` (`src/api/contract.zod.ts`) and `EnhancedApiErrorSchema.userMessage` (`src/api/errors.zod.ts`) are in the request's locale, with the fallback rule (workspace default, then `en`).\n2. Give advisory findings a user-facing text field beside the stable rule id (or extend an existing one), and have `packages/lint`'s findings (for example `validate-security-posture.ts`) carry it. Whether the catalog is spec-shipped or per producer is this lane's call within the ruling.\n3. Declare it as a protocol addition; the server and console layers read it.\n\n## Order\n\nLayer 2 (server producers) and layer 3 (console) are `Blocked-by:` this card."

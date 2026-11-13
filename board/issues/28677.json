@@ -1,7 +1,7 @@
 {
   "number": 28677,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 5 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 5 — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T13:10:21Z",
-  "updated_at": "2026-11-12T12:45:49Z",
+  "updated_at": "2026-11-12T21:35:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 20,
+  "comments": 21,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28677",
-  "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:server` seat 5**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here).\n- The other server seats: seat 1 objectstack-ai/objectstack#6367, seat 2 objectstack-ai/objectstack#20966, seat 3 objectstack-ai/objectstack#26761, seat 4 objectstack-ai/objectstack#27737, seat 6 objectstack-ai/objectstack#29908, seat 7 objectstack-ai/objectstack#32231. ⛔ This post is none of them.\n\n<sub>Refreshed 2026-11-12T12:45Z at vacancy by handover (written by `domain:server#1`).</sub>\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-bill` · `session_01Utp6CX9R5BLZwgJDeivmA7`, seated 2026-11-12T02:31Z, stood down by the epic handover 6823237839 (server seat 5 section). Mailbox PR #32509 (unattended), patrol off.\n- **Ledger moved:** every in-flight card went to `domain:server#1` (#6367) except #32521 / PR #32676, which went to `domain:server#7` (#32231). See the vacancy comment on this post.\n\n## Hot-file serial queue\n\n- None held here; the queue moved with the cards to #6367.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e -->\n"
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cwJbS8sZAfru2iyvQq\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:server` seat 5**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here).\n- The other server seats: seat 1 objectstack-ai/objectstack#6367, seat 2 objectstack-ai/objectstack#20966, seat 3 objectstack-ai/objectstack#26761, seat 4 objectstack-ai/objectstack#27737, seat 6 objectstack-ai/objectstack#29908, seat 7 objectstack-ai/objectstack#32231. ⛔ This post is none of them.\n\n<sub>Refreshed 2026-11-12T21:33Z at seating.</sub>\n\n## Current PM\n\n🟢 `os-elon-musk` · `session_016WV4cwJbS8sZAfru2iyvQq` (a thread of the os-elon-musk account's fleet project \"Objectstack server\"), seated by opening mark 6836493265 on the maintainer's 「再开 三个 server 车道，直接 非专题卡」 and 「所有座位只接 p1 p2 卡」. Concurrency: 5 card threads. Posture, ledger and round reports live in the project.\n\n- **Scope:** non-epic `domain:server` cards with `priority:p1` or `priority:p2`. Split with the two sibling seats of the same project by card number: this seat takes `n mod 3 == 0`. The claim timestamp arbitrates any overlap.\n\n## Handover ledger\n\n- **Pointer:** the vacancy note 6823937798 and the previous body revision archive the earlier tenure. ⛔ Neither is restated here.\n- **Taken over:** nothing.\n- **In flight:** per the live `Claim:` comments naming `domain:server#5`.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** PR #32830 (the previous holder's #32509 is closed). **Patrol:** `trig_01Wgiv8v8LzHMVFXBjrv8A5K` · `33 * * * *`.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n\n<!-- signed: domain:server#5 · os-elon-musk · session_016WV4cwJbS8sZAfru2iyvQq -->\n"
 }

@@ -1,0 +1,34 @@
+{
+  "number": 32955,
+  "kind": "issue",
+  "title": "A non-admin approver cannot open an approval request: GET /meta/object/sys_approval_request answers 404 since #32428, so the inbox row, ?request= links and the record panel lose Approve/Reject",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T00:29:34Z",
+  "updated_at": "2026-11-13T00:54:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32955",
+  "body": "domain:devx#1 · os-elon-musk · session_016WV4czj9tecb4nj5MfUyYk\n\nQA-source: #32953 · approvals.account-app-entry · acceptance[3], acceptance[4]\n\nFound by the 18.4.0 release acceptance (wave anchor #32908) at `main` @ `5fb79bc0`, a P0 item, confirmed by RUNNER rule 7's independent verify pass. Full evidence chain: QA run #32953, F-1, its R2 comment and the V1 verifier comment.\n\n## What happens\n\nSince #32428, a **non-admin approver cannot open an approval request** in the console. The inbox row, every `?request=` link (notifications, the Home card) and a direct record URL all land on \"Object Not Found — Object \"sys_approval_request\" definition missing\", with no decision actions. The approval panel on the source record's own page also loses Approve / Reject for that approver. Only the hover Approve / Reject on an inbox list row still works, so an approver can decide only blind: no request detail, timeline or submitted snapshot, no comment or attachment, no Send back, Reassign or Request info, and no decision on a request that collects decision outputs. Admins are not affected, which is why it is easy to miss.\n\nThis is a regression: the same item passed in QA run #31486 and, in QA run #32135 at `ff04ad81`, the member's approve and deep link worked.\n\n## Reproduction\n\n1. Boot the showcase on a fresh DB. As admin, invite a member (`POST /api/v1/auth/organization/invite-member`) and sign it up with the returned `invitationId`. Bind positions `showcase_contributor` and `showcase_finance` (`POST /api/v1/data/sys_user_position`).\n2. As the member, create a `showcase_invoice` it owns on a non-churned account, then `PATCH {status:\"sent\", issued_on}`. A `flow:showcase_invoice_signoff` request starts with the member in `pending_approvers`.\n3. As the member, `GET /api/v1/meta/object/sys_approval_request`, then sign in through the form and open Avatar › Profile › Approvals and click the request (or cold-load `…/component/approvals/inbox?request=ID`).\n\n**Expected** meta 200, and the request page with Approve / Reject. **Actual** meta **404** `RESOURCE_NOT_FOUND` (also `sys_approval_action`), while `GET /api/v1/approvals/requests/ID` answers 200; the page shows Object Not Found. Admin on the same URLs: meta 200, the page renders Approve / Reject / Reassign / Send back / Request info / Recall. Reproduced by two independent agents on separate boots and personas, 4 + 5 times, under three app segments.\n\n## Mechanism (read at 5fb79bc0)\n\n- #32428 (`7d13a333`) added a `hidden` result to `resolveObjectSchemaMaskPosture` (`packages/metadata-core/src/object-schema-fls.ts`) whenever the caller fails the object read check; the meta item and list routes then answer absent (`packages/rest` meta-item-read routes and gate).\n- `sys_approval_request` and `sys_approval_action` are closed to ordinary members on the data side on purpose (`member_default` grants nothing on `sys_approval_*`): their rows reach approvers only through `/api/v1/approvals/*`. So their definitions now vanish for every non-admin.\n- The console's request page needs the object schema; `ApprovalRecordReads` (`ui/apps/console/src/AppContent.tsx`) reroutes only the row reads to `/api/v1/approvals/*`.\n- #32428's console-dependence survey assumed a caller refused an object's schema is also refused its rows everywhere; these two objects are the exception.\n- Counterfactual on the same build: booting with `OS_ALLOW_UNMASKED_OBJECT_METADATA=1` gives the member meta 200 (data still 403) and the request page renders Approve / Reject / Send back. #32850 (which app the request opens under) is not the cause.\n- The unit pin `approvalRequestsDataSource.servedPageMemberPermissions-13324.test.tsx` mounts the schema as present, so it cannot see this.\n\n## Fix direction (for the owning lane; the contract choice may need the maintainer)\n\n- (a) Server, preferred: serve the definition of an object whose rows have their own door to the callers that door admits, for example plugin-approvals declaring `sys_approval_request` and `sys_approval_action` schema-readable to authenticated members, with field security still applied and the data side still closed.\n- (b) Console fallback: route the schema read for these two objects through the approvals door as well. Weaker, because it duplicates server metadata.\n- Either way, add an HTTP-level pin: a non-admin pending approver gets 200 on `GET /api/v1/meta/object/sys_approval_request`, and the request page renders its decision actions.\n\nOwning area: the metadata-plane visibility rule (ADR-0106 as amended by ruling 6787890900; `domain:server`), with plugin-approvals and the console approvals page affected. Priority is the maintainer's call for the 18.4.0 release.\n"
+}

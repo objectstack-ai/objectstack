@@ -1,0 +1,30 @@
+{
+  "number": 32859,
+  "kind": "issue",
+  "title": "metadata-protocol: the boot census reports a second holder's served declared override as unserved and prescribes deleting the stored row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T22:01:43Z",
+  "updated_at": "2026-11-12T22:01:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32859",
+  "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nFollow-up of #32613, from its card thread's out-of-scope finding on `claude/project-thread-63cajz@04c58fb52`. Not fixed in place: the file is under #32552's claim. Filed as a correctness issue (the warning prescribes deleting a live customisation).\n\nBlocked-by: #32613, #32552\n\n## 维护者速读\n\n- 改什么：启动普查 `metadata_sealed_overlay_unserved` 判断声明覆盖时只看第一个持有包，于是第二个持有包的覆盖明明在生效，也被报成「没有读取服务它……请删除存储行」。\n- 为什么：这条告警给的处方会删掉一个正在生效的定制（ADR-0150 D4：每个持有包的声明覆盖各自成立）。#32613 已把读路径的同类判定改成对每个出货包判断，普查没跟上。\n- 风险：只改启动普查的告警判定，不改读写；第一方计数需实测。\n- 先看：`packages/metadata-protocol/src/protocol-diff-delete-load.ts` 约 1180 行的 `metadata_sealed_overlay_unserved` 普查。\n- 验证：`service-automation` 的 `flow-declared-override-first-boot-pull.integration.test.ts` 中 `[#32613]` 的 override then other-override 一例，告警 flow×1 点名 OTHER 的覆盖；修复后两种注册顺序都不告警，真正无人服务的行照旧告警（CONTROL）。\n- 需要你做的：无，p2，席位落地。\n\n## Do\n\n1. Measure on `main` after #32613 merges: two packages ship the same sealed-type name, each with a declared override; boot; read the census warnings.\n2. Judge each shipping holder's declared override (as #32613 does on the read path), pin both registration orders and an unserved CONTROL, one ablation per negative pin.\n\n**Clause-②:** expected `no (narrowing)`; the dev measures. **Metadata-protocol:** none expected (warning text only); the dev measures."
+}

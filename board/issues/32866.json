@@ -1,0 +1,36 @@
+{
+  "number": 32866,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): card threads skip SKILL.md, fact tables read by section, patrol reads GitHub by named fields",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T22:18:29Z",
+  "updated_at": "2026-11-13T00:27:10Z",
+  "closed_at": "2026-11-13T00:27:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-13T00:27:07Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32866",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DMeeUPU5qaHPMckpHnnrPHi)_\n\nFixes #32855\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:派发技能的两份参考文件改 5 行、删 2 行、增 2 行:卡线程不再读 SKILL.md;事实表按小节 grep;巡查读 GitHub 只点名字段,CI 日志落盘后 grep。\n- 为什么改:会话成本 ≈ 上下文大小 × 调用次数,读进来的文件每次调用都重付一遍;这三处是卡线程与席位常驻上下文里最大的可省部分。\n- 风险与回滚:只改技能文字,不动代码与门禁;两个文件仍在行数上限(37 / 245)。回滚 = revert 本 PR。\n- 先看:`reading-discipline.md`(新增两行与两处删减),再看 `dispatch-runbook.md` 的卡线程节两行。\n- 两分钟验证:`pnpm check:pm-skill-ratchet && pnpm check:pm-skill-id-lint`,预期两行 ✓ 且 exit 0。\n- 需要你做的:无,席位落地(Tier S)。\n\n## What changes\n\nThree parts, each an in-place rewrite or a same-file paid addition; no re-wrap, no ceiling raise.\n\n**Part 1 — a card thread does not read the skill** (`dispatch-runbook.md`, card-thread section)\n- :130 the cost of opening a thread no longer lists re-reading the skill: it re-clones and re-reads `os-dev.md`.\n- :143 rewritten: the thread reads `os-dev.md`, the dispatch order, the card and all its comments; ⛔ it does not read `SKILL.md`; a `references/` file is read when a pointer sends it there.\n\n**Part 2 — fact tables by section** (`reading-discipline.md` :6)\n- The `platform-readings.md` fact table is grepped at the moment of the operation and only the hit section is read; ⛔ never read whole.\n\n**Part 3 — seats read GitHub by named fields** (`reading-discipline.md`, two lines added directly under the read-order line :35)\n- Patrol and probe reads of GitHub name their fields (`gh api --jq`); ⛔ a whole issue/PR JSON or the full comment text is not pulled into context.\n- CI logs are saved to disk and then grepped, ⛔ never tail-only; a claim and a contract review still read the whole card/PR thread; long threads are outsourced per the runbook (its existing long-thread rule).\n- `board-snapshot.mjs` is untouched.\n\n**Paying cuts (same file, `reading-discipline.md`), and where each one's content still lives**\n- Deleted 「⛔ 不用共享检出的工作树核验 main,它的 HEAD 由别的 agent 摆布。」 — still carried by the line above it (verify main with `origin/main`: fetch, then `git grep … origin/main` / `git show origin/main:PATH`), by :5 (「不取本地工作树」), and by AGENTS.md Prime Directive #11 (the shared tree's HEAD is switched under you).\n- Deleted 「放行认门禁 job 的结论(`completed: success`),⛔ 不认聚合读数。」 — still carried by `platform-readings.md:38` (aggregate readings are a negative screen only; clearance reads the single job by name) and by AGENTS.md multi-agent §7 (green means the gate-carrying jobs' `conclusion` is `success`).\n\n**Line budget**: `reading-discipline.md` 37 → 37 (ceiling 37); `dispatch-runbook.md` 245 → 245 (ceiling 245). Every touched line ≤ 120 bytes.\n\n**Maintainer's words this card carries** (Elon, project thread, 2026-11-12 UTC, verbatim): 21:46:10Z 「任务很多，评估如何节约 token」; 21:47:28Z 「把共用的部分压成一页摘要」; 21:50:27Z 「以上建议用 fable评审，然后立skills 卡优化」; 21:54:51Z 「…按照你的意见补充立卡并全部交给 skills 车道 派发。都是 p1」. The rule text itself carries no quotation: the corpus is rules-only (the id-lint header and `os-dev.md` keep quotations only where the words themselves are the operative test), and both files sit at their line ceilings; the citation lives here.\n\n## Tests\n\nNo code changed. No test pins the rewritten or deleted lines (`git grep` over `scripts/` and `packages/` for each changed phrase: zero hits outside `.claude/skills`).\n\n## Acceptance notes\n\n- Deviation: the measured parenthetical on :143 (「仓 `.claude/agents` 类型未加载(实测)」) is dropped to fit the new rule into the 120-byte line; its operative half (the thread reads `os-dev.md`) stays.\n- Deviation: the maintainer citation is in this body, not the skill text (reason above).\n\n## Verification\n\n<details><summary>Local derived gates at 4453fb16 — 17/17 exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 17 commands; each ran with its exit code captured before any pipe; `--ran` reconciliation: `17 derived famil(ies) accounted for — 17 run, 0 NOT-MEASURED`.\n\n```\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/pm/check-harness-current.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0\npnpm check:agent-test-spelling :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-skill-id-lint :: exit 0\npnpm check:pm-skill-ratchet :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:skill-frame-sync :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n\nThe doc-formula gate first exited 3 (prerequisite: its packages unbuilt in a fresh worktree); after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` it exits 0. Every CI-only family is read from this PR's check-runs, not re-run locally.\n</details>\n\nTier S (`.claude/**` only): lands by the owning seat after a contract-review PASS on the current head. `skip-changeset`: nothing published changes.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4czXDHyLHFjrNu7MiS5)_\n"
+}

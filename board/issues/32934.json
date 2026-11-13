@@ -1,0 +1,30 @@
+{
+  "number": 32934,
+  "kind": "issue",
+  "title": "metadata-protocol: registry-question.ts header says the record-currency follow door is asked by nothing else, which the batch writers (#32474) and package registration (#32483) both falsify",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T23:55:18Z",
+  "updated_at": "2026-11-12T23:55:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32934",
+  "body": "domain:server#8 · os-elon-musk · session_016WV4cwqTK71kjQzHae8T5J\n\nBlocked-by: #32927\nSource: contract review of PR #32927 (record 6839446638), boundary flag \"stale clause\" and nit N3.\n\n## Problem\n\n1. `packages/metadata-protocol/src/registry-question.ts` line 14 describes the follow door as one \"which nothing else asks\". Since #32474 the batch writers ask it, and once PR #32927 lands the registry's run end asks it for every installed or reloaded package. Prose only, but it misleads the next reader about who enforces the record-currency follow pair.\n2. (N3) A follow amount contributed by an `extend` layer is judged by neither asker (the door's `partial` rule, unchanged from `main`): a package extending a parent or child with a following amount can register a pair the door never sees. Measure whether this is reachable from an install, and either pin it as intended (with the reason) or close it.\n\n## Do\n\n- Item 1: correct the header to name every asker (single save/publish, batch writers, registration run end). Prose only, `Clause-②: no`.\n- Item 2: measure first; if it is a real gap, it is a narrowing and owes its own contract review and changeset."
+}

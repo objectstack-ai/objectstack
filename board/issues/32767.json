@@ -2,8 +2,8 @@
   "number": 32767,
   "kind": "issue",
   "title": "mcp: prompts/list projects a skill whose bound tools the connection does not serve, and a host has no declared seam to withhold one",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,25 @@
     "area:ai",
     "bug",
     "domain:server",
-    "pm:queue",
-    "priority:p2"
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T15:49:39Z",
-  "updated_at": "2026-11-12T16:49:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T02:06:38Z",
+  "closed_at": "2026-11-13T02:06:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32767",
   "body": "repo:cloud#4 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\nFiling gate: finding from the cloud lane (cloud#4337, PR objectstack-ai/cloud#4419). Cloud now filters through a proxy over the `mcp` service; this card is the framework seam that replaces the proxy.\n\n## What\nOn a `data:read` token, `/api/v1/mcp` `prompts/list` listed `metadata_authoring` (and 8 more in-app skills), which name 18 tools the connection does not list — measured red on the hosted rig (cloud e2e `mcp-served-guidance-4337`, item 1). `packages/mcp/src/skill-prompts.ts:156` (`listSkillPrompts`) and `mcp-server-runtime.ts:2488` (`registerSkillPrompts`) project every skill row with instructions; a host has no seam to keep a skill off the prompt surface.\n\n## Expected\n`prompts/list` / `prompts/get` project a skill only when the connection serves the tools it binds (`SkillSchema.tools` vs the request's served tool list), and/or a declared host seam to withhold skills per request. Cloud then drops its proxy after the next pin move. Pin test: a data-only connection lists no skill naming an unserved tool.\n\nSeam: spec:SkillSchema.tools → runtime:packages/mcp/src/skill-prompts.ts listSkillPrompts. Not in batch #32434-#32440/#32442/#32443. Dedupe words: skill prompt projection, prompts/list unserved tools, listSkills host filter, skill tools served. Related: cloud#4337."

@@ -1,0 +1,30 @@
+{
+  "number": 32905,
+  "kind": "issue",
+  "title": "console + rest: the History item tool reads and rolls back by the bare name, so a name two packages hold in a type stored per package cannot be read or rolled back from the console (ADR-0150 D3/D4)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T23:05:12Z",
+  "updated_at": "2026-11-12T23:48:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32905",
+  "body": "epic:#31527#1 · os-sales · session_01L6bhgXVGkKY8TFH7GcQT4a\n\nParent: #32778 (ADR-0150 phase 2). Found by: the #32578 card thread (report 6838394149, `out_of_scope_findings`), while it re-measured #32578's premise. **This is a read-only inference. Nothing below was measured over HTTP or in a browser. Measure it first.**\n\n## Premise (inferred from the code, not measured)\n\nSince #32569, the history, diff and rollback of a type stored per package address one package's row. With two holders and no package named, the metadata manager refuses `409` and names both. #32577 adds `webhook` to that set, which already holds flow, action, permission, api, agent, skill and email_template.\n\n- The console's History item tool (`ui/packages/app-shell/src/views/item-tools/ResourceHistoryPage.tsx`) calls `client.history(type, name)` and `client.rollback(type, name, version)` with the type and name only. The client's `history()` (`ui/packages/data-objectstack/src/metadata-client.ts`) has no package option.\n- The REST `GET /meta/:type/:name/history` route (`packages/rest/src/meta-item-history-routes.ts`) does not appear to read a `?package=` query. The rollback route has not been checked.\n- So, inferred: for a name two packages hold, the History tool answers 409 and offers no way to pick a holder. This holds for every type stored per package, not only webhook.\n\n## Measure first\n\n1. Install two packages that each ship one name of a type stored per package (a webhook or a flow), and edit each one once so that each has history rows.\n2. `GET /meta/TYPE/NAME/history` bare, then with `?package=PKG`: record the status for each.\n3. `POST .../rollback` bare, for a version of each package: does it refuse 409, or does it write to one of the holders?\n4. Open the History tool from the console for that item and record what it shows.\n\n## Grade\n\np2. **If the measurement shows that a bare rollback under two holders writes to one of them (a silent pick), promote this card to p1** (the epic seat's instruction).\n\n## Fix shape (if confirmed)\n\nThe history and rollback doors take the holder's package, as `/layers?package=` does. The History tool sends the package its item page was opened with (the URL `?package=`, as `ResourceEditPage` does for its layered read). A name with one holder keeps working bare.\n\nDedupe words: history rollback package two holders console"
+}

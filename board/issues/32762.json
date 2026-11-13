@@ -2,8 +2,8 @@
   "number": 32762,
   "kind": "issue",
   "title": "spec: BlueprintViewSchema.name refuses the qualified OBJECT.SUFFIX view name every other view door requires (apply_blueprint answers 'views.0.name must match pattern')",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ai",
     "bug",
     "domain:spec",
-    "pm:queue",
-    "priority:p2"
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T15:29:05Z",
-  "updated_at": "2026-11-12T15:47:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T02:13:15Z",
+  "closed_at": "2026-11-13T02:12:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32762",
   "body": "repo:cloud#4 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\nFiling gate: finding from the cloud lane (cloud#4339, PR objectstack-ai/cloud#4409, merged). Item 3 of that card; the cloud side now explains the rule, but the root is in spec.\n\n## What\n`packages/spec/src/ai/solution-blueprint.zod.ts` (main ~:418; cloud pin c5758b0d ~:379): `BlueprintViewSchema.name: z.string().regex(SNAKE_CASE)`. An MCP agent sending `views[0].name: 'ticket.open_list'` through `/api/v1/mcp` apply_blueprint gets `views.0.name must match pattern`, while every other view door (and cloud's stager `viewName` in service-ai-studio blueprint-tools.ts) uses or accepts the qualified `OBJECT.SUFFIX` form. Measured through the real door in the cloud PR's test.\n\n## Expected\nOne rule: either admit `OBJECT.SUFFIX` when the prefix equals the view's `object`, or keep the pattern and say so in `.describe` (so the schema the agent reads states the suffix-only form). Pin test both ways.\n\nDedupe words: BlueprintViewSchema name SNAKE_CASE qualified view name, apply_blueprint views name pattern. Related: cloud#4339."

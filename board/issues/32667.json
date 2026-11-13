@@ -2,8 +2,8 @@
   "number": 32667,
   "kind": "issue",
   "title": "Approvals UI: an approval request opens inside an unrelated app's shell, and its 记录 card copies to the clipboard instead of opening the record",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -14,20 +14,21 @@
     "area:workflow",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-lizheng"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T09:39:52Z",
-  "updated_at": "2026-11-12T20:12:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T01:31:10Z",
+  "closed_at": "2026-11-12T22:34:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 10,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32667",
   "body": "Filing category: ① product defect (user-visible).\nreach: public entry — the console in a browser (Playwright, zh-CN), measured on a hosted tenant (`pnpm dev:stack --with-ui`; cloud `ff373e02`, framework `d7c3d44e`) with two users (approver = organization owner, applicant = member) and two leave apps installed in the environment.\n\n## Business reason\n\nThe approval round trip is approver: notification → request → decide; applicant: 「请求已驳回」 notification → their request → fix → resubmit. Both hops break: the approver lands in the wrong app, and the applicant cannot get from the rejected request to the record they must edit.\n\n## What happens\n\n1. **Wrong app shell.** From 首页 › 我的工作 › 待审批 (and from the 通知 entries), a request for a record of app `app.el5z` (「请假审批（UI测试）」) opens at `/_console/apps/com.example.leave/sys_approval_request/record/areq_…` — inside a different app (「请假管理」), with that app's sidebar (请假申请 / 假期余额 / 请假看板). Same for the applicant.\n2. **The record card does not navigate.** On the request page, the 「记录 · 请假单 · 张三-年假1天」 card is a `role=\"button\"` `[data-record-preview]`; clicking it (or its title) does not open the record, and the page throws `Failed to execute 'writeText' on 'Clipboard'` (its copy button). The applicant had to find the record again through 首页 › 最近访问.\n3. **Smaller, same pages:** the rejection reason is only under the 时间线 tab, not on the request's 详情 view the notification opens; the approver is offered 「撤回」 (an applicant action); after step one of a two-step flow, step one's request reads 「已批准」 while the record is still waiting on step two.\n\n## Expected\n\nA request opens in the app that owns its record (or in a neutral approvals context), and its record card opens the record. The rejection comment is visible where the applicant lands.\n\nReader who acts: the `domain:ui` seat (approval request page and inbox routing in `ui/apps/console`).\nDedupe: `repo:objectstack-ai/objectstack is:issue approval request page app context wrong app` → 282 hits; top 3 (#30208 Setup wording, #28988 Setup routes in another app's shell — related class, closed, Setup only, #26180 approver read) — none covers approval requests; `approval request record card navigate clipboard` → 1 hit (#29002, QA run)."

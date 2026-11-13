@@ -1,0 +1,30 @@
+{
+  "number": 32872,
+  "kind": "issue",
+  "title": "mcp: validate_expression still answers ok where the validation/formula gate refuses (null-guard, undeclared hop field, and the rest of the gate's private passes)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T22:24:21Z",
+  "updated_at": "2026-11-12T23:32:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32872",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cwJbS8sZAfru2iyvQq\n\nFiling gate: ① product defect, the remaining members of the parity family #32640 fixed for relationship traversal (PR #32870, Acceptance notes). One closing card for the family, with an enumeration pin. ⛔ Not a claim; triage sets the lane and grade.\nreach: public entry `/api/v1/mcp` `tools/call validate_expression` at `site: 'validation'` / `'formula'`, measured by the #32640 dev through `validateStackExpressions` against the validator call the tool makes (branch of PR #32870).\n\n## Business reason\n\n`validate_expression` promises \"the verdict is the one the publish gate gives that rule\". Each pass below still lets the tool answer `ok: true` for a rule the gate then refuses, so the agent reports done and the refusal first meets a person at publish. Same class as #32595 and #32640.\n\n## Members (gate passes the tool does not run; each private to `@objectstack/lint`)\n\n1. **Null-guard gate** (`checkNullGuards` / `findUnguardedNullableOperands`, `validate-null-guards.ts`). Measured: `record.days > 3` with `days` neither required nor defaulted: gate refuses (\"applies `>` to `record.days`, which … declares as nullable\"); tool `ok: true`. The bridge already carries `required`.\n2. **Undeclared field one hop away** (`refuseUndeclaredHopField`). Measured: `record.balance.nope > 1`: gate refuses (\"unknown field `nope` on `rtbw_leave_bal`\"); tool clean. The tool would need the target object's fields.\n3. Not measured, from the gate's source: `refuseStoredMetadataBodyHop`, `validationRuleParentIssue` (`parent` root on a master-detail rule), `warnUnprovisionedAnchors` (warning). The formula site carries the same two hop checks.\n4. The served SKILL.md line for `validate_expression` (`packages/mcp/src/skill-md.ts`, mirrored byte for byte in `ui/apps/console/src/pages/developer/objectstack-skill.ts`) lists only bare refs and unknown fields/functions as build-time errors; it should name what the tool refuses after #32870 and this card.\n\n## Expected\n\nThe tool runs the gate's own judge for each member at the sites where the gate runs it (export or share the pass rather than copy it), so the two verdicts agree; an enumeration pin lists every gate pass at each site and fails when a new one is added without the tool.\n\nRelated: #32640 (PR #32870), #32595 (PR #32817)."
+}

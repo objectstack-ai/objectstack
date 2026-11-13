@@ -2,8 +2,8 @@
   "number": 32764,
   "kind": "issue",
   "title": "spec: BlueprintObjectSchema does not apply the stage-field option-kind rule ObjectSchema enforces, so apply_blueprint stages half a build",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ai",
     "bug",
     "domain:spec",
-    "pm:queue",
-    "priority:p2"
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T15:30:24Z",
-  "updated_at": "2026-11-12T15:46:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T02:14:39Z",
+  "closed_at": "2026-11-13T02:12:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32764",
   "body": "repo:cloud#4 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\nFiling gate: finding from the cloud lane (cloud#4339, PR objectstack-ai/cloud#4409, merged).\n\n## What\n`/api/v1/mcp` apply_blueprint with `stageField: 'status'` whose options carry no `kind` passes blueprint validation; the object write then fails `Option 'draft' of field status declares no kind …`, yet the call answers `status: 'drafted'` having staged that object's kanban view and nav entry (2 dangling references in verify_build; cloud#4339 comment 6819231279).\n\nEvidence: `packages/spec/src/ai/solution-blueprint.zod.ts` — option `kind` is described as REQUIRED under stageField but not enforced; `BlueprintObjectSchema`'s only refinement is `refuseUnfitDefaultValue` (main ~:344), vs `ObjectSchema`'s `refuseStageFieldWithoutKinds` (`packages/spec/src/data/object.zod.ts` ~:2803).\n\n## Expected\n`BlueprintObjectSchema` applies the same stage-field option-kind refinement, so cloud's existing `SolutionBlueprintSchema.safeParse` refuses such a blueprint with nothing staged. Pin test. (Cloud-side defence in depth — not staging a failed object's dependents — stays a cloud follow-up if wanted.)\n\nDedupe words: stageField kind blueprint, BlueprintObjectSchema stageField option kind, apply_blueprint half staged. Adjacent: objectstack#32396. Related: cloud#4339."

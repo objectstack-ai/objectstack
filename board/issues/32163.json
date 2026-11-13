@@ -14,7 +14,7 @@
     "bug",
     "domain:server",
     "pm:queue",
-    "priority:p2"
+    "priority:p1"
   ],
   "assignees": [
     "huangyiirene"
@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:39:40Z",
-  "updated_at": "2026-11-12T02:31:15Z",
+  "updated_at": "2026-11-12T23:23:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32163",
   "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ① product defect, reproduced on a public entry (reach below).\n\nQA-source: #32135 · ai.mcp-run-action-exposure-gate · observed beside the clauses\nBatch-of: objectstack-ai/objectstack#32135 follow-ups, 15 cards filed on the maintainer's 「立卡处理」\n\n## What we saw\n\nReach: MCP `tools/call list_actions` as a plain member (`phone.demo`, `auditor.demo`) on the showcase at framework ff04ad81. The list includes `invite_user`, `remove_member`, `delete_sso_provider`, `create_organization` and others; `run_action invite_user` is then refused 403. #30771 (ruling A) made `list_actions` list only what the caller can run, reading each action's declared gate; these identity actions declare no gate, so they still appear.\n\n## Proposed change\n\nDeclare the gate on the remaining identity actions (the same declaration #30771 introduced), so `list_actions` and REST `/actions` leave them out for callers who would be refused.\n\n## Business reason\n\nWho: AI agents operating an app over MCP. Cost: an agent plans around actions it will be refused, wasting turns and confusing users.\n\n## Reader\n\nTriage first touch; lands where those actions are declared (`plugin-auth` / platform-objects identity actions).\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack list_actions caller cannot run` (49, open and closed): #30771 and #28943 (closed) fixed the mechanism and one case; this is the remaining set."

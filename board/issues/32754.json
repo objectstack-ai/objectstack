@@ -15,7 +15,8 @@
     "bug",
     "domain:server",
     "needs-user-decision",
-    "priority:p1"
+    "pm:dispatched",
+    "priority:p0"
   ],
   "assignees": [
     "os-sales"
@@ -23,12 +24,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T14:43:22Z",
-  "updated_at": "2026-11-12T19:00:59Z",
+  "updated_at": "2026-11-13T01:34:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 6,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32754",
-  "body": "Filing category: ① product defect.\nreach: public entry `/api/v1/mcp` `create_upload_link`, measured on a hosted tenant (`pnpm dev:stack --with-ui`, Team plan; cloud `ff373e02`, framework `d7c3d44e`), with a member's and the owner's MCP OAuth tokens, twice (two apps, a day apart).\n\n## Business reason\n\n\"Attach the receipt / the contract / the photo to my request\" is the most common file action an employee takes. On a record they own and can edit, they are told they lack permission.\n\n## What happens\n\nRecord `ebqu_claim/W7rSVhWT5NV0pOfj`, owned by the member, status draft, editable by them (`update_record` succeeds; `create_upload_link { field: 'invoices' }` succeeds and the upload lands):\n- member: `create_upload_link { objectName: 'ebqu_claim', recordId, attachments: true }` → `403 PERMISSION_DENIED — You cannot attach files: your permissions do not allow creating attachments (sys_attachment).`\n- owner, same record → link issued.\n\nThe member's access comes from the app's member permission set (AI-built, granted to everyone from Studio › 权限); it grants the app's object, not `sys_attachment`. The same refusal was measured on an earlier app (`k7en_claim`).\n\n## Expected\n\nAttaching to a record follows the record: a user who may edit the record may attach to it (the delete side already reasons from the parent, #21729 / #22455), or the app member permission set carries attachment create. Either way, the member's own draft takes an attachment.\n\nReader who acts: the attachments/storage seat (`attachFileAs` gate) or the security seat (default grants), whichever owns the posture.\nDedupe: `repo:objectstack-ai/objectstack is:issue member attachment sys_attachment create own record` → 57 hits (#32686 open, cites this refusal as evidence only; #21729 and #22455 closed, delete side and the sharing gate) — none on create for a member."
+  "body": "domain:server#4 · os-sales · session_01L6bhgWRcTEB3toGxnWvuvX\n\nRuled: 6837170004 · letter B · 2026-11-12T22:03Z\n\nFiling category: ① product defect.\nreach: public entry `/api/v1/mcp` `create_upload_link`, measured on a hosted tenant (`pnpm dev:stack --with-ui`, Team plan; cloud `ff373e02`, framework `d7c3d44e`), with a member's and the owner's MCP OAuth tokens, twice (two apps, a day apart).\n\n## Business reason\n\n\"Attach the receipt / the contract / the photo to my request\" is the most common file action an employee takes. On a record they own and can edit, they are told they lack permission.\n\n## What happens\n\nRecord `ebqu_claim/W7rSVhWT5NV0pOfj`, owned by the member, status draft, editable by them (`update_record` succeeds; `create_upload_link { field: 'invoices' }` succeeds and the upload lands):\n- member: `create_upload_link { objectName: 'ebqu_claim', recordId, attachments: true }` → `403 PERMISSION_DENIED — You cannot attach files: your permissions do not allow creating attachments (sys_attachment).`\n- owner, same record → link issued.\n\nThe member's access comes from the app's member permission set (AI-built, granted to everyone from Studio › 权限); it grants the app's object, not `sys_attachment`. The same refusal was measured on an earlier app (`k7en_claim`).\n\n## Expected\n\nAttaching to a record follows the record: a user who may edit the record may attach to it (the delete side already reasons from the parent, #21729 / #22455), or the app member permission set carries attachment create. Either way, the member's own draft takes an attachment.\n\nReader who acts: the attachments/storage seat (`attachFileAs` gate) or the security seat (default grants), whichever owns the posture.\nDedupe: `repo:objectstack-ai/objectstack is:issue member attachment sys_attachment create own record` → 57 hits (#32686 open, cites this refusal as evidence only; #21729 and #22455 closed, delete side and the sharing gate) — none on create for a member.\n"
 }

@@ -1,7 +1,7 @@
 {
   "number": 18883,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 3 — ⏳ vacant",
+  "title": "[PM seat] domain:spec · seat 3 — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,18 @@
     "pm:seat"
   ],
   "assignees": [
+    "os-elon-musk",
     "os-sam"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T04:07:15Z",
-  "updated_at": "2026-11-11T05:57:09Z",
+  "updated_at": "2026-11-12T22:07:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 71,
+  "comments": 72,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18883",
-  "body": "domain:spec#3 · os-support-ai · session_01WGufzi7JmNEq5dKHBJdAFu\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:spec` seat 3**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here).\n- The other spec seats: seat 1 objectstack-ai/objectstack#6017, seat 2 objectstack-ai/objectstack#18549, seat 4 objectstack-ai/objectstack#18917, seat 5 objectstack-ai/objectstack#19357. ⛔ This post is none of them.\n\n<sub>Refreshed 2026-11-11T05:54Z at clock-out.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-support-ai` · `session_01WGufzh7cM8EmUX4T2CBNHX` (project \"objectstack spec\"), seated 2026-11-10T00:08Z (6754972458), stood down 2026-11-10T23:49Z on the maintainer's 「当前任务处理完就下班」. `check-handover` exit 0. The clock-out brief is 6788268038, written by `session_01WGufzi7JmNEq5dKHBJdAFu`, which completed the missed steps.\n- **Mailbox:** PR #32006, closed at clock-out. **Patrol:** disabled at clock-out. The next holder opens both anew.\n- **Resume:** `/pm-dispatch 接手`, then read this post and the clock-out brief below it.\n\n## Ledger\n\n- **In flight:** none. **Stay-behind:** none.\n- **Queue snapshot (p1/p2 `domain:spec`):** no eligible card (only the tracking card #29428). Open p3 follow-ups from this tenure: #32282, #32345.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- `merge=os-regen` paths (`content/docs/references/**`, `packages/spec/authorable-surface/**`) and the hand-kept registration files merge with `bash scripts/pm/os-regen-merge.sh`.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:spec#3 · os-support-ai · session_01WGufzi7JmNEq5dKHBJdAFu -->\n"
+  "body": "domain:spec#3 · os-elon-musk · session_016WV4d1T5HEokjRgR6vCBX8\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:spec` seat 3**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here).\n- The other spec seats: seat 1 objectstack-ai/objectstack#6017, seat 2 objectstack-ai/objectstack#18549, seat 4 objectstack-ai/objectstack#18917, seat 5 objectstack-ai/objectstack#19357. ⛔ This post is none of them.\n\n<sub>Refreshed 2026-11-12T22:06Z (patrol interval).</sub>\n\n## Current PM\n\n🟢 `os-elon-musk` · `session_016WV4d1T5HEokjRgR6vCBX8` (a thread of the os-elon-musk account's fleet project \"Objectstack server\"), seated by opening mark 6835951643 on the maintainer's 「开 spec 座位」 and 「spec 席 2 已收班，你要接手他所有卡」. Concurrency: 5 card threads. Posture, ledger and round reports live in the project.\n\n## Handover ledger\n\n- **Pointer:** the previous holder's clock-out brief 6788268038 and the previous body revision archive the earlier tenure. ⛔ Neither is restated here.\n- **Taken over from seat 2's released set (brief 6824552073 on #18549):** #32529 + #32554 (PR #32701 → superseded by PR #32858), #32623 (PR #32668). #32642 (p3) dropped under the maintainer's p1/p2-only rule. The p1 cards of that brief stay with seat 2.\n- **In flight:** per the live `Claim:` comments naming `domain:spec#3`.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n- `merge=os-regen` paths (`content/docs/references/**`, `packages/spec/authorable-surface/**`) and the hand-kept registration files merge with `bash scripts/pm/os-regen-merge.sh`.\n\n## Notes\n\n- **Mailbox:** PR #32823. **Patrol:** `trig_01VJxhw4gmwc6QYVTZNj1VpJ` · `7 */2 * * *` (every 2 h while cards are in flight; the maintainer's token rules forbid a 60–70 min interval; idle ⇒ mailbox/PR events + a 4–6 h backstop).\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n\n<!-- signed: domain:spec#3 · os-elon-musk · session_016WV4d1T5HEokjRgR6vCBX8 -->\n"
 }

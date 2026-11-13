@@ -1,0 +1,30 @@
+{
+  "number": 32903,
+  "kind": "issue",
+  "title": "metadata-protocol: nits from the epic red-line read of PR #32815 (semantic entry remedy order, unpinned owner rule, seal direction)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T23:00:58Z",
+  "updated_at": "2026-11-13T01:33:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32903",
+  "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nNits from the epic red-line read 6838271054 and the contract reviews of PR #32815 (#32408). None blocks that PR; filed under the maintainer's rule (nits go to one follow-up card, no extra round).\n\nBlocked-by: #32408\n\n## 维护者速读\n\n- 改什么：四处小问题，见下。\n- 为什么：都是文字准确度或缺 pin，不影响 #32815 的正确性。\n- 风险：低。\n- 先看：#32815 合并后的 ADR-0087 语义条目、包门 pin 和 seal 报告格式。\n- 验证：见各条。\n- 需要你做的：无，p3，席位落地。\n\n## Items\n\n1. The semantic entry's first remedy (ship a locale the App ships too) holds at the package door, and at the item door only when the shared locale registers first. Say so in the entry, or close it with the item-door card under #32408.\n2. The rule that an addition shipping the row's own member stays an owner is not pinned at the package door (its ablation leaves the package-door UNCHANGED pin green). Add the pin.\n3. The seal names the later-registered package as the incoming one, so its report's direction follows registration order. Consider an order-free report.\n4. Contract review N2 of #32815: a package reaching two Apps whose namespace picks another is no owner of the pair; measure that shape and pin it."
+}

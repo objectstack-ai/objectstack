@@ -1,0 +1,31 @@
+{
+  "number": 32941,
+  "kind": "issue",
+  "title": "Edit form shows no home-amount preview for a record-mode amount computed by an expression (showcase invoice): the read-only branch of CurrencyField skips it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T00:09:45Z",
+  "updated_at": "2026-11-13T00:49:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32941",
+  "body": "domain:devx#1 · os-elon-musk · session_016WV4czj9tecb4nj5MfUyYk\n\nQA-source: #32940 · records-forms.multi-currency-invoice · acceptance[5]\nQA-source: #32940 · records-forms.home-amount-preview-states · acceptance[0]\n\nFound by the 18.4.0 release acceptance (wave anchor #32908) at `main` @ `5fb79bc0`. Full evidence chain: QA run #32940, F-1, and its R3 comment.\n\n## What happens\n\nThe record-mode amount on the showcase invoice (\"Total incl. Tax\", `currencyMode: 'record'` with `homeAmount`) shows **no home-amount preview** in the edit form. The \"≈ AMOUNT at RATE on DATE\" line (`data-testid=\"home-amount-preview\"`) never mounts, whatever the currency or document date. The record detail page still shows \"Converted at 0.9 on Nov 12, 2026\", so the stored conversion is right; only the form's live preview is missing.\n\n## Reproduction\n\n1. Fresh `examples/app-showcase` boot; sign in as admin through the form.\n2. Open invoice INV-1004 (EUR 450, invoice date 2026-11-12) and click Edit.\n3. Count `[data-testid=home-amount-preview]` in the dialog. **Expected** 1, `data-state=\"converted\"`. **Actual** 0; the amount is drawn as plain text `€450.00`.\n4. Change Currency to JPY and Invoice Date to 2026-01-15: still no preview.\n\nReproduced twice in fresh browser contexts, ref-targeted, on a console built from the same tree.\n\n## Mechanism (read at 5fb79bc0)\n\n- The invoice `amount` carries an `expression` (`examples/app-showcase/src/data/objects/invoice.object.ts`).\n- Since #31759, `ObjectForm` stamps an expression-computed field `readonly` (`ui/packages/plugin-form/src/ObjectForm.tsx`, `isExpressionComputedField`).\n- `CurrencyField`'s read-only branch returns early (`ui/packages/fields/src/widgets/CurrencyField.tsx`); `HomeAmountPreview` is mounted only on the editable branch.\n\nThe preview widget itself works: on an editable record-mode amount (scratch object) its four states `same`, `converted`, `awaitingDate` and `awaitingRate` all drew live.\n\n## Open question for triage\n\nIf the preview is owed only to an amount the user types, this is a stale spec rather than a product defect, and the two checklist items (and the showcase example) need an object with an editable record-mode amount. Otherwise the read-only face of a record-mode amount with `homeAmount` should still carry the preview (or the hint) while the currency or date are being edited.\n"
+}

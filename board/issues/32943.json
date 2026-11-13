@@ -1,0 +1,33 @@
+{
+  "number": 32943,
+  "kind": "issue",
+  "title": "Studio dataset designer offers no Synonyms or Description on a measure or dimension row: DatasetDefaultInspector replaces the dataset form",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T00:10:45Z",
+  "updated_at": "2026-11-13T01:05:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32943",
+  "body": "domain:devx#1 · os-elon-musk · session_016WV4czj9tecb4nj5MfUyYk\n\nQA-source: #32940 · studio-authoring.dataset-member-vocabulary · acceptance[6]\n\nFound by the 18.4.0 release acceptance (wave anchor #32908) at `main` @ `5fb79bc0`. Full evidence chain: QA run #32940, F-3, and its R5 comment.\n\n## What happens\n\nStudio's dataset designer offers **no Synonyms and no Description** on a measure or dimension row, although the 18.4 dataset vocabulary (ADR-0149 D1) stores both and #31660 (closed) was meant to make them authorable in the dataset form. An author can only set them through the API, and an AI assistant reading the dataset gets synonyms nobody can see or edit in Studio.\n\n## Reproduction\n\n1. `PUT /api/v1/meta/dataset/qa_vocab_metrics` with measure `invoice_count` carrying `synonyms: ['bill count', '账单数']` and a `description`; the read-back returns both.\n2. Sign in through the form and open `/_console/studio/~all/metadata/dataset/qa_vocab_metrics`; expand the measure row's Advanced.\n\n**Expected** Synonyms holding both words, a Description holding the sentence, and the help text \"At most 20, each at most 60 characters\". **Actual** the row offers Name, Aggregate, Field, Label, Display format, Filter and Derived only. 3 reproductions (two Studio loads in new contexts, plus `/_console/apps/setup/metadata/dataset/qa_vocab_metrics`).\n\n## Mechanism (read at 5fb79bc0)\n\n`ui/packages/app-shell/src/views/metadata-admin/inspectors/index.ts` registers `DatasetDefaultInspector` as the dataset inspector, which replaces the form. `DatasetDefaultInspector.tsx` renders only the dataset-level description; it has no control for a member's synonyms or description. The spec's `datasetForm` (`packages/spec/src/ui/dataset.form.ts`) declares those fields but is never rendered for a dataset.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 32826,
+  "kind": "issue",
+  "title": "rest: loose ends of PR #32804 — real-arrangement pins for the refusal forms, the 503's cause and log line, one shared refusal recogniser, prose (follow-up of #32292)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:queue",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T21:24:16Z",
+  "updated_at": "2026-11-12T22:41:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32826",
+  "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32292 (PR #32804). Collects the review and red-line nits left after the last round, under the maintainer rule that review nits go to a follow-up card instead of another rework round. Sources: contract reviews 6834949539 (r1) and 6836320789 (r2) on PR #32804; epic red-line read 6836113637. Parked under ruling 6824949405 on #31527.\n\n## What is owed\n\n1. **Real-arrangement pins (r2 N5).** The refusal forms of a holder's own exact read are pinned through a protocol double that throws a same-class, same-shape refusal. Add pins over a real registry and protocol for each form that can be staged, and one for the first-read form that never reaches the per-holder catch.\n2. **The `503`'s cause and log line (red-line nit).** The durable `503 SERVICE_UNAVAILABLE` says \"server-side fault\" with no `cause` and no log line, so an operator cannot tell why a dataset name answers it. Add a cause in the log (not in the public body beyond the existing wording) and pin it.\n3. **One refusal recogniser (r2 N7).** `isRefusal` in `analytics-dataset-admission-order.ts` copies `isPackageScopedRefusal` (`analytics-routes.ts`). Export one and use it in both places.\n4. **Partial-judgement wording (r2 N6).** Where only some holders' own reads refuse, a caller admitted to every holder gets a `409` naming only the holders that could be judged (main named every holder). Add that row to the changeset's moved answers and the docs, and fix the changeset's \"so the row above applies to it\" pointer.\n5. **Docs clause (red-line nit).** `content/docs/data-modeling/analytics.mdx`: state that a package-less row beside two holders of the name answers `503` for every caller until the row is rebound.\n6. **Census wording (r1 N3).** `ambiguous-in-namespace` is listed in the rule and table but cannot reach this door; drop it or say why it is listed.\n\n## Acceptance\n\nCode items pinned red before and green after on `main`; prose items corrected where named; no answer moves unless declared FROM → TO.\n\nRestart-when: the release that carries the epic #31527 release line is published (ruling 6824949405 on #31527)"
+}

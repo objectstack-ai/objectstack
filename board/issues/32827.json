@@ -1,0 +1,33 @@
+{
+  "number": 32827,
+  "kind": "issue",
+  "title": "runtime: no public reader returns a composed artifact's collections across its `packages[]` bodies, so a consumer that needs \"every collection of the suite\" can only compose flat — which #32810 refuses for a suite",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T21:31:23Z",
+  "updated_at": "2026-11-12T23:44:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32827",
+  "body": "domain:spec#2 · os-sales · session_01L6bhgU7jN46DmQ6XFvz28s\n\nFiling gate: ① a consumer the #32810 narrowing leaves without a platform route (measured on hotcrm `8277e61`, read-only). Carried from the #32810 card thread's measurement, ruled A by the `domain:spec#2` seat.\n\nReader: the `domain:server` lane (runtime) (`packages/runtime/src/artifact-collections.ts` `resolveArtifactCollections`, `packages/runtime/src/index.ts`).\n\n## 维护者速读\n\n#32810 让 `composeStacks` 拒绝把一个套件扁平组合成「一个包 id 挂多个应用」。hotcrm 的测试视图 `test/helpers/composed-stack.ts` 恰好就是这么用的：把五个包扁平组合，只为在顶层拿到全套集合。正确的读法是 `preserve` 组合后跨包体合并集合，平台内部已有这个读法（`resolveArtifactCollections`），但没有从任何包入口导出。这张卡让平台公开给出这个读法，hotcrm 才能不自己重写读法就迁过去。须在带 #32810 的 minor 发版前落地，或同版落地。\n\n## Business reason\n\n- **The consumer.** hotcrm `test/helpers/composed-stack.ts:43` composes its five package stacks flat — `composeStacks(packageStacks)`, default `manifest: 'last'` — to give its suites one view of every collection of the app. 165 of hotcrm's 266 test files load it: 158 import it directly, 7 more through `test/helpers/flow-regions.ts` or `test/helpers/stack-picklists.ts`, which import it (static `git grep` on hotcrm `8277e61`, not a run). Its docblock states the rule it keeps: nothing in the helper re-implements a platform reader; it uses the platform's own composition.\n- **Why it breaks.** The selected manifest is `app.objectstack.hotcrm` (`type: 'app'`) and the concatenated `apps` hold the service, marketing and CRM apps (three). After #32810, `composeStacks` refuses that composition with `STACK_SINGLE_APP_VIOLATION` at module load, so each importing file fails whole. hotcrm pins `@objectstack/*` `18.3.0`, so it breaks on the bump to the minor that carries #32810, not before.\n- **Why hotcrm cannot move today without a workaround.** The shape-correct route is `composeStacks(packageStacks, { manifest: 'preserve' })`, whose multi-package artifact carries each collection once, in its package body, and no flattened copy (ADR-0130 D4, 2026-09-22 addendum). Reading \"every collection of the artifact\" from that is `resolveArtifactCollections` (`packages/runtime/src/artifact-collections.ts:457`), the reader the runtime's own boot paths use (`app-plugin.ts`, `load-artifact-bundle.ts`, `standalone-stack.ts`, `app-artifact-handlers.ts`, `resolve-project-database.ts`). It is not exported from `@objectstack/runtime`'s entry (`packages/runtime/src/index.ts` names neither it nor `artifact-collections`). `@objectstack/core` exports `resolveArtifactPackageOrder` (the bodies in registration order), but merging the bodies' collections from that is the reader re-implemented in the app, which the helper's rule and the app/platform boundary both refuse.\n\n## Work\n\n1. Give a public, documented reader of a composed artifact's package-owned collections across the flattened top level and every `packages[]` body — the merge `resolveArtifactCollections` already performs — from a package entry an app's test suite can import (export it from `@objectstack/runtime`, or place it where the lane judges right). One implementation: ⛔ no second copy of the merge.\n2. A pin from the consumer's side: a `manifest: 'preserve'` composition of an app package and module packages, read through the exported reader, yields every input's collections (objects, apps, flows, translations, hooks) with the same contents a flat composition gave before #32810.\n3. Declarations: an added public export is a widening — `Clause-②: yes (widening)`, its changeset level per AGENTS.md, `check:api-surface` regenerated.\n\n## Acceptance\n\nhotcrm's test view can be written as `READER(composeStacks(packageStacks, { manifest: 'preserve' }))`, READER being the exported reader, with no platform logic copied into hotcrm, and the reader is in a release no later than the one that carries #32810's refusal.\n\n## Sequencing\n\nLands before, or in the same release as, the minor that carries #32810 (PR on branch `claude/project-thread-2eliu6`). The hotcrm-lane move of `test/helpers/composed-stack.ts` follows this card and the bump.\n\n## Dedupe\n\n`resolveArtifactCollections is:issue` → 19, all closed, none exports it; `resolveArtifactCollections export is:issue is:open` → 1, the spec seat-5 post, not a card.\n\nSuggested-grade: p1 · it unblocks the consumer of a p1 narrowing (「相关任务都是 p1」 on #32586's rule line)."
+}

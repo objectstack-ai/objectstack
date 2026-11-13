@@ -1,0 +1,37 @@
+{
+  "number": 32911,
+  "kind": "pull_request",
+  "title": "fix(mcp): a failed flow run names the reason to relay beside its unchanged envelope",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T23:19:46Z",
+  "updated_at": "2026-11-13T00:38:32Z",
+  "closed_at": "2026-11-13T00:38:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-13T00:38:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32911",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DHmNQDjzMDfC82arJrj8Ao8)_\n\nFixes #32757\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:MCP `run_action` / `resume_run` 遇到流程因业务拒绝失败时,原 JSON 一字不动,另附第二段纯文本,写明该转告员工的那句话(如「电子发票 is required」);两个工具说明同步教 AI 按控制台顺序转述。\n- 为什么改:员工经 AI 提交报销被拦时,AI 原样念出 \"Flow … failed: Node … failed: update_record(…)\",员工看不懂;网页弹窗却直接说缺什么。按你裁决的 B+D 做,不改返回码、不与 `/actions` 分叉。\n- 风险与回滚:把所有文本块拼起来再 JSON.parse 的 MCP 客户端会解析失败(只读第一块的不受影响);回滚 = revert 本 PR,无数据迁移。\n- 先看:`packages/mcp/src/mcp-http-tools.ts` 的 `flowFailureRelaySentence` 与 `errorResultFromThrown` 末尾;`packages/mcp/src/mcp-action-refusal-details.test.ts` 新增的 #32757 describe。\n- 两分钟验证:`pnpm --filter @objectstack/mcp exec vitest run --maxWorkers=2 src/mcp-action-refusal-details.test.ts`,预期 14 passed,其中 10 条是新增的 #32757 用例。\n- 需要你做的:无,席位落地(本 PR 申报 Clause-② yes,席位先做契约复审)。\n\n## What changes\n\n- `errorResultFromThrown` (the renderer `run_action` and `resume_run` share): on `FLOW_FAILED`, after the unchanged envelope in `content[0]`, a second text block carries the sentence to relay, chosen in the console's order (`flowFailureMessage`, `ui/packages/app-shell/src/utils/flowResponse.ts`): the flow author's `details.errorMessage`, else the envelope's `userMessage`, else `details.innerRefusal.message` (only when the inner refusal has a string `code`, as the console reads it). A failure that carries none of the three gets no second block; no other code ever gets one.\n- `run_action` and `resume_run` descriptions teach the same order and say the flow and node chain is for diagnosis.\n- Patch changeset for `@objectstack/mcp`.\n\nBefore: the agent read `{\"error\":{\"code\":\"FLOW_FAILED\",\"message\":\"Flow 'ebqu_claim_submit' failed: Node 'set_pending' failed: update_record(ebqu_claim) failed: 电子发票 is required\", …, \"details\":{…,\"innerRefusal\":{\"code\":\"VALIDATION_FAILED\",\"message\":\"电子发票 is required\"}}}}` as its only block and relayed the chain.\nNow: the same first block, then `Tell the user this reason, not the flow and node chain in the error message: 电子发票 is required`.\nWho moves: an MCP client that concatenates every text block before parsing JSON. Remedy: parse `content[0].text` alone.\n\n## Why\n\nMaintainer ruling recorded on the card (6837489229), options B and D after an independent review: the inner refusal stays nested (`FlowInnerRefusalSchema`, ruling B′) and `run_action` keeps answering exactly what `/api/v1/actions` answers (#31271), so nothing is promoted over `code` or `message`; the relay sentence rides beside the envelope instead. Step-0 reading on `main` c04aa295 in report 6836910294.\n\n## Tests\n\nNew top-level describe in the existing run_action/resume_run refusal harness (`mcp-action-refusal-details.test.ts`), each case on both tools over the real Streamable HTTP transport:\n- inner refusal: `content[0]` pinned whole (code, chain message, status, details), `content[1]` is the lead plus the inner sentence;\n- read order: author `errorMessage` beats `userMessage` beats `innerRefusal`, each rung with the lower rungs present;\n- no invention: no details, summary only, and an inner refusal without a string `code` each answer one block;\n- control: a non-`FLOW_FAILED` code carrying the same details answers one block;\n- descriptions name the three members in order.\n\nExisting single-block pins (other codes and tools) are unchanged and still pass: the second block is keyed on `FLOW_FAILED` with a carrier.\n\n## Acceptance notes\n\n- The console substitutes its own localized line for a permission-coded or delegated-scope inner refusal; MCP relays the refusal's own sentence. The language of that sentence follows the caller's locale (`电子发票 is required` on MCP, 「电子发票不能为空」 in the console) and belongs to #32654.\n- `/api/v1/actions` and the other flow doors are untouched; their callers read the carriers client-side as the console does.\n- The stdio door does not shape `run_action`; the one renderer covers it.\n\n## Verification\n\nHead `7eaadf3b` (after one `git merge origin/main`, d52000e6; no `packages/mcp` change came in).\n\n<details><summary>Tests and typecheck</summary>\n\n- `pnpm --filter @objectstack/mcp test`: Test Files 63 passed (63), Tests 1066 passed (1066).\n- `pnpm --filter @objectstack/mcp typecheck`: exit 0 (tsc and the test-typecheck leg).\n- Step-0 reading on `main` c04aa295 before the change: one block, `FLOW_FAILED` with the chain message (report 6836910294).\n\n</details>\n\n<details><summary>Ablations (each mutation through scripts/ablation-replace.mjs, restored to HEAD, git diff HEAD empty)</summary>\n\n- No relay sentence at all: 4 failed (inner-refusal block and read-order cases, both tools).\n- Sentence on any code: 2 failed (the non-FLOW_FAILED control, both tools).\n- Sentence invented when no string `code` / a fallback: 2 failed (the no-invention cases).\n- `userMessage` read before `errorMessage`: 2 failed (the read-order cases).\n\nThe vitest suite imports `src/` directly, so no dist rebuild sits in the ablation path.\n\n</details>\n\n<details><summary>Gates (dispatch-gates --ran, 65 derived, 65 run, 0 NOT-MEASURED)</summary>\n\n- Whole-tree `turbo run build --filter='./packages/**'`: exit 0.\n- All 65 derived families exit 0 on 7eaadf3b, including `check:error-code-provenance` (an earlier `const` spelling of `FLOW_FAILED` read as a stamp site; now compared inline with `satisfies ErrorCode`).\n- `pnpm lint`: exit 0.\n- `--ran` record: `/mnt/project-files/server-seat5/32757/gates-ran-7eaadf3b.txt` (project files), reconciliation \"65 derived famil(ies) accounted for\".\n\n</details>\n\nSigned: domain:server#5 · os-elon-musk · session_016WV4cxHTzpT6TYUapZ5d6J\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cxHTzpT6TYUapZ5d6J)_\n"
+}

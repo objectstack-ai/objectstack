@@ -1,0 +1,30 @@
+{
+  "number": 32978,
+  "kind": "issue",
+  "title": "spec: strict defineStack counts every top-level app of a packages[]-carrying stack against the stack's own manifest, while composeStacks and the load path count only the apps no body declares",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T01:30:28Z",
+  "updated_at": "2026-11-13T01:36:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32978",
+  "body": "domain:spec#2 · os-sales · session_01L6bhgU7jN46DmQ6XFvz28s\n\nFiling gate: ③ a follow-up a contract review escalated. The delta contract review of PR #32898 (for #32810), record 6840656371 ③, names it as outside that diff and escalates it to the lane seat as a card. Both behaviours below are on `main` since #32586 (PR #32792); PR #32898 moves neither.\n\nReader: the `domain:spec` lane (`packages/spec/src/stack.zod.ts`: `validateSingleApp` and its `defineStack` call site).\n\n## 维护者速读\n\n一个带 `packages[]`（多包体）的栈，平台加载时只把「没有包体声明的顶层应用」算到栈自己的包下。#32898 让 `composeStacks` 也按这个读法判。但严格模式的 `defineStack` 仍把全部顶层应用都算到栈自己的包下，于是两道门对同一个形状判得不一样：一边会误拒正常的组合制品，一边会放过手搭的坏栈。这张卡让 `defineStack` 和加载路径、`composeStacks` 用同一个读法。\n\n## What happens (read on `main`, reasoning from the review; not reproduced by the filer)\n\nFor a stack that carries `packages[]` and a manifest of type `app` or `module`, handed to strict `defineStack`:\n\n- **Refused, though registration is fine:** an additive artifact whose top level repeats two apps that two different bodies declare. Registration puts each under its own body's id; `validateSingleApp` counts both against the stack's manifest.\n- **Accepted, though registration breaks the rule:** a hand-assembled stack whose body with the manifest's id declares one app, plus one top-level app that no body declares. The load path's residual rule (`unclaimedTopLevel` in `packages/metadata/src/plugin.ts`) registers the undeclared app under the manifest id, beside the body's own: two apps under one `app`/`module` package. `defineStack` counts only one top-level app and passes.\n\nThe docblock of `validateSingleApp` says `composeStacks` judges its result by the same rule; after #32898 that sentence is looser than the code.\n\n## Work\n\n1. Make strict `defineStack` judge a `packages[]`-carrying stack the way #32898's `composeStacks` does: per body, plus the residual apps no body declares counted against the manifest's id. One implementation shared by both doors (⛔ no second copy).\n2. Pins, with ablation per pin: both cases above, and the control that a stack without `packages[]` is judged unchanged.\n3. Declarations per AGENTS.md: one direction narrows and one widens, so the PR states both arms and the ADR-0087 entry it needs; the lane measures who calls strict `defineStack` with `packages[]` before choosing the level.\n\n## Sequencing\n\nAfter PR #32898 merges (it lands after the 18.4.0 version commit, ruling 6838530241): the shared reader lives in its diff.\n\n## Dedupe\n\nSuggested words: `validateSingleApp packages[] top-level apps`, `defineStack strict residual apps`, `unclaimedTopLevel defineStack`. Related: #32586, #32810, #32898.\n\nSuggested-grade: p2 · no measured consumer hits either case today."
+}

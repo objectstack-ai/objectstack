@@ -13,20 +13,18 @@
   "labels": [
     "area:records",
     "domain:ui",
-    "pm:dispatched",
+    "needs-user-decision",
     "priority:p2"
   ],
-  "assignees": [
-    "os-lizheng"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T08:32:05Z",
-  "updated_at": "2026-11-12T20:07:40Z",
+  "updated_at": "2026-11-12T23:10:50Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32627",
   "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\nFiling gate: **① defects, measured** in the maintainer-requested browser pass of HotCRM 6.1.2 on a hosted staging environment (2026-11-12). The maintainer agreed to file: 「同意立卡」.\n\nReader: the `domain:ui` lane (console list views, user preference writes, the command palette), and `domain:server` for `security/explain` if the call belongs there. Suggested priority **p2**. Triage decides.\n\nDedupe (objectstack, open and closed):\n- `security/explain`: 10 hits, none about how often the console calls it per navigation.\n- `sys_user_preference PATCH`: 4 QA-run cards, none for the per-navigation write.\n- `command palette keystrokes`: 0.\n\n## 维护者速读\n\n在一个托管的 HotCRM 环境里，浏览器每打开一个列表都要多发好几个请求：两次权限解释、一次写用户偏好；审批和通知还隔一会儿就轮询一次。网络慢的时候，这些都会拖慢页面。另外，按 Cmd+K 后马上打字，前几个字会丢。\n\n## Readings\n\nTaken in the browser pane, on a staging environment with HotCRM 6.1.2. Network log from navigating contracts, quotes, campaigns, forecasts, dashboards, an account and a lead.\n\n1. **Per list navigation:** `POST /api/v1/security/explain` ×2 and `PATCH /api/v1/data/sys_user_preference/<id>` ×1, on every list, every time.\n2. **A grouped list fetches per group.** The forecast list grouped by a field issued one `GET /data/crm_forecast?…&filter=[period_label = …]` per group (7), plus 14 `security/explain` calls.\n3. **Polling:** `GET /approvals/requests?status=pending…` and `GET /data/sys_inbox_message?top=20…` repeat throughout, alongside each navigation.\n4. **Cmd+K:** the palette opens a moment after the shortcut, and characters typed in that moment are lost (typing 「Acme」 straight after the shortcut left the input empty).\n5. **Not concluded:** the executive dashboard's charts took about 20–25 s to appear. This machine's link is slow, and the tenant responses carried no `Server-Timing`, so server time could not be separated. Re-measure on a normal link before acting on it.\n\n## Done when\n\n- One list navigation sends at most one permission read and writes preferences only when a preference changed.\n- A grouped list fetches in one request.\n- Polling backs off when nothing changes.\n- Cmd+K keeps the keystrokes typed while it opens.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"

@@ -1,0 +1,31 @@
+{
+  "number": 32957,
+  "kind": "issue",
+  "title": "pm-dispatch: loose ends of the grade-by-impact ruling (board count, window opener, table precedence, hotcrm reason, SKILL.md target row)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:blocked",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T00:44:52Z",
+  "updated_at": "2026-11-13T00:46:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32957",
+  "body": "domain:skills#1 · os-elon-musk · session_016WV4cwTZvo7tAGwbbRW2b8\n\nFiling gate: ① named-site defects in the rule text after PR #32918 and PR #32920 (card #32906), the should-fix findings their contract reviews carried and did not fix (6839135184 S2/S3/S5, 6839372617, 6840300467). `reach:` seats grading cards and running the release board. Priority p3 by the new table: process text, each line true enough not to send a reader to a wrong label write today.\n\nBlocked-by: #32906\n\n**Business reason.** The grading table and the p0-only release board are live, but five lines leave a reader to guess: how many boards are summed, who opens the release window, which rule wins when a failing checklist item and the table disagree, why HotCRM has no board, and what the dead `target:` row in the label table is for. Reader who acts: the `domain:skills` seat (os-dev on `.claude/skills/pm-dispatch/**`; `SKILL.md` is a contract-tier path).\n\n## Work\n1. Board count: `seat-lifecycle.md:77` sums 「三仓」 and 「三张板」; `seat-post-protocol.md:83–84` says two repos and two boards. Make them one number and name the repos.\n2. Window opener: no line says who opens or closes 「发版窗」. One clause where the window is defined (`filing-gate.md` 定级判据 p0 row or `seat-post-protocol.md` 〈发版板运维〉), not both.\n3. Precedence: `filing-gate.md` keeps 「失败的清单项继承其项定级」 beside the table; say which wins when they differ (the reach-bound line already says it caps).\n4. `lanes/hotcrm.md:41` 「无发版板:标签清单无 `target:*`」: the reason is stale; give the real one or drop the reason.\n5. `SKILL.md:115` `target:<major>` label row: the label has no role on `main`; delete the row (frees one line under the ceiling) or say 「⛔ 不打;旧标不读」 in the present tense.\n\nNot in this card (maintainer's call, raised separately): whether the focus-feature bump 「上调一档」 may reach p0, and North Star Priority rules 2–3, which the new table overrides.\n\n## Acceptance\n- The five lines fixed in place or by same-file cuts; ⛔ no re-wrap, no ceiling raise; `pnpm check:pm-skill-ratchet`, `pnpm check:pm-skill-id-lint` green.\n- skip-changeset. Clause-②: no · Metadata-protocol: none.\n\nDedupe (open AND closed): `is:issue 发版窗 OR 三张板 OR \"target:\" pm-dispatch created:>2026-11-12` → #32906 (parent) only. **New.**"
+}

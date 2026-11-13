@@ -1,7 +1,7 @@
 {
   "number": 18549,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 2 — 🟢 os-sales · p1 only",
+  "title": "[PM seat] domain:spec · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -19,12 +19,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T00:45:41Z",
-  "updated_at": "2026-11-12T17:27:04Z",
+  "updated_at": "2026-11-13T01:39:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 147,
+  "comments": 149,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18549",
-  "body": "domain:spec#2 · os-sales · session_01L6bhgU7jN46DmQ6XFvz28s\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 2**. Seat 1 is #6017, seat 3 is #18883, seat 4 is #18917 and seat 5 is #19357 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-12T17:25Z at seating.</sub>\n\n## Current PM\n\n🟢 `os-sales` · `session_01L6bhgU7jN46DmQ6XFvz28s` (a thread of the os-sales account's fleet project), seated by opening mark 6830853001 on the maintainer's 「开一个 spec 座位，只处理 p1 卡」. **Scope: `priority:p1` cards only.** Posture, ledger and round reports live in the project.\n\n## Handover ledger\n\n- **Pointer:** the previous holder's clock-out brief 6824552073 and the previous body revision archive the earlier tenure. ⛔ Neither is restated here.\n- **In flight:** per the live `Claim:` comments naming `domain:spec#2`.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n- `merge=os-regen` paths (`content/docs/references/**`, `packages/spec/authorable-surface/**`) and the hand-kept registration files merge with `bash scripts/pm/os-regen-merge.sh`.\n\n## Notes\n\n- **Mailbox:** PR #32786. **Patrol:** `trig_01FXg25mzyxv2cdPMPBHmQzM` · `23 * * * *`.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n\n<!-- signed: domain:spec#2 · os-sales · session_01L6bhgU7jN46DmQ6XFvz28s -->\n"
+  "body": "domain:spec#2 · os-sales · session_01L6bhgU7jN46DmQ6XFvz28s\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 2**. Seat 1 is #6017, seat 3 is #18883, seat 4 is #18917 and seat 5 is #19357 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-13T01:34Z at clock-out.</sub>\n\n## Current PM\n\n⏳ vacant. Previous holder `os-sales` · `session_01L6bhgU7jN46DmQ6XFvz28s`, seated 6830853001 on 「开一个 spec 座位，只处理 p1 卡」, stood down on 「UI spec 处理完当前任务就下班」 (note 6836386268); `check-handover.mjs` exit 0 at clock-out. To take the seat: `/pm-dispatch 接手`, then read this post and the clock-out brief below it.\n\n## Handover ledger\n\n- **Pointer:** the clock-out brief (the newest comment on this post) carries the tenure's landings, rulings recorded and owed steps. ⛔ Not restated here.\n- **In flight:** none held by this seat. Parked with a resume point: #32810 (`pm:on-hold`, PR #32898 at `91fca555`, `Restart-when:` on the card).\n- **Ruled, waiting:** #32603 (`pm:on-hold`, `Restart-when: closed objectstack-ai/objectstack#31527`).\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. PR #32898 touches `packages/spec/src/stack.zod.ts`, `packages/spec/src/api/error-code-ledger.zod.ts` and a semantic migration entry; a seat dispatching on those paths before it lands reads that PR first.\n- `merge=os-regen` paths (`content/docs/references/**`, `packages/spec/authorable-surface/**`) and the hand-kept registration files merge with `bash scripts/pm/os-regen-merge.sh`.\n\n## Notes\n\n- **Mailbox:** PR #32786 closed at clock-out; the next holder opens a new one. Its head branch `claude/project-thread-wi26s7` is left for a human to delete. **Patrol:** none (deleted at clock-out).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n"
 }

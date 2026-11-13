@@ -2,8 +2,8 @@
   "number": 32230,
   "kind": "issue",
   "title": "runtime: 环境成员缓存（60 秒）在成员变更时不失效，被撤权的用户最长还能访问一分钟",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,24 @@
   },
   "labels": [
     "bug",
-    "priority:p1",
+    "priority:p0",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T13:39:22Z",
-  "updated_at": "2026-11-10T14:00:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T01:52:31Z",
+  "closed_at": "2026-11-13T01:52:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32230",
   "body": "repo:cloud#4 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\nFiling gate: **③ 维护者裁决的任务。** cloud 多副本清单（cloud `docs/design/multi-replica-stateful-inventory.md` §6 S4、§7.2 E1、草稿 Card 12）把 E1 留给维护者；账户所有者对席位建议「A：按普通 bug 卡修」回复原话「以上问题都同意」（cloud#4153 线程）。\n\n## 维护者速读\n\n框架运行时把「用户属于哪个环境」缓存 60 秒，成员被移除或降权后不会主动失效，所以被撤权的人最长还能继续访问一分钟。单节点上也如此，多副本时每个副本各有一份。要做：成员变更时让该缓存失效（多副本下经已有的跨副本失效通道）。企业版单环境部署（演练 P09）不会填这个缓存，所以紧急度不高。\n\n## Where（objectstack `main`）\n\n- `packages/runtime/src/http-dispatcher.ts:486-491`（60 秒 TTL 的设计说明）、`:1772-1842`（读写）；文件外无任何失效调用。\n\n## Expected\n\n成员增删、角色变更后，下一次请求即按新成员关系判断；多副本下所有副本一致；有测试钉住「撤权后立即拒绝」。\n\nDedupe：objectstack 与 cloud 均无涉及该缓存失效的卡（清单记为 Not filed）。"

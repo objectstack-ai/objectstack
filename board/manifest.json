@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-11-12T20:17:30.684Z",
+  "generated_at": "2026-11-13T02:21:06.689Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-11-12T20:01:49.020Z",
-      "since": "2026-11-12T14:05:21.105Z",
+      "cursor": "2026-11-13T02:05:24.314Z",
+      "since": "2026-11-12T20:01:49.020Z",
       "slice": 300
     },
     "history": {
@@ -20,28 +20,28 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-11-12T14:05:21.105Z",
-  "since_reason": "incremental from the previous run's next_since (2026-11-12T14:05:21.105Z)",
-  "next_since": "2026-11-12T20:01:49.020Z",
+  "since": "2026-11-12T20:01:49.020Z",
+  "since_reason": "incremental from the previous run's next_since (2026-11-12T20:01:49.020Z)",
+  "next_since": "2026-11-13T02:05:24.314Z",
   "resume": null,
   "counts": {
-    "issues_open": 357,
-    "issues_closed": 14334,
+    "issues_open": 391,
+    "issues_closed": 14399,
     "issues_transferred": 7,
-    "pulls_open": 48,
-    "pulls_closed": 15951,
-    "records": 30697
+    "pulls_open": 54,
+    "pulls_closed": 16024,
+    "records": 30875
   },
   "board": {
-    "open_issues_count": 338,
-    "open_pull_requests": 43,
-    "read_at": "2026-11-12T20:17:24.125Z"
+    "open_issues_count": 378,
+    "open_pull_requests": 49,
+    "read_at": "2026-11-13T02:21:00.318Z"
   },
   "count_check": {
     "verdict": "ok",
     "reason": null,
-    "expected": 295,
-    "archived": 357,
+    "expected": 329,
+    "archived": 391,
     "shortfall": 0,
     "surplus": 0,
     "gone_ledger": 62,
@@ -52,10 +52,10 @@
     "pending_since": null,
     "reason": null
   },
-  "requests": 282,
+  "requests": 606,
   "run": {
-    "numbers_read": 160,
-    "files_written": 292,
+    "numbers_read": 362,
+    "files_written": 670,
     "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,
@@ -65,12 +65,12 @@
     "reconcile": {
       "first": {
         "verdict": "ok",
-        "expected": 295,
-        "archived": 357,
+        "expected": 329,
+        "archived": 391,
         "shortfall": 0,
         "surplus": 0
       },
-      "listed": 338,
+      "listed": 378,
       "candidates": 5,
       "left": 0,
       "reread": [],

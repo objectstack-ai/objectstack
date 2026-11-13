@@ -1,0 +1,36 @@
+{
+  "number": 32920,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): the target label row no longer marks a release blocker",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T23:31:01Z",
+  "updated_at": "2026-11-13T02:06:38Z",
+  "closed_at": "2026-11-13T02:06:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-13T02:06:36Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32920",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D9NANhsoG9Y2vqC3XZSxSFX)_\n\nFixes #32906\nClause-②: no\nMetadata-protocol: none\n\ndomain:skills#1 · os-elon-musk · session_016WV4d1irZfFzssa7NiqDbp (card thread, claim restated in comment 6838796788)\n\n## 维护者速读\n\n- **改了什么**:pm-dispatch 主文件标签表里 `target:MAJOR` 那一行,原文「发版阻塞:每个 backlog 恰好一个生产者」改为「不再作发版阻塞标记:阻塞卡只升 `priority:p0`,窗与回落见 `references/filing-gate.md` 定级判据」。一行换一行,不增行。\n- **为什么改**:您 2026-11-12 的裁定是发版阻塞卡只升 p0、不打 `target:`、发版后回 p1。主文件这一行是最后一处仍把 `target:` 当阻塞标记的文字。\n- **风险与回滚**:纯内部协议文字,1 文件 +1/-1;回滚即 revert。它指向的定级表由姊妹 PR(分支 `claude/project-thread-2y8ee8`,Part of 同一张卡)写入,本 PR 应在其后落地。\n- **先看**:`.claude/skills/pm-dispatch/SKILL.md` 第 115 行,唯一的 hunk。\n- **两分钟验证**:`pnpm check:pm-skill-ratchet`,预期全绿且 SKILL.md 仍为 319 行、最宽表格行 pin 341 不变。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\nOne row of the label table in `.claude/skills/pm-dispatch/SKILL.md` (line 115), replaced in place. The `target:MAJOR` row no longer calls the label the release-blocker mark. It now says a blocker is only raised to `priority:p0`, and points at the grading section of `references/filing-gate.md` for the release window and the return to p1.\n\nThis is the second half of the card. The sibling PR from `claude/project-thread-2y8ee8` (`Part of` the same card) writes the grading table and reconciles the references. This PR carries the closing keyword, so it lands after the sibling.\n\nJudged against the sibling branch at `778a8c54`: its `filing-gate.md` grading section states \"发版阻塞卡只在发版窗内升 p0(⛔ 不打 `target:`),发版后回 p1\", which is exactly what this row points to. The row text is the one the sibling thread proposed, unchanged.\n\n## Tests\n\nNo test changes: rules prose only, no behaviour pinned by a test.\n\n## Acceptance notes\n\n- The order named a 120-byte cap. The row is 141 bytes. The ratchet holds table rows to the file's widest-row pin (341 bytes for this file), not to 120, and it passes with the pin unchanged. Named here as a deviation from the order's wording.\n- After both PRs land, the remaining `target:` mentions under `.claude/skills/pm-dispatch` are this row (which now denies the blocker role), the unrelated `target: cloud` in `dispatch-runbook.md`, and `lanes/hotcrm.md:41` (\"无发版板:标签清单无 `target:*`\"), which marks nothing.\n- `lanes/director.md:83` still says \"每张板恰好一个生产者\", so the producer rule this row used to carry is still stated once.\n\n## Verification\n\nHead `85bbef0c`, merge base `bfbcd81f` (main at the time of the run).\n\n<details><summary>Derived gates: 21 derived, 21 run, all exit 0</summary>\n\n```\n0  node scripts/check-closing-keyword-parity.mjs\n0  node scripts/check-closing-keyword-parity.mjs --self-test\n0  node scripts/check-comment-mask-corpus.mjs\n0  node scripts/pm/check-governed-queue-guard.mjs --self-test\n0  node scripts/pm/check-harness-current.mjs --self-test\n0  pnpm --filter @objectstack/lint run check:doc-formula-expressions\n0  pnpm check:agent-test-spelling\n0  pnpm check:cross-package-test-inputs\n0  pnpm check:doc-authoring\n0  pnpm check:driver-memory-census\n0  pnpm check:gitlink-declared\n0  pnpm check:nul-bytes\n0  pnpm check:pm-expected-skips\n0  pnpm check:pm-governed-merges\n0  pnpm check:pm-governed-prose\n0  pnpm check:pm-label-write\n0  pnpm check:pm-skill-id-lint\n0  pnpm check:pm-skill-ratchet\n0  pnpm check:refd-timer-probe\n0  pnpm check:skill-frame-sync\n0  pnpm check:watch-hint-literal\n```\n\n`dispatch-gates --ran`: 21 derived, 21 run, 0 NOT-MEASURED, 0 UNRUN. Ratchet lines: `SKILL.md: widest table row is 341 bytes (pin 341; headroom 0)` and `SKILL.md is 319 lines (ceiling 319; headroom 0)`. A first pass before `pnpm install` answered exit 3 (prerequisite) on six families and exit 1 on one; all were re-run after install and a build of the formula and lint packages.\n\n</details>\n\n`dispatch-gates --tier`: MANDATORY contract tier for `.claude/skills/pm-dispatch/SKILL.md`; this edit was authored at that tier. `skip-changeset`: `.claude/**` only, nothing published.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4d1irZfFzssa7NiqDbp)_\n"
+}

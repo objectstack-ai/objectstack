@@ -13,18 +13,19 @@
   "labels": [
     "area:devpath",
     "domain:server",
-    "pm:on-hold",
+    "pm:queue",
+    "priority:p3",
     "tests"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T20:05:58Z",
-  "updated_at": "2026-11-12T20:05:58Z",
+  "updated_at": "2026-11-12T22:40:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32806",
   "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32521 (PR #32676). Collects the review and red-line nits left after the last round, under the maintainer rule that review nits go to a follow-up card instead of another rework round. Sources: contract reviews 6832698813 (r2) and 6834563087 (r3) on PR #32676; epic red-line reads 6832051643 and 6834330415. Parked under ruling 6824949405 on #31527.\n\n## What is owed\n\n1. **Row 11f, sweep and pin (r3 S3, red-line nit 1).** Sweep every bare `packagedArtifactOwner({ type: 'flow' })` and `lookupArtifactItem('flow', name)` / `getArtifactItem('flow', name)` call site and classify it (still unclassified: `protocol-diff-delete-load.ts:431` and `:1178`, `protocol-class-head.ts:209`, `protocol-packaged-base-refusal.ts:168`, `protocol-lock-state.ts:138/164/181`, `protocol-tenant-authored-write.ts:36`, `protocol-write-gates.ts:283`). In the package-less shape (package-less row saved last) the owner read moves from none to the first registered holder: check every reader that only asks whether an owner exists. Pin the move. Correct row 11f's FROM cell and the changeset clause (\"moves the same way\") for that shape.\n2. **Composition ③ on a real stored-row host (r3 nit 2).** Measure the boot pull with a `protocol` service whose protocol reads the same `sys_metadata` table (the pin and the review's probe have no data driver, so the protocol's own stored-row hydration never ran).\n3. **Pin strictness (r3 N10, red-line nit 3).** Assert the `RESOURCE_CONFLICT` code, not only the names, for bare `getFlow` and `toggleFlow` in ③; cover `execute` and `toggleFlow` in S2's ③ leg (today only `getFlow`).\n4. **Two installed namespaces (carried from r1).** Measure the seal's warning when the two holders are in two declared namespaces (no warning expected; the resolver still refuses) and pin it.\n5. **Hydration comparator.** `protocol-registry-hydration.ts:623` compares slots without a package for flow; classify it against ADR-0150 D4 and pin or document.\n6. **Main's own text and one reader (r3 observations).** The seal's flow clause says \"the automation engine arms one flow per name\" (`bare-name-one-holder.ts:577`), no longer true on a protocol host. Bare `listRuns(name)` of a name two slots hold answers an empty list after a run of each slot, where the other bare readers refuse: decide refuse or list both.\n7. **Prose.** Refresh the B2 sweep table's line numbers after the main merge (r3 N8); add \"when its row was saved last\" to the changeset and both `Clause-②:` sentences about the environment's flow (N9); the `flowDispatchHolder` callers are the schedule and time-relative triggers (N11); cite ruling comment 6834330415 in the body (N12).\n\nNot on this card: tightening #32676's C3 `action` cell is item 3 of #32791 (PR #32802 carries it); the action bound to two objects by one holder stays on #32681; the third-party stored-row loader name stays on #32680.\n\n## Acceptance\n\nEach code item pinned red before and green after on `main`; each prose item corrected in the docs or changeset it names; no answer moves unless declared FROM → TO.\n\nRestart-when: the release that carries the epic #31527 release line is published (ruling 6824949405 on #31527)"

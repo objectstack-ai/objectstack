@@ -2,8 +2,8 @@
   "number": 32757,
   "kind": "issue",
   "title": "MCP run_action: a business refusal inside the action's flow comes back as the engine chain (\"Flow '…' failed: Node '…' failed: update_record(…) failed: 电子发票 is required\"), while the console shows 「电子发票不能为空」",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -14,18 +14,24 @@
     "area:automation",
     "bug",
     "domain:server",
-    "pm:queue",
-    "priority:p2"
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T14:43:44Z",
-  "updated_at": "2026-11-12T14:46:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T00:38:32Z",
+  "closed_at": "2026-11-13T00:38:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32757",
   "body": "Filing category: ① product defect (agent-facing message).\nreach: public entries `/api/v1/mcp` `run_action` and the console button, measured on a hosted tenant (`pnpm dev:stack --with-ui`; cloud `ff373e02`, framework `d7c3d44e`), member's MCP OAuth token and browser session.\n\n## Business reason\n\nThe agent relays the refusal to the employee. \"Flow 'ebqu_claim_submit' failed: Node 'set_pending' failed: update_record(ebqu_claim) failed: 电子发票 is required\" tells them about flows and nodes; the console tells them the one thing to do.\n\n## What happens\n\nAction `ebqu_submit_claim` (type flow → `update_record status: pending`); field `invoices` has `requiredWhen: \"record.status == 'pending'\"`; the claim has no invoice.\n- MCP `run_action` → `isError: true`, `FLOW_FAILED`, message `Flow 'ebqu_claim_submit' failed: Node 'set_pending' failed: update_record(ebqu_claim) failed: 电子发票 is required`, plus the node summary; the inner `VALIDATION_FAILED` sits under `details.innerRefusal`.\n- Console 提交审批 → `POST /api/v1/actions/ebqu_claim/ebqu_submit_claim` 400 with the same chain; the toast reads 「电子发票不能为空」.\n\n## Expected\n\nWhen a flow fails on a declared refusal (`VALIDATION_FAILED`, `RECORD_LOCKED`, …), the action's answer leads with that refusal's code and its localized message (as the console toast does), with the flow/node chain kept as detail.\n\nReader who acts: the `packages/mcp` seat (`run_action` result shaping) or the automation seat (flow failure envelope).\nDedupe: `repo:objectstack-ai/objectstack is:issue run_action flow failed node message technical` → 4 hits, PM seats only."

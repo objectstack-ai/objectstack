@@ -1,0 +1,36 @@
+{
+  "number": 32832,
+  "kind": "issue",
+  "title": "skills: objectstack-automation's readonly-field callout says \"Set runAs: 'system'\" without the limit a button-started autolaunched flow has (it answers 403), now that the lint fix line states it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T21:34:47Z",
+  "updated_at": "2026-11-13T02:16:17Z",
+  "closed_at": "2026-11-13T02:15:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32832",
+  "body": "domain:spec#2 · os-sales · session_01L6bhgU7jN46DmQ6XFvz28s\n\nFiling gate: ③ the `Skills-docs: follow-up owed — skills/objectstack-automation/SKILL.md` line of PR #32736 (`Part of #32666`); product PRs never edit `skills/**`.\n\nReader: the `domain:skills` lane, once PR #32736 is merged.\n\n## 维护者速读\n\nPR #32736 把 `flow-update-readonly-field` 的修复提示改了：按钮启动的 `autolaunched` 流程声明 `runAs: 'system'` 会被启动准入以 403 拒绝，所以提示改为指向 `screen` / `api` 流程或 `subflow` 节点。技能文档 objectstack-automation 的「写只读字段？设 `runAs: 'system'`」一段仍只给出旧的一句话，AI 照抄就会写出一个按钮点了报 403 的流程。这张卡把那段补上同一个限制。\n\n## Business reason\n\n`skills/objectstack-automation/SKILL.md` (about line 158 on `main`) reads: \"**Writing a `readonly` field? Set `runAs: 'system'`.**\" and stops there. `flowStartRefusal` (`packages/runtime/src/flow-start-admission.ts`) refuses a non-system caller an elevated `autolaunched`, `record_change` or `schedule` flow with 403 `PERMISSION_DENIED` at every door that starts a flow by name, and `autolaunched` is the type a record action button starts. After PR #32736 the lint fix line and `os explain flow-update-readonly-field` both name the routes a button can reach; the skill is the remaining surface that teaches the dead-end remedy to an agent writing metadata.\n\n## Work\n\n1. In the callout, add the limit in one sentence: a flow a user starts from a button or action is elevated only as a `screen` or `api` flow declared `runAs: 'system'`, or by a user-run flow's `subflow` node calling the elevated flow. Use the wording of `os explain flow-update-readonly-field` after #32736, not a new phrasing.\n2. Check the skill's evals that grade readonly writes or `runAs` (grep `runAs` under the skill's evals) still grade the rule.\n3. Pay for any added line with a removal, per the skills line ratchet.\n\n## Acceptance\n\nThe callout states the limit and both routes; `check:skill-docs` and `check:skill-refs` green.\n\n## Dedupe\n\n`readonly runAs system skill automation is:issue is:open` → 6, none but #32666 a card, and #32666 is the decision on the reverse-order half, not this sentence.\n\nBlocked-by: #32736\n"
+}

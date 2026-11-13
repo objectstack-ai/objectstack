@@ -1,0 +1,36 @@
+{
+  "number": 32862,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the publish sheet marks an edit to a published container view as Update, not New",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T22:09:03Z",
+  "updated_at": "2026-11-12T23:01:34Z",
+  "closed_at": "2026-11-12T23:01:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T23:01:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32862",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DY4fJ9yvtA1wQ4MMKNiNpgV)_\n\nFixes #32755\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Studio 发布对话框判断「新增 / 更新」时,视图草稿若不在已发布列表里,会再按名字读一次已发布版本,读到即判「更新」。\n- 为什么改:已发布视图列表只列出视图容器展开后的视图,不列容器本身的名字,所以以 `<对象>.default` 存放的表单视图被改动后显示成「新增」,审阅人看不出线上布局即将被改。\n- 风险与回滚:只影响发布对话框的标记,只多发一次只读请求(仅限不在列表中的视图草稿);回滚即 revert 本 PR。\n- 先看:`ui/packages/app-shell/src/preview/DraftChangesPanel.tsx` 分类循环中 `type === 'view'` 的分支;其次新测试 `DraftChangesPanel.containerViewUpdate-32755.test.tsx`。\n- 两分钟验证:`cd ui && pnpm exec vitest run packages/app-shell/src/preview/__tests__/DraftChangesPanel.containerViewUpdate-32755.test.tsx`,预期 4 例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`DraftChangesPanel` classifies each pending draft as New or Update from one published-list read per type. For `view`, that list (`GET /api/v1/meta/view`) by contract never enumerates a stored aggregated view container, only the items it expands to (the \"Canonical-shape exposure\" filter in `readFlattenedMetaItems`). A view stored as a container under its own name, such as `ebqu_claim.default` carrying a `form`, is therefore published yet absent from the list, and its next draft read **New**, with no changed keys in its drill-in.\n\nNow a `view` draft the list does not name asks the by-name published door (`GET /api/v1/meta/view/:name?package=…`), which serves the container row, the same way a bundle member is already classified. Present means Update; 404 means New; a failed read leaves the entry unclassified (neutral), as a failed list read already does. Listed views cost no extra read. Other types are unchanged.\n\nThe server half was measured and holds no defect: the list door omits containers by design, and the by-name door answers the container. No `domain:server` carrier is needed.\n\n## Tests\n\n- New `DraftChangesPanel.containerViewUpdate-32755.test.tsx` (4 cases): the container view reads Update and its drill-in lists one changed key, `~ form`; CONTROL: a never-published view draft still reads New; only unlisted views get a by-name read; CONTROL: a failed by-name read leaves the entry unclassified.\n- All 26 `DraftChangesPanel*` / preview suites: 174 passed.\n- `@object-ui/app-shell` `type-check` (src + test tsconfig): exit 0.\n\n## Acceptance notes\n\n- Live reading (scratch dogfood probe on `bootStack`, not committed): after drafting and publishing `ebqu_claim.default` = `{ object, label, form }` and drafting a second `form` change, `GET /meta/view` listed only `ebqu_claim.ebqu_claim.default.form`, while `GET /meta/view/ebqu_claim.default` answered 200 with keys `name, object, label, form`. A never-published `ebqu_claim.fresh` answered 404 by name.\n- Observation only, not filed: a package-less container stored as `ebqu_claim.default` on a package's object expands under its own name (`<object>.<container name>.form`), so its form is listed as `ebqu_claim.ebqu_claim.default.form`. That is the documented own-name arm for a container on another package's object; it is outside this card.\n\n## Verification\n\n<details><summary>Ablation (one-shot, restored)</summary>\n\n`node scripts/ablation-replace.mjs --file ui/packages/app-shell/src/preview/DraftChangesPanel.tsx --anchor 'published.has(entry.name) || confirmed.has(key)' --replacement 'published.has(entry.name) /* ABLATION-32755 */' -- …vitest run …containerViewUpdate-32755.test.tsx`\n\n- Mutation landed: replacement marker x0 → x1.\n- Result: `× classifies the container view as Update and lists its changed form key` · `Tests 1 failed | 3 passed (4)`; both CONTROL cases stayed green.\n- Restored: blob == HEAD, `git diff HEAD` empty.\n- A first attempt used a replacement that is a substring of the anchor; the tool refused it (count rose by 0) and ran nothing. It is recorded here, not counted.\n</details>\n\n<details><summary>Gates (derived by `dispatch-gates --commands`, run on the final head)</summary>\n\nRun on head `2fe4bc53`; `dispatch-gates --ran`: 36 derived, 36 run, 0 NOT-MEASURED.\n\n- `node scripts/check-adr-0087-registration.mjs --base origin/main :: exit 0`\n- `node scripts/check-adr-0087-registration.mjs --self-test :: exit 0`\n- `node scripts/check-changeset-no-major.mjs --base origin/main :: exit 0`\n- `node scripts/check-closing-keyword-parity.mjs :: exit 0`\n- `node scripts/check-closing-keyword-parity.mjs --self-test :: exit 0`\n- `node scripts/check-comment-mask-corpus.mjs :: exit 0`\n- `node scripts/check-empty-changeset.mjs --base origin/main :: exit 0`\n- `node scripts/check-empty-changeset.mjs --self-test :: exit 0`\n- `node scripts/check-sdui-manifest.mjs :: exit 0`\n- `node scripts/check-sdui-manifest.mjs --self-test :: exit 0`\n- `node scripts/ci/snapshot-next.mjs --self-test :: exit 0`\n- `node scripts/pm/release-rehearsal-clone.mjs --self-test :: exit 0`\n- `node scripts/release-pending-publish.mjs --self-test :: exit 0`\n- `pnpm --dir ui exec vitest run scripts/ :: exit 0`\n- `pnpm --filter @objectstack/spec run check:duration-unit-keys :: exit 0`\n- `pnpm check:changeset-gate-self-tests :: exit 0`\n- `pnpm check:closed-ceremony-text :: exit 0`\n- `pnpm check:cross-package-test-inputs :: exit 0`\n- `pnpm check:dispatcher-error-vocabulary :: exit 0`\n- `pnpm check:driver-memory-census :: exit 0`\n- `pnpm check:engine-double-contract :: exit 0`\n- `pnpm check:gitlink-declared :: exit 0`\n- `pnpm check:nul-bytes :: exit 0`\n- `pnpm check:published-files :: exit 0`\n- `pnpm check:query-options-erasure :: exit 0`\n- `pnpm check:refd-timer-probe :: exit 0`\n- `pnpm check:registry-log-declared :: exit 0`\n- `pnpm check:rest-log-spy-declared :: exit 0`\n- `pnpm check:skill-identifier-liveness :: exit 0`\n- `pnpm check:test-source-alias :: exit 0`\n- `pnpm check:tier-file-adoption :: exit 0`\n- `pnpm check:type-check-coverage :: exit 0`\n- `pnpm check:type-check-debt :: exit 0`\n- `pnpm check:undeclared-dep-imports :: exit 0`\n- `pnpm check:watch-hint-literal :: exit 0`\n- `pnpm check:where-matcher :: exit 0`\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cy8TYJzKTiUWKp8z62\n"
+}

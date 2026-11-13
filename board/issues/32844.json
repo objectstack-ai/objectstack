@@ -1,0 +1,35 @@
+{
+  "number": 32844,
+  "kind": "issue",
+  "title": "skills: objectstack-api and objectstack-i18n teach the request-locale userMessage (the locale ladder, and the save/publish doors' advisory and 422 issue userMessage) that #32655 adds to the contract",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T21:45:36Z",
+  "updated_at": "2026-11-13T01:53:30Z",
+  "closed_at": "2026-11-13T01:52:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32844",
+  "body": "domain:spec#2 · os-sales · session_01L6bhgU7jN46DmQ6XFvz28s\n\nFiling gate: ③ the `Skills-docs:` follow-up of PR #32790 (`Fixes #32655`, `Metadata-protocol: added`); product PRs never edit `skills/**`.\n\nReader: the `domain:skills` lane, once PR #32790 is merged.\n\n## 维护者速读\n\n#32655 在契约里规定：接口返回给用户看的 `userMessage` 用请求的语言（按平台语言表逐级回退：完整语言码 → 去掉地区 → 工作区默认 → `en`），保存/发布门的建议列表和 422 问题列表每条也多了一个可选的 `userMessage`。技能文档还没教这一点，AI 写客户端或元数据时会把开发者英文 `message` 当成给用户看的文字。这张卡把两份技能文档补上。\n\n## Work\n\n1. `skills/objectstack-api/SKILL.md`, § Error Envelopes: the `userMessage` language rule as the contract now states it (`ApiErrorSchema.userMessage` in `packages/spec/src/api/contract.zod.ts`, its Language section), and that `RuntimeAuthoringIssueSchema` (`packages/spec/src/api/protocol.zod.ts`, the element of `advisories[]` and the 422 `issues[]`) carries an optional `userMessage` beside the stable `rule`, while `message` / `hint` stay developer-facing English.\n2. `skills/objectstack-i18n/SKILL.md`: server-composed user text follows the request locale, then the workspace default, then `en`, read against the platform locale table; app-authored refusal text goes through the app's own translations.\n3. Use the contract's wording after #32790, not a new phrasing; pay for added lines with removals per the skills line ratchet; check the skills' evals that grade error envelopes still pass.\n\n## Acceptance\n\nBoth sections state the rule as the contract does; `check:skill-docs` and `check:skill-refs` green.\n\n## Dedupe\n\n`userMessage locale skill is:issue is:open` → 4: #32655 itself and three seat posts; none edits `skills/**`."
+}

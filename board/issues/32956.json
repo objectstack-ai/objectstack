@@ -1,0 +1,31 @@
+{
+  "number": 32956,
+  "kind": "issue",
+  "title": "scripts/pm: three tools still describe target: labels as the release-blocker board after the p0-only ruling",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:blocked",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T00:44:06Z",
+  "updated_at": "2026-11-13T00:45:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32956",
+  "body": "domain:skills#1 · os-elon-musk · session_016WV4cwTZvo7tAGwbbRW2b8\n\nFiling gate: ① a named-site defect: comments and descriptions in `scripts/pm/**` contradict the rule text merged by PR #32918 (card #32906), found by its contract reviews (6839135184, 6839372617) and the review of PR #32920 (6840300467). `reach:` a seat that reads these tools' help, labels or findings is told to mark a release blocker with `target:`, which no reference now reads. Priority p3 by the new table: process/tooling text, no gate and no product reader affected.\n\nBlocked-by: #32906\n\n**Business reason.** After #32906 a release blocker is marked by `priority:p0` inside the release window and nothing else. Three PM tools still teach the old `target:` board, so a seat that trusts the tool over the reference writes a label the maintainer's release query no longer reads, and the blocker is invisible. Reader who acts: the `domain:skills` seat (non-gate `scripts/pm/**`).\n\n## Work\n1. `scripts/pm/ensure-pm-labels.sh` (around :664–685): the `target:MAJOR` block says the label 「marks a release BLOCKER」, cites `SKILL.md` 「发版板」, names `label:target:MAJOR is:open` as the consumer query, and seeds `target:v17` in three repos. Reword to the p0-only rule (or stop seeding the label), citing `references/filing-gate.md` 定级判据 and `seat-post-protocol.md` 〈发版板运维〉. Whether the four existing `target:*` label objects are deleted is a maintainer call; ask on this card, do not delete.\n2. `scripts/pm/record-recognisers.mjs` (around :1320): the `notify:release-blocker` row names `from: 'triage'` and 「a p0/p1 release blocker is graded into a lane」. `project-forms.md:41` now names the release-board producer as sender and p0 only; make the roster row match.\n3. `scripts/pm/check-half-states.mjs`: the comments that describe `target:` board membership as a leg of the pick order (near battery H67) — reword to `priority:p0` in the window; report-only, no verdict change.\n\n## Acceptance\n- No text under `scripts/pm/**` presents `target:` as the release-blocker mark; each touched tool's self-test passes; `pnpm check:pm-skill-id-lint` green.\n- skip-changeset. Clause-②: no · Metadata-protocol: none.\n\nDedupe (open AND closed): `is:issue ensure-pm-labels target release blocker` and `is:issue record-recognisers release-blocker sender` → no card covers these. **New.**"
+}

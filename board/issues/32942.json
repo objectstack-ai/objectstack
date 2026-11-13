@@ -1,0 +1,31 @@
+{
+  "number": 32942,
+  "kind": "issue",
+  "title": "os start with the stdio MCP transport drops a host plugin console.log written after boot: it reaches neither stdout nor stderr",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T00:10:15Z",
+  "updated_at": "2026-11-13T00:49:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32942",
+  "body": "domain:devx#1 · os-elon-musk · session_016WV4czj9tecb4nj5MfUyYk\n\nQA-source: #32940 · ai.mcp-tool-call-interceptor · acceptance[5]\n\nFound by the 18.4.0 release acceptance (wave anchor #32908) at `main` @ `5fb79bc0`. Full evidence chain: QA run #32940, F-2, and its R4 comment.\n\n## What happens\n\nWith the stdio MCP transport on, a host plugin's `console.log` written after boot reaches **neither stdout nor stderr**. The tool-call interceptor seam itself runs over stdio (its deny and its malformed-verdict fault both answer correctly), but nothing the host logs from it is visible, so host diagnostics are lost on every stdio deployment and the checklist's stdio log oracle can never be met.\n\n## Reproduction\n\n1. Scratch copy of `examples/app-showcase` whose config adds a plugin that installs a tool-call interceptor which `console.log`s one `[qa-interceptor] {door, transport, toolName, userId}` line per call, denies `delete_record` and answers `describe_object` with a malformed verdict.\n2. Mint an `osk_` key. Run `objectstack start --no-ui -p PORT -d file:DB` with `OS_MCP_STDIO_ENABLED=true` and `OS_MCP_STDIO_API_KEY=KEY`.\n3. Over stdin: `initialize`, `notifications/initialized`, then `tools/call` for `list_objects`, `delete_record`, `describe_object`. Capture both pipes in full.\n\n**Expected** one `[qa-interceptor] … \"transport\":\"stdio\"` line per call on stderr. **Actual** `delete_record` → PERMISSION_DENIED from the interceptor and `describe_object` → INTERNAL_ERROR with the MCP WARN on stderr, but no `[qa-interceptor]` line on either stream. Control: the same copy and DB under `os start` over HTTP print the line on stderr. 3 reproductions (SDK stdio client once, raw pipe twice).\n\n## Where to look\n\nNot pinned. Candidates: the stdout→stderr redirect and the boot-quiet console swap / `restoreOutput` on the stdio path in `packages/cli/src/commands/serve.ts`, or the stdio transport's own stdout claim (`packages/mcp/src/mcp-server-runtime.ts`, `protocol-stdout.ts`).\n"
+}

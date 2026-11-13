@@ -13,18 +13,18 @@
   "labels": [
     "area:formula",
     "domain:skills",
-    "pm:blocked",
-    "priority:p2"
+    "pm:queue",
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T10:33:52Z",
-  "updated_at": "2026-11-12T11:42:45Z",
+  "updated_at": "2026-11-13T01:49:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32703",
   "body": "domain:spec#2 · sunhaolin · session_017xRBcSbLCxEmyHf9upz3pz\n\nFiling gate: ① published skill text that teaches a shape the platform now warns on, owed by an in-flight PR (PR #32701's `Skills-docs: follow-up owed` line; the seat files the card and rewrites that line to this number). ⛔ Not a claim. Triage sets the lane and grade.\nReader: `domain:skills` (`skills/**`, shipped with `npx skills add`).\nDedupe: `is:issue stored computed field skills cross-record volatile` → 3 hits (#32529, #32614, a seat post), none on the skills text.\nreach: named producer — the published skills an authoring agent loads. On `origin/main`: `skills/objectstack-data/rules/relationships.md` (~:325-333, the line-item \"Computed column\" bullet), `skills/objectstack-data/rules/field-types.md` (~:131, the `formula` row: \"both need a stored field of its return type with the same `expression`\"), `skills/objectstack-ui/rules/dashboards.md` (~:100-103, the total-over-a-formula bullet). Each tells an agent to move a formula's `expression` onto a stored field; none says the two rules PR #32701 adds: an input read from another record (`record.<lookup>.<field>`) is warned at authoring (`stored-expression-cross-record-input`, warning, #32529; seat call 6821360087), and one that changes without a write (the clock, the acting user, a permission check) is warned (`stored-expression-volatile-input`, #32554). An agent following the skill as written on a formula like `record.customer.discount * record.amount` writes a field that now draws an authoring warning and goes stale on the next change of the related record.\n\n## Business reason\n\nThe skills are the agent's instructions; the lint is what refuses. After #32443 (ruled B) the skills route every \"total a computed value\" case to a stored computed field, so the shapes they leave unqualified are exactly the ones the new rules catch. Saying it in the skill turns a warning-then-retry loop into a first-time correct field.\n\n## Ask\n\n- In each of the three places, one sentence: a stored computed field reads only its own row's fields; a value from a related record stays a `formula` (read time, not totallable) or is a snapshot a flow on the related record writes (`os migrate stored-expressions --changed` repairs drift); an input that changes without a write (`now()`, `today()`, the acting user, `can()`) is fixed at the write and warned.\n- Use the rule ids and the remedy wording PR #32701 lands (read them on `main` after it merges). Lands after PR #32701.\n\nBlocked-by: #32529\n\n"

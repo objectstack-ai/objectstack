@@ -1,0 +1,33 @@
+{
+  "number": 32865,
+  "kind": "issue",
+  "title": "spec: a per-object, read-only AI exposure declaration so an agent can read a declared system object through the MCP record tools (#32442 read half)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T22:14:35Z",
+  "updated_at": "2026-11-13T01:21:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32865",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cwJbS8sZAfru2iyvQq\n\nFiling gate: executing a recorded ruling. The maintainer ruled **A** on the read half of #32442 (this seat's decision card, verbatim 「同意」; recorded on #32442). A metadata-protocol addition is a spec sub-card (`.claude/skills/pm-dispatch/references/lanes/spec.md`), so this card carries the spec half and #32442's read half is `Blocked-by:` it. ⛔ Not a claim; triage sets the lane and grade.\n\n## 维护者速读\n\n经理问 AI「我有哪些待审批？」今天答不了：MCP 的读工具一律拒绝系统表，审批请求表也是系统表。你已裁 A：在对象上加一个按对象声明的只读 AI 开放键，由审批请求表自己声明，AI 用现有的查询工具看到与控制台「我的待审批」相同的行。本卡只做 spec 那一半（键的形状与规则），产品那一半在 #32442。\n\n## Measured (origin/main, read by the #32442 dev and an independent review)\n\n- `packages/mcp/src/mcp-http-tools.ts` object-tool `guard` and the `list_objects` filter refuse every `sys_*` object by name; the only switch is the host-wide `allowSystemObjects` (README: \"no deployment switch opens one\").\n- `packages/spec/src/data/object.zod.ts` `ObjectCapabilities` declares `apiEnabled` / `apiMethods` and no AI exposure key. Actions already have a declared opt-in (`ai.exposed`, ADR-0011; ADR-0066 :78; #27681: exposure is declared by the author, no deployment switch).\n- The console's My Pending view reads `sys_approval_request` through the generic data door, rows narrowed by `request-read-gate.ts`.\n\n## Do (the shape the ruling and the review set)\n\n- One per-object declaration that opens **read only** to AI (query, get one, aggregate, describe, list) and **never write**; writes stay on declared actions.\n- Meaningful only on `sys_*` objects: declaring it elsewhere is refused by lint, so no declared-but-inert key exists (ADR-0049).\n- The stored-metadata-body family (`sys_metadata` and its kin) is refused before the key is read, so no declaration opens it (as #27681 does for actions).\n- Named in line with actions' `ai.exposed`; `allowSystemObjects` keeps its meaning; no new deployment switch.\n- `Clause-②: yes (widening)`, `Metadata-protocol: added`; contract review at the contract tier.\n\n## Not here (the server half, #32442)\n\nThe bridge attesting the object, the three mcp guards honouring the attestation, `sys_approval_request` declaring the key, and acceptance through a real MCP client (an approver sees only their rows, a non-participant sees none, payloads redacted as today).\n\nRelated: #32442 (product card), #27681, ADR-0011, ADR-0066."
+}

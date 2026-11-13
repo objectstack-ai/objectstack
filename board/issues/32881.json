@@ -1,0 +1,36 @@
+{
+  "number": 32881,
+  "kind": "pull_request",
+  "title": "chore(pm-dispatch): retire the director seat's daily digest",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T22:43:41Z",
+  "updated_at": "2026-11-13T00:27:13Z",
+  "closed_at": "2026-11-13T00:27:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-13T00:27:11Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32881",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DHgTuk5yhiQFG8PkR2tCQ14)_\n\nFixes #32869\n\n## What\n\nThe maintainer retired the fleet daily report on 2026-11-12. This takes the duty out of the `pm-dispatch` skill text so no seat rebuilds it.\n\n- `references/lanes/director.md`: section `职责四` retitled `职责四:发版板与总表`; the `每日摘要` bullet removed.\n- `references/seat-lifecycle.md:67`: dropped `五项健康指标进总监席的每日摘要`; the rest of the line stays.\n- `references/project-forms.md:58`: dropped `总监席日报与` from the roster issue's regenerators.\n- `scripts/pm/check-skill-line-ratchet.mjs`: `lanes/director.md` ceiling 86 → 82 (landed count, one-line note in the existing convention). The two other skill files are in-place edits and keep their ceilings. The history comment near line 1650 is untouched.\n\n## External-demand rows: removed\n\nThe three bullets after the digest (`外部需求行三数…`, `① ② ③`, `查法…`) define the digest's `外部需求行` and nothing else. `git grep -n \"外部需求\"` over `.claude`, `scripts/pm` and `AGENTS.md` on `origin/main` hit only those lines and the digest bullet itself, so no other reading consumes them. They go with the digest.\n\nAfter the change, `git grep -n -i \"日报\\|每日摘要\\|daily digest\" -- .claude scripts/pm AGENTS.md` returns only the ratchet file's history comment (line 1650) and the new ceiling note: no line assigns the duty.\n\nOut of scope and unchanged: release board, roster issue, triage daily reconciliation.\n\n## Acceptance notes\n\nRound 2, after the contract review FAIL on a1dd46b5 (all in-place rewrites, no line added, no ceiling moved beyond 86 → 82; every touched line stays under the 120-byte cap, no re-wrap):\n\n- must-fix: `lanes/director.md:82` no longer regenerates the roster 「随本摘要」; it now reads 「车队总表由坐席/接管/收班同笔重生成」, matching `project-forms.md:58`.\n- should-fix: the maintainer retired the daily report, not the checks it carried; those stay director duties done on the director seat's patrol. 「总监席摘要」 → 「总监席巡查」 at `dispatch-runbook.md:39` (heading), `:41`, `:46`, `seat-lifecycle.md:33`, `lanes/qa.md:8`. 「摘要台账」 (the per-session rulings ledger) is untouched, as are `dispatch-runbook.md:130/:143` (PR #32866).\n- nit: `scripts/pm/fleet-roster.mjs` header no longer names the director seat's digest as a caller.\n\nRemaining hits for `日报|每日摘要|总监席摘要|本摘要|daily digest` over `.claude/skills/pm-dispatch`, `AGENTS.md`, `scripts/pm`: only `scripts/pm/check-skill-line-ratchet.mjs:1659` (the history comment the card says to keep) and `:1668` (this PR's ceiling note). Neither assigns the duty.\n\n## Gates\n\nHead 295963d9 (round 2): `node scripts/pm/check-skill-line-ratchet.mjs`, `pnpm check:pm-skill-ratchet`, `pnpm check:pm-skill-id-lint`, plus all 38 `dispatch-gates.mjs` derived families: exit 0 (`--ran` reconcile: 38 run, 0 NOT-MEASURED). Round 1 (a1dd46b5) ran the same set green.\n\nskip-changeset (`.claude/**` + `scripts/pm/**` only). Clause-②: no. Tier S.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cxsX7gNKUfobALqJtH\n\n<!-- signed: domain:skills#1 · os-elon-musk · session_016WV4cxsX7gNKUfobALqJtH -->\n"
+}

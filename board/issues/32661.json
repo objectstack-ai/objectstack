@@ -14,17 +14,17 @@
     "documentation",
     "domain:server",
     "pm:queue",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T09:31:20Z",
-  "updated_at": "2026-11-12T10:42:58Z",
+  "updated_at": "2026-11-12T23:24:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32661",
   "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：#32516（PR #32652）契约审查 should-fix 1 与专题红线读 6819900035 finding 1。Part of #31527 (ADR-0150)。Blocked-by #32652.\n\n## What\n\n`docs/adr/0130-release-artifact-as-co-ownership-boundary.md` lines 757-767 (the 2026-09-22 addendum) say `objectConflict: 'merge'` / `'override'` reconcile two packages' same-named objects under the stripped/`'preserve'` shapes, and that \"none is refused: a composition that was legal before this change stays legal\". After PR #32652, `composeStacks` refuses with `STACK_COMPOSE_OBJECT_CONFLICT` (422) whenever two distinct inputs declare one object name and at least one declaration sits in a package body: the additive nested input, the flat pair under `'preserve'`, and `'preserve'` with a manifest-less sibling. The addendum is now false.\n\n## Acceptance\n\n- A dated amendment under ADR-0130 (append-only; the 2026-09-22 text stays) records the refusal, its three shapes, the error code and status, and points at #32516 / PR #32652 and ADR-0150 D4.\n- It names the cells that still reconcile (default-manifest flat inputs; two manifest-less inputs) so the addendum's remaining sentences stay true.\n- No code change. `docs/adr/**` is governed: Tier H review by os-zhuang and hotlong.\n\n## 业务理由\n\n谁受益：读 ADR-0130 决定如何组合多包 stack 的开发者和审查者。场景：按 ADR 写了两个包同名对象的 override 组合，结果 compose 直接 422。不做：ADR 与行为矛盾，审查以错误前提放行或驳回。\n\n## 读者\n\ndocs/ADR 维护者，PR #32652 合并后；起点 ADR-0130 :757-767 与 PR #32652 的 changeset。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue ADR-0130 objectConflict refused` → 0 open hits; #32516 is the code card. No duplicate.\n\n<!-- signed: domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G -->"

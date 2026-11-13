@@ -1,0 +1,31 @@
+{
+  "number": 32980,
+  "kind": "issue",
+  "title": "Formula refusal for date-time subtraction names only whole-day helpers; an hour span (overtime hours) has no named form, though `datetime(a) - datetime(b)` works",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T01:31:17Z",
+  "updated_at": "2026-11-13T01:46:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32980",
+  "body": "Filing category: ① product defect (authoring guidance).\nreach: public entries `/api/v1/mcp` `apply_blueprint` (verification) and `validate_expression`, measured on a hosted tenant (`pnpm dev:stack --with-ui`; cloud `ff373e02`, framework `d7c3d44e`).\n\n## Business reason\n\n\"Overtime hours = end − start\" is a first-day formula for any HR app. The refusal sends the author to `daysBetween`, which cannot express 3.5 hours, and the working form is undiscoverable without reading `packages/formula/src/stdlib.ts`.\n\n## What happens\n\n- Formula `double((record.end_time - record.start_time).getMinutes()) / 60.0` on two `datetime` fields → `invalid_expression: date arithmetic DateText - DateText … Use daysBetween(a, b) for the span in whole days, and daysFromNow(n) / addDays(d, n) / addMonths(d, n) to shift a date.` (also the wording of migration entry 18.formula-date-subtraction-refused).\n- `double((datetime(record.end_time) - datetime(record.start_time)).getMinutes()) / 60.0` → `validate_expression ok: true, inferredType: number`; at runtime the field reads 3, 10, 3.5, 2 on four records — correct.\n\n## Expected\n\nThe refusal (and the formula docs / AI rule) names the sub-day form — wrap each side in `datetime(…)` and read the Duration (`.getMinutes()` / `.getHours()`), or a helper such as `hoursBetween(a, b)` — next to `daysBetween`. If the `datetime()` form is not meant to be supported, the validator refuses it too.\n\nReader who acts: the formula seat (`packages/formula` validate / stdlib, refusal text).\nDedupe: `repo:objectstack-ai/objectstack is:issue date-text-arithmetic hours datetime` → 0."
+}

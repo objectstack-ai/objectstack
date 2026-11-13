@@ -1,0 +1,31 @@
+{
+  "number": 32913,
+  "kind": "issue",
+  "title": "cloud-connection: state every moved install-local answer of PR #32889 (dry run, scheduled work off, unmanaged mode, runtime without the export) and pin them (follow-up of #32572)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T23:22:26Z",
+  "updated_at": "2026-11-12T23:50:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32913",
+  "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32572 (PR #32889). Source: PR #32889's contract review r1 (6838806726), findings S1, S2 and N1 to N3. Review issues go to a follow-up card, not another round. If PR #32889's changeset is still unreleased when this card is worked, amend it; otherwise add a changeset of this card's own. The doc halves of S1 and S2 go on #32896.\n\n## Findings (verbatim from the review record)\n\n**S1 — should-fix, the follow-up card below. The dry run moves and no row names it.** `POST /api/v1/marketplace/install-local` with `dryRun: true` (`os package install --dry-run`) on a twin package: `main` answered 200 with the upgrade plan; the head answers 422 `VALIDATION_ERROR` and reads no plan. Distinct names: 200 with the plan on both. The TO is right: the door's header says the dry run answers \"after every refusal that says the package cannot install at all\", and step 1d already refused a no-body job's dry run. The `Clause-②:` line covers it by route. But the PR's FROM → TO table (\"every moved answer\") has no dry-run row, the changeset's BREAKING bullets speak only of \"the install\", and no pin holds it. Fix: one row, one sentence in the changeset, one case in `marketplace-install-local-jobs.test.ts` (the harness needs only a `planUpgrade` on its `manifest` service).\n\n**S2 — should-fix, the same card. The FROM is stated for a deployment that runs package-authored scheduled work.** The changeset's Before bullet says the binder \"refused the name at `error`\", and the PR's rows 1 and 2 say the same. That holds only with the scheduled-work switch on. The switch is off by default in every posture (\"Unset means off\", `packages/types/src/env.ts`). With it off, or with no `job` service, the binder judges no job name at all. Measured on `main`: 200, the package registered and ledgered, every job withheld (one `info` or `warn` line, nothing refused; with the switch off, no `error` line), and, with the switch off, an upgrade landed v2 whole. At the head: 422, nothing registered, and an upgrade is refused with v1's ledger entry kept. The move is declared (the route-level `Clause-②:` line and \"Who moves\" name every author whose package shares a name), and nothing in the text says a deployment is spared, so this is not a blocker. But on the default deployment the plain consequence differs from the one written: a package, or an upgrade, that installed whole (its jobs inert by the switch) is now refused whole, and no job of it was running to keep. Fix, prose: state the FROM by deployment shape (switch on: the bind refusal and the cancel; switch off or no job service: installed, jobs withheld, nothing refused), and say that the door judges the package whatever the switch, as it judges a job with no body. A pin for the switch-off install is optional.\n\n**N1 — nit, prose, the same card. The unmanaged mode is listed as not changed, and its answer moves.** `installMode: 'unmanaged'` passes step 1d before the import, as the PR says. Measured with a stub importer: `main` reached the importer with the twin package, and the head refuses at 1d before it. With the real importer, any package carrying a job is refused `422 UNMANAGED_INSTALL_UNCOPYABLE` with `details.findings` naming `jobs`, since `job` is `allowRuntimeCreate: false` (read, not run). So for this mode the answer moves from one 422 to another (`VALIDATION_ERROR`, no `details`), not from 200. Two sentences are wrong for an unmanaged copy, which is never bound and has no earlier version: the `Clause-②:` line's \"where it answered `200`\", and the refusal's closing sentence (\"Installed, … an earlier version … would be cancelled\"). The other 1d clauses use the same managed-install wording. Fix: one row, and move the sentence out of \"Not changed\".\n\n**N2 — nit, a pin and one sentence, the same card. The degrade path is declared in the PR body only, and is not pinned.** Measured with `collectJobNameCollisions` absent from the runtime module: the door answers exactly as `main` does. The install answers 200, the binder refuses the name at `error`, and only the other job is scheduled; an upgrade answers 200 and cancels the installed job, with the ledger at 0.2.0. One `warn` line per install is added, on distinct names too. So the degrade admits, and only the log says so. The PR body says this plainly (\"judges nothing and says so at `warn`, as for the other two\"). The changeset does not. No pin holds it, and none holds the other two judgements' degrade either. It is reachable only on a mismatched pair: both packages are in the changeset `fixed` group, and cloud-connection depends on the runtime at `workspace:*`. The warn says \"the binder schedules none of them\", which is true of a runtime that has #32563. A runtime older than #32563 keeps the later job. Fix: one case that pins the warn and the 200, and one changeset sentence.\n\n**N3 — nit, prose, the same card.** The claim's Responsibility line asked for first-party reach to be measured, and the PR body states none. It is 0 .\n\n## Owed\n\nFROM → TO rows, changeset sentences and pins for each finding above; first-party reach stated (0).\n\nRestart-when: PR #32889 has merged."
+}

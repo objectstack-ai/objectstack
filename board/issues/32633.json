@@ -2,8 +2,8 @@
   "number": 32633,
   "kind": "issue",
   "title": "Console: opening at the /_console/ root asks GET /meta/app and the boot sys_user_preference read twice, the second time one wave later; opening the app page directly asks each once",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T08:39:28Z",
-  "updated_at": "2026-11-12T08:47:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T23:02:09Z",
+  "closed_at": "2026-11-12T23:01:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32633",
   "body": "coordinator#1 · hotlong · session_f4c42f815d5e47b39de5e9fb0d6d7864\n\n立卡门类别:① 用户可见的体验缺陷(reach: 界面实测,见下)\n\n## 维护者速读\n用户从 `/_console/` 根地址打开控制台时(书签、登录后的落点),控制台先挂一遍再跳到默认应用的首页,结果 `GET /api/v1/meta/app` 和启动时读用户偏好的那条 `sys_user_preference` 各发了两次。第二次落在下一个波次,所以首屏前多了一轮串行往返。直接打开应用首页地址,这两个请求各只发一次。\n\n## reach\nstaging 控制面 `cloud.objectos.app`(cloud main `23b6cf9d`),维护者的会话,页面可见,读于 2026-11-12T08:35Z–08:40Z,每次都是热打开:\n- 顶层标签页打开 `/_console/`,落到 `/_console/apps/com.objectstack.cloud/page/welcome`:21 个 API 请求,其中 `/api/v1/meta/app` 在 2125 ms 和 3063 ms 各发一次;`/api/v1/data/sys_user_preference?top=403&filter=[\"and\",[\"user_id\",\"=\",…],[\"or\",[\"key\",\"in\",[\"ui.flow.palette.recents\",\"ui.recent\",\"ui.favorites\"]],…]]` 在 2127 ms 和 3066 ms 各发一次,两次的 URL 完全相同。\n- 同一会话直接打开 `/_console/apps/cloud_control/page/welcome`:18 个请求,没有重复 URL。\n- 在同源 iframe 里打开 `/_console/`,连续 3 次都是同样的两组重复(26 个请求)。\n\n## 预期\n从根地址进入也是每个 URL 只请求一次:跳转到默认应用后,沿用跳转前已经拿到的 `/meta/app` 和偏好结果,或者让第二个调用方共用还在进行中的那次请求。\n\n## 落点\n`ui/apps/console` 与 `ui/packages/app-shell`:根路径挑选默认应用并跳转的那一段,以及读 `/meta/app` 和启动偏好的 provider。跳转后 provider 重新挂载,又发了一遍请求。机制待车道确认。\n\n## 业务理由\n- 谁受益:每个从书签或登录落点打开控制台的用户。\n- 场景:最常见的入口就是 `/_console/`。\n- 不做会怎样:首屏前多一轮串行往返;在慢链路上(staging 实测每次往返 300–900 ms)启动页多显示约半秒到一秒。cloud#2914 定的「每个 URL 只请求一次」在这个入口上不成立。\n\nReader: `domain:ui` 车道,控制台启动与根路径跳转(`ui/apps/console`、`ui/packages/app-shell`)。验收:从 `/_console/` 热打开时,`/meta/app` 和启动偏好读各只请求一次;加请求计数测试并做消融。cloud 那边的预算检查补上根路径入口,另立 cloud 卡。\n\nDedupe: `console root redirect meta/app twice` → 38 hits,`sys_user_preference duplicate request boot` → 23 hits,`\"/_console/\" default app redirect remount providers` → 2 hits。最接近的是开着的 #28085(app-crm 列表页上 get-session、meta/app、me/permissions、me/apps 四个请求同时各发两次)。本卡入口不同(根路径跳转)、请求不同(meta/app 加偏好读),而且是前后两个波次串行重复,不是同时发两份,所以单独立卡。\n\nRelated: objectstack-ai/cloud#2914,#28085。"

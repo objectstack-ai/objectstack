@@ -13,7 +13,7 @@
   "labels": [
     "area:devpath",
     "domain:server",
-    "pm:on-hold",
+    "pm:queue",
     "priority:p3",
     "tests"
   ],
@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T12:42:29Z",
-  "updated_at": "2026-11-12T13:37:19Z",
+  "updated_at": "2026-11-12T22:41:58Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32730",
   "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32351 (PR #32569), from two reviews of its main-merge head `1776d3034`: the epic red-line short read 6823747063 (PASS-with-nits) and contract review r6 6823885397 (PASS-with-nits). Not a merge blocker (maintainer rule: only correctness, red-line or security items block; the rest becomes a follow-up card).\n\n## What is owed\n\n1. **Pin the crossing of #32351 and #32540 (should-fix).** No committed pin covers object-bound `action` bodies held by two packages. #32569's per-type pins use object-less bodies; #32540's (PR #32651) use one package. Today the merged resolution is caught only through #32569's `F1` / `S4` pins. Add to `packages/metadata/src/metadata-history.test.ts` the four cases the reviewer probed (uncommitted probe: 4/4 green on `1776d3034`, the two write cases red under the ablation \"member row picked among every row of the name\"):\n   - two packages each bind action `x` to objects `o1` and `o2`; a rollback addressed to package B of B's `o1` version writes B's `o1` row only, the other three rows unchanged;\n   - with B's `o1` row deleted, the same rollback recreates it in B with `bundle_member` `o1` and writes one `revert` history row attributed to B;\n   - A's version addressed to B is refused with nothing written;\n   - unaddressed: `409 RESOURCE_CONFLICT` `ambiguous-in-environment`.\n2. **Doc wording (nit).** `DatabaseLoader.registerRollback`'s doc comment describes the slot only; add one sentence for the member pick within the slot (#32540). The inline comment at the opening of the slot block (`database-loader.ts`, the `[#31699 R3-B] A bundled type's one slot` sentence) still reads as if a bundled type had one slot; it is now the slot `rollbackSlot` chose.\n3. **Miss wording (nit, optional).** For an action with no row left, the miss reads `not found for rollback` with `(member canonical)` appended (#32540's wording on main, matched by #32569's S2a pin); `canonical` is not a word an action has. Change only together with the pin.\n\n## Acceptance\n\n- The four pins land in `metadata-history.test.ts`, green on the head, and the ablation above turns the two write cases red.\n- No answer moves: `Clause-②: no`, `Metadata-protocol: none`.\n\nFile surface: `packages/metadata/src/metadata-history.test.ts`, `packages/metadata/src/loaders/database-loader.ts` (comments only, or the miss string with its pin)."

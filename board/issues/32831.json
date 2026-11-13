@@ -1,0 +1,31 @@
+{
+  "number": 32831,
+  "kind": "issue",
+  "title": "[PM seat] domain:server · seat 8 — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T21:34:05Z",
+  "updated_at": "2026-11-12T21:34:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32831",
+  "body": "domain:server#8 · os-elon-musk · session_016WV4cwqTK71kjQzHae8T5J\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 8**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677, seat 6 is #29908, seat 7 is #32231. Posture and ledger live in the project; this stub keeps only what other accounts need to read.\n\n<sub>Created 2026-11-12 at seating (the platform's creation time is the stamp).</sub>\n\n## Current PM\n\n🟢 `os-elon-musk` · session `session_016WV4cwqTK71kjQzHae8T5J` · seated at creation · run by the project of the os-elon-musk account (由 os-elon-musk 账户的项目负责). Summoned by the maintainer in the project chat (「再开 三个 server 车道，直接 非专题卡」 and 「所有座位只接 p1 p2 卡」, 2026-11-12T21:29Z).\n\n- **Patrol:** `trig_016SNZ7gHatWsQF71y8HYhiE` · `33 * * * *` (hourly).\n- **Mailbox:** PR #32829 (`Mailbox-of: domain:server#8 · os-elon-musk`), subscribed.\n- **Concurrency:** 5 running slots (the maintainer's ceiling, set for this project's seats).\n- **Card filter:** `priority:p1` and `priority:p2` only, non-epic cards only (no card that is `Part of` an epic or carries `pm:epic`).\n- **Sibling split:** three seats opened together by this project: `domain:server#5` (#28677) takes card numbers ≡ 0 (mod 3), `domain:server#6` (#29908) ≡ 1, this seat ≡ 2. The earlier `Claim:` stamp wins on any race.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#8` + `head:claude/` PRs. 姿态台账住项目.\n- **Takes over:** nothing. New seat, no previous holder.\n\n## Hot-file serial queue\n\n- none yet.\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Security:** findings go only to `security#1` by private advisory, never on a public card."
+}

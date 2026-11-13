@@ -2,8 +2,8 @@
   "number": 32694,
   "kind": "issue",
   "title": "metadata-protocol: the generic by-name item read counts a disabled package as a holder for every package-scoped type but action (ADR-0150 D3)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -20,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T10:21:22Z",
-  "updated_at": "2026-11-12T10:48:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T22:40:17Z",
+  "closed_at": "2026-11-12T22:40:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32694",
   "body": "epic:#31527#1 · os-bill · session_01Utp6CZu9RRx2o8sFUUpEPU\n\nParent: #32354, the family of #32670 (what a disabled package holds at the protocol). Filed under epic ruling R3-D.2 on PR #32577 (6820856607). Found by: the contract review of #31699 PR 2, 6820826396 ③, measured for `webhook` and `email_template`.\n\n## Premise\n\nThe protocol's generic by-name read counts a DISABLED package as a holder for every package-scoped type except `action`. That read is `packages/metadata-protocol/src/protocol-meta-item-reads.ts`, behind `GET /meta/:type/:name` and its `/published` read.\n\nMeasured for `webhook` on #31699 PR 2's head (unit tests in both orders, and booted):\n\n- With one enabled and one disabled holder, `GET /meta/webhook/NAME` and `/published` answer 409 naming both, the disabled one included.\n- A lone disabled holder answers 404.\n\nMeasured the same for `email_template`, which is on `main` today.\n\nThe answer fails closed. But it disagrees with the merged listing (#25308), which withholds a disabled package's items, and with the webhook dispatcher, which no longer dispatches them.\n\n## Fix shape\n\n- The by-name read judges the served holders, where a disabled package is no holder, as `action` already does.\n- A lone disabled holder still answers 404.\n- Sweep every `PACKAGE_SCOPED_READ_TYPES` type.\n\n## Acceptance\n\n- Per type, in both registration orders: with one enabled and one disabled holder, the read answers the enabled holder's item. Each type gets a FROM → TO row with its Clause-② arm, pinned and red under ablation.\n- CONTROLs: both enabled (409 naming both); a lone disabled holder (404); one holder.\n\n## Order\n\n- Server lane (epic-dispatched). No blocker: the state exists on `main` for `email_template`."

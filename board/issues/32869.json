@@ -1,0 +1,36 @@
+{
+  "number": 32869,
+  "kind": "issue",
+  "title": "pm-dispatch: retire the director seat's daily digest — the maintainer dropped the fleet daily report (2026-11-12)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T22:22:00Z",
+  "updated_at": "2026-11-13T00:29:33Z",
+  "closed_at": "2026-11-13T00:27:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32869",
+  "body": "coordinator#1 · os-elon-musk · session_016WV4cw3hFWwj6wA2yQzyA2\n\nThe maintainer retired the fleet daily report on 2026-11-12 22:19Z (「车队日报 routine 作废，不需要」, then 「立卡处理」). The scheduled task that produced it (a project routine that rewrote one Claude Doc every day at 00:00Z) was disabled the same minute. The skill text still makes the director seat owe that digest, so a seat reading `pm-dispatch` would rebuild it. This card takes the duty out of the text.\n\n## Do\n\nRead on `origin/main` (2026-11-12 21:38Z):\n\n- `.claude/skills/pm-dispatch/references/lanes/director.md`, section `## 职责四:每日摘要、发版板与总表`, first bullet `每日摘要:在飞/待裁/待落地/撞墙、复审逾 24h 的 PR、发版板、无卡 fork PR、外部需求行。` — remove the daily digest as a deliverable. Retitle the section so it no longer names `每日摘要`.\n- The same section's external-demand rows (`外部需求行三数…` and its two follow-on bullets) are defined as part of the digest. Keep them only if another reading in the file still consumes them; otherwise remove them with the digest. Say in the PR which way you went and why.\n- `.claude/skills/pm-dispatch/references/seat-lifecycle.md:67` — `五项健康指标进总监席的每日摘要` points at the retired digest. Drop that clause; keep the rest of the line.\n- `.claude/skills/pm-dispatch/references/project-forms.md:58` — `正文由总监席日报与坐席/接管/移交重生成` names the digest as one regenerator of the roster issue. Drop `总监席日报与`.\n- `scripts/pm/check-skill-line-ratchet.mjs` — lower the `lanes/director.md` ceiling (and any other touched file's) to the landed count, with a one-line note in the existing convention (lowering is always legitimate). The comment near line 1650 that mentions \"the daily digest\" is history; leave it.\n- `git grep -n -i \"日报\\|每日摘要\\|daily digest\" -- .claude scripts/pm AGENTS.md` should return nothing that still assigns the duty.\n\n## Out of scope\n\n- The release board, the roster issue and the triage seat's daily reconciliation (`triage-duties.md` `每日一 fire…`, `每日看板`) stay; they are separate duties, not the retired report.\n- No new duty replaces the digest.\n\n## Done when\n\n- No skill line under `.claude/skills/pm-dispatch/` assigns a daily digest or daily report to any seat.\n- The ratchet ceilings equal the landed counts; `node scripts/pm/check-skill-line-ratchet.mjs` passes.\n\nclass: b · type: Tooling · Suggested-grade: p2 · lane: `domain:skills` (skills seat 1 to dispatch)."
+}

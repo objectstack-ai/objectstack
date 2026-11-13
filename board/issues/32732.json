@@ -2,8 +2,8 @@
   "number": 32732,
   "kind": "issue",
   "title": "stored-expression fill: a row moved mid-walk by a write that did not apply the new expression is skipped and counted as computed",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:formula",
     "bug",
     "domain:server",
-    "pm:queue",
-    "priority:p2"
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T12:51:01Z",
-  "updated_at": "2026-11-12T12:51:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T01:52:31Z",
+  "closed_at": "2026-11-13T01:52:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32732",
   "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nFollow-up of #32527 (PR #32690), from its delta contract review (PR #32690 comment 6823923136, finding F1 should-fix, F2 and nits). Filed as a follow-up card under the maintainer's rule of 2026-11-12 09:41Z: review findings that do not break correctness of the reviewed change get their own card, not another PR round. None blocks #32690.\n\nBlocked-by: #32527\n\n## 维护者速读\n\n- 改什么：存储计算字段的补算（保存、发布时自动跑，以及 `os migrate stored-expressions --apply`）遇到「补算期间被别的写入改过的行」时，现在直接跳过并记为「对方已算过」。少数情况下这个假设不成立，行会留空。\n- 为什么：对方若是尚未生效新定义的另一台节点，或绕过引擎的写入，它并没有按新表达式算；这行被跳过、计入已算，回执可能仍说「无需处理」。\n- 风险：窗口很窄，`os migrate stored-expressions --changed --apply` 能补救；修法只动补算内部，不改公开答案形状。\n- 先看：`packages/objectql/src/stored-expression-backfill.ts` 的 `writeUnlessMovedSince` 与 `moved` 分支。\n- 验证：被「旧定义」写入改过的行，补算后仍得到新表达式的值，且有 pin 与消融。\n- 需要你做的：无，p2。\n\n## Do\n\n1. **F1 (should-fix).** On `moved`, do not trust that the write which moved the row computed the field under the live definition. Re-read the row, recompute the changed fields under the definition now live, and either write under the new stamp (same precondition) or count the row as left (`stored-expression-fill-incomplete`). Pin: a row moved mid-walk by a write that did NOT apply the new expression (simulate a peer on the old definition or a raw driver write) ends filled or reported as left, never counted as computed; a CONTROL where the moving write did compute it stays untouched. Ablate the recompute.\n2. **F2 (prose).** The #32690 changeset does not name `concurrentRows` (now a required member of the exported `StoredExpressionBackfillReport` and `StoredExpressionBackfillFieldOutcome`) or that the command's writes are now conditional. Carry one changeset sentence for `@objectstack/objectql` with this card's change.\n3. **Nits from the same review** (fix while there, or drop with a reason in the PR): the notice's \"1 row … were not written over\" agreement; a row deleted mid-walk counted as \"written by another write\"; the silent same-stamp fallback (no signal when a driver's predicate never matches its own read); the engine's one-time no-`updateMany` warning that speaks only of claims and the round-robin cursor; the stale comments \"Two users today\" in `concurrent-update-error.ts` and the `WRITE_PRECONDITION_OPTION` docblock; the `cli.mdx` row not mentioning the guard.\n\n**Clause-②:** expected `no` (internal fill behaviour; no published face moves). **Metadata-protocol:** none."

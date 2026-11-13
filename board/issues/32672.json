@@ -14,17 +14,17 @@
     "bug",
     "domain:server",
     "pm:queue",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T09:43:22Z",
-  "updated_at": "2026-11-12T10:43:52Z",
+  "updated_at": "2026-11-12T23:25:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32672",
   "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：#32516（PR #32652）合约审查 should-fix 2–4 与专题红线读 6819900035 finding 2、3。按 Bill 规则「简单的问题后续单独立卡」（Bill，项目聊天）从 PR 中拆出。Part of #31527 (ADR-0150)。Blocked-by #32652.\n\n## What\n\nPR #32652 refuses `STACK_COMPOSE_OBJECT_CONFLICT` (422) in `composeStacks` for three shapes. The behaviour is correct and pinned; these loose ends were left for a separate PR:\n\n1. One refused cell has no pin: under `'preserve'`, a flat input with a manifest beside a nested input that carries the name at its top level only.\n2. Two admit-side CONTROLs are missing: two manifest-less inputs under `'preserve'` with override/merge, and a nested top-only name beside a flat input under the default manifest. Both should still reconcile.\n3. The changeset's \"Before\" omits the shape-3 loose-first cell under override/preserve (correct on main), and its \"error text unchanged\" is exact only for the `'error'` walk and issue lines: the message header/explanation for cells #32495 already refused changed (`packages/spec/src/stack.zod.ts` ~7849-7861). Code, status and issues are unchanged. A follow-up `.changeset/` note (or an edit of #32652's changeset before release) states both.\n4. Stale comment at `packages/runtime/src/app-artifact-handlers.ts:602-605`; tautological precondition at `app-artifact-handlers.test.ts:250`; over-long docblock line at `stack.zod.ts:8479`. Existing CONTROLs assert names rather than full equality.\n\n## Acceptance\n\n- Pins for item 1 (red under ablation of the refusal) and CONTROLs for item 2 (full-equality assertions).\n- Changeset wording per item 3; comment and test cleanups per item 4.\n- `Clause-②: no` (test/wording only); no behaviour change.\n\n## 业务理由\n\n谁受益：维护 compose 的开发者和读发布说明的作者。场景：发布说明说「报错文本不变」，但 #32495 已拒绝的格子标题变了。不做：一个拒绝格子无 pin 可被悄悄回退，发布说明有一句不准确。\n\n## 读者\n\nserver 车道，PR #32652 合并后；起点 `packages/spec/src/compose-stacks*.test.ts`、`.changeset/` 与上列行号。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue STACK_COMPOSE_OBJECT_CONFLICT` → #32516 (the code card), #32661 (ADR-0130 amendment). No duplicate.\n\n<!-- signed: domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G -->"

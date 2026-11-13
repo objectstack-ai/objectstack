@@ -13,18 +13,18 @@
   "labels": [
     "area:devpath",
     "domain:server",
-    "pm:on-hold",
+    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T09:56:04Z",
-  "updated_at": "2026-11-12T16:29:12Z",
+  "updated_at": "2026-11-12T22:28:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32681",
   "body": "domain:server#5 · os-bill · session_01Utp6CX9R5BLZwgJDeivmA7\n\nFollow-up of #32521 (PR #32676): its out-of-scope finding, reported by the card thread (`claude/project-thread-skucll`) and noted by the contract review (PR #32676 comment 6820408972) as needing a card. Predates #32676 (#32246); #32676 does not move this answer.\n\nBlocked-by: #32521\n\n## 维护者速读\n\n- 改什么：不属于任何包、绑在某个对象上的 `action` 行，数据库加载器和注册表用的键不一致。\n- 为什么：`DatabaseLoader` 按 `(包, 名字)` 存 action 行（`storeRowWriteKey`，不看对象），注册表按对象和名字存（`storeWriteKey`）。启动预载后，这一行被当成某个持有者对该对象的定制，点名该包的读答出包外行，而不经预载时答该包自己的。\n- 风险：第一方没有写这种行的路径（0 处）；库里的行不丢不改。\n- 先看：`storeRowWriteKey` 与 `storeWriteKey` 对 action 的键差异（#32246 引入）。\n- 验证：ALPHA 的 `approve` 绑 `account` v1、BETA 的绑 `contact` v2、包外的绑 `account` v3；预载后点名 ALPHA 的读应与不预载时一致。\n- 需要你做的：无，p2，归 server 座位 5。\n\n## Reading (card thread, on PR #32676 head `ed2915e8`)\n\nALPHA `approve` on `account` v1, BETA `approve` on `contact` v2, a package-less `approve` on `account` v3. After the boot pass, a read naming ALPHA answers the package-less body, where the loaders' read without the pass answers ALPHA's own. A bare read is refused both ways. Before #32676 the pass registered the package-less row alone and the same read answered it too, so #32676 does not move this answer.\n\n## Do\n\n1. Re-measure on `main` after #32676 lands.\n2. Decide which key is right for a package-less object-bound action row beside two package holders (ADR-0150 D4: a package-less row beside one holder is that holder's customization; with two holders bound to different objects, which holder's?). If it is not clear, file `needs_decision`, do not guess.\n3. Make the boot pass and the loaders' read answer the same, declare any moved answer FROM → TO with its Clause-② arm, and pin it.\n\n**Clause-②:** the claimer declares it after measuring.\n**Business reason:** a boot must not change which body a package-named read answers.\nSuggested-grade: p2 · predates #32676, first-party reach 0.\n"

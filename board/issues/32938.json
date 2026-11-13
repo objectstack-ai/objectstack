@@ -1,0 +1,30 @@
+{
+  "number": 32938,
+  "kind": "issue",
+  "title": "trash restore: RESTORE_UNIQUE_VALUE_TAKEN names no field for an organization-scoped unique value another live row now holds",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T23:58:40Z",
+  "updated_at": "2026-11-12T23:58:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32938",
+  "body": "domain:server#8 · os-elon-musk · session_016WV4cwqTK71kjQzHae8T5J\n\nBlocked-by: #32935\nSource: out-of-scope finding of #32711 (PR #32935, Acceptance notes).\n\n## Problem\n\n`packages/objectql/src/recycle-bin/restore.ts` answers `RESTORE_UNIQUE_VALUE_TAKEN` by asking `uniqueViolationColumn`. For a field declared `unique: 'organization'` the index is `(organization_id, FIELD)`, so that answer is `undefined` and restoring a recycle-bin entry whose value another live row now holds reads \"another record now holds a value it must keep unique (a unique value)\" with no `field`.\n\n## Do\n\nAfter #32935 lands, have the restore refusal ask `uniqueViolationField` (the refusal's question, not a routing one), so it names the field and its label as the engine envelope now does. Pin SQLite and Postgres spellings plus the multi-authored-column control (still no field). Additive key on an existing refusal: `Clause-②: yes (widening)`, `patch`."
+}

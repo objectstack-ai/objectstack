@@ -1,0 +1,36 @@
+{
+  "number": 32857,
+  "kind": "issue",
+  "title": "pm-dispatch(seat-lifecycle): at a wave stop past 150k context, flush to the seat post and continue the seat in a fresh session",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T21:59:44Z",
+  "updated_at": "2026-11-13T02:13:09Z",
+  "closed_at": "2026-11-13T02:12:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32857",
+  "body": "domain:skills#1 · os-elon-musk · session_016WV4cwTZvo7tAGwbbRW2b8\n\nFiling gate: ③ 维护者直派 (pm rule change, filed because the maintainer named it). Priority p1 by the maintainer's word 「都是 p1」. Serial after the reading-discipline card #32855: without it, a 150k cap would trigger a handover every ~20 minutes.\n\nBlocked-by: #32855\n\nMaintainer's words, verbatim (Elon, project thread 「评估车队如何节约 token」, 2026-11-12, UTC):\n- 21:46:10Z 「任务很多，评估如何节约 token」\n- 21:47:28Z his five measures: 「只在落地前合一次 main，中间不追」「只在设计、复读和红线检查时用 xhigh，写代码和修门禁降到 high，nit 继续用 medium」「把共用的部分压成一页摘要」「空闲的座位把巡逻间隔拉长，或者有新信件再唤醒」「互相依赖的卡串着做，不同时开」\n- 21:50:27Z 「以上建议用 fable评审，然后立skills 卡优化」\n- 21:54:51Z 「…按照你的意见补充立卡并全部交给 skills 车道 派发。都是 p1」\n- 21:55:16Z 「32847 给你参考。冲突的话可以关闭 32847」\n\nMeasured spend (session usage readings, 2026-11-12): cache reads are 65–78% of every Opus session's cost, cache writes 11–25%, output 10–14%, so a session's cost ≈ context size × model calls. Seats reach 225–262k context within 15–40 min of seating; server seat 1 (11-05→06, 25 h) cost $272 with 521M cache-read tokens and a 347k peak. M cards cost $11.7–15.3, S cards $2.4. The proposals were reviewed read-only at the contract tier (`/mnt/project-files/token-savings/fable-review-2026-11-12.md` in the fleet project); this card carries the adopted form. Supersedes #32847, which is closed: its Part 2 had card threads switch effort mid-thread (a project thread's effort is fixed at spawn) and its Part 3 adds a third copy of the rules (「⛔ 不另抄」).\n\n**Business reason.** Per-call cost grows with context. Seats run to the 384k autocompact threshold; server seat 1 peaked at 347k and spent $272 in 25 h. A restart costs about 70k of cache write and pays back within about ten calls. Reader who acts: the `domain:skills` seat (os-dev on `references/**`; contract-tier review).\n\n## Part 1 — context check at the wave stop (`seat-lifecycle.md:82`)\nToday 「`/compact` 由维护者在终端会话择机执行,永远不是派发前提」 — a seat cannot `/compact` itself, so it runs to autocompact. Wanted, in place: 「收工点读上下文:≥150k ⇒ flush 座位贴后同席换新会话接管(`check-handover.mjs` 退出 0),⛔ 不等自动压缩;永远不是派发前提。」 Only at the wave stop (in-flight = 0); 「⛔ 不在复核中途压缩」 stays, because subagent reports live only in the dispatching session. Instrument: the session's own `get_session` → `external_metadata.context_usage.used_tokens`; where it is not readable, a fixed count of waves stands in.\n\n## Part 2 — a light same-seat continuation (`seat-post-protocol.md`, beside the seat/handover forms)\nA full handover closes the mailbox and rebuilds the routine; a same-seat continuation should not. Wanted: same account, same seat post, same mailbox PR; the successor session is opened by the coordinator, re-subscribes the mailbox PR and its in-flight PRs, moves the patrol trigger to itself (`update_trigger`), writes a `Successor-of:` line on the seat post; the old session ends. ⛔ No `seat-offline`/`seat-online` pair for a continuation.\n\n## Acceptance\n- Both parts in the skill text, citing the maintainer's 2026-11-12 words.\n- `pnpm check:pm-skill-ratchet` / `check:pm-skill-id-lint` green; seat-lifecycle (98) and seat-post-protocol at ceiling: in-place or same-file deletion only, ⛔ no re-wrap. Part 2's lines are region-disjoint from the execution-duties card's `seat-post-protocol.md:65` edit.\n- skip-changeset. Clause-②: no · Metadata-protocol: none.\n\nDedupe (open AND closed): `is:issue compact in:title` → 9 hits, all product cards; `is:issue context in:title seat` → 2 hits (#26460, #9325, closed, CI contexts). **New.**"
+}
