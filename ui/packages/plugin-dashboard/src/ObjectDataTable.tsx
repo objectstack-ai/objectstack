@@ -1081,11 +1081,15 @@ export const ObjectDataTable: React.FC<ObjectDataTableProps> = ({ schema, dataSo
     // derived case, AUTHORED LABEL for the case the condition protects.
     if (schema.columns && schema.columns.length > 0) {
       const normalized = normalizeColumns(schema.columns);
-      const withHeaders = normalized.map((col) => {
+      const withHeaders = normalized.map((col, i) => {
         // Nothing to key a lookup or a humanization on. `normalizeColumns`
         // returns such an entry untouched and so does this.
         if (!col?.accessorKey) return col;
-        const authoredHeader = col.header && col.header !== col.accessorKey ? col.header : undefined;
+        // A string-shorthand entry carries no display text of its own: the
+        // header `normalizeColumns` gave it is the humanized key, not the
+        // author's, so it takes the same fallback as a raw-key header.
+        const shorthand = typeof schema.columns?.[i] === 'string';
+        const authoredHeader = !shorthand && col.header && col.header !== col.accessorKey ? col.header : undefined;
         // Below an authored header, the same precedence as `buildHeader`: the
         // field's declared label, then the humanized key, so a whitelisted
         // column and the same auto-derived column never disagree.

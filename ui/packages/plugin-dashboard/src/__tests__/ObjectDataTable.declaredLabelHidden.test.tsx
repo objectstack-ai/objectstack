@@ -21,7 +21,9 @@
  * Controls: a bundle entry still beats the declared label; a field with no
  * label still shows the humanized key; an explicit whitelist that names a
  * hidden field still shows it; an authored column header still beats the
- * declared label.
+ * declared label. PARITY: a whitelist that authors no header text (the drill
+ * callers' raw-key objects, the string shorthand) heads a column exactly as
+ * the auto-derived table does.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, waitFor } from '@testing-library/react';
@@ -171,6 +173,13 @@ describe('ObjectDataTable auto-derived columns — declared label and hidden fie
     const declared = await renderWidget(asDrillColumns(['subject', 'needs_analysis']));
     expect(declared).toEqual([auto[0], auto[3]]);
     expect(declared).toEqual(['报销事项', humanizeFieldKey('needs_analysis')]);
+  });
+
+  it('PARITY: a string-shorthand whitelist heads its columns like the auto-derived ones', async () => {
+    const auto = await renderWidget(undefined);
+    cleanup();
+    const declared = await renderWidget(['subject', 'needs_analysis']);
+    expect(declared).toEqual([auto[0], auto[3]]);
   });
 
   it('CONTROL: an authored column header still beats the declared label', async () => {
