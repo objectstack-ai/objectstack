@@ -1,6 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it, vi } from 'vitest';
+import { RuntimeAuthoringIssueSchema } from '@objectstack/spec/api';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
 // No approver binding is `unsupported` today (ADR-0142 D6 implemented the
 // last one, `queue`), so the `approval-approver-type-unsupported` arm is
@@ -45,8 +47,6 @@ describe('approval-approver-type-unsupported', () => {
 
 // The user sentence of the same arm, reachable only against this file's table.
 describe('approval-approver-type-unsupported · user text', async () => {
-  const { PLATFORM_LOCALE_TAGS } = await import('@objectstack/spec/system');
-  const { RuntimeAuthoringIssueSchema } = await import('@objectstack/spec/api');
   const { findingUserMessage, FINDING_USER_TEXT_CATALOG } = await import('./finding-user-text.js');
   const { APPROVAL_APPROVERS_USER_TEXT } = await import('./validate-approval-approvers.user-text.js');
   const { runRuntimeAuthoringRules } = await import('./runtime-gate.js');
