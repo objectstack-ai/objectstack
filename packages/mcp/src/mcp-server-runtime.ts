@@ -1637,18 +1637,42 @@ export function registerAuthoringTools(
  * `handleHttpRequest`'s own options so that the authoring family stays its
  * only reader: it is read under {@link grantsAuthoringTools}, the one
  * predicate that admits the registry in {@link registerAuthoringTools}. A
- * grant that registers the family is answered with the host's text; a
- * `data:read` / `data:write` / `actions:execute` token, an empty grant, and
- * the undefined grant of an API key or a session are not, whatever the host
- * injected — they fall through to the configured or default instructions.
+ * grant that registers the family is answered with the host's
+ * `instructions`; a `data:read` / `data:write` / `actions:execute` token, an
+ * empty grant, and the undefined grant of an API key or a session are not,
+ * whatever the host injected.
+ *
+ * [#32766] Those requests read the injection's `dataOnlyInstructions`
+ * instead — the exact complement under the same predicate, so a request is
+ * answered with at most one of the two host texts. It is how a host that
+ * mounts a build door says, on a connection that cannot build, how to get
+ * one that can (cloud#4329, ruled B: the hint only where a build door is
+ * mounted). A host with no build door injects no registry, so it has no
+ * injection to carry the text, and the default below never promises
+ * building. Either host text omitted or blank falls through to the
+ * configured or default instructions.
  */
-function authoringInstructions(
+function hostInstructions(
   authoring: McpAuthoringInjection | undefined,
   grantedScopes: readonly string[] | undefined,
 ): string | undefined {
-  if (!authoring || !grantsAuthoringTools(grantedScopes)) return undefined;
-  return authoring.instructions;
+  if (!authoring) return undefined;
+  const text = grantsAuthoringTools(grantedScopes) ? authoring.instructions : authoring.dataOnlyInstructions;
+  // Blank is absent: an empty answer would replace the configured or default
+  // text with nothing, which no host means by an empty string.
+  return text?.trim() ? text : undefined;
 }
+
+/**
+ * [#32766] The `initialize` instructions an HTTP request gets when neither the
+ * host's per-request text nor the runtime's configured text answers it. It
+ * says only that the tool list follows the connection's grant — true for
+ * every grant (a `metadata:write`-only or `actions:execute`-only token lists
+ * no data tool) and with or without a build door mounted, so it never
+ * promises building to a deployment that has none.
+ */
+const DEFAULT_HTTP_INSTRUCTIONS =
+  'ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted.';
 
 /**
  * [#31605] Who an HTTP request was admitted as, as the HOST resolved it — the
@@ -2502,7 +2526,8 @@ export class MCPServerRuntime {
    * @param opts.toolOptions  Tool exposure options (system objects, query limits, the token's `grantedScopes`).
    * @param opts.authoring    [#26464] The host's authoring registry plus the token principal and environment
    *                          that become each call's provenance; registered only for a `metadata:write` grant.
-   *                          [#31022] Its optional `instructions` answer `initialize` under that same grant.
+   *                          [#31022] Its optional `instructions` answer `initialize` under that same grant;
+   *                          [#32766] its optional `dataOnlyInstructions` answer it under every other grant.
    * @param opts.caller       [#31605] The `ExecutionContext` the host admitted this request as and the
    *                          environment it dispatched it for: the principal a tool-call interceptor reads
    *                          for every call on this request. Read only when an interceptor is installed.
@@ -2567,13 +2592,15 @@ export class MCPServerRuntime {
         capabilities: { ...(skillBridge ? { prompts: {} } : {}) },
         // [#31022] A host's per-request instructions ride the authoring
         // injection and are read under the grant that admits the family
-        // (`authoringInstructions`), so a request the family does not
-        // register for — a `data:read` token, a key, a session — is answered
-        // with the configured or default text and never sees them.
+        // (`hostInstructions`), so a request the family does not register
+        // for — a `data:read` token, a key, a session — never sees them.
+        // [#32766] Such a request reads the injection's
+        // `dataOnlyInstructions` instead; without one, it gets the configured
+        // or default text.
         instructions:
-          authoringInstructions(opts.authoring, opts.toolOptions?.grantedScopes) ??
+          hostInstructions(opts.authoring, opts.toolOptions?.grantedScopes) ??
           this.config.instructions ??
-          'ObjectStack MCP Server — query and modify your app\'s data objects as tools.',
+          DEFAULT_HTTP_INSTRUCTIONS,
       },
     );
 

@@ -26,7 +26,7 @@ import { declaredRefusalMessage, resolveThrownHttpError } from '@objectstack/typ
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 import { PACKAGE_SCOPED_READ_TYPES, PackageScopedNameRefusedError } from './package-scoped-read.js';
-import { NAMESPACE_SCOPED_BARE_NAME_TYPES, PACKAGE_SCOPED_TYPES } from '@objectstack/core';
+import { ENGINE_FUNCTION_TYPE, NAMESPACE_SCOPED_BARE_NAME_TYPES, PACKAGE_SCOPED_TYPES } from '@objectstack/core';
 
 /** ADR-0150's covered types whose by-name readers no child of the epic has wired yet. */
 const UNWIRED_COVERED_TYPES = PACKAGE_SCOPED_TYPES.filter(
@@ -454,7 +454,9 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
       readsNothingByPackage = new ObjectStackProtocolImplementation({ ...engine, registry: view } as never);
     });
 
-    it.each([...NAMESPACE_SCOPED_BARE_NAME_TYPES])('%s: 501 naming the missing resolver, even for one holder (BASE: served it)', async (type) => {
+    // [#31700] Every narrowed metadata type: the engine's `function` is
+    // narrowed too, but is no metadata type and has no `/meta` read.
+    it.each(NAMESPACE_SCOPED_BARE_NAME_TYPES.filter((type) => type !== ENGINE_FUNCTION_TYPE))('%s: 501 naming the missing resolver, even for one holder (BASE: served it)', async (type) => {
       shipValid(type, 'solo', A);
       let thrown: (Error & { status?: number; code?: string; refusal?: unknown }) | undefined;
       try {
@@ -770,6 +772,9 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
   });
   const listed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'email_template', packageId } as never)) as { items?: Array<{ label?: string }> })
     .items?.map((i) => i.label).sort();
+  /** The execution list at `packageId`'s address: what a send resolved to that package reads. */
+  const forSend = async (packageId: string) => ((await protocol.getMetaItemsForExecution({ type: 'email_template', packageId } as never)) as { items?: Array<{ label?: string }> })
+    .items?.map((i) => i.label).sort();
 
   beforeEach(() => {
     registry.installPackage(manifest(APP), 'code');
@@ -792,6 +797,29 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     // CONTROL: each holder's own member is still its own.
     expect(labelOf(await read(X, 'en-US'))).toBe('suitex en-US');
     expect(labelOf(await read(Y, 'en-US'))).toBe('suitey en-US');
+  });
+
+  // [#32183, contract review M2 should-fix] The owner check judges the served
+  // holders (`pairMemberWithheldAt`, `pairRowOnAddress`): with one of the two
+  // holders disabled, the member is the enabled holder's, served on its exact
+  // address and in its list (FROM: refused naming both and left out), and the
+  // disabled holder's address answers its withheld item. Re-enabled, as FROM.
+  // [epic ruling R4-A, row 34] The execution list at the enabled holder's
+  // address, which a send resolved to that holder reads, carries the member
+  // too (FROM: no fr-FR template there; measured on `main` 216674301).
+  it.each([['enabled holder first', [X, Y]], ['disabled holder first', [Y, X]]] as const)('[#32183] one of the two holders disabled (%s): the member is the enabled holder\'s, on its exact address, in its list and in its execution list; re-enabled, refused naming both and left out', async (_order, order) => {
+    for (const id of order) tpl('en-US', id);
+    pairRow();
+    registry.disablePackage(Y);
+    expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+    expect(await listed(X)).toContain('pair fr-FR');
+    expect(await forSend(X)).toEqual(['pair fr-FR', 'suitex en-US']);
+    expect((await read(Y, 'fr-FR'))?.item, 'the disabled holder\'s address').toBeUndefined();
+    registry.enablePackage(Y);
+    const err = await refusalOf(() => read(X, 'fr-FR'));
+    expect([err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()]).toEqual([409, [X, Y]]);
+    expect(await listed(X)).not.toContain('pair fr-FR');
+    expect(await forSend(X)).toEqual(['suitex en-US']);
   });
 
   it('one holder of the pair: the member is served on its address and listed there (#28390 ruling A)', async () => {
@@ -837,6 +865,124 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     try { served = labelOf(await read(Y, 'fr-FR')); } catch (e) { served = (e as { code?: string }).code; }
     expect(served, 'Y shares the pair but holds no template of the name').toBe('RESOURCE_CONFLICT');
     expect(await listed(Y)).not.toContain('pair fr-FR');
+  });
+});
+
+/**
+ * [#32183, epic rulings R4-B and R4-B2] A name only a disabled package holds,
+ * read at an address that neither holds it nor is a pair of a holder (a
+ * sibling module of the App), at a member only the App's customization pair
+ * stores. The metadata service answers the pair's row by name, as in the
+ * contract review's measurement (6819947096), so a layer of the exact read
+ * reaches it.
+ *
+ * FROM (`main` 216674301, measured on this fixture): `?package=Y&member=fr-FR`,
+ * its namespace path and `_env` refuse 409 naming X. The round-3 head served
+ * the pair's row at the first two and at `_env`. TO: the first two answer 404
+ * (row 17: an exact address of such a name serves only a row stored under
+ * its own package); `_env` keeps `main`'s 409 (R4-B2: with no served holder,
+ * its admission judges every holder).
+ */
+describe('[#32183] a name only a disabled package holds, at an address that neither holds it nor pairs a holder', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Y = 'com.acme.suitey';
+  const PAIR = `${APP}.custom`;
+  const memberOf = (id: string) => ({
+    id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop()!,
+    dependencies: { [APP]: '^1.0.0' },
+  }) as never;
+  const pairBody = { name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', _packageId: PAIR };
+  const storedRow = (packageId: string, label: string) => rows.push({
+    id: `row_${packageId}`, type: 'email_template', name: 'welcome', state: 'active', package_id: packageId, bundle_member: 'fr-FR',
+    metadata: JSON.stringify({ name: 'welcome', label, locale: 'fr-FR', subject: label, bodyHtml: '<p>r</p>' }),
+  });
+  let served: ObjectStackProtocolImplementation;
+  const at = (packageId: string) => served.getMetaItem({ type: 'email_template', name: 'welcome', packageId, member: 'fr-FR' } as never);
+  const atNamespace = () => {
+    const address = served.resolveMetaItemAddress({ type: 'email_template', segment: 'suitey', name: 'welcome' });
+    expect(address).toEqual({ kind: 'namespace', namespace: 'suitey', packageId: Y });
+    return at((address as { packageId: string }).packageId);
+  };
+  const atEnvironment = () => {
+    served.admitEnvironmentQualifier({ type: 'email_template', name: 'welcome', member: 'fr-FR' });
+    return served.getMetaItem({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never);
+  };
+  const READS = [['?package=Y', () => at(Y)], ['its namespace path', atNamespace], ['_env', atEnvironment]] as const;
+
+  beforeEach(() => {
+    registry.installPackage(manifest(APP), 'code');
+    registry.installPackage(memberOf(X), 'code');
+    registry.installPackage(memberOf(Y), 'code');
+    registry.installPackage(manifest(PAIR), 'code');
+    registry.registerItem('email_template', {
+      name: 'welcome', label: 'suitex en-US', locale: 'en-US', subject: 'suitex en-US', bodyHtml: '<p>x</p>',
+    }, 'name' as never, X);
+    storedRow(PAIR, 'pair fr-FR');
+    const metadata = {
+      get: vi.fn(async () => ({ ...pairBody })),
+      getDiagnosed: vi.fn(async () => ({ data: { ...pairBody }, degraded: false, errors: [] })),
+    };
+    served = new ObjectStackProtocolImplementation(engine as never, () => new Map<string, unknown>([['metadata', metadata]]));
+  });
+
+  it.each(READS.slice(0, 2))('X disabled: %s at that member answers 404, never the pair\'s row (R4-B)', async (_label, read) => {
+    registry.disablePackage(X);
+    const answer = await read();
+    expect(answer?.item).toBeUndefined();
+    expect(JSON.stringify(answer ?? null)).not.toContain('pair fr-FR');
+  });
+
+  it('X disabled: `_env` at that member refuses 409 naming X, as on main (R4-B2)', async () => {
+    registry.disablePackage(X);
+    const err = await refusalOf(atEnvironment);
+    expect([err.status, err.refusal.reason, err.refusal.candidates]).toEqual([409, 'not-held-by-qualifier', [{ kind: 'package', packageId: X }]]);
+  });
+
+  it('CONTROL — X disabled: a row stored under Y\'s own package is served at Y', async () => {
+    storedRow(Y, 'suitey row fr-FR');
+    registry.disablePackage(X);
+    expect(labelOf(await at(Y))).toBe('suitey row fr-FR');
+  });
+
+  it('CONTROL — X enabled: each of the three refuses 409 naming X, as on main', async () => {
+    for (const [label, read] of READS) {
+      const err = await refusalOf(read);
+      expect([err.status, err.refusal.reason, err.refusal.candidates], label).toEqual([409, 'not-held-by-qualifier', [{ kind: 'package', packageId: X }]]);
+    }
+  });
+});
+
+/**
+ * [#32183, epic ruling R4-C] `?package=DISABLED&member=` where only the
+ * disabled package's customization pair stores the member. FROM (`main`
+ * 216674301, measured): 200 with the pair's row, one holder or two, both
+ * orders; `?package=DISABLED.custom&member=` the same. TO: 404, the disabled
+ * package's withheld item, at both (`disabledExactAddressHolder`): an address
+ * that reads only a disabled package never serves its customization (row 23).
+ * Re-enabled, as FROM.
+ */
+describe('[#32183] `?package=DISABLED&member=` where only the pair\'s row carries the member', () => {
+  const tpl = (packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} en-US`, locale: 'en-US', subject: 'en', bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const at = (packageId: string) => protocol.getMetaItem({ type: 'email_template', name: 'welcome', packageId, member: 'fr-FR' } as never);
+  const STATES = [['one holder', [A]], ['two holders, the disabled one first', [A, B]], ['two holders, the enabled one first', [B, A]]] as const;
+
+  it.each(STATES)('%s: A disabled, `?package=A` and `?package=A.custom` at the member answer 404; re-enabled, the pair\'s row', async (_state, order) => {
+    for (const id of order) tpl(id);
+    rows.push({
+      id: 'row_fr', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR_A, bundle_member: 'fr-FR',
+      metadata: JSON.stringify({ name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>' }),
+    });
+    registry.disablePackage(A);
+    for (const address of [A, PAIR_A]) {
+      const answer = await at(address);
+      expect(answer?.item, address).toBeUndefined();
+      expect(JSON.stringify(answer ?? null), address).not.toContain('pair fr-FR');
+    }
+    registry.enablePackage(A);
+    for (const address of [A, PAIR_A]) expect(labelOf(await at(address)), address).toBe('pair fr-FR');
   });
 });
 
@@ -899,7 +1045,11 @@ describe('[#31699] a package-less row of a name two packages hold is no holder\'
     expect(await forSend(A)).toEqual(['env en-US']);
   });
 
-  for (const type of ['agent', 'skill', 'app', 'dashboard']) {
+  // [#32568, epic ruling 6817768147] `agent`, `skill` and `app` are sealed
+  // managed types: their package-less item of a name a package ships is
+  // declined at every holder's exact address (below, `[#32568]`), with one
+  // holder or two. The D4 refusal pinned here is the overlay types'.
+  for (const type of ['dashboard', 'report']) {
     it(`${type}: the environment's item of a name two packages hold is refused on both exact addresses naming both; with one holder it is served`, async () => {
       envItem(type, 'dup');
       ship(type, 'dup', A);
@@ -913,14 +1063,135 @@ describe('[#31699] a package-less row of a name two packages hold is no holder\'
     });
   }
 
+  // [#32183, seat ruling A on the open question] The exact read judges the
+  // served holders: with the other holder disabled, the package-less row is
+  // the enabled holder's customization, served on its address; re-enabled,
+  // it is refused naming both again. Never a refusal naming the disabled one.
+  // [#32568, epic ruling 6817768147] Only the overlay type stays here:
+  // `agent` is a sealed managed type, whose package-less item is declined at
+  // every holder's exact address, one holder served or two (below).
+  for (const type of ['dashboard']) {
+    it(`[#32183] ${type}: the environment's item of a name two packages hold, one disabled, is the enabled holder's on its exact address; re-enabled, refused naming both`, async () => {
+      envItem(type, 'dup');
+      ship(type, 'dup', A);
+      ship(type, 'dup', B);
+      registry.disablePackage(B);
+      expect(labelOf(await protocol.getMetaItem({ type, name: 'dup', packageId: A } as never))).toBe(`env ${type}`);
+      registry.enablePackage(B);
+      const err = await refusalOf(() => protocol.getMetaItem({ type, name: 'dup', packageId: A } as never));
+      expect([err.status, err.refusal.reason]).toEqual([409, 'ambiguous-in-closure']);
+      expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    });
+  }
+
+  // [#32568 × #32183, epic ruling 6817768147] A sealed type (`agent`): the
+  // environment's item is declined at the enabled holder's exact address
+  // with the other holder disabled, and at both re-enabled; each serves its
+  // own. FROM (`main` with #32497): with B disabled, A's address served the
+  // environment's item; re-enabled, refused naming both.
+  it('[#32568 × #32183] agent: the environment\'s item of a name two packages hold is declined at the enabled holder\'s exact address, one disabled or neither (#32497: served there with one disabled, 409 naming both re-enabled)', async () => {
+    envItem('agent', 'dup');
+    ship('agent', 'dup', A);
+    ship('agent', 'dup', B);
+    registry.disablePackage(B);
+    expect(labelOf(await protocol.getMetaItem({ type: 'agent', name: 'dup', packageId: A } as never))).toBe('alpha agent');
+    registry.enablePackage(B);
+    for (const [at, own] of [[A, 'alpha agent'], [B, 'beta agent']] as const) {
+      expect(labelOf(await protocol.getMetaItem({ type: 'agent', name: 'dup', packageId: at } as never)), at).toBe(own);
+    }
+  });
+
+  // [#32183, contract review M2] The same row, read where the disabled holder
+  // is addressed and where the enabled holder lists. The disabled holder's
+  // exact address and its pair answer its withheld item (FROM: refused naming
+  // both, the row counting two owners); the list scoped to the enabled holder
+  // serves the row as its customization (FROM: its own item, the row left
+  // out). Re-enabled, each answers as FROM. Both registration orders.
+  const dashboardsListed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'dashboard', packageId } as never)) as { items?: Array<{ name?: string; label?: string }> })
+    .items?.filter((i) => i.name === 'dup').map((i) => i.label);
+  const dashboardsForSend = async (packageId: string) => ((await protocol.getMetaItemsForExecution({ type: 'dashboard', packageId } as never)) as { items?: Array<{ name?: string; label?: string }> })
+    .items?.filter((i) => i.name === 'dup').map((i) => i.label);
+  const sortedCandidates = (err: PackageScopedNameRefusedError) => err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort();
+  const HOLDER_ORDERS = [['disabled holder first', [A, B]], ['enabled holder first', [B, A]]] as const;
+
+  const storedPackageLessDashboard = () => rows.push({
+    id: 'row_dup', type: 'dashboard', name: 'dup', state: 'active', package_id: null,
+    metadata: JSON.stringify({ name: 'dup', label: 'stored dashboard' }),
+  });
+  const PACKAGE_LESS_ROWS = [
+    ['the environment\'s item', () => envItem('dashboard', 'dup')],
+    ['a package-less stored row', () => storedPackageLessDashboard()],
+  ] as const;
+
+  it.each(HOLDER_ORDERS.flatMap(([order, ids]) => PACKAGE_LESS_ROWS.map(([row, add]) => [order, row, ids, add] as const)))('[#32183] dashboard (%s, beside %s): the disabled holder\'s address and its pair answer its withheld item; re-enabled, both refused naming both', async (_order, _row, order, addRow) => {
+    for (const id of order) ship('dashboard', 'dup', id);
+    addRow();
+    registry.disablePackage(A);
+    for (const at of [A, PAIR_A]) {
+      const answer = await protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: at } as never);
+      expect(labelOf(answer), at).toBeUndefined();
+      expect(JSON.stringify(answer ?? null), at).not.toMatch(/(env|stored|alpha|beta) dashboard/);
+    }
+    registry.enablePackage(A);
+    for (const at of [A, PAIR_A]) {
+      const err = await refusalOf(() => protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: at } as never));
+      expect([err.status, err.refusal.reason], at).toEqual([409, 'ambiguous-in-closure']);
+      expect(sortedCandidates(err), at).toEqual([A, B]);
+    }
+  });
+
+  // [#32183, epic ruling R4-D, row 26] The ENABLED holder's pair beside the
+  // same row, the other holder disabled. FROM (`main` 216674301, measured):
+  // 409 `ambiguous-in-closure` naming both. Re-enabled, as FROM.
+  const PAIR_B = `${B}.custom`;
+  const ROW_LABELS: Record<string, string> = { 'the environment\'s item': 'env dashboard', 'a package-less stored row': 'stored dashboard' };
+  it.each(HOLDER_ORDERS.flatMap(([order, ids]) => PACKAGE_LESS_ROWS.map(([row, add]) => [order, row, ids, add] as const)))('[#32183] dashboard (%s, beside %s): `?package=<enabled>.custom` serves the row as the enabled holder\'s customization, or 404 while #32501 location 1 stands; re-enabled, refused naming both', async (_order, row, order, addRow) => {
+    for (const id of order) ship('dashboard', 'dup', id);
+    addRow();
+    registry.disablePackage(A);
+    const answer = await protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: PAIR_B } as never);
+    // [#32501 location 1] With the disabled holder registered first, the pair
+    // address's envelope falls back to the first holder that ships the name,
+    // the disabled one, so the face withholds it (404), as the same fallback
+    // does on `main`. ⚠️ Flip this arm to the row (200) when #32501 lands.
+    if (order[0] === A) expect([labelOf(answer), /(env|stored|alpha|beta) dashboard/.test(JSON.stringify(answer ?? null))]).toEqual([undefined, false]);
+    else expect(labelOf(answer)).toBe(ROW_LABELS[row]);
+    registry.enablePackage(A);
+    const err = await refusalOf(() => protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: PAIR_B } as never));
+    expect([err.status, err.refusal.reason, sortedCandidates(err)]).toEqual([409, 'ambiguous-in-closure', [A, B]]);
+  });
+
+  // [epic ruling R4-A, row 33] …and so does the execution list at that
+  // address, which a send resolved to the enabled holder reads (FROM: its own
+  // item; measured on `main` 216674301).
+  it.each(HOLDER_ORDERS)('[#32183] dashboard (%s): the list scoped to the enabled holder, and its execution list, serve the package-less stored row as its customization while the other holder is disabled; re-enabled, its own item', async (_order, order) => {
+    for (const id of order) ship('dashboard', 'dup', id);
+    storedPackageLessDashboard();
+    registry.disablePackage(A);
+    expect(await dashboardsListed(B)).toEqual(['stored dashboard']);
+    expect(await dashboardsForSend(B)).toEqual(['stored dashboard']);
+    registry.enablePackage(A);
+    expect(await dashboardsListed(B)).toEqual(['beta dashboard']);
+    expect(await dashboardsForSend(B)).toEqual(['beta dashboard']);
+  });
+
+  it.each(HOLDER_ORDERS)('[#32183] CONTROL — dashboard (%s): the environment\'s item in the registry is not in the list scoped to a holder, the other holder disabled or not', async (_order, order) => {
+    envItem('dashboard', 'dup');
+    for (const id of order) ship('dashboard', 'dup', id);
+    registry.disablePackage(A);
+    expect(await dashboardsListed(B)).toEqual(['beta dashboard']);
+    registry.enablePackage(A);
+    expect(await dashboardsListed(B)).toEqual(['beta dashboard']);
+  });
+
   for (const stamp of ['sys_metadata', '']) {
     it(`a package-less row hydrated into the registry (stamped ${JSON.stringify(stamp)}) is refused at both holders' exact addresses; with one holder it is served (contract review R2-A)`, async () => {
-      registry.registerItem('agent', { name: 'dup', label: 'hydrated agent', _packageId: stamp, _provenance: 'org' }, 'name' as never);
-      ship('agent', 'dup', A);
-      expect(labelOf(await protocol.getMetaItem({ type: 'agent', name: 'dup', packageId: A } as never)), 'one holder').toBe('hydrated agent');
-      ship('agent', 'dup', B);
+      registry.registerItem('dashboard', { name: 'dup', label: 'hydrated dashboard', _packageId: stamp, _provenance: 'org' }, 'name' as never);
+      ship('dashboard', 'dup', A);
+      expect(labelOf(await protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: A } as never)), 'one holder').toBe('hydrated dashboard');
+      ship('dashboard', 'dup', B);
       for (const at of [A, B]) {
-        const err = await refusalOf(() => protocol.getMetaItem({ type: 'agent', name: 'dup', packageId: at } as never));
+        const err = await refusalOf(() => protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: at } as never));
         expect([err.status, err.refusal.reason], at).toEqual([409, 'ambiguous-in-closure']);
         expect(err.refusal.candidates, at).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
       }
@@ -953,6 +1224,196 @@ describe('[#31699] a package-less row of a name two packages hold is no holder\'
     ship('agent', 'dup', A);
     ship('agent', 'dup', B);
     expect(() => protocol.admitEnvironmentQualifier({ type: 'agent', name: 'dup' })).toThrow(PackageScopedNameRefusedError);
+  });
+});
+
+/**
+ * [#32407, ADR-0150 D4, epic ruling 6761802819] The package-less row refusal
+ * above, for a package-scoped type whose one-holder rule has narrowed to the
+ * namespace but whose by-name readers do not consult `(package, name)`:
+ * `action` (#31697). Two namespaces may hold its name, so a package-less item
+ * of a two-holder name is no holder's own on either exact address, and the
+ * list scoped to a holder leaves it out. The layered read (`?layers=true`)
+ * judges its code layer and its stored row at the exact address as the plain
+ * read judges what it serves there.
+ *
+ * BASE (measured on 27abd458a8 before this change, same fixture): `?package=`
+ * of each holder served the environment's package-less `action` item (the
+ * registry's bare slot, hydrated or registered); the layered read `?package=`
+ * of a package-less `email_template` or `action` row of a two-holder name
+ * reported the row as that holder's overlay, at both holders.
+ */
+describe('[#32407] a package-less item of a two-holder name of a narrowed type outside the read set is no holder\'s own', () => {
+  const actionBody = (label: string) => ({ name: 'approve', label, type: 'url', target: 'https://example.com' });
+  const shipAction = (packageId: string) =>
+    registry.registerItem('action', actionBody(`${packageId.split('.').pop()} action`), 'name' as never, packageId);
+  /** The environment's item in the registry's bare slot: as the hydrator puts a package-less row there, or as code registers one. */
+  const envAction = (stamp?: string) => registry.registerItem('action', {
+    ...actionBody('env action'), _provenance: 'org', ...(stamp === undefined ? {} : { _packageId: stamp }),
+  }, 'name' as never);
+  const storeAction = (packageId: string | null, label: string) => rows.push({
+    id: `row_${packageId ?? 'env'}`, type: 'action', name: 'approve', state: 'active', package_id: packageId,
+    bundle_member: null, metadata: JSON.stringify(actionBody(label)),
+  });
+  const read = (packageId: string) => protocol.getMetaItem({ type: 'action', name: 'approve', packageId } as never);
+  const layered = (type: string, name: string, packageId: string) =>
+    protocol.getMetaItemLayered({ type, name, packageId } as never) as Promise<{ overlay?: { label?: string } | null; code?: { label?: string } | null }>;
+  const listed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'action', packageId } as never)) as { items?: Array<{ name?: string; label?: string }> })
+    .items?.filter((i) => i.name === 'approve').map((i) => i.label).sort();
+
+  it('the premise: `action` is narrowed to the namespace and its readers do not consult `(package, name)`', () => {
+    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('action');
+    expect(registry.readsByPackage('action')).toBe(false);
+  });
+
+  // [#32568, epic ruling 6817768147] `action` is a sealed managed type: the
+  // environment's item of a name a package ships is the declined row's copy
+  // a hydration put in the bare slot, so each holder's exact read serves its
+  // own action, with one holder or two (#32407 refused it 409 with two, and
+  // served it with one).
+  for (const stamp of [undefined, '', 'sys_metadata']) {
+    it(`two holders: both exact reads of the environment's item (stamp ${JSON.stringify(stamp)}) serve the holder's own action; both lists serve the holder's own (#32407: 409 naming both)`, async () => {
+      envAction(stamp);
+      shipAction(A);
+      shipAction(B);
+      for (const [at, own] of [[A, 'alpha action'], [B, 'beta action']] as const) {
+        expect(labelOf(await read(at)), at).toBe(own);
+        expect(await listed(at), at).toEqual([own]);
+      }
+    });
+  }
+
+  it('one holder: the environment\'s item is declined on the holder\'s exact address, which serves its own action (#32407: served the environment\'s item)', async () => {
+    envAction();
+    shipAction(A);
+    expect(labelOf(await read(A))).toBe('alpha action');
+  });
+
+  it('CONTROL — after a bind: the item bound to alpha is served on alpha only; beta serves its own', async () => {
+    envAction(A);
+    shipAction(A);
+    shipAction(B);
+    expect(labelOf(await read(A))).toBe('env action');
+    expect(labelOf(await read(B))).toBe('beta action');
+  });
+
+  it('CONTROL — a stored package-less row of a shipped action is declined at each exact address (ADR-0126 Regime C), as on main: each serves its own', async () => {
+    shipAction(A);
+    shipAction(B);
+    storeAction(null, 'stored action');
+    expect(labelOf(await read(A))).toBe('alpha action');
+    expect(labelOf(await read(B))).toBe('beta action');
+    expect(await listed(A)).toEqual(['alpha action']);
+    expect(await listed(B)).toEqual(['beta action']);
+  });
+
+  it('CONTROL — the bare read keeps its own judge: two holders refused 409, as #32244 refuses it', async () => {
+    envAction();
+    shipAction(A);
+    shipAction(B);
+    let thrown: (Error & { status?: number; code?: string }) | undefined;
+    try {
+      await protocol.getMetaItem({ type: 'action', name: 'approve' } as never);
+    } catch (err) {
+      thrown = err as typeof thrown;
+    }
+    expect([thrown?.status, thrown?.code], String(thrown)).toEqual([409, 'RESOURCE_CONFLICT']);
+  });
+
+  // [#32183 × #32407, ADR-0150 D3] The package-less row's owners are the
+  // SERVED holders (`packageLessRowOwners`), for a type `judgesPackageLessRows`
+  // judges because it narrowed (`action`) as for one whose readers are wired
+  // (rows 26 and 32): with the other holder disabled the row is the enabled
+  // holder's customization, and the disabled holder's address answers its
+  // withheld item; re-enabled, both refuse naming both. FROM (`main` with
+  // #32407): both refused naming both, the disabled holder included.
+  // [#32568, epic ruling 6817768147] `action` is sealed: its package-less
+  // item is declined at a holder's exact address, so the enabled holder's
+  // address serves its own action, the disabled holder's still answers its
+  // withheld item, and re-enabled each serves its own. FROM (`main` with
+  // #32497): the environment's item at A with B disabled; 409 naming both
+  // re-enabled.
+  it.each([['enabled holder first', [A, B]], ['disabled holder first', [B, A]]] as const)('[#32183] one of the two holders disabled (%s): the environment\'s item is declined at the enabled holder\'s exact address, the disabled holder\'s answers its withheld item; re-enabled, each serves its own (#32497: the environment\'s item; 409 naming both)', async (_order, order) => {
+    envAction();
+    for (const id of order) shipAction(id);
+    registry.disablePackage(B);
+    expect(labelOf(await read(A))).toBe('alpha action');
+    const withheld = await read(B);
+    expect(labelOf(withheld)).toBeUndefined();
+    expect(JSON.stringify(withheld ?? null)).not.toMatch(/(env|alpha|beta) action/);
+    registry.enablePackage(B);
+    for (const [at, own] of [[A, 'alpha action'], [B, 'beta action']] as const) {
+      expect(labelOf(await read(at)), at).toBe(own);
+    }
+  });
+
+  it.each([['enabled holder first', [A, B]], ['disabled holder first', [B, A]]] as const)('[#32183] one of the two holders disabled (%s): the layered read at the enabled holder reports no overlay for a package-less stored row, and its own action as effective, re-enabled too (#32497: the row as its overlay; 409 naming both)', async (_order, order) => {
+    for (const id of order) shipAction(id);
+    storeAction(null, 'stored action');
+    const layered = () => protocol.getMetaItemLayered({ type: 'action', name: 'approve', packageId: A } as never) as Promise<{ overlay?: { label?: string } | null; effective?: { label?: string } }>;
+    registry.disablePackage(B);
+    for (const when of ['B disabled', 're-enabled']) {
+      if (when === 're-enabled') registry.enablePackage(B);
+      const answer = await layered();
+      expect([answer.overlay ?? null, answer.effective?.label], when).toEqual([null, 'alpha action']);
+    }
+  });
+
+  describe('the layered read (`?layers=true&package=X`) judges the exact address as the plain read does (epic read S2)', () => {
+    const tpl = (packageId: string) => registry.registerItem('email_template', {
+      name: 'welcome', label: `${packageId.split('.').pop()} en-US`, locale: 'en-US', subject: 's', bodyHtml: '<p>x</p>',
+    }, 'name' as never, packageId);
+    const envTpl = () => rows.push({
+      id: 'env_tpl', type: 'email_template', name: 'welcome', state: 'active', package_id: null, bundle_member: null,
+      metadata: JSON.stringify({ name: 'welcome', label: 'env en-US', locale: 'en-US', subject: 's', bodyHtml: '<p>e</p>' }),
+    });
+
+    it('two holders: `?layers=true&package=X` of an overlay type\'s package-less row refuses 409 naming both, at both holders (BASE: reported the row as each holder\'s overlay)', async () => {
+      tpl(A);
+      tpl(B);
+      envTpl();
+      for (const at of [A, B]) {
+        const err = await refusalOf(() => layered('email_template', 'welcome', at));
+        expect([err.status, err.refusal.reason, err.refusal.candidates], at)
+          .toEqual([409, 'ambiguous-in-closure', [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]]);
+      }
+    });
+
+    // [#32568, epic ruling 6817768147] A sealed type's package-less row is no
+    // holder's customization: declined at the address, so no overlay layer.
+    it('a sealed type (`action`): `?layers=true&package=X` of a package-less row reports no overlay and the holder\'s own as effective, with two holders or one (#32407: 409 naming both; one holder reported the row)', async () => {
+      shipAction(A);
+      storeAction(null, 'stored action');
+      const one = await layered('action', 'approve', A) as { overlay?: unknown; effective?: { label?: string } };
+      expect([one.overlay ?? null, one.effective?.label], 'one holder').toEqual([null, 'alpha action']);
+      shipAction(B);
+      for (const [at, own] of [[A, 'alpha action'], [B, 'beta action']] as const) {
+        const two = await layered('action', 'approve', at) as { overlay?: unknown; effective?: { label?: string } };
+        expect([two.overlay ?? null, two.effective?.label], at).toEqual([null, own]);
+      }
+    });
+
+    it('CONTROL — one holder: the layered read reports an overlay type\'s package-less row as the overlay', async () => {
+      tpl(A);
+      envTpl();
+      expect((await layered('email_template', 'welcome', A)).overlay?.label).toBe('env en-US');
+    });
+
+    it('CONTROL — after a bind: the layered read of the bound holder reports its row; the other holder\'s reports none', async () => {
+      shipAction(A);
+      shipAction(B);
+      storeAction(A, 'bound action');
+      expect((await layered('action', 'approve', A)).overlay?.label).toBe('bound action');
+      expect((await layered('action', 'approve', B)).overlay ?? null).toBeNull();
+    });
+
+    it('CONTROL — the code layer is the holder\'s own: the environment\'s registry item of a two-holder name is no holder\'s code layer, as on main', async () => {
+      envAction();
+      shipAction(A);
+      shipAction(B);
+      expect((await layered('action', 'approve', A)).code?.label).toBe('alpha action');
+      expect((await layered('action', 'approve', B)).code?.label).toBe('beta action');
+    });
   });
 });
 
@@ -1189,5 +1650,292 @@ describe('[#32310] the caller arm resolves a dataset from the reader\'s package 
     expect(labelOf(await protocol.getMetaItem({ type: 'dataset', name: 'pipeline' }))).toBe('alpha dataset');
     expect(labelOf(await protocol.getMetaItem({ type: 'dataset', name: 'twin', packageId: B }))).toBe('beta dataset');
     expect((await refusalOf(() => protocol.getMetaItem({ type: 'dataset', name: 'twin' }))).refusal.reason).toBe('ambiguous-in-environment');
+  });
+});
+
+/**
+ * [#32568, ADR-0150 D4, ADR-0126 Regime C; epic ruling 6817768147] A
+ * package-less row of a name a package ships, at a holder's exact address,
+ * answers one thing on every read and in every hydration state, by type class:
+ *
+ *  - an OVERLAY type (`email_template`, `dashboard`, `report`): the row is a
+ *    holder's customization (D4). With two holders it is refused naming both
+ *    on the strict draft read, `previewDrafts`, the layered `draft` layer and
+ *    the list's preview, as on the active read; with one it is served;
+ *  - a SEALED managed type (`action`, `queue`, `hook`, …: artifact-backed and
+ *    no overlay channel): the row customizes nothing, so it is declined, and
+ *    the address serves its holder's own item, with one holder or two, before
+ *    and after a hydration (the read-side hydrator no longer lays it into the
+ *    first holder's slot under that holder's envelope).
+ *
+ * BASE (measured on 238b9ee694 before this change, same fixture): a
+ * package-less draft of a two-holder `email_template` or `action` was served
+ * 200 at both holders on the strict draft read, the preview and the layered
+ * `draft` layer, and the list scoped to either holder previewed it; a
+ * package-less `hook`/`job`/`queue`/`sharing_rule`/`assignment_rule` item of
+ * a two-holder name was served at both. A stored package-less `action` or
+ * `queue` row, two holders: `?package=` of each answered its own before an
+ * unscoped list read; after it, the first-registered holder's address served
+ * the stored body as that holder's own (the hydrator had laid it into that
+ * holder's slot under its envelope); with a bare-slot copy (stamp `''` or
+ * `sys_metadata`) `action` answered 409 and `queue` the copy; the layered read
+ * refused `action` 409 and reported the `queue` row as each holder's overlay.
+ * With one holder, the exact and the bare read served the stored body after
+ * the list read and the holder's own before it.
+ */
+describe('[#32568] a package-less row at a holder\'s exact address: declined for a sealed type, refused with two holders for an overlay type, in every state', () => {
+  const tpl = (packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} en-US`, locale: 'en-US', subject: 's', bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const actionBody = (label: string) => ({ name: 'approve', label, type: 'url', target: 'https://example.com' });
+  const sealedBody = (type: string, label: string) => (type === 'action' ? actionBody(label) : { name: 'approve', label });
+  const shipSealed = (type: string, packageId: string) =>
+    registry.registerItem(type, sealedBody(type, `${packageId.split('.').pop()} ${type}`), 'name' as never, packageId);
+  const storeRow = (type: string, state: 'active' | 'draft', label: string, body?: Record<string, unknown>) => rows.push({
+    id: `${type}_${state}`, type, name: body?.name ?? 'approve', state, package_id: null, bundle_member: null,
+    metadata: JSON.stringify(body ?? sealedBody(type, label)),
+  });
+  const read = (type: string, name: string, packageId: string, opts: Record<string, unknown> = {}) =>
+    protocol.getMetaItem({ type, name, packageId, ...opts } as never);
+  const layeredDraft = async (type: string, name: string, packageId: string) =>
+    ((await protocol.getMetaItemLayered({ type, name, packageId } as never, { withDraft: true } as never)) as { draft?: { label?: string } | null }).draft ?? null;
+  const previewList = async (type: string, packageId: string) =>
+    ((await protocol.getMetaItems({ type, packageId, previewDrafts: true } as never)) as { items?: Array<{ label?: string }> }).items?.map((i) => i.label).sort();
+  const expectBothRefused = async (at: string, answer: () => Promise<unknown>) => {
+    const err = await refusalOf(answer);
+    expect([err.status, err.refusal.reason, err.refusal.candidates], at)
+      .toEqual([409, 'ambiguous-in-closure', [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]]);
+  };
+
+  describe('locations 1 and 3: the draft exits judge the address as the active read does', () => {
+    const envDraft = () => storeRow('email_template', 'draft', 'env draft', {
+      name: 'welcome', label: 'env draft', locale: 'en-US', subject: 's', bodyHtml: '<p>d</p>',
+    });
+
+    it('overlay type, two holders: the strict draft read, the preview and the layered `draft` layer refuse 409 naming both; the scoped list previews the holder\'s own (BASE: served the package-less draft at both)', async () => {
+      tpl(A);
+      tpl(B);
+      envDraft();
+      for (const [at, own] of [[A, 'alpha en-US'], [B, 'beta en-US']] as const) {
+        await expectBothRefused(`${at} strict`, () => read('email_template', 'welcome', at, { state: 'draft' }));
+        await expectBothRefused(`${at} preview`, () => read('email_template', 'welcome', at, { previewDrafts: true }));
+        await expectBothRefused(`${at} layered draft`, () => layeredDraft('email_template', 'welcome', at));
+        expect(await previewList('email_template', at), at).toEqual([own]);
+      }
+    });
+
+    it('CONTROL — overlay type, one holder: the package-less draft is that holder\'s, on every draft exit', async () => {
+      tpl(A);
+      envDraft();
+      expect(labelOf(await read('email_template', 'welcome', A, { state: 'draft' }))).toBe('env draft');
+      expect(labelOf(await read('email_template', 'welcome', A, { previewDrafts: true }))).toBe('env draft');
+      expect((await layeredDraft('email_template', 'welcome', A) as { label?: string } | null)?.label).toBe('env draft');
+      expect(await previewList('email_template', A)).toEqual(['env draft']);
+    });
+
+    it('sealed type (`action`), two holders and one: the package-less draft is declined: no draft at the address, the preview serves the holder\'s own, the layered `draft` layer is null (BASE: served the draft at both)', async () => {
+      shipSealed('action', A);
+      storeRow('action', 'draft', 'env draft');
+      for (const holders of [[A], [A, B]]) {
+        if (holders.length === 2) shipSealed('action', B);
+        for (const at of holders) {
+          const own = `${at.split('.').pop()} action`;
+          const err = await read('action', 'approve', at, { state: 'draft' }).then(() => undefined, (e: { status?: number }) => e);
+          expect(err?.status, `${at} strict, ${holders.length} holder(s)`).toBe(404);
+          expect(labelOf(await read('action', 'approve', at, { previewDrafts: true })), `${at} preview`).toBe(own);
+          expect(await layeredDraft('action', 'approve', at), `${at} layered draft`).toBeNull();
+        }
+      }
+    });
+  });
+
+  describe('location 2: the types with no one-holder rule are sealed, so their package-less item is declined', () => {
+    for (const type of ['hook', 'job', 'queue', 'sharing_rule', 'assignment_rule']) {
+      it(`${type}: the environment's item of a name two packages hold is declined at both exact addresses, each serving its own (BASE: served the environment's item at both)`, async () => {
+        registry.registerItem(type, { name: 'approve', label: `env ${type}`, _provenance: 'org' }, 'name' as never);
+        shipSealed(type, A);
+        shipSealed(type, B);
+        expect(labelOf(await read(type, 'approve', A)), A).toBe(`alpha ${type}`);
+        expect(labelOf(await read(type, 'approve', B)), B).toBe(`beta ${type}`);
+      });
+    }
+  });
+
+  describe('location 4: one answer in every hydration state (both registration orders)', () => {
+    const STATES = ['stored, not hydrated', 'after the read-side hydrator', "bare-slot copy stamped ''", "bare-slot copy stamped 'sys_metadata'"] as const;
+    const enter = async (type: string, state: (typeof STATES)[number]) => {
+      storeRow(type, 'active', 'stored');
+      if (state === 'after the read-side hydrator') await protocol.getMetaItems({ type } as never);
+      if (state.startsWith('bare-slot')) {
+        registry.registerItem(type, { ...sealedBody(type, 'stored'), _provenance: 'org', _packageId: state.endsWith("''") ? '' : 'sys_metadata' }, 'name' as never);
+      }
+    };
+
+    for (const type of ['action', 'queue']) {
+      for (const order of [[A, B], [B, A]]) {
+        for (const state of STATES) {
+          it(`${type}, two holders (${order.map((p) => p.split('.').pop()).join(' then ')}), ${state}: each exact address serves its own; the layered read reports no overlay (BASE: in the describe header)`, async () => {
+            for (const p of order) shipSealed(type, p);
+            await enter(type, state);
+            for (const at of [A, B]) {
+              const own = `${at.split('.').pop()} ${type}`;
+              expect(labelOf(await read(type, 'approve', at)), at).toBe(own);
+              const layers = await protocol.getMetaItemLayered({ type, name: 'approve', packageId: at } as never) as { overlay?: unknown; effective?: { label?: string } };
+              expect([layers.overlay ?? null, layers.effective?.label], `${at} layered`).toEqual([null, own]);
+            }
+            expect((registry.getPackageScopedItem(type, 'approve', order[0]!) as { label?: string }).label, 'the first holder\'s slot keeps its own')
+              .toBe(`${order[0]!.split('.').pop()} ${type}`);
+          });
+        }
+      }
+
+      it(`${type}, one holder: the stored row is declined before and after the read-side hydrator, on the exact and the bare read (BASE: after it, both served the row)`, async () => {
+        shipSealed(type, A);
+        storeRow(type, 'active', 'stored');
+        for (const when of ['before', 'after']) {
+          if (when === 'after') await protocol.getMetaItems({ type } as never);
+          expect(labelOf(await read(type, 'approve', A)), `${when} exact`).toBe(`alpha ${type}`);
+          expect(labelOf(await protocol.getMetaItem({ type, name: 'approve' } as never)), `${when} bare`).toBe(`alpha ${type}`);
+        }
+      });
+    }
+
+    // [Contract review S1 on #32741] The `metadata` service keys some types by
+    // name alone, so it can answer a package-less copy of the declined row at
+    // a holder's exact address. The layered read's code layer is the plain
+    // read's code step judged as the plain read judges it: the copy is
+    // declined there too, never the holder's `code` (one holder) nor a 409
+    // naming both (two).
+    for (const type of ['action', 'queue']) {
+      for (const holders of [[A], [A, B]]) {
+        it(`${type}, ${holders.length} holder(s): a service copy of the package-less row is declined on the plain read and the layered read's code layer alike`, async () => {
+          for (const p of holders) shipSealed(type, p);
+          storeRow(type, 'active', 'stored');
+          const copy = { ...sealedBody(type, 'stored'), _provenance: 'org', _packageId: '' };
+          const metadata = {
+            get: vi.fn(async () => copy),
+            getDiagnosed: vi.fn(async () => ({ data: copy, degraded: false, errors: [] })),
+          };
+          const served = new ObjectStackProtocolImplementation(
+            (protocol as unknown as { engine: never }).engine,
+            () => new Map<string, unknown>([['metadata', metadata]]),
+          );
+          for (const at of holders) {
+            const own = `${at.split('.').pop()} ${type}`;
+            expect(labelOf(await served.getMetaItem({ type, name: 'approve', packageId: at } as never)), `${at} plain`).toBe(own);
+            const layers = await served.getMetaItemLayered({ type, name: 'approve', packageId: at } as never) as { code?: { label?: string } | null; overlay?: unknown; effective?: { label?: string } };
+            expect([layers.code?.label, layers.overlay ?? null, layers.effective?.label], `${at} layered`).toEqual([own, null, own]);
+          }
+          expect(metadata.get.mock.calls.length + metadata.getDiagnosed.mock.calls.length, 'the service layer was read').toBeGreaterThan(0);
+        });
+      }
+    }
+
+    it('CONTROL — the bare read of a two-holder action keeps #32244\'s 409, after the hydrator too', async () => {
+      shipSealed('action', A);
+      shipSealed('action', B);
+      await enter('action', 'after the read-side hydrator');
+      const err = await read('action', 'approve', undefined as never).then(() => undefined, (e: { status?: number }) => e);
+      expect(err?.status).toBe(409);
+    });
+
+    it('overlay type (`email_template`), two holders: 409 naming both before and after the read-side hydrator, as before; the first holder\'s slot keeps its own (BASE: the hydrator laid the row into it)', async () => {
+      tpl(A);
+      tpl(B);
+      storeRow('email_template', 'active', 'env', { name: 'welcome', label: 'env en-US', locale: 'en-US', subject: 's', bodyHtml: '<p>e</p>' });
+      for (const when of ['before', 'after']) {
+        if (when === 'after') await protocol.getMetaItems({ type: 'email_template' } as never);
+        for (const at of [A, B]) await expectBothRefused(`${when} ${at}`, () => read('email_template', 'welcome', at));
+      }
+      expect((registry.getPackageScopedItem('email_template', 'welcome', A) as { label?: string }).label).toBe('alpha en-US');
+    });
+
+    // [#32568 × #32497] One holder disabled while the read-side hydrator
+    // runs: the served holder set is the enabled one, so an overlay type's
+    // row is that holder's customization (served at its address, and laid in
+    // under its envelope), and a sealed type's row is declined. Re-enabled,
+    // the protocol's exact read answers one thing per state: the overlay row
+    // is refused naming both, and each sealed holder serves its own. Not
+    // pinned here, and not healed by this card: an overlay type's copy stays
+    // in the enabled holder's registry slot after the re-enable, so that
+    // slot, the list scoped to it and its execution list answer the
+    // environment's row as its own until the next unscoped hydration (the
+    // re-enable heal, a follow-up under #32568).
+    const BOTH = [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }];
+    for (const type of ['email_template', 'action', 'queue']) {
+      it(`${type}, two holders, one disabled while the read-side hydrator runs, then re-enabled: one answer per state on the exact read`, async () => {
+        const overlay = type === 'email_template';
+        if (overlay) {
+          tpl(A);
+          tpl(B);
+          storeRow('email_template', 'active', 'env', { name: 'welcome', label: 'env en-US', locale: 'en-US', subject: 's', bodyHtml: '<p>e</p>' });
+        } else {
+          shipSealed(type, A);
+          shipSealed(type, B);
+          storeRow(type, 'active', 'stored');
+        }
+        const name = overlay ? 'welcome' : 'approve';
+        const answer = (at: string) => read(type, name, at).then((r) => labelOf(r) as unknown, (e: { status?: number; refusal?: { candidates?: unknown[] } }) => [e.status, e.refusal?.candidates]);
+        registry.disablePackage(B);
+        const servedAtA = overlay ? 'env en-US' : `alpha ${type}`;
+        expect(await answer(A), 'B disabled').toEqual(servedAtA);
+        await protocol.getMetaItems({ type } as never);
+        expect(await answer(A), 'B disabled, after the hydrator').toEqual(servedAtA);
+        registry.enablePackage(B);
+        for (const at of [A, B]) {
+          expect(await answer(at), `${at} re-enabled`).toEqual(overlay ? [409, BOTH] : `${at.split('.').pop()} ${type}`);
+        }
+      });
+    }
+
+    it('CONTROL — overlay type, one holder: the read-side hydrator still lays the row in under its one holder\'s envelope, and the exact read serves it', async () => {
+      tpl(A);
+      storeRow('email_template', 'active', 'env', { name: 'welcome', label: 'env en-US', locale: 'en-US', subject: 's', bodyHtml: '<p>e</p>' });
+      await protocol.getMetaItems({ type: 'email_template' } as never);
+      expect(labelOf(await read('email_template', 'welcome', A))).toBe('env en-US');
+      expect((registry.getPackageScopedItem('email_template', 'welcome', A) as { label?: string; _packageId?: string })).toMatchObject({ label: 'env en-US', _packageId: A });
+    });
+  });
+});
+
+/**
+ * [#32183, ruling (c)] An App's pair (`<App>.custom`) is the pair of every
+ * module of the App, so two modules holding one name are both its bases. A
+ * disabled base holds no name: the pair's address is read at the enabled
+ * base, and a refusal never names the disabled one. A pair whose every base
+ * is disabled answers a base's withheld item. The fixture's first holder is
+ * a package outside the App, so the layer below reaches neither base's item
+ * and the address's own bases decide the answer.
+ */
+describe('[#32183] an App\'s pair two modules share, one of them disabled', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Y = 'com.acme.suitey';
+  const APP_PAIR = `${APP}.custom`;
+  const moduleOf = (id: string) => ({
+    id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop()!, dependencies: { [APP]: '^1.0.0' },
+  }) as never;
+
+  beforeEach(() => {
+    registry.installPackage(manifest(APP), 'code');
+    registry.installPackage(moduleOf(X), 'code');
+    registry.installPackage(moduleOf(Y), 'code');
+  });
+
+  it.each([['enabled base first', [X, Y]], ['disabled base first', [Y, X]]] as const)('dashboard (%s): read at the enabled base; both enabled, refused naming both; both disabled, not found', async (_order, order) => {
+    ship('dashboard', 'dup', C);
+    for (const id of order) ship('dashboard', 'dup', id);
+    const read = () => protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: APP_PAIR } as never);
+    // CONTROL — both bases enabled: refused naming both, as on BASE.
+    const both = await refusalOf(read);
+    expect([both.status, both.refusal.reason]).toEqual([409, 'ambiguous-in-closure']);
+    expect(both.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()).toEqual([X, Y]);
+    // BASE (main f0f729e7 with the email-template branch): refused naming X and the disabled Y.
+    registry.disablePackage(Y);
+    expect(labelOf(await read())).toBe('suitex dashboard');
+    registry.disablePackage(X);
+    const neither = await read();
+    expect(labelOf(neither)).toBeUndefined();
+    expect(JSON.stringify(neither ?? null)).not.toMatch(/(suitex|suitey) dashboard/);
   });
 });

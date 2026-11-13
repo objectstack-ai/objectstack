@@ -466,3 +466,37 @@ describe('operation message catalog — the queue refusal, a sentence per verb',
     }
   });
 });
+
+/**
+ * `field_edit_denied`'s `{{fields}}` is spelled by two list rules that live in
+ * this catalog: `field_label_quoted` quotes one label, `field_label_list_separator`
+ * joins them. A locale added without them is refused by "every locale defines
+ * every key en defines" above; this asserts their shape. The rendered sentence
+ * per locale is pinned byte for byte at its call site,
+ * `packages/plugins/plugin-security/src/owner-queue-field-write-user-message.test.ts`.
+ */
+describe('operation message catalog — the field-label list rules', () => {
+  it('every locale quotes with exactly one {{label}} and separates with a placeholder-free mark', () => {
+    const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+    expect(locales.length).toBeGreaterThanOrEqual(4);
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      const quoted = catalog.field_label_quoted;
+      expect(quoted, `${locale} defines field_label_quoted`).toBeTypeOf('string');
+      expect(quoted.match(/\{\{\w+\}\}/g), `${locale}.field_label_quoted`).toEqual(['{{label}}']);
+      expect(quoted.replace('{{label}}', ''), `${locale}.field_label_quoted quotes`).not.toBe('');
+      const separator = catalog.field_label_list_separator;
+      expect(separator, `${locale} defines field_label_list_separator`).toBeTypeOf('string');
+      expect(separator.length, `${locale}.field_label_list_separator`).toBeGreaterThan(0);
+      expect(separator, `${locale}.field_label_list_separator placeholder-free`).not.toMatch(/[{}]/);
+    }
+  });
+
+  it('a deployment translation override wins for each rule, under the shared `errors.` address', () => {
+    const translate = (k: string) =>
+      k === 'errors.field_label_quoted' ? '[{{label}}]' : k === 'errors.field_label_list_separator' ? ' / ' : k;
+    expect(renderOperationMessage({ messageKey: 'field_label_quoted', params: { label: 'A' } }, { locale: 'en', translate }))
+      .toBe('[A]');
+    expect(renderOperationMessage({ messageKey: 'field_label_list_separator' }, { locale: 'en', translate }))
+      .toBe(' / ');
+  });
+});

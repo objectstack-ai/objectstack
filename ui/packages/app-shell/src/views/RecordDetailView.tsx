@@ -15,12 +15,13 @@ import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHea
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale, useLocalization, pickLocalized } from '@object-ui/i18n';
-import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, answeredLoadFailure, extractWriteErrorMessage, isExternalWriteRefusal } from '@object-ui/react';
+import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, usePredicateScope, classifyLoadError, answeredLoadFailure, extractWriteErrorMessage, isExternalWriteRefusal } from '@object-ui/react';
 import type { AnsweredLoadFailure } from '@object-ui/react';
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
 import { Database, ArrowLeft, ChevronLeft, ChevronRight, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, PanelRight } from 'lucide-react';
+import { checkPageRecordPlacesComponent } from '@objectstack/spec/ui';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
@@ -58,6 +59,7 @@ import { createConsoleServerActionHandler } from '../utils/consoleServerAction.j
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 import { actionContextOrg } from '../utils/actionContextOrg.js';
+import { editFormLockedByState } from '../utils/editFormLockedByState.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
@@ -100,6 +102,7 @@ import { shortcutKeycaps, useAdvertiseShortcut, type AdvertisedShortcut, type Sh
 import { nativeShare } from '@object-ui/mobile';
 import { useActionModal } from '../hooks/useActionModal.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
+import { BackToHomeButton, NotFoundState } from '../components/NotFoundState.js';
 import { resolveCascadeDeleteLabels } from '../hooks/useObjectActions.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
 import { useObjectPresence } from '../hooks/useObjectPresence.js';
@@ -308,6 +311,21 @@ const PAGE_NODE_PROPERTY_KEYS = ['children', 'items'] as const;
  * other strip keeps its selection in its own state, which this view cannot see.
  */
 const TABS_URL_SYNC_KEYS: ReadonlySet<string> = new Set(['regions', 'components', 'children']);
+
+/**
+ * Whether an authored record page places no component, by the spec's own
+ * reading: `checkPageRecordPlacesComponent` (`@objectstack/spec/ui`) refuses a
+ * `full` record page whose regions place nothing, because it draws a blank
+ * detail panel. The save door refuses one, but a row stored before that
+ * refusal, or a page a package registers flat, still arrives here; it is
+ * explained where its body would be, never swapped for the default page.
+ */
+function recordPagePlacesNoComponent(page: Parameters<typeof checkPageRecordPlacesComponent>[0] | null | undefined): boolean {
+  if (!page || typeof page !== 'object') return false;
+  let refused = false;
+  checkPageRecordPlacesComponent(page, { value: page, issues: [], addIssue: () => { refused = true; } });
+  return refused;
+}
 
 /**
  * The fields the highlight strip of a synthesized record page draws: the
@@ -2697,6 +2715,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   });
   const editDisabledByPredicate = editPredicates?.disabledWhen != null && editDisabledPred;
   const deleteDisabledByPredicate = deletePredicates?.disabledWhen != null && deleteDisabledPred;
+  // objectstack#32756 — the record's state leaves the edit form nothing to
+  // edit: every field it shows resolves read-only, at least one by its
+  // `readonlyWhen`. Judged by the form's own field-rule evaluator over the
+  // same predicate scope the form binds (`editFormLockedByState`), so Edit
+  // goes off exactly when the form would open with no control.
+  const predicateScope = usePredicateScope();
+  const editLockedByState = useMemo(
+    () => editFormLockedByState(objectDef as any, pageRecord as Record<string, unknown> | null | undefined, predicateScope),
+    [objectDef, pageRecord, predicateScope],
+  );
 
   // ── Audit history fetch ────────────────────────────────────────────
   // Loads recent sys_audit_log entries for this record so the record page can
@@ -4348,17 +4376,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
   if (!objectDef) {
     return withPhoneBar(
-      <div className="flex h-full items-center justify-center p-4">
-        <Empty>
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-            <Database className="h-6 w-6 text-muted-foreground" />
-          </div>
-          <EmptyTitle>{t('empty.objectNotFound')}</EmptyTitle>
-          <EmptyDescription>
-            {t('empty.objectNotFoundDescription', { name: objectName })}
-          </EmptyDescription>
-        </Empty>
-      </div>
+      <NotFoundState
+        testId="object-not-found"
+        icon={Database}
+        title={t('empty.objectNotFound')}
+        description={t('empty.objectNotFoundDescription', { name: objectName })}
+        actions={<BackToHomeButton testId="object-not-found-home" />}
+      />
     );
   }
 
@@ -4391,22 +4415,31 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // broken page instead of a clean 404.
   // A write deleted the record (`recordDeleted`): it is missing, and no body
   // is drawn, so none of its readers asks the server for it again.
+  // Its way out is the object's own list, then Home.
   if (pageRecordStatus === 'missing' || recordDeleted) {
+    const listName = servedObjectPluralLabel(objectDef, language, objectPluralLabel);
     return withPhoneBar(
-      <div className="flex h-full items-center justify-center p-4">
-        <Empty>
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-            <Database className="h-6 w-6 text-muted-foreground" />
-          </div>
-          <EmptyTitle>{t('empty.recordNotFound', { defaultValue: 'Record not found' })}</EmptyTitle>
-          <EmptyDescription>
-            {t('empty.recordNotFoundDescription', {
-              defaultValue:
-                'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
-            })}
-          </EmptyDescription>
-        </Empty>
-      </div>
+      <NotFoundState
+        testId="record-not-found"
+        icon={Database}
+        title={t('empty.recordNotFound', { defaultValue: 'Record not found' })}
+        description={t('empty.recordNotFoundDescription', {
+          defaultValue:
+            'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
+        })}
+        actions={
+          <>
+            {objectListPath ? (
+              <Button asChild variant="outline">
+                <Link to={objectListPath} data-testid="record-not-found-list">
+                  {t('empty.backToList', { name: listName, defaultValue: 'Back to {{name}}' })}
+                </Link>
+              </Button>
+            ) : null}
+            <BackToHomeButton testId="record-not-found-home" />
+          </>
+        }
+      />
     );
   }
 
@@ -4513,6 +4546,39 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     );
   }
 
+  // The authored record page places no component, so its body would be a
+  // blank panel for every record. A page is what its author composes, so the
+  // default page is not drawn in its place: the panel says what is wrong and
+  // how to fix it. Judged on the page as authored, before pruning. Like the
+  // refused named page, it stamps no print root.
+  if (assignedPage && recordPagePlacesNoComponent(resolvedPage)) {
+    return withPhoneBar(
+      <div className="flex h-full items-center justify-center p-4">
+        <Empty data-testid="record-page-places-no-component">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <FileText className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <EmptyTitle>
+            {t('empty.recordPagePlacesNoComponent', { defaultValue: 'This record page has nothing to show' })}
+          </EmptyTitle>
+          <EmptyDescription>
+            {/* A page row with no name gets the sentence that names none. */}
+            {resolvedPage?.name
+              ? t('empty.recordPagePlacesNoComponentDescription', {
+                  name: resolvedPage.name,
+                  defaultValue:
+                    'The record page "{{name}}" places no component in its regions, so it shows nothing for any record. An administrator can fix it in Studio: add components to a region, make the page slotted to show the default record page, or delete the page so the default record page shows.',
+                })
+              : t('empty.recordPagePlacesNoComponentDescriptionUnnamed', {
+                  defaultValue:
+                    'This record page places no component in its regions, so it shows nothing for any record. An administrator can fix it in Studio: add components to a region, make the page slotted to show the default record page, or delete the page so the default record page shows.',
+                })}
+          </EmptyDescription>
+        </Empty>
+      </div>
+    );
+  }
+
   // A page always exists past the guards above — authored (assignedPage)
   // or synthesized (buildDefaultPageSchema).
   // Synthesized pages place `record:attachments` beside the discussion feed
@@ -4602,7 +4668,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // are independent reasons, and neither may cancel the other. With no
         // predicate declared `editDisabledByPredicate` is `false`, so this is
         // byte-identical to the pre-#4213 `disabled: approvalLocked`.
-        disabled: approvalLocked || editDisabledByPredicate,
+        //
+        // objectstack#32756 — a record whose state locks every field of the
+        // edit form is a third reason for the same off, explained beside the
+        // header by the `editLockedByState` badge, as the lock band explains
+        // the approval lock.
+        disabled: approvalLocked || editDisabledByPredicate || editLockedByState,
         onClick: () => onEdit({ id: pureRecordId }),
       } as any);
     }
@@ -5055,8 +5126,26 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // lives in `ManagedByBadge`, so an end user sees none here. Inside
   // Setup it is not drawn at all: its note rides the header's
   // object-label chip (`objectLabelNote` below, objectui#13385).
+  //
+  // The state lock (objectstack#32756) rides here too: the header's Edit is
+  // the host's own action, so its reason is the host's to draw (the
+  // `page:header` renderer draws a disabled reason for authored actions
+  // only), as the DetailView lock band draws the approval lock's. Not while
+  // an approval lock already explains a disabled Edit.
+  const stateLockLabel = t('detail.lockedByState', { defaultValue: 'Not editable in its current state' });
   const sharedChrome = (
     <>
+      {editLockedByState && !approvalLocked && (
+        <span
+          role="status"
+          data-testid="record-state-lock"
+          title={stateLockLabel}
+          className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
+        >
+          <Lock className="h-3 w-3" aria-hidden="true" />
+          <span>{stateLockLabel}</span>
+        </span>
+      )}
       {recordPresence.length > 0 && (
         <PresenceAvatars users={recordPresence} size="sm" maxVisible={3} showStatus />
       )}
@@ -5123,7 +5212,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             the header-vs-row asymmetry #4213 is about: Edit gone from the
             header while double-click still opened a draft the object says this
             record may not have. `disabledWhen` suppresses the pencils for the
-            same reason `approvalLocked` does — a draft Save would reject. */}
+            same reason `approvalLocked` does — a draft Save would reject.
+            `editLockedByState` (objectstack#32756) joins for the same
+            mirror: a record whose state locks every field has no pencil. */}
         <InlineEditProvider
           canEdit={
             resolveRecordHeaderActionGates(objectDef, perms).edit
@@ -5131,6 +5222,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             && !approvalLocked
             && editVisible
             && !editDisabledByPredicate
+            && !editLockedByState
           }
           locked={approvalLocked}
           approvalPending={approvalPending}

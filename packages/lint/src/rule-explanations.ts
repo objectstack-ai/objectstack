@@ -64,13 +64,15 @@ const FIELD_NO_CONSUMERS_EXPLANATION: RuleExplanation = {
       'an inline grid column, a form section, a page binding, a flow node, a dataset or cube member, a ' +
       'dashboard widget, a formula, a validation, a hook or an action that names it; a row-level ' +
       'security predicate (`rowLevelSecurity[].using` / `.check`, or an object\'s `defaultRowScope`) that ' +
-      'filters or checks rows by it; the ' +
+      'filters or checks rows by it; a field permission\'s row condition (`fields[...].when`), judged on ' +
+      'the row a write touches; the ' +
       'line-position field an inline grid stamps on drag-reorder and orders its lines by; a declared field ' +
       'group (`group` naming one of the object\'s `fieldGroups`) that places it on the synthesized ' +
       'layout; or a seed or import mapping that matches on it (`externalId` / `upsertKey`). One such ' +
       'site is enough: a field that is only drawn is the ordinary state of most fields, not a defect.',
     'A CARRIER names a field without reading it, so it does not count: a translation label, a seed ' +
-      'value, an import-mapping target, a field-level permission grant, a flow that only WRITES it, an ' +
+      'value, an import-mapping target, a field-level permission grant (the `<object>.<field>` key of a ' +
+      'permission set\'s `fields`), a flow that only WRITES it, an ' +
       '`inlineColumns` entry on a relationship field that does not set `inlineEdit` (no grid is ' +
       'drawn), or a dataset or cube member path the analytics door refuses (a hop or column that does ' +
       'not resolve, or a join the dataset\'s `include` does not declare).',
@@ -1466,6 +1468,13 @@ const FLOW_UPDATE_READONLY_FIELD_EXPLANATION: RuleExplanation = {
       'remove the field from the node. Seeding a readonly column at create time is a SYSTEM act, so a ' +
       '`create_record` has a third route: stamp the value in a `beforeInsert` hook on the object, because a ' +
       'hook-assigned key is the hook\'s write, not a caller-supplied one, and survives the strip.',
+    'Elevation has one limit where a person starts the flow. A button, an action, an endpoint or the ' +
+      'trigger route does not let a user start an `autolaunched`, `record_change` or `schedule` flow ' +
+      'declared `runAs: \'system\'`: it answers 403 `PERMISSION_DENIED`, because those types start on ' +
+      'their own trigger or from a parent flow\'s `subflow` node. So for a flow a user starts from a ' +
+      'button, the elevated routes are a `screen` or `api` flow declared `runAs: \'system\'` (it admits ' +
+      'whoever holds the capabilities its `requiredPermissions` names), or a user-run flow whose ' +
+      '`subflow` node calls the elevated flow, which then writes as the system.',
   ],
 };
 
@@ -4090,6 +4099,11 @@ const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'whole-set figure (`count_unique` over a multi-select counts distinct lists); once the set ' +
       'outgrows the page or the view is grouped, that figure becomes the page\'s or no group at all, ' +
       'so the declaration is refused whatever the row count.',
+    'An `object-grid` page component\'s `properties.columns` carry the same column entry, and a paged ' +
+      'grid asks the same footer whole-set query of their summaries, so a grid column\'s `summary` is ' +
+      'judged the same way, under this id, and refused when the page is saved. The grid is bound by its ' +
+      '`dataSource.object`, else `properties.objectName`; its grouped header numbers come from its ' +
+      '`aggregations` (`grid-aggregation-field-type-refused`), not from the column summaries.',
     AGGREGATE_PAIR_ROWS,
     'The fix is a field of a type the function accepts (`summary: { type, field }` aggregates another ' +
       'field), or a summary the field accepts: `count`, or a filled / empty count, takes any field. ' +
@@ -4618,9 +4632,11 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
       'a typo (`mange_users` for `manage_users`) parses and fails CLOSED at run time: the gate denies ' +
       'its callers, the safe direction, and nothing tells the author the capability exists nowhere.',
     // The three sources are held to the rule by its test, each one silencing it.
-    'A capability is known when it is a built-in platform capability, when the stack declares it ' +
-      'with `defineCapability` (`stack.capabilities`, ADR-0066 D1), or when a permission set in the ' +
-      'stack grants it through `systemPermissions` (granting declares it). A seed row is no source: ' +
+    'A capability is known when it is a built-in platform capability, when the stack or any package ' +
+      'of the artifact it is built into declares it with `defineCapability` (`stack.capabilities`, ' +
+      'ADR-0066 D1), or when a permission set there grants it through `systemPermissions` (granting ' +
+      'declares it). A sibling package\'s grant counts because the runtime counts it: a caller holds ' +
+      'the grants of every set it holds, whichever package declared the set. A seed row is no source: ' +
       'no runtime reader consults one, so ship the capability with `defineCapability` instead. ' +
       '`systemPermissions` itself is never reported: it is the declaration side.',
     // The positions are held to the rule by its test, each fired.
@@ -4629,10 +4645,11 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
       'each top-level action\'s, each flow\'s, an app\'s and each of its nav entries (through `navigation`, ' +
       '`areas`, `tabs`, `children` and `items`), a view\'s (its own, its `config`\'s, its default ' +
       '`list`\'s and each `listViews` entry\'s, on views and on objects) and a dashboard\'s.',
-    'A warning, not an error: one package\'s lint cannot see the capabilities other installed ' +
-      'packages declare, and the reference fails closed anyway, so a dangling one is almost ' +
-      'certainly a typo to surface, not a build to break. If another installed package declares the ' +
-      'capability, the warning is expected: leave the reference as it is.',
+    'A warning, not an error: the lint reads every package of the artifact being built, but it ' +
+      'cannot see the capabilities other installed packages declare, and the reference fails closed ' +
+      'anyway, so a dangling one is almost certainly a typo to surface, not a build to break. If ' +
+      'another installed package declares the capability, the warning is expected: leave the ' +
+      'reference as it is.',
   ],
 };
 
@@ -6016,6 +6033,74 @@ const FLOW_REGION_SHAPE_INVALID_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION: RuleExplanation = {
+  rule: 'stored-expression-cross-record-input',
+  covers: 'why a stored expression that reads another record drifts',
+  paragraphs: [
+    'A field that is not a `formula` and declares an `expression` is a stored computed field: the engine ' +
+      'computes the expression from the row each write stores, on every insert and every update by id, and ' +
+      'stores the result in the column, which is what lets a `summary`, a dataset or a report total it, and ' +
+      'an import match a record by it. A `formula` field is the other kind: it has no column and is computed ' +
+      'on every read.',
+    'A stored expression may read one relationship hop, `record.employee.daily_hours`, and the write reads ' +
+      'that value from the related record, as the writer, when it computes. Nothing computes the row again ' +
+      'when the related record changes: there is no list of the rows that read it, and the platform does not ' +
+      'recompute rows across records. The stored value keeps what the related record held at this record\'s ' +
+      'last write, and every total over it drifts, with no fault and no log. So the build and the object save ' +
+      'door warn where the expression is written. A warning, not a refusal: a stored title that reads the ' +
+      'owner\'s name is sometimes meant (an import matches a record by its stored title), and the drift can be ' +
+      'repaired. A `--strict` run (`os lint --strict`, `os validate --strict`) fails on every warning, this ' +
+      'one included; there is no per-rule switch, so a strict CI step fails until the field takes one of the ' +
+      'ways forward below.',
+    'Counted: a read through a reference field of the object as the registry serves it, at one hop or more, ' +
+      'by any spelling the engine resolves (`record.a.b`, `record.?a.?b`, `record[\'a\'].b`): a `lookup`, ' +
+      '`master_detail`, `user` or `tree` field the object declares, one an object extension adds, and a ' +
+      'reference column the registry injects (`owner_id`, `created_by`, `updated_by`, each a `lookup` to ' +
+      '`sys_user`). Not counted: a read of the reference itself (`record.employee`) or of its `id` ' +
+      '(`record.employee.id`), which is the value this row stores, and a read through a field that is not a ' +
+      'reference (an object or JSON value is part of this row). A `formula` field reading the same hop is not ' +
+      'judged: it is computed on every read, so it never goes stale.',
+    'Three ways forward. To read the current value, make the field a `formula`: it is current on every read, ' +
+      'but a `formula` cannot be totalled. To keep a stored copy current, make it a snapshot field written by a ' +
+      'flow on the related object that runs when the value changes and updates the records that point at it. ' +
+      'To repair stored values that have drifted, run `os migrate stored-expressions --object OBJECT --field ' +
+      'FIELD --changed --apply`, which writes every row of that object whose stored value of that field ' +
+      'differs from its expression (it needs the database URL). The scope picks the rows, not the fields: ' +
+      'the apply is a write, so each row it writes recomputes every stored field of that row, and a field ' +
+      'of the same object reading the clock moves to the time of the run on those rows. Unscoped, ' +
+      '`--changed` writes every row in the database whose stored value differs, and one reading the clock ' +
+      'always differs. Without `--apply` the command is a dry run: it counts those rows and writes nothing.',
+  ],
+};
+
+const STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION: RuleExplanation = {
+  rule: 'stored-expression-volatile-input',
+  covers: 'which inputs a stored expression keeps from the write',
+  paragraphs: [
+    'A field that is not a `formula` and declares an `expression` is computed when the record is written, ' +
+      'and the result is stored until the next write of that record. A `formula` field carrying the same ' +
+      'expression is computed again on every read. For an expression over the record\'s own fields the two ' +
+      'agree; for one that reads an input that changes without a write, they do not.',
+    'Counted, as the engine binds them for a stored expression: the clock, through `now()`, `today()`, ' +
+      '`daysFromNow()` and `daysAgo()`, so the stored value is the date or time of the last write; the acting ' +
+      'user, under any of its four spellings `current_user`, `user`, `ctx.user` and `os.user` (an index ' +
+      'spelling such as `os[\'user\']` included), so the stored ' +
+      'value is about the user who last wrote the record, not the one reading it; and the acting user\'s ' +
+      'permissions, through `can()` and `hasCapability()`, so it holds the writer\'s permission at that write. ' +
+      'Not counted: `os.org`, the writer\'s organization, which is the record\'s own; and `label()`, which ' +
+      'reads the declared option labels for a stored value, never the reader\'s locale.',
+    'A warning, as a read of another record is: a value of the moment of the write is sometimes what is meant (who last ' +
+      'changed the record), and the build and the save door both pass it. A `--strict` run (`os lint ' +
+      '--strict`, `os validate --strict`) fails on every warning, this one included. A `formula` field reading ' +
+      'the same inputs is not judged.',
+    'To show the current value, make the field a `formula` (current on every read, but not summable). To keep ' +
+      'a stored value current as time passes, recompute it with a scheduled flow that updates the records. ' +
+      '`os migrate stored-expressions --changed --apply` recomputes such a value to the time of the run: ' +
+      'unscoped, on every row; scoped with `--object` and `--field` to another field, on every row of that ' +
+      'object the repair writes, since a write recomputes every stored field of its row.',
+  ],
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -6246,6 +6331,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [REPORT_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: REPORT_FILTER_FIELD_UNKNOWN_EXPLANATION,
   [NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION.rule]: NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION,
   [FLOW_REGION_SHAPE_INVALID_EXPLANATION.rule]: FLOW_REGION_SHAPE_INVALID_EXPLANATION,
+  [STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION,
+  [STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

@@ -41,13 +41,17 @@
  *     field its column path reads — {@link creditAnalyticsColumns}), a widget
  *     filter, a sharing-rule condition, a row-level security predicate
  *     ({@link isRlsPredicateSite} — `rowLevelSecurity[].using` / `.check`,
- *     and an object's `defaultRowScope`).
+ *     and an object's `defaultRowScope`), a field permission's row condition
+ *     ({@link isFieldPermissionConditionSite} — `fields[...].when`).
  *   - **display** — the field is drawn: a view column, a form section, a page
  *     binding, an inline grid column ({@link creditInlineGridColumns}),
  *     `highlightFields`, `searchableFields`, an index.
  *   - **carrier** — the field is merely carried along: a translation label, a
  *     seed value, an import-mapping column, a field-level permission grant
- *     (every path under `permissions` but an RLS predicate), a flow's WRITE of
+ *     (the `"<object>.<field>"` key of a permission set's `fields` —
+ *     {@link fieldPermissionGrantOf} — and every other path under
+ *     `permissions` but an RLS predicate and a field permission's row
+ *     condition), a flow's WRITE of
  *     the field, prose that names it. These are what a REMOVAL
  *     must clean up; none of them is evidence that anything reads the field.
  *     A seeded value nothing reads is precisely the shape being hunted.
@@ -90,7 +94,13 @@
  *     are read as expressions, every identifier a candidate. An object's
  *     `defaultRowScope` is the same policy shape with the object implied
  *     (`DefaultRowScopeSchema`), already a behaviour site under `objects`,
- *     and its two clauses are read as expressions the same way.
+ *     and its two clauses are read as expressions the same way. A field
+ *     permission's `when` ({@link isFieldPermissionConditionSite}) is a row
+ *     condition in the same language, judged on the row a write touches, so
+ *     it is read the same way, against the object its `"<object>.<field>"`
+ *     key names ({@link fieldPermissionObjectOf}). The key itself, which
+ *     names the field the entry grants on, is not a read: it is a carrier
+ *     ({@link fieldPermissionGrantOf}).
  *   - **A derived inline grid** ({@link creditDerivedInlineGrid},
  *     `deriveInlineGridColumns`). A relationship field that sets `inlineEdit`
  *     with no `inlineColumns`, and a `subforms` entry with no `columns`, both
@@ -210,7 +220,12 @@ import {
 } from '@objectstack/spec/data';
 import type { DisplayNameObjectMeta, ServiceObject } from '@objectstack/spec/data';
 import { referenceTargetOf } from '@objectstack/spec/data';
-import type { DefaultRowScope, PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
+import type {
+  DefaultRowScope,
+  FieldPermission,
+  PermissionSet,
+  RowLevelSecurityPolicy,
+} from '@objectstack/spec/security';
 import { collectionEntries } from './collection-entries.js';
 import {
   indexServedObjectGraph,
@@ -358,9 +373,11 @@ const RLS_PREDICATE_KEYS: ReadonlySet<string> = new Set(
  * indices in `segments`, so the policy key and the clause are the last two
  * segments whatever shape (array or name-keyed map) the root was authored in.
  *
- * A permission-set policy is the only READ under the `permissions` carrier
- * root: a field-level grant (`fields`), an object grant and every other key
- * of a permission set stay carriers. A policy's `object` is the enclosing
+ * A permission-set policy is one of the two READS under the `permissions`
+ * carrier root; the other is a field permission's row condition
+ * ({@link isFieldPermissionConditionSite}). A field-level grant itself, an
+ * object grant and every other key of a permission set stay carriers. A
+ * policy's `object` is the enclosing
  * declaration {@link contextOf} already resolves, and a `defaultRowScope`'s
  * object is the one that declares it, so the predicate's identifiers are
  * credited to the object the policy filters.
@@ -373,6 +390,93 @@ function isRlsPredicateSite(root: string, segments: readonly string[]): boolean 
     (root === 'permissions' && carrier === RLS_POLICIES_KEY) ||
     (root === 'objects' && carrier === DEFAULT_ROW_SCOPE_KEY)
   );
+}
+
+/**
+ * The permission-set key that holds its field permissions
+ * (`PermissionSetSchema.fields`), a map keyed `"<object>.<field>"`. Typed
+ * against the spec for the reason {@link RLS_POLICIES_KEY} gives.
+ */
+const FIELD_PERMISSIONS_KEY = 'fields' satisfies keyof PermissionSet;
+
+/**
+ * A field permission's row condition (`FieldPermissionSchema.when`). Typed
+ * against the spec for the reason {@link RLS_POLICIES_KEY} gives.
+ */
+const FIELD_PERMISSION_CONDITION_KEY = 'when' satisfies keyof FieldPermission;
+
+/**
+ * Whether a site is a field permission's row condition:
+ * `permissions[].fields["<object>.<field>"].when`. The condition is CEL in the
+ * language an RLS `using` is written in, and the write gate judges it on the
+ * stored row before an update and on the incoming row of an insert
+ * (`PermissionEvaluator.getFieldPermissions`), so it READS every field it
+ * names, the way an RLS predicate does. The walk does not put array indices
+ * in `segments`, so the map key, the entry key and the condition are the last
+ * three segments whatever shape (array or name-keyed map) the root was
+ * authored in.
+ *
+ * Only the condition is credited. The entry's key names the field the
+ * permission grants on, and a grant is a carrier
+ * ({@link fieldPermissionGrantOf}), so nothing here credits it.
+ */
+function isFieldPermissionConditionSite(root: string, segments: readonly string[]): boolean {
+  const n = segments.length;
+  return (
+    root === 'permissions' &&
+    n >= 3 &&
+    segments[n - 1] === FIELD_PERMISSION_CONDITION_KEY &&
+    segments[n - 3] === FIELD_PERMISSIONS_KEY
+  );
+}
+
+/**
+ * The object a field permission entry is on: the head of its
+ * `"<object>.<field>"` key before the first `.`, the reading
+ * `PermissionEvaluator.getFieldPermissions` (`key.startsWith(objectName + '.')`)
+ * and `validate-rls-predicate-enforceability`'s judge of the same condition
+ * both make. A permission set names no object of its own, so without this the
+ * condition's identifiers reach the walk with no object to credit them to.
+ * `undefined` for any other map, for an unqualified key, and for an object
+ * this stack does not declare.
+ */
+function fieldPermissionObjectOf(
+  ledger: ConsumerLedger,
+  root: string,
+  segments: readonly string[],
+  key: string,
+): string | undefined {
+  if (root !== 'permissions' || segments[segments.length - 1] !== FIELD_PERMISSIONS_KEY) return undefined;
+  const dot = key.indexOf('.');
+  const head = dot > 0 ? key.slice(0, dot) : undefined;
+  return ledger.isObject(head) ? head : undefined;
+}
+
+/**
+ * [#32628] The field a field permission entry grants on, when its key names
+ * one this stack declares: the head of `"<object>.<field>"` is the object
+ * ({@link fieldPermissionObjectOf}), and the remainder is the column
+ * `PermissionEvaluator.getFieldPermissions` looks up
+ * (`key.substring(objectName.length + 1)`), dots and all — FLS keys address
+ * columns, never joins, so a remainder with a dot names no declared field.
+ *
+ * The grant is a CARRIER: it reads nothing, but it names the field, so a
+ * removal must clean it or leave a key that masks a column that no longer
+ * exists. The walk reads a map key as a reference only where the key is a
+ * bare field name, so without this the spec's own shape (a composite key)
+ * was recorded as no site at all, and the `fix:` line named no grant.
+ * `undefined` for any other map and for a key that names no declared field.
+ */
+function fieldPermissionGrantOf(
+  ledger: ConsumerLedger,
+  root: string,
+  segments: readonly string[],
+  key: string,
+): { object: string; field: string } | undefined {
+  const object = fieldPermissionObjectOf(ledger, root, segments, key);
+  if (object === undefined) return undefined;
+  const field = key.slice(object.length + 1);
+  return ledger.declares(object, field) ? { object, field } : undefined;
 }
 
 /** Roots whose sites are display by default; `BEHAVIOUR_SEGMENTS` earn behaviour back. */
@@ -645,11 +749,12 @@ class ConsumerLedger {
 function bucketFor(root: string, segments: readonly string[], leafKey: string): SiteKind {
   // An upsert identity inside a carrier root is a read there: the loader
   // matches rows on that column. So is a row-level security predicate: the
-  // policy filters, or checks, rows by the fields it names on every request.
-  // Everything else a carrier root holds is a value it writes or a label it
-  // carries.
+  // policy filters, or checks, rows by the fields it names on every request,
+  // and so is a field permission's row condition, judged on the row a write
+  // touches. Everything else a carrier root holds is a value it writes or a
+  // label it carries.
   if (CARRIER_ROOTS.includes(root)) {
-    if (isRlsPredicateSite(root, segments)) return 'behaviour';
+    if (isRlsPredicateSite(root, segments) || isFieldPermissionConditionSite(root, segments)) return 'behaviour';
     return segments.some((s) => CARRIER_IDENTITY_SEGMENTS.has(s)) ? 'behaviour' : 'carrier';
   }
   if (PROSE_KEYS.has(leafKey)) return 'carrier';
@@ -1066,6 +1171,13 @@ function walk(
         ledger.unresolved += 1;
       }
     }
+    // [#32628] A field permission's composite key names the field it grants
+    // on. Spelled as a quoted key, the way `validate-security-posture` locates
+    // the same entry, because the key itself holds a `.`.
+    const granted = fieldPermissionGrantOf(ledger, root, segments, key);
+    if (granted) {
+      ledger.record(granted.object, granted.field, { root, path: `${path}[${JSON.stringify(key)}]`, kind: 'carrier' });
+    }
     // [#21091] A `record:line_items` block's `properties` is a child entry,
     // and that entry's child-query keys name fields of its `childObject`.
     const panel = key === 'properties' && typeof rec.type === 'string' && CHILD_ENTRY_COMPONENT_TYPES.has(rec.type);
@@ -1075,8 +1187,10 @@ function walk(
     }
     // A map KEYED by object name — `translations[].en.objects.crm_x`,
     // `permissions[].objects.crm_x` — names its object in a position no
-    // `object:` lookup reaches.
-    walk(ledger, value, ledger.isObject(key) ? key : inner, root, childPath, childSegments, key, panel ? 'panel' : undefined);
+    // `object:` lookup reaches. A field permission's key names its object as
+    // the head of `"<object>.<field>"`, which is what its `when` reads.
+    const keyed = ledger.isObject(key) ? key : fieldPermissionObjectOf(ledger, root, segments, key);
+    walk(ledger, value, keyed ?? inner, root, childPath, childSegments, key, panel ? 'panel' : undefined);
   }
 }
 

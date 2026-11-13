@@ -243,8 +243,15 @@ lifecycle: {
   Until expiry amendments ship (ADR-0154 P4), the retention sweeper still
   deletes sealed rows, which then read as missing.
 - Sealing needs a crypto provider, which the host passes to `AuditPlugin` as
-  `cryptoProvider`. Without one, nothing is sealed and the plugin says so at
-  `error`, again each hour while it lasts.
+  `cryptoProvider`. `os serve` passes the one it seals every secret with; an
+  app that puts its own `AuditPlugin` in `plugins` passes one itself. Without
+  one, nothing is sealed and the plugin says so at `error`, again each hour
+  while it lasts. A one-shot command (`os audit verify`, `os migrate …`,
+  an `OS_MIGRATE_AND_EXIT=1` boot) starts no sealer (`armSealer: false`).
+- A platform migration that rewrites a value column of a sealed row writes a
+  signed redaction amendment first, or leaves the row as it is
+  ([sealed audit rows](/docs/deployment/cli#sealed-audit-rows-os-migrate-audit-)).
+  `os audit verify` then reads the row `redacted`.
 
 Operations knobs live in the `lifecycle` settings namespace: a runtime
 `enabled` switch, tenant-scoped `retention_overrides` (a regulated tenant

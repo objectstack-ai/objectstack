@@ -1736,10 +1736,30 @@ export class HttpDispatcher {
         // System project is always reachable by any authenticated user.
         if (environmentId === HttpDispatcher.SYSTEM_ENVIRONMENT_ID) return null;
 
-        // Read the session. If auth is not wired up, fail open — tests
-        // and single-tenant setups run without auth.
+        // The gate judges the principal this request RESOLVED
+        // (`resolveRequestScope`), whichever credential admitted it — a
+        // session, an API key or an OAuth access token (with or without a
+        // cookie beside it) — in the organization its resolution vetted
+        // (`resolveAuthzContext`), the one every other door reads
+        // (`resolveActiveOrganizationId`). Which credential that was is the
+        // one reading the api-action forward takes too
+        // (`admittingCredentialKind`).
+        //
+        // A signed-in caller is never admitted because the gate could not
+        // read its session: the identity step already named the principal, so
+        // the gate does not ask the session again for it. An input the gate
+        // still needs and cannot read is the outage it is (the membership
+        // read below), never "allowed".
+        const resolved = context.executionContext;
+        if (admittingCredentialKind(context) !== undefined && resolved?.userId) {
+            return this.judgeMembershipOf(context, environmentId, resolved.userId, resolved.tenantId);
+        }
+
+        // No credential admitted a principal. Read the session; if auth is
+        // not wired up, or the read fails, there is no principal to judge and
+        // upstream auth decides — tests and single-tenant setups run without
+        // auth.
         let userId: string | undefined;
-        let activeOrganizationId: string | undefined;
         let sessionUnread = false;
         try {
             // [#4127 batch 4] This read was `authService?.api?.getSession?.(…)`
@@ -1764,38 +1784,30 @@ export class HttpDispatcher {
             // [#24222] Typed as `AuthSessionApi` declares the answer, not `any`.
             const sessionData: SessionRead | null = await api?.getSession?.(inProcessSessionReadInput(context.request?.headers));
             userId = sessionData?.user?.id ?? sessionData?.session?.userId;
-            activeOrganizationId = sessionData?.session?.activeOrganizationId;
         } catch {
             sessionUnread = true;
         }
+        if (sessionUnread || !userId) return null; // No principal — upstream auth will decide.
 
-        // The gate judges the principal this request RESOLVED
-        // (`resolveRequestScope`), whichever credential admitted it. A
-        // principal an API key or an OAuth access token admitted (with or
-        // without a cookie beside it) is the one judged, in the organization
-        // its resolution vetted; which credential that was is the one reading
-        // the api-action forward takes too (`admittingCredentialKind`). A
-        // session principal is the user the session read above names, in the
-        // organization its resolution vetted (below).
-        const resolved = context.executionContext;
-        const admittedBy = admittingCredentialKind(context);
-        if ((admittedBy === 'api_key' || admittedBy === 'oauth') && resolved?.userId) {
-            userId = resolved.userId;
-            activeOrganizationId = resolved.tenantId;
-        } else if (sessionUnread) {
-            // Auth resolution failed — do not block the request on RBAC.
-            return null;
-        } else {
-            // A session principal acts in the organization its resolution
-            // vetted (`resolveAuthzContext`), the one every other door reads
-            // (`resolveActiveOrganizationId`).
-            activeOrganizationId = resolved?.userId !== undefined && resolved.userId === userId
-                ? resolved.tenantId
-                : undefined;
-        }
+        // A session no credential admission recorded acts in the organization
+        // a resolution vetted only when that resolution named the same user.
+        const activeOrganizationId = resolved?.userId !== undefined && resolved.userId === userId
+            ? resolved.tenantId
+            : undefined;
+        return this.judgeMembershipOf(context, environmentId, userId, activeOrganizationId);
+    }
 
-        if (!userId) return null; // Anonymous requests — upstream auth will decide.
-
+    /**
+     * The membership verdict on one named principal: `userId`, acting in
+     * `activeOrganizationId`, against `sys_environment_member` for
+     * `environmentId`.
+     */
+    private async judgeMembershipOf(
+        context: HttpProtocolContext,
+        environmentId: string,
+        userId: string,
+        activeOrganizationId: string | undefined,
+    ): Promise<{ status: number; body: any } | null> {
         // Platform-org members bypass project membership.
         if (activeOrganizationId === HttpDispatcher.PLATFORM_ORG_ID) return null;
 

@@ -284,8 +284,8 @@ export abstract class VerdictLedger {
   private readonly orgs: ReadonlySet<string> | null;
   private readonly rangeLo: number;
   private readonly rangeHi: number;
-  /** Each key a record named: its public half when trusted, `null` when not. */
-  protected readonly keys = new Map<string, { key: KeyObject; publicKey: string } | null>();
+  /** The D6 trust rule this check signs under ({@link SigningKeyTrust}). */
+  private readonly trust = new SigningKeyTrust((keyId) => this.publicKeyOf(keyId));
   private readonly faults: AuditChainFault[] = [];
   private readonly findings: AuditRowFinding[] = [];
   private readonly dangling: AuditDanglingRedaction[] = [];
@@ -301,6 +301,11 @@ export abstract class VerdictLedger {
 
   /** The public half (raw 32 bytes, base64) of signing key `keyId` when this check trusts it, else `null`. */
   protected abstract publicKeyOf(keyId: string): Promise<string | null>;
+
+  /** Each key a record named: its public half when trusted, `null` when not. */
+  protected get keys(): ReadonlyMap<string, { key: KeyObject; publicKey: string } | null> {
+    return this.trust.keys;
+  }
 
   protected report(objects: readonly string[]): AuditVerifyReport {
     const chains = [...this.chains.values()].sort((a, b) => (a.object === b.object ? cmp(a.chain, b.chain) : cmp(a.object, b.object)));
@@ -375,6 +380,26 @@ export abstract class VerdictLedger {
   }
 
   /** Whether `signature` over `bytes` verifies under signing key `keyId`, as this check trusts it. */
+  signature(keyId: string, bytes: Uint8Array, signature: unknown): Promise<SignatureVerdict> {
+    return this.trust.signature(keyId, bytes, signature);
+  }
+}
+
+/**
+ * @internal ADR-0154 D6 — the one rule a signed body is admitted by, for every
+ * reader of one: the live and offline checks, and the redaction amendment
+ * writer before it proves a row against a checkpoint or names an amendment
+ * already written. A signature is `ok` only under a key the trust anchor
+ * vouches for (`publicKeyOf`), and only when it verifies over the body's bytes.
+ * Each key is asked about once.
+ */
+export class SigningKeyTrust {
+  /** Each key a record named: its public half when trusted, `null` when not. */
+  readonly keys = new Map<string, { key: KeyObject; publicKey: string } | null>();
+
+  constructor(private readonly publicKeyOf: (keyId: string) => Promise<string | null>) {}
+
+  /** Whether `signature` over `bytes` verifies under signing key `keyId`, as the anchor trusts it. */
   async signature(keyId: string, bytes: Uint8Array, signature: unknown): Promise<SignatureVerdict> {
     const trusted = await this.trustedKey(keyId);
     if (!trusted) return 'untrusted_key';
@@ -401,6 +426,29 @@ export abstract class VerdictLedger {
     this.keys.set(keyId, trusted);
     return trusted;
   }
+}
+
+/**
+ * @internal The live trust anchor (D6): a host's `audit.checkpointSigner` when
+ * one is given, else the local key, trusted only through its wrapped private
+ * half ({@link trustedSigningKey}). The two objects a key is trusted through
+ * are its row and the `sys_secret` row of its wrapped private half: either
+ * table absent is no key, and any other read fault is thrown rather than read
+ * as tampering.
+ */
+export function anchoredPublicKeyOf(
+  engine: SealStorageReader,
+  crypto: ICryptoProvider,
+  trust?: Pick<IAuditCheckpointSigner, 'trustedPublicKey'>,
+): (keyId: string) => Promise<string | null> {
+  return async (keyId) => {
+    try {
+      return trust ? await trust.trustedPublicKey(keyId) : await trustedSigningKey(engine, crypto, keyId);
+    } catch (err) {
+      if (!isMissingTableError(err, AUDIT_SIGNING_KEY_OBJECT) && !isMissingTableError(err, SECRET_OBJECT)) throw err;
+      return null;
+    }
+  };
 }
 
 /** The live check: the ledger read from the hot store and the archive, keys vouched for by the anchor. */
@@ -466,19 +514,8 @@ class LedgerCheck extends VerdictLedger {
     return resolved;
   }
 
-  protected async publicKeyOf(keyId: string): Promise<string | null> {
-    try {
-      return this.options.trust
-        ? await this.options.trust.trustedPublicKey(keyId)
-        : await trustedSigningKey(this.options.engine, this.options.crypto, keyId);
-    } catch (err) {
-      // The two objects a key is trusted through: its row, and the
-      // `sys_secret` row of its wrapped private half. Either table absent is
-      // no key; any other read fault stops the run rather than reading as
-      // tampering.
-      if (!isMissingTableError(err, AUDIT_SIGNING_KEY_OBJECT) && !isMissingTableError(err, SECRET_OBJECT)) throw err;
-      return null;
-    }
+  protected publicKeyOf(keyId: string): Promise<string | null> {
+    return anchoredPublicKeyOf(this.options.engine, this.options.crypto, this.options.trust)(keyId);
   }
 
   private async hasCheckpoints(object: string): Promise<boolean> {
@@ -500,8 +537,8 @@ const kindOrder = (kind: CheckpointSignedBody['kind']): number => (kind === 'win
 export const judgingOrder = (a: CheckpointHead, b: CheckpointHead): number =>
   windowOf(a.windowStart) - windowOf(b.windowStart) || kindOrder(a.kind) - kindOrder(b.kind) || cmp(a.chain, b.chain) || a.sequence - b.sequence;
 
-/** Every row of `object` a driver holds that `where` matches, in id order, page by page. */
-async function readAll(driver: SealStorageDriver, object: string, where: Row): Promise<Row[]> {
+/** @internal Every row of `object` a driver holds that `where` matches, in id order, page by page. */
+export async function readAll(driver: SealStorageDriver, object: string, where: Row): Promise<Row[]> {
   const rows: Row[] = [];
   for (let after: unknown; ;) {
     const page = await driver.find(object, {

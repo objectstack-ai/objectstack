@@ -170,6 +170,7 @@ import {
     PackageScopedNameRefusedError,
     artifactPackageId,
     describePackageScopedHolder,
+    type PackageScopedHolder,
     resolveArtifactPackageOrder,
     type PackageScopedRefusal,
 } from '@objectstack/core';
@@ -511,7 +512,10 @@ interface FunctionHoldingEngine {
     unregisterFunctionsByPackage?(packageId: string): number;
     registerFunction?(name: string, handler: any, options?: { packageId?: string; effect?: unknown }): void;
     resolveFunctionEntry?(name: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined;
-    functionHoldersOf?(name: string): { packageItem(packageId: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined };
+    functionHoldersOf?(name: string): {
+        readonly packageHolders: readonly string[];
+        packageItem(packageId: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined;
+    };
 }
 
 /** The `handler` names `owner`'s hooks in `groups` carry. */
@@ -536,6 +540,11 @@ function hookHandlersOf(groups: readonly HookBindingGroup[], owner: string): str
  * `known`. The bare slot of each kept name is put back as it was. A function
  * code outside this binder registered under `holder` that none of those names
  * leaves with the removal, as a dropped body's does.
+ *
+ * [#31700, epic seat ruling R3-B] Only for a name one package holds: two
+ * namespaces' packages may each hold one function name, and the bare read of
+ * such a name is refused (409, ADR-0150 D3) and answers no reader, so for it
+ * `holder`'s own entry is all that is read and put back.
  */
 function releaseMovedFunctions(engine: FunctionHoldingEngine, holder: string, moved: readonly string[], known: Iterable<string>): void {
     if (typeof engine.registerFunction !== 'function' || typeof engine.functionHoldersOf !== 'function') return;
@@ -544,8 +553,9 @@ function releaseMovedFunctions(engine: FunctionHoldingEngine, holder: string, mo
     const keep: Array<{ name: string; entry: { readonly handler: any; readonly effect?: unknown }; bare?: { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } }> = [];
     for (const name of new Set(known)) {
         if (leaving.has(name)) continue;
-        const entry = engine.functionHoldersOf(name).packageItem(packageId);
-        if (entry) keep.push({ name, entry, bare: engine.resolveFunctionEntry?.(name) });
+        const holders = engine.functionHoldersOf(name);
+        const entry = holders.packageItem(packageId);
+        if (entry) keep.push({ name, entry, bare: holders.packageHolders.length > 1 ? undefined : engine.resolveFunctionEntry?.(name) });
     }
     engine.unregisterFunctionsByPackage?.(holder);
     for (const { name, entry, bare } of keep) {
@@ -1116,7 +1126,10 @@ export function judgeJobPull(
  * artifact binds the flattened top-level copies, so this is the usual path),
  * answers a REFUSAL naming every declaring body (ADR-0150 D3,
  * `ambiguous-in-environment`), never the first body in package order: the
- * binder fails that job's run with it before any call or write.
+ * binder fails that job's run with it before any call or write. (Two ENABLED
+ * jobs of one name never reach a run: the binder refuses the name at bind,
+ * {@link jobNameCollisions}. A run meets this refusal when the name's twin is
+ * disabled.)
  *
  * [#32355] So does a job name a body declares and the residual carries too:
  * the residual's job is met by that name as well, and it is not the body's.
@@ -1137,31 +1150,9 @@ export function jobDeclaringPackages(
     bundle: unknown,
     appId: string,
 ): (job: unknown) => string | undefined | PackageScopedRefusal {
-    if (bundle === null || typeof bundle !== 'object' || (bundle as { packages?: unknown }).packages === undefined) {
-        return () => appId;
-    }
-    const byIdentity = new Map<unknown, string>();
-    const byName = new Map<string, string[]>();
-    // [#32355] How many jobs of each name the bodies declare, copies counted once each.
-    const declaredCount = new Map<string, number>();
-    // The residual's owner is a package only when a body carries its id.
-    let residual: string | undefined;
-    for (const body of resolveArtifactPackageOrder(bundle)) {
-        const id = artifactPackageId(body);
-        if (id === appId) residual = appId;
-        const jobs = (body as { jobs?: unknown } | null | undefined)?.jobs;
-        if (!id || !Array.isArray(jobs)) continue;
-        for (const job of jobs) {
-            if (!job || typeof job !== 'object') continue;
-            byIdentity.set(job, id);
-            const name = (job as { name?: unknown }).name;
-            if (typeof name !== 'string') continue;
-            const declarers = byName.get(name) ?? [];
-            if (!declarers.includes(id)) declarers.push(id);
-            byName.set(name, declarers);
-            declaredCount.set(name, (declaredCount.get(name) ?? 0) + 1);
-        }
-    }
+    const declarations = bodyJobDeclarations(bundle, appId);
+    if (declarations === undefined) return () => appId;
+    const { byIdentity, byName, declaredCount, residual } = declarations;
     // [#32355] The body job names the residual carries too: the binder's jobs
     // hold more of the name than the bodies declare.
     const boundCount = new Map<string, number>();
@@ -1183,6 +1174,132 @@ export function jobDeclaringPackages(
         }
         return declarers.length === 1 ? declarers[0] : jobNameRefusal(name as string, declarers);
     };
+}
+
+/** The jobs an artifact's package bodies declare ({@link bodyJobDeclarations}). */
+interface BodyJobDeclarations {
+    /** A body's own job object → that body's package id. */
+    readonly byIdentity: ReadonlyMap<unknown, string>;
+    /** A job name → every body declaring it, each once, in package order. */
+    readonly byName: ReadonlyMap<string, readonly string[]>;
+    /** [#32355] A job name → how many jobs of it the bodies declare, copies counted once each. */
+    readonly declaredCount: ReadonlyMap<string, number>;
+    /** The residual's owner: a package only when a body carries the artifact's id. */
+    readonly residual: string | undefined;
+}
+
+/**
+ * Walk an artifact's package bodies in package order (`resolveArtifactPackageOrder`) for the jobs each
+ * declares — what {@link jobDeclaringPackages} and {@link jobNameCollisions} both read. `undefined` for an
+ * artifact without `packages[]`, whose every job is declared by the app itself.
+ */
+function bodyJobDeclarations(bundle: unknown, appId: string): BodyJobDeclarations | undefined {
+    if (bundle === null || typeof bundle !== 'object' || (bundle as { packages?: unknown }).packages === undefined) {
+        return undefined;
+    }
+    const byIdentity = new Map<unknown, string>();
+    const byName = new Map<string, string[]>();
+    const declaredCount = new Map<string, number>();
+    let residual: string | undefined;
+    for (const body of resolveArtifactPackageOrder(bundle)) {
+        const id = artifactPackageId(body);
+        if (id === appId) residual = appId;
+        const jobs = (body as { jobs?: unknown } | null | undefined)?.jobs;
+        if (!id || !Array.isArray(jobs)) continue;
+        for (const job of jobs) {
+            if (!job || typeof job !== 'object') continue;
+            byIdentity.set(job, id);
+            const name = (job as { name?: unknown }).name;
+            if (typeof name !== 'string') continue;
+            const declarers = byName.get(name) ?? [];
+            if (!declarers.includes(id)) declarers.push(id);
+            byName.set(name, declarers);
+            declaredCount.set(name, (declaredCount.get(name) ?? 0) + 1);
+        }
+    }
+    return { byIdentity, byName, declaredCount, residual };
+}
+
+/** How a job runs, for a refusal that names it: the run form the binder would bind it by. */
+function describeJobRunForm(job: unknown): string {
+    const { pull, body, handler } = (job ?? {}) as { pull?: { mapping?: unknown }; body?: unknown; handler?: unknown };
+    if (pull !== undefined) return typeof pull?.mapping === 'string' ? `pulls mapping "${pull.mapping}"` : 'pulls';
+    if (body) return 'runs a sandboxed body';
+    if (typeof handler === 'string') return `runs handler "${handler}"`;
+    return 'declares no run form';
+}
+
+/**
+ * [#32411, ADR-0150 D3] The job names two or more ENABLED jobs of one artifact share, each with its refusal.
+ *
+ * The binder schedules every job of an artifact under the artifact's id ({@link jobKeyFor}), and a job
+ * service keys a job by its name and REPLACES the job it already holds under that name
+ * (`CronJobAdapter.schedule`, `IntervalJobAdapter.store`, `DbJobAdapter.schedule`) — the replace a reinstall
+ * relies on. Two jobs of one name would therefore keep only the later one, and the earlier would never run,
+ * with nothing said. Nothing picks one of them, so the name is refused: none of its jobs is scheduled.
+ *
+ * The holders the refusal names are every body declaring the name, and — when the artifact holds more jobs
+ * of the name than its bodies declare (the residual's own, `composeStacks(…, { manifest: 'preserve' })` with
+ * an input that has no `manifest`) — the artifact's top level outside every package body, as
+ * {@link jobNameRefusal} names it; an artifact without `packages[]` is its app's alone. The refusal's
+ * `candidates` are every declaring body as a `package`, then the residual as `{ kind: 'residual', ownerId }`
+ * (the artifact's id), or the app itself for an artifact without `packages[]`. Each job is named by
+ * its run form. Counted by name, never by content: a conversion replays a body under its own version window.
+ *
+ * A disabled job is scheduled by nothing, so it collides with nothing and is not counted: its enabled twin
+ * keeps the run-time attribution refusal {@link jobDeclaringPackages} gives it.
+ */
+function jobNameCollisions(bundle: unknown, appId: string, jobs: readonly unknown[]): Map<string, PackageScopedRefusal> {
+    const enabledByName = new Map<string, unknown[]>();
+    for (const job of jobs) {
+        const { name, enabled } = (job ?? {}) as { name?: unknown; enabled?: unknown };
+        if (typeof name !== 'string' || name === '' || enabled === false) continue;
+        enabledByName.set(name, [...(enabledByName.get(name) ?? []), job]);
+    }
+    const shared = [...enabledByName].filter(([, named]) => named.length > 1);
+    const refusals = new Map<string, PackageScopedRefusal>();
+    if (shared.length === 0) return refusals;
+    const declarations = bodyJobDeclarations(bundle, appId);
+    const boundCount = new Map<string, number>();
+    for (const job of jobs) {
+        const name = (job as { name?: unknown } | null | undefined)?.name;
+        if (typeof name === 'string') boundCount.set(name, (boundCount.get(name) ?? 0) + 1);
+    }
+    for (const [name, named] of shared) {
+        const describe = (packageId: string) => describePackageScopedHolder({ kind: 'package', packageId });
+        let holders: string[];
+        let candidates: PackageScopedHolder[];
+        if (declarations === undefined) {
+            holders = [`${describe(appId)}, the app itself`];
+            candidates = [{ kind: 'package', packageId: appId }];
+        } else {
+            const declarers = declarations.byName.get(name) ?? [];
+            candidates = declarers.map((packageId) => ({ kind: 'package' as const, packageId }));
+            holders = declarers.map(describe);
+            const residualJobs = (boundCount.get(name) ?? 0) - (declarations.declaredCount.get(name) ?? 0);
+            if (residualJobs > 0) {
+                // [#32412] The residual by its own kind, after every declaring body, as `jobNameRefusal` names it.
+                candidates.push({ kind: 'residual', ownerId: appId });
+                const owner = declarations.residual;
+                holders.push(`this artifact's top level outside every package body (its residual, ${owner === undefined
+                    ? 'which names no package'
+                    : `which runs as ${describe(owner)}, the body that carries the artifact's id`})`);
+            }
+        }
+        refusals.set(name, {
+            status: 'refused',
+            reason: 'ambiguous-in-environment',
+            type: 'job',
+            name,
+            callerPackageId: null,
+            candidates,
+            message: `The artifact holds ${named.length} enabled jobs named "${name}", declared by ${holders.join('; and by ')} `
+                + `— one that ${named.map(describeJobRunForm).join(', and one that ')}. The job service keys a job by its name `
+                + 'and keeps only the last one scheduled under it, so the others would never run: none of them is scheduled. '
+                + 'Rename all but one of them so each job name is declared once in the artifact.',
+        });
+    }
+    return refusals;
 }
 
 /**
@@ -1449,6 +1566,13 @@ export interface AppArtifactJobScheduling {
      * with scheduled work switched on).
      */
     missingOrganization: string[];
+    /**
+     * [#32411] Enabled jobs NOT scheduled because another enabled job of the
+     * artifact has the same name: the job service keys a job by its name and
+     * keeps only the last, so the name is refused and none of its jobs runs.
+     * One entry per job, as for the other lists.
+     */
+    refused: string[];
     /** Jobs whose `IJobService.schedule` call threw. */
     failed: string[];
     /**
@@ -1469,6 +1593,11 @@ export interface AppArtifactJobScheduling {
  * Per job, in this order:
  *
  *   - `enabled: false` → skipped (debug);
+ *   - (#32411) a name another enabled job of the artifact shares → NOT
+ *     scheduled, nor is any job of that name: the job service keys a job by
+ *     its name and would keep only the later one. Refused once per name at
+ *     `error`, naming every job ({@link jobNameCollisions}); a job of that
+ *     name this app scheduled before is cancelled with the rest;
  *   - (#20281 stage ③) no `organization` on a deployment whose scheduled-work
  *     policy requires one (`isolated`, switch on) → NOT scheduled, at `error`
  *     ({@link describeMissingJobOrganization}), whatever its run form;
@@ -1536,7 +1665,7 @@ export async function scheduleAppArtifactJobs(
     const logger: Logger = ctx.logger;
     const tag = `[${options.source ?? 'AppPlugin'}]`;
     const out: AppArtifactJobScheduling = {
-        bodies: [], handlers: [], pulls: [], notScheduled: [], missingOrganization: [], failed: [], cancelled: [],
+        bodies: [], handlers: [], pulls: [], notScheduled: [], missingOrganization: [], refused: [], failed: [], cancelled: [],
     };
 
     const jobs = collectBundleJobs(bundle);
@@ -1640,6 +1769,16 @@ export async function scheduleAppArtifactJobs(
     // [ADR-0150 D3, #32071] Which package declares each job: a pull reads its
     // mapping from it.
     const declaringPackageOf = jobDeclaringPackages(bundle, appId);
+    // [#32411, ADR-0150 D3] A name two enabled jobs share is refused here, at
+    // bind: the job service would keep only the later of them, silently.
+    const collisions = jobNameCollisions(bundle, appId, jobs);
+    for (const [name, refusal] of collisions) {
+        logger.error(`${tag} NOT SCHEDULED — ${refusal.message}`, new PackageScopedNameRefusedError(refusal), {
+            appId,
+            job: name,
+            candidates: refusal.candidates,
+        });
+    }
 
     for (const job of jobs) {
         const jobName: string = job?.name;
@@ -1650,6 +1789,10 @@ export async function scheduleAppArtifactJobs(
         }
         if (job.enabled === false) {
             logger.debug(`${tag} job disabled — skipping`, { appId, job: jobName });
+            continue;
+        }
+        if (collisions.has(jobName)) {
+            out.refused.push(jobName);
             continue;
         }
 
@@ -1875,6 +2018,7 @@ export async function scheduleAppArtifactJobs(
         pulls: out.pulls.length,
         notScheduled: out.notScheduled.length,
         missingOrganization: out.missingOrganization.length,
+        refused: out.refused.length,
         failed: out.failed.length,
         cancelled: out.cancelled.length,
     });

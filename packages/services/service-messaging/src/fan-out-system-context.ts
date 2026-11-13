@@ -11,7 +11,10 @@
  * `RecipientResolver.resolveEmail` (`sys_user`).
  *
  * [#21908] Also by the rest of the fan-out: `RecipientResolver.resolveRole`
- * (`sys_member`), `resolveTeam` (`sys_team_member`) and `resolveOwnerOf` (the
+ * (`sys_member`), `resolveTeam` (`sys_team_member`) — and, since #32445,
+ * `resolveOrganizationMembers` (`sys_member` of the emitting organization,
+ * the `org:members` audience), all three through `memberUserIds`, projected
+ * to `user_id` — and `resolveOwnerOf` (the
  * named record, projected to `id` plus its owner fields — maintainer ruling
  * Q2), the email and SMS channels' recipient reads (`sys_user`: the address or
  * number, and the locale), `NotificationTemplateStore.load`
@@ -25,6 +28,12 @@
  * [#25194] And by `MessagingService.userRecipients` (`sys_user`, the id alone),
  * the one read per emit that tells which recipients are a user, for the
  * delivery rows' `recipient_user_id`.
+ *
+ * [#32445] And by the in-app message door's recipient check
+ * (`in-app-message-routes.ts`, `sys_member` of the sender's current
+ * organization and the picked ids, projected to `user_id`), which tells
+ * whether each picked user is a member before anything is sent. The door has
+ * decided the sender may send before it reads.
  *
  * `emit()` takes no caller context. The door in front of an emitting caller
  * has already decided whether it may notify, and every row these calls read or

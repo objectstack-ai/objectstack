@@ -148,8 +148,8 @@ function mount(opts: MountOptions = {}) {
       authorization_servers: [ISSUER],
     }),
     // The auth catch-all's two reads; no request here reaches it.
-    handleRequest: vi.fn(async () => new Response(null, { status: 404 })),
-    ownsRoute: vi.fn(async () => false),
+    handleVendorRequest: vi.fn(async () => new Response(null, { status: 404 })),
+    ownsVendorRoute: vi.fn(async () => false),
   };
 
   const rawApp = opts.wrapGet

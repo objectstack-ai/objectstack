@@ -221,6 +221,42 @@ const booleanFlagRule = (unsetRequired: string) =>
   + 'default is empty, not false, on every record created without it, so a filter on false misses those records.';
 
 /**
+ * The two uses of a blueprint field's `expression` (ruling B on #32443), read
+ * by both describes so the lenient field and the strict mirror teach the same
+ * thing. `expression` on `FieldSchema` is the contract: on a `formula` it is
+ * computed on read with no column; on any other (stored) field the engine
+ * computes it on every write and stores it. The formula half carries the ONE
+ * remedy sentence the aggregate refusals print, `VIRTUAL_FIELD_AGGREGATE_REMEDY`
+ * in `data/aggregate-field-type-compatibility.ts`, verbatim, so the refusal and
+ * the blueprint say the same sentence; the blueprint test pins it by importing
+ * that constant. It is spelled out rather than imported because an import
+ * would pull that module's query types into the published `objectstack-ai`
+ * skill's reference index (`gen:skill-refs`), for a describe string.
+ *
+ * The stored half states the inputs it may read: this record's own fields. A
+ * stored expression reading another record is warned at authoring
+ * (`stored-expression-cross-record-input`), and one reading the clock or the
+ * acting user keeps the value it had at the write and is warned at authoring
+ * too (`stored-expression-volatile-input`) (ruling 6816315099 on #32443), so
+ * neither appears here as an example.
+ */
+const FORMULA_STORAGE_RULE =
+  'A "formula" is computed on read and stored nowhere: it is shown everywhere, but a list cannot sort by it, search '
+  + 'does not scan it, and a `sum` / `avg` over it is refused with the one remedy every such refusal prints: '
+  + '"Computed on read, the field stores no value: make it a field of its return type with the same `expression` '
+  + '(computed and stored on write) and aggregate that. Counting records is a different question."';
+const STORED_EXPRESSION_RULE =
+  'Second, the stored computed value that remedy names: the same `expression` on a field of the value\'s own return '
+  + 'type, never a "formula" (`number` / `currency` / `percent` for a quantity or an amount, `date` for a date). '
+  + 'The engine computes it from the record on every write and keeps it in a column, so `sum` / `avg` and sort work '
+  + 'on it as on any stored field of that type. Use it whenever the value is totalled, averaged or charted: '
+  + '销售额 = 销量 × 单价 is a "currency" field with "record.quantity * record.unit_price". Name the return type, not '
+  + '"number" for every value: a date expression on a "number" field is refused at every write. A stored expression '
+  + 'reads only this record\'s own fields: a value from a related record stays a "formula" (shown, not totalled) or '
+  + 'is a snapshot field written by a flow on the related object when that value changes, and an input that changes '
+  + 'over time (the current date, the acting user) is frozen at the write.';
+
+/**
  * The refusal of a `defaultValue` that does not fit the field (ruling B on
  * cloud#3619): a runtime token, a type that takes none, a select / radio that
  * declares no options, or a value outside the type's literal contract. Each
@@ -295,8 +331,13 @@ export const BlueprintFieldSchema = lazySchema(() => z.object({
   })).optional().describe('Choices for select / multiselect / radio fields'),
   summaryOperations: BlueprintSummaryOperationsSchema.optional()
     .describe('REQUIRED when `type` is "summary" (a roll-up of child records: 任务总数 / 报名人数 / 合计金额 / 已完成任务数). Names the child object, the aggregation, and — for a qualified count/sum — the condition. A "summary" field without it materializes runtime-dead.'),
+  // ⛔ Must stay in lockstep with the strict `StrictField.expression`: both
+  // describes end on the same two rules, the formula's storage and the stored
+  // computed value, so a design model reading either is taught both uses.
   expression: z.string().optional()
-    .describe('REQUIRED when `type` is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer.name" for a composed title. A formula reads a lookup / master_detail field\'s related record ONE hop through it — `record.<lookup>.<field>`, as `record.customer.name` above; the bare `record.customer` is the stored id, and a second hop (`record.customer.owner.name`) is refused at build. A "formula" field without it materializes runtime-dead: the engine builds its formula plan only from fields that HAVE an expression, so the field reads null everywhere, forever. Same failure shape as a "summary" with no `summaryOperations`. Note `nameField` on the object recommends a formula for numbered entities (invoice/ticket) — that formula needs THIS key, or the record title is blank on every card, lookup chip and breadcrumb.'),
+    .describe('The CEL body a computed field computes. Two uses. First, REQUIRED when `type` is "formula", e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer.name" for a composed title. A formula reads a lookup / master_detail field\'s related record ONE hop through it — `record.<lookup>.<field>`, as `record.customer.name` above; the bare `record.customer` is the stored id, and a second hop (`record.customer.owner.name`) is refused at build. A "formula" field without it materializes runtime-dead: the engine builds its formula plan only from fields that HAVE an expression, so the field reads null everywhere, forever. Same failure shape as a "summary" with no `summaryOperations`. Note `nameField` on the object recommends a formula for numbered entities (invoice/ticket) — that formula needs THIS key, or the record title is blank on every card, lookup chip and breadcrumb. '
+      + `${FORMULA_STORAGE_RULE} ${STORED_EXPRESSION_RULE} Omit it on a field that is neither a formula nor a stored `
+      + 'computed value.'),
   // Ruling B on cloud#3619. The scalar union is the value space every admitted
   // type draws from; whether THIS field takes a default, and which value, is a
   // rule across `type` / `options` and this key, so it is the refinement below.
@@ -610,8 +651,13 @@ const StrictField = z.object({
     .describe('Choices for select-family fields, or null'),
   summaryOperations: StrictSummaryOperations.nullable()
     .describe('REQUIRED when type is "summary" (a roll-up of child records onto this parent: 任务总数 / 报名人数 / 合计金额 / 已完成任务数); null for every other field type. A "summary" field without it is runtime-dead — it reads 0/empty everywhere.'),
+  // ⛔ Must stay in lockstep with the lenient `BlueprintFieldSchema.expression`.
+  // THIS describe is the one the design model reads, and strict mode makes the
+  // key required, so the model decides on every field whether it is computed.
   expression: z.string().nullable()
-    .describe('REQUIRED when type is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer.name" for a composed record title; null for every other field type. A formula reads a lookup / master_detail field\'s related record ONE hop through it — `record.<lookup>.<field>`, as `record.customer.name` above; the bare `record.customer` is the stored id, and a second hop (`record.customer.owner.name`) is refused at build. A "formula" field without it is runtime-dead — it reads null everywhere, forever. This is the formula analogue of summaryOperations: name the type and you must supply the body.'),
+    .describe('The CEL body a computed field computes, or null. Two uses. First, REQUIRED when type is "formula", e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer.name" for a composed record title. A formula reads a lookup / master_detail field\'s related record ONE hop through it — `record.<lookup>.<field>`, as `record.customer.name` above; the bare `record.customer` is the stored id, and a second hop (`record.customer.owner.name`) is refused at build. A "formula" field without it is runtime-dead — it reads null everywhere, forever. This is the formula analogue of summaryOperations: name the type and you must supply the body. '
+      + `${FORMULA_STORAGE_RULE} ${STORED_EXPRESSION_RULE} Null on a field that is neither a formula nor a stored `
+      + 'computed value.'),
   // ⛔ Must stay in lockstep with the lenient `BlueprintFieldSchema.defaultValue`
   // (ruling B on cloud#3619). One scalar union, because strict structured
   // output states a rule per key and cannot read `type` while judging this one:

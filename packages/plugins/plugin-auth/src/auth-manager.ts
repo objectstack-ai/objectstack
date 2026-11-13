@@ -760,6 +760,21 @@ export function readInvitationPlacementIntent(
   return { businessUnitId, positions };
 }
 
+/**
+ * [#32637] The plugin's own auth route table, as `AuthManager.handleRequest`
+ * answers through it: every route `AuthPlugin`'s mount serves, registered by
+ * the one function that fills the self-hosted mount (`auth-plugin.ts`).
+ */
+export interface AuthRouteSurface {
+  /**
+   * Answer one request under `basePath`, with what the transport knows about
+   * it. An exception is a rejection, never a fabricated answer.
+   */
+  fetch(request: Request, transport?: { remoteAddress?: string }): Promise<Response>;
+  /** Does the table itself serve `method` on `pathname` (a `HEAD` as its `GET`)? */
+  owns(method: string, pathname: string): boolean;
+}
+
 export interface AuthManagerOptions extends Partial<AuthConfig> {
   /**
    * Better-Auth instance (for advanced use cases)
@@ -2284,6 +2299,7 @@ export class AuthManager {
       emailLocaleArg: (...a) => this.emailLocaleArg(...a),
       enforceSessionControls: (...a) => this.enforceSessionControls(...a),
       getAppName: (...a) => this.getAppName(...a),
+      getAudience: (...a) => this.getAudience(...a),
       getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       getEmailService: (...a) => this.getEmailService(...a),
@@ -4047,12 +4063,20 @@ export class AuthManager {
   }
 
   /**
-   * Handle an authentication request
-   * Forwards the request directly to better-auth's universal handler
+   * Handle an authentication request: the plugin's WHOLE auth surface.
    *
-   * better-auth catches internal errors (database / adapter / ORM) and
-   * returns a 500 Response instead of throwing.  We therefore inspect the
-   * response status and log server errors so they are not silently swallowed.
+   * [#32637] A request under `basePath` is answered by the route table
+   * `AuthPlugin` bound to this manager ({@link bindRouteSurface}) — the same
+   * registration that fills the self-hosted mount, so the routes the platform
+   * mounts itself (`/config`, the `/admin/*` doors, …), their mount-layer
+   * checks, and better-auth behind them through that table's catch-all. A host
+   * that forwards its auth path here serves exactly what the self-hosted mount
+   * serves and nothing else. With no bound table (a manager constructed on its
+   * own), or for a path outside `basePath`, the request goes straight to
+   * better-auth ({@link handleVendorRequest}), as it always did.
+   *
+   * An exception on the table reaches the caller as a rejection: the host
+   * turns it into its own public error body.
    *
    * @param request - Web standard Request object
    * @param transport - What the transport knows about the request that a Fetch
@@ -4060,10 +4084,50 @@ export class AuthManager {
    *   (`IHttpRequest.remoteAddress`). Omitted, the request's client address is
    *   established from trusted forwarded headers alone, and is undetermined
    *   when `trustProxy` is not declared. Either way the vendored library is
-   *   handed that address and no other (`client-address-vendor.ts`).
+   *   handed that address and no other (`client-address-vendor.ts`), and the
+   *   table's mount-layer checks judge by that same address.
    * @returns Web standard Response object
    */
   handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+    const surface = this.routeSurface;
+    if (surface && this.betterAuthEndpointPath(request) !== undefined) return surface.fetch(request, transport);
+    return this.handleVendorRequest(request, transport);
+  }
+
+  /**
+   * [#32637] Bind the plugin's own route table: from now on
+   * {@link handleRequest} answers through it and {@link ownsRoute} counts its
+   * routes. `AuthPlugin` binds it in `init()`, right after constructing this
+   * manager, so the table is complete before the first request.
+   *
+   * @internal The plugin's wiring, not an extension point.
+   */
+  bindRouteSurface(surface: AuthRouteSurface | undefined): void {
+    this.routeSurface = surface;
+  }
+
+  /** [#32637] The table {@link bindRouteSurface} bound, if any. */
+  private routeSurface?: AuthRouteSurface;
+
+  /**
+   * better-auth's universal handler ALONE — the vendor entry.
+   *
+   * Every in-process re-dispatch into the vendor goes here, never through
+   * {@link handleRequest}: a bridge mounted on the route table that re-dispatched
+   * through `handleRequest` would be answered by that table again — the
+   * table's catch-all would call itself, and a gate-then-delegate mount on the
+   * vendor's own path (`/admin/remove-user`) would call its own route — and
+   * the mount-layer checks would run a second time on one request.
+   *
+   * better-auth catches internal errors (database / adapter / ORM) and
+   * returns a 500 Response instead of throwing.  We therefore inspect the
+   * response status and log server errors so they are not silently swallowed.
+   *
+   * @param request - Web standard Request object
+   * @param transport - As {@link handleRequest}'s.
+   * @returns Web standard Response object
+   */
+  handleVendorRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
     const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'resolveAuthSecret'> = {
       config: this.config,
@@ -4154,7 +4218,8 @@ export class AuthManager {
           return (await auth.$context) as ThirdPartyLoginContext;
         },
         startUrl: new URL(`${this.getBasePath()}/sign-in/sso`, callback.request.url).href,
-        dispatch: (request) => this.handleRequest(request, transport),
+        // The vendor's own start, so never back through the route table.
+        dispatch: (request) => this.handleVendorRequest(request, transport),
         logger: this.config.logger,
       },
       callbackScope,
@@ -4311,6 +4376,31 @@ export class AuthManager {
   }
 
   /**
+   * Does this auth service ROUTE this request — is it one {@link handleRequest}
+   * answers with an answer of its own, whatever that answer is?
+   *
+   * [#32637] True for a route the bound route table serves itself, judged by
+   * method AND path (`POST /admin/sso/register` is the table's, a `GET` on that
+   * path is not), so a host that yields a `404` it is told nobody owns keeps an
+   * objectstack route's own `404` (a withdraw naming no consent) as the answer.
+   * Otherwise, whether better-auth's own router serves it
+   * ({@link ownsVendorRoute}).
+   */
+  ownsRoute(request: Request): Promise<boolean> {
+    const surface = this.routeSurface;
+    if (surface) {
+      let pathname: string | undefined;
+      try {
+        pathname = new URL(request.url).pathname;
+      } catch {
+        pathname = undefined;
+      }
+      if (pathname !== undefined && surface.owns(request.method, pathname)) return Promise.resolve(true);
+    }
+    return this.ownsVendorRoute(request);
+  }
+
+  /**
    * [#15417] Does better-auth ROUTE this request — i.e. is the path one its own
    * router owns, whatever it then answers?
    *
@@ -4330,7 +4420,7 @@ export class AuthManager {
    * request it cannot decide, so a failure to enumerate can never take the
    * #4088 surface down with it.
    */
-  ownsRoute(request: Request): Promise<boolean> {
+  ownsVendorRoute(request: Request): Promise<boolean> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
     const readRouteOwnership = () => this.routeOwnership;
     const writeRouteOwnership = (v: AuthManager['routeOwnership']) => { this.routeOwnership = v; };
@@ -5786,7 +5876,8 @@ export class AuthManager {
     // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
     const readOrgRolesMap = () => this.orgRolesMap;
     const readOrganizationDeleteStandingJudge = () => this.organizationDeleteStandingJudge;
-    const host: Pick<ActorGuardHost, 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteStandingJudge' | 'resolveActor'> = {
+    const host: Pick<ActorGuardHost, 'getAudience' | 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteStandingJudge' | 'resolveActor'> = {
+      getAudience: (...a) => this.getAudience(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       get orgRolesMap() { return readOrgRolesMap(); },
       get organizationDeleteStandingJudge() { return readOrganizationDeleteStandingJudge(); },

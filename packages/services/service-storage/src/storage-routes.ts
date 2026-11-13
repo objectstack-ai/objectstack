@@ -2308,18 +2308,24 @@ function isUnusableUploadLink(err: unknown): boolean {
  * outages (the authorization store's, and a `503` `SERVICE_UNAVAILABLE`),
  * so a fault's own text never reaches the link's holder — every other throw
  * is the route's `500`.
+ *
+ * [#32734] The declared status is read over both spellings producers use
+ * (`resolveThrownHttpError`'s `declaredStatus`: `status`, then `statusCode`):
+ * a lifecycle hook's refusal declares `statusCode` — the record lock's
+ * `409 RECORD_LOCKED` — and reading `status` alone answered it `500`.
  */
 function relayUploadLinkRefusal(res: IHttpResponse, err: unknown): boolean {
   if (isAuthzStoreUnavailableError(err)) {
     sendError(res, err.status, err.code, err.message);
     return true;
   }
-  const e = err as { code?: unknown; status?: unknown; message?: unknown } | null;
-  if (!e || typeof e.code !== 'string' || typeof e.status !== 'number') return false;
-  const relayable =
-    (e.status >= 400 && e.status < 500) || (e.status === 503 && e.code === 'SERVICE_UNAVAILABLE');
+  const e = err as { code?: unknown; message?: unknown } | null;
+  if (!e || typeof e.code !== 'string') return false;
+  const status = resolveThrownHttpError(err).declaredStatus;
+  if (status === undefined) return false;
+  const relayable = (status >= 400 && status < 500) || (status === 503 && e.code === 'SERVICE_UNAVAILABLE');
   if (!relayable) return false;
-  sendError(res, e.status, e.code as ErrorCode, typeof e.message === 'string' ? e.message : 'Upload refused');
+  sendError(res, status, e.code as ErrorCode, typeof e.message === 'string' ? e.message : 'Upload refused');
   return true;
 }
 

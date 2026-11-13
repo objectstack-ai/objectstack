@@ -2636,3 +2636,164 @@ describe('ListView.setupChrome-12606', () => {
     });
   });
 });
+
+// ── ListView.groupPickerUnstored-32631 ──────────────────────────────────────────
+
+/**
+ * objectstack#32631 — the server refuses a group key naming a VIRTUAL field
+ * (a `formula`: computed on read, no stored column) with `400 INVALID_FIELD`.
+ * Two halves are pinned here, each beside its control:
+ *
+ *   - neither Group editor offers such a field (the wide toolbar's Group panel
+ *     and the Display popover's Group section); a stored field is still
+ *     offered;
+ *   - a grouping the READER brought (laid over the view's own, as the console
+ *     lays a URL grouping) that names one is left out of the query: the grid
+ *     is handed the grouping without it, a notice says so, and its button
+ *     writes that grouping back. A grouping the VIEW declares is handed down
+ *     as declared, so its refusal stays the grid's error.
+ */
+describe('ListView.groupPickerUnstored-32631', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'leave_32631';
+  const TITLE = { field: 'display_title', order: 'asc' as const, collapsed: false };
+  const STATUS = { field: 'status', order: 'asc' as const, collapsed: false };
+
+  const objectDef = (titleType: 'formula' | 'text') => ({
+    name: OBJECT,
+    fields: {
+      display_title: { type: titleType, label: 'Title', ...(titleType === 'formula' ? { expression: 'subject' } : {}) },
+      subject: { type: 'text', label: 'Subject' },
+      status: { type: 'text', label: 'Status' },
+    },
+  });
+
+  let gridProps: any;
+  let previousGrid: ReturnType<typeof ComponentRegistry.get>;
+
+  function mount(opts: {
+    titleType?: 'formula' | 'text';
+    compactToolbar?: boolean;
+    grouping?: { fields: Array<typeof TITLE> };
+    viewGrouping?: { fields: Array<typeof TITLE> } | undefined;
+  } = {}) {
+    const dataSource = {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', subject: 'Leave', status: 'open' }], total: 1 }),
+      queryGroupHeaders: vi.fn().mockResolvedValue([]),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn().mockResolvedValue(objectDef(opts.titleType ?? 'formula')),
+    };
+    const onGroupingChange = vi.fn();
+    const schema = {
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: ['display_title', 'subject', 'status'],
+      compactToolbar: opts.compactToolbar ?? false,
+      ...(opts.grouping ? { grouping: opts.grouping } : {}),
+    } as unknown as ListViewSchema;
+    render(
+      <SchemaRendererProvider dataSource={dataSource as never}>
+        <ListView
+          schema={schema}
+          dataSource={dataSource as never}
+          onGroupingChange={onGroupingChange}
+          viewDefaults={{ grouping: opts.viewGrouping } as never}
+        />
+      </SchemaRendererProvider>,
+    );
+    return { onGroupingChange };
+  }
+
+  async function openOptions(trigger: HTMLElement): Promise<string[]> {
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const listbox = await screen.findByRole('listbox');
+    return within(listbox).getAllByRole('option').map((o) => o.textContent ?? '');
+  }
+
+  beforeEach(() => {
+    gridProps = undefined;
+    previousGrid = ComponentRegistry.get('object-grid');
+    ComponentRegistry.register('object-grid', (props: any) => {
+      gridProps = props;
+      return <div data-testid="grid-stub" />;
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    if (previousGrid) ComponentRegistry.register('object-grid', previousGrid as any);
+  });
+
+  describe('the Group editors do not offer a formula field (objectstack#32631)', () => {
+    it('the toolbar Group panel: "Add group field" seeds the first stored field, and the level lists stored fields only', async () => {
+      const { onGroupingChange } = mount();
+      await screen.findByTestId('grid-stub');
+      fireEvent.click(screen.getByRole('button', { name: /group/i }));
+      await screen.findByTestId('group-field-list');
+      fireEvent.click(screen.getByTestId('grouping-add'));
+      expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'subject', order: 'asc', collapsed: false }] });
+      expect(await openOptions(screen.getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
+    });
+
+    it('the Display popover\'s Group section offers the same', async () => {
+      const { onGroupingChange } = mount({ compactToolbar: true });
+      await screen.findByTestId('grid-stub');
+      fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+      const content = await screen.findByTestId('view-settings-content');
+      fireEvent.click(within(content).getByTestId('grouping-add'));
+      expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'subject', order: 'asc', collapsed: false }] });
+      expect(await openOptions(within(content).getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
+    });
+
+    it('CONTROL — the same field stored (`text`) is offered first, in both editors', async () => {
+      const { onGroupingChange } = mount({ titleType: 'text' });
+      await screen.findByTestId('grid-stub');
+      fireEvent.click(screen.getByRole('button', { name: /group/i }));
+      await screen.findByTestId('group-field-list');
+      fireEvent.click(screen.getByTestId('grouping-add'));
+      expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [TITLE] });
+      expect(await openOptions(screen.getByTestId('grouping-field-0'))).toEqual(['Title', 'Subject', 'Status']);
+    });
+  });
+
+  describe('a refused grouping the reader brought falls back to the list without it (objectstack#32631)', () => {
+    it('a grouping by the formula alone: the grid is handed no grouping, the notice names the field, and its button clears it', async () => {
+      const { onGroupingChange } = mount({ grouping: { fields: [TITLE] }, viewGrouping: undefined });
+      await screen.findByTestId('grid-stub');
+      expect(gridProps.schema.grouping).toBeUndefined();
+      const notice = screen.getByTestId('list-grouping-unstored-notice');
+      expect(notice.getAttribute('role')).toBe('status');
+      expect(notice.textContent).toContain('Title');
+      fireEvent.click(within(notice).getByTestId('list-grouping-unstored-remove'));
+      expect(onGroupingChange).toHaveBeenCalledTimes(1);
+      expect(onGroupingChange).toHaveBeenCalledWith(undefined);
+    });
+
+    it('a stored level beside it is kept: the grid groups by that level, and the button writes it alone', async () => {
+      const { onGroupingChange } = mount({ grouping: { fields: [STATUS, TITLE] }, viewGrouping: undefined });
+      await screen.findByTestId('grid-stub');
+      await waitFor(() => expect(gridProps.schema.grouping?.fields).toEqual([STATUS]));
+      fireEvent.click(screen.getByTestId('list-grouping-unstored-remove'));
+      expect(onGroupingChange).toHaveBeenCalledWith({ fields: [STATUS] });
+    });
+
+    it('CONTROL — the VIEW declares that grouping: it is handed down as declared, and no notice is drawn', async () => {
+      mount({ grouping: { fields: [TITLE] }, viewGrouping: { fields: [TITLE] } });
+      await screen.findByTestId('grid-stub');
+      expect(gridProps.schema.grouping?.fields).toEqual([TITLE]);
+      expect(screen.queryByTestId('list-grouping-unstored-notice')).toBeNull();
+    });
+
+    it('CONTROL — the reader groups by the field stored (`text`): handed down, and no notice is drawn', async () => {
+      mount({ titleType: 'text', grouping: { fields: [TITLE] }, viewGrouping: undefined });
+      await screen.findByTestId('grid-stub');
+      expect(gridProps.schema.grouping?.fields).toEqual([TITLE]);
+      expect(screen.queryByTestId('list-grouping-unstored-notice')).toBeNull();
+    });
+  });
+});

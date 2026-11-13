@@ -12,6 +12,7 @@ import { ViewFilterRuleSchema } from '../ui/view.zod';
 import { SortItemSchema } from '../shared/enums.zod';
 import { FieldSchema, FieldType, SelectOptionSchema } from '../data/field.zod';
 import { ObjectSchema } from '../data/object.zod';
+import { VIRTUAL_FIELD_AGGREGATE_REMEDY } from '../data/aggregate-field-type-compatibility';
 
 const validBlueprint: SolutionBlueprint = {
   summary: 'A simple project tracker',
@@ -1526,6 +1527,90 @@ describe('blueprint field `defaultValue`', () => {
       expect(text).toContain('never `required`');
       expect(text).toContain('defaultValue false');
       expect(text).toContain('refused by name');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A blueprint field's `expression` has two uses (ruling B on #32443): the body
+// of a `formula`, computed on read and never totallable, and — on a field of
+// the value's own return type — a stored computed value the engine computes
+// on every write, which `sum` / `avg` can read. The SHAPE always admitted the
+// second use; the describes the design model reads told it "null for every
+// other field type", so the AI builder authored a totalled amount as a formula
+// and every sum over it was refused (#32614).
+// ---------------------------------------------------------------------------
+describe('blueprint field `expression` — the stored computed value', () => {
+  const STORED = { name: 'amount', type: 'number', expression: 'record.quantity * record.unit_price' } as const;
+  const expressionDescribeOf = (root: any): string =>
+    root.shape.objects.element.shape.fields.element.shape.expression.description;
+
+  it('a non-formula field with an expression parses under the lenient schema and keeps its expression', () => {
+    const parsed = SolutionBlueprintSchema.parse({
+      summary: 's',
+      objects: [{
+        name: 'order_line',
+        fields: [
+          { name: 'quantity', type: 'number' },
+          { name: 'unit_price', type: 'currency' },
+          STORED,
+        ],
+      }],
+    });
+    expect(parsed.objects[0].fields[2]).toMatchObject(STORED);
+  });
+
+  it('the same field parses under the strict mirror and keeps its expression', () => {
+    const parsed = SolutionBlueprintStrictSchema.parse({
+      summary: 's',
+      assumptions: [],
+      questions: null,
+      objects: [{
+        name: 'order_line', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+        fields: [{
+          ...STORED, label: null, required: null, reference: null, options: null, summaryOperations: null, defaultValue: null,
+        }],
+      }],
+      views: null,
+      dashboards: null,
+      app: null,
+    });
+    expect(parsed.objects[0].fields[0]).toMatchObject(STORED);
+  });
+
+  it('the built field\'s own schema admits it as a stored computed field', () => {
+    // The applier carries the field into the object, where `FieldSchema` judges
+    // it again: a field legal to propose must be legal to stage.
+    const built = FieldSchema.safeParse({ ...STORED, label: 'Amount' });
+    expect(built.success).toBe(true);
+    expect(built.data?.expression).toBeDefined();
+  });
+
+  it('both describes carry the aggregate refusals\' remedy sentence verbatim and teach the stored use in lockstep', () => {
+    const tails = [SolutionBlueprintSchema, SolutionBlueprintStrictSchema].map((root) => {
+      const text = expressionDescribeOf(root);
+      expect(text).not.toContain('null for every other field type');
+      const at = text.indexOf(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+      expect(at).toBeGreaterThan(-1);
+      // The shared tail runs from the remedy to the closing absence sentence,
+      // which each side spells its own way (omit / null).
+      return text.slice(at).replace(/ (Omit it|Null) on a field that is neither a formula nor a stored computed value\.$/, '');
+    });
+    expect(tails[1]).toEqual(tails[0]);
+  });
+
+  it('neither describe gives a stored expression that reads another record or the clock', () => {
+    // A stored expression reads only the row's own fields (ruling 6816315099):
+    // one reading another record is warned at authoring
+    // (`stored-expression-cross-record-input`), one reading the clock or the
+    // acting user keeps its write-time value and is warned at authoring too
+    // (`stored-expression-volatile-input`). The only lookup read in the
+    // describes is the formula's composed title, before the stored half.
+    for (const root of [SolutionBlueprintSchema, SolutionBlueprintStrictSchema]) {
+      const text = expressionDescribeOf(root);
+      const stored = text.slice(text.indexOf(VIRTUAL_FIELD_AGGREGATE_REMEDY));
+      expect(stored).not.toMatch(/record\.\w+\.\w+/);
+      expect(text).not.toMatch(/\b(today|now)\(\)/);
     }
   });
 });

@@ -3079,6 +3079,34 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "주제별"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "앱 내 메시지 보내기",
+        description: "조직의 모든 구성원 또는 선택한 구성원에게 메시지를 보냅니다. 각 수신자의 알림에 표시됩니다.",
+        successMessage: "{{ result.recipients }}명에게 메시지를 보냈습니다",
+        params: {
+          everyone: {
+            label: "이 조직의 모든 구성원",
+            helpText: "현재 조직의 모든 구성원에게 보냅니다. 끄면 아래에서 수신자를 선택할 수 있습니다."
+          },
+          recipients: {
+            label: "수신자",
+            helpText: "메시지가 모두를 위한 것이 아닐 때 보낼 조직 구성원입니다."
+          },
+          title: {
+            label: "제목",
+            helpText: "각 수신자가 알림에서 보게 되는 한 줄입니다."
+          },
+          body: {
+            label: "본문"
+          },
+          link: {
+            label: "링크",
+            helpText: "선택 사항. 메시지가 여는 이 앱의 페이지(/로 시작) 또는 웹 주소입니다."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3752,9 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "버전"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "작업 유형",

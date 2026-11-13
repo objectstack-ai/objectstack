@@ -89,6 +89,8 @@ export const ptBRGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_metadata_commit.label": "e468d6648e2b0c37",
   "objects.sys_metadata_commit.pluralLabel": "20e7caa05a2b0373",
   "objects.sys_metadata_history.fields.id.label": "00b0385c9c152888",
+  "objects.sys_metadata_history.fields.package_id.label": "cf01d56712075feb",
+  "objects.sys_notification._actions.send_in_app_message.params.link.label": "483804d6e2fdd5c0",
   "objects.sys_oauth_access_token.fields.id.label": "00b0385c9c152888",
   "objects.sys_oauth_access_token.fields.token.label": "6e8de3393d2cee54",
   "objects.sys_oauth_application._actions.create_oauth_application.params.type.options.web": "2a7ead3da8c035c5",
