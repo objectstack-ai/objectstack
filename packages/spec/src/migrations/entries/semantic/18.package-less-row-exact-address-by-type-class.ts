@@ -22,15 +22,20 @@ export const entry: SemanticMigration = {
     + 'assignment_rule and the like): any package-less row of a name a package ships. Whether the change moves to a '
     + 'declared override turns on the type: only flow, action, page, app, dataset, doc, book and mapping have one',
   replacement:
-    'For (1), save the customization under the one package it customizes (?package=ID on the write), then delete '
-    + 'the package-less draft. For (2), what the change becomes depends on whether the type has a declared override '
-    + 'channel (ADR-0146). (2a) flow and action (under ADR-0146 D9\'s conditions), page, app, dataset, doc, book and '
-    + 'mapping: author the change as a declared override in the holder\'s paired .custom package, then delete the '
-    + 'package-less row. (2b) every other sealed type (hook, job, queue, sharing_rule, assignment_rule, agent, skill, '
-    + 'api and the like) has no override channel: delete the package-less row, and ship the change as a new version of '
-    + 'the holding package\'s source, or keep it as an item of its own under a name no package ships (an environment '
-    + 'action bound to an object neither holder binds included). A package-less overlay row of a name one package '
-    + 'holds is that holder\'s customization and is served as before',
+    'Delete the package-less row FIRST (DELETE /api/v1/meta/TYPE/NAME naming no package; ?state=draft for a '
+    + 'draft), then save the change where it belongs: a package-less delete addresses the one package the name\'s '
+    + 'rows are bound to, so run after the save it removes the change just saved and leaves the package-less row. '
+    + 'For (1), save the draft under the package it customizes: ?package=ID when the holder is a writable '
+    + '(authored) package; for a code package, whose own address refuses the save 403 NOT_OVERRIDABLE naming its '
+    + 'pair, in the holder\'s paired .custom package (?package=ID.custom with overrides: { package: ID, basedOn: '
+    + 'VERSION }). For (2), what the change becomes depends on whether the type has a declared override channel '
+    + '(ADR-0146). (2a) flow and action (under ADR-0146 D9\'s conditions), page, app, dataset, doc, book and '
+    + 'mapping: author the change as a declared override in the holder\'s paired .custom package, after deleting the '
+    + 'package-less row. (2b) every other sealed type (hook, job, queue, sharing_rule, assignment_rule, agent, '
+    + 'skill, api and the like) has no override channel: delete the package-less row, and ship the change as a new '
+    + 'version of the holding package\'s source, or keep it as an item of its own under a name no package ships (an '
+    + 'environment action bound to an object neither holder binds included). A package-less overlay row of a name '
+    + 'one package holds is that holder\'s customization and is served as before',
   reason:
     'A package-less row of an overlay type is a holder\'s customization that cannot say which holder when two '
     + 'packages hold the name (ADR-0150 D4), so each holder\'s exact read refuses it 409 RESOURCE_CONFLICT naming '
@@ -44,8 +49,9 @@ export const entry: SemanticMigration = {
     + 'the change landed: no first-party composition has two packages holding one name with a package-less row.',
   acceptanceCriteria:
     'For every package-less draft of an email_template, dashboard or report whose name two installed packages '
-    + 'hold, the draft is re-saved under one package and the package-less draft deleted: each holder\'s '
-    + '?package=ID&state=draft then answers its own draft, never 409 naming both. For every package-less stored row '
+    + 'hold, the package-less draft is deleted and the draft re-saved under the package it customizes: '
+    + '?package=ID&state=draft answers it for a writable holder, ?package=ID.custom&state=draft for a code package '
+    + '(whose own ?package=ID&state=draft answers no draft), and no holder\'s draft read answers 409 naming both. For every package-less stored row '
     + 'of a sealed type whose name a package ships, no package-less row of the name remains, and: for a type of '
     + '(2a), the change lives in a declared override of the holder\'s .custom package and ?package=ID answers the '
     + 'override, before and after a reload; for a type of (2b), ?package=ID answers the holder\'s own shipped item '
