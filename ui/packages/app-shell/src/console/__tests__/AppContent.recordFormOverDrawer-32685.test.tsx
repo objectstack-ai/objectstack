@@ -28,7 +28,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import React, { useEffect } from 'react';
 import { render, cleanup, waitFor, screen, fireEvent, act, within } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useNavigate, type NavigateFunction } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useNavigate, useLocation, type NavigateFunction } from 'react-router-dom';
 import { registerAllFields } from '@object-ui/fields';
 // The console's draft bar loads the linter lazily: pay that load while the file
 // is collected, never inside a case's timeout (`check:test-source-alias`).
@@ -41,6 +41,8 @@ const probe = vi.hoisted(() => ({
   events: [] as string[],
   /** The list suspends once before it draws (a lazy chunk the route still loads). */
   suspend: null as null | { promise: Promise<void>; done: boolean },
+  /** The location as of the latest render. */
+  where: '',
 }));
 
 vi.mock('@object-ui/plugin-form', async (importOriginal) => {
@@ -79,6 +81,9 @@ vi.mock('../../chrome/KeyboardShortcutsDialog', () => ({ KeyboardShortcutsDialog
 vi.mock('../../chrome/OnboardingWalkthrough', () => ({ OnboardingWalkthrough: () => null }));
 vi.mock('../../views/RecordFormPage', () => ({
   RecordFormPage: () => <div data-testid="record-form-page" />,
+}));
+vi.mock('../../views/RecordDetailView', () => ({
+  RecordDetailView: () => <div data-testid="record-page" />,
 }));
 
 // The list's record drawer, as `ObjectView` mounts it
@@ -192,8 +197,10 @@ import { AppContent } from '../AppContent';
 const nav: { current: NavigateFunction | null } = { current: null };
 function NavProbe() {
   const navigate = useNavigate();
+  const location = useLocation();
   useEffect(() => {
     nav.current = navigate;
+    probe.where = `${location.pathname}${location.search}`;
   });
   return null;
 }
@@ -289,5 +296,54 @@ describe('#32685 — a related-record form the URL opens over a record drawer is
     mountAt('/apps/crm/crm_contact?form=new');
     await waitFor(() => expect(document.querySelector('[data-testid="modal-form-footer"]')).not.toBeNull(), { timeout: 5000 });
     expect(screen.queryByTestId('record-body')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#32750 — on a phone the list answers a drawer link with the
+ * record's page (objectstack#27058), and carries the related-record form the
+ * link names onto it: `record/<id>?form=new&formObject=…&formLink=…`
+ * (`objectViewRecordNavigation.phonePush-29074.test.tsx` pins that redirect).
+ * Here, the page it lands on: the form opens over the record page and stays
+ * open, as the same link opens it over the drawer on a desktop.
+ * CONTROL: the record page with no form parameters draws no form.
+ *
+ * Mounted at the URL the redirect writes: in this harness a router
+ * transition from the list route to the record route never commits (measured
+ * on a desktop width too), so the redirect itself is pinned at the hook. The
+ * waits below are plain timers, not `act`: the record route keeps re-rendering
+ * under this harness's doubles, and `act` waits for that to settle.
+ */
+describe('#32750 — on a phone the related-record form a drawer link carries stays open over the record page', () => {
+  const width = window.innerWidth;
+  beforeEach(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 });
+  });
+  afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+  });
+
+  it('the form opens over the record page and is still open after the page settles', async () => {
+    mountAt(`/apps/crm/crm_account/record/a1?${RELATED_NEW}`);
+    await screen.findByTestId('record-page', {}, { timeout: 5000 });
+    const footer = await waitFor(() => {
+      const found = document.querySelector('[data-testid="modal-form-footer"]');
+      expect(found).not.toBeNull();
+      return found!;
+    }, { timeout: 5000 });
+    // The card measured the form closing about half a second after it opened.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(footer.isConnected).toBe(true);
+    expect(probe.events).not.toContain('form:false');
+    expect(within(footer.closest('[role="dialog"]') as HTMLElement).getByRole('button', { name: 'Create' })).toBeEnabled();
+    expect(probe.where).toBe(`/apps/crm/crm_account/record/a1?${RELATED_NEW}`);
+  });
+
+  it('CONTROL: the record page with no form parameters draws no form', async () => {
+    mountAt('/apps/crm/crm_account/record/a1');
+    await screen.findByTestId('record-page', {}, { timeout: 5000 });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(document.querySelector('[data-testid="modal-form-footer"]')).toBeNull();
+    expect(probe.where).toBe('/apps/crm/crm_account/record/a1');
   });
 });
