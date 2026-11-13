@@ -1145,17 +1145,15 @@ describe('[#31699] a package-less row of a name two packages hold is no holder\'
   // 409 `ambiguous-in-closure` naming both. Re-enabled, as FROM.
   const PAIR_B = `${B}.custom`;
   const ROW_LABELS: Record<string, string> = { 'the environment\'s item': 'env dashboard', 'a package-less stored row': 'stored dashboard' };
-  it.each(HOLDER_ORDERS.flatMap(([order, ids]) => PACKAGE_LESS_ROWS.map(([row, add]) => [order, row, ids, add] as const)))('[#32183] dashboard (%s, beside %s): `?package=<enabled>.custom` serves the row as the enabled holder\'s customization, or 404 while #32501 location 1 stands; re-enabled, refused naming both', async (_order, row, order, addRow) => {
+  it.each(HOLDER_ORDERS.flatMap(([order, ids]) => PACKAGE_LESS_ROWS.map(([row, add]) => [order, row, ids, add] as const)))('[#32183] dashboard (%s, beside %s): `?package=<enabled>.custom` serves the row as the enabled holder\'s customization in both orders; re-enabled, refused naming both', async (_order, row, order, addRow) => {
     for (const id of order) ship('dashboard', 'dup', id);
     addRow();
     registry.disablePackage(A);
     const answer = await protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: PAIR_B } as never);
-    // [#32501 location 1] With the disabled holder registered first, the pair
-    // address's envelope falls back to the first holder that ships the name,
-    // the disabled one, so the face withholds it (404), as the same fallback
-    // does on `main`. ⚠️ Flip this arm to the row (200) when #32501 lands.
-    if (order[0] === A) expect([labelOf(answer), /(env|stored|alpha|beta) dashboard/.test(JSON.stringify(answer ?? null))]).toEqual([undefined, false]);
-    else expect(labelOf(answer)).toBe(ROW_LABELS[row]);
+    // [#32501 location 1] The pair address's envelope is the package it reads
+    // (the enabled holder), never the first registered holder, so the disabled
+    // holder registered first no longer withholds the row (was 404).
+    expect(labelOf(answer)).toBe(ROW_LABELS[row]);
     registry.enablePackage(A);
     const err = await refusalOf(() => protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: PAIR_B } as never));
     expect([err.status, err.refusal.reason, sortedCandidates(err)]).toEqual([409, 'ambiguous-in-closure', [A, B]]);

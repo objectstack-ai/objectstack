@@ -239,6 +239,33 @@ function envelopePackageId(requestedPackageId: string | undefined, served: unkno
 }
 
 /**
+ * [#32501, ADR-0150 D5, epic red line 2] The artifact envelope a read at an
+ * admitted exact address wears: the artifact of the ONE package that address
+ * reads, and only when it is that package's OWN (`_packageId` is it, the check
+ * `shippedArtifactsOf` makes). That package is the one the address names when
+ * it holds the name, else the one base it was admitted at; two admitted bases
+ * (two modules of one App sharing its pair), or none (a row bound only to the
+ * named package), leave the address no package to read an envelope from, so
+ * the body keeps its own stamp.
+ *
+ * {@link envelopePackageId} looked the artifact up at the named package, a
+ * pair id that ships nothing, so `registry.getArtifactItem`'s any-composite
+ * tier answered the first registered package that ships the name: the pair
+ * address of the second holder served its base's body under the first
+ * holder's `_packageId`, `_packageVersion` and `_provenance`, and, the first
+ * holder disabled, the item face withheld it by that stamp (404).
+ * `lookup(packageId)` is the read's own artifact lookup at that package.
+ */
+function exactAddressArtifact(
+    address: { readonly packageId: string; readonly registryHolders: readonly string[] },
+    lookup: (packageId: string) => unknown,
+): unknown {
+    const reads = address.registryHolders.length === 1 ? address.registryHolders[0] : address.packageId;
+    const artifact = lookup(reads);
+    return (artifact as { _packageId?: unknown } | null | undefined)?._packageId === reads ? artifact : undefined;
+}
+
+/**
  * [#28831, #22024, ADR-0146 D8] The artifact envelope an item of the
  * per-package layer ({@link ObjectStackProtocolImplementation.getMetaItemsPerPackage})
  * wears: the artifact the read looked up at the item's package
@@ -509,6 +536,7 @@ export {
     bundleMemberOf,
     declinesBorrowedEnvelope,
     envelopePackageId,
+    exactAddressArtifact,
     isShippedViewItem,
     mergeArtifactProtection,
     perPackageLayerEnvelope,

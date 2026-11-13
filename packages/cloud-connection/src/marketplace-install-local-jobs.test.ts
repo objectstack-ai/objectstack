@@ -31,7 +31,11 @@
  *     entry an earlier build persisted rehydrates with its unbindable pull job
  *     withheld and warned by name;
  *   - a package without jobs, and one whose handler-only job is DISABLED,
- *     install unchanged.
+ *     install unchanged;
+ *   - #32572: so is a package with two or more ENABLED jobs of one name,
+ *     naming the binder's own refusal of the name (every job, every holder);
+ *     an upgrade declaring it leaves the installed version's job running, and
+ *     distinct names or a DISABLED twin install as before.
  *
  * The binder is the REAL `@objectstack/runtime` export (resolved through its
  * `exports`, i.e. its built `dist/`, like the plugin's own lazy import), and so
@@ -48,6 +52,7 @@ import { tmpdir } from 'node:os';
 import '@objectstack/runtime';
 import { SCHEDULED_WORK_ENV } from '@objectstack/types';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
@@ -503,5 +508,114 @@ describe('install-local refuses an enabled job whose pull does not bind, by the 
             String(message).includes('NOT scheduled') && (meta as { job?: string } | undefined)?.job === UNDECLARED.name);
         expect(warned, 'no warn names the withheld pull job').toBeDefined();
         expect(String(warned![0])).toContain("pull.mapping: this artifact declares no mapping 'orders_pul'");
+    });
+});
+
+/**
+ * [#32572, ADR-0150 D3] Two or more ENABLED jobs of one name. The binder refuses the name at bind
+ * (`scheduleAppArtifactJobs`, its `jobNameCollisions`): the job service keys a job by its name and would keep
+ * only the later, so none of the name's jobs is scheduled, and a job of the name an earlier version scheduled
+ * is cancelled. This door answered such a package 200. It now refuses it as it refuses every other job it
+ * cannot run — `422 VALIDATION_ERROR`, before anything is registered, persisted or scheduled — quoting the
+ * binder's own refusal (`collectJobNameCollisions`): every job of the name, and its holders, the residual
+ * by its own words included. A disabled twin collides with nothing, as at bind.
+ */
+describe('[#32572] install-local refuses a package with two enabled jobs of one name, as the binder refuses it at bind', () => {
+    const TWIN = { ...BODY_JOB, name: 'jobs_app_twin' };
+    const TWIN_SLOW = { ...TWIN, schedule: { type: 'interval', intervalMs: 5000 } };
+    const OTHER = { ...BODY_JOB, name: 'jobs_app_other' };
+
+    it('answers 422 VALIDATION_ERROR naming the name, both jobs and their holder — and changes nothing', async () => {
+        const { install, rec, jobs, register } = await bootPlugin();
+
+        const res = await install(artifact([TWIN, TWIN_SLOW, OTHER]));
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('VALIDATION_ERROR');
+        const message: string = res.payload.error.message;
+        expect(message).toContain(`two or more of its enabled jobs share the name '${TWIN.name}'`);
+        // The binder's own refusal, quoted: both jobs by their run form, the holder in the bind's words.
+        expect(message).toContain(`The artifact holds 2 enabled jobs named "${TWIN.name}", declared by package "${APP_ID}"`);
+        expect(message).toContain('one that runs a sandboxed body, and one that runs a sandboxed body');
+        expect(message).toContain('Rename all but one of them');
+        // The job of a name of its own is no part of the refusal.
+        expect(message).not.toContain(OTHER.name);
+        // The runtime is left exactly as it was found.
+        expect(registered(register), 'a refused package must not be registered').toEqual([]);
+        expect(new LocalManifestSource(dir).read(APP_ID).entry, 'nor persisted').toBeNull();
+        expect(jobs.svc.schedule, 'nor any of its jobs scheduled — not even the job of a name of its own').not.toHaveBeenCalled();
+        expect(rec.writes).toEqual([]);
+    });
+
+    it('an upgrade whose new version declares the name twice is refused, and the job the installed version runs keeps running', async () => {
+        const { install, jobs } = await bootPlugin();
+        expect((await install(artifact([TWIN]))).status).toBe(200);
+        expect([...jobs.scheduled.keys()]).toEqual([TWIN.name]);
+
+        const res = await install(artifact([TWIN, TWIN_SLOW]));
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(res.payload.error.code).toBe('VALIDATION_ERROR');
+        expect(jobs.cancels, 'the installed version’s job must not be cancelled').toEqual([]);
+        expect([...jobs.scheduled.keys()]).toEqual([TWIN.name]);
+        const ledgered = new LocalManifestSource(dir).read(APP_ID).entry as { manifest?: { jobs?: unknown[] } } | null;
+        expect(ledgered?.manifest?.jobs, 'the ledger keeps the installed version').toHaveLength(1);
+    });
+
+    it('a multi-package artifact: the name a package body declares and the residual carries is refused, naming the body and the residual', async () => {
+        const { install, jobs, register } = await bootPlugin();
+        const SYNCED = { name: 'jobs_alpha_rec', label: 'Alpha record', fields: { name: { type: 'text', label: 'Name' } } };
+        const alpha = defineStack({
+            manifest: { id: 'com.example.jobsalpha', namespace: 'jobs_alpha', name: 'Jobs Alpha', version: '0.1.0', type: 'module' },
+            objects: [SYNCED],
+            jobs: [TWIN],
+        } as never);
+        // No `manifest`: its jobs reach the artifact's top level and no package body — the residual.
+        const host = defineStack({ objects: [{ ...SYNCED, name: 'jobs_app_host_rec', label: 'Host record' }], jobs: [TWIN_SLOW] } as never);
+        const bundle = JSON.parse(JSON.stringify(composeStacks([alpha, host, defineStack(artifact(undefined) as never)] as never[], { manifest: 'preserve' })));
+
+        const res = await install(bundle);
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(res.payload.error.code).toBe('VALIDATION_ERROR');
+        const message: string = res.payload.error.message;
+        expect(message).toContain(`two or more of its enabled jobs share the name '${TWIN.name}'`);
+        expect(message).toContain('package "com.example.jobsalpha"');
+        expect(message).toContain("this artifact's top level outside every package body (its residual");
+        expect(registered(register)).toEqual([]);
+        expect(jobs.svc.schedule).not.toHaveBeenCalled();
+    });
+
+    it('one answer names the shared name beside a job with no body, so the author fixes both in one pass', async () => {
+        const { install } = await bootPlugin();
+
+        const res = await install(artifact([TWIN, TWIN_SLOW, HANDLER_JOB]));
+
+        expect(res.status).toBe(422);
+        const message: string = res.payload.error.message;
+        expect(message).toContain(`share the name '${TWIN.name}'`);
+        expect(message).toContain(`'${HANDLER_JOB.name}' (handler 'tick') has no \`body\``);
+    });
+
+    it('CONTROL: two enabled jobs of distinct names install as today, and both are scheduled', async () => {
+        const { install, jobs, register } = await bootPlugin();
+
+        const res = await install(artifact([TWIN, OTHER]));
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(registered(register)).toEqual([APP_ID]);
+        expect([...jobs.scheduled.keys()].sort()).toEqual([OTHER.name, TWIN.name].sort());
+    });
+
+    it('CONTROL: a DISABLED twin does not trigger the refusal — the package installs and its enabled job of the name is scheduled', async () => {
+        const { install, jobs, register } = await bootPlugin();
+
+        const res = await install(artifact([TWIN, { ...TWIN_SLOW, enabled: false }]));
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(registered(register)).toEqual([APP_ID]);
+        expect([...jobs.scheduled.keys()]).toEqual([TWIN.name]);
+        expect(jobs.svc.schedule).toHaveBeenCalledTimes(1);
     });
 });
