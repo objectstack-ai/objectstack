@@ -251,7 +251,8 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  * `confirm: true` asserts that the human in the loop has approved THIS call.
  * It is an attestation carried by the request, not a workflow: there is no
  * queue, no parking, no server-side approval record, and a refused call is
- * simply not executed. The caller fixes the request and retries.
+ * simply not executed. A caller acting for a person fixes the request and
+ * retries; an AI service account cannot attest for itself (below).
  *
  * Absent, `false`, or any non-`true` value is NOT a confirmation. Executors
  * MUST treat only the boolean `true` as an attestation — a truthy string is a
@@ -259,9 +260,16 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  *
  * ## Which predicate gates the refusal — the DECLARED flag, never a heuristic
  *
- * An AI-facing action door MUST refuse a call when, and only when,
+ * An AI-facing action door MUST refuse a call when
  * `action.ai.requiresConfirmation === true` — the flag the action's AUTHOR
  * declared — and the request does not carry the confirmation member as `true`.
+ *
+ * One caller is refused whatever it sends (ADR-0151 D3 rule 3): an AI service
+ * account (an agent principal acting for itself, with no `onBehalfOf`) does not
+ * confirm an action for itself. For such a caller every action door refuses a
+ * declared-gated action, REST `/actions` included, with the member and without
+ * it; the member is not read, retrying cannot succeed, and a person runs the
+ * action instead. Every other caller is gated by the member as below.
  *
  * The predicate is deliberately narrower than the one behind the
  * `requiresConfirmation` field of a tool/action LISTING (see
@@ -287,8 +295,10 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  *   that direction too.
  *
  * The member is ACCEPTED on every AI-facing action call and only REQUIRED on
- * the declared-gated ones, so a client that always confirms whenever a listing
- * says `requiresConfirmation: true` is always correct. Inferring the opposite
+ * the declared-gated ones, so a client acting for a person (a person, or an
+ * agent with `onBehalfOf`) that confirms with its human whenever a listing
+ * says `requiresConfirmation: true` is always correct; an AI service account
+ * is refused a declared-gated action whatever it sends. Inferring the opposite
  * — that a listing's `false` means no door will ever refuse — is sound only
  * because the listing's predicate is the wider of the two.
  *
@@ -358,9 +368,12 @@ export interface ActionConfirmationRequiredDetails {
     /** The object the action operates on; omitted for object-less actions. */
     objectName?: string;
     /**
-     * The request member the caller must set to `true` and retry — always the
-     * value of {@link AI_ACTION_CONFIRMATION_MEMBER}, echoed so the caller
-     * reads it off the refusal instead of restating it.
+     * The request member a caller acting for a person sets to `true` and
+     * retries with, once its human approves — always the value of
+     * {@link AI_ACTION_CONFIRMATION_MEMBER}, echoed so the caller reads it off
+     * the refusal instead of restating it. An AI service account's refusal
+     * carries it too, but no retry of that account's succeeds: a person runs
+     * the action (ADR-0151 D3 rule 3).
      */
     confirmationMember: typeof AI_ACTION_CONFIRMATION_MEMBER;
 }

@@ -8,6 +8,7 @@ import { MetadataManager } from '../metadata-manager.js';
 import { MemoryLoader } from './memory-loader.js';
 import { MetadataPlugin } from '../plugin.js';
 import { PACKAGE_SLOTTED_STORE_TYPES, isBundledStoreType } from '../package-slotted-store.js';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { FilesystemLoader } from './filesystem-loader.js';
 import { JSONSerializer } from '../serializers/json-serializer.js';
 // Paid at collection, not inside a case's window: `plugin.ts` imports it lazily (check:test-source-alias).
@@ -2082,6 +2083,8 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
   const BETA = 'com.beta.app';
   const HOST = 'com.host.app';
   const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  /** [#31699 PR 2] The unbundled slotted types the boot pass reads: every one but `webhook`, which the registry the pass walks does not list. */
+  const BOOT_PASS_READS = UNBUNDLED.filter((type) => DEFAULT_METADATA_TYPE_REGISTRY.some((entry) => entry.type === type));
   let driver: IDataDriver;
 
   /** A row of `helper` bound to `packageId` by the column, or package-less for `null`. */
@@ -2400,7 +2403,7 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
     const seen: unknown[] = [];
     const cells = (type: string, order: string) =>
       [undefined, ALPHA, HOST].filter((hostPackage) => !(type === 'action' && order === 'package-less row saved last' && hostPackage === HOST));
-    for (const type of UNBUNDLED) {
+    for (const type of BOOT_PASS_READS) {
       for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
         for (const hostPackage of cells(type, order)) {
           driver = createMockDriver();
@@ -2415,11 +2418,41 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
         }
       }
     }
-    expect(seen).toEqual(UNBUNDLED.flatMap((type) => [
+    expect(seen).toEqual(BOOT_PASS_READS.flatMap((type) => [
       ...cells(type, 'package-less row saved last').map((hostPackage) => [type, 'package-less row saved last', hostPackage ?? 'no host package', 'env']),
       ...cells(type, 'package-less row saved first').map((hostPackage) => [type, 'package-less row saved first', hostPackage ?? 'no host package', ALPHA]),
     ]));
-    expect(seen).toHaveLength(UNBUNDLED.length * 6 - 1);
+    expect(seen).toHaveLength(BOOT_PASS_READS.length * 6 - 1);
+  });
+
+  /**
+   * [#31699 PR 2] `webhook` is slotted, but the pass registers none of its
+   * rows (`DEFAULT_METADATA_TYPE_REGISTRY` lists no `webhook`), so the case
+   * above, which asks for the row the pass registered, does not hold for it.
+   * Its bare read is the loader's own: the package's row, in either save
+   * order, on every host. FROM (`webhook` out of `PACKAGE_SLOTTED_STORE_TYPES`,
+   * as on main): the row saved first, so `ALPHA` when the package-less row
+   * was saved last and the package-less row when it was saved first.
+   */
+  it('CONTROL webhook, slotted but not a type the pass reads, one package\'s row and a package-less row: the pass registers neither, and the bare read answers the package\'s row in either save order on every host (FROM the row saved first)', async () => {
+    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook'));
+    const seen: unknown[] = [];
+    for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
+      for (const hostPackage of [undefined, ALPHA, HOST]) {
+        driver = createMockDriver();
+        if (order === 'package-less row saved last') {
+          await seed('webhook', ALPHA, 1);
+          await seed('webhook', null, 2);
+        } else {
+          await seed('webhook', null, 1);
+          await seed('webhook', ALPHA, 2);
+        }
+        const m = await bootPass(hostPackage);
+        seen.push([order, hostPackage ?? 'no host package', registryKeys(m, 'webhook'), await answer(m, 'webhook')]);
+      }
+    }
+    expect(seen).toEqual(['package-less row saved last', 'package-less row saved first'].flatMap((order) =>
+      ['no host package', ALPHA, HOST].map((host) => [order, host, [], ALPHA])));
   });
 
   it('CONTROL action, the host\'s own item registered in memory beside one package\'s stored row: the host is a holder — the bare read is refused naming both', async () => {
@@ -2452,6 +2485,12 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
   const BETA = 'com.beta.app';
   const HOST = 'com.host.app';
   const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  /**
+   * The ones the boot pass reads: it walks `DEFAULT_METADATA_TYPE_REGISTRY`, and `webhook` (#31699 PR 2)
+   * is slotted without being listed there, so the pass registers none of its rows and its reads stay
+   * the loader's, as before it was slotted.
+   */
+  const BOOT_PASS_READS = UNBUNDLED.filter((type) => DEFAULT_METADATA_TYPE_REGISTRY.some((entry) => entry.type === type));
   let driver: IDataDriver;
 
   // Bound by the `package_id` column; the body names no package (the protocol writes none).
@@ -2517,8 +2556,19 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
   });
 
   it('the types are taken from the tree', () => {
-    expect(UNBUNDLED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'action', 'permission']));
+    expect(UNBUNDLED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'action', 'permission', 'webhook']));
     expect(UNBUNDLED).not.toContain('email_template');
+    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook'));
+  });
+
+  it('CONTROL — webhook: the boot pass registers none of its rows, so a read stays the loader\'s, as before it was slotted', async () => {
+    await seed('webhook', ALPHA, 1);
+    await seed('webhook', BETA, 2);
+    const before = await stored('webhook');
+    const m = await bootPass();
+    expect([...((m as any).registry.get('webhook')?.keys() ?? [])]).toEqual([]);
+    expect(await stored('webhook')).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
   });
 
   it('a body whose name is another row\'s key is never stamped with that row\'s package (contract review F3)', async () => {
@@ -2537,6 +2587,7 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
         });
         // Main's answer for the name: the body `loadMany` keeps first, unstamped.
         expect(await manager().loadMany(type)).toEqual([{ name: 'a', label: 'stray' }]);
+        if (!BOOT_PASS_READS.includes(type)) continue;
         const m = await bootPass();
         expect([...((m as any).registry.get(type)?.keys() ?? [])]).toEqual(['a']);
       }
@@ -2574,7 +2625,7 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       expect(driver.update).not.toHaveBeenCalled();
     });
 
-    it(`${type}: the boot pass registers the row under its own package, never the host's or none (BEFORE: ALPHA's read served BETA's body)`, async () => {
+    if (BOOT_PASS_READS.includes(type)) it(`${type}: the boot pass registers the row under its own package, never the host's or none (BEFORE: ALPHA's read served BETA's body)`, async () => {
       await seed(type, ALPHA, 1);
       await seed(type, BETA, 2);
       const before = await stored(type);
@@ -2601,7 +2652,7 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       expect(driver.create).toHaveBeenCalledTimes(2);
     });
 
-    it(`${type}: one holder — the boot pass writes nothing, and a bare read answers the unique holder, now stamped with its package (BEFORE: unstamped)`, async () => {
+    if (BOOT_PASS_READS.includes(type)) it(`${type}: one holder — the boot pass writes nothing, and a bare read answers the unique holder, now stamped with its package (BEFORE: unstamped)`, async () => {
       await seed(type, ALPHA, 1);
       const before = await stored(type);
       const m = await bootPass();
@@ -2635,6 +2686,12 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
   const ALPHA = 'com.alpha.app';
   const BETA = 'com.beta.app';
   const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  /**
+   * [#31699 PR 2] The ones the pass reads: it walks `DEFAULT_METADATA_TYPE_REGISTRY`, and `webhook`
+   * is slotted without being listed there, so the pass primes none of its rows (as for #32548's
+   * cases above). Its reads after the pass are pinned by the webhook CONTROL below.
+   */
+  const BOOT_PASS_READS = UNBUNDLED.filter((type) => DEFAULT_METADATA_TYPE_REGISTRY.some((entry) => entry.type === type));
   let driver: IDataDriver;
 
   /** A row of `helper` bound to `packageId` by the column; `stamped` also names it in the body. */
@@ -2678,7 +2735,7 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
   });
 
   for (const type of UNBUNDLED) {
-    for (const [shape, body] of [['bound by the column only', {}], ['stamped in the body too', { _packageId: true }]] as const) {
+    if (BOOT_PASS_READS.includes(type)) for (const [shape, body] of [['bound by the column only', {}], ['stamped in the body too', { _packageId: true }]] as const) {
       it(`${type}, ${shape}: two holders — after the pass a bare read is refused 409 naming both, as without it, and list keeps both (BEFORE: BETA's body, list [BETA])`, async () => {
         await seed(type, ALPHA, 1, body._packageId ? { _packageId: ALPHA } : {});
         await seed(type, BETA, 2, body._packageId ? { _packageId: BETA } : {});
@@ -2775,7 +2832,7 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     ['package-less row saved first', HOST, [ALPHA], [`${ALPHA}\u0000helper`], ALPHA, ALPHA, undefined],
   ];
 
-  for (const type of UNBUNDLED) {
+  for (const type of BOOT_PASS_READS) {
     it(`CONTROL ${type}, one package's row and a package-less row of the name (that holder's customization, D4): every read after the pass answers what it answered before — the row saved last — with no host package, a host package equal to the holder, or another`, async () => {
       const seen: unknown[] = [];
       for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
@@ -2903,6 +2960,30 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     });
   }
 
+  it('CONTROL — webhook, slotted but not a type the pass reads: it primes none of the rows, and after it every read answers what it answers without it — two holders refused naming both, each its own, the package-less row kept, nothing written — on a host declaring no package, one of the holders, or another', async () => {
+    expect(UNBUNDLED).toContain('webhook');
+    expect(BOOT_PASS_READS).not.toContain('webhook');
+    for (const order of ['none', 'first', 'between the two', 'last'] as const) {
+      for (const hostPackage of [undefined, ALPHA, BETA, HOST]) {
+        driver = createMockDriver();
+        const writes = [(version: number) => seed('webhook', ALPHA, version), (version: number) => seed('webhook', BETA, version)];
+        if (order !== 'none') writes.splice(order === 'first' ? 0 : order === 'last' ? 2 : 1, 0, (version: number) => seedPackageless('webhook', version));
+        for (const [at, write] of writes.entries()) await write(at + 1);
+        const m = await bootPass(hostPackage);
+        const at = [order, hostPackage];
+        expect([...at, registryKeys(m, 'webhook')]).toEqual([...at, []]);
+        for (const packageId of [undefined, ALPHA, BETA, HOST]) {
+          expect([...at, packageId, await answer(m, 'webhook', 'helper', packageId)]).toEqual([...at, packageId, await answer(cold(), 'webhook', 'helper', packageId)]);
+        }
+        expect([...at, await answer(m, 'webhook', 'helper')]).toEqual([...at, REFUSED]);
+        expect([...at, await answer(m, 'webhook', 'helper', ALPHA), await answer(m, 'webhook', 'helper', BETA), await answer(m, 'webhook', 'helper', HOST)])
+          .toEqual([...at, ALPHA, BETA, undefined]);
+        expect([...at, labels(await m.list('webhook'))]).toEqual([...at, order === 'none' ? [ALPHA, BETA] : [ALPHA, BETA, 'env']]);
+        expect(driver.update).not.toHaveBeenCalled();
+      }
+    }
+  });
+
   it('agent, two holders of a name and another row\'s body that says the same name: no body of the name is stamped, so none takes a package its row is not bound to (contract review F3 of #32458)', async () => {
     await seed('agent', ALPHA, 1);
     await seed('agent', BETA, 2);
@@ -2928,5 +3009,111 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     expect(await answer(m, 'email_template', 'welcome')).toEqual(REFUSED);
     expect(labels(await m.list('email_template'))).toEqual([ALPHA, BETA]);
     expect((await new DatabaseLoader({ driver }).loadManyKeyed('email_template')).map((entry) => entry.packageId)).toEqual([ALPHA, BETA]);
+  });
+});
+
+/**
+ * [#32986; follow-up of #32198, ADR-0150 D4] On a host that declares its
+ * package, the boot priming pass stamps a package-less stored row of a type
+ * NOT stored per `(package, name)` (`object`, `view`, `app`, `hook`,
+ * `dashboard` …) with the host's package (`applyProtection`), and the stamp
+ * stays: an `object` row so stamped is still registered by ObjectQL as the
+ * host package's contribution (`_packageId ?? 'metadata-service'`). But since
+ * #32198 `unregisterPackage` selects a package's items by `_packageId` too,
+ * so `unregisterPackage(host)` deleted the environment's own rows — the
+ * registry entry and the stored row both. The removal now leaves an item a
+ * stored-row loader handed on naming no package, whose only claim to the
+ * package is the stamp the pass put on it.
+ *
+ * BEFORE (`main`): every case below not marked CONTROL lost the row (the
+ * registry entry gone, the stored row deleted). The CONTROLs answer on `main`
+ * as here.
+ */
+describe('[#32986] unregisterPackage of the host package keeps the environment\'s own rows the boot pass stamped with the host', () => {
+  const HOST = 'com.host.app';
+  const OTHER = 'com.other.app';
+  /** One name per type, each a name the type's own write rule keeps as it is. */
+  const ITEMS: ReadonlyArray<readonly [type: string, name: string]> = [
+    ['object', 'env_account'], ['view', 'env_account.all'], ['app', 'env_app'], ['hook', 'env_hook'], ['dashboard', 'env_dashboard'],
+  ];
+  let driver: IDataDriver;
+
+  const seed = (type: string, name: string, packageId: string | null, body: Record<string, unknown> = {}) =>
+    driver.create('sys_metadata', {
+      id: `${type}_${name}_${packageId ?? 'env'}`, type, name, state: 'active', version: 1, checksum: `${type}_${name}_${packageId ?? 'env'}`,
+      source: 'database', package_id: packageId, metadata: JSON.stringify({ name, label: packageId ?? 'env', ...body }),
+    });
+  /** The real pass over one database loader, on a host that declares `hostPackage`. */
+  const bootPass = async (hostPackage?: string) => {
+    const plugin = new MetadataPlugin({ ...(hostPackage ? { packageId: hostPackage } : {}), watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  /** Per item: the registry's stamp, what a read answers, and whether its stored row is still there. */
+  const state = async (m: MetadataManager) => {
+    const out: unknown[] = [];
+    for (const [type, name] of ITEMS) {
+      const held = (m as any).registry.get(type)?.get(name) as { _packageId?: string } | undefined;
+      const read = (await m.get(type, name)) as { label?: string } | undefined;
+      const rows = await driver.find('sys_metadata', { where: { type, name } } as never);
+      out.push([type, held?._packageId ?? null, read?.label ?? null, rows.length]);
+    }
+    return out;
+  };
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('package-less rows of object, view, app, hook and dashboard, on a host declaring its package: the pass stamps them with the host as before, and unregisterPackage(host) keeps each registry entry and stored row (BEFORE: every one deleted)', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, null);
+    const m = await bootPass(HOST);
+    const primed = ITEMS.map(([type]) => [type, HOST, 'env', 1]);
+    expect(await state(m), 'the stamp, as before: the object contribution owner does not move').toEqual(primed);
+    await m.unregisterPackage(HOST);
+    expect(await state(m)).toEqual(primed);
+  });
+
+  it('CONTROL the host\'s own rows (their bodies carry the host\'s stamp, as a host item the pass seeded is stored): unregisterPackage(host) still removes each, from the registry and storage', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, null, { _packageId: HOST });
+    const m = await bootPass(HOST);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
+    await m.unregisterPackage(HOST);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, null, 0]));
+  });
+
+  /**
+   * [#32986, review S2] The legacy `package` key is the item's own claim, as
+   * 18.3.0's `unregisterPackage` read it: the row is the host's, though its
+   * stored body names no package the store's reads index (`_packageId`).
+   */
+  it('CONTROL the host\'s own rows naming it through the legacy `package` key in their stored bodies: unregisterPackage(host) still removes each, from the registry and storage', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, null, { package: HOST });
+    const m = await bootPass(HOST);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
+    await m.unregisterPackage(HOST);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, null, 0]));
+  });
+
+  it('an item registered in memory for the host (code) beside the environment\'s rows: unregisterPackage(host) removes the host\'s item and keeps the environment\'s (BEFORE: both removed)', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, null);
+    const m = await bootPass(HOST);
+    await m.registerInMemory('object', 'host_thing', { name: 'host_thing', label: 'code', _packageId: HOST });
+    await m.unregisterPackage(HOST);
+    expect(await m.get('object', 'host_thing')).toBeUndefined();
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
+  });
+
+  it('CONTROL unregisterPackage of another package, and a host declaring no package: the environment\'s rows are untouched, unstamped on the second', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, null);
+    const m = await bootPass(HOST);
+    await m.unregisterPackage(OTHER);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
+    const bare = await bootPass();
+    await bare.unregisterPackage(HOST);
+    expect(await state(bare)).toEqual(ITEMS.map(([type]) => [type, null, 'env', 1]));
   });
 });

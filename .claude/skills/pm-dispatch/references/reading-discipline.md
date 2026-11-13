@@ -32,6 +32,6 @@
 - 冲突立成 `needs-user-decision` 卡,该 PR 不挂 auto-merge 留异议窗口。
 - 读序 git、payload、REST、MCP;REST 可达性逐会话探一次;通道对照见 `references/rest-channel.md`。
 - 巡查与探针读 GitHub 点名字段(`gh api --jq`),⛔ 不把整份 issue/PR JSON 与评论全文拉进上下文。
-- CI 日志落盘后 grep,⛔ 不只读尾;认领与契约复审仍整读卡/PR 线程,长线程照 runbook 外包。
+- CI 日志落盘后 grep,⛔ 不只读尾;长线程照 runbook 外包;认领与契约复审仍整读卡/PR 线程。
 - 派发前读一次 `rate_limit`,余量装不下整批就减批,⛔ 不靠撞墙发现。
 - 写少而大:同卡同轮结论合成一条评论,⛔ 不放慢单笔、不攒着一次性发;写量按身份计。

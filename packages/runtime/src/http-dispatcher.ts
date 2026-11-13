@@ -1403,7 +1403,8 @@ export class HttpDispatcher {
      * [#15942] No longer a bare "HITL hint": the platform now ENFORCES the
      * declared flag. An action whose author set `ai.requiresConfirmation: true`
      * is REFUSED at the AI-facing door (`ACTION_CONFIRMATION_REQUIRED`, 428)
-     * unless the request carries the confirmation member — see
+     * unless the request carries the confirmation member, and for an AI service
+     * account whatever the request carries (ADR-0151 D3 rule 3) — see
      * `actionConfirmationRefusal` in `./action-execution.ts`. This predicate is
      * the WIDER of the two and is not the one that refuses: it also answers
      * `true` on the `mode:'delete'` / `variant:'danger'` heuristic, where the

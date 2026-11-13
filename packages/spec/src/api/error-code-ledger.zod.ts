@@ -337,8 +337,10 @@ export const ERROR_CODE_LEDGER = {
     // whose AUTHOR declared `ai.requiresConfirmation: true` when the request
     // does not carry the confirmation member as `true` — 428, the standard
     // catalog's "request is missing a required precondition" status, because
-    // the request is VALID and merely incomplete: the identical call with the
-    // member set succeeds, and nothing about server state changed. Never
+    // the request is VALID and merely incomplete: for a caller acting for a
+    // person the identical call with the member set succeeds, and nothing about
+    // server state changed. An AI service account is refused the same way
+    // whatever it sends (ADR-0151 D3 rule 3): no retry of its own succeeds. Never
     // carries `status: 'failed'`: nothing dispatched, no action body ran, no
     // record was read or written.
     // Contract, including which request member and what `error.details` carries:
