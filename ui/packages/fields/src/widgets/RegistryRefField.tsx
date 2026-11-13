@@ -368,6 +368,25 @@ export function RegistryRefField({
   const storedPackage = packageField ? dependentValues?.[packageField] : undefined;
   const writePackage = packageField !== null && typeof onAutofill === 'function' ? onAutofill : null;
 
+  // objectstack#32833 — a package names a holder OF A NAME, so it belongs to
+  // the name it was picked for. This holds the name the stored package goes
+  // with: the name of this widget's own pick, or the name it was first seen
+  // beside. When the name changes by any other path (a host re-seeding an open
+  // create form, whose reset carries the package column over because no create
+  // seed holds it), the package no longer names a holder of the name on screen,
+  // so it is cleared, never carried to the new name. Only where this form can
+  // write the package (the grant's create form); a name with no package beside
+  // it moves the mark along.
+  const packageNameRef = React.useRef<string | undefined>(undefined);
+  React.useEffect(() => {
+    if (!writePackage || !packageField) return;
+    if (!namesAPackage(storedPackage) || packageNameRef.current === undefined) {
+      packageNameRef.current = current;
+      return;
+    }
+    if (packageNameRef.current !== current) writePackage({ [packageField]: null });
+  }, [current, storedPackage, packageField, writePackage]);
+
   // The stored name as the server reads it: one holder by itself; more than
   // one by the package the record names (`storedGrantHolders`), and none when
   // that leaves no single holder — never the first one served.
@@ -507,6 +526,7 @@ export function RegistryRefField({
   const commit = (next: string) => {
     if (blockedKeys.has(next)) return;
     const target = targets.get(next);
+    packageNameRef.current = target ? target.name : next;
     onChange(target ? target.name : next);
     if (!writePackage || !packageField) return;
     if (target?.addressing !== undefined) writePackage({ [packageField]: target.addressing });

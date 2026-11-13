@@ -604,9 +604,15 @@ export const SysApprovalRequest = ObjectSchema.create({
   // `visible` is not that gate and the door does not read it. Each declares
   // `requiresConfirmation: true`, ADR-0011's bucket C for a consequential,
   // bounded act (`sys_user.ban_user` is the precedent), so `run_action`
-  // refuses until the call carries the confirmation. The submitter levers,
-  // request-info and the thread reply stay unexposed: the ruling named the
-  // four decisions.
+  // refuses until the call carries the confirmation.
+  //
+  // [#32993] The submitter's side of the same process: recall and resubmit
+  // are exposed the same way, so the submitter's agent can withdraw a request
+  // to fix the record and send a returned one back into review. Same door,
+  // same gate: `ApprovalService.recall` admits the submitter (and, on a
+  // pending request, the override holder) and refuses anyone else with
+  // `approval_recall_not_submitter`; `ApprovalService.resubmit` admits the
+  // submitter alone. Remind, request-info and the thread reply stay unexposed.
   actions: [
     {
       name: 'approval_approve',
@@ -833,6 +839,15 @@ export const SysApprovalRequest = ObjectSchema.create({
       locations: ['record_section'],
       successMessage: 'Recalled "{{ result.request.record_title }}"',
       refreshAfter: true,
+      // [#32993] Exposed to AI for the request's submitter. See the note above
+      // the actions array. The tool description is its own text, never the
+      // dialog question in `description`.
+      ai: {
+        exposed: true,
+        description:
+          'Withdraw an approval request (the record: a sys_approval_request id) that the user submitted, with an optional comment, while it is pending or was sent back for revision. Approvers can no longer act on it and the record is unlocked for editing; a recalled request is closed, so sending the record for approval again goes through the app\'s own submit action. Only the submitter of the request, or an administrator who may override a stuck pending request, may recall it; anyone else is refused. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       name: 'approval_resubmit',
@@ -848,6 +863,14 @@ export const SysApprovalRequest = ObjectSchema.create({
       locations: ['record_section'],
       successMessage: 'Resubmitted "{{ result.request.record_title }}"',
       refreshAfter: true,
+      // [#32993] Exposed to AI for the request's submitter. See the note above
+      // the actions array.
+      ai: {
+        exposed: true,
+        description:
+          'Send an approval request (the record: a sys_approval_request id) that an approver sent back for revision (status returned) into review again, after the user revised the record, with an optional note on what changed. It applies only to a returned request. Only the submitter of the request may resubmit it; anyone else is refused. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
 
     // ── Thread reply ────────────────────────────────────────────────

@@ -464,5 +464,36 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       // Spent: the link is not usable a second time.
       expect((await put(late.path, minimalPdf('Taxi invoice'))).status).toBe(404);
     });
+
+    // [#32768] The issue-time half: once the lock holds, the agent gets no
+    // link at all, refused for the lock `update_record` reports on the same
+    // field (`droppedFields`, reason `readonly_when`), in the words the
+    // update's strict refusal uses for it.
+    it('after approval create_upload_link gets no link, refused 403 for the lock update_record reports on the field', async () => {
+      const users = (await ql.find('sys_user', { where: { email: MEMBER_EMAIL }, ...SYS })) as Array<{ id: string }>;
+      const created = await ql.insert(UPLOAD_CLAIM, { name: 'Trip to Porto', status: 'draft', created_by: users[0]!.id, owner_id: users[0]!.id }, SYS);
+      const claimId = String(created?.id ?? created?.record?.id ?? created);
+      const draft = await mint({ objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
+      const first = await put(draft.path, minimalPdf('Train invoice'), { 'x-file-name': 'train-invoice.pdf' });
+      const firstBody: any = await first.json();
+      expect(first.status, JSON.stringify(firstBody)).toBe(200);
+
+      await ql.update(UPLOAD_CLAIM, { status: 'approved' }, { where: { id: claimId }, ...SYS });
+      const linksBefore = (await ql.find('sys_file', { where: { name: 'upload-link', status: 'pending' }, ...SYS })).length;
+      const error = await refused(memberToken, 'create_upload_link', { objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
+      expect(error.code).toBe('FIELD_NOT_ACCESSIBLE');
+      expect(error.message).toBe(
+        `You cannot attach a file to ${UPLOAD_CLAIM}.invoices: the field is read-only in the target record's current state ` +
+          '(a TRUE `readonlyWhen` predicate).',
+      );
+      expect((await ql.find('sys_file', { where: { name: 'upload-link', status: 'pending' }, ...SYS })).length).toBe(linksBefore);
+
+      const { json } = await ok(memberToken, 'update_record', {
+        objectName: UPLOAD_CLAIM, recordId: claimId, data: { invoices: [firstBody.data.fileId] },
+      });
+      expect(json.droppedFields, JSON.stringify(json)).toEqual(
+        expect.arrayContaining([expect.objectContaining({ reason: 'readonly_when', fields: ['invoices'] })]),
+      );
+    });
   });
 });

@@ -589,6 +589,14 @@ export const ERROR_CODE_LEDGER = {
     'AUTH_REQUIRED',
     'ERR_FILE_CONSTRAINT',
     'ERR_FILE_REFERENCE_COPY',
+    // [#32754] 403 from the storage service's own per-object attachment opt-in
+    // gate (`attachment-files-opt-in.ts`): a `sys_attachment` insert, or an
+    // update that re-points one, onto an object that does not declare
+    // `enable.files: true`, thrown from its engine hook and answered by every
+    // attach door as it was thrown. Second EMITTER of the code
+    // `@objectstack/plugin-audit` registers for its own gate on the same
+    // declaration. Provenance, not identity (see above).
+    'FILES_DISABLED',
     'FILE_DOWNLOAD_DENIED',
     'FILE_FIELD_BULK_WRITE_REFUSED', // a multi/predicate update wrote a file id into a file-class field (#7102)
     'FILE_NOT_FOUND',

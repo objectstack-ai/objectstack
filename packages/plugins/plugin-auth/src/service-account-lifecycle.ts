@@ -51,7 +51,8 @@
  *
  * Revoke and restore act on one key of an account and leave the others alone.
  * They follow the restore guard's reasons (`api-key-restore-guard.ts`): a key
- * revoked because a membership ended is never restored, a key an administrator
+ * revoked because a membership ended, or because the organization's directory
+ * deactivated its owner, is never restored, a key an administrator
  * stopped is restored by a platform administrator only, a platform
  * administrator's revoke of a key that carries no reason records
  * `administrator_suspended`, an existing reason is never overwritten, and a
@@ -75,6 +76,7 @@ import { ADMINISTRATOR_SUSPENDED_REVOKE_REASON } from './api-key-restore-guard.j
 import { authSystemWriteContext } from './auth-actor-attribution.js';
 import { FORCED_RESET_REVOKE_REASON } from './forced-reset-revocation.js';
 import { MEMBERSHIP_ENDED_REVOKE_REASON } from './membership-ended-session.js';
+import { SCIM_DEACTIVATION_REVOKE_REASON } from './scim-deactivation-key-revocation.js';
 import { SERVICE_ACCOUNT_OWNER_LEFT_REASON } from './service-account-owner-leaves.js';
 import { isAgentAccountRow } from './service-account-identity.js';
 import {
@@ -423,13 +425,16 @@ export async function runRestoreServiceAccountKey(
   if (!found.isOwner && !found.isAdministrator) return ownerOrAdministrator('restore its key');
 
   const storedReason = str(found.key.revoked_reason);
-  // Restore-guard rule 1: no one restores a key whose membership ended.
-  if (storedReason === MEMBERSHIP_ENDED_REVOKE_REASON) {
+  // Restore-guard rule 1: no one restores a key whose membership ended, or
+  // one the organization's directory deactivation revoked.
+  if (storedReason === MEMBERSHIP_ENDED_REVOKE_REASON || storedReason === SCIM_DEACTIVATION_REVOKE_REASON) {
+    const because = storedReason === SCIM_DEACTIVATION_REVOKE_REASON
+      ? 'the organization\'s directory deactivated the AI service account'
+      : 'the AI service account\'s organization membership ended';
     return fail(
       403,
       'PERMISSION_DENIED',
-      'This key was revoked because the AI service account\'s organization membership ended, so it cannot be '
-        + 'restored. Create a new key instead.',
+      `This key was revoked because ${because}, so it cannot be restored. Create a new key instead.`,
     );
   }
   // Restore-guard rule 2: an administrator's stop is lifted by a platform administrator only.

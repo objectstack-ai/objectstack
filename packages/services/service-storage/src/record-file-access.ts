@@ -253,7 +253,22 @@ export interface UploadLinkDoor {
 }
 
 /** The data-engine surface these verbs use: the reads and writes every engine has, plus its schema read. */
-export type RecordFileEngine = IDataEngine & { getObject?(objectName: string): unknown };
+export interface RecordFileEngine extends IDataEngine {
+  getObject?(objectName: string): unknown;
+  /**
+   * [#32768] The engine's write-free verdict on whether `field` takes the
+   * caller's write on this record now (ObjectQL's `judgeFieldWriteLock`): its
+   * own `readonlyWhen` evaluation, with the reason the update reports the
+   * field under and the words its strict refusal uses. Optional: an engine
+   * without it is not asked, and the upload's own write still refuses.
+   */
+  judgeFieldWriteLock?(
+    object: string,
+    id: unknown,
+    field: string,
+    options?: { context?: ExecutionContext },
+  ): Promise<{ reason: string; phrase: string } | null>;
+}
 
 /** What {@link RecordFileAccess} is composed over — each read at call time. */
 export interface RecordFileAccessDeps {
@@ -671,6 +686,16 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       // update strips it, so a link to it could never attach anything.
       if (fieldDef?.readonly === true) {
         refuse('FIELD_NOT_ACCESSIBLE', 403, `You cannot attach a file to ${object}.${field}: the field is read-only.`);
+      }
+      // [#32768] Nor a field whose `readonlyWhen` holds now: the update would
+      // take it back out, so the upload would be refused when it arrives. The
+      // engine's own judgement, not a second evaluation here; the refusal
+      // names the lock in the words the update's strict refusal uses.
+      if (typeof engine.judgeFieldWriteLock === 'function') {
+        const lock = await engine.judgeFieldWriteLock(object, recordId, field, { context: caller });
+        if (lock) {
+          refuse('FIELD_NOT_ACCESSIBLE', 403, `You cannot attach a file to ${object}.${field}: the field is ${lock.phrase}.`);
+        }
       }
       // [#32734] Nor does a record a pending approval locks: every edit of it
       // is refused until the approval is decided, recalled or rejected. The

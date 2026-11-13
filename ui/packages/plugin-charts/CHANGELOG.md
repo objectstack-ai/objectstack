@@ -1,5 +1,222 @@
 # @object-ui/plugin-charts
 
+## 18.4.0
+
+### Patch Changes
+
+- 4128213: fix(console): a nav entry with no icon draws its object's icon, record field labels read in one style, a count chart fits a small count, and a page whose entry failed to load retries (#30126)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Navigation icons.** An app navigation entry of type `object` that names no `icon` now draws the icon its object declares, in the sidebar and in the `nav:menu` page block. Before, every such row drew the same generic page icon, so an app whose navigation names no icons showed one icon down the whole sidebar. The icon is read by object name from the metadata the console already holds, so no request is added and the navigation is not written to. An authored `icon` wins, and an object with no icon, a dashboard, page or report entry, and a host with no resolver keep the generic icon. `@object-ui/layout` exports `resolveNavItemIcon`, the types `NavIconTarget` and `NavTargetIconResolver`, and an optional `resolveTargetIcon` prop on `NavigationRenderer`, alongside the existing `resolveTargetLabel`.
+  - **Record field labels.** A record page's section field labels no longer carry an uppercase transform. Only Latin text took it, so in a zh console an untranslated label (`REPAIR COST`) read in capitals beside a translated one (`负责人`). Section labels now render as authored, in the style of the highlights strip above them.
+  - **Small count charts.** A count axis whose largest value is a small whole number (1 to 3) now tops out at that number, so a chart of one record draws its bar to the top of the axis instead of a quarter of the way up a 0–4 axis. An axis with an authored `min`, `max` or `stepSize`, fractional values, or a count of 4 or more draws as before.
+  - **Boot retry.** When the page's entry script fails to load before anything mounts (the server went away between serving the page and serving its entry, as during an `os dev` restart), the page now reloads itself, backing off from 1 second and doubling, at most five times per tab. Before, the loading splash stayed forever. The count is cleared on the first mount, and where `sessionStorage` cannot be read nothing retries.
+- ff12aed: fix(core): a compareTo widget on a forward date range (next month, next quarter, next 30 days) compares with the period just before it, not with itself
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/core`: `shiftFilterByCompareTo`** with `kind: 'previousPeriod'` moved only `current_*` / `today` tokens, so a dashboard filtered to `next_month` or `next_quarter` compared the window with itself and the delta always read 0, and `next_30_days` (`{today}` … `{30_days_from_now}`) moved only its start and compared with a window that overlapped it on all but one day. A forward window now steps back one period: `{next_month_*}` becomes this month, `{next_quarter_*}` this quarter, and a `{today}` … `{N_days_from_now}` pair on one field becomes the N + 1 days that end yesterday (`{(N+1)_days_ago}` … `{yesterday}`), the same window the dataset executor computes for that range. Every other token, and the 13 backward presets, compare as before.
+  - **`@object-ui/core`: `compareToTrendLabelKey`** names that window: `vsThisMonth` for a forward month, `vsThisQuarter` for a forward quarter, and `vsPreviousPeriod` for a forward rolling window (it read `vsLastMonth`, `vsLastQuarter` and `vsYesterday`).
+  - **`@object-ui/i18n`:** `dashboard.trend.vsThisMonth` and `dashboard.trend.vsThisQuarter` in all ten locale packs (zh: 较本月, 较本季度).
+  - **`@object-ui/plugin-dashboard`, `@object-ui/plugin-charts`:** English fallbacks for the two keys in the metric tile and in the chart's comparison series label.
+- 7b2e557: fix(drill): "Open in list" from a dashboard or report drill is offered only when the list can show exactly the drawer's records
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A drill filter is the clicked bucket AND the widget's filter AND the measure's drill scope. The list route holds one value per filter param and has no spelling for `$in`, so a drill with two conditions on one field (a `status = sent` bucket under a `status = paid` measure scope) or an `$in` scope opened a wider list than the drawer: the drawer showed 0 invoices and the list showed every sent one. The Console now offers "Open in list", and follows `drillDown.target: 'navigate'`, only when the route can write every condition of the drill filter, after resolving its placeholders; otherwise the drill stays in the drawer. A plain equality or date-range drill opens the same URL as before.
+  
+  `DrillNavigationValue` (`@object-ui/react`) gains an optional `canOpenRecordList(objectName, filter)`. The drill drawers (`DrillDownDrawer`, `OpenInListButton`, `ObjectChart`) offer the escape hatch only when `openRecordList` is present and `canOpenRecordList` is absent or answers `true`. A host that does not provide it behaves exactly as before.
+- 0a81d2a: fix(ui)!: dashboards, reports and dataset charts send their package on dataset queries (ADR-0150 D5)
+  
+  Clause-②: yes (narrowing + widening) — a dashboard, report or list-view chart whose dataset only a dependency of its own package holds is refused where it was served (BREAKING below); and `@object-ui/data-objectstack`'s `queryDataset` accepts an optional `packageId` option, `@object-ui/core` exports `servedPackageId`, `DatasetWidget` (`@object-ui/plugin-dashboard`) and `ObjectChart` (`@object-ui/plugin-charts`) accept an optional `packageId` prop. Nothing an item with no package sends changes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata shape, schema, stored row or registered node type changes: what changes is which package a dataset query names, and the stored dashboard, report and dataset rows are read exactly as before, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  `POST /api/v1/analytics/dataset/query` resolves a bare `datasetName` by ADR-0150 D3, and answers a name two packages hold with `409 RESOURCE_CONFLICT` naming both. A saved dataset is now read under the package of the item that references it, sent as the exact qualifier `?package=`:
+  
+  - a dashboard's dataset widgets name the dashboard's own served package (`_packageId`), on both `DashboardRenderer` and `DashboardGridLayout`;
+  - a dataset-bound report names the report's own served package on every selection, the joined blocks' included;
+  - a dataset-bound list-view chart names the view's own served package.
+  
+  An item authored in the environment (no `_packageId`, or the package-less `sys_metadata` sentinel) sends no `?package=`, so its read stays caller-less exactly as before. An inline dataset (the dashboard filter bar's option query, the Studio dataset preview) names no saved item and sends none. A `409` is shown as the server's sentence, naming every candidate, and is never retried with the bare name.
+  
+  **BREAKING** (the dataset query of a package item, interim under the epic's ruling A): `?package=` is the exact qualifier (ADR-0150 D5), not the dependency-closure read of D3. **FROM:** a dashboard, report or list-view chart in package P, whose dataset only a dependency of P holds, is served by the bare read. **TO:** it is refused `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`), naming the holder, and the item's widget or block shows that sentence. **The interim fix:** ship the dataset in the item's own package. No first-party package references a dataset across packages (read in this repository; **corrected by #32929:** one first-party app outside this repository does — HotCRM's CRM Overview dashboard, in its app package `app.objectstack.hotcrm`, binds the dataset `product_metrics` that its module package `app.objectstack.hotcrm.revenue` holds, so once the console sends the item's package the tile is refused where it drew on 18.3.0; the module depends on the app, so declaring the module from the app is a cycle the kernel refuses at boot. Other first-party apps outside this repository: not measured). Follow-ups #32310 (a caller-package arm on the dataset query door, with closure semantics) and #32311 (the console switches to it) restore the dependency case.
+- 66fa70d: fix(ui): dashboards, reports and dataset charts send their package as the reader's package (`?callerPackage=`) on dataset reads, so a package item reads a dependency's dataset (ADR-0150 D3)
+  
+  Clause-②: yes (widening) — `@object-ui/data-objectstack`'s `queryDataset(dataset, selection, options)` and `queryDatasetBatch(queries, options)` accept an optional `callerPackage` option, sent as `?callerPackage=` with a saved dataset name. A dashboard, report or list-view chart in package P whose dataset only a dependency of P holds is now served where the exact qualifier refused it. Nothing an item with no package sends changes.
+  Metadata-protocol: none
+  
+  A saved dataset is read for the package of the item that references it, sent as the reader's package `?callerPackage=` (ADR-0150 D3) instead of the exact qualifier `?package=` (ADR-0150 D5). The server reads that package's own dataset, else the one holder among its dependencies (transitively) plus `sys`, else refuses `409 RESOURCE_CONFLICT` naming the candidates:
+  
+  - a dashboard's dataset widgets, on `DashboardRenderer` and `DashboardGridLayout`, and the batch request a dashboard render sends (one request per caller package: two packages' queries never share one);
+  - a dataset-bound report's selections, the joined blocks' included, and the definition read that finds the date dimension a `dateRange` with no `dimension` windows on;
+  - a dataset-bound list-view chart's query, and the definition read its option colours come from.
+  
+  The package stays part of each query's signature, so a cached answer never crosses packages. An item authored in the environment (no `_packageId`, or the `sys_metadata` and `__runtime__` sentinels) sends no package, and its read stays caller-less exactly as before. An inline dataset names no saved item and sends none. A `409` is shown as the server's sentence on the widget and the report block, and as its status (`HTTP 409`) on the date range; the option-colour read keeps the theme palette. None of them is retried with the bare name. The `packageId` option (`?package=`) stays on both adapter methods for a caller that means the holder.
+  
+  **What this does to the BREAKING note of the `?package=` change** (`32077-dataset-query-package`, the interim this follows up). That note refuses a dashboard, report or list-view chart in package P whose dataset only a dependency of P holds, with `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`). After this change such an item is served again: the dependency's dataset, resolved for P. Two cases stay refused, now as `outside-closure`: a dataset held only by a package P does not declare in its `dependencies` (transitively), and a dataset authored in the environment rather than in a package. **The fix for those:** add the holder to P's `dependencies`, or ship the dataset in P. When the holder already depends on P (a module of the app that reads it), that dependency is a cycle: move the reading item into the holder instead. **First-party (corrected by #32929):** HotCRM's CRM Overview dashboard, in its app package `app.objectstack.hotcrm`, binds the dataset `product_metrics` that its module package `app.objectstack.hotcrm.revenue` holds; the module depends on the app, not the app on the module, so once the console sends the reader's package the tile answers `409 RESOURCE_CONFLICT` (`outside-closure`) where it drew on 18.3.0, and declaring the module from the app would be a dependency cycle the kernel refuses at boot. HotCRM fixes it in its own release, by moving the dashboard into the module or the dataset into the app package; the HotCRM lane chooses (#32929). Other first-party apps outside this repository: not measured.
+- Updated dependencies [96b5dab]
+- Updated dependencies [7da99b7]
+- Updated dependencies [85d9264]
+- Updated dependencies [3214615]
+- Updated dependencies [d0512c2]
+- Updated dependencies [4261169]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [604a2b3]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [2e33533]
+- Updated dependencies [2a32bd4]
+- Updated dependencies [ba875d2]
+- Updated dependencies [bb61872]
+- Updated dependencies [4211f50]
+- Updated dependencies [a1d243e]
+- Updated dependencies [9728ab1]
+- Updated dependencies [1e6f542]
+- Updated dependencies [b379262]
+- Updated dependencies [7945a3b]
+- Updated dependencies [c2be734]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [f0ad1f7]
+- Updated dependencies [03be565]
+- Updated dependencies [7e9fa4b]
+- Updated dependencies [bc8945f]
+- Updated dependencies [42afac7]
+- Updated dependencies [a9fb14b]
+- Updated dependencies [6f095b9]
+- Updated dependencies [5f80129]
+- Updated dependencies [0c7e95a]
+- Updated dependencies [aa57c76]
+- Updated dependencies [c8e6d38]
+- Updated dependencies [d99cd3b]
+- Updated dependencies [b6caa14]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [ea5807e]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [6c48d48]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [31260ca]
+- Updated dependencies [ef2ad31]
+- Updated dependencies [18870c9]
+- Updated dependencies [fa9c0aa]
+- Updated dependencies [fd749a4]
+- Updated dependencies [6a8f415]
+- Updated dependencies [56cac5e]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [77c203a]
+- Updated dependencies [648089d]
+- Updated dependencies [10ecafd]
+- Updated dependencies [b6f4c0e]
+- Updated dependencies [b4f4781]
+- Updated dependencies [042efb7]
+- Updated dependencies [48231b0]
+- Updated dependencies [0d54279]
+- Updated dependencies [8e5fabe]
+- Updated dependencies [ac56acf]
+- Updated dependencies [a91409c]
+- Updated dependencies [ab12a3b]
+- Updated dependencies [2b35374]
+- Updated dependencies [7b10a30]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [a058413]
+- Updated dependencies [062236c]
+- Updated dependencies [d996c38]
+- Updated dependencies [47c457b]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [115a43a]
+- Updated dependencies [c1da957]
+- Updated dependencies [b631573]
+- Updated dependencies [78d4fe9]
+- Updated dependencies [78eb352]
+- Updated dependencies [a0b40f2]
+- Updated dependencies [6ddf827]
+- Updated dependencies [d9d3eb7]
+- Updated dependencies [2ce2646]
+- Updated dependencies [bd1b768]
+- Updated dependencies [0f920b9]
+- Updated dependencies [1c66988]
+- Updated dependencies [584f7b8]
+- Updated dependencies [065bba7]
+- Updated dependencies [d8d0791]
+- Updated dependencies [66b17a3]
+- Updated dependencies [f5e23e2]
+- Updated dependencies [3f61e4f]
+- Updated dependencies [51992df]
+- Updated dependencies [1f37085]
+- Updated dependencies [534a287]
+- Updated dependencies [9a63ecb]
+- Updated dependencies [eff90af]
+- Updated dependencies [ce965cf]
+- Updated dependencies [f88ca70]
+- Updated dependencies [f67f3b3]
+- Updated dependencies [1ff1d45]
+- Updated dependencies [2c6b936]
+- Updated dependencies [46ec2ec]
+- Updated dependencies [e728d7a]
+- Updated dependencies [6be71ab]
+- Updated dependencies [3224545]
+- Updated dependencies [3684d18]
+- Updated dependencies [ac8fede]
+- Updated dependencies [60996d4]
+- Updated dependencies [2715a09]
+- Updated dependencies [6180c87]
+- Updated dependencies [52ffd5a]
+- Updated dependencies [f6b8985]
+- Updated dependencies [94019a6]
+- Updated dependencies [60f8149]
+- Updated dependencies [f75466c]
+- Updated dependencies [a127a45]
+- Updated dependencies [49bc3be]
+- Updated dependencies [36b216b]
+- Updated dependencies [0a81d2a]
+- Updated dependencies [cc8c4b0]
+- Updated dependencies [33c3b5e]
+- Updated dependencies [4820ea2]
+- Updated dependencies [4d9ac62]
+- Updated dependencies [c04aa29]
+- Updated dependencies [c4b6160]
+- Updated dependencies [8a3eeef]
+- Updated dependencies [ee230a2]
+- Updated dependencies [967822a]
+- Updated dependencies [fa1134c]
+- Updated dependencies [386891e]
+- Updated dependencies [d094752]
+- Updated dependencies [6aa95dc]
+- Updated dependencies [6cde924]
+- Updated dependencies [5b1fe45]
+- Updated dependencies [1a6c330]
+- Updated dependencies [8ce5827]
+- Updated dependencies [f84205b]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [767f110]
+- Updated dependencies [341448e]
+- Updated dependencies [6303e74]
+- Updated dependencies [136eba4]
+- Updated dependencies [b463ec6]
+  - @object-ui/components@18.4.0
+  - @object-ui/core@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @object-ui/i18n@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

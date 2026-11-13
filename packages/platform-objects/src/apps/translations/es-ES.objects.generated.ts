@@ -1209,11 +1209,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motivo de la revocación",
-        help: "Por qué se revocó la clave, cuando eso decide quién puede restaurarla. Restablecimiento forzado de la contraseña por un administrador: solo un administrador de la plataforma puede restaurar la clave. Fin de la pertenencia a la organización: el propietario dejó la organización y nadie puede restaurar la clave; un miembro crea una nueva. Suspendida por un administrador: un administrador de la plataforma revocó una clave que no es suya, y solo un administrador de la plataforma puede restaurarla. Se borra cuando la clave se restaura. Vacío para una clave que su propietario revocó desde la lista de claves de API.",
+        help: "Por qué se revocó la clave, cuando eso decide quién puede restaurarla. Restablecimiento forzado de la contraseña por un administrador: solo un administrador de la plataforma puede restaurar la clave. Fin de la pertenencia a la organización: el propietario dejó la organización y nadie puede restaurar la clave; un miembro crea una nueva. Suspendida por un administrador: un administrador de la plataforma revocó una clave que no es suya, y solo un administrador de la plataforma puede restaurarla. Desactivada por el directorio: el directorio de la organización (SCIM) desactivó o eliminó al propietario, y nadie puede restaurar la clave, ni siquiera después de reactivar al propietario; el propietario crea una nueva. Se borra cuando la clave se restaura. Vacío para una clave que su propietario revocó desde la lista de claves de API.",
         options: {
           admin_password_reset: "Restablecimiento forzado de la contraseña por un administrador",
           organization_membership_ended: "Fin de la pertenencia a la organización",
-          administrator_suspended: "Suspendida por un administrador"
+          administrator_suspended: "Suspendida por un administrador",
+          scim_deactivated: "Desactivada por el directorio"
         }
       },
       key: {
