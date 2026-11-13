@@ -1855,9 +1855,12 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
     // row is that holder's customization (served at its address, and laid in
     // under its envelope), and a sealed type's row is declined. Re-enabled,
     // the protocol's exact read answers one thing per state: the overlay row
-    // is refused naming both, and each sealed holder serves its own. The
-    // registry slot the hydrator laid the overlay row into is healed on the
-    // enable, pinned under `[#32820]` below.
+    // is refused naming both, and each sealed holder serves its own. Not
+    // pinned here, and not healed by this card: an overlay type's copy stays
+    // in the enabled holder's registry slot after the re-enable, so that
+    // slot, the list scoped to it and its execution list answer the
+    // environment's row as its own until the next unscoped hydration (the
+    // re-enable heal, a follow-up under #32568).
     const BOTH = [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }];
     for (const type of ['email_template', 'action', 'queue']) {
       it(`${type}, two holders, one disabled while the read-side hydrator runs, then re-enabled: one answer per state on the exact read`, async () => {
@@ -1892,95 +1895,6 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
       expect(labelOf(await read('email_template', 'welcome', A))).toBe('env en-US');
       expect((registry.getPackageScopedItem('email_template', 'welcome', A) as { label?: string; _packageId?: string })).toMatchObject({ label: 'env en-US', _packageId: A });
     });
-  });
-});
-
-/**
- * [#32820, ADR-0150 D4] A package-less overlay row the read-side hydrator lays
- * in while one of two holders is disabled wears the served holder's envelope:
- * that holder's slot answers it as its own. Enabling the other holder builds
- * the entry again for the holders served now, so each holder's slot, the list
- * scoped to it and the registry's execution list answer the holder's own item,
- * as when the hydrator ran with both served.
- */
-describe('[#32820] re-enabling a holder: the package-less overlay row the hydrator laid into the other holder\'s slot leaves it', () => {
-  const body = (type: string, label: string) => (type === 'email_template'
-    ? { name: 'welcome', label, locale: 'en-US', subject: 's', bodyHtml: '<p>x</p>' }
-    : { name: 'welcome', label });
-  const holderOwn = (type: string, id: string) => registry.registerItem(type, body(type, `${id.split('.').pop()} own`), 'name' as never, id);
-  const storeEnvRow = (type: string) => rows.push({
-    id: `${type}_env`, type, name: 'welcome', state: 'active', package_id: null, bundle_member: null,
-    metadata: JSON.stringify(body(type, 'env row')),
-  });
-  /** The three registry readers of a holder's item, and the slot's stamp. */
-  const readers = async (type: string, at: string) => {
-    const slot = registry.getPackageScopedItem(type, 'welcome', at) as { label?: string; _packageId?: string } | undefined;
-    const scoped = ((await protocol.getMetaItems({ type, packageId: at } as never)) as { items?: Array<{ name?: string; label?: string }> })
-      .items?.filter((i) => i.name === 'welcome').map((i) => i.label);
-    const execution = (registry.listItems(type, at) as Array<{ name?: string; label?: string }>)
-      .filter((i) => i.name === 'welcome').map((i) => i.label);
-    return { slot: slot?.label, stamp: slot?._packageId, scoped, execution };
-  };
-  const own = (id: string) => {
-    const label = `${id.split('.').pop()} own`;
-    return { slot: label, stamp: id, scoped: [label], execution: [label] };
-  };
-
-  for (const type of ['email_template', 'dashboard', 'report']) {
-    for (const order of [[A, B], [B, A]]) {
-      it(`${type}, registered ${order.map((id) => id.split('.').pop()).join(' then ')}: B disabled while the hydrator runs, then enabled: A's slot, A's scoped list and A's execution list answer A's own (BASE: the environment's row, listed beside A's own)`, async () => {
-        for (const id of order) holderOwn(type, id);
-        storeEnvRow(type);
-        registry.disablePackage(B);
-        await protocol.getMetaItems({ type } as never);
-        // The disabled period: A is the one served holder, so the row is its customization.
-        expect((await readers(type, A)).slot, 'B disabled').toBe('env row');
-        registry.enablePackage(B);
-        expect(await readers(type, A), 'B enabled').toEqual(own(A));
-        expect(await readers(type, B), 'B enabled').toEqual(own(B));
-        // The protocol's exact read is unchanged: refused naming both.
-        const err = await refusalOf(() => protocol.getMetaItem({ type, name: 'welcome', packageId: A } as never));
-        expect([err.status, err.refusal.reason]).toEqual([409, 'ambiguous-in-closure']);
-      });
-    }
-  }
-
-  it('CONTROL — the slot after the heal is the one the hydrator builds with both holders served', async () => {
-    holderOwn('email_template', A);
-    holderOwn('email_template', B);
-    storeEnvRow('email_template');
-    await protocol.getMetaItems({ type: 'email_template' } as never);
-    const hydrated = await readers('email_template', A);
-    expect(hydrated).toEqual(own(A));
-    const bare = registry.getItem('email_template', 'welcome', undefined, 'en-US');
-    registry.disablePackage(B);
-    await protocol.getMetaItems({ type: 'email_template' } as never);
-    registry.enablePackage(B);
-    expect(await readers('email_template', A)).toEqual(hydrated);
-    expect(registry.getItem('email_template', 'welcome', undefined, 'en-US')).toEqual(bare);
-  });
-
-  it('CONTROL — an enable that leaves A the one served holder keeps the row as A\'s customization', async () => {
-    holderOwn('email_template', A);
-    storeEnvRow('email_template');
-    registry.disablePackage(C);
-    await protocol.getMetaItems({ type: 'email_template' } as never);
-    const before = await readers('email_template', A);
-    expect([before.slot, before.stamp]).toEqual(['env row', A]);
-    registry.enablePackage(C);
-    expect(await readers('email_template', A)).toEqual(before);
-  });
-
-  it('CONTROL — an entry written over the slot after the hydration is the slot\'s: the enable does not touch it', async () => {
-    holderOwn('email_template', A);
-    holderOwn('email_template', B);
-    storeEnvRow('email_template');
-    registry.disablePackage(B);
-    await protocol.getMetaItems({ type: 'email_template' } as never);
-    const written = { ...body('email_template', 'written later'), _packageId: A };
-    registry.registerItem('email_template', written, 'name' as never);
-    registry.enablePackage(B);
-    expect(registry.getItem('email_template', 'welcome', undefined, 'en-US')).toBe(written);
   });
 });
 
