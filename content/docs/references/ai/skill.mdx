@@ -38,7 +38,7 @@ const result = SkillSchema.parse(data);
 | **description** | `string` | optional | Skill description |
 | **surface** | `Enum<'ask' \| 'build' \| 'both'>` | optional (default: `"ask"`) | Agent surface this skill binds to ('ask' \| 'build' \| 'both') — ADR-0063 §3; read by the cloud agent runtime only |
 | **instructions** | `string` | optional | LLM instructions when skill is active — also served as an MCP prompt |
-| **tools** | `string[]` | ✅ | Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`) — bound by the cloud agent runtime only |
+| **tools** | `string[]` | ✅ | Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`) — bound by the cloud agent runtime; an MCP server whose prompts `registerSkillPrompts` installs offers the skill only when it serves every tool named here (an `action_` entry also through `run_action`) |
 | **triggerConditions** | `{ field: string; operator: Enum<'eq' \| 'neq' \| 'in' \| 'not_in' \| 'contains'>; value: string \| string[] }[]` | optional | Programmatic activation conditions — evaluated by the cloud agent runtime only |
 | **active** | `boolean` | optional (default: `true`) | Whether the skill is enabled |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this skill. |
