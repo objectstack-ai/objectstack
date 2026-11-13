@@ -2930,3 +2930,109 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     expect((await new DatabaseLoader({ driver }).loadManyKeyed('email_template')).map((entry) => entry.packageId)).toEqual([ALPHA, BETA]);
   });
 });
+
+/**
+ * [#32986; follow-up of #32198, ADR-0150 D4] On a host that declares its
+ * package, the boot priming pass stamps a package-less stored row of a type
+ * NOT stored per `(package, name)` (`object`, `view`, `app`, `hook`,
+ * `dashboard` …) with the host's package (`applyProtection`), and the stamp
+ * stays: an `object` row so stamped is still registered by ObjectQL as the
+ * host package's contribution (`_packageId ?? 'metadata-service'`). But since
+ * #32198 `unregisterPackage` selects a package's items by `_packageId` too,
+ * so `unregisterPackage(host)` deleted the environment's own rows — the
+ * registry entry and the stored row both. The removal now leaves an item a
+ * stored-row loader handed on naming no package, whose only claim to the
+ * package is the stamp the pass put on it.
+ *
+ * BEFORE (`main`): every case below not marked CONTROL lost the row (the
+ * registry entry gone, the stored row deleted). The CONTROLs answer on `main`
+ * as here.
+ */
+describe('[#32986] unregisterPackage of the host package keeps the environment\'s own rows the boot pass stamped with the host', () => {
+  const HOST = 'com.host.app';
+  const OTHER = 'com.other.app';
+  /** One name per type, each a name the type's own write rule keeps as it is. */
+  const ITEMS: ReadonlyArray<readonly [type: string, name: string]> = [
+    ['object', 'env_account'], ['view', 'env_account.all'], ['app', 'env_app'], ['hook', 'env_hook'], ['dashboard', 'env_dashboard'],
+  ];
+  let driver: IDataDriver;
+
+  const seed = (type: string, name: string, packageId: string | null, body: Record<string, unknown> = {}) =>
+    driver.create('sys_metadata', {
+      id: `${type}_${name}_${packageId ?? 'env'}`, type, name, state: 'active', version: 1, checksum: `${type}_${name}_${packageId ?? 'env'}`,
+      source: 'database', package_id: packageId, metadata: JSON.stringify({ name, label: packageId ?? 'env', ...body }),
+    });
+  /** The real pass over one database loader, on a host that declares `hostPackage`. */
+  const bootPass = async (hostPackage?: string) => {
+    const plugin = new MetadataPlugin({ ...(hostPackage ? { packageId: hostPackage } : {}), watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  /** Per item: the registry's stamp, what a read answers, and whether its stored row is still there. */
+  const state = async (m: MetadataManager) => {
+    const out: unknown[] = [];
+    for (const [type, name] of ITEMS) {
+      const held = (m as any).registry.get(type)?.get(name) as { _packageId?: string } | undefined;
+      const read = (await m.get(type, name)) as { label?: string } | undefined;
+      const rows = await driver.find('sys_metadata', { where: { type, name } } as never);
+      out.push([type, held?._packageId ?? null, read?.label ?? null, rows.length]);
+    }
+    return out;
+  };
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('package-less rows of object, view, app, hook and dashboard, on a host declaring its package: the pass stamps them with the host as before, and unregisterPackage(host) keeps each registry entry and stored row (BEFORE: every one deleted)', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, null);
+    const m = await bootPass(HOST);
+    const primed = ITEMS.map(([type]) => [type, HOST, 'env', 1]);
+    expect(await state(m), 'the stamp, as before: the object contribution owner does not move').toEqual(primed);
+    await m.unregisterPackage(HOST);
+    expect(await state(m)).toEqual(primed);
+  });
+
+  it('CONTROL the host\'s own rows (their bodies carry the host\'s stamp, as a host item the pass seeded is stored): unregisterPackage(host) still removes each, from the registry and storage', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, null, { _packageId: HOST });
+    const m = await bootPass(HOST);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
+    await m.unregisterPackage(HOST);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, null, 0]));
+  });
+
+  /**
+   * [#32986, review S2] The legacy `package` key is the item's own claim, as
+   * 18.3.0's `unregisterPackage` read it: the row is the host's, though its
+   * stored body names no package the store's reads index (`_packageId`).
+   */
+  it('CONTROL the host\'s own rows naming it through the legacy `package` key in their stored bodies: unregisterPackage(host) still removes each, from the registry and storage', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, null, { package: HOST });
+    const m = await bootPass(HOST);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
+    await m.unregisterPackage(HOST);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, null, 0]));
+  });
+
+  it('an item registered in memory for the host (code) beside the environment\'s rows: unregisterPackage(host) removes the host\'s item and keeps the environment\'s (BEFORE: both removed)', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, null);
+    const m = await bootPass(HOST);
+    await m.registerInMemory('object', 'host_thing', { name: 'host_thing', label: 'code', _packageId: HOST });
+    await m.unregisterPackage(HOST);
+    expect(await m.get('object', 'host_thing')).toBeUndefined();
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
+  });
+
+  it('CONTROL unregisterPackage of another package, and a host declaring no package: the environment\'s rows are untouched, unstamped on the second', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, null);
+    const m = await bootPass(HOST);
+    await m.unregisterPackage(OTHER);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
+    const bare = await bootPass();
+    await bare.unregisterPackage(HOST);
+    expect(await state(bare)).toEqual(ITEMS.map(([type]) => [type, null, 'env', 1]));
+  });
+});
