@@ -469,7 +469,20 @@ describe('set-as-default over a refused clear of the previous default leaves ONE
     expect(toast.success).not.toHaveBeenCalled();
   });
 
-  it('CONTROL: both views user-owned, the clear lands first and only then the set', async () => {
+  it('CONTROL: both views user-owned, the previous default is cleared and the new one set, and nothing is raised', async () => {
+    const dataSource = makeDataSource({ listViews: vi.fn(async () => [OTHER_DEFAULT, SAVED_ROW]) });
+    await mountOnSavedView(dataSource);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('stub-set-default'));
+    });
+    await waitFor(() => expect((dataSource as any).updateView).toHaveBeenCalledWith(OBJECT_NAME, SAVED_ID, { isDefault: true }));
+    expect((dataSource as any).updateView).toHaveBeenCalledWith(OBJECT_NAME, OTHER_DEFAULT.name, { isDefault: false });
+    expect((dataSource as any).updateView).toHaveBeenCalledTimes(2);
+    await settle();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('the set is issued only once the clear has landed (both views user-owned)', async () => {
     let landClear!: () => void;
     const clearPending = new Promise<void>((resolve) => { landClear = resolve; });
     const updateView = vi.fn(async (_object: string, viewId: string) => {
