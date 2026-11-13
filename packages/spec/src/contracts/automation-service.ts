@@ -852,7 +852,10 @@ export interface AutomationResult {
      * paused and resumed (#33019), as {@link summary} credits them. Unlike
      * `summary`, a child run that FAILED answers no drops, so where a
      * `try_catch` or `fault` edge contains that failure an absent member is
-     * not proof the failed child dropped nothing.
+     * not proof the failed child dropped nothing. A `map` item whose paused
+     * run an operator cancelled (#27971) answers none either: the map goes
+     * on with the cancelled marker in the item's `results` slot, and that
+     * run's drops, like its totals, reach the parent nowhere.
      */
     droppedFields?: DroppedFieldsEvent[];
 }

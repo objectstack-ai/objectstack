@@ -485,8 +485,8 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
     ),
     // #32861 — mirrors `AutomationResult.droppedFields`; the element IS the
     // data engine's `DroppedFieldsEventSchema`, so no new vocabulary. #33019
-    // rolled up the paused-child and `map`-item legs; the failed-child clause
-    // is what remains.
+    // rolled up the paused-child and `map`-item legs; the failed child and
+    // the operator-cancelled paused `map` item (#27971) are what remains.
     droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
       'Caller-supplied field values a write step of the run did not store (e.g. a `readonly` '
       + 'field an `update_record` step wrote): the data engine\'s own drop events, one per object '
@@ -496,7 +496,8 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
       + 'a field was dropped. Delegated writes roll up here too: a `subflow` child\'s run and each '
       + '`map` item\'s run, whether it completed without pausing or paused and resumed. A child run '
       + 'that failed answers no drops, so where a `try_catch` or `fault` edge contains that failure '
-      + 'an absent member is not proof the failed child dropped nothing.',
+      + 'an absent member is not proof the failed child dropped nothing. A `map` item whose paused run '
+      + 'an operator cancelled answers none either (its slot in `results` holds the cancelled marker).',
     ),
   }),
 }));

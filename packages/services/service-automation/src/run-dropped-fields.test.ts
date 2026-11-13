@@ -307,6 +307,84 @@ describe('delegated writes roll their drops up onto the parent\'s answer (#33019
         expect(done.droppedFields).toEqual([{ object: 'expense_line', fields: ['amount'], reason: 'readonly' }]);
     });
 
+    it('map: an earlier item\'s drop survives a later item\'s failure that a `fault` edge contains (the map\'s failure exit)', async () => {
+        const engine = makeEngine();
+        engine.registerNodeExecutor({
+            type: 'item_step',
+            async execute(_node: unknown, _vars: unknown, context: AutomationContext) {
+                if ((context as { params?: { tag?: string } }).params?.tag === 'b') return { success: false, error: 'row b refused by the remote' };
+                return { success: true, droppedFields: [{ object: 'expense_line', fields: ['amount'], reason: 'readonly' }] };
+            },
+        } as never);
+        engine.registerNodeExecutor({ type: 'noop', async execute() { return { success: true }; } } as never);
+        engine.registerFlow('one_item', chain('one_item', [{ id: 'step', type: 'item_step', label: 'Step' }]));
+        engine.registerFlow('process_each', {
+            name: 'process_each', label: 'process_each', type: 'autolaunched', runAs: 'user',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'each', type: 'map', label: 'Each', config: { flowName: 'one_item', collection: ['a', 'b'], input: { tag: { dialect: 'cel', source: 'item' } } } },
+                { id: 'handler', type: 'noop', label: 'Handler' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'each' },
+                { id: 'e2', source: 'each', target: 'end' },
+                { id: 'e_fault', source: 'each', target: 'handler', type: 'fault' },
+                { id: 'e3', source: 'handler', target: 'end' },
+            ],
+        } as never);
+
+        const res = await engine.execute('process_each', CALLER);
+
+        // The fault edge contained item `b`'s failure, so the run completed —
+        // and item `a`'s drop rides only on the map's failed step.
+        expect(res.success).toBe(true);
+        expect(res.status).toBeUndefined();
+        expect(res.droppedFields).toEqual([{ object: 'expense_line', fields: ['amount'], reason: 'readonly' }]);
+    });
+
+    it('a paused child\'s drops MERGE with the drops its awaiting step already holds (creditChildRun)', async () => {
+        const engine = makeEngine();
+        const tagOf = (context: AutomationContext) => (context as { params?: { tag?: string } }).params?.tag;
+        // Item `a` drops `amount` synchronously; item `b` pauses at `gate`
+        // and, resumed, drops `memo` at `late` — so the map step that `b`
+        // suspended already holds `a`'s event when `b`'s is credited onto it.
+        engine.registerNodeExecutor({
+            type: 'gate_step',
+            descriptor: defineActionDescriptor({ type: 'gate_step', version: '1.0.0', name: 'Gate', supportsPause: true, resumeAuthority: 'any' }),
+            async execute(_node: unknown, _vars: unknown, context: AutomationContext) {
+                if (tagOf(context) === 'b') return { success: true, suspend: true, correlation: 'held' };
+                return { success: true, droppedFields: [{ object: 'expense_line', fields: ['amount'], reason: 'readonly' }] };
+            },
+        } as NodeExecutor);
+        engine.registerNodeExecutor({
+            type: 'late_step',
+            async execute(_node: unknown, _vars: unknown, context: AutomationContext) {
+                return tagOf(context) === 'b'
+                    ? { success: true, droppedFields: [{ object: 'expense_line', fields: ['memo'], reason: 'readonly' }] }
+                    : { success: true };
+            },
+        } as never);
+        engine.registerFlow('one_item', chain('one_item', [
+            { id: 'gate', type: 'gate_step', label: 'Gate' },
+            { id: 'late', type: 'late_step', label: 'Late' },
+        ]));
+        engine.registerFlow('process_each', chain('process_each', [
+            { id: 'each', type: 'map', label: 'Each', config: { flowName: 'one_item', collection: ['a', 'b'], input: { tag: { dialect: 'cel', source: 'item' } } } },
+            { id: 'confirm', type: 'hold', label: 'Confirm' },
+        ]));
+
+        const parked = await engine.execute('process_each', CALLER);
+        expect(parked.status).toBe('paused');
+        const itemB = await childRunOf(engine, parked.runId!, 'map:');
+        const itemDone = await engine.resume(itemB);
+        expect(itemDone.droppedFields).toEqual([{ object: 'expense_line', fields: ['memo'], reason: 'readonly' }]);
+
+        const done = await engine.resume(parked.runId!);
+        expect(done.success).toBe(true);
+        expect(done.droppedFields).toEqual([{ object: 'expense_line', fields: ['amount', 'memo'], reason: 'readonly' }]);
+    });
+
     it('subflow: a child that paused, resumed through the PARENT\'s run id (the delegated leg), rolls its drop up', async () => {
         const engine = makeEngine();
         engine.registerFlow('pause_then_submit', PAUSE_THEN_SUBMIT);
