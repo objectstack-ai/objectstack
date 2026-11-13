@@ -373,17 +373,21 @@ export interface McpActionSummary {
   /** Declared input parameters. */
   params?: McpActionParamSummary[];
   /**
-   * Present when `run_action` would refuse this action for THIS caller's
-   * credential before running it: an `api` action whose target endpoint does
-   * not accept the credential the caller connected with (an OAuth access token
-   * is honoured on the MCP endpoint only, so an endpoint outside it cannot read
-   * it), or an action declaring `ai.requiresConfirmation: true` listed for an
-   * AI service account, which never confirms an action for itself (ADR-0151 D3
-   * rule 3). The action is still listed, so an agent can tell its user why it
+   * Present when `run_action` would refuse this action for THIS caller: an
+   * `api` action whose target endpoint does not accept the credential the
+   * caller connected with (an OAuth access token is honoured on the MCP
+   * endpoint only, so an endpoint outside it cannot read it); an action
+   * declaring `ai.requiresConfirmation: true` listed for an AI service
+   * account, which never confirms an action for itself (ADR-0151 D3 rule 3);
+   * or an `api` action whose target is an organization endpoint the caller's
+   * membership role in this organization does not reach (inviting, removing a
+   * member, editing the organization or its teams), which that endpoint
+   * refuses. The action is still listed, so an agent can tell its user why it
    * cannot run it; `code` is the error code `run_action` answers with
-   * (`UNAUTHENTICATED` for the endpoint, `ACTION_CONFIRMATION_REQUIRED` for the
-   * account), `reason` the sentence it carries, including what would let the
-   * action run. Absent when the action can be run.
+   * (`UNAUTHENTICATED` for the credential, `ACTION_CONFIRMATION_REQUIRED` for
+   * the account, `PERMISSION_DENIED` for the membership role), `reason` the
+   * sentence that says why, including what would let the action run. Absent
+   * when the action can be run.
    */
   unavailable?: McpActionUnavailable;
 }
@@ -3124,12 +3128,12 @@ export function registerActionTools(
         'List the business actions you can invoke in this app (e.g. "complete task", "convert lead"). ' +
         'Returns each action\'s name, the object it operates on, a description, whether it needs a record id, ' +
         'whether it is destructive, and its input parameters. Only actions the app author has exposed to AI ' +
-        'and that the caller is permitted to run are returned. Use run_action to invoke one. One name can be ' +
+        'and that the caller\'s permissions allow are returned. Use run_action to invoke one. One name can be ' +
         'listed on several rows, one per object it is bound to: each row carries its own face, and run_action ' +
         'takes that face as actionName (or the row\'s name with its objectName and namespace). An action that ' +
-        'carries "unavailable" cannot be run with the credential you connected with: run_action would refuse ' +
-        'it with unavailable.code, and unavailable.reason says why and what would let it run, so tell the ' +
-        'user instead of calling it.',
+        'carries "unavailable" cannot be run by you as you are connected (your credential, or your role in ' +
+        'this organization): run_action would refuse it with unavailable.code, and unavailable.reason says ' +
+        'why and what would let it run, so tell the user instead of calling it.',
       inputSchema: strictToolInput({ surface: 'this list_actions call' }, {}),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },

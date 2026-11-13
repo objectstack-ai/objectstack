@@ -14,6 +14,13 @@ import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 // [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
 import { isAiReadExposed } from '@objectstack/spec/data';
+import {
+    BUILTIN_MEMBERSHIP_ROLES,
+    MEMBERSHIP_REACH,
+    mapMembershipRole,
+    type BuiltinMembershipRole,
+    type MembershipReachEntry,
+} from '@objectstack/spec/identity';
 import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
 import {
     FEDERATION_READ_CAPABILITY,
@@ -54,6 +61,67 @@ import { actionRunFieldVisibilityRefusal, actionRunMasker, projectActionForCalle
 
 /** Typed as the registered vocabulary, so a misspelling fails to compile. */
 const FIELD_VISIBILITY_UNRESOLVED: ErrorCode = 'FIELD_VISIBILITY_UNRESOLVED';
+
+/**
+ * The code `run_action` answers when an organization endpoint refuses the
+ * caller's membership role: the forward relays the endpoint's 403, served as
+ * the standard code for that status (ADR-0112).
+ */
+const MEMBERSHIP_REACH_REFUSAL_CODE: ErrorCode = 'PERMISSION_DENIED';
+
+/** An identity-route target on better-auth's organization plugin, captured relative to the auth base path. */
+const ORGANIZATION_ENDPOINT_TARGET = /^\/api\/v1\/auth(\/organization\/[^?#]+)/;
+
+/**
+ * [ruling record 6812625052, letter E: list and mark, do not hide] Why
+ * `run_action` would be refused for a listed `api` action whose target is an
+ * organization endpoint the caller's membership role does not reach, or
+ * `undefined` when it would not, or when this listing cannot tell.
+ *
+ * The reach is read from the action's declared `target` against the spec's
+ * reach table ({@link MEMBERSHIP_REACH}, pinned equal to the vendor doors in
+ * plugin-auth), never from a local list: the grades that reach the endpoint
+ * are those of every row naming it (`/organization/update-member-role` is two
+ * rows, so its reach is their union). A target no row names is no grade's to
+ * judge (`/organization/create` is judged on the deployment's tenancy posture,
+ * an SSO provider or OAuth application on record ownership), so it is never
+ * marked.
+ *
+ * The caller's grades are its `positions` in the organization this listing
+ * reads, by the names {@link mapMembershipRole} projects them to: the reading
+ * the action's `requiresMembershipReach` sugar is lowered to. Only a principal
+ * whose envelope carries its own positions is judged: the system context, a
+ * delegated agent (its envelope carries the agent ceiling, not the delegating
+ * person's grades) and an envelope with no `positions` are left unmarked.
+ *
+ * This is a mark and nothing else. The run doors do not read it: the endpoint
+ * stays the authority, and a call naming another organization is judged there.
+ */
+function membershipReachRefusal(action: any, objectName: string | undefined, ec: any): { code: string; message: string } | undefined {
+    if (action?.type !== 'api' || typeof action?.target !== 'string') return undefined;
+    const endpoint = ORGANIZATION_ENDPOINT_TARGET.exec(action.target)?.[1]?.replace(/\/+$/, '');
+    if (!endpoint) return undefined;
+    const reaching = new Set<BuiltinMembershipRole>();
+    for (const row of Object.values(MEMBERSHIP_REACH) as MembershipReachEntry[]) {
+        if (row.endpoint === endpoint) for (const grade of row.grades) reaching.add(grade);
+    }
+    if (reaching.size === 0) return undefined;
+    if (!ec || ec.isSystem === true || ec.onBehalfOf || !Array.isArray(ec.positions)) return undefined;
+    const grades = BUILTIN_MEMBERSHIP_ROLES.filter((grade) => reaching.has(grade));
+    if (grades.some((grade) => ec.positions.includes(mapMembershipRole(grade)))) return undefined;
+
+    const names = grades.map((grade) => grade.replace(/_/g, ' '));
+    const roles = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}` : names[0];
+    const on = objectName ? ` on '${objectName}'` : '';
+    const where = ec.tenantId ? 'in this organization' : 'in any organization you belong to';
+    return {
+        code: MEMBERSHIP_REACH_REFUSAL_CODE,
+        message:
+            `Action '${String(action?.name ?? '')}'${on} needs an organization ${roles}: its endpoint ` +
+            `(${endpoint}) refuses every other membership role, and your role ${where} is none of those. ` +
+            `Ask a person who holds one of those roles to run it.`,
+    };
+}
 
 /**
  * [ADR-0106 D6 tier 3] The refusal an MCP object-schema read answers when the
@@ -1222,7 +1290,14 @@ export function buildMcpBridge(
                 const confirmation = actionExec.isAiServiceAccountCaller(ec)
                     ? actionExec.actionConfirmationRefusal(deps, action, undefined, objectName, ec)
                     : undefined;
-                const refusal = confirmation ?? actionExec.apiForwardCredentialRefusal(context, action);
+                // [ruling record 6812625052, letter E] …and an organization
+                // endpoint the caller's membership role does not reach: the
+                // forward reaches it and it refuses 403. Asked last, because
+                // `run_action` meets it last: after the admission sequence and
+                // the forward's credential table. Listed, never hidden: the
+                // run doors do not read the mark ({@link membershipReachRefusal}).
+                const refusal = confirmation ?? actionExec.apiForwardCredentialRefusal(context, action)
+                    ?? membershipReachRefusal(action, actionExec.isObjectLessActionKey(objectName) ? undefined : objectName, ec);
                 // [ADR-0106 D1] Summarised against the object as this caller is
                 // served it, and not listed where `/meta` withholds it.
                 const served = await servedActionObject(action, objectName, obj, objectsByName);
