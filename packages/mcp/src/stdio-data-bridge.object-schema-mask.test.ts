@@ -38,7 +38,7 @@ import {
   securityDoubleFor,
   type ObjectSchemaMaskCase,
 } from '@objectstack/metadata-core/testing';
-import { OBJECT_SCHEMA_MASK_DISABLE_ENV } from '@objectstack/metadata-core';
+import { OBJECT_SCHEMA_MASK_DISABLE_ENV, type ObjectSchemaReadDelegateSource } from '@objectstack/metadata-core';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
 import { registerObjectTools } from './mcp-http-tools.js';
 import { MCPServerPlugin } from './plugin.js';
@@ -57,7 +57,7 @@ interface ToolAnswer {
 }
 
 /** The stdio bridge under `testCase`'s caller and security service, behind the real tools. */
-async function connectBridge(testCase: ObjectSchemaMaskCase | undefined) {
+async function connectBridge(testCase: ObjectSchemaMaskCase | undefined, schemaReadDelegates?: ObjectSchemaReadDelegateSource) {
   const security = testCase ? securityDoubleFor(testCase) : undefined;
   const metadataService = {
     listObjects: vi.fn(async () => [account()]),
@@ -68,6 +68,7 @@ async function connectBridge(testCase: ObjectSchemaMaskCase | undefined) {
     metadataService: metadataService as unknown as IMetadataService,
     resolvePrincipal: async () => ({ ...(testCase?.context ?? { userId: 'u_staff' }) }) as unknown as ExecutionContext,
     ...(security ? { security: () => security } : {}),
+    ...(schemaReadDelegates ? { schemaReadDelegates } : {}),
   });
   const server = new McpServer({ name: 'pin', version: '0' });
   registerObjectTools(server, bridge);
@@ -99,9 +100,9 @@ async function underDeployment<T>(testCase: ObjectSchemaMaskCase | undefined, ru
 }
 
 /** One case's answers from the three tools that serve the object's fields. */
-async function answersUnder(testCase: ObjectSchemaMaskCase | undefined) {
+async function answersUnder(testCase: ObjectSchemaMaskCase | undefined, schemaReadDelegates?: ObjectSchemaReadDelegateSource) {
   return underDeployment(testCase, async () => {
-    const session = await connectBridge(testCase);
+    const session = await connectBridge(testCase, schemaReadDelegates);
     try {
       return {
         described: await session.call('describe_object', { objectName: OBJECT }),
@@ -206,6 +207,46 @@ describe('[ADR-0106] stdio describe_object / list_objects / validate_expression 
   }
 });
 
+describe('[decision 6840464379] an unreadable object its owner opens through a schemaReadDelegate', () => {
+  const UNREADABLE = OBJECT_SCHEMA_MASK_CASES.find((c) => c.id === 'unreadable-object/absent')!;
+  const caseWith = (readable: readonly string[]): ObjectSchemaMaskCase => ({ ...UNREADABLE, readable });
+  /** A source whose `account` names `owner_door`, a service answering `verdict`. */
+  const sourceAnswering = (verdict: boolean) => {
+    const authorizeSchemaRead = vi.fn(async () => verdict);
+    const source: ObjectSchemaReadDelegateSource = {
+      declaredDelegate: (name) => (name === OBJECT ? 'owner_door' : undefined),
+      service: (name) => (name === 'owner_door' ? { authorizeSchemaRead } : undefined),
+    };
+    return { source, authorizeSchemaRead };
+  };
+
+  it('serves it to a principal the delegate admits, projected by their field security', async () => {
+    const { source, authorizeSchemaRead } = sourceAnswering(true);
+    const { described, listed, validated } = await answersUnder(caseWith(['id', 'name']), source);
+    expect(described.isError).toBe(false);
+    expect(described.json.fields.map((f: any) => f.name)).toEqual(['id', 'name']);
+    expect(listed.json.objects.find((o: any) => o.name === OBJECT)?.fieldCount).toBe(2);
+    expect(validated.isError).toBe(false);
+    for (const answer of [described, listed, validated]) {
+      expect(mentions(answer.text, 'salary_grade')).toBe(false);
+      expect(mentions(answer.text, 'bonus_formula')).toBe(false);
+    }
+    // Asked about this transport's principal, for the object it declares.
+    const [object, context] = authorizeSchemaRead.mock.calls[0] as unknown as [string, any];
+    expect(object).toBe(OBJECT);
+    expect(context.userId).toBe(UNREADABLE.context.userId);
+  });
+
+  it('keeps it absent for a principal the delegate refuses, exactly as with no delegate', async () => {
+    const refused = await answersUnder(caseWith(['id', 'name']), sourceAnswering(false).source);
+    const undeclared = await answersUnder(caseWith(['id', 'name']));
+    for (const answers of [refused, undeclared]) {
+      expect(answers.described.text.split(OBJECT).join('no_such_object')).toBe(answers.unknownDescribed.text);
+      expect(answers.listed.json.objects.map((o: any) => o.name)).not.toContain(OBJECT);
+    }
+  });
+});
+
 describe('[ADR-0106] MCPServerPlugin hands the stdio bridge and the object resources the host security service', () => {
   const originalEnv = { ...process.env };
   beforeEach(() => {
@@ -219,7 +260,10 @@ describe('[ADR-0106] MCPServerPlugin hands the stdio bridge and the object resou
   });
 
   /** The plugin over a security service answering `readable`, and a client on its long-lived server. */
-  async function boot(readable: readonly string[] | 'throw') {
+  async function boot(
+    readable: readonly string[] | 'throw',
+    opts: { objectReadable?: boolean; delegate?: (object: string, context: any) => boolean } = {},
+  ) {
     const metadata = {
       listObjects: vi.fn(async () => [account()]),
       getObject: vi.fn(async (name: string) => (name === OBJECT ? account() : null)),
@@ -238,13 +282,20 @@ describe('[ADR-0106] MCPServerPlugin hands the stdio bridge and the object resou
         return [];
       }),
       update: vi.fn(async () => ({})),
+      // [decision 6840464379] The registered definition the delegate source reads.
+      getSchema: vi.fn((name: string) => (name === OBJECT && opts.delegate ? { ...account(), schemaReadDelegate: 'owner_door' } : undefined)),
     };
     const answer = async () => {
       if (readable === 'throw') throw new Error('security service unhealthy (test)');
       return [...readable];
     };
-    const security = { getReadableFields: vi.fn(answer), getMetadataReadableFields: vi.fn(answer) };
+    const security = {
+      getReadableFields: vi.fn(answer),
+      getMetadataReadableFields: vi.fn(answer),
+      ...(opts.objectReadable === false ? { canReadObject: vi.fn(async () => false) } : {}),
+    };
     const registry = new Map<string, unknown>([['metadata', metadata], ['objectql', objectql], ['security', security]]);
+    if (opts.delegate) registry.set('owner_door', { authorizeSchemaRead: vi.fn(async (o: string, c: any) => opts.delegate!(o, c)) });
     const ctx: any = {
       registerService: vi.fn((name: string, service: unknown) => registry.set(name, service)),
       getService: vi.fn((name: string) => {
@@ -316,6 +367,27 @@ describe('[ADR-0106] MCPServerPlugin hands the stdio bridge and the object resou
       }
     } finally {
       await k.close();
+    }
+  });
+
+  it('[decision 6840464379] an unreadable object is served on both to the key principal its declared delegate admits', async () => {
+    const admitted = await boot(['id', 'name'], { objectReadable: false, delegate: (_o, c) => c?.userId === 'usr_stdio' });
+    try {
+      const described = await admitted.tool('describe_object', { objectName: OBJECT });
+      expect(described.isError).toBe(false);
+      expect(JSON.parse(described.text).fields.map((f: any) => f.name)).toEqual(['id', 'name']);
+      expect(JSON.parse(await admitted.resource(`objectstack://objects/${OBJECT}`)).fields.map((f: any) => f.name))
+        .toEqual(['id', 'name']);
+    } finally {
+      await admitted.close();
+    }
+    const refused = await boot(['id', 'name'], { objectReadable: false, delegate: () => false });
+    try {
+      expect((await refused.tool('describe_object', { objectName: OBJECT })).isError).toBe(true);
+      const listing = JSON.parse(await refused.resource('objectstack://objects'));
+      expect(listing.objects.map((o: any) => o.name)).not.toContain(OBJECT);
+    } finally {
+      await refused.close();
     }
   });
 

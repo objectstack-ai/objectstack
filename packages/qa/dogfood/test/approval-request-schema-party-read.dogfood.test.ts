@@ -111,6 +111,7 @@ const baselineSet: PermissionSet = PermissionSetSchema.parse({
 const approverFieldSet: PermissionSet = PermissionSetSchema.parse({
   name: 'schread_approver_fls',
   label: 'Schema Read Approver — request field withheld',
+  objects: {},
   fields: { [`${REQUEST}.${WITHHELD}`]: { readable: false, editable: false } },
 });
 

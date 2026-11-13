@@ -5518,6 +5518,30 @@ describe('ApprovalService — authorizeSchemaRead delegate (ADR-0106, decision 6
     expect(visible.mock.calls[0][1]).toBe('t1');
   });
 
+  it('counts only requests the door serves in the caller\'s organization', async () => {
+    const svc = await seed(); // t1: submitter u1, pending approver u9
+    // u9 also decides a request in t2.
+    const inT2 = { userId: 'u3', tenantId: 't2', positions: [], permissions: [] } as any;
+    const req = await svc.openNodeRequest(openInput(['u9'], { recordId: 'opp_t2', record: { id: 'opp_t2' } }), inT2);
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    const u9In = (tenantId: string) => ({ userId: 'u9', tenantId, positions: [], permissions: [] }) as any;
+    expect(await svc.authorizeSchemaRead('sys_approval_request', u9In('t1')), 'pending approver in t1').toBe(true);
+    expect(await svc.authorizeSchemaRead('sys_approval_request', u9In('t2')), 'past actor in t2').toBe(true);
+    // In t3 u9 is party to nothing: the t2 decision the already-acted probe
+    // collects is not a request the door serves there.
+    expect(await svc.authorizeSchemaRead('sys_approval_request', u9In('t3')), 'party to nothing in t3').toBe(false);
+  });
+
+  it('asks the door once per request context, for both objects', async () => {
+    const svc = await seed();
+    const visible = vi.spyOn(svc as any, 'visibleRequestIds');
+    const ctx = as('u9');
+    for (const object of OBJECTS) expect(await svc.authorizeSchemaRead(object, ctx), object).toBe(true);
+    expect(visible).toHaveBeenCalledTimes(1);
+    expect(await svc.authorizeSchemaRead('sys_approval_request', as('u9'))).toBe(true);
+    expect(visible).toHaveBeenCalledTimes(2);
+  });
+
   it('speaks only for its own two objects, whoever asks', async () => {
     const svc = await seed();
     for (const object of ['sys_approval_approver', 'opportunity', 'sys_user', '']) {

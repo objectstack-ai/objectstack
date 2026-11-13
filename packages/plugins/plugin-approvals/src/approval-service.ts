@@ -1962,6 +1962,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   private objectReadAdmission?: ObjectReadAdmissionSource;
   /** [#11993] Lazily-resolved deployment i18n lookup for refusal copy. */
   private messageTranslator?: () => ValidationMessageTranslator | undefined;
+  /** [decision 6840464379] {@link authorizeSchemaRead}'s verdict, kept per request context. */
+  private readonly schemaReadVerdicts = new WeakMap<object, Promise<boolean>>();
   /** [#24863] Lazily-resolved `i18n` service for the reader-locale display labels. */
   private i18nServiceSource?: () => ReaderLabelI18n | undefined;
   /** [ADR-0142 D6] Lazily-resolved `ownership-queue` service a `queue` approver expands through. */
@@ -10405,11 +10407,15 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * a member only through this service's door. The request page that door
    * links to needs both definitions to render, so the callers the door serves
    * a request to are the callers who need them: this answers by the door's
-   * own rule ({@link visibleRequestIds}, the one `getRequest` and
-   * `listActions` apply), asked without a named request — does the caller
-   * see at least one? That is a current approver, the submitter, a past
-   * actor, or the override holder; a member party to no request is refused
-   * and keeps the absent answer.
+   * own rule, asked without a named request: does the door serve the caller
+   * at least one request? {@link visibleRequestIds} (the participant rule
+   * `getRequest` and `listActions` apply), then the door's own row read
+   * inside the caller's organization ({@link findRequestRow}'s scope): the
+   * already-acted probe is not organization-scoped, so an id it collects in
+   * another organization is one the door would not serve here, and must not
+   * count. That admits a current approver, the submitter, a past actor, and
+   * the override holder; a member party to no request in their organization
+   * is refused and keeps the absent answer.
    *
    * The record-reader tier is not asked: it is evaluated only against a named
    * record, and a definition read names none.
@@ -10419,12 +10425,34 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * nothing: the rows stay behind this service's door and the data door's
    * read check. Errors propagate (the outlet answers them as its 5xx fault);
    * a failed visibility probe already reads as "nothing collected".
+   *
+   * One answer per request: both objects ask the same question of the same
+   * caller, and an object list asks it for both, so the verdict is kept for
+   * the life of the context object the outlet resolved for this request.
    */
   async authorizeSchemaRead(objectName: string, context: ExecutionContext): Promise<boolean> {
     if (!SCHEMA_READ_DELEGATED_OBJECTS.has(objectName)) return false;
+    if (context === null || typeof context !== 'object') return this.servesAnyRequest(context);
+    let verdict = this.schemaReadVerdicts.get(context);
+    if (!verdict) {
+      verdict = this.servesAnyRequest(context);
+      this.schemaReadVerdicts.set(context, verdict);
+    }
+    return verdict;
+  }
+
+  /** {@link authorizeSchemaRead}'s question, asked once: does the door serve this caller any request? */
+  private async servesAnyRequest(context: ExecutionContext): Promise<boolean> {
     // `organizationId` is not on the envelope — see isOverrideActor().
-    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
-    const visible = await this.visibleRequestIds(context, tenantOrg ?? null);
-    return visible === null || visible.size > 0;
+    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId ?? null;
+    const visible = await this.visibleRequestIds(context, tenantOrg);
+    if (visible === null) return true;
+    if (visible.size === 0) return false;
+    const where: any = { id: { $in: [...visible] } };
+    if (tenantOrg) where.organization_id = tenantOrg;
+    const rows = await this.engine.find('sys_approval_request', {
+      where, fields: ['id'], limit: 1, context: SYSTEM_CTX,
+    });
+    return Array.isArray(rows) && rows.length > 0;
   }
 }
