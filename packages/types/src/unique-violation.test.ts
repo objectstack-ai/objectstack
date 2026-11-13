@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { isUniqueViolationError, uniqueViolationColumn } from './unique-violation.js';
+import { isUniqueViolationError, uniqueViolationColumn, uniqueViolationField } from './unique-violation.js';
 
 describe('isUniqueViolationError — input shapes', () => {
     it('accepts a bare string, for callers that already unwrapped `err.message`', () => {
@@ -253,5 +253,85 @@ describe('uniqueViolationColumn — gated on the predicate', () => {
         const mysql = "ER_DUP_ENTRY: Duplicate entry 'a@b.com' for key 'idx_email_unique'";
         expect(isUniqueViolationError(mysql)).toBe(true);
         expect(uniqueViolationColumn(mysql)).toBeUndefined();
+    });
+});
+
+describe('uniqueViolationField — the implied organization key part is set aside', () => {
+    /**
+     * A field declared `unique: 'organization'` (or `unique: true`) is keyed
+     * `(organization_id, FIELD)`. The organization part is the scope the
+     * platform stamps, not a value the writer typed, so the field a refusal
+     * names is FIELD — on both dialects that name columns. The SQLite sentence
+     * is the one the defect was measured on, verbatim.
+     */
+    const sqlite = () =>
+        Object.assign(
+            new Error('UNIQUE constraint failed: k7en_claim_line.organization_id, k7en_claim_line.invoice_no'),
+            { code: 'SQLITE_CONSTRAINT_UNIQUE' },
+        );
+    const postgres = () =>
+        Object.assign(
+            new Error('duplicate key value violates unique constraint "uniq_k7en_claim_line_invoice_no"'),
+            { code: '23505', detail: 'Key (organization_id, invoice_no)=(org_a, INV-0001) already exists.' },
+        );
+
+    it("SQLite's composite names the authored field", () => {
+        expect(uniqueViolationField(sqlite())).toBe('invoice_no');
+    });
+
+    it("Postgres' DETAIL on `error.detail` names the authored field", () => {
+        expect(uniqueViolationField(postgres())).toBe('invoice_no');
+    });
+
+    it('the position of the organization part does not matter', () => {
+        expect(uniqueViolationField('UNIQUE constraint failed: t.invoice_no, t.organization_id')).toBe('invoice_no');
+    });
+
+    it('a key whose only part is the organization still names that column', () => {
+        expect(uniqueViolationField('UNIQUE constraint failed: t.organization_id')).toBe('organization_id');
+    });
+
+    it('a single-column key answers exactly as `uniqueViolationColumn` does', () => {
+        expect(uniqueViolationField('UNIQUE constraint failed: sys_user.email')).toBe('email');
+        expect(uniqueViolationField("ER_DUP_ENTRY: Duplicate entry 'a@b.com' for key 'idx_email_unique'")).toBeUndefined();
+        expect(uniqueViolationField('NOT NULL constraint failed: sys_user.email')).toBeUndefined();
+    });
+
+    /**
+     * The routing answer does NOT move: the autonumber retry reads a named
+     * column as "every reservation on this field collided", and in a batch
+     * spanning two organizations the column cannot say which organization's
+     * counter did. `undefined` is what sends it to the per-row data probe.
+     */
+    it('`uniqueViolationColumn` still names no column for the same composite', () => {
+        expect(uniqueViolationColumn(sqlite())).toBeUndefined();
+        expect(uniqueViolationColumn(postgres())).toBeUndefined();
+    });
+
+    // Control: two AUTHORED columns stay a composite — a wrong field is worse
+    // than none — whether or not the organization part rides along.
+    it.each([
+        ['SQLite, organization + two authored', { message: 'UNIQUE constraint failed: t.organization_id, t.department, t.code' }],
+        ['SQLite, two authored', { message: 'UNIQUE constraint failed: t.department, t.code' }],
+        [
+            'Postgres, organization + two authored',
+            {
+                message: 'duplicate key value violates unique constraint "uniq_t_department_code"',
+                code: '23505',
+                detail: 'Key (organization_id, department, code)=(org_a, d, c) already exists.',
+            },
+        ],
+        ['a scope column other than organization_id', { message: 'UNIQUE constraint failed: t.workspace_id, t.invoice_no' }],
+        [
+            'the legacy COALESCE expression part',
+            {
+                message: 'duplicate key value violates unique constraint "uniq_t_invoice_no"',
+                code: '23505',
+                detail: "Key (COALESCE(organization_id, '__global__'::text), invoice_no)=(org_a, INV-0001) already exists.",
+            },
+        ],
+    ])('names no field for %s', (_label, error) => {
+        expect(isUniqueViolationError(error)).toBe(true);
+        expect(uniqueViolationField(error)).toBeUndefined();
     });
 });

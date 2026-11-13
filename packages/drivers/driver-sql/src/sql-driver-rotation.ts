@@ -297,6 +297,16 @@ export class RotationFacet {
     const numericCols: string[] = [];
     const numericValueCols: string[] = [];
     const fractionalCols: string[] = [];
+    // [#32590] The three temporal registries are REBUILT from this declaration,
+    // like every list beside them, never added to. They used to be grown with
+    // `(set ??= new Set()).add(name)`, so a re-registration that retyped a field
+    // left it in its old set: a `date` field published as `datetime` sat in
+    // BOTH, and `formatInput` — which collapses every `dateFields` member to
+    // `YYYY-MM-DD` after the datetime pass — dropped the time of day from every
+    // write until the process restarted. A publish re-registers through here.
+    const dateCols: string[] = [];
+    const datetimeCols: string[] = [];
+    const timeCols: string[] = [];
     const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
     // Tenant-isolation column: explicit tenancy opt-out → declared field →
     // implicit `organization_id`. See {@link computeAndRecordTenantField}
@@ -339,15 +349,9 @@ export class RotationFacet {
         if (aggregandColumnClass({ type, multiple: field?.multiple }) === 'fractional') {
           fractionalCols.push(name);
         }
-        if (type === 'date') {
-          (this.dateFields[tableName] ??= new Set()).add(name);
-        }
-        if (type === 'datetime') {
-          (this.datetimeFields[tableName] ??= new Set()).add(name);
-        }
-        if (type === 'time') {
-          (this.timeFields[tableName] ??= new Set()).add(name);
-        }
+        if (type === 'date') dateCols.push(name);
+        if (type === 'datetime') datetimeCols.push(name);
+        if (type === 'time') timeCols.push(name);
         if (type === 'auto_number' || type === 'autonumber') {
           const fmt = resolveAutonumberFormat(field);
           // Tokenize once: the renderer resolves date tokens (`{YYYYMMDD}`),
@@ -366,6 +370,9 @@ export class RotationFacet {
     this.numericFields[tableName] = numericCols;
     this.numericValueFields[tableName] = numericValueCols;
     this.fractionalNumericFields[tableName] = fractionalCols;
+    this.dateFields[tableName] = new Set(dateCols);
+    this.datetimeFields[tableName] = new Set(datetimeCols);
+    this.timeFields[tableName] = new Set(timeCols);
     this.autoNumberFields[tableName] = autoNumberCols;
     this.tenantFieldByTable[tableName] = tenantField;
     // [commit 479fba50d] The declared shape's answer to "does this table carry
