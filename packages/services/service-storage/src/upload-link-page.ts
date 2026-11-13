@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import type { IHttpResponse } from '@objectstack/spec/contracts';
 import type { UploadLinkView } from './record-file-access.js';
 import { formatUploadLinkExpiry, type UploadLinkCopy } from './upload-link-copy.js';
+import { UPLOAD_LINK_FORM_HEADER, UPLOAD_LINK_FORM_HEADER_VALUE } from './upload-link-wire.js';
 
 /**
  * [#30892] The page an upload link opens: one file picker that sends the
@@ -33,6 +34,13 @@ import { formatUploadLinkExpiry, type UploadLinkCopy } from './upload-link-copy.
  * writes. An upload's refusal is shown as the answer's `userMessage`, which
  * the `PUT` door composes in the same language; an answer without one shows
  * the page's own "the upload failed".
+ *
+ * [#32747] A link to a multi-file field takes several files in its one
+ * submit: the picker takes `multiple`, the page says how many the link takes
+ * (up to the cap for a record, exactly the count asked for a record not yet
+ * created), and the files go in one `PUT` as a form (`file0` … `fileN-1` and
+ * `count`, `upload-link-wire.ts`). A single-file link sends the file as the
+ * request body, as before.
  */
 
 /** The response headers every upload-link page carries. */
@@ -80,24 +88,34 @@ function shell(copy: UploadLinkCopy, title: string, body: string, nonce: string,
 
 /**
  * The script: send the picked file to this page's own address, once. `text`
- * is the page's status lines in its language, as a JSON literal.
+ * is the page's status lines in its language, and the number of files the
+ * link takes (`min`, `max`), as a JSON literal. [#32747] More than one file
+ * goes as one form: `file0` … `fileN-1`, each named URI-encoded, and `count`,
+ * marked by {@link UPLOAD_LINK_FORM_HEADER}.
  */
 function uploadScript(text: string): string {
   return [
     '(function(){',
     `var T=${text};`,
     'var input=document.getElementById("file"),button=document.getElementById("send"),status=document.getElementById("status");',
-    'input.addEventListener("change",function(){button.disabled=!input.files||!input.files.length;});',
+    'function picked(){return input.files?input.files.length:0;}',
+    'input.addEventListener("change",function(){var n=picked();var fits=n>=T.min&&n<=T.max;',
+    'button.disabled=!n||!fits;status.textContent=n&&!fits?T.pickCount:"";});',
     'button.addEventListener("click",function(){',
-    'var file=input.files&&input.files[0];if(!file)return;',
+    'var n=picked();if(!n||n<T.min||n>T.max)return;var files=input.files;',
     'button.disabled=true;input.disabled=true;status.textContent=T.uploading;',
-    'fetch(location.pathname,{method:"PUT",credentials:"same-origin",cache:"no-store",',
-    'headers:{"content-type":file.type||"application/octet-stream","x-file-name":encodeURIComponent(file.name)},body:file})',
+    'var request;',
+    'if(T.max>1){var form=new FormData();form.append("count",String(n));',
+    'for(var i=0;i<n;i++){form.append("file"+i,files[i],encodeURIComponent(files[i].name));}',
+    `request={method:"PUT",credentials:"same-origin",cache:"no-store",headers:${JSON.stringify({ [UPLOAD_LINK_FORM_HEADER]: UPLOAD_LINK_FORM_HEADER_VALUE })},body:form};}`,
+    'else{var file=files[0];request={method:"PUT",credentials:"same-origin",cache:"no-store",',
+    'headers:{"content-type":file.type||"application/octet-stream","x-file-name":encodeURIComponent(file.name)},body:file};}',
+    'fetch(location.pathname,request)',
     '.then(function(r){return r.json().catch(function(){return null;}).then(function(b){return{ok:r.ok,body:b};});})',
     '.then(function(r){',
     // [#32734] "Attached" only on the answer that says where the file landed:
     // a success naming the stored file. Anything else is the refusal it carries.
-    'if(r.ok&&r.body&&r.body.success===true&&r.body.data&&r.body.data.fileId){status.textContent=T.attached;return;}',
+    'if(r.ok&&r.body&&r.body.success===true&&r.body.data&&r.body.data.fileId){status.textContent=n>1?T.attachedSeveral:T.attached;return;}',
     // [#32712] The refusal as the door wrote it for a person, in this page's
     // language; an answer that carries none gets the page's own sentence.
     'var u=r.body&&r.body.error&&r.body.error.userMessage;status.textContent=typeof u==="string"&&u?u:T.failed;})',
@@ -128,11 +146,20 @@ function newNonce(): string {
 /** The picker page for a usable link, in `copy`'s language. */
 export function sendUploadLinkPage(res: IHttpResponse, view: UploadLinkView, copy: UploadLinkCopy): void {
   const nonce = newNonce();
+  // [#32747] How many files the link takes.
+  const files = view.files;
+  const several = files.max > 1;
+  const wanted = !several
+    ? copy.wanted(view.target === 'attachments' ? 'attachments' : 'field')
+    : files.min === files.max
+      ? copy.wantedExactly(files.min)
+      : copy.wantedSeveral(files.max);
   const body =
     `<h1>${escapeHtml(copy.pageTitle)}</h1>` +
-    `<p>${escapeHtml(copy.wanted(view.target === 'attachments' ? 'attachments' : 'field'))} ${escapeHtml(copy.once)}</p>` +
+    `<p>${escapeHtml(wanted)} ${escapeHtml(copy.once)}</p>` +
     `<p class="muted">${escapeHtml(copy.expires(formatUploadLinkExpiry(copy, view.expiresAt)))}</p>` +
-    `<label for="file">${escapeHtml(copy.fileLabel)}</label><input id="file" type="file">` +
+    `<label for="file">${escapeHtml(several ? copy.filesLabel : copy.fileLabel)}</label>` +
+    `<input id="file" type="file"${several ? ' multiple' : ''}>` +
     `<button id="send" type="button" disabled>${escapeHtml(copy.send)}</button>` +
     '<p id="status" role="status" aria-live="polite"></p>';
   const text = scriptLiteral({
@@ -140,6 +167,10 @@ export function sendUploadLinkPage(res: IHttpResponse, view: UploadLinkView, cop
     // [#32686] A link that names no record attaches nothing: the file waits
     // for the record the assistant creates.
     attached: view.newRecord === true ? copy.received : copy.attached,
+    attachedSeveral: view.newRecord === true ? copy.receivedSeveral : copy.attachedSeveral,
+    min: files.min,
+    max: files.max,
+    pickCount: copy.pickCount(files.min, files.max),
     failed: copy.failed,
     connectionLost: copy.connectionLost,
   });

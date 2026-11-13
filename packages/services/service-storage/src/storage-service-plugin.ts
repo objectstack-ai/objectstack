@@ -1378,7 +1378,10 @@ function resolveUploadLinkDoor(registry: StorageGateRegistry): () => UploadLinkD
     } catch {
       return undefined;
     }
-    return service && typeof service.inspectUploadLink === 'function' && typeof service.consumeUploadLink === 'function'
+    return service &&
+      typeof service.inspectUploadLink === 'function' &&
+      typeof service.consumeUploadLink === 'function' &&
+      typeof service.consumeUploadLinkFiles === 'function'
       ? (service as UploadLinkDoor)
       : undefined;
   };

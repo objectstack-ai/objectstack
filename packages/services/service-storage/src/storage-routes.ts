@@ -65,12 +65,19 @@ import { buildKey } from './storage-key.js';
 export { buildKey };
 // [#30892] The upload-link doors: the service verbs they call, the one
 // refusal an unusable link gets, and the page a link opens.
-import type { UploadLinkDoor, UploadLinkView } from './record-file-access.js';
+import type { UploadLinkDoor, UploadLinkUpload, UploadLinkView } from './record-file-access.js';
 import {
+  UPLOAD_LINK_FORM_COUNT_FIELD,
+  UPLOAD_LINK_FILE_COUNT_CODE,
+  UPLOAD_LINK_FILE_COUNT_STATUS,
+  UPLOAD_LINK_FORM_FILE_PREFIX,
+  UPLOAD_LINK_FORM_HEADER,
+  UPLOAD_LINK_FORM_HEADER_VALUE,
   UPLOAD_LINK_SEGMENT,
   UPLOAD_LINK_UNUSABLE_CODE,
   UPLOAD_LINK_UNUSABLE_MESSAGE,
   UPLOAD_LINK_UNUSABLE_STATUS,
+  uploadLinkFileCountMessage,
 } from './upload-link-wire.js';
 import { sendUnusableUploadLinkPage, sendUploadLinkPage } from './upload-link-page.js';
 import { uploadLinkCopy, uploadLinkRefusalText, type UploadLinkCopy } from './upload-link-copy.js';
@@ -1879,17 +1886,54 @@ export function registerStorageFamily(
         });
         return;
       }
-      // The declared length first, so an oversized body is refused before it
-      // is read; the service judges the bytes read again, before the link is
-      // spent, so an oversized upload never uses it up.
+      // The declared length first: this door refuses a body that declares more
+      // than it takes before this door reads it. The service judges the bytes
+      // read again, before the link is spent, so an oversized upload never uses
+      // it up. [#32747] A body is the page's several-file form only when it
+      // says so (`multipart/form-data` carrying the form header) AND the link
+      // takes several files; that form may declare up to as many files as the
+      // link takes, each within the limit, plus the form's framing. Any other
+      // body, on any link, is the file itself, whatever its content type,
+      // under the one-file limit, with the checks and order it had before
+      // links took several.
+      const token = String(req.params.token ?? '');
       const { maxUploadBytes } = currentLimits();
       const declaredBody = declaredContentLength(req);
+      const linkFiles = isUploadLinkForm(req.headers?.['content-type'], req.headers?.[UPLOAD_LINK_FORM_HEADER])
+        ? await severalFilesOf(door, token, caller.userId as string)
+        : undefined;
+      const formLimit =
+        linkFiles !== undefined && maxUploadBytes !== undefined
+          ? maxUploadBytes * linkFiles.max + UPLOAD_LINK_FORM_OVERHEAD_BYTES
+          : undefined;
       const tooLarge =
         declaredBody === undefined
           ? null
-          : uploadSizeRefusal(declaredBody, maxUploadBytes, (n) => `The upload body is ${n} bytes`);
+          : formLimit !== undefined
+            ? declaredBody > formLimit
+              ? `The upload body is ${declaredBody} bytes, over the ${formLimit} bytes this link's upload can carry ` +
+                `(${linkFiles!.max} files, each within the "Max upload size (MB)" storage setting).`
+              : null
+            : uploadSizeRefusal(declaredBody, maxUploadBytes, (n) => `The upload body is ${n} bytes`);
       if (tooLarge !== null) {
         sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, tooLarge, { userMessage: copy.tooLarge });
+        return;
+      }
+      if (linkFiles !== undefined) {
+        const uploads = await uploadLinkFormFiles(req.body, linkFiles);
+        if (!Array.isArray(uploads)) {
+          sendError(res, uploads.status, uploads.code, uploads.message, { userMessage: copy.refused(uploads.message) });
+          return;
+        }
+        const outcome = await door.consumeUploadLinkFiles(token, uploads, caller.userId as string);
+        const fileIds = outcome.files.map((file) => file.fileId);
+        sendOk(res, {
+          fileId: fileIds[0],
+          fileIds,
+          files: outcome.files,
+          ...(outcome.field !== undefined ? { field: outcome.field } : {}),
+          ...(outcome.attachmentId !== undefined ? { attachmentId: outcome.attachmentId } : {}),
+        });
         return;
       }
       let data: Buffer;
@@ -1903,7 +1947,7 @@ export function registerStorageFamily(
         return;
       }
       const outcome = await door.consumeUploadLink(
-        String(req.params.token ?? ''),
+        token,
         {
           filename: uploadLinkFilename(req.headers?.['x-file-name']),
           mimeType: uploadLinkMimeType(req.headers?.['content-type']),
@@ -1913,6 +1957,8 @@ export function registerStorageFamily(
       );
       sendOk(res, {
         fileId: outcome.fileId,
+        // [#32747] Every answer names its ids as a list, one here.
+        fileIds: [outcome.fileId],
         size: outcome.size,
         ...(outcome.field !== undefined ? { field: outcome.field } : {}),
         ...(outcome.attachmentId !== undefined ? { attachmentId: outcome.attachmentId } : {}),
@@ -2410,6 +2456,128 @@ function relayUploadLinkRefusal(res: IHttpResponse, err: unknown, copy: UploadLi
     ...(declaredCode !== undefined ? { declaredCode } : {}),
   });
   return true;
+}
+
+/**
+ * [#32747] Room for a several-file submit's form framing (boundaries, part
+ * headers, the `count` field) beyond its files' own bytes, in the declared
+ * body cap.
+ */
+const UPLOAD_LINK_FORM_OVERHEAD_BYTES = 64 * 1024;
+
+/**
+ * [#32747] How many files a link that takes several takes, read before a
+ * multipart body is judged (a read that writes nothing), or `undefined` for a
+ * link that takes one file. A link that cannot be read is `undefined` too: it
+ * takes the one-file path, whose spend answers the refusal it answered before
+ * links took several, in the order it did.
+ */
+async function severalFilesOf(
+  door: UploadLinkDoor,
+  token: string,
+  callerUserId: string,
+): Promise<{ min: number; max: number } | undefined> {
+  let files: { min: number; max: number };
+  try {
+    files = (await door.inspectUploadLink(token, callerUserId)).files;
+  } catch {
+    return undefined;
+  }
+  return files.max > 1 ? files : undefined;
+}
+
+/**
+ * [#32747] Is the submit the page's several-file form: `multipart/form-data`
+ * carrying {@link UPLOAD_LINK_FORM_HEADER}? A multipart body without it is a
+ * file, as it was before links took several.
+ */
+function isUploadLinkForm(contentType: string | string[] | undefined, marker: string | string[] | undefined): boolean {
+  const type = Array.isArray(contentType) ? contentType[0] : contentType;
+  const mark = Array.isArray(marker) ? marker[0] : marker;
+  return (
+    typeof type === 'string' &&
+    type.split(';')[0].trim().toLowerCase() === 'multipart/form-data' &&
+    typeof mark === 'string' &&
+    mark.trim().toLowerCase() === UPLOAD_LINK_FORM_HEADER_VALUE
+  );
+}
+
+/** [#32747] A form value that is a file: what a form parser hands for a file part. */
+interface FormFilePart {
+  name?: unknown;
+  type?: unknown;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+function isFormFilePart(value: unknown): value is FormFilePart {
+  return !!value && typeof value === 'object' && typeof (value as FormFilePart).arrayBuffer === 'function';
+}
+
+/** [#32747] Why a several-file form is refused before any of its parts is read. */
+interface UploadLinkFormRefusal {
+  status: number;
+  code: StandardErrorCode | RegisteredErrorCode;
+  message: string;
+}
+
+/**
+ * [#32747] The files of a several-file submit, in the order sent, or the
+ * reason the form is not one: `count` must name how many files it carries
+ * (a whole number, at most what the link takes), and parts `file0` …
+ * `fileN-1` must each be a file, with no other file part beside them, so a
+ * part a parser dropped (or one sent twice under one name, of which a parser
+ * keeps only the last) is refused rather than stored as fewer files than were
+ * picked. Every one of those refusals comes before any part's bytes are read
+ * here. A `count` over what the link takes gets the link's file-count
+ * refusal; the service judges the exact count again before the spend.
+ */
+async function uploadLinkFormFiles(
+  body: unknown,
+  linkFiles: { min: number; max: number },
+): Promise<UploadLinkUpload[] | UploadLinkFormRefusal> {
+  const malformed = (message: string): UploadLinkFormRefusal => ({ status: 400, code: 'INVALID_REQUEST', message });
+  const form = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  const rawCount = form[UPLOAD_LINK_FORM_COUNT_FIELD];
+  const countText = Array.isArray(rawCount) ? undefined : typeof rawCount === 'string' ? rawCount.trim() : undefined;
+  const count = countText !== undefined && /^[0-9]{1,3}$/.test(countText) ? Number(countText) : NaN;
+  if (!Number.isInteger(count) || count < 1) {
+    return malformed(
+      `A several-file upload is a form naming how many files it carries (${UPLOAD_LINK_FORM_COUNT_FIELD}) ` +
+        `and each file as ${UPLOAD_LINK_FORM_FILE_PREFIX}0, ${UPLOAD_LINK_FORM_FILE_PREFIX}1, …`,
+    );
+  }
+  if (count > linkFiles.max) {
+    return {
+      status: UPLOAD_LINK_FILE_COUNT_STATUS,
+      code: UPLOAD_LINK_FILE_COUNT_CODE,
+      message: uploadLinkFileCountMessage(linkFiles, count),
+    };
+  }
+  const partName = new RegExp(`^${UPLOAD_LINK_FORM_FILE_PREFIX}(0|[1-9][0-9]*)$`);
+  const fileParts = Object.entries(form).filter(([key, value]) => isFormFilePart(value) || partName.test(key));
+  if (fileParts.length !== count) {
+    return malformed(`The form names ${count} file(s) in ${UPLOAD_LINK_FORM_COUNT_FIELD} but carries ${fileParts.length}.`);
+  }
+  const parts: FormFilePart[] = [];
+  for (let i = 0; i < count; i++) {
+    const part = form[`${UPLOAD_LINK_FORM_FILE_PREFIX}${i}`];
+    if (!isFormFilePart(part)) {
+      return malformed(
+        `The form carries no file ${UPLOAD_LINK_FORM_FILE_PREFIX}${i}: the files are ` +
+          `${UPLOAD_LINK_FORM_FILE_PREFIX}0 … ${UPLOAD_LINK_FORM_FILE_PREFIX}${count - 1}.`,
+      );
+    }
+    parts.push(part);
+  }
+  const uploads: UploadLinkUpload[] = [];
+  for (const part of parts) {
+    uploads.push({
+      filename: uploadLinkFilename(typeof part.name === 'string' ? part.name : undefined),
+      mimeType: uploadLinkMimeType(typeof part.type === 'string' ? part.type : undefined),
+      data: Buffer.from(await part.arrayBuffer()),
+    });
+  }
+  return uploads;
 }
 
 /** The longest file name an upload link stores, in characters. */

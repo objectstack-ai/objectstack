@@ -415,6 +415,25 @@ type PortProbe = (port: number) => Promise<boolean>;
  * skip**. ⚠️ Nearby cards have described this search as hopping over ports; it
  * does not, and a diagnostic written from that reading would be wrong.
  */
+/**
+ * The mark `@objectstack/mcp` leaves on `process.stdout` when its stdio
+ * transport claims the stream (`PROTOCOL_STDOUT_CLAIM`,
+ * `packages/mcp/src/protocol-stdout.ts`, which says why it is a `Symbol.for`
+ * key). Read here by key rather than imported, so the boot-quiet window does
+ * not load the MCP package to ask; the same key on both sides is pinned by
+ * `serve-stdio-stdout-purity.e2e.test.ts`, which boots the real transport.
+ */
+const PROTOCOL_STDOUT_CLAIM = Symbol.for('@objectstack/mcp:protocol-stdout-claimed');
+
+/**
+ * Whether a stdio MCP transport has claimed this process's stdout — i.e.
+ * whether this process has started serving calls over stdio. `serve`'s
+ * boot-quiet window stops holding back the console from that moment.
+ */
+export function isProtocolStdoutClaimed(stream: NodeJS.WriteStream = process.stdout): boolean {
+  return (stream as unknown as Record<symbol, unknown>)[PROTOCOL_STDOUT_CLAIM] === true;
+}
+
 export class PortSearchExhaustedError extends Error {
   /** The first port probed — the walk's own record of it, not the caller's. */
   readonly startPort: number;
@@ -2784,6 +2803,30 @@ export default class Serve extends Command {
       return lines.length > 0 ? { lines, dropped: bootLogs.droppedCount } : undefined;
     };
 
+    /**
+     * Whether the boot-quiet window still holds back what is written to the
+     * console and to `process.stdout` — the window is open AND nothing is being
+     * served yet.
+     *
+     * The second half is the stdio MCP transport. Its client writes `initialize`
+     * at spawn and its first `tools/call` the moment that is answered, and the
+     * transport attaches inside `runtime.start()` — so those calls are served
+     * while this window is still open. Everything a host plugin
+     * `console.log`ged from one (an interceptor's audit line, a hook's trace)
+     * was dropped as boot chatter, and reached neither stream. So the window
+     * ends for the console once the transport has claimed stdout
+     * ({@link isProtocolStdoutClaimed}): from that moment a line may be a call's
+     * output, and the stream cannot tell it from the rest of the boot, so
+     * nothing is held back. It still goes to stderr — `origStdoutWrite` is the
+     * stderr forwarder — never to stdout, which carries the protocol only.
+     *
+     * Read per write, never once: the claim happens during the window. An
+     * HTTP-only boot never claims, so its window is exactly as before, and the
+     * console output of the boot up to the claim (every plugin's `init()`, the
+     * starts ahead of the MCP plugin's) is still held back under stdio too.
+     */
+    const quietHolds = () => bootQuiet && !isProtocolStdoutClaimed();
+
     const restoreOutput = () => {
       bootQuiet = false;
       process.stdout.write = origStdoutWrite;
@@ -2808,7 +2851,7 @@ export default class Serve extends Command {
       bootQuiet = !verboseBoot;
       if (!verboseBoot) {
         process.stdout.write = (chunk: any, ...rest: any[]) => {
-          if (bootQuiet) {
+          if (quietHolds()) {
             bootLogs.write(chunk, typeof rest[0] === 'string' ? rest[0] : undefined);
             // Honor the write callback so a caller awaiting drain still resumes.
             const cb = rest.find((a) => typeof a === 'function');
@@ -2817,8 +2860,8 @@ export default class Serve extends Command {
           }
           return (origStdoutWrite as any)(chunk, ...rest);
         };
-        console.log = (...args: any[]) => { if (!bootQuiet) originalConsoleLog(...args); };
-        console.debug = (...args: any[]) => { if (!bootQuiet) originalConsoleDebug(...args); };
+        console.log = (...args: any[]) => { if (!quietHolds()) originalConsoleLog(...args); };
+        console.debug = (...args: any[]) => { if (!quietHolds()) originalConsoleDebug(...args); };
       }
 
       // Load configuration
