@@ -68,6 +68,10 @@ import { render, cleanup, act, screen, fireEvent, waitFor, within } from '@testi
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 import { toast } from 'sonner';
+// The page reaches `celAuthoring`'s dynamic `@objectstack/lint` import; its
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 
 vi.mock('@object-ui/permissions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/permissions')>();
