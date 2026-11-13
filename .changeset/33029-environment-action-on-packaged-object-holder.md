@@ -16,7 +16,7 @@ BREAKING, in three places, for an action the environment authored (no `?package=
 - FROM (1, 2): `run_action { actionName: NAME, objectName: OBJECT, namespace: PACKAGE_NAMESPACE }`, or `POST /actions/PACKAGE_NAMESPACE/OBJECT/NAME`.
 - TO (1, 2): the face `list_actions` lists for it (`OBJECT-NAME`), the bare name with its `objectName`, or `POST /actions/_env/OBJECT/NAME`.
 - FROM (3): an environment-authored flow action on a packaged object whose `target` names a flow two packages hold.
-- TO (3): author the action with `?package=` of the package whose flow is meant, or point its `target` at a flow name one package holds.
+- TO (3): bind the action with `?package=` to a writable package whose own flow, or whose one dependency's flow, is meant, or point its `target` at a flow name one package holds.
 
 The protocol's merged listings serve an action an administrator saved with no `?package=` twice: on its own in the `action` listing, and inside the served object's `actions` in the `object` listing, where the registry attaches it. Neither copy carries a package. The action collector filed it under the package that ships the object, so the ADR-0150 D4 dedupe, which keys on the holder, kept both copies. `list_actions` then listed the action twice, once under a namespace that never shipped it, and refused its face `OBJECT-NAME` as derived for two actions, so `run_action` on that face answered 404.
 

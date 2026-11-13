@@ -38,8 +38,9 @@
 // and a second code package in its own namespace (`qatwin`) — the call is
 // refused 409 naming both, on the face, the bare name and `_env`. Before, the
 // action was the object's package's, and ran that package's flow. The fix for
-// a caller: author the action with `?package=` of the package whose flow is
-// meant, or target a flow name one package holds.
+// a caller: bind the action with `?package=` to a writable package whose own
+// flow, or whose one dependency's flow, is meant (a code package is read-only,
+// 422), or target a flow name one package holds.
 //
 // The file is ISOLATED: it writes `/meta` and creates a package.
 
