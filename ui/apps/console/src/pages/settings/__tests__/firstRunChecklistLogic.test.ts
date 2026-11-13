@@ -16,6 +16,7 @@ import {
   hasInvitedColleagues,
   isKeySet,
   isMailConfigured,
+  isMailDelivering,
   isOrganizationNamed,
   localeOffer,
   localizationRows,
@@ -152,6 +153,20 @@ describe('done is read from the resolved value', () => {
       isMailConfigured({ provider: fromTenant('smtp'), from_email: fromTenant('a@b.co'), smtp_host: fromTenant('mx') }),
     ).toBe(true);
     expect(isMailConfigured({ provider: fromTenant('resend'), from_email: fromTenant('a@b.co') })).toBe(true);
+  });
+
+  it('mail follows the provider the running system states (live.provider), the saved values only without that statement', () => {
+    const saved = { provider: fromTenant('smtp'), from_email: fromTenant('a@b.co'), smtp_host: fromTenant('mx') };
+    // Configured through the deployment's environment: nothing saved, still delivering.
+    expect(isMailDelivering({ values: {}, live: { provider: { value: 'smtp', source: 'environment' } } })).toBe(true);
+    expect(isMailDelivering({ values: {}, live: { provider: { value: 'resend', source: 'settings' } } })).toBe(true);
+    // The development log delivers nothing: not done, even over saved values that would pass.
+    expect(isMailDelivering({ values: saved, live: { provider: { value: null, source: 'none' } } })).toBe(false);
+    // CONTROL: no statement, so the saved values decide, as before.
+    expect(isMailDelivering({ values: saved })).toBe(true);
+    expect(isMailDelivering({ values: { provider: fromTenant('log'), from_email: fromTenant('a@b.co') } })).toBe(false);
+    expect(isMailDelivering({ values: saved, live: {} })).toBe(true);
+    expect(isMailDelivering({ values: {}, live: {} })).toBe(false);
   });
 
   it('the organization is named once it no longer carries the platform name', () => {
