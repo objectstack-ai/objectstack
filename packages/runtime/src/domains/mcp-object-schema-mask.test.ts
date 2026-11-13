@@ -1512,3 +1512,133 @@ describe('[#32435] describe_object serves what a write needs, as the caller is s
         expect(text).toBe(JSON.stringify(await unsecured.bridge.describeObject(OBJ)));
     });
 });
+
+describe('[#32530] describe_object serves readonly where a write never stands — the real engine and security layer', () => {
+    const OBJ = 'mcp_write_ticket';
+    let engine: ObjectQL;
+    let services: Record<string, any>;
+
+    /** Denied the edit of `locked_note` (it may still read it); every other field is open. */
+    const MEMBER = { userId: 'usr_ticket_member', positions: [] as string[], permissions: ['mcp_ticket_member'], systemPermissions: [] as string[] };
+
+    beforeAll(async () => {
+        engine = new ObjectQL();
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
+        const storeObjects = [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject] as any[];
+        await driver.initObjects(storeObjects);
+        engine.registerDriver(driver as any, true);
+        await engine.init();
+        for (const o of storeObjects) engine.registry.registerObject(o, '@objectstack/platform-objects');
+        engine.registerApp({
+            id: 'com.objectstack.qa.mcp-describe-computed',
+            name: 'MCP describe computed fields',
+            version: '1.0.0',
+            type: 'plugin',
+            scope: 'system',
+            objects: [{
+                name: OBJ,
+                label: 'Ticket',
+                sharingModel: 'public_read_write',
+                fields: {
+                    // CONTROL: an ordinary field, writable.
+                    title: { name: 'title', type: 'text', label: 'Title' },
+                    qty: { name: 'qty', type: 'number', label: 'Qty' },
+                    // CONTROL: a declared `readonly` stays true.
+                    frozen_note: { name: 'frozen_note', type: 'text', label: 'Frozen note', readonly: true },
+                    // A hand-authored runtime-owned literal: no `readonly` flag (the builder injects one; a literal does not).
+                    ticket_no: { name: 'ticket_no', type: 'autonumber', label: 'Ticket No', autonumberFormat: 'T-{0000}' },
+                    // Computed on read, no column.
+                    total: { name: 'total', type: 'formula', label: 'Total', expression: 'record.qty * 2' },
+                    // A stored field the engine computes on every write.
+                    doubled: { name: 'doubled', type: 'number', label: 'Doubled', expression: 'record.qty * 2' },
+                    // Readable, not editable, for the member: the schema says writable.
+                    locked_note: { name: 'locked_note', type: 'text', label: 'Locked note' },
+                },
+            }],
+        } as never);
+        await engine.syncSchemas();
+        const all = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+        const sets = [
+            PermissionSetSchema.parse({
+                name: 'mcp_ticket_member', label: 'Member', objects: { '*': all },
+                fields: { [`${OBJ}.locked_note`]: { readable: true, editable: false } },
+            }),
+            PermissionSetSchema.parse({ name: 'mcp_ticket_staff', label: 'Staff', objects: { '*': all } }),
+        ];
+        const pluginServices: Record<string, unknown> = {
+            manifest: { register: vi.fn() },
+            objectql: engine,
+            metadata: {
+                get: async (type: string, name: string) =>
+                  (type === 'permission' ? sets.find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
+                list: async () => sets,
+            },
+        };
+        const ctx = {
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            registerService: vi.fn((name: string, service: unknown) => { pluginServices[name] = service; }),
+            getService: (name: string) => {
+                if (!(name in pluginServices)) throw new Error(`service not registered: ${name}`);
+                return pluginServices[name];
+            },
+        };
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'mcp_ticket_staff' });
+        await plugin.init(ctx as never);
+        await plugin.start(ctx as never);
+        expect(pluginServices.security, 'precondition: the security plugin registered its service').toBeDefined();
+        vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+        services = {
+            protocol: new ObjectStackProtocolImplementation(engine as any),
+            security: pluginServices.security,
+            objectql: engine,
+        };
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    }, 60_000);
+
+    afterAll(async () => {
+        vi.restoreAllMocks();
+        try { await engine?.destroy(); } catch { /* noop */ }
+    });
+
+    const readonlyOf = (described: any) =>
+        Object.fromEntries(described.fields.map((f: any) => [f.name, f.readonly]));
+    const rowOf = async (id: string): Promise<any> => engine.findOne(OBJ, { where: { id }, context: { isSystem: true } });
+
+    it('precondition: the autonumber literal reaches the served object WITHOUT a readonly flag', async () => {
+        expect((engine.getSchema(OBJ) as any).fields.ticket_no.readonly).not.toBe(true);
+        expect((engine.getSchema(OBJ) as any).fields.total.readonly).not.toBe(true);
+    });
+
+    it('autonumber, formula and a stored expression are served readonly: true; CONTROL a plain field stays false and a declared readonly stays true', async () => {
+        const { bridge } = await bridgeFor(kernelOver(services), MEMBER);
+        const served = readonlyOf(await bridge.describeObject(OBJ));
+        expect(served).toMatchObject({
+            title: false,
+            qty: false,
+            frozen_note: true,
+            ticket_no: true,
+            total: true,
+            doubled: true,
+        });
+    });
+
+    it('…and the engine, through the same bridge, never stores what a caller sends to any of them', async () => {
+        const { bridge } = await bridgeFor(kernelOver(services), MEMBER);
+        const created: any = await bridge.create(OBJ, { title: 'Pump', qty: 3, ticket_no: 'FORGED-1', total: 999, doubled: 999 });
+        const id = String(created?.id ?? created?.record?.id);
+        const row = await rowOf(id);
+        expect(row.title, 'CONTROL: the writable field is stored').toBe('Pump');
+        expect(row.ticket_no).not.toBe('FORGED-1');
+        expect(row.total).not.toBe(999);
+        expect(row.doubled).toBe(6);
+    });
+
+    it('a field the caller may read but not edit is served the SCHEMA\'s readonly (false), and the write naming it is refused', async () => {
+        const { bridge } = await bridgeFor(kernelOver(services), MEMBER);
+        const described: any = await bridge.describeObject(OBJ);
+        expect(readonlyOf(described).locked_note).toBe(false);
+        const refused = await rejectionOf(() => bridge.create(OBJ, { title: 'Valve', locked_note: 'x' }));
+        expect(refused, 'the field-level write gate refuses the field the member may not edit').toBeDefined();
+        expect(typeof refused.code).toBe('string');
+    });
+});
