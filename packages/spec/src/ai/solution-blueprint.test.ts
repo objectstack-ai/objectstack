@@ -439,27 +439,142 @@ describe('SolutionBlueprintSchema', () => {
         .toEqual({ path: ['objects', 0, 'stageField'], code: 'invalid_format' });
     });
 
-    it('carries exactly what the object schema reads: a 1:1 copy parses, and an option missing its kind is refused there', () => {
-      // The blueprint does not judge the kinds itself (strict structured
-      // output cannot express a cross-key rule); the object schema the applier
-      // writes through does. This pins that the two keys land on the object
-      // schema's own spellings — `stageField` on the object, `kind` on the
-      // option — so a plain copy is all an applier has to do.
-      const toObject = (bp: ReturnType<typeof loanObject>) => {
-        const parsed = SolutionBlueprintSchema.parse({ summary: 's', objects: [bp] }).objects[0];
-        return {
-          name: parsed.name,
-          fields: Object.fromEntries(parsed.fields.map(({ name, ...field }) => [name, { label: name, ...field }])),
-          stageField: parsed.stageField,
-        };
-      };
-      expect(ObjectSchema.safeParse(toObject(loanObject())).success).toBe(true);
+    it('carries exactly what the object schema reads: a 1:1 copy parses, and an option missing its kind is refused at both doors', () => {
+      // The two keys land on the object schema's own spellings — `stageField`
+      // on the object, `kind` on the option — so a plain copy is all an
+      // applier has to do, and the copy parses.
+      const toObject = (bp: ReturnType<typeof loanObject>) => ({
+        name: bp.name,
+        fields: Object.fromEntries(bp.fields.map(({ name, ...field }) => [name, { label: name, ...field }])),
+        stageField: bp.stageField,
+      });
+      const parsed = SolutionBlueprintSchema.parse({ summary: 's', objects: [loanObject()] }).objects[0];
+      expect(ObjectSchema.safeParse(toObject(parsed as ReturnType<typeof loanObject>)).success).toBe(true);
 
+      // [#32764] An option missing its kind is refused by the blueprint parse
+      // `apply_blueprint` runs, before anything is staged, at the option's own
+      // array path; the object schema refuses the same option at its map path.
       const forgot = LOAN_STAGES.map((o) => (o.value === 'written_off' ? { label: o.label, value: o.value } : o));
+      expect(firstIssue({ summary: 's', objects: [loanObject(forgot)] }))
+        .toEqual({ path: ['objects', 0, 'fields', 1, 'options', 3, 'kind'], code: 'custom' });
       const refused = ObjectSchema.safeParse(toObject(loanObject(forgot)));
       expect(refused.success).toBe(false);
       expect(refused.error?.issues.map((i) => ({ path: i.path, code: i.code })))
         .toEqual([{ path: ['fields', 'status', 'options', 3, 'kind'], code: 'custom' }]);
+    });
+
+    describe('[#32764] the blueprint object runs the object schema\'s stage-field rule', () => {
+      /** Every issue of a lenient blueprint parse of one object, as `{ path, code }`. */
+      const issues = (object: Record<string, unknown>) => {
+        const result = SolutionBlueprintSchema.safeParse({ summary: 's', objects: [object] });
+        return result.success ? [] : result.error.issues.map((i) => ({ path: i.path, code: i.code }));
+      };
+      /** The same object as an `ObjectSchema` body: the field array keyed by name. */
+      const asObject = (object: { name: string; fields: Array<Record<string, unknown>>; stageField?: string }) => ({
+        name: object.name,
+        fields: Object.fromEntries(object.fields.map(({ name, ...field }) => [name as string, { label: name, ...field }])),
+        ...(object.stageField !== undefined ? { stageField: object.stageField } : {}),
+      });
+
+      it('refuses one issue per option without kind, each at that option\'s own path', () => {
+        const noKinds = LOAN_STAGES.map(({ label, value }) => ({ label, value }));
+        expect(issues(loanObject(noKinds))).toEqual([0, 1, 2, 3].map((i) => (
+          { path: ['objects', 0, 'fields', 1, 'options', i, 'kind'], code: 'custom' }
+        )));
+      });
+
+      it('accepts the same stage field once every option declares its kind', () => {
+        expect(issues(loanObject())).toEqual([]);
+      });
+
+      it('locates the option by the field\'s index in the ARRAY, wherever the stage field sits', () => {
+        const forgot = LOAN_STAGES.map((o, i) => (i === 0 ? { label: o.label, value: o.value } : o));
+        const object = {
+          name: 'loan',
+          fields: [
+            { name: 'status', type: 'select' as const, options: forgot },
+            { name: 'title', type: 'text' as const },
+          ],
+          stageField: 'status',
+        };
+        expect(issues(object)).toEqual([{ path: ['objects', 0, 'fields', 0, 'options', 0, 'kind'], code: 'custom' }]);
+      });
+
+      it('judges EVERY entry carrying the stage field\'s name: a kind-less duplicate after a clean one is refused at its own index', () => {
+        // Which of two same-named entries an applier keeps is the applier's
+        // choice, so the parse judges both rather than betting on one.
+        const noKinds = LOAN_STAGES.map(({ label, value }) => ({ label, value }));
+        const object = {
+          name: 'loan',
+          fields: [
+            { name: 'title', type: 'text' as const },
+            { name: 'status', type: 'select' as const, options: LOAN_STAGES },
+            { name: 'status', type: 'select' as const, options: noKinds.slice(0, 1) },
+          ],
+          stageField: 'status',
+        };
+        expect(issues(object)).toEqual([{ path: ['objects', 0, 'fields', 2, 'options', 0, 'kind'], code: 'custom' }]);
+        // …and the reverse order: the kind-less one first, the clean one after.
+        const reversed = { ...object, fields: [object.fields[0], object.fields[2], object.fields[1]] };
+        expect(issues(reversed)).toEqual([{ path: ['objects', 0, 'fields', 1, 'options', 0, 'kind'], code: 'custom' }]);
+      });
+
+      it('refuses a stage field that holds no single option code, at stageField', () => {
+        const object = loanObject(LOAN_STAGES.map(({ label, value }) => ({ label, value })));
+        object.fields[1] = { ...object.fields[1], type: 'multiselect' as never };
+        expect(issues(object)).toEqual([{ path: ['objects', 0, 'stageField'], code: 'custom' }]);
+      });
+
+      it('leaves alone what the object schema leaves alone: no stageField, an undeclared one, a field with no options', () => {
+        const noKinds = LOAN_STAGES.map(({ label, value }) => ({ label, value }));
+        const { stageField: _omit, ...withoutStageField } = loanObject(noKinds);
+        expect(issues(withoutStageField)).toEqual([]);
+        expect(issues(loanObject(noKinds, { stageField: 'phase' }))).toEqual([]);
+        const optionless = loanObject(noKinds);
+        optionless.fields[1] = { name: 'status', type: 'select' as const } as never;
+        expect(issues(optionless)).toEqual([]);
+      });
+
+      it('agrees with ObjectSchema on every case: refused by one iff refused by the other, with as many issues', () => {
+        // One rule, not two that agree today: the blueprint hands its field
+        // array to the very function `ObjectSchema` runs. This walks the
+        // cases that function distinguishes and holds the verdicts equal.
+        const noKinds = LOAN_STAGES.map(({ label, value }) => ({ label, value }));
+        const oneMissing = LOAN_STAGES.map((o, i) => (i === 2 ? { label: o.label, value: o.value } : o));
+        let refusedCases = 0;
+        const cases: Array<{ type: string; options?: Array<Record<string, unknown>>; stageField?: string }> = [
+          { type: 'select', options: LOAN_STAGES },
+          { type: 'select', options: noKinds },
+          { type: 'select', options: oneMissing },
+          { type: 'radio', options: noKinds },
+          { type: 'radio', options: LOAN_STAGES },
+          { type: 'multiselect', options: noKinds },
+          { type: 'select' },
+          { type: 'text' },
+          { type: 'select', options: noKinds, stageField: 'missing_field' },
+        ];
+        for (const c of cases) {
+          const object = {
+            name: 'loan',
+            fields: [
+              { name: 'title', type: 'text' },
+              { name: 'status', type: c.type, ...(c.options ? { options: c.options } : {}) },
+            ],
+            stageField: c.stageField ?? 'status',
+          };
+          // Only the stage rule's two issue sites are compared: the object
+          // schema judges the field itself too (a select with no options),
+          // which is not this rule and not the blueprint's to repeat.
+          const stageRule = (path: PropertyKey[]) => path.at(-1) === 'kind' || path.at(-1) === 'stageField';
+          const blueprint = issues(object).filter((i) => stageRule(i.path)).length;
+          const result = ObjectSchema.safeParse(asObject(object));
+          const viaObject = result.success ? 0 : result.error.issues.filter((i) => stageRule(i.path)).length;
+          expect({ case: c, blueprint }).toEqual({ case: c, blueprint: viaObject });
+          refusedCases += blueprint > 0 ? 1 : 0;
+        }
+        // The walk is not vacuous: four of the cases above are refusals.
+        expect(refusedCases).toBe(4);
+      });
     });
   });
 });
@@ -478,6 +593,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
         name: 'project',
         label: null,
         description: null,
+        icon: null,
         sharingModel: null,
         nameField: null,
         stageField: null,
@@ -521,7 +637,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const badField = {
       ...strictBp,
       objects: [
-        { name: 'x', label: null, description: null, sharingModel: null, nameField: null, stageField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null }] },
+        { name: 'x', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null }] },
       ],
     };
     // `f` is missing the (nullable, required) `label` key.
@@ -542,6 +658,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
           name: 'project',
           label: null,
           description: null,
+          icon: null,
           sharingModel: null,
           nameField: null,
           stageField: null,
@@ -1105,16 +1222,42 @@ describe('strict mirror ↔ lenient schema — VALUE parity', () => {
     return out;
   };
 
+  /**
+   * The paths where the mirror is DELIBERATELY narrower than the applier, each
+   * with both patterns spelled out. Narrower is the one safe direction: every
+   * value the model can generate is still one the applier accepts. Each entry
+   * must carry its reason; the pin below fails on any drift not listed here and
+   * on any listed entry that no longer drifts.
+   */
+  const DELIBERATE_NARROWER_MIRROR: Record<string, { lenient: string; strict: string; reason: string }> = {
+    // [#32762] The applier also admits the qualified `OBJECT.KEY` view name
+    // when the qualifier is the view's own object: a cross-key rule the
+    // per-leaf mirror cannot state, so the mirror keeps the bare key and the
+    // model cannot generate a qualifier naming another object.
+    'views[].name': {
+      lenient: String(/^(?:[a-z_][a-z0-9_]*\.)?[a-z_][a-z0-9_]*$/),
+      strict: String(/^[a-z_][a-z0-9_]*$/),
+      reason: 'qualified OBJECT.KEY admitted on apply, cross-key, not generated',
+    },
+  };
+
   it('every identifier the applier constrains is constrained the same way in the model-facing mirror', () => {
     const lenient = indexPatterns(SolutionBlueprintSchema);
     const strict = indexPatterns(SolutionBlueprintStrictSchema);
     // Only paths BOTH sides carry are comparable — the key-parity gate above
     // owns "which keys exist"; this one owns "what values they accept".
-    const drift = [...lenient.entries()]
+    const drifting = [...lenient.entries()]
       .filter(([path]) => strict.has(path))
-      .filter(([path, pattern]) => strict.get(path) !== pattern)
+      .filter(([path, pattern]) => strict.get(path) !== pattern);
+    const drift = drifting
+      .filter(([path]) => !Object.prototype.hasOwnProperty.call(DELIBERATE_NARROWER_MIRROR, path))
       .map(([path, pattern]) => `${path}: lenient ${pattern ?? 'none'} vs strict ${strict.get(path) ?? 'none'}`);
     expect(drift).toEqual([]);
+    // Every listed exception still drifts, and exactly as listed.
+    for (const [path, expected] of Object.entries(DELIBERATE_NARROWER_MIRROR)) {
+      expect({ path, lenient: lenient.get(path), strict: strict.get(path) })
+        .toEqual({ path, lenient: expected.lenient, strict: expected.strict });
+    }
   });
 
   it('the model cannot emit the leading-digit option value the applier rejects', () => {
@@ -1140,6 +1283,7 @@ describe('strict mirror ↔ lenient schema — VALUE parity', () => {
         name: 'customer',
         label: null,
         description: null,
+        icon: null,
         sharingModel: null,
         nameField: null,
         stageField: null,
@@ -1179,7 +1323,7 @@ describe('blueprint widget `aggregate` and calendar view `startDateField`', () =
     assumptions: [],
     questions: null,
     objects: [{
-      name: 'interview', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+      name: 'interview', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
       fields: [{
         name: 'score', label: null, type: 'number', required: null, reference: null, options: null,
         summaryOperations: null, expression: null, defaultValue: null,
@@ -1359,7 +1503,7 @@ describe('blueprint field `defaultValue`', () => {
     assumptions: [],
     questions: null,
     objects: [{
-      name: 'task', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+      name: 'task', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
       fields: [{
         name: 'flag', label: null, required: null, reference: null, options: null, summaryOperations: null,
         expression: null, defaultValue: null, ...field,
@@ -1467,7 +1611,7 @@ describe('blueprint field `defaultValue`', () => {
     const bare = SolutionBlueprintStrictSchema.safeParse({
       summary: 's', assumptions: [], questions: null, views: null, dashboards: null, app: null,
       objects: [{
-        name: 'task', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+        name: 'task', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
         fields: [{
           name: 'flag', label: null, type: 'boolean', required: null, reference: null, options: null,
           summaryOperations: null, expression: null,
@@ -1566,7 +1710,7 @@ describe('blueprint field `expression` — the stored computed value', () => {
       assumptions: [],
       questions: null,
       objects: [{
-        name: 'order_line', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+        name: 'order_line', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
         fields: [{
           ...STORED, label: null, required: null, reference: null, options: null, summaryOperations: null, defaultValue: null,
         }],
@@ -1612,5 +1756,109 @@ describe('blueprint field `expression` — the stored computed value', () => {
       expect(stored).not.toMatch(/record\.\w+\.\w+/);
       expect(text).not.toMatch(/\b(today|now)\(\)/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#32763] The blueprint object's `icon` — `ObjectSchema.icon`'s own leaf.
+// ---------------------------------------------------------------------------
+describe('blueprint object `icon`', () => {
+  const lenientIcon = () => (SolutionBlueprintSchema as any).shape.objects.element.shape.icon;
+  const strictIcon = () => (SolutionBlueprintStrictSchema as any).shape.objects.element.shape.icon;
+  const objectIcon = () => (ObjectSchema as any).shape.icon;
+
+  it('is ObjectSchema.icon\'s own leaf, by identity, on both sides', () => {
+    // Identity, not shape: a re-declared leaf would agree today and drift the
+    // day the object's icon gains a rule.
+    expect(lenientIcon().unwrap()).toBe(objectIcon().unwrap());
+    expect(strictIcon().unwrap()).toBe(objectIcon().unwrap());
+  });
+
+  it('carries an icon through the lenient parse, into a body the object schema accepts', () => {
+    const parsed = SolutionBlueprintSchema.parse({
+      summary: 's',
+      objects: [{ name: 'invoice', icon: 'receipt', fields: [{ name: 'title', type: 'text' }] }],
+    });
+    expect(parsed.objects[0].icon).toBe('receipt');
+    const asObject = {
+      name: parsed.objects[0].name,
+      icon: parsed.objects[0].icon,
+      fields: { title: { label: 'Title', type: 'text' } },
+    };
+    expect(ObjectSchema.safeParse(asObject).success).toBe(true);
+  });
+
+  it('stays optional on the lenient side, and is refused when it is not a string, at the key', () => {
+    const absent = SolutionBlueprintSchema.parse({ summary: 's', objects: [{ name: 'invoice', fields: [] }] });
+    expect(absent.objects[0].icon).toBeUndefined();
+    const result = SolutionBlueprintSchema.safeParse({ summary: 's', objects: [{ name: 'invoice', icon: 7, fields: [] }] });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => ({ path: i.path, code: i.code })))
+      .toEqual([{ path: ['objects', 0, 'icon'], code: 'invalid_type' }]);
+  });
+
+  it('is required-but-nullable on the strict mirror (OpenAI strict: every key in `required`)', () => {
+    const object = {
+      name: 'invoice', label: null, description: null, icon: 'receipt', sharingModel: null, nameField: null, stageField: null,
+      fields: [{ name: 'title', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null }],
+    };
+    const bp = (o: Record<string, unknown>) => ({ summary: 's', assumptions: [], questions: null, objects: [o], views: null, dashboards: null, app: null });
+    expect(SolutionBlueprintStrictSchema.parse(bp(object)).objects[0].icon).toBe('receipt');
+    expect(SolutionBlueprintStrictSchema.parse(bp({ ...object, icon: null })).objects[0].icon).toBeNull();
+    const { icon: _omit, ...missing } = object;
+    const result = SolutionBlueprintStrictSchema.safeParse(bp(missing));
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => i.path.join('.'))).toEqual(['objects.0.icon']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#32762] A blueprint view's `name`: the bare key, or `OBJECT.KEY` qualified
+// with the view's own object — the spelling every stored view record carries.
+// ---------------------------------------------------------------------------
+describe('blueprint view `name` — bare, or qualified with its own object', () => {
+  const view = (name: string, object = 'ticket') => ({
+    summary: 's',
+    objects: [{ name: 'ticket', fields: [{ name: 'title', type: 'text' as const }] }],
+    views: [{ object, name, type: 'list' as const }],
+  });
+  const verdict = (input: unknown) => {
+    const result = SolutionBlueprintSchema.safeParse(input);
+    return result.success ? 'ok' : result.error.issues.map((i) => ({ path: i.path, code: i.code }));
+  };
+
+  it('accepts the bare snake_case key, as before', () => {
+    expect(verdict(view('open_list'))).toBe('ok');
+  });
+
+  it('accepts OBJECT.KEY when the qualifier is the view\'s own object, and carries it as written', () => {
+    expect(verdict(view('ticket.open_list'))).toBe('ok');
+    expect(SolutionBlueprintSchema.parse(view('ticket.open_list')).views?.[0].name).toBe('ticket.open_list');
+  });
+
+  it('refuses a qualifier naming another object, at the view\'s name', () => {
+    expect(verdict(view('case.open_list'))).toEqual([{ path: ['views', 0, 'name'], code: 'custom' }]);
+  });
+
+  it('refuses what is neither spelling, by the pattern, at the view\'s name', () => {
+    for (const name of ['ticket.open.list', 'Ticket.open_list', 'ticket.', '.open_list', 'ticket/open_list', 'open-list']) {
+      expect({ name, verdict: verdict(view(name)) })
+        .toEqual({ name, verdict: [{ path: ['views', 0, 'name'], code: 'invalid_format' }] });
+    }
+  });
+
+  it('keeps the strict mirror on the bare key: the model cannot generate a qualifier naming another object', () => {
+    // The cross-key half of the rule has no per-leaf form, so the mirror stays
+    // narrower than the applier (listed in the VALUE-parity exceptions).
+    const strictName = (SolutionBlueprintStrictSchema as any).shape.views.unwrap().element.shape.name;
+    expect(strictName.safeParse('open_list').success).toBe(true);
+    expect(strictName.safeParse('ticket.open_list').success).toBe(false);
+  });
+
+  it('BlueprintViewSchema on its own judges the same rule', () => {
+    expect(BlueprintViewSchema.safeParse({ object: 'ticket', name: 'ticket.open_list' }).success).toBe(true);
+    const foreign = BlueprintViewSchema.safeParse({ object: 'ticket', name: 'case.open_list' });
+    expect(foreign.error?.issues.map((i) => ({ path: i.path, code: i.code })))
+      .toEqual([{ path: ['name'], code: 'custom' }]);
   });
 });
