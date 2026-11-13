@@ -244,9 +244,15 @@ describe('widget-dataset-unknown — a sibling package’s dataset resolves thro
     };
     expect(union.dashboards).toHaveLength(1);
     expect(datasetUnknown(union)).toEqual([]);
-    // CONTROL: the same manifest handed as the app's body itself IS the per-package pass, and refuses nothing here either.
+    // CONTROL: the per-package pass of the same composition still refuses the app reading the module's dataset.
+    // The app's body carries the module's dashboard and is handed as its own manifest, as `packageBodyAsStack` does.
     const appEntry = composed.packages.find((p) => p.manifest.id === APP)!.manifest;
-    expect(datasetUnknown({ ...appEntry, manifest: appEntry, packages: composed.packages })).toEqual([]);
+    const appReads = { ...appEntry, dashboards: union.dashboards };
+    const entries = composed.packages.map((p) => (p.manifest.id === APP ? { manifest: appReads } : p));
+    const refused = datasetUnknown({ ...appReads, manifest: appReads, packages: entries });
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ severity: 'error' });
+    expect(refused[0].hint).toContain('dependency cycle');
   });
 
   it('reaches the rule table the per-package pass runs', () => {
