@@ -31,7 +31,8 @@
 
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import { storedRowDocument } from './item-lock.js';
-import { installedManifestsOf, itemDiscriminator } from '@objectstack/metadata-core';
+import { installedManifestsOf, isTenantAuthored, itemDiscriminator } from '@objectstack/metadata-core';
+import { isPackageScopedType } from '@objectstack/core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { bindStoredRow } from './stored-row-binding.js';
@@ -155,6 +156,18 @@ async function readHealBaseline(
         if (bases.length !== 1) throw error;
         return host.readItemFromMetadataService(type, name, bases[0]);
     }
+}
+
+/**
+ * [#32568] The one package holding `(type, name)` in the registry, `undefined`
+ * when none does (the lookup naming no package then finds no artifact either),
+ * and `null` when two or more do: a package-less row of the name wears no
+ * holder's envelope.
+ */
+function soleHolderOf(registry: { packageScopedHoldersOf?(type: string, name: string): readonly string[] | undefined }, type: string, name: string): string | null | undefined {
+    const holders = typeof registry.packageScopedHoldersOf === 'function' ? registry.packageScopedHoldersOf(type, name) ?? [] : [];
+    if (holders.length > 1) return null;
+    return holders[0];
 }
 
 export class ProtocolRegistryHydrationFacet {
@@ -525,7 +538,7 @@ export class ProtocolRegistryHydrationFacet {
      * anything the static map does not carry, so a runtime kind the platform
      * has never heard of can never trip this gate.
      */
-    static async hydrateOverlayIntoRegistry(host: Pick<ProtocolHost, 'anotherPackageShips' | 'engine' | 'hydrateExpandedViewItems' | 'lookupArtifactItem' | 'packagedArtifactOwner' | 'registerStoredObjectExtension' | 'shippedArtifactsOf'>, type: string,
+    static async hydrateOverlayIntoRegistry(host: Pick<ProtocolHost, 'anotherPackageShips' | 'declinesStoredRow' | 'engine' | 'hydrateExpandedViewItems' | 'lookupArtifactItem' | 'packagedArtifactOwner' | 'registerStoredObjectExtension' | 'restoreArtifactRegistryView' | 'shippedArtifactsOf'>, type: string,
             data: unknown,
             options: HydrationOptions,): Promise<boolean> {
         // [#9111] See the header: the mint door asserts, the caller folds.
@@ -570,14 +583,42 @@ export class ProtocolRegistryHydrationFacet {
             await host.hydrateExpandedViewItems(type, data, options);
             return true;
         }
+        // [#32568, ADR-0126 Regime C, epic ruling 6817768147] A package-less
+        // row the reads decline, of a type ADR-0150 addresses by `(package,
+        // name)` (a sealed managed item's stored row), is not registered.
+        // Registered, it took the first holder's slot under that holder's
+        // envelope, so one stored row was served as that holder's own item
+        // after a hydration and declined before it. ⛔ Not a flow: its tenant
+        // row registers as it is, without the envelope (below), so the boot
+        // pull reports it (#20913).
+        const rowName = String((data as any).name);
+        const scoped = isPackageScopedType(canonicalType);
+        // A copy of it registered before the package arrived (the write-through
+        // of a save the seal did not refuse yet) is healed by the one heal walk
+        // (#23198), so the registry answers the package's item whichever came
+        // first. The walk re-hydrates the stored rows, and this row then meets
+        // the package's item, not a tenant-authored one, so it stops there.
+        if (scoped && canonicalType !== 'flow' && !options.packageId && host.declinesStoredRow(type, rowName, { type, package_id: null, metadata: data })) {
+            if (isTenantAuthored(registry.getItem?.(type, rowName))) {
+                await host.restoreArtifactRegistryView(type, rowName, null, null, bundleMemberOf(type, data));
+            }
+            return false;
+        }
         // [#23074] The artifact of the row's OWN bundle member: an overlay of
         // a member the package does not ship has none, so it registers as the
         // tenant row it is ({@link mergeArtifactProtection}). It used to take
         // the bundle's artifact canonical-first, and a `zh-CN` overlay beside
         // a shipped `en-US` was registered wearing that envelope, which every
         // registry reader then took for the package's own `zh-CN` artifact.
-        const artifact = host.lookupArtifactItem(
-            type, (data as any).name, options.packageId ?? undefined, bundleMemberOf(type, data),
+        // [#32568, epic ruling 6817768147] A package-less row of such a type
+        // borrows no envelope through a lookup naming no package, which
+        // answered the FIRST package that registered the name: it wears its
+        // one holder's, and with two or more holders none, registering as the
+        // environment's tenant row that each holder's exact read judges
+        // (ADR-0150 D4). ⛔ Never a pick between two.
+        const envelopePackage = options.packageId ?? (scoped ? soleHolderOf(registry, canonicalType, rowName) : undefined);
+        const artifact = envelopePackage === null ? undefined : host.lookupArtifactItem(
+            type, (data as any).name, envelopePackage ?? undefined, bundleMemberOf(type, data),
         );
         // [#29600] See the header: a dashboard, report or email-template row
         // bound to a package that ships no artifact of its name, under a name

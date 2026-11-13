@@ -117,6 +117,10 @@ function HomeProbe() {
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ConsoleShell: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  // The organization gate over `/home`, `/apps` and `/forms` sits beside the
+  // stubbed `ProtectedRoute` now, not inside it (objectstack#32633); auth and
+  // organizations are not the question here either.
+  RequireOrganization: ({ children }: { children?: ReactNode }) => <>{children}</>,
   ConsoleToaster: () => null,
   LoadingScreen: () => <div data-testid="loading-screen" />,
   DefaultHomePage: () => <HomeProbe />,

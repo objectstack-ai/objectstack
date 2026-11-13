@@ -31,7 +31,7 @@
 
 import { useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ConsolePageHeader } from '@object-ui/app-shell';
+import { ConsolePageHeader, objectHostAppSegment, useMetadata } from '@object-ui/app-shell';
 import {
   Button,
   buttonVariants,
@@ -715,11 +715,25 @@ function InlineActions({
 /**
  * The router path of a request's page: the console's standard record route for
  * `sys_approval_request`, where `RecordDetailView` mounts the page objectstack
- * serves for it (`sys_approval_request_detail`). The app segment falls back to
- * `setup` as the row's record link does.
+ * serves for it (`sys_approval_request_detail`).
+ *
+ * The app segment is the app that owns the request's RECORD
+ * (`objectHostAppSegment`, objectstack#32667): the app it is asked from when
+ * that app lists the record's object, else the first app that does, else
+ * Setup. A request opened under an app whose navigation never names the
+ * record's object drew that app's sidebar around it, and its record card could
+ * not reach the record. Only when the reader can open no such app, nor Setup,
+ * does the request stay in the app it was asked from (or `setup` outside one,
+ * as the row's record link falls back).
  */
-function requestPagePath(appName: string | undefined, requestId: string): string {
-  return `/apps/${appName || 'setup'}/${APPROVAL_REQUEST_OBJECT}/record/${encodeURIComponent(requestId)}`;
+function requestPagePath(
+  apps: readonly Record<string, unknown>[] | undefined,
+  objectName: string | null | undefined,
+  appName: string | undefined,
+  requestId: string,
+): string {
+  const segment = objectHostAppSegment(apps, objectName, appName) ?? (appName || 'setup');
+  return `/apps/${segment}/${APPROVAL_REQUEST_OBJECT}/record/${encodeURIComponent(requestId)}`;
 }
 
 /**
@@ -729,11 +743,51 @@ function requestPagePath(appName: string | undefined, requestId: string): string
  * one, the route draws the queue.
  */
 export function ApprovalsInboxPage() {
-  const { appName } = useParams<{ appName?: string }>();
   const [searchParams] = useSearchParams();
   const request = searchParams.get('request');
-  if (request) return <Navigate to={requestPagePath(appName, request)} replace />;
+  if (request) return <RequestDeepLink requestId={request} />;
   return <ApprovalsQueue />;
+}
+
+/**
+ * The deep link's redirect. The link names the request alone, and the app its
+ * page opens under is the one that owns the request's record
+ * (`requestPagePath`), so the request is read first, once, for its
+ * `object_name`. A read that fails leaves the object unknown, and the page
+ * opens where it was asked from, where the record page says why it cannot load.
+ *
+ * With no app in the catalog there is no app to choose between, so nothing is
+ * read: the answer cannot depend on the record.
+ */
+function RequestDeepLink({ requestId }: { requestId: string }) {
+  const { appName } = useParams<{ appName?: string }>();
+  const { apps, loading } = useMetadata();
+  const catalog = Array.isArray(apps) ? (apps as Record<string, unknown>[]) : undefined;
+  const choose = !loading && !!catalog && catalog.length > 0;
+  /** `undefined` while the read is in flight; `null` when it named no object. */
+  const [answer, setAnswer] = useState<{ requestId: string; objectName: string | null } | undefined>(undefined);
+
+  useEffect(() => {
+    if (!choose) return;
+    let cancelled = false;
+    approvalsApi.getRequest(requestId).then(
+      (out) => {
+        const objectName = out?.data?.object_name;
+        if (!cancelled) setAnswer({ requestId, objectName: typeof objectName === 'string' ? objectName : null });
+      },
+      () => {
+        if (!cancelled) setAnswer({ requestId, objectName: null });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [choose, requestId]);
+
+  if (loading) return null;
+  if (!choose) return <Navigate to={requestPagePath(catalog, null, appName, requestId)} replace />;
+  if (answer?.requestId !== requestId) return null;
+  return <Navigate to={requestPagePath(catalog, answer.objectName, appName, requestId)} replace />;
 }
 
 function ApprovalsQueue() {
@@ -743,6 +797,7 @@ function ApprovalsQueue() {
   const displayLocale = useDisplayLocale();
   const { user } = useAuth();
   const { appName } = useParams<{ appName?: string }>();
+  const { apps: metadataApps } = useMetadata();
   const navigate = useNavigate();
   const identities = useMemo(() => buildApproverIdentities(user as any), [user]);
 
@@ -906,11 +961,20 @@ function ApprovalsQueue() {
   /**
    * Open a request on its page (objectui#12484): the page objectstack serves
    * for it, on the standard record route. A navigation, so Back returns to the
-   * queue with its tab, filters and scroll as they were.
+   * queue with its tab, filters and scroll as they were. It opens under the
+   * app that owns the row's record (`requestPagePath`).
    */
   const openRequest = useCallback(
-    (id: string) => navigate(requestPagePath(appName, id)),
-    [navigate, appName],
+    (r: ApprovalRequestRow) =>
+      navigate(
+        requestPagePath(
+          Array.isArray(metadataApps) ? (metadataApps as Record<string, unknown>[]) : undefined,
+          r.object_name,
+          appName,
+          r.id,
+        ),
+      ),
+    [navigate, appName, metadataApps],
   );
 
   /**
@@ -1358,7 +1422,7 @@ function ApprovalsQueue() {
         setFocusIndex(Math.max(idx - 1, 0));
       } else if (e.key === 'Enter' && idx >= 0 && list[idx]) {
         e.preventDefault();
-        openRequest(list[idx].id);
+        openRequest(list[idx]);
       } else if ((e.key === 'x' || e.key === ' ') && idx >= 0 && list[idx] && tab === 'pending') {
         e.preventDefault();
         toggleRow(list[idx].id);
@@ -1433,7 +1497,7 @@ function ApprovalsQueue() {
                     'group cursor-pointer hover:bg-accent/50',
                     focusIndex === i && 'ring-2 ring-inset ring-ring bg-accent/30',
                   )}
-                  onClick={() => { setFocusIndex(i); openRequest(r.id); }}
+                  onClick={() => { setFocusIndex(i); openRequest(r); }}
                 >
                   {tab === 'pending' && (
                     <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
@@ -1534,7 +1598,7 @@ function ApprovalsQueue() {
       {/* Mobile cards */}
       <div className="md:hidden space-y-2">
         {filteredRows.map((r) => (
-          <Card key={r.id} className="cursor-pointer active:bg-accent/50 [content-visibility:auto] [contain-intrinsic-size:auto_9rem]" onClick={() => openRequest(r.id)}>
+          <Card key={r.id} className="cursor-pointer active:bg-accent/50 [content-visibility:auto] [contain-intrinsic-size:auto_9rem]" onClick={() => openRequest(r)}>
             <CardContent className="p-3 space-y-1.5">
               <div className="flex items-start justify-between gap-2">
                 <div className="font-medium text-sm truncate">{processLabel(r)}</div>
