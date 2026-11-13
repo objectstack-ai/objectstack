@@ -243,7 +243,12 @@ describe('an approver\'s agent decides a pending approval request over MCP (#324
     const requestId = await openRequest('account');
     const answer = await approve({ key: accountKey }, requestId, true);
     expect(answer.isError, answer.text).toBe(true);
-    expect(answer.payload?.error?.code, answer.text).toBe('REQUEST_NOT_FOUND');
+    // The account confirmation rule answers first (ADR-0151 D3 rule 3): an AI
+    // service account does not confirm an action for itself, so the decision
+    // action, which declares `ai.requiresConfirmation`, is refused at admission
+    // whatever the call carries, before the request is looked up.
+    expect(answer.payload?.error?.code, answer.text).toBe('ACTION_CONFIRMATION_REQUIRED');
+    expect(answer.payload?.error?.status, answer.text).toBe(428);
     await expectUndecided(requestId, 'an AI service account');
   });
 
