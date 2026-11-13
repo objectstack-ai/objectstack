@@ -31,6 +31,7 @@ import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@objectstack/rest';
 import type { IDataEngine } from '@objectstack/core';
 import { readSsoProviderDeleteImpact, ssoProviderDeleteSummary, type SsoProviderDeleteImpact } from './sso-provider-lifecycle.js';
+import { samlLogoutServiceOf } from './sso-sign-out-of-idp.js';
 
 export interface RegisterSsoFormResult {
   /** HTTP status to return to the caller. */
@@ -311,6 +312,7 @@ export async function runRegisterSamlProviderFromForm(
   const entryPoint = str(body?.entryPoint);
   const cert = str(body?.cert);
   const identifierFormat = str(body?.identifierFormat);
+  const logoutUrl = str(body?.logoutUrl);
 
   const missing = (
     [
@@ -323,6 +325,14 @@ export async function runRegisterSamlProviderFromForm(
   ).filter(([, v]) => !v).map(([k]) => k);
   if (missing.length) {
     return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: `Missing required field(s): ${missing.join(', ')}` } } };
+  }
+  // The IdP's single logout address (ruling record 6866334319), stored where
+  // the vendor's own single logout reads it: `idpMetadata.singleLogoutService`.
+  let singleLogoutService: Array<{ Binding: string; Location: string }> | undefined;
+  if (logoutUrl) {
+    const read = samlLogoutServiceOf(logoutUrl);
+    if ('refusal' in read) return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: read.refusal } } };
+    singleLogoutService = read.service;
   }
 
   let origin: string;
@@ -349,7 +359,7 @@ export async function runRegisterSamlProviderFromForm(
     // Without it `/sso/register` refuses every form with 400. The IdP SSO URL
     // and signing cert stay top-level (`entryPoint`, `cert`), which the vendor
     // reads when `idpMetadata` names no `singleSignOnService` / `cert`.
-    idpMetadata: { entityID: issuer },
+    idpMetadata: { entityID: issuer, ...(singleLogoutService ? { singleLogoutService } : {}) },
     // better-auth requires an SP descriptor (its inner fields are optional). Use
     // the SP metadata URL as our EntityID — the value the IdP keys this SP on.
     spMetadata: { entityID: spMetadataUrl },
@@ -876,7 +886,7 @@ export async function runSetSsoGroupsClaim(
 // loses nothing.
 
 /** The flat fields each protocol's edit action posts, besides `providerId`. */
-const SAML_EDIT_FIELDS = ['issuer', 'entryPoint', 'cert', 'keepCurrentCert'] as const;
+const SAML_EDIT_FIELDS = ['issuer', 'entryPoint', 'cert', 'keepCurrentCert', 'logoutUrl'] as const;
 const OIDC_EDIT_FIELDS = ['clientId', 'clientSecret', 'scopes'] as const;
 
 /** The members the vendor treats as the provider's identity, by the form field that changes them. */
@@ -926,9 +936,10 @@ function storedCertificates(saml: Record<string, unknown>): string[] {
  * each optional and blank meaning "keep":
  *
  *   - SAML: `issuer` (the IdP entity ID), `entryPoint` (the IdP SSO URL),
- *     `cert` (a new signing certificate) and `keepCurrentCert` (true to keep
+ *     `cert` (a new signing certificate), `keepCurrentCert` (true to keep
  *     trusting the stored certificate beside the new one while the IdP
- *     switches over; false or absent replaces it);
+ *     switches over; false or absent replaces it) and `logoutUrl` (the IdP's
+ *     single logout address, ruling record 6866334319);
  *   - OIDC: `clientId`, `clientSecret` (write-only), `scopes` (space- or
  *     comma-separated).
  *
@@ -1021,6 +1032,18 @@ export async function runUpdateSsoProviderFromForm(
       const unique = certs.filter((c, i) => certs.findIndex((d) => certificateBody(d) === certificateBody(c)) === i);
       samlUpdate.cert = unique.length === 1 ? unique[0] : unique;
       updated.push('cert');
+    }
+    const logoutUrl = str(body.logoutUrl);
+    if (logoutUrl) {
+      const read = samlLogoutServiceOf(logoutUrl);
+      if ('refusal' in read) return updateRefusal(400, 'INVALID_REQUEST', read.refusal, 'logoutUrl');
+      const idp = isPlainObject(saml!.idpMetadata) ? saml!.idpMetadata : {};
+      const current = Array.isArray(idp.singleLogoutService) ? idp.singleLogoutService : [];
+      const same = current.length === 1 && (current[0] as { Location?: unknown })?.Location === read.service[0]!.Location;
+      if (!same) {
+        samlUpdate.idpMetadata = { ...(isPlainObject(samlUpdate.idpMetadata) ? samlUpdate.idpMetadata : {}), singleLogoutService: read.service };
+        updated.push('logoutUrl');
+      }
     }
     if (Object.keys(samlUpdate).length > 0) update.samlConfig = samlUpdate;
   } else {

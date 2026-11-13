@@ -59,6 +59,13 @@ export const SSO_ALLOW_IDP_INITIATED_FIELD = 'allow_idp_initiated';
 /** `sys_sso_provider` column for the JIT-provisioning toggle. */
 export const SSO_ALLOW_JIT_FIELD = 'allow_jit';
 
+/**
+ * `sys_sso_provider` column for "sign out of the company sign-in too" (ruling
+ * record 6866334319): signing out of the platform also ends the identity
+ * provider's session (`sso-sign-out-of-idp.ts`).
+ */
+export const SSO_SIGN_OUT_OF_IDP_FIELD = 'sign_out_of_idp';
+
 /** `sys_sso_provider` column for the OIDC userinfo opt-out (claims from the ID token only). */
 export const SSO_SKIP_USER_INFO_FIELD = 'skip_user_info';
 
@@ -94,15 +101,17 @@ export const SSO_PROVIDER_SIGN_IN_FIELDS = {
   allowIdpInitiated: { type: 'boolean', required: false, defaultValue: false, input: true },
   allowJit: { type: 'boolean', required: false, defaultValue: false, input: true },
   skipUserInfo: { type: 'boolean', required: false, defaultValue: false, input: true },
+  signOutOfIdp: { type: 'boolean', required: false, defaultValue: false, input: true },
 } as const;
 
 /** One provider's sign-in options, as the store answers them. */
 export interface SsoProviderSignInOptions {
   allowIdpInitiated: boolean;
   allowJit: boolean;
+  signOutOfIdp: boolean;
 }
 
-const ALL_OFF: SsoProviderSignInOptions = { allowIdpInitiated: false, allowJit: false };
+const ALL_OFF: SsoProviderSignInOptions = { allowIdpInitiated: false, allowJit: false, signOutOfIdp: false };
 
 /**
  * A toggle column read below better-auth: the adapter runs with
@@ -137,6 +146,7 @@ export async function readSsoProviderSignInOptions(
     return {
       allowIdpInitiated: ssoToggleStoredOn(row[SSO_ALLOW_IDP_INITIATED_FIELD]),
       allowJit: ssoToggleStoredOn(row[SSO_ALLOW_JIT_FIELD]),
+      signOutOfIdp: ssoToggleStoredOn(row[SSO_SIGN_OUT_OF_IDP_FIELD]),
     };
   } catch {
     return ALL_OFF;
@@ -258,22 +268,65 @@ export function restoreUserInfoEndpointOnWrite(objectName: string, row: unknown)
   record[SSO_OIDC_CONFIG_FIELD] = serialize(parsed);
 }
 
-// ── SAML: the vendor's one option, answered per ACS request ─────────────────
+// ── SAML: the vendor's plugin-wide options, answered per provider request ────
 
-const samlIdpInitiatedScope = new AsyncLocalStorage<{ allow: boolean }>();
-
-/**
- * The `saml` options handed to `sso()`. `allowIdpInitiated` is a getter: the
- * vendor reads it while it validates a Response, inside the request's scope.
- */
-export function ssoSamlOptions(): { readonly allowIdpInitiated: boolean } {
-  return Object.defineProperty({} as { readonly allowIdpInitiated: boolean }, 'allowIdpInitiated', {
-    enumerable: true,
-    get: () => samlIdpInitiatedScope.getStore()?.allow === true,
-  });
+/** What one SAML request's provider has turned on; absent ⇒ every option OFF. */
+export interface SamlProviderScope {
+  /** `allow_idp_initiated`: an unsolicited Response is accepted. */
+  allowIdpInitiated?: boolean;
+  /** `sign_out_of_idp`: single logout runs for this provider (`sso-sign-out-of-idp.ts`). */
+  singleLogout?: boolean;
 }
 
-/** Run one SAML ACS request with its provider's IdP-initiated toggle in scope. */
+const samlProviderScope = new AsyncLocalStorage<SamlProviderScope>();
+
+/** The `saml` options object handed to `sso()`, every member read at request time. */
+export interface SsoSamlOptions {
+  readonly allowIdpInitiated: boolean;
+  readonly enableSingleLogout: boolean;
+  readonly wantLogoutRequestSigned: true;
+  readonly wantLogoutResponseSigned: true;
+}
+
+/**
+ * The `saml` options handed to `sso()`. The vendor reads each one off this
+ * object while it serves a request, so the two toggles are getters that answer
+ * the provider of the request in scope ({@link runWithSamlProviderScope}):
+ *
+ * - `allowIdpInitiated`: read while it validates a Response's `InResponseTo`.
+ * - `enableSingleLogout`: read by the ACS (it records the session's NameID and
+ *   SessionIndex), the SP metadata (it advertises the logout service), the
+ *   SP-initiated logout (`/sso/saml2/logout/:providerId`) and the IdP's logout
+ *   endpoint (`/sso/saml2/sp/slo/:providerId`), which is closed unless it
+ *   answers true. No scope ⇒ false: the logout endpoints stay closed.
+ *
+ * The two signature options are constant: a LogoutRequest or a LogoutResponse
+ * coming back from the identity provider is accepted only when signed by the
+ * provider's own signing certificate (ruling record 6866334319). They are read
+ * only where single logout already answered true.
+ */
+export function ssoSamlOptions(): SsoSamlOptions {
+  const options = { wantLogoutRequestSigned: true, wantLogoutResponseSigned: true } as SsoSamlOptions;
+  Object.defineProperty(options, 'allowIdpInitiated', {
+    enumerable: true,
+    get: () => samlProviderScope.getStore()?.allowIdpInitiated === true,
+  });
+  Object.defineProperty(options, 'enableSingleLogout', {
+    enumerable: true,
+    get: () => samlProviderScope.getStore()?.singleLogout === true,
+  });
+  return options;
+}
+
+/** Run one SAML request with its provider's options in scope. */
+export function runWithSamlProviderScope<T>(scope: SamlProviderScope, run: () => Promise<T>): Promise<T> {
+  return samlProviderScope.run(
+    { allowIdpInitiated: scope.allowIdpInitiated === true, singleLogout: scope.singleLogout === true },
+    run,
+  );
+}
+
+/** Run one SAML ACS request with its provider's IdP-initiated toggle in scope (single logout off). */
 export function runWithSamlIdpInitiated<T>(allow: boolean, run: () => Promise<T>): Promise<T> {
-  return samlIdpInitiatedScope.run({ allow: allow === true }, run);
+  return runWithSamlProviderScope({ allowIdpInitiated: allow }, run);
 }

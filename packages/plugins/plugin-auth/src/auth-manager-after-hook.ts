@@ -76,6 +76,7 @@ export interface AfterHookHost {
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
   settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
+  settleSsoSignOutOfIdp: AuthManager['settleSsoSignOutOfIdp'];
   stampLastLogin: AuthManager['stampLastLogin'];
   stampPasswordChangedAt: AuthManager['stampPasswordChangedAt'];
 }
@@ -227,6 +228,11 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // vendor's writes).
   // See `sso-provider-lifecycle.ts`.
   if (ctx?.path === SSO_PROVIDER_DELETE_PATH) await this.settleSsoProviderDelete(ctx);
+
+  // Ruling record 6866334319: an OIDC provider saved with "sign out of the
+  // company sign-in too" on keeps the end_session_endpoint its before-hook
+  // read (`sso-sign-out-of-idp.ts`).
+  await this.settleSsoSignOutOfIdp(ctx);
 
   // ── ADR-0069 D2: account lockout (counter) ──────────────────
   // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs

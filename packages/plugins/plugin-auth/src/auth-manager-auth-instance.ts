@@ -135,6 +135,7 @@ export interface AuthInstanceHost {
   assertRevokeSessionIdentifiesRecord: AuthManager['assertRevokeSessionIdentifiesRecord'];
   assertSsoProviderDeletable: AuthManager['assertSsoProviderDeletable'];
   assertSsoProviderDomainFree: AuthManager['assertSsoProviderDomainFree'];
+  assertSsoSignOutOfIdpSupported: AuthManager['assertSsoSignOutOfIdpSupported'];
   auditRefusedSignIn: AuthManager['auditRefusedSignIn'];
   buildPluginList: AuthManager['buildPluginList'];
   clearSignInLockout: AuthManager['clearSignInLockout'];
@@ -173,6 +174,7 @@ export interface AuthInstanceHost {
   sendExistingAccountSignUpNotice: AuthManager['sendExistingAccountSignUpNotice'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
   settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
+  settleSsoSignOutOfIdp: AuthManager['settleSsoSignOutOfIdp'];
   signUpForcedOff: AuthManager['signUpForcedOff'];
   ssoDiscoveryTrustedOrigins: AuthManager['ssoDiscoveryTrustedOrigins'];
   stampLastLogin: AuthManager['stampLastLogin'];
@@ -819,6 +821,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           assertRevokeSessionIdentifiesRecord: (...a) => this.assertRevokeSessionIdentifiesRecord(...a),
           assertSsoProviderDeletable: (...a) => this.assertSsoProviderDeletable(...a),
           assertSsoProviderDomainFree: (...a) => this.assertSsoProviderDomainFree(...a),
+          assertSsoSignOutOfIdpSupported: (...a) => this.assertSsoSignOutOfIdpSupported(...a),
           get config() { return readConfig(); },
           existingAddressSignUpAnswersSuccess: (...a) => this.existingAddressSignUpAnswersSuccess(...a),
           hasExistingUserFor: (...a) => this.hasExistingUserFor(...a),
@@ -848,6 +851,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
           settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
           settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
+          settleSsoSignOutOfIdp: (...a) => this.settleSsoSignOutOfIdp(...a),
           stampLastLogin: (...a) => this.stampLastLogin(...a),
           stampPasswordChangedAt: (...a) => this.stampPasswordChangedAt(...a),
         };
