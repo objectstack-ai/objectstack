@@ -402,6 +402,78 @@ describe('query_dataset', () => {
     expect(plain).not.toHaveProperty('warning');
   });
 
+  // The tool asks the service for one row past the cap so `truncated` is a
+  // fact, then serves `cap` rows. Every member of the answer aligned to `rows`
+  // by index is served to the same length, entry i beside row i: a drill
+  // sidecar that kept the probe row described a bucket the caller was never
+  // shown. Members aligned to something else are served as the service
+  // answered them.
+  describe('a truncated answer serves every row-aligned sidecar to the served rows', () => {
+    const rows = [
+      { stage: 'draft', revenue: 1 },
+      { stage: 'paid', revenue: 2 },
+      { stage: 'void', revenue: 3 },
+    ];
+
+    for (const limit of [1, 2]) {
+      it(`limit ${limit}: drillRawRows holds exactly the served rows' raw values, in row order`, async () => {
+        const { service } = await bootWired(rows);
+        const out = await service.datasetTools({ loadDatasets: loadSaved }).queryDataset(
+          { datasetName: 'pipeline', selection: { measures: ['revenue'], dimensions: ['stage'], limit } },
+          ADMIN,
+        );
+        expect(out).toMatchObject({ rowCount: limit, truncated: true, dimensionFields: { stage: 'stage' } });
+        expect(out.rows).toHaveLength(limit);
+        expect(out.drillRawRows).toHaveLength(out.rows.length);
+        out.rows.forEach((row, i) => expect(out.drillRawRows?.[i]).toEqual({ stage: row.stage }));
+      });
+    }
+
+    it('trims drillRanges with the rows and leaves totals, drillRawTotals, dimensionFields and drillScopes as answered', async () => {
+      const { service } = await bootWired();
+      const range = (gte: string, lt: string) => ({ closed_on: { field: 'closed_on', gte, lt } });
+      const totals = [{ dimensions: [], rows: [{ revenue: 6 }] }];
+      const drillRawTotals = [[{}]];
+      const drillScopes = { revenue: { amount: { $null: false } } };
+      vi.spyOn(service, 'queryDataset').mockResolvedValue({
+        rows: rows.map((r) => ({ ...r })),
+        fields: [{ name: 'stage', type: 'string' }, { name: 'revenue', type: 'number' }],
+        object: 'crm_opp',
+        totals,
+        dimensionFields: { stage: 'stage' },
+        drillRawRows: rows.map((r) => ({ stage: r.stage })),
+        drillRawTotals,
+        drillRanges: [range('2026-01-01', '2026-02-01'), range('2026-02-01', '2026-03-01'), range('2026-03-01', '2026-04-01')],
+        drillScopes,
+      });
+      const out = await service.datasetTools({ loadDatasets: loadSaved }).queryDataset(
+        { datasetName: 'pipeline', selection: { measures: ['revenue'], dimensions: ['stage'], limit: 2 } },
+        ADMIN,
+      );
+      expect(out).toMatchObject({ rowCount: 2, truncated: true });
+      expect(out.drillRawRows).toEqual([{ stage: 'draft' }, { stage: 'paid' }]);
+      expect(out.drillRanges).toEqual([range('2026-01-01', '2026-02-01'), range('2026-02-01', '2026-03-01')]);
+      // Aligned to `totals`, keyed by name, or describing the whole answer: not row-indexed.
+      expect(out.totals).toEqual(totals);
+      expect(out.drillRawTotals).toEqual(drillRawTotals);
+      expect(out.dimensionFields).toEqual({ stage: 'stage' });
+      expect(out.drillScopes).toEqual(drillScopes);
+    });
+
+    it('CONTROL: an answer within the cap is served as the service answered it', async () => {
+      const { service } = await bootWired(rows);
+      const direct = await service.queryDataset(PIPELINE as never, { measures: ['revenue'], dimensions: ['stage'] } as never, ADMIN);
+      const out = await service.datasetTools({ loadDatasets: loadSaved }).queryDataset(
+        { datasetName: 'pipeline', selection: { measures: ['revenue'], dimensions: ['stage'], limit: 3 } },
+        ADMIN,
+      );
+      expect(out).toMatchObject({ rowCount: 3, truncated: false });
+      expect(out.rows).toEqual(direct.rows);
+      expect(out.drillRawRows).toEqual(direct.drillRawRows);
+      expect(out.drillRawRows).toEqual([{ stage: 'draft' }, { stage: 'paid' }, { stage: 'void' }]);
+    });
+  });
+
   it('answers 503 when the dataset read itself fails, never NOT_FOUND', async () => {
     const { service } = await bootWired();
     const tools = service.datasetTools({ loadDatasets: async () => { throw new Error('loader down'); } });
