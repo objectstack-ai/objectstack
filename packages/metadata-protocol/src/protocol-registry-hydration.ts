@@ -169,6 +169,91 @@ function soleHolderOf(registry: { packageScopedHoldersOf?(type: string, name: st
     return holders[0];
 }
 
+/**
+ * [#32820] A package-less row of a name ONE package held when the read-side
+ * hydrator laid it in, under that holder's artifact envelope
+ * ({@link soleHolderOf}): what the registry entry was built from, so it can be
+ * built again when the holder set changes.
+ */
+interface SoleHolderEnvelope {
+    readonly host: Pick<ProtocolHost, 'lookupArtifactItem'>;
+    readonly type: string;
+    readonly canonicalType: string;
+    readonly name: string;
+    readonly member: string | undefined;
+    readonly data: unknown;
+    /** The holder whose envelope the entry wears. */
+    readonly holder: string;
+    /** The entry as registered: the heal touches the slot only while it still holds this object. */
+    readonly registered: unknown;
+}
+
+type EnvelopeRegistry = {
+    getItem?(type: string, name: string, currentPackageId?: string, member?: string): unknown;
+    registerItem(type: string, item: unknown, keyField: string): unknown;
+    packageScopedHoldersOf?(type: string, name: string): readonly string[] | undefined;
+    onPackageEnabled?(listener: (packageId: string) => void): () => void;
+};
+
+/** Per registry, the {@link SoleHolderEnvelope} of each bare-slot key (`type`, `name`, member). */
+const soleHolderEnvelopes = new WeakMap<object, Map<string, SoleHolderEnvelope>>();
+
+const envelopeKey = (type: string, name: string, member: string | undefined) => `${type}\u0000${name}\u0000${member ?? ''}`;
+
+/**
+ * [#32820, ADR-0150 D4] Record (or, with no `holder`, forget) the envelope a
+ * package-less row's registry entry wears. The first record for a registry
+ * subscribes {@link healSoleHolderEnvelopes} to its package enables.
+ */
+function recordSoleHolderEnvelope(registry: EnvelopeRegistry, key: string, envelope: SoleHolderEnvelope | undefined): void {
+    let records = soleHolderEnvelopes.get(registry);
+    if (envelope === undefined) {
+        records?.delete(key);
+        return;
+    }
+    if (records === undefined) {
+        if (typeof registry.onPackageEnabled !== 'function') return;
+        const created = new Map<string, SoleHolderEnvelope>();
+        records = created;
+        soleHolderEnvelopes.set(registry, created);
+        registry.onPackageEnabled(() => healSoleHolderEnvelopes(registry, created));
+    }
+    records.set(key, envelope);
+}
+
+/**
+ * [#32820, ADR-0150 D4] A package-less overlay row the read-side hydrator laid
+ * into a holder's slot while that holder alone was served (another holder of
+ * the name disabled) wears that holder's envelope, so the registry reads it
+ * as that holder's own item (`getPackageScopedItem`, the scoped list, the
+ * execution list). An enable that serves a second holder makes it a
+ * customization no holder can claim: the entry is built again as the
+ * hydrator builds it for the holders served now (none's envelope with two),
+ * so each holder's slot answers its own item again, as with no hydration in
+ * the disabled period. Synchronous, inside the enable, so every enable door
+ * (`PATCH /packages/:id/enable`, an install's `enableOnInstall`) answers
+ * after it.
+ *
+ * Only an entry the slot still holds as registered: a later write, delete or
+ * hydration replaced it and owns the slot.
+ */
+function healSoleHolderEnvelopes(registry: EnvelopeRegistry, records: Map<string, SoleHolderEnvelope>): void {
+    for (const [key, record] of [...records]) {
+        if (typeof registry.getItem !== 'function'
+            || registry.getItem(record.type, record.name, undefined, record.member) !== record.registered) {
+            records.delete(key);
+            continue;
+        }
+        const holder = soleHolderOf(registry, record.canonicalType, record.name);
+        if (holder === record.holder) continue;
+        const artifact = holder === null ? undefined : record.host.lookupArtifactItem(record.type, record.name, holder ?? undefined, record.member);
+        const registered = mergeArtifactProtection(record.type, stateTenantAuthorship(withRowBinding(record.data, undefined)), artifact);
+        registry.registerItem(record.type, registered, 'name');
+        if (typeof holder === 'string' && artifact) records.set(key, { ...record, holder, registered });
+        else records.delete(key);
+    }
+}
+
 export class ProtocolRegistryHydrationFacet {
     /**
      * Mirror an object-type overlay write into the in-memory engine
@@ -667,6 +752,15 @@ export class ProtocolRegistryHydrationFacet {
             if (!incomingTakesStoredFlowSlot(held, registered, owner, installedManifestsOf(registry))) return true;
         }
         registry.registerItem(type, registered, 'name' as any);
+        // [#32820] A package-less row wearing the envelope of the one holder
+        // served now is recorded, so an enable serving a second holder builds
+        // it again ({@link healSoleHolderEnvelopes}); any other registration
+        // of the key forgets it.
+        const member = bundleMemberOf(type, data);
+        recordSoleHolderEnvelope(registry, envelopeKey(type, rowName, member),
+            !options.packageId && typeof envelopePackage === 'string' && envelope
+                ? { host, type, canonicalType, name: rowName, member, data, holder: envelopePackage, registered }
+                : undefined);
         await host.hydrateExpandedViewItems(type, data, options);
         return true;
     }
