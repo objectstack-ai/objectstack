@@ -683,10 +683,16 @@ export class MetadataManager implements IMetadataService {
    * registers such an `object` as the host package's contribution — but the
    * row is not the package's item, so {@link unregisterPackage} leaves it
    * ({@link isStampedEnvironmentRow}). [#33003] A copy that replaces one
-   * joins the set ({@link rewritesEnvironmentRow}), and {@link register}
+   * joins the set ({@link carryEnvironmentRowMark}), and {@link register}
    * stores a member without the stamp.
    */
   private readonly storedEnvironmentRows = new WeakSet<object>();
+  /**
+   * [#33003] The host stamp each {@link storedEnvironmentRows} member carried
+   * on, so an unstamped replacement passes it on to the copy after it
+   * ({@link carryEnvironmentRowMark}).
+   */
+  private readonly environmentRowHosts = new WeakMap<object, string>();
   /**
    * [ADR-0150 D4, #32791] The {@link storedPackagelessRows} whose registration
    * replaced an item no loader handed out (one registered in memory or by
@@ -1345,8 +1351,8 @@ export class MetadataManager implements IMetadataService {
         this.storedRowsOverOwnItems.add(data);
       }
     }
-    // [#33003] A copy of an environment row the boot pass stamped, still carrying the stamp, is that row.
-    if (this.rewritesEnvironmentRow(typeStore.get(key), data)) this.storedEnvironmentRows.add(data as object);
+    // [#33003] A copy of an environment row the boot pass stamped, carrying its stamp or none, is that row.
+    this.carryEnvironmentRowMark(typeStore.get(key), data);
     for (const replaced of replaces) typeStore.delete(replaced);
     typeStore.set(key, data);
     recordStoreWrite(typeStore, key);
@@ -2779,24 +2785,35 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
-   * [#33003] Whether writing `data` over `before` rewrites an environment row
-   * the boot pass stamped: `before` is such a row ({@link environmentRowStamp}),
-   * and `data` is a copy no loader handed out that still carries that stamp (a
-   * copy that also names the package by its own key stays the package's item:
-   * {@link isStampedEnvironmentRow} reads every key at each use). Every writer
-   * that registers such a copy reaches this — ObjectQL's late-manifest bridge
-   * (the `ownPreviousCopy` re-register and `restoreExtendedObjectCopies`) and
-   * its object-copy follow (`registerInMemory`), `publishPackage` /
-   * `revertPackage` over {@link collectPackageMembers}, and `importMetadata`'s
-   * merge — so the copy keeps the row's mark instead of the mark riding the
-   * replaced object. An item a loader handed out (a file's, a stored row's) is
-   * that loader's item, never a copy: a stored row is marked by
-   * {@link loadMany} itself.
+   * [#33003] Writing `data` over `before`, where `before` is one of the
+   * {@link storedEnvironmentRows}: `data` is that row rewritten, and keeps its
+   * mark, when no loader handed it out and it carries the row's host stamp or
+   * none. A copy that also names the package by its own key stays the
+   * package's item ({@link isStampedEnvironmentRow} reads every key at each
+   * use); a copy stamped with another package is that package's. The host
+   * stamp is remembered ({@link environmentRowHosts}), so a copy stamped with
+   * the host after an unstamped replacement (an `importMetadata` without
+   * `merge`, a `bulkRegister`, a `rollback` to an authored version, then
+   * ObjectQL's object-copy follow) is still the row.
+   *
+   * Every writer that registers such a copy reaches this — ObjectQL's
+   * late-manifest bridge (the `ownPreviousCopy` re-register and
+   * `restoreExtendedObjectCopies`) and its object-copy follow
+   * (`registerInMemory`), `publishPackage` / `revertPackage` over
+   * {@link collectPackageMembers}, `importMetadata`, `bulkRegister` and
+   * {@link rollback} — so the copy keeps the row's mark instead of the mark
+   * riding the replaced object. An item a loader handed out (a file's, a
+   * stored row's) is that loader's item, never a copy: a stored row is marked
+   * by {@link loadMany} itself.
    */
-  private rewritesEnvironmentRow(before: unknown, data: unknown): boolean {
-    if (data === null || typeof data !== 'object' || data === before || this.loadedFrom.has(data)) return false;
-    const stamp = this.environmentRowStamp(before);
-    return stamp !== undefined && (data as { _packageId?: unknown })._packageId === stamp;
+  private carryEnvironmentRowMark(before: unknown, data: unknown): void {
+    if (data === null || typeof data !== 'object' || data === before || this.loadedFrom.has(data)) return;
+    if (before === null || typeof before !== 'object' || !this.storedEnvironmentRows.has(before)) return;
+    const host = this.environmentRowHosts.get(before) ?? this.environmentRowStamp(before);
+    const stamp = (data as { _packageId?: unknown })._packageId;
+    if (stamp !== undefined && stamp !== host) return;
+    this.storedEnvironmentRows.add(data);
+    if (host !== undefined) this.environmentRowHosts.set(data, host);
   }
 
   /**
@@ -4667,10 +4684,16 @@ export class MetadataManager implements IMetadataService {
     // Restore the metadata using the dedicated rollback path so that a single
     // 'revert' history entry is written (instead of a conflicting 'update' entry)
     const restoredMetadata = targetVersion.metadata;
+    // [#33003] A version restored over an environment row the boot pass
+    // stamped is that row (a version a rewrite stored before #33003 carries the
+    // host stamp): stored without the stamp, as {@link register} stores it.
+    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
+    if (!slotted) this.carryEnvironmentRowMark(this.registry.get(type)?.get(name), restoredMetadata);
+    const stamp = this.environmentRowStamp(restoredMetadata);
     await dbLoader.registerRollback(
       type,
       name,
-      restoredMetadata,
+      stamp === undefined ? restoredMetadata : withoutEnvironmentRowStamp(restoredMetadata as Record<string, unknown>, stamp),
       version,
       options?.changeNote,
       options?.recordedBy,
@@ -4683,7 +4706,6 @@ export class MetadataManager implements IMetadataService {
     // as the row it was written to is. [S4] One restored by the environment
     // address is filed under the bare slot, as its row is, even when one
     // package holds the name (the write rule would file it under that package's).
-    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
     if (slotted && isPackageCaller(address?.packageId)) {
       this.writeRegistryEntry(type, name, withEntryPackage({ name, data: restoredMetadata, packageId: address.packageId }));
     } else if (slotted && address !== undefined) {

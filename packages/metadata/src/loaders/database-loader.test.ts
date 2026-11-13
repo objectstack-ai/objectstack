@@ -3227,6 +3227,56 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
     expect(await state(m)).toEqual(ITEMS.map(([type, name]) => name === 'env_account' ? [type, name, null, false, 0] : [type, name, HOST, true, 1]));
   });
 
+  /**
+   * [#33003, review S3] An unstamped replacement (an import without `merge`,
+   * a `bulkRegister`) keeps the row's mark and its host, so the copy ObjectQL's
+   * object-copy follow then writes, stamped with the registry owner (still the
+   * host), is the row too.
+   */
+  for (const [writer, replace] of [
+    ['importMetadata overwrite', (m: MetadataManager) => m.importMetadata({ object: [{ name: 'env_account', label: 'replaced' }] }, { conflictResolution: 'overwrite' })],
+    ['bulkRegister', (m: MetadataManager) => m.bulkRegister([{ type: 'object', name: 'env_account', data: { name: 'env_account', label: 'replaced' } }])],
+  ] as const) {
+    it(`an unstamped replacement (${writer}), then the object-copy follow stamped with the host: unregisterPackage(host) keeps the row (BEFORE: deleted)`, async () => {
+      for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
+      const m = await bootPass();
+      await replace(m);
+      m.registerInMemory('object', 'env_account', { name: 'env_account', label: 'served', _packageId: HOST });
+      await m.unregisterPackage(HOST);
+      expect(await state(m)).toEqual(kept());
+    });
+  }
+
+  /**
+   * [#33003, review S2] `rollback` persists through the loader's own rollback
+   * path, not `register`. A version a rewrite stored before #33003 carries the
+   * host stamp; restored over the environment's row, it is that row.
+   */
+  it('rollback to a version stored with the host stamp: unregisterPackage(host) keeps the row in this process and after a reboot (BEFORE: deleted after the reboot)', async () => {
+    for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
+    const m = await bootPass();
+    // A version a rewrite stored before #33003: the body carries the host stamp.
+    await (m as any).getDatabaseLoader().save('object', 'env_account', { name: 'env_account', label: 'stamped', _packageId: HOST });
+    await m.register('object', 'env_account', { name: 'env_account', label: 'later' });
+    await m.rollback('object', 'env_account', 2);
+    const rebooted = await bootPass();
+    await rebooted.unregisterPackage(HOST);
+    expect(await state(rebooted)).toEqual(kept());
+    await m.unregisterPackage(HOST);
+    expect(await state(m)).toEqual(kept());
+  });
+
+  it('CONTROL rollback of the host\'s own row to a stamped version: removed after a reboot', async () => {
+    for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, { _packageId: HOST });
+    const m = await bootPass();
+    await (m as any).getDatabaseLoader().save('object', 'env_account', { name: 'env_account', label: 'stamped', _packageId: HOST });
+    await m.register('object', 'env_account', { name: 'env_account', label: 'later', _packageId: HOST });
+    await m.rollback('object', 'env_account', 2);
+    const rebooted = await bootPass();
+    await rebooted.unregisterPackage(HOST);
+    expect(await state(rebooted)).toEqual(gone());
+  });
+
   it('CONTROL unregisterPackage of the extender leaves the environment\'s object the bridge rewrote, and of another package nothing moves', async () => {
     for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
     const m = await bootPass();
