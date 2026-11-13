@@ -91,6 +91,8 @@ import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
 import { FORCED_RESET_REVOKE_REASON } from './forced-reset-revocation.js';
 import { MEMBERSHIP_ENDED_REVOKE_REASON } from './membership-ended-session.js';
 import { SCIM_DEACTIVATION_REVOKE_REASON } from './scim-deactivation-key-revocation.js';
+import { SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON, SERVICE_ACCOUNT_OWNER_LEFT_REASON } from './service-account-owner-leaves.js';
+import { runResumeServiceAccount, type ServiceAccountLifecycleDeps } from './service-account-lifecycle.js';
 import { runSetUserManager } from './admin-set-user-manager.js';
 import { runAdminSetUserPassword } from './admin-user-endpoints.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_STATUS } from './cloud-managed.js';
@@ -1168,6 +1170,199 @@ describe('a directory deactivation revokes the user\'s API keys, and a re-activa
     } finally {
       errors.mockRestore();
     }
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// (j) — a directory deactivation suspends the person's AI service accounts
+// ---------------------------------------------------------------------------
+
+/** The organization the accounts below belong to (the SCIM connection's). */
+const AGENT_ORG = 'org_scim_8b';
+const AGENT_OTHER_ORG = 'org_agents_other';
+
+/**
+ * An AI service account `ownerId` is accountable for, a member of `org`, with
+ * one key, written as the registration door writes it (system context). The
+ * owner is made a member of `org` too, as registration requires.
+ */
+async function agentAccount(h: Harness, ownerId: string, id: string, org = AGENT_ORG): Promise<string> {
+  await h.engine.insert(
+    'sys_user',
+    { id, name: id, email: `${id}@agents.example`, email_verified: false, principal_kind: 'agent', accountable_user_id: ownerId },
+    SYSTEM,
+  );
+  await h.engine.insert('sys_member', { id: `mem_${id}`, user_id: id, organization_id: org, role: 'member' }, SYSTEM);
+  const ownerThere = await h.engine.find('sys_member', { where: { user_id: ownerId, organization_id: org } }, SYSTEM);
+  if (!Array.isArray(ownerThere) || ownerThere.length === 0) {
+    await h.engine.insert('sys_member', { id: `mem_${ownerId}_${org}`, user_id: ownerId, organization_id: org, role: 'member' }, SYSTEM);
+  }
+  return mintKey(h, id, `key_${id}`);
+}
+
+async function accountBan(h: Harness, id: string): Promise<{ banned: boolean; ban_reason: string | null }> {
+  const row = (await h.engine.findOne('sys_user', { where: { id }, fields: ['id', 'banned', 'ban_reason'] }, SYSTEM)) as
+    | Record<string, unknown>
+    | null;
+  expect(row, `sys_user '${id}' must exist`).toBeTruthy();
+  return { banned: isBanned(row), ban_reason: (row!.ban_reason as string | null | undefined) ?? null };
+}
+
+const DIRECTORY_SUSPENDED = { banned: true, ban_reason: SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON };
+const RUNNING = { banned: false, ban_reason: null };
+
+/** `POST /service-account/resume` by a platform administrator, through the door's own handler. */
+async function platformResume(h: Harness, accountId: string): Promise<{ status: number; code?: string }> {
+  const deps: ServiceAccountLifecycleDeps = {
+    getDataEngine: () => h.engine as never,
+    runAtomically: (work) => work(),
+  };
+  const res = await runResumeServiceAccount(
+    deps,
+    { id: 'usr_platform_admin', isPlatformAdmin: true, activeOrganizationId: AGENT_ORG } as never,
+    new Request(`${AUTH}/service-account/resume`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: accountId }),
+    }),
+  );
+  const error = (res.body as { error?: { code?: string } }).error;
+  return { status: res.status, ...(error?.code ? { code: error.code } : {}) };
+}
+
+describe('a directory deactivation suspends the AI service accounts the person is accountable for, and a re-activation resumes none', () => {
+  it('(j) active:false suspends each account in every organization; active:true leaves them suspended; resume waits for the re-activation', async () => {
+    const h = await boot();
+    const pia = await provision(h, 'pia');
+    const other = await provision(h, 'quinn');
+    const rawA = await agentAccount(h, pia.userId, 'usr_agent_pia_a');
+    const rawB = await agentAccount(h, pia.userId, 'usr_agent_pia_b', AGENT_OTHER_ORG);
+    const rawOther = await agentAccount(h, other.userId, 'usr_agent_quinn');
+    // Control: before the directory deactivates, every account's key works.
+    expect([await keyDoor(h, rawA), await keyDoor(h, rawB), await keyDoor(h, rawOther)]).toEqual(['admitted', 'admitted', 'admitted']);
+
+    expect((await setActive(h, pia.scimId, false)).status).toBe(200);
+    expect([await accountBan(h, 'usr_agent_pia_a'), await accountBan(h, 'usr_agent_pia_b')]).toEqual([DIRECTORY_SUSPENDED, DIRECTORY_SUSPENDED]);
+    // Suspension is the ban: nothing is revoked, and the keys are refused on it.
+    expect([await keyRow(h, 'key_usr_agent_pia_a'), await keyRow(h, 'key_usr_agent_pia_b')]).toEqual([LIVE, LIVE]);
+    expect([await keyDoor(h, rawA), await keyDoor(h, rawB)]).toEqual(['refused:owner_banned', 'refused:owner_banned']);
+    // Another person's account is not this person's to stop.
+    expect(await accountBan(h, 'usr_agent_quinn')).toEqual(RUNNING);
+    expect(await keyDoor(h, rawOther)).toBe('admitted');
+
+    // Resume is refused while the owner is still deactivated.
+    expect(await platformResume(h, 'usr_agent_pia_a')).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+    expect(await accountBan(h, 'usr_agent_pia_a')).toEqual(DIRECTORY_SUSPENDED);
+
+    const res = await setActive(h, pia.scimId, true);
+    expect(res.status, `SCIM PATCH active:true failed: ${await res.clone().text()}`).toBe(200);
+    // The person's ban is lifted (the directory's to lift) …
+    expect(isBanned(await userRow(h, pia.email))).toBe(false);
+    // … and the accounts stay suspended: a re-activation resumes none of them.
+    expect([await accountBan(h, 'usr_agent_pia_a'), await accountBan(h, 'usr_agent_pia_b')]).toEqual([DIRECTORY_SUSPENDED, DIRECTORY_SUSPENDED]);
+    expect([await keyDoor(h, rawA), await keyDoor(h, rawB)]).toEqual(['refused:owner_banned', 'refused:owner_banned']);
+
+    // An administrator's resume, with the re-activated owner kept, lets the same key work again.
+    expect(await platformResume(h, 'usr_agent_pia_a')).toEqual({ status: 200 });
+    expect(await accountBan(h, 'usr_agent_pia_a')).toEqual(RUNNING);
+    expect(await keyDoor(h, rawA)).toBe('admitted');
+    expect(await accountBan(h, 'usr_agent_pia_b')).toEqual(DIRECTORY_SUSPENDED);
+  }, 60_000);
+
+  it('(j) DELETE /Users/{id} suspends them the same way; a re-link through the tombstone resumes none', async () => {
+    const h = await boot();
+    const body = {
+      schemas: [USER_SCHEMA],
+      userName: 'rio@example.com',
+      externalId: 'ext-rio',
+      name: { givenName: 'rio', familyName: 'Example' },
+      displayName: 'rio Example',
+      emails: [{ value: 'rio@example.com', primary: true, type: 'work' }],
+      active: true,
+    };
+    const created = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(created.status, `SCIM POST /Users failed: ${await created.clone().text()}`).toBe(201);
+    const scimId = ((await created.json()) as { id: string }).id;
+    const userId = String((await userRow(h, 'rio@example.com'))!.id);
+    const raw = await agentAccount(h, userId, 'usr_agent_rio');
+
+    const del = await h.send(scimRequest(h, 'DELETE', `/Users/${scimId}`));
+    expect(del.status, `SCIM DELETE /Users/{id} failed: ${await del.clone().text()}`).toBe(204);
+    expect(await accountBan(h, 'usr_agent_rio')).toEqual(DIRECTORY_SUSPENDED);
+    expect(await keyDoor(h, raw)).toBe('refused:owner_banned');
+
+    const again = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(again.status, `SCIM re-link POST /Users failed: ${await again.clone().text()}`).toBe(201);
+    expect(isBanned(await userRow(h, 'rio@example.com'))).toBe(false);
+    expect(await accountBan(h, 'usr_agent_rio')).toEqual(DIRECTORY_SUSPENDED);
+    expect(await keyDoor(h, raw)).toBe('refused:owner_banned');
+  }, 60_000);
+
+  it('(j) an account already suspended keeps its own reason', async () => {
+    const h = await boot();
+    const sol = await provision(h, 'sol');
+    await agentAccount(h, sol.userId, 'usr_agent_sol_left');
+    await h.engine.update('sys_user', { id: 'usr_agent_sol_left', banned: true, ban_reason: SERVICE_ACCOUNT_OWNER_LEFT_REASON, ban_expires: null }, SYSTEM);
+    await agentAccount(h, sol.userId, 'usr_agent_sol_stopped');
+    await h.engine.update('sys_user', { id: 'usr_agent_sol_stopped', banned: true, ban_reason: 'Stopped by a platform administrator', ban_expires: null }, SYSTEM);
+
+    expect((await setActive(h, sol.scimId, false)).status).toBe(200);
+    expect(await accountBan(h, 'usr_agent_sol_left')).toEqual({ banned: true, ban_reason: SERVICE_ACCOUNT_OWNER_LEFT_REASON });
+    expect(await accountBan(h, 'usr_agent_sol_stopped')).toEqual({ banned: true, ban_reason: 'Stopped by a platform administrator' });
+  }, 60_000);
+
+  it('(j) CONTROL: an administrator\'s ban of the owner leaves the account as it is', async () => {
+    const h = await boot();
+    const tam = await provision(h, 'tam');
+    const raw = await agentAccount(h, tam.userId, 'usr_agent_tam');
+
+    await adminBan(h, tam.userId, 'Policy violation');
+    expect(await accountBan(h, 'usr_agent_tam')).toEqual(RUNNING);
+    expect(await keyDoor(h, raw)).toBe('admitted');
+  }, 60_000);
+
+  it('(j) a suspension that cannot be written still deprovisions the person, and says so once at error', async () => {
+    const h = await boot();
+    const uma = await provision(h, 'uma');
+    const raw = await agentAccount(h, uma.userId, 'usr_agent_uma');
+    let refused = 0;
+    const real = h.engine;
+    const refusing = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'update') {
+          return (object: string, data: Record<string, unknown>, options?: unknown) => {
+            if (object === 'sys_user' && data?.id === 'usr_agent_uma') {
+              refused += 1;
+              throw new Error('account suspension write refused (test)');
+            }
+            return target.update(object, data as never, options as never);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(refusing as never);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await setActive(h, uma.scimId, false);
+      expect(res.status, `SCIM PATCH failed: ${await res.clone().text()}`).toBe(200);
+      expect(refused).toBe(1);
+      const row = await userRow(h, uma.email);
+      expect(isBanned(row)).toBe(true);
+      expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+      expect(await accountBan(h, 'usr_agent_uma')).toEqual(RUNNING);
+      expect(await keyDoor(h, raw)).toBe('admitted');
+      expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('AI service account suspension INCOMPLETE'))).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
+
+    // The next directory write that leaves the person inactive (here an
+    // attribute sync) retries it.
+    vi.mocked(h.manager.getDataEngine).mockReturnValue(real as never);
+    expect((await setDisplayName(h, uma.scimId, 'uma Renamed')).status).toBe(200);
+    expect(await accountBan(h, 'usr_agent_uma')).toEqual(DIRECTORY_SUSPENDED);
   }, 60_000);
 });
 
