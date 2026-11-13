@@ -37,6 +37,8 @@ import { SchemaRegistry } from './registry.js';
 
 const A = 'com.acme.alpha';
 const B = 'com.acme.beta';
+/** [#32692] An installed package that declares no webhook. */
+const S = 'com.acme.stray';
 const T = 'task_changed';
 const hook = (url: string) => ({ name: T, label: 'Task changed', object: 'showcase_task', triggers: ['create'], url });
 const shipped = (id: string) => `https://hooks.example/${id.split('.').pop()}`;
@@ -45,6 +47,7 @@ const shipped = (id: string) => `https://hooks.example/${id.split('.').pop()}`;
 function registryShipping(ids: string[]): SchemaRegistry {
     const registry = new SchemaRegistry();
     registry.logLevel = 'silent';
+    registry.installPackage({ id: S, name: S, version: '1.0.0', type: 'app', namespace: 'stray' } as never, 'code');
     for (const id of ids) {
         registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop() } as never, 'code');
         registry.registerItem('webhook', hook(shipped(id)), 'name' as never, id);
@@ -79,6 +82,7 @@ async function hydrate(ids: string[], rows: Array<{ packageId: string | null; ur
         holders: [...registry.packageScopedHoldersOf('webhook', T)].sort(),
         environment: registry.getEnvironmentScopedItem('webhook', T),
         slots: Object.fromEntries(ids.map((id) => [id, slot(id)])),
+        stray: slot(S),
     };
 }
 
@@ -91,7 +95,7 @@ describe('a stored webhook row at boot: loadMetaFromDb registers it in its own h
         for (const [packageId, url] of [[A, 'https://stored.example/row'], [null, shipped(A)]] as const) {
             const got = await hydrate([A], [{ packageId, url: 'https://stored.example/row' }]);
             expect(got.load).toMatchObject({ loaded: 1, errors: 0 });
-            expect([got.holders, got.environment, got.slots], String(packageId)).toEqual([[A], undefined, { [A]: url }]);
+            expect([got.holders, got.environment, got.slots, got.stray], String(packageId)).toEqual([[A], undefined, { [A]: url }, undefined]);
         }
         // The boot census names the sealed residue row (ADR-0131 D6).
         expect(warn.mock.calls.some((call: unknown[]) => String(call[0]).includes('metadata_sealed_overlay_unserved'))).toBe(true);
@@ -105,6 +109,27 @@ describe('a stored webhook row at boot: loadMetaFromDb registers it in its own h
                 expect([got.holders, got.environment], own).toEqual([[A, B], undefined]);
                 expect(got.slots, own).toEqual({ [own]: 'https://stored.example/row', [other]: shipped(other) });
             }
+        });
+    }
+
+    it('[#32692] CONTROL — one holder: a row naming a package that declares nothing keeps its reading (it is the one holder\'s), as before', async () => {
+        const got = await hydrate([A], [{ packageId: S, url: 'https://stored.example/stray' }]);
+        expect([got.holders, got.environment, got.slots]).toEqual([[A], undefined, { [A]: 'https://stored.example/stray' }]);
+        expect(warn.mock.calls.some((call: unknown[]) => String(call[0]).includes('metadata_stored_row_names_no_holder'))).toBe(false);
+    });
+
+    for (const order of [[A, B], [B, A]]) {
+        it(`[#32692] two holders (${order[0] === A ? 'alpha' : 'beta'} first): a row naming a package that holds no webhook of the name lands in no slot and is reported naming both holders`, async () => {
+            // FROM: the row took the first-registered holder's slot (alpha's,
+            // or beta's in the other order), so that holder's events went to
+            // the row's URL. TO: no slot takes it.
+            const got = await hydrate(order, [{ packageId: S, url: 'https://stored.example/stray' }]);
+            expect([got.holders, got.environment, got.stray]).toEqual([[A, B], undefined, undefined]);
+            expect(got.slots).toEqual({ [A]: shipped(A), [B]: shipped(B) });
+            const report = warn.mock.calls.map((call: unknown[]) => String(call[0])).find((line) => line.includes('metadata_stored_row_names_no_holder'));
+            expect(report).toContain(`'${S}'`);
+            expect(report).toContain(`'${A}'`);
+            expect(report).toContain(`'${B}'`);
         });
     }
 });
