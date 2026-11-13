@@ -2598,7 +2598,7 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
         return [item?._packageId, item?._provenance];
       };
       const listed = async (m: MetadataManager) => ((await m.list('action')) as Array<{ label?: string }>).map((item) => item.label).sort();
-      const tableOf = async () => ((await driver.find('sys_metadata', { where: { type: 'action' } } as any)) as Array<Record<string, unknown>>)
+      const tableOf = async () => ((await driver.find('sys_metadata', { where: { type: 'action' } } as never)) as Array<Record<string, unknown>>)
         .map((row) => [row.package_id ?? null, row.version]).sort();
       driver = createMockDriver();
       await seedRows([[ALPHA], [null]]);
