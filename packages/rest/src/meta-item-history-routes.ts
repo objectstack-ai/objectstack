@@ -218,6 +218,17 @@ export interface MetaItemHistoryRouteHost {
 }
 
 /**
+ * [ADR-0150 D3/D4, #32905] The `?package=` of the history and rollback doors,
+ * read as `/layers?package=` reads it ({@link metaItemPackageBinding}: `all`
+ * and the empty string name no package): the holder whose versions the door
+ * reads, or whose row it restores.
+ */
+function historyPackageSelector(query: unknown): { packageId?: string } {
+    const packageId = metaItemPackageBinding((query as { package?: unknown } | undefined)?.package);
+    return packageId !== undefined ? { packageId } : {};
+}
+
+/**
  * Register the `/meta` history family — the change log, the audit trail, the
  * publish, the rollback and the version comparison, the sixth group of
  * `RestServer#registerMetadataEndpointsInner`' body, called by that method at
@@ -295,7 +306,7 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                 // of the page the caller asked for.
                 // [#22877] Recognition first, over the measured closed set.
                 if (refuseUnknownQueryParams(req, res, META_ITEM_HISTORY_PARAMS)) return;
-                if (refuseRepeatedQueryParams(req, res, ['sinceSeq', 'limit', META_ITEM_MEMBER_PARAM])) return;
+                if (refuseRepeatedQueryParams(req, res, ['sinceSeq', 'limit', 'package', META_ITEM_MEMBER_PARAM])) return;
                 // [#20139] `sinceSeq` is parsed through its DECLARATION
                 // (`HistoryMetaItemRequestSchema.sinceSeq`, `z.number().optional()`),
                 // the way `limit` is just below: `?sinceSeq=abc` used to be `NaN`,
@@ -356,6 +367,10 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                     ...(limit !== undefined ? { limit } : {}),
                     // [#22877] ONE member's events of the bundle's lineage.
                     ...metaMemberSelector(req.query),
+                    // [ADR-0150 D3/D4, #32905] ONE holder's versions, for a type
+                    // stored per `(package, name)`: the name's log interleaves
+                    // every holder's, and naming none of two is refused 409.
+                    ...historyPackageSelector(req.query),
                 };
                 const result = await p.historyMetaItem(historyRequest);
                 res.json(result);
@@ -804,7 +819,7 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                 // by name says what actually happened.
                 // [#22877] Recognition first, over the measured closed set.
                 if (refuseUnknownQueryParams(req, res, META_ITEM_ROLLBACK_PARAMS)) return;
-                if (refuseRepeatedQueryParams(req, res, ['toVersion', META_ITEM_MEMBER_PARAM])) return;
+                if (refuseRepeatedQueryParams(req, res, ['toVersion', 'package', META_ITEM_MEMBER_PARAM])) return;
                 const body = (req.body && typeof req.body === 'object') ? req.body : {};
                 // [#25482] `toVersion` names a history row, so only a positive
                 // integer is a version. A bare `Number(...)` here coerced
@@ -855,6 +870,9 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                     ...(message ? { message } : {}),
                     // [#22877] Reverts ONE member of a bundled type.
                     ...metaMemberSelector(req.query),
+                    // [ADR-0150 D3/D4, #32905] …and ONE holder's row, for a type
+                    // stored per `(package, name)`; naming none of two is refused 409.
+                    ...historyPackageSelector(req.query),
                 });
                 res.json(result);
             } catch (error: any) {

@@ -2327,6 +2327,13 @@ export const HistoryMetaItemRequestSchema = lazySchema(() => z.object({
     + 'verb accepts.)',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  packageId: z.string().optional().describe(
+    'Optional package ID (`?package=` on the REST door, the `/layers` spelling) — '
+    + 'for a type stored per (package, name), the holder whose versions to read: '
+    + 'its own row\'s, or its `.custom` pair\'s declared override\'s (ADR-0150 D3/D4). '
+    + 'Absent, a name two holders\' rows hold is refused 409 naming every holder. '
+    + 'Every other type reads the name\'s log either way.',
+  ),
 }));
 
 /**

@@ -9507,6 +9507,11 @@ export class ObjectStackProtocolImplementation implements
      * construction: `saveMetaItem` refuses them outright (#5086), and the one
      * write channel they retain — `deleteMetaItem`'s legacy raw-engine branch
      * on a control-plane kernel — appends no `sys_metadata_history` row.
+     *
+     * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
+     * name two row slots hold is refused `409` naming every holder when no
+     * package is named, and `packageId` reads that holder's versions alone
+     * (`protocol-history-slots.ts`); a name one slot holds reads as before.
      */
     async historyMetaItem(request: {
         type: string;
@@ -9515,6 +9520,8 @@ export class ObjectStackProtocolImplementation implements
         limit?: number;
         /** [#22877] The bundle member whose lineage to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string;
+        /** [ADR-0150 D3/D4, #32905] The package whose versions to read; omitted, the name's (refused for two holders). */
+        packageId?: string;
     }): Promise<{ events: import('@objectstack/metadata-core').MetadataEvent[] }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.historyMetaItem(protocolHost(this), request);
@@ -10891,9 +10898,16 @@ export class ObjectStackProtocolImplementation implements
      * 409 (`VERSION_NOT_RESTORABLE`) when the target is a delete
      * tombstone (no body to bring back).
      *
-     * [#29848, ADR-0146 D8 item 2] The door names no package: it restores
-     * into the row the by-name read naming no package serves, a `.custom`
-     * pair's declared override over a row bound to its read-only base.
+     * [#29848, ADR-0146 D8 item 2] Naming no package, it restores into the
+     * row the by-name read naming no package serves, a `.custom` pair's
+     * declared override over a row bound to its read-only base.
+     *
+     * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
+     * name two row slots hold is refused `409` naming every holder when no
+     * package is named, with nothing written; `packageId` restores into that
+     * holder's row (its own, or its pair's declared override), and the
+     * version must be that holder's: another holder's answers 404
+     * `VERSION_NOT_FOUND` (`protocol-history-slots.ts`).
      *
      * [#32700] Then, as the save door does: the restored object's storage is
      * synced, and every stored computed field the restore makes compute

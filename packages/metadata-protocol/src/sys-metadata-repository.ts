@@ -66,6 +66,7 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 // [ruling 6677709817 (c)] The snapshot body both history writers store: the
 // written body without what the type's redactor marks not carried forward.
 import { historySnapshotBody } from '@objectstack/metadata/history-snapshot';
+import { ENVIRONMENT_HISTORY_MARK, PACKAGE_SLOTTED_STORE_TYPES, historyRowAttribution } from '@objectstack/metadata';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type {
   MetadataRepository,
@@ -553,6 +554,42 @@ export function versionNotFoundError(
   err.code = 'VERSION_NOT_FOUND';
   err.status = 404;
   return err;
+}
+
+/**
+ * [ADR-0150 D3/D4, #32905] The `sys_metadata_history.package_id` a snapshot of
+ * a row bound to `binding` is recorded with, for a type stored per
+ * `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`): the row's package, or the
+ * environment's mark for the package-less row — the column `DatabaseLoader`
+ * writes for the same table, so one rule ({@link historyRowAttribution}) says
+ * whose version a row is whichever writer recorded it. Every other type
+ * leaves the column out, as before.
+ */
+function historySnapshotPackageColumn(
+  type: string,
+  binding: string | null | undefined,
+): { package_id?: string } {
+  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return {};
+  return { package_id: typeof binding === 'string' && binding !== '' ? binding : ENVIRONMENT_HISTORY_MARK };
+}
+
+/**
+ * [ADR-0150 D3/D4, #32905] Whose versions a history read serves, or whose
+ * version a restore may write: the row slot `packageId` names (`null`: the
+ * package-less row), and whether a version attributed to no package
+ * (recorded before the column was written) is that slot's too — only when
+ * the name has no other row slot, so an unattributed version is never
+ * guessed onto one of several holders.
+ */
+export interface HistoryVersionOwner {
+  packageId: string | null;
+  unattributed: boolean;
+}
+
+/** [#32905] Whether history row `row` is a version of `owner`'s slot. */
+function isVersionOf(row: Record<string, unknown>, owner: HistoryVersionOwner): boolean {
+  const attributed = historyRowAttribution(row);
+  return attributed === undefined ? owner.unattributed : attributed === owner.packageId;
 }
 
 /**
@@ -1257,6 +1294,8 @@ export class SysMetadataRepository implements MetadataRepository {
           previous_checksum: existingHash,
           change_note: opts.message,
           source: opts.source ?? 'sys-metadata-repo',
+          // [ADR-0150 D3/D4, #32905] Whose row this snapshot is of.
+          ...historySnapshotPackageColumn(ref.type, parentRowData.package_id as string | null | undefined),
           // #4556 — `recorded_by` is a lookup('sys_user'). A write with no
           // actor stores NULL, never a sentinel string: an id that resolves
           // to no row is a foreign key that lies.
@@ -1414,6 +1453,8 @@ export class SysMetadataRepository implements MetadataRepository {
             previous_checksum: existingHash,
             change_note: opts.message,
             source: opts.source ?? 'sys-metadata-repo',
+            // [ADR-0150 D3/D4, #32905] Whose row the tombstone is of.
+            ...historySnapshotPackageColumn(ref.type, (existing as { package_id?: string | null }).package_id),
             // #4556 — NULL, not a sentinel, when the delete had no actor.
             recorded_by: opts.actor ?? null,
             recorded_at: now,
@@ -1711,6 +1752,16 @@ export class SysMetadataRepository implements MetadataRepository {
        * the unbound row, as before. A LOCAL extension, as on {@link delete}.
        */
       packageId?: string | null;
+      /**
+       * [ADR-0150 D3/D4, #32905] The row slot whose version `targetVersion`
+       * must be: a version attributed to another package (or to the
+       * environment, for a package's slot) answers 404 `VERSION_NOT_FOUND`,
+       * as another member's does, and an unattributed one is restored only
+       * where {@link HistoryVersionOwner.unattributed} admits it — ⛔ never
+       * another holder's version written into this slot's row. Omitted → any
+       * version of the name, as before.
+       */
+      versionOf?: HistoryVersionOwner;
     },
   ): Promise<{ version: string; seq: number; item: MetadataItem }> {
     this.assertOpen();
@@ -1724,6 +1775,20 @@ export class SysMetadataRepository implements MetadataRepository {
       context: { isSystem: true },
     });
     if (!row) throw versionNotFoundError(ref, targetVersion);
+    if (opts.versionOf !== undefined && !isVersionOf(row as Record<string, unknown>, opts.versionOf)) {
+      const owner = historyRowAttribution(row as Record<string, unknown>);
+      const whose = (id: string | null) => (id === null ? 'the environment\'s own row' : `package '${id}'`);
+      const err: any = new Error(
+        `No history row at version ${targetVersion} for ${ref.type}/${ref.name} of ${whose(opts.versionOf.packageId)}: `
+          + (owner === undefined
+            ? 'that version is attributed to no package, and more than one holds the name, so nothing says whose it is.'
+            : `that version belongs to ${whose(owner)}.`)
+          + ' Nothing was restored.',
+      );
+      err.code = 'VERSION_NOT_FOUND';
+      err.status = 404;
+      throw err;
+    }
     const raw = (row as any).metadata;
     if (raw === null || raw === undefined) {
       const err: any = new Error(
@@ -1921,7 +1986,14 @@ export class SysMetadataRepository implements MetadataRepository {
      * [#22877] `member` — the bundle member whose lineage to yield; omitted,
      * the canonical one (see {@link get}). Ignored for every other type.
      */
-    opts?: HistoryOptions & { member?: string | null },
+    opts?: HistoryOptions & {
+      member?: string | null;
+      /**
+       * [ADR-0150 D3/D4, #32905] One row slot's versions only
+       * ({@link HistoryVersionOwner}); omitted, every version of the name.
+       */
+      versionsOf?: HistoryVersionOwner;
+    },
   ): AsyncIterable<MetadataEvent> {
     this.assertOpen();
     const full = this.fullRef(ref);
@@ -1931,11 +2003,14 @@ export class SysMetadataRepository implements MetadataRepository {
     };
     // [#21908] The explicit system opt-in, as `get` carries — see its note.
     // [#22877] One member's rows only — {@link historyRowsOfMember}.
-    const rows = historyRowsOfMember(
+    let rows = historyRowsOfMember(
       full.type,
       await this.engine.find(this.historyTable, { where, context: { isSystem: true } }),
       opts?.member,
     );
+    // [#32905] …and one slot's, before the cursor and the limit page them.
+    const versionsOf = opts?.versionsOf;
+    if (versionsOf !== undefined) rows = rows.filter((row: Record<string, unknown>) => isVersionOf(row, versionsOf));
     rows.sort((a: any, b: any) => {
       const va = typeof a.event_seq === 'number' ? a.event_seq : 0;
       const vb = typeof b.event_seq === 'number' ? b.event_seq : 0;
