@@ -1199,7 +1199,7 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
     const useLinkForm = (token: string, picks: Pick[], user: string | null = OWNER.userId, extra: Record<string, unknown> = {}) => {
       const body: Record<string, unknown> = { count: String(picks.length), ...extra };
       picks.forEach((pick, i) => {
-        body[`file${i}`] = new File([pick.bytes], encodeURIComponent(pick.name), { type: pick.type ?? 'application/pdf' });
+        body[`file${i}`] = new File([new Uint8Array(pick.bytes)], encodeURIComponent(pick.name), { type: pick.type ?? 'application/pdf' });
       });
       return call('PUT', `${BASE}/upload-links/:token`, {
         params: { token },
@@ -1374,7 +1374,7 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       const upload = storage.upload.bind(storage);
       const keys: string[] = [];
       let calls = 0;
-      vi.spyOn(storage, 'upload').mockImplementation(async (key: string, data: Buffer, opts?: any) => {
+      vi.spyOn(storage, 'upload').mockImplementation(async (key, data, opts) => {
         calls += 1;
         if (calls === 2) throw new Error('disk full');
         keys.push(key);
@@ -1392,7 +1392,7 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       const pre = await files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count: 3 }, OWNER as never);
       calls = 0;
       keys.length = 0;
-      vi.spyOn(storage, 'upload').mockImplementation(async (key: string, data: Buffer, opts?: any) => {
+      vi.spyOn(storage, 'upload').mockImplementation(async (key, data, opts) => {
         calls += 1;
         if (calls === 2) throw new Error('disk full');
         keys.push(key);
