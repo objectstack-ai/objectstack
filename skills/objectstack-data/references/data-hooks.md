@@ -20,12 +20,7 @@ inline `handler`), the `HookContext` API, registration, and the canonical patter
 ### What Are Hooks?
 
 Hooks are **event handlers** that execute during the ObjectQL data access lifecycle.
-They intercept operations at specific points (before/after) and can:
-
-- **Read** the operation context (user, session, input data)
-- **Modify** input parameters or operation results
-- **Validate** data and throw errors to abort operations
-- **Trigger** side effects (notifications, integrations, logging)
+They intercept operations at specific points (before/after) — see [Before vs After](#before-vs-after-hooks).
 
 ### Hook Lifecycle Events
 
@@ -199,7 +194,7 @@ async: true
 ```
 
 **When to use async: true:**
-- Sending emails/notifications
+- Sending notifications
 - Non-critical side effects
 
 **When to use async: false:**
@@ -438,7 +433,7 @@ set of legal tokens (`HookBodyCapability`) is exactly seven:
 | `crypto.uuid` | `ctx.crypto.randomUUID()` |
 | `log` | `ctx.log.debug` / `info` / `warn` / `error(msg, data?)` |
 | `email.send` | `ctx.email.send({ to, subject, text })` — mail via the mail service; sender, user and organization are stamped (`BodyMailSendInputSchema`). **Not in a hook body** (refused at parse and at bind): a message cannot be taken back if the hook's write rolls back. Mail on a record change goes through an action, a job or a flow. |
-| `activity.append` | `ctx.activity.append({ object, recordId, type, summary })` — one record-timeline entry; actor and origin are stamped (`BodyActivityAppendInputSchema`). Commits or rolls back with the write that runs the body. |
+| `activity.append` | `ctx.activity.append({ object, recordId, type, summary })` — one record-timeline entry; actor and origin are stamped (`BodyActivityAppendInputSchema`). `type` is the app's own, never a `SYS_ACTIVITY_PLATFORM_TYPES` value (403 `PERMISSION_DENIED`, aborting the write under `onError: 'abort'`); never inside `ctx.api.transaction` (409 `RESOURCE_CONFLICT`). Commits or rolls back with the write that runs the body. |
 
 There is **no `http.fetch` capability** by design — outbound calls go through
 [Connector recipes](../../objectstack-automation/references/integration-recipes.md)
