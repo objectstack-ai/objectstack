@@ -515,9 +515,6 @@ export async function computeWithheldUpdateFilter(
   return branches.length === 1 ? branches[0] : { $or: branches };
 }
 
-/** [#32442] The listed columns (`side-copy-columns.ts`), re-exported for the activity pins. */
-export { SIDE_COPY_COLUMNS as ACTIVITY_SIDE_COPY_COLUMNS } from './side-copy-columns.js';
-
 /**
  * Redact the value-bearing columns of the activity rows one read is about to
  * hand back, as `context`. Mutates the rows in place (they are the read's own

@@ -7,7 +7,9 @@
  * search, group or aggregate by one of their value-bearing columns only when
  * it is served every field of the objects the query can reach: the ONE parent
  * object the query names, or, when it names none, every registered object.
- * Any other such query is refused, in the engine's own refusal shape.
+ * A query that names a parent whose copies `side-copy-columns.ts` lists, by a
+ * column holding such a copy, reaches every registered object too. Any other
+ * such query is refused, in the engine's own refusal shape.
  *
  * ## The defect this closes
  *
@@ -61,7 +63,13 @@
  *
  *  - A query that names ONE parent object — an equality on `object_name` at the
  *    root of its `where`, directly or inside a root `$and` — reaches no other
- *    parent, and is judged against that object alone.
+ *    parent, and is judged against that object alone, with one exception:
+ *  - A query that names one parent `side-copy-columns.ts` lists AND names a
+ *    column holding a copy of its row ({@link SIDE_COPY_CARRIER_COLUMNS}) is
+ *    judged as one that names none ({@link reachesSideCopy}). Such a copy can
+ *    carry field values of other objects, so pinning the parent does not
+ *    bound what the column holds. Naming any other column, or another parent,
+ *    keeps the pinned rule.
  *  - A query that names none is judged against the DECLARED set: every object
  *    registered in the engine ({@link declaredParentObjects}), read from
  *    metadata, never from rows, so it answers the same whatever the query and
@@ -134,7 +142,8 @@ export interface ParentFieldQueryGuard {
 const remedy = (what: string) =>
   ` ${what} carries field values of the record its row is about, so a query may filter, sort, search, group ` +
   'or aggregate by it only for a caller served every field of the objects it can reach: one parent object ' +
-  'named by equality on object_name, or every object when it names none.';
+  'named by equality on object_name, or every object when it names none or when the named object\'s ' +
+  'copies in this column can carry other objects\' values.';
 
 /**
  * The activity stream: the columns the field redaction narrows (see its header
@@ -415,9 +424,10 @@ function installParentFieldQueryGuard(
       const security = getSecurity();
       if (!security) return next();
       const parent = pinnedParentObject(ctx.ast.where, guard.object);
+      const askEveryObject = parent === null || reachesSideCopy(guard.object, parent, named);
       let refuse = true;
       try {
-        if (parent !== null && !reachesSideCopy(guard.object, parent, named)) {
+        if (!askEveryObject && parent !== null) {
           refuse = await readerWithholdsParentField(security, parent, ctx.context, logger);
         } else {
           refuse = await readerWithholdsAnyDeclaredParentField(engine, security, ctx.context, logger);
@@ -425,7 +435,7 @@ function installParentFieldQueryGuard(
       } catch (err) {
         logger.warn(
           `[audit] ${guard.object} query guard: could not tell whether the caller is served every field of ` +
-            `${parent !== null ? `'${parent}'` : 'every registered object'} — refusing the query (fail closed): ` +
+            `${askEveryObject ? 'every registered object' : `'${parent}'`} — refusing the query (fail closed): ` +
             `${(err as Error)?.message ?? err}`,
         );
         refuse = true;

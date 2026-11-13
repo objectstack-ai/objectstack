@@ -1,13 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#32442] `ACTIVITY_SIDE_COPY_COLUMNS`: the listed parent columns are not
+ * [#32442] `SIDE_COPY_COLUMNS`: the listed parent columns are not
  * served in an activity row's `metadata.old` / `metadata.new`, for any reader;
  * every other key is narrowed as before, and other objects are untouched.
  */
 
 import { describe, it, expect } from 'vitest';
-import { redactActivityRows, ACTIVITY_SIDE_COPY_COLUMNS } from './activity-field-redaction.js';
+import { redactActivityRows } from './activity-field-redaction.js';
+import { SIDE_COPY_COLUMNS } from './side-copy-columns.js';
 
 const SNAPSHOT = JSON.stringify({ name: 'INV-1', cost_code: 'SYNTH-SIDE-COPY-41' });
 const reader = { userId: 'u_reader', positions: [], permissions: [] };
@@ -20,7 +21,7 @@ const allServed = (fields: string[]) => ({
 
 describe('[#32442] activity rows do not serve the listed parent columns', () => {
   it('names exactly the request snapshot column', () => {
-    expect([...ACTIVITY_SIDE_COPY_COLUMNS.entries()]).toEqual([['sys_approval_request', ['payload_json']]]);
+    expect([...SIDE_COPY_COLUMNS.entries()]).toEqual([['sys_approval_request', ['payload_json']]]);
   });
 
   it('drops payload_json from both sides for a reader served every request field, keeping the rest', async () => {
