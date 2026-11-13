@@ -390,9 +390,20 @@ function refusedReferenceHint(refusal: PackageScopedRefusal, bodies: readonly Ju
   const holders = refusal.candidates.flatMap((c) => (c.kind === 'package' ? [c.packageId] : []));
   const caller = refusal.callerPackageId;
   if (refusal.reason === 'outside-closure' && caller !== null) {
-    const declare = holders.length === 1
-      ? `add \`'${holders[0]}': '${rangeOf(holders[0], bodies)}'\` to the \`dependencies\` of package '${caller}'`
-      : `add the one package whose list the field means (${holders.map((id) => `'${id}'`).join(' or ')}) ` +
+    // [#32967] A holder that already depends on the caller (a module of the
+    // app whose field names it) cannot be declared back: the kernel refuses
+    // the cycle at boot. Read off the artifact, so the hint names the open fix.
+    const registry = artifactRegistry(bodies);
+    const declarable = holders.filter((id) => !packageResolutionClosure(registry, id).has(caller));
+    if (holders.length > 0 && declarable.length === 0) {
+      return `${holders.length === 1 ? `'${holders[0]}' already depends` : `${holders.map((id) => `'${id}'`).join(' and ')} already depend`} ` +
+        `on '${caller}', so declaring a holder back would be a dependency cycle: declare the list in '${caller}' itself, ` +
+        `or move the field into the package that holds the list. ` +
+        'Until then the installed field serves no options and its values are refused.';
+    }
+    const declare = declarable.length === 1
+      ? `add \`'${declarable[0]}': '${rangeOf(declarable[0], bodies)}'\` to the \`dependencies\` of package '${caller}'`
+      : `add the one package whose list the field means (${declarable.map((id) => `'${id}'`).join(' or ')}) ` +
         `to the \`dependencies\` of package '${caller}'`;
     return `Declare the dependency: ${declare}. Or declare the list in '${caller}' itself. ` +
       'Until then the installed field serves no options and its values are refused.';

@@ -562,15 +562,29 @@ export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 
     case 'ambiguous-in-environment':
       return `${subject} is held by ${refusal.candidates.length} ${counted} in this environment and the caller names ` +
         `no package: ${named}. Nothing picks one of them: address it by its package.`;
-    case 'outside-closure':
+    case 'outside-closure': {
       // [#32929] Two fixes, because the first is not always open: when the
       // holder already depends on the caller (a module of the app that reads
       // it), declaring the holder back is a dependency cycle the kernel
       // refuses at boot. The sentence is static; the answer does not move.
-      return `${subject} is held outside the declared dependency closure of package "${refusal.callerPackageId}": ` +
-        `${named}. Declare a dependency on the package that holds it (ADR-0141). If that package already depends on ` +
-        `"${refusal.callerPackageId}", the dependency would be a cycle: move what reads it into that package, or move the ` +
-        `${typeLabel(refusal.type)} into "${refusal.callerPackageId}" (ADR-0150 D3).`;
+      const caller = refusal.callerPackageId;
+      const moveIn = `move the ${typeLabel(refusal.type)} into "${caller}"`;
+      const packages = refusal.candidates.filter((c) => c.kind === 'package').length;
+      const head = `${subject} is held outside the declared dependency closure of package "${caller}": ${named}.`;
+      // [#32967] Only the environment holds it (step 3's environment
+      // candidate): no package holds it, so there is nothing to depend on.
+      if (packages === 0) {
+        return `${head} No package holds it, so no dependency reaches it: ${moveIn} (ADR-0150 D3).`;
+      }
+      // [#32967] Two or more package holders: depending on every one would
+      // only turn this refusal into `ambiguous-in-closure`.
+      const declare = packages === 1
+        ? 'Declare a dependency on the package that holds it (ADR-0141).'
+        : `Declare a dependency on the one package whose ${typeLabel(refusal.type)} is meant; depending on more than one ` +
+          'leaves the name ambiguous (ADR-0141).';
+      return `${head} ${declare} If that package already depends on "${caller}", the dependency would be a cycle: ` +
+        `move what reads it into that package, or ${moveIn} (ADR-0150 D3).`;
+    }
     case 'not-held-by-qualifier':
       return `${subject} is not held by ${refusal.callerPackageId === null ? 'the environment' : `package "${refusal.callerPackageId}"`}, ` +
         `which the address names exactly (ADR-0150 D5): it is held by ${named}. Address it by its holder.`;

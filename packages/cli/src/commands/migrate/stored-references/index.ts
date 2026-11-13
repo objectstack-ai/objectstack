@@ -27,7 +27,7 @@ export function describeCandidate(c: ReferenceCandidate): string {
 const REASONS = {
   ambiguous: 'more than one holder, none picked — bind one after review',
   'environment-only': 'only an environment-authored item holds it, which a package never reaches (ADR-0150 D3 (a)) — not bindable',
-  'outside-closure': 'only packages outside the writer\'s declared dependencies hold it (ADR-0150 D3 (c)) — declare the dependency; not bindable',
+  'outside-closure': 'only packages outside the writer\'s declared dependencies hold it (ADR-0150 D3 (c)) — declare the dependency, or move the item where that dependency would be a cycle; not bindable',
 } as const;
 
 /**
