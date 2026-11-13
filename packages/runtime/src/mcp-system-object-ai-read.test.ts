@@ -23,6 +23,9 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
+// Paid at collection: the dispatcher's reach loads it lazily (check:test-source-alias).
+import '@objectstack/metadata';
+
 import { STORED_METADATA_BODY_OBJECTS } from '@objectstack/spec/kernel';
 
 import { HttpDispatcher } from './http-dispatcher.js';
