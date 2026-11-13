@@ -101,7 +101,7 @@ function validate(appReads: boolean, opts: { residual?: boolean; elsewhere?: boo
       join(dir, 'objectstack.config.mjs'),
       "import { composeStacks, defineStack } from '@objectstack/spec';\n\n"
         + (opts.residual
-          ? `export default { ...${composed}, datasets: [${JSON.stringify(RESIDUAL)}] };\n`
+          ? `export default defineStack({ ...${composed}, datasets: [${JSON.stringify(RESIDUAL)}] });\n`
           : `export default ${composed};\n`),
     );
     mkdirSync(join(dir, 'node_modules', '@objectstack'), { recursive: true });
