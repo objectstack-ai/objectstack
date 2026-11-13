@@ -1624,6 +1624,15 @@ function jsonText(value: unknown): string {
  * pass hands the validator the object's option-bearing fields on a formula
  * field's `expression` and nowhere else, so the tool asks the bridge for them
  * on the `formula` site only and answers every other site as the gate does.
+ *
+ * [#32640] `traversalHydration`: the sites where the gate runs the shared
+ * validator with `ExprSchemaHint.traversalHydration` — a validation rule's
+ * condition and a formula field's `expression`, the two seams the engine
+ * hydrates one relationship hop for (`@objectstack/lint`'s rule pass and
+ * `judgeFieldFormula`). There the validator refuses a reference read both
+ * through the relationship and as a plain value, and a second hop, in the
+ * gate's words; nothing hydrates a flow condition or a template, so the gate
+ * does not ask there and neither does the tool.
  */
 const VALIDATE_SITE_MAP: Record<
   string,
@@ -1632,6 +1641,7 @@ const VALIDATE_SITE_MAP: Record<
     scope: 'record' | 'flattened';
     slot: z.ZodType;
     optionLabels?: true;
+    traversalHydration?: true;
     /**
      * [#29904, #29926, #29959] What the gate's runtime does on a fault at this
      * site, from the caller's optional `severity` / `triggerKind` — the two
@@ -1647,14 +1657,16 @@ const VALIDATE_SITE_MAP: Record<
     }) => ExprFaultOutcome | undefined;
   }
 > = {
-  formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true },
+  formula: {
+    role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true, traversalHydration: true,
+  },
   // [#29904, #29926] A `severity: 'error'` rule (the default) fails closed: a
   // fault refuses the write. An advisory rule (`warning` / `info`) fails open:
   // the rule is skipped and the write proceeds. The gate grades a
   // text-vs-number comparison an error worded for each; the tool answers what
   // the gate will for the severity it is told.
   validation: {
-    role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema,
+    role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema, traversalHydration: true,
     faultOutcome: ({ severity }) => (severity === 'warning' || severity === 'info' ? 'fail-open' : 'fail-closed'),
   },
   // [#29926, #29959] A record-triggered flow's start, edge or `decision`
@@ -2215,7 +2227,8 @@ export function registerObjectTools(
       {
         description:
           'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns ' +
-          'build-time errors (bare field refs, unknown fields, unknown functions) and advisory warnings ' +
+          'build-time errors (bare field refs, unknown fields, unknown functions; at a `formula` or `validation` site, a ' +
+          'reference field read both through the relationship and as a plain value, or more than one hop) and advisory warnings ' +
           '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
           '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
           'a warning on any other flow; date-equality pitfalls), plus the fields and stdlib ' +
@@ -2304,7 +2317,8 @@ export function registerObjectTools(
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
-          const { role, scope, slot, optionLabels, faultOutcome: outcomeOf } = VALIDATE_SITE_MAP[site ?? 'formula'];
+          const { role, scope, slot, optionLabels, traversalHydration, faultOutcome: outcomeOf } =
+            VALIDATE_SITE_MAP[site ?? 'formula'];
           const faultOutcome = outcomeOf?.({
             severity: severity ?? 'error',
             triggerKind: triggerKind ?? 'record_change',
@@ -2322,6 +2336,8 @@ export function registerObjectTools(
             fieldTypes,
             scope,
             ...(optionFields ? { optionFields } : {}),
+            // [#32640] The gate's relationship-traversal checks, where it runs them.
+            ...(traversalHydration ? { traversalHydration } : {}),
             ...(faultOutcome ? { faultOutcome } : {}),
             // [#30250] A time-relative sweep's run is fired by no write: the
             // gate's run-fails sentence there names none, and so does this one.
@@ -3284,7 +3300,8 @@ export function registerFileTools(
           'as an attachment (attachments: true). Give the link to the user to open in a browser where they are ' +
           'signed in to this deployment as themselves; it works only for them, once, for this record and field ' +
           'only, and expires (see expiresAt). The upload is stored as the user, so they must be able to edit the ' +
-          'record (and the field).',
+          'record (and the field): a record a pending approval locks, or a read-only field, gets no link, and an ' +
+          'upload the field cannot take when it arrives is refused with the reason, attaching nothing.',
         inputSchema: strictToolInput(
           {
             surface: 'this create_upload_link call',

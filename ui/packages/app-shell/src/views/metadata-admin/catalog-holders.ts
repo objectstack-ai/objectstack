@@ -18,11 +18,19 @@
  *
  * One person is counted once, however many rows they hold. A page the server
  * reports as longer than one read is said as a lower bound, never as the total.
+ *
+ * A permission set whose name more than one package holds (objectstack#32537,
+ * ADR-0150 D4) is counted for the one holder the confirm switches: the same
+ * reads, each grant and position read by the rule the resolver reads it with
+ * (`permission-set-holder.ts`). A position whose declaring package holds no set
+ * of the name is judged by that package's dependencies on the server; it is
+ * counted, so the confirm never says fewer people than lose the access.
  * ⛔ A refused read rejects: the caller says the count could not be read, never
  * "0 users" (objectui#12706).
  */
 
 import { positionsDistributing } from './AssignedUsersSection.js';
+import { holderPackageOf, storedGrantHolders, type PermissionSetHolding } from './permission-set-holder.js';
 
 /** Which catalog types the deactivation confirm counts holders for. */
 export const HOLDER_COUNTED_TYPES = ['permission', 'position'] as const;
@@ -74,12 +82,13 @@ async function readUserIds(
   object: string,
   filter: Record<string, unknown>,
   into: Set<string>,
+  keep: (row: Record<string, unknown>) => boolean = () => true,
 ): Promise<boolean> {
   const res = await source.find(object, { $filter: filter, $top: HOLDER_PAGE_SIZE });
   const rows = rowsOf(res);
   for (const row of rows) {
     const uid = row?.user_id;
-    if (uid !== undefined && uid !== null && uid !== '') into.add(String(uid));
+    if (uid !== undefined && uid !== null && uid !== '' && keep(row)) into.add(String(uid));
   }
   return truncatedAnswer(res, rows);
 }
@@ -88,14 +97,16 @@ async function readUserIds(
 const ANCHOR_POSITIONS = new Set(['everyone', 'guest']);
 
 /**
- * How many users hold `name` of `type`. Rejects when there is no data source or
- * any read is refused.
+ * How many users hold `name` of `type` — for a permission set, `holding`'s set
+ * of the name when the page passes one (module doc). Rejects when there is no
+ * data source or any read is refused.
  */
 export async function readCatalogHolderCount(
   source: HolderReadSource | null | undefined,
   metadata: HolderMetadataSource,
   type: string,
   name: string,
+  holding?: PermissionSetHolding,
 ): Promise<CatalogHolderCount> {
   if (!source) throw new Error('No data source to read the holders from.');
   const users = new Set<string>();
@@ -104,8 +115,12 @@ export async function readCatalogHolderCount(
     return { count: users.size, truncated, everyone: false };
   }
   if (type !== 'permission') throw new Error(`No holders to count for metadata type '${type}'`);
-  let truncated = await readUserIds(source, 'sys_user_permission_set', { permission_set: name }, users);
-  const distributing = positionsDistributing(await metadata.ensureType('position'), name);
+  const heldHere = holding
+    ? (grant: Record<string, unknown>) =>
+        storedGrantHolders(holderPackageOf(grant.permission_set_package), holding.holders).includes(holding.packageId)
+    : undefined;
+  let truncated = await readUserIds(source, 'sys_user_permission_set', { permission_set: name }, users, heldHere);
+  const distributing = positionsDistributing(await metadata.ensureType('position'), name, holding);
   const everyone = distributing.includes('everyone');
   const positions = distributing.filter((p) => !ANCHOR_POSITIONS.has(p));
   if (positions.length > 0) {

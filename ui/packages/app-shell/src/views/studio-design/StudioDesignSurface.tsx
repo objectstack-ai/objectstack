@@ -1422,7 +1422,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // the package-less scope: its one pillar keeps its own aside, and its build
   // thread would be a package's, with no package here to build into
   // (objectui#11553).
-  const slotHost = chatDockMode && packageId !== null;
+  // objectstack#32615 — nor in a package that is not there (`pkgMissing`): its
+  // copilot would offer to "edit this app" and write drafts under an id no
+  // package has.
+  const slotHost = chatDockMode && packageId !== null && !pkgMissing;
   // Shown or hidden from the top bar, remembered per tab under the key the
   // Studio dock kept its collapse in (#2477 item 2): an author who hid the
   // copilot finds the slot hidden. Under `md` the slot overlays the page and
@@ -1572,7 +1575,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
         {/* The ADR-0080 `aiSlot` seam — a cloud edition may still inject its own
           * left copilot panel; the built-in copilot is the RIGHT dock below. */}
-        {aiSlot ? (
+        {/* objectstack#32615 — not beside a package that is not there. */}
+        {aiSlot && !pkgMissing ? (
           <aside className="w-64 shrink-0 overflow-auto border-r bg-muted/40">{aiSlot}</aside>
         ) : null}
 
@@ -9802,6 +9806,17 @@ export function AccessPillar({
   const navigate = useNavigate();
   const location = useLocation();
   const [newSimilarOpen, setNewSimilarOpen] = React.useState(false);
+  // objectstack#32774 — the package "New similar" clones the open set from,
+  // as the matrix read it: named only where the set's name has more than one
+  // holder (`onCloneSourceRead`), so a name with one holder is cloned by name.
+  const [newSimilarSource, setNewSimilarSource] = React.useState<{ name: string; sourcePackage: string | undefined } | null>(
+    null,
+  );
+  const onCloneSourceRead = React.useCallback((name: string, sourcePackage: string | undefined) => {
+    setNewSimilarSource((prev) =>
+      prev && prev.name === name && prev.sourcePackage === sourcePackage ? prev : { name, sourcePackage },
+    );
+  }, []);
   const [newSimilarStrip, setNewSimilarStrip] = React.useState<NewSimilarStrip | null>(() => {
     // objectstack#28572 — a copy that landed in the base's pair arrives on
     // the base's surface; matched by the spec's pairing rule (a read).
@@ -10498,6 +10513,7 @@ export function AccessPillar({
               studio={{
                 tab: accessTab,
                 onTabChange: setAccessTab,
+                onCloneSourceRead,
                 leading: accessRailToggleEl,
                 chips: currentAddedIn ? (
                   <>
@@ -10553,6 +10569,7 @@ export function AccessPillar({
       {newSimilarOpen && current && (
         <PermissionSetCloneDialog
           source={current}
+          sourcePackage={newSimilarSource?.name === current ? newSimilarSource.sourcePackage : undefined}
           locale={locale}
           onClose={() => setNewSimilarOpen(false)}
           onCloned={onNewSimilarSaved}

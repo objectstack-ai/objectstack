@@ -3079,6 +3079,34 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "トピック別"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "アプリ内メッセージを送信",
+        description: "組織の全員、または選んだメンバーにメッセージを送信します。各受信者の通知に表示されます。",
+        successMessage: "{{ result.recipients }} 人にメッセージを送信しました",
+        params: {
+          everyone: {
+            label: "この組織の全員",
+            helpText: "現在の組織のすべてのメンバーに送信します。オフのままにすると、下で受信者を選べます。"
+          },
+          recipients: {
+            label: "受信者",
+            helpText: "全員宛てでないときに送信する、組織のメンバー。"
+          },
+          title: {
+            label: "タイトル",
+            helpText: "各受信者が通知で目にする一行。"
+          },
+          body: {
+            label: "本文"
+          },
+          link: {
+            label: "リンク",
+            helpText: "任意。メッセージが開く、このアプリ内のページ（/ で始まる）またはウェブアドレス。"
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3752,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "バージョン"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "操作タイプ",

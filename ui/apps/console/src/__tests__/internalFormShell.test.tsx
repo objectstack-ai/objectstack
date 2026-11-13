@@ -56,6 +56,10 @@ const { passthrough, stub } = vi.hoisted(() => ({
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ConsoleShell: passthrough,
+  // The organization gate over `/home`, `/apps` and `/forms` sits beside the
+  // stubbed `ProtectedRoute` now, not inside it (objectstack#32633); auth and
+  // organizations are not the question here either.
+  RequireOrganization: ({ children }: { children?: ReactNode }) => <>{children}</>,
   ConsoleToaster: () => null,
   // Suspense fallback for App.tsx's lazy /docs routes (objectui#5467).
   // The route elements are built when App renders, so this export is

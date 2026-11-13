@@ -101,6 +101,29 @@ export const FLOW_UPDATE_READONLY_WHEN_FIELD = 'flow-update-readonly-when-field'
 export const READONLY_WHEN_STRIP_SCOPE = 'where its predicate is TRUE';
 export const READONLY_INSERT_STRIP_OUTCOME = 'so the row is created WITHOUT this column';
 
+/**
+ * [#32666] The flow type whose static-branch remedy states a limit.
+ * `runAs:'system'` is the channel through which automation maintains a readonly
+ * field, but the start-admission rule that every door starting a flow by name
+ * asks (`flowStartRefusal`, `packages/runtime/src/flow-start-admission.ts`)
+ * refuses a non-system caller a `runAs:'system'` flow whose type runs on its
+ * own trigger (`autolaunched`, `record_change`, `schedule`) with 403
+ * `PERMISSION_DENIED`. Of the three, `autolaunched` is the one a record action
+ * button (`type: 'flow'`) names, so its remedy says which elevated flow a
+ * button or action CAN start: a `screen` or `api` flow, the two entry types the
+ * admission leaves to the flow's own `requiredPermissions`, or an elevated flow
+ * a user-run flow's `subflow` node calls (the child's `runAs` decides its
+ * writes: `crud-runas.test.ts` in service-automation). A `record_change` or
+ * `schedule` flow starts on its own trigger, where elevation is admitted, so
+ * its remedy is unchanged.
+ *
+ * ⛔ Not a copy of the admission's type set: this judges one type and names the
+ * two the admission admits, of the five `FlowSchema.type` declares.
+ */
+const BUTTON_STARTED_FLOW_TYPE = 'autolaunched';
+/** The elevated flows a button or action can start for a user (#32666). */
+const ELEVATED_BUTTON_ENTRY = "a 'screen' or 'api' flow";
+
 /** The node type whose payload the STATIC branch alone judges (#15394). */
 const CREATE_NODE_TYPE = 'create_record';
 /** The node type both branches judge. */
@@ -281,6 +304,9 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
     // branch below (#14201).
     const runAs = flow.runAs === 'user' || flow.runAs === 'system' ? flow.runAs : 'user';
     const isSystemRun = runAs === 'system';
+    // [#32666] A button or action starts this type, and refuses to start it
+    // elevated, so the remedy names what it can start (BUTTON_STARTED_FLOW_TYPE).
+    const buttonStarted = flow.type === BUTTON_STARTED_FLOW_TYPE;
 
     const flowName = typeof flow.name === 'string' ? flow.name : `#${flowIndex}`;
     // Every node, INCLUDING those nested in try_catch / loop / parallel regions.
@@ -346,12 +372,21 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
               (isCreate ? `INSERT silently strips, ${READONLY_INSERT_STRIP_OUTCOME}` : 'UPDATE silently strips'),
             // [#22161] One remedy line per verb. Why runAs:'system' is the
             // intended channel, and why a beforeInsert stamp survives the strip,
-            // are `os explain flow-update-readonly-field`.
+            // are `os explain flow-update-readonly-field`. [#32666] On an
+            // autolaunched flow the line names the elevated flow a button or
+            // action can start, and a create leads with the stamp, which a
+            // button-started run keeps.
             hint: isCreate
-              ? `Declare the flow runAs:'system', stamp '${fieldName}' in a beforeInsert hook on '${objectName}', ` +
-                `or remove it from this create_record node`
-              : `Declare the flow runAs:'system' if automation maintains '${fieldName}', or remove it from this ` +
-                `update_record node`,
+              ? buttonStarted
+                ? `Stamp '${fieldName}' in a beforeInsert hook on '${objectName}', or remove it from this ` +
+                  `create_record node; runAs:'system' from a button needs ${ELEVATED_BUTTON_ENTRY} or a subflow node`
+                : `Declare the flow runAs:'system', stamp '${fieldName}' in a beforeInsert hook on '${objectName}', ` +
+                  `or remove it from this create_record node`
+              : buttonStarted
+                ? `Declare the flow runAs:'system' (a button starts an elevated flow only as ${ELEVATED_BUTTON_ENTRY}, ` +
+                  `or through a subflow node), or remove '${fieldName}' from this update_record node`
+                : `Declare the flow runAs:'system' if automation maintains '${fieldName}', or remove it from this ` +
+                  `update_record node`,
           });
         } else if (meta.readonlyWhen && !isCreate) {
           // `!isCreate`: the conditional lock has no prior record to evaluate on

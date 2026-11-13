@@ -3079,6 +3079,34 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "Nach Thema"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "In-App-Nachricht senden",
+        description: "Senden Sie eine Nachricht an alle in Ihrer Organisation oder an die Mitglieder, die Sie auswählen. Sie erscheint in den Benachrichtigungen jedes Empfängers.",
+        successMessage: "Nachricht gesendet. Empfänger: {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "Alle in dieser Organisation",
+            helpText: "An jedes Mitglied Ihrer aktuellen Organisation senden. Lassen Sie es aus, um die Empfänger unten auszuwählen."
+          },
+          recipients: {
+            label: "Empfänger",
+            helpText: "Die Mitglieder Ihrer Organisation, an die gesendet wird, wenn die Nachricht nicht für alle ist."
+          },
+          title: {
+            label: "Titel",
+            helpText: "Die Zeile, die jeder Empfänger in seinen Benachrichtigungen sieht."
+          },
+          body: {
+            label: "Nachricht"
+          },
+          link: {
+            label: "Link",
+            helpText: "Optional. Eine Seite in dieser App (beginnend mit /) oder eine Webadresse, die die Nachricht öffnet."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3752,9 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "Version"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "Vorgangstyp",

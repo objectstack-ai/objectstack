@@ -46,6 +46,7 @@ export const zhHantGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_metadata_commit.label": "e468d6648e2b0c37",
   "objects.sys_metadata_commit.pluralLabel": "20e7caa05a2b0373",
   "objects.sys_metadata_history.fields.id.label": "00b0385c9c152888",
+  "objects.sys_metadata_history.fields.package_id.label": "cf01d56712075feb",
   "objects.sys_oauth_access_token.fields.id.label": "00b0385c9c152888",
   "objects.sys_oauth_application._actions.create_oauth_application.resultDialog.fields.client.client_id": "09cb452151e7b1b6",
   "objects.sys_oauth_application._actions.create_oauth_application.resultDialog.fields.client.client_secret": "8c703fe05bf2ed5d",

@@ -45,6 +45,7 @@ import {
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type {
+  IApprovalService,
   IHttpServer,
   IDataEngine,
   II18nService,
@@ -420,6 +421,16 @@ export class StorageServicePlugin implements Plugin {
         getSecurity: () => {
           try {
             return ctx.getService<ISecurityService>('security');
+          } catch {
+            return null;
+          }
+        },
+        // [#32734] Whether a pending approval locks the record a field upload
+        // link would write, asked when the link is minted. No approvals
+        // plugin: no record is locked.
+        getApprovals: () => {
+          try {
+            return ctx.getService<IApprovalService>('approvals');
           } catch {
             return null;
           }

@@ -150,6 +150,7 @@ import {
   checkPageDefaultPlacement,
   checkPageMainRegionWidth,
   checkPageRecordBindingPlacement,
+  checkPageRecordPlacesComponent,
   checkAppLandingItems,
   VIEW_METADATA_MEMBERS as SpecViewMetadataMembers,
   // objectui#12736 — the form option's spec shape: the form-view option.
@@ -746,6 +747,10 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
       // `PageKindNodeSchema`, and `record` binding placement, on `PageKindNodeSchema` only.
       ['checkPageMainRegionWidth', checkPageMainRegionWidth],
       ['checkPageRecordBindingPlacement', checkPageRecordBindingPlacement],
+      // objectstack#32478: the record page body check objectstack#32434 adds to `PageSchema` —
+      // a `full` record page that places no component, refused at `regions` — on
+      // `PageKindNodeSchema` only.
+      ['checkPageRecordPlacesComponent', checkPageRecordPlacesComponent],
       // objectui#12670: the list view chart-binding check `@objectstack/spec` 18 carries on
       // `ListViewSchema`, attached on the authored page `list-view` node's bag
       // (`ListViewPropsBag`), whose `type` is the spec's view kind.

@@ -3079,6 +3079,34 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "按主题"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "发送站内消息",
+        description: "向组织内的所有人或你挑选的成员发送一条消息，它会出现在每位收件人的通知中。",
+        successMessage: "消息已发送给 {{ result.recipients }} 人",
+        params: {
+          everyone: {
+            label: "本组织所有人",
+            helpText: "发送给当前组织的每位成员。不打开则在下方挑选收件人。"
+          },
+          recipients: {
+            label: "收件人",
+            helpText: "消息不是发给所有人时，要发送给的本组织成员。"
+          },
+          title: {
+            label: "标题",
+            helpText: "每位收件人在通知中看到的那一行。"
+          },
+          body: {
+            label: "正文"
+          },
+          link: {
+            label: "链接",
+            helpText: "可选。消息打开的本应用页面（以 / 开头）或网址。"
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3752,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "版本"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "操作类型",

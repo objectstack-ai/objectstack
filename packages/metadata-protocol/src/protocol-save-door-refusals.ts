@@ -61,7 +61,7 @@ import {
 } from '@objectstack/spec/api';
 import { resolveItemLock, withItemLockFamily } from './item-lock.js';
 import type { ItemAddress } from './item-lock.js';
-import { isFederatedObject, PackageScopedNameRefusedError } from '@objectstack/core';
+import { isFederatedObject, PackageScopedNameRefusedError, permissionSetHoldersMeet } from '@objectstack/core';
 import { itemDiscriminator } from '@objectstack/metadata-core';
 import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns, SeedSchema } from '@objectstack/spec/data';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
@@ -348,13 +348,18 @@ function registryPackageHoldersOf(registry: unknown, name: string): readonly str
  * The body of `ObjectStackProtocolImplementation#permissionSetNameCollisionRefusal`;
  * the method's docblock there is its contract.
  *
- * A `permission` set's name is its identity across the whole deployment: a
- * grant (`sys_user_permission_set.permission_set`) resolves its set by that
- * name alone (ADR-0131 D4), so positions, permission sets and capabilities each
- * hold one name per deployment (maintainer ruling Q4 = A on #15196, record
- * 6050490870). A write that would make a set of a name ACTIVE under an owner
- * other than the one already holding the name is refused here, with nothing
- * written — a package never writes into a record another owns (ADR-0086 D4).
+ * A `permission` set's name was its identity across the whole deployment (Q4 =
+ * A on #15196, record 6050490870). [ADR-0150 D2/D9, #31698] It is now one name
+ * per NAMESPACE: a set is `(package, name)`, a grant carries its package
+ * column (D8), and two packages of two namespaces each hold their own set of a
+ * name — judged by the ONE predicate the install gate asks too,
+ * `permissionSetHoldersMeet` (`@objectstack/core`). A write that would make a
+ * set of a name ACTIVE under an owner other than a holder it meets is refused
+ * here, with nothing written — a package never writes into a record another
+ * owns (ADR-0086 D4). The environment meets every holder, as before. A set
+ * another package STORES meets every writer too: the registry keeps one entry
+ * per stored set of a name, so two stored sets of one name are not yet kept
+ * apart there (#31698), and a second one stays refused.
  *
  * ## The owner
  *
@@ -435,8 +440,25 @@ export async function permissionSetNameCollisionRefusal(
     if (storedUnbound && residueOf === undefined) holders.add(null);
 
     const written = typeof owner === 'string' && owner !== '' ? owner : residueOf ?? null;
+    // [ADR-0150 D2/D9, #31698] A set is one name per namespace: a package
+    // holder the writing package does not meet under the ONE predicate the
+    // install gate asks ({@link permissionSetHoldersMeet}) holds its own set of
+    // the name, not this one. The environment, on either side, still meets
+    // every holder. ⛔ A STORED row of another package still holds the name
+    // whatever its namespace: the registry keeps one entry per stored set of a
+    // name, so a second stored set would take the first one's place there. Two
+    // namespaces' sets of one name are admitted where the first is shipped (an
+    // installed package's own), never beside another package's stored set.
+    const namespaceOf = (packageId: string): string | undefined => {
+        const namespace = (this.engine?.registry as { getPackage?: (id: string) => { manifest?: { namespace?: unknown } } | undefined } | undefined)
+            ?.getPackage?.(packageId)?.manifest?.namespace;
+        return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
+    };
+    const meets = (holder: string | null): boolean =>
+        holder === null || written === null || storedPackages.has(holder)
+        || permissionSetHoldersMeet(namespaceOf(written), namespaceOf(holder), name);
     const foreign = [...holders]
-        .filter((holder) => holder !== written)
+        .filter((holder) => holder !== written && meets(holder))
         // Packages by id, the environment last, so the sentence is the same on every driver.
         .sort((a, b) => (a === b ? 0 : a === null ? 1 : b === null ? -1 : a < b ? -1 : 1));
     if (foreign.length === 0) return undefined;
@@ -453,9 +475,9 @@ export async function permissionSetNameCollisionRefusal(
     const err = new Error(
         `Security catalog name conflict: ${writer} cannot ${verb} the permission set "${name}" — it is already held by `
         + `${foreign.map(holderPhrase).join(' and ')}. Nothing was ${verb === 'publish' ? 'published' : 'written'}. ${remedy} `
-        + 'Positions, permission sets and capabilities each hold one name per deployment: an assignment names a '
-        + 'permission set by its bare name, with no package to tell two definitions apart, so with two holders which '
-        + 'definition grants would depend on registration order. See ADR-0048.',
+        + 'A permission set holds one name per namespace: two packages of one namespace, a platform package '
+        + '(`base`, `system`, `sys`), a package with no namespace, the environment, or a name the platform requests '
+        + 'by spelling share one set of it, and a set another package stores holds its name. See ADR-0150 D2.',
     ) as Error & { code: 'NAMESPACE_CONFLICT'; status: 422 };
     err.code = 'NAMESPACE_CONFLICT';
     err.status = 422;

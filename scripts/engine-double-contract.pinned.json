@@ -1887,6 +1887,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.registry-heal-package-read.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.registry-heal-package-read.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.registry-heal-package-read.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.restore-doors-save-refusal-family.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2962,6 +2977,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/metadata-sync-flow-two-holders.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/package-disable-enforcement.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3008,6 +3028,21 @@
     },
     {
       "file": "packages/objectql/src/protocol-boot-object-package-binding.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-cluster-signal-package.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-cluster-signal-package.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-cluster-signal-package.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3137,6 +3172,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/protocol-permission-set-name-registry-reading.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/protocol-publish-package-drafts.test.ts",
       "verb": "update",
       "pinned": 1
@@ -3153,6 +3193,21 @@
     },
     {
       "file": "packages/objectql/src/protocol-publish-rollback.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-registry-heal-packageless-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-registry-heal-packageless-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-registry-heal-packageless-refusal.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -5089,7 +5144,7 @@
     {
       "file": "packages/runtime/src/domains/actions-addressed-route.test.ts",
       "verb": "findOne",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/runtime/src/domains/catalog-activation-door.test.ts",
@@ -5163,6 +5218,11 @@
     },
     {
       "file": "packages/runtime/src/domains/packages-seed-apply-read-decorations.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/permission-set-package-doors.test.ts",
       "verb": "update",
       "pinned": 1
     },

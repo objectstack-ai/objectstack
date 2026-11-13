@@ -147,6 +147,8 @@ export interface FileAttachmentServiceDeps {
     | (AttachmentSecurityLike & Partial<Pick<ISecurityService, 'explain' | 'getWritableFields'>>)
     | null
     | undefined;
+  /** [#32734] The approvals service, for whether a record a field upload link writes is locked. */
+  getApprovals?: RecordFileAccessDeps['getApprovals'];
   /**
    * [#30892] What the record-file verbs ({@link ICallerRecordFileService},
    * {@link UploadLinkDoor}) are bound over beyond the members above — the
@@ -318,6 +320,7 @@ export class FileAttachmentService
           attachments: this,
           getSharing: () => deps.getSharing?.(),
           getSecurity: () => deps.getSecurity?.(),
+          getApprovals: () => deps.getApprovals?.(),
           logger: deps.logger,
         })
       : null;
