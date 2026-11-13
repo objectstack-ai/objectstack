@@ -3200,6 +3200,25 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
     expect(await state(m)).toEqual(ITEMS.map(([type, name]) => name === 'env_account' ? [type, name, null, false, 0] : [type, name, HOST, true, 1]));
   });
 
+  it('CONTROL a stored row that now names the host in its own body, read again by the pass over the marked entry, is the host\'s: unregisterPackage(host) removes it', async () => {
+    for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
+    const plugin = new MetadataPlugin({ packageId: HOST, watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    await (plugin as any)._loadFromFileSystem({ logger });
+    // Another writer (a peer node, a CLI) stores the host's own row under the name.
+    await driver.update('sys_metadata', 'object_env_account', { metadata: JSON.stringify({ name: 'env_account', label: 'host', _packageId: HOST }), checksum: 'host' });
+    // A fresh loader over the store (no read cache), as a reload reads it.
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    await (plugin as any)._loadFromFileSystem({ logger });
+    expect((m as any).registry.get('object').get('env_account')).toMatchObject({ label: 'host', _packageId: HOST });
+    await m.unregisterPackage(HOST);
+    expect(await state(m)).toEqual(ITEMS.map(([type, name]) => name === 'env_account' ? [type, name, null, false, 0] : [type, name, HOST, true, 1]));
+  });
+
   it('CONTROL unregisterPackage of the extender leaves the environment\'s object the bridge rewrote, and of another package nothing moves', async () => {
     for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
     const m = await bootPass();

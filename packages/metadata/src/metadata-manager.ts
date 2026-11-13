@@ -198,21 +198,19 @@ function namesPackageByStampAlone(item: object, packageId: string): boolean {
 /**
  * [#33003] The body {@link MetadataManager.register} stores for an environment
  * row the boot pass stamped with `stamp`: `data` without that stamp, at the top
- * and in the two bodies a stored row nests — `metadata` (the publish envelope's
- * body, which the store's package read peels to) and `publishedDefinition`
- * (the snapshot `revertPackage` restores into `metadata`). The registry keeps
- * `data` as it is, stamp included. A copy: `data` is never changed.
+ * and in the publish envelope's `metadata` body (`revertPackage` restores the
+ * stamped snapshot there, and the store's package read peels to it). The
+ * registry keeps `data` as it is, stamp included. A copy: `data` is never
+ * changed.
  */
 function withoutEnvironmentRowStamp(data: Record<string, unknown>, stamp: string): Record<string, unknown> {
   const stored: Record<string, unknown> = { ...data };
   delete stored._packageId;
-  for (const key of [STORED_BODY_KEY, 'publishedDefinition'] as const) {
-    const nested = stored[key];
-    if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) continue;
-    if ((nested as { _packageId?: unknown })._packageId !== stamp) continue;
-    const body: Record<string, unknown> = { ...(nested as Record<string, unknown>) };
-    delete body._packageId;
-    stored[key] = body;
+  const body = stored[STORED_BODY_KEY];
+  if (body !== null && typeof body === 'object' && !Array.isArray(body) && (body as { _packageId?: unknown })._packageId === stamp) {
+    const unstamped: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+    delete unstamped._packageId;
+    stored[STORED_BODY_KEY] = unstamped;
   }
   return stored;
 }
