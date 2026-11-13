@@ -2584,8 +2584,8 @@ export const FindReferencesToMetaResponseSchema = lazySchema(() => z.object({
  *
  * Transcribed from `rollbackMetaItem`'s declared return
  * (`@objectstack/metadata-protocol` `protocol.ts`); objectui's
- * `metadata-client.ts` docblock independently documents the same five fields
- * (#12038 survey §3d).
+ * `metadata-client.ts` docblock independently documents its first five fields
+ * (#12038 survey §3d); `advisories` was added after that survey (#32700).
  */
 export const RollbackMetaItemResponseSchema = lazySchema(() => z.object({
   success: z.boolean().describe('Whether the rollback landed.'),
@@ -2596,6 +2596,22 @@ export const RollbackMetaItemResponseSchema = lazySchema(() => z.object({
   seq: z.number().describe('The new live row\'s history sequence number.'),
   restoredFromVersion: z.number().describe('Which history version was restored.'),
   message: z.string().optional().describe('Rollback note, when one was recorded.'),
+  advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+    'What the rollback did beyond restoring the row, in '
+    + 'the same element shape and omitted-when-empty discipline as '
+    + '`SaveMetaItemResponseSchema.advisories`. Present ONLY when at least one '
+    + 'entry was raised: an empty array is never emitted, so a clean answer\'s '
+    + 'bytes are unchanged and a caller that ignores this key behaves exactly '
+    + 'as before. Three rules ride it: `object-storage-sync-refused` (`warning`), '
+    + 'the restored object\'s storage sync was refused; and, per stored computed '
+    + 'field (a non-`formula` field declaring `expression`) the restore makes '
+    + 'compute something new (added back, turned from a formula or a plain '
+    + 'field, or its expression, stored type or scale changed), the fill of '
+    + 'the object\'s existing rows the save door also runs: '
+    + '`stored-expression-filled` (`info`, the rows written) or '
+    + '`stored-expression-fill-incomplete` (`warning`, what is left and how to '
+    + 'fill it). The restore itself SUCCEEDED either way.',
+  ),
 }));
 
 /**
