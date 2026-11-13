@@ -21,7 +21,11 @@
 //   ⭐ a member on no slate is refused, and the request stays pending;
 //   ⭐ the submitter is refused, and the request stays pending;
 //   ⭐ an AI service account acting for itself (ADR-0151, its own API key, on
-//      no slate) is refused, and the request stays pending;
+//      no slate) is refused, and the request stays pending: the account
+//      confirmation rule (ADR-0151 D3 rule 3) answers first, `428`
+//      `ACTION_CONFIRMATION_REQUIRED` whatever the call sends, `confirm: true`
+//      included — an account does not confirm an action for itself, so the
+//      action is handed to a person;
 //   ⭐ the approver is refused `428` until the call carries `confirm: true`;
 //   ⭐ confirmed, the approver's call decides: the request is approved and
 //      the decision is recorded once, as the approver's.

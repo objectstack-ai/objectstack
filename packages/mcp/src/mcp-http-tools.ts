@@ -2991,6 +2991,11 @@ export function registerActionTools(
         'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
         'An action the author gated (list_actions reports requiresConfirmation) is REFUSED unless you also ' +
         'send confirm: true — ask the human first, then retry; nothing runs on a refused call. ' +
+        // [ADR-0151 D3 rule 3] `actionConfirmationRefusal` (runtime) never reads
+        // the member for an AI service account, so no retry is taught to one.
+        'Under an AI service account\'s own key (an agent acting for itself, for no person) the call is ' +
+        'refused whatever it sends and nothing runs: hand the action to a person, or its author declares ' +
+        'ai.requiresConfirmation: false when it is safe unattended. ' +
         // [#32757] The read order `flowFailureRelaySentence` applies, taught
         // to the reader as well, as the console reads it.
         'A flow action that fails answers error.code FLOW_FAILED with a message naming the flow and node, ' +
@@ -3069,7 +3074,8 @@ export function registerActionTools(
             'Set to true to confirm a call the app author gated with ai.requiresConfirmation '
             + '(list_actions reports requiresConfirmation for each action). Assert this only when '
             + 'the human in the loop has approved THIS call; without it a gated action is refused '
-            + 'and nothing runs.',
+            + 'and nothing runs. Under an AI service account\'s own key it is not read: the call is '
+            + 'refused whatever it sends.',
           ),
         },
       ),
@@ -3166,8 +3172,10 @@ export function registerActionTools(
           '(author AI opt-in, your capabilities, your read access to the record). The rest of the flow runs ' +
           'the app\'s business logic and can mutate data. When list_actions reports requiresConfirmation for ' +
           'the action that started the run, send confirm: true (ask the human first); without it the call ' +
-          'is refused and the run stays paused. A run that fails answers as run_action does: tell the user ' +
-          'the reason in the second text block, never the flow and node chain in the error message.',
+          'is refused and the run stays paused. Under an AI service account\'s own key the call is refused ' +
+          'whatever it sends and the run stays paused: hand it to a person. A run that fails answers as ' +
+          'run_action does: tell the user the reason in the second text block, never the flow and node chain ' +
+          'in the error message.',
         inputSchema: strictToolInput(
           {
             surface: 'this resume_run call',
@@ -3209,7 +3217,8 @@ export function registerActionTools(
                 'Set to true to confirm resuming a run of an action the app author gated with '
                 + 'ai.requiresConfirmation (list_actions reports requiresConfirmation). Assert this only when '
                 + 'the human in the loop has approved THIS call; without it the call is refused and the run '
-                + 'stays paused.',
+                + 'stays paused. Under an AI service account\'s own key it is not read: the call is refused '
+                + 'whatever it sends.',
               ),
           },
         ),
