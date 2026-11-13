@@ -381,11 +381,11 @@ All four are cloud-runtime skills — none resolves on the open edition, so
 `surface` / `triggerConditions` on your own skills are authored for cloud and
 inert there; their `instructions` are what MCP serves. `tools` binds nothing
 there but is read: `registerSkillPrompts` offers a skill on `prompts/list` /
-`prompts/get` only when the server it is installed on (the HTTP door, or a
-host's own server, stdio included) lists every tool the skill binds — a plain
-name by a tool of that name, a wildcard by any match, an `action_*` entry also
-by `run_action`. A skill binding a tool no MCP family serves is offered on no
-such server; one binding no tool is offered as before.
+`prompts/get` only when its server lists every tool the skill binds — a plain
+name by that tool, a wildcard by any match, an `action_*` entry also by
+`run_action`. That covers the HTTP door and any host server that calls it; the
+plugin's own stdio transport lists every skill. Bind a tool no MCP family
+serves (the MCP table above) and no filtering server offers the skill.
 `visualize_data` is the only built-in that draws a chart (an inline `data-chart`
 part), auto-registered **only** when an analytics service (`IAnalyticsService`)
 is wired — `query_data` / `aggregate_data` return numbers, not charts.
