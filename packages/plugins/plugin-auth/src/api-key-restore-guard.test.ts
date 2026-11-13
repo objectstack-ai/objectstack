@@ -556,10 +556,10 @@ describe('a key the directory deactivation revoked is restored by no one from a 
     await mint(engine, 'key_a');
     await mint(engine, 'key_b');
     const refusing = {
-      find: (object: string, query: unknown, opts: unknown) => engine.find(object, query as any, opts as any),
-      update: async (object: string, doc: Record<string, unknown>, opts: unknown) => {
-        if (doc.id === 'key_b') throw new Error('write refused (test)');
-        return engine.update(object, doc as any, opts as any);
+      find: (...args: Parameters<ObjectQL['find']>) => engine.find(...args),
+      update: async (...args: Parameters<ObjectQL['update']>) => {
+        if ((args[1] as { id?: unknown }).id === 'key_b') throw new Error('write refused (test)');
+        return engine.update(...args);
       },
     };
 
