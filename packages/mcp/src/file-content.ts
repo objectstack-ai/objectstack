@@ -312,6 +312,16 @@ export interface McpUploadLink {
 }
 
 /**
+ * [#32686] A single-use upload link for a file field of a record not yet
+ * created, with the file id(s) the upload is stored under: the value the
+ * agent writes into the field when it creates the record. An array so that a
+ * link taking several files answers more entries, not a second key.
+ */
+export interface McpNewRecordUploadLink extends McpUploadLink {
+  fileIds: string[];
+}
+
+/**
  * [#30892] The file seam of the HTTP MCP tools, implemented by the runtime
  * over the storage plugin's `file-attachments` service. Every member runs AS
  * the authenticated principal and throws ADR-0112 coded refusals. OPTIONAL,
@@ -331,6 +341,12 @@ export interface McpFileBridge {
   ): Promise<McpReadFile>;
   /** A single-use upload link bound to exactly this record and field (or its attachments). */
   createUploadLink?(object: string, recordId: string, target: McpUploadLinkTarget): Promise<McpUploadLink>;
+  /**
+   * [#32686] A single-use upload link for a file field of a record the caller
+   * is about to create. Optional on its own: a host without it serves links
+   * for existing records only, and `create_upload_link` then needs `recordId`.
+   */
+  createUploadLinkForNewRecord?(object: string, target: { field: string }): Promise<McpNewRecordUploadLink>;
 }
 
 /** One MCP tool-result content block `read_file` answers with. */

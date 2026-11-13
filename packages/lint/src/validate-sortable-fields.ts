@@ -291,10 +291,10 @@ import {
   suggestName,
   type ObjectGraph,
 } from './object-graph.js';
-import type { UserTextParams } from './finding-user-text.js';
 import { walkPageComponents } from './page-walk.js';
 import { LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, columnSummaryRefusal } from './validate-list-view-field-refs.js';
 import { PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED } from './validate-page-field-bindings.js';
+import type { UserTextParams } from './finding-user-text.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
@@ -342,10 +342,13 @@ export interface SortableFieldFinding {
   /** How to fix it. */
   hint: string;
   /**
-   * The names this finding's user-facing sentence interpolates, set at the
-   * page-sort `page-field-unprovisioned` push site (the advisory the page
-   * publish door returns); the sentence is the id owner's,
-   * `validate-page-field-bindings.user-text.ts` (`AuthoringFinding.userTextParams`).
+   * The names this finding's user sentence interpolates: set on
+   * `sort-field-unprovisioned`, the list-view advisory the publish door returns
+   * (its sentences are `validate-sortable-fields.user-text.ts`), and on the
+   * page-sort `page-field-unprovisioned` warning, the advisory the page publish
+   * door returns (its sentences belong to `validate-page-field-bindings.ts`, the
+   * id's owner, in `validate-page-field-bindings.user-text.ts`). The errors
+   * carry none.
    */
   userTextParams?: UserTextParams;
 }
@@ -495,6 +498,7 @@ export function checkSortDeclaration(
           rule: SORT_FIELD_UNPROVISIONED,
           where,
           path: `${path}${key.at}`,
+          userTextParams: { object: objectName, field: name },
           // [#22161] One verdict sentence: the shared short anchor clause and
           // this axis' consequence. The measured byte-identical reading and why
           // no door refuses it are the id's `os explain` entry.

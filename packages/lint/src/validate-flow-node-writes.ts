@@ -98,6 +98,7 @@ import {
 import { indexUnprovisionedAnchors, unprovisionedAnchorFix } from './system-fields.js';
 import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
 import { recordsOf } from './object-graph.js';
+import type { UserTextParams } from './finding-user-text.js';
 
 /**
  * `error` for the existence verdict — a literal key against a literal object is
@@ -119,6 +120,11 @@ export interface FlowNodeWriteFinding {
   path: string;
   message: string;
   hint: string;
+  /**
+   * The names this finding's user sentence interpolates, on the advisory push
+   * sites only (`validate-flow-node-writes.user-text.ts` sibling catalog); see `AuthoringFinding.userTextParams`.
+   */
+  userTextParams?: UserTextParams;
 }
 
 // Rule id (registry entry).
@@ -265,6 +271,7 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
             path: `${nodePath}.config.fields.${fieldName}`,
             message: unprovisionedAnchorWriteVerdict(objectName, fieldName, `this ${node.type} write`),
             hint: unprovisionedAnchorFix(objectName, fieldName),
+            userTextParams: { flow: flowName, node: nodeName, field: fieldName, object: objectName },
           });
           continue;
         }
