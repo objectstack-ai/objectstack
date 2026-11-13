@@ -1128,7 +1128,17 @@ export function buildMcpBridge(
                 // [#28943] …and one the target's per-object gate refuses for
                 // that credential (a `sys_api_key` write under an API key),
                 // marked with that gate's own code and sentence.
-                const refusal = actionExec.apiForwardCredentialRefusal(context, action);
+                // [ADR-0151 D3 rule 3] …and one declaring `ai.requiresConfirmation:
+                // true` for an AI service account, which never confirms for
+                // itself: `run_action` refuses it whatever the call sends, with
+                // the gate's own code and sentence. That gate runs in the
+                // admission sequence, ahead of the forward, so where both
+                // apply it is the refusal the mark carries. Asked only for an
+                // account: a person and a delegated agent confirm and run.
+                const confirmation = actionExec.isAiServiceAccountCaller(ec)
+                    ? actionExec.actionConfirmationRefusal(deps, action, undefined, objectName, ec)
+                    : undefined;
+                const refusal = confirmation ?? actionExec.apiForwardCredentialRefusal(context, action);
                 // [ADR-0106 D1] Summarised against the object as this caller is
                 // served it, and not listed where `/meta` withholds it.
                 const served = await servedActionObject(action, objectName, obj, objectsByName);
