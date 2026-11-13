@@ -22,7 +22,7 @@
  * flow's own record, or a record a node bound to a variable), which decides
  * the remedy as the rule's hint does.
  *
- * `validate-flow-template-paths.user-text.test.ts` renders every entry from
+ * `finding-user-text.test.ts` renders every entry from
  * the rule's real findings in every platform locale.
  */
 

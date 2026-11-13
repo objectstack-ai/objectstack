@@ -18,7 +18,7 @@
  * itself, for the rule's module-note reason: the sentence travels into the
  * save response too.
  *
- * `validate-flow-writes.user-text.test.ts` renders it from the rule's real
+ * `finding-user-text.test.ts` renders it from the rule's real
  * findings in every platform locale, one per position.
  */
 

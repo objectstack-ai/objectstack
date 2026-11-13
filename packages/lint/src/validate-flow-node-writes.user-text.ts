@@ -16,7 +16,7 @@
  * Params, set at the push site in `validate-flow-node-writes.ts`: `flow`,
  * `node` (the node's label, as the rule's `where` shows it), `field`, `object`.
  *
- * `validate-flow-writes.user-text.test.ts` renders it from the rule's real
+ * `finding-user-text.test.ts` renders it from the rule's real
  * finding in every platform locale.
  */
 

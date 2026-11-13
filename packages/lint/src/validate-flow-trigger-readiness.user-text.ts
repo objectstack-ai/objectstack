@@ -29,7 +29,7 @@
  * no params, so a refusal never renders these sentences. Status values are the
  * API values (`active`, `obsolete`), as the flow's settings store them.
  *
- * `validate-flow-trigger-readiness.user-text.test.ts` renders every entry from
+ * `finding-user-text.test.ts` renders every entry from
  * the rule's real findings in every platform locale.
  */
 

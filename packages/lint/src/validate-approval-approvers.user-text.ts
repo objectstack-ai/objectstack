@@ -35,8 +35,10 @@
  * never renders the advisory's sentence. Like the rule's own `message`, no
  * sentence names what an empty slate does beyond what the finding states.
  *
- * `validate-approval-approvers.user-text.test.ts` renders every entry from the
- * rule's real findings in every platform locale.
+ * `finding-user-text.test.ts` renders every entry from the rule's real
+ * findings in every platform locale; the unsupported-type arm, which no
+ * shipped binding reaches, is rendered against a mocked binding table in
+ * `validate-approval-approvers.unsupported-type.test.ts`.
  */
 
 import type { UserTextCatalog, UserTextParams } from './finding-user-text.js';
