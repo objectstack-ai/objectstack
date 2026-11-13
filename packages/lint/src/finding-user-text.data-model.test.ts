@@ -31,7 +31,6 @@ import {
   OBJECT_REFERENCE_UNREGISTERED_PLATFORM,
   validateObjectReferences,
 } from './validate-object-references.js';
-import { PAGE_FIELD_UNPROVISIONED } from './validate-page-field-bindings.js';
 import { TITLE_UNRESOLVABLE } from './validate-record-title.js';
 import {
   RELATIONSHIP_MASTER_DETAIL_REQUIRED,
@@ -243,21 +242,9 @@ describe('data-model advisories user text · rendered from the rules\' real find
     const unknown = lintAutonumberFormats(autonumberStack('{gone_field}-{0000}')).filter((f) => f.rule === AUTONUMBER_UNKNOWN_FIELD);
     expect(unknown.map((f) => f.severity)).toEqual(['error']);
     expect(unknown[0]!.userTextParams).toBeUndefined();
-    // A page sort's unprovisioned warning is `validate-page-field-bindings.ts`'s
-    // id: this file's page-sort site carries no params of its own.
-    const pageSort = validateSortableFields({
-      objects: [EXT],
-      pages: [{
-        name: 'acme_customer_page', type: 'app',
-        regions: [{ name: 'main', components: [{
-          type: 'object-grid',
-          properties: { objectName: 'acme_ext_customer', sort: [{ field: 'created_at', order: 'desc' }] },
-        }] }],
-      }],
-    }).filter((f) => f.rule === PAGE_FIELD_UNPROVISIONED);
-    expect(pageSort.map((f) => f.severity)).toEqual(['warning']);
-    expect(pageSort[0]!.userTextParams).toBeUndefined();
-    expect(FINDING_USER_TEXT_CATALOG[PAGE_FIELD_UNPROVISIONED]).toBeUndefined();
+    // The page-sort `page-field-unprovisioned` warning this rule pushes does
+    // carry params, for its owner's catalog (`validate-page-field-bindings.user-text.ts`);
+    // `finding-user-text.pages-forms.test.ts` pins that site.
     // The object-reference sites a per-write snapshot never carries as the
     // written item (here an object field's lookup target) carry none.
     const fieldSite = validateObjectReferences({
