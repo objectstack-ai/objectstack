@@ -3004,6 +3004,19 @@ describe('[#32986] unregisterPackage of the host package keeps the environment\'
     expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, null, 0]));
   });
 
+  /**
+   * [#32986, review S2] The legacy `package` key is the item's own claim, as
+   * 18.3.0's `unregisterPackage` read it: the row is the host's, though its
+   * stored body names no package the store's reads index (`_packageId`).
+   */
+  it('CONTROL the host\'s own rows naming it through the legacy `package` key in their stored bodies: unregisterPackage(host) still removes each, from the registry and storage', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, null, { package: HOST });
+    const m = await bootPass(HOST);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
+    await m.unregisterPackage(HOST);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, null, 0]));
+  });
+
   it('an item registered in memory for the host (code) beside the environment\'s rows: unregisterPackage(host) removes the host\'s item and keeps the environment\'s (BEFORE: both removed)', async () => {
     for (const [type, name] of ITEMS) await seed(type, name, null);
     const m = await bootPass(HOST);
