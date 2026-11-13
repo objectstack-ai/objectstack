@@ -288,6 +288,36 @@ describe('[ADR-0150 D4] bindAppArtifactHandlers on a multi-package artifact', ()
         await expect(ql.executeAction('global', 'qa_note', { params: {} })).resolves.toEqual({ from: 'two' });
     });
 
+    it('a body\'s door origin names the package body that declares it, not the artifact', async () => {
+        const body = (ns: string) => ({
+            id: `com.qa.origin.${ns}`, namespace: ns, name: `qa_origin_${ns}`, version: '1.0.0', type: 'module',
+            actions: [{
+                name: `qa_${ns}_note`, label: 'Note', type: 'script',
+                body: {
+                    language: 'js',
+                    source: "return await ctx.activity.append({ object: 'qa_doc', recordId: 'd1', type: 'completed', summary: 'x' });",
+                    capabilities: ['activity.append'],
+                },
+            }],
+        });
+        const artifact = {
+            manifest: { id: 'com.qa.origin', name: 'qa_origin', version: '1.0.0', type: 'app' },
+            packages: [{ manifest: body('alpha') }, { manifest: body('beta') }],
+        };
+        const stamps: any[] = [];
+        const getService = (name: string): unknown =>
+            name === 'audit'
+                ? { appendAppActivity: async (_entry: unknown, stamp: unknown) => { stamps.push(stamp); return { id: 'act_1' }; } }
+                : undefined;
+        const ql = new ObjectQL({ logger: quiet } as any);
+        // The record the entry is about reads as present to the caller.
+        (ql as any).findOne = async (_object: string, query: any) => ({ id: query?.where?.id });
+        bindAppArtifactHandlers(ql as any, artifact, { appId: 'com.qa.origin', logger: quiet, getService } as any);
+
+        await ql.executeAction('global', 'qa_beta_note', { params: {} });
+        expect(stamps.map((s) => s.origin)).toEqual(['com.qa.origin.beta/action:qa_beta_note']);
+    });
+
     it('a re-bind that drops a package body stops that body\'s actions', async () => {
         const body = (ns: string, action: string) => ({
             id: `com.qa.rebind.${ns}`, namespace: ns, name: `qa_rebind_${ns}`, version: '1.0.0', type: 'module',

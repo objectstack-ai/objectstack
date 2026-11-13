@@ -191,6 +191,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Metadados",
         help: "Contexto adicional serializado em JSON"
       },
+      origin: {
+        label: "Origin",
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry not written through the activity door."
+      },
       changed_fields: {
         label: "Campos alterados",
         help: "O conjunto de chaves da alteração registrada: em uma atualização, todos os campos citados pelos valores antigos/novos registrados; vazio para as demais linhas. Gravado pela plataforma no momento da escrita; servido restrito aos campos que o leitor pode ver. NULL significa que a linha ainda não foi marcada (execute `os migrate activity-changed-fields`)."

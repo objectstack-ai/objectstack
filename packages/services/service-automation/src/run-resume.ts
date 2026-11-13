@@ -24,6 +24,7 @@ import { refuseNode } from './guard-refusal.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
+import { withDroppedFields } from './run-dropped-fields.js';
 import { noteTenantCurrencyReadFault } from './builtin/template.js';
 import { mapItemCancelledVariable, type MapItemCancelledMarker } from './builtin/map-node.js';
 // The values below (`buildRunTrigger`, `FlowRefusalSignal`, `isRefusalSignal`,
@@ -1965,6 +1966,9 @@ export async function resumeInternal(
                 ),
                 flowLabel: flow.label,
                 summary,
+                // #32861 — like `summary`, over the WHOLE run: a drop before
+                // the pause reaches the answer the run finally gives.
+                ...withDroppedFields(steps),
             };
         } catch (err: unknown) {
             // [#15788] A resumed run reached a refusing `end` — the SECOND
