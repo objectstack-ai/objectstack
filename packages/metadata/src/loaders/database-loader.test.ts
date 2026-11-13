@@ -2074,7 +2074,10 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
  * CONTROL was refused naming `com.host.app`. The CONTROLs answer on that
  * `main` as here. Where #32812 moved a #32791 pin, its comment names the
  * FROM (`main` `25ee5076`) and the TO, which is the cell's answer on a host
- * that declares no package.
+ * that declares no package. The comments and titles of the unmoved pins
+ * (the "stamped row", its overwrite mark, the judged view's filing, the
+ * earlier heads they cite) describe #32791's read-time mechanism, which
+ * #32812 removed; their answers hold unchanged with the row unstamped.
  */
 describe('[#32791] a stored package-less row the boot pass files under the host\'s package is one holder of an action name, not two', () => {
   const ALPHA = 'com.alpha.app';
@@ -2527,6 +2530,25 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
       }
     }
     expect(seen).toEqual(UNBUNDLED.flatMap((type) => [[type, HOST, 'written'], [type, 'none', 'written']]));
+  });
+
+  /**
+   * [#32812] `email_template` (bundled), one package's row and a package-less
+   * row saved last: the pass files the package-less row in the holder's slot
+   * (its customization), on a host declaring another package as on one
+   * declaring none. FROM `main` `25ee5076`: the host's slot beside the
+   * holder's, and the bare read refused naming the holder and the host.
+   */
+  it('email_template, one package\'s row and a package-less row saved last: the pass files the row in the holder\'s slot and the bare read answers it, on a host declaring another package as on one declaring none', async () => {
+    const seen: unknown[] = [];
+    for (const hostPackage of [HOST, undefined]) {
+      driver = createMockDriver();
+      await seed('email_template', ALPHA, 1);
+      await seed('email_template', null, 2);
+      const m = await bootPass(hostPackage);
+      seen.push([hostPackage ?? 'none', registryKeys(m, 'email_template'), await answer(m, 'email_template')]);
+    }
+    expect(seen).toEqual([[HOST, [`${ALPHA}\u0000helper`], 'env'], ['none', [`${ALPHA}\u0000helper`], 'env']]);
   });
 });
 

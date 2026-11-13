@@ -1729,17 +1729,17 @@ const STORED_ROW_LOADER = 'database';
 /**
  * [#32521, #32812; epic #31527 red line 2, ADR-0150 D4] Whether the boot
  * priming pass keeps the host's declared package off `item`: a package-less
- * STORED ROW (an item `DatabaseLoader` handed on, no package on its column or
- * body) of a type stored per `(package, name)`. Such a row is the
+ * STORED ROW (an item `DatabaseLoader` handed on that names no package, as
+ * `loadMany` hands it on) of a type stored per `(package, name)`. Such a row is the
  * environment's own item, or the customization of the one package that holds
  * its name (D4), and the store files it where it files any write that carries
  * no package. Stamped with the host's package, the registry filed it into the
  * host's slot while the loaders still stored it package-less: the host was
  * counted as a holder it is not (a third holder beside two packages, #32521;
  * a second beside one, which after a package-less write named the host in
- * the bare read's refusal, #32812), and a read naming the host served the
- * environment's row. Unstamped, every read answers what it answers on a host
- * that declares no package. The host's own file items, and every other
+ * the bare read's refusal, #32812), and the read naming the holder served
+ * the holder's own row over its customization. Unstamped, every read answers
+ * what it answers on a host that declares no package. The host's own file items, and every other
  * type's items, are stamped as before.
  */
 function unstampedStoredRow(type: string, item: unknown, loader: string | undefined): boolean {
@@ -1758,7 +1758,7 @@ function unstampedStoredRow(type: string, item: unknown, loader: string | undefi
  * package-less item would be filed into the first one's slot as its
  * customization and answer a read naming that package; registered before
  * them, the first one's item would take its bare slot over and `list` would
- * drop it. With the host's package stamp kept off such an item
+ * drop it. With the host's package stamp kept off a package-less stored row
  * (`unstampedStoredRow`), the registry holds what a read without the pass
  * answers, whatever order the loaders handed the items in and whatever
  * package the host declares. A name one package holds
