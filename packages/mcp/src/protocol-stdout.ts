@@ -3,6 +3,29 @@
 import type { Writable } from 'node:stream';
 
 /**
+ * The mark {@link protocolStdout} leaves on `process.stdout` when a stdio
+ * transport claims it: from that moment this process is SERVING, and whatever
+ * it writes may be the output of a call rather than of its boot.
+ *
+ * Who reads it: a host that holds its boot output back for a while. `os serve`
+ * keeps a boot-quiet window open until `runtime.start()` returns, so the
+ * banner is not buried under boot chatter (`packages/cli/src/commands/serve.ts`).
+ * A stdio client writes `initialize` at spawn and its first `tools/call` the
+ * moment that is answered, so its calls are served while that window is still
+ * open: everything a host plugin `console.log`ged from them was dropped with
+ * the chatter, on stdout and stderr alike. The window ends for a host's console
+ * when it reads this mark — and only then, so an HTTP-only boot keeps its quiet
+ * window exactly as before.
+ *
+ * Registered with `Symbol.for`, so a second copy of this package in the
+ * process (an ESM and a CJS load, two versions) writes the same key, and a host
+ * can read it without importing this package. The key is pinned on both sides
+ * (this package's `protocol-stdout.test.ts`, and the CLI's stdio purity e2e,
+ * which boots the real transport).
+ */
+export const PROTOCOL_STDOUT_CLAIM: unique symbol = Symbol.for('@objectstack/mcp:protocol-stdout-claimed');
+
+/**
  * The stdout channel the **stdio MCP transport** writes its JSON-RPC frames to
  * (#7915).
  *
@@ -49,6 +72,11 @@ export function protocolStdout(): Writable {
     write: (chunk: string | Uint8Array, ...rest: unknown[]) => boolean;
     once: (event: string, listener: (...args: unknown[]) => void) => unknown;
   };
+
+  // Say so on the stream, BEFORE the transport can read its first request: the
+  // caller attaches stdin only after this returns, so no call can be served
+  // while the mark is still missing. See {@link PROTOCOL_STDOUT_CLAIM}.
+  (stdout as unknown as Record<symbol, unknown>)[PROTOCOL_STDOUT_CLAIM] = true;
 
   // The prototype's `write`, i.e. the one an instance-level interception
   // replaced. Falls back to the instance property when there is no prototype
