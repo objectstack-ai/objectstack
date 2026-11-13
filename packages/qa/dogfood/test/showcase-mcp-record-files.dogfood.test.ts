@@ -37,6 +37,12 @@
 // the link answered: two agent calls and one upload, over the real
 // `/api/v1/mcp` and the real upload-link route.
 //
+// [#32747] And one link, three PDFs: a link for the claim's multi-file
+// `invoices` takes the three invoices in one send, as the page's form sends
+// them through the real transport (`multipart/form-data`, `file0` … `file2`
+// and `count`), and lands all three in one write; a link for a claim not yet
+// created takes `count: 3` and answers the three ids `create_record` names.
+//
 // Not eligible for the shared showcase project: it boots its own plugins.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -552,7 +558,7 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       const res = await put(path, pdf, { 'x-file-name': 'fp-0001.pdf' });
       const body: any = await res.json();
       expect(res.status, JSON.stringify(body)).toBe(200);
-      expect(body.data).toEqual({ fileId, size: pdf.length, field: 'invoice' });
+      expect(body.data).toEqual({ fileId, fileIds: [fileId], size: pdf.length, field: 'invoice' });
       expect(await fileRow(fileId)).toMatchObject({ status: 'committed', size: pdf.length, ref_id: null, name: 'fp-0001.pdf' });
 
       // Agent call 2: the create names the file id; the record holds the file.
@@ -595,6 +601,101 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       expect(error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
       expect(error.message).toBe('You cannot upload a file for a new showcase_task: you cannot create showcase_task records.');
       expect((await ql.find('sys_file', { where: { name: 'upload-link', status: 'pending' }, ...SYS })).length).toBe(linksBefore);
+    });
+  });
+
+  // [#32747] Ruling A: one link, several files, on a multi-file field.
+  describe('[#32747] one link, three PDFs (`dogfood_upload_claim.invoices`)', () => {
+    const invoicesOf = async (id: string): Promise<string[]> => {
+      const row = await ql.findOne(UPLOAD_CLAIM, { where: { id }, ...SYS });
+      const value = row?.invoices;
+      const list = Array.isArray(value) ? value : value == null ? [] : [value];
+      return list.map((v: any) => String(typeof v === 'object' ? v.id : v));
+    };
+    /** The page's several-file send: one form, `count` and `file0` … `fileN-1`, each name URI-encoded. */
+    const putForm = (path: string, picks: Array<{ name: string; bytes: Buffer }>, token: string | null = memberToken) => {
+      const form = new FormData();
+      form.append('count', String(picks.length));
+      picks.forEach((pick, i) => {
+        form.append(`file${i}`, new Blob([new Uint8Array(pick.bytes)], { type: 'application/pdf' }), encodeURIComponent(pick.name));
+      });
+      return stack.raw(path, { method: 'PUT', headers: authOf(token), body: form });
+    };
+    const threeInvoices = () => [
+      { name: 'hotel-invoice.pdf', bytes: minimalPdf('Hotel invoice 268.00') },
+      { name: 'taxi-invoice.pdf', bytes: minimalPdf('Taxi invoice 42.50') },
+      { name: 'meal-invoice.pdf', bytes: minimalPdf('Meal invoice 96.00') },
+    ];
+
+    it('a claim\'s link takes the three invoices in one send: three ids, three files on the field, each read back', async () => {
+      const users = (await ql.find('sys_user', { where: { email: MEMBER_EMAIL }, ...SYS })) as Array<{ id: string }>;
+      const created = await ql.insert(UPLOAD_CLAIM, { name: 'Trip to Turin', status: 'draft', created_by: users[0]!.id, owner_id: users[0]!.id }, SYS);
+      const claimId = String(created?.id ?? created?.record?.id ?? created);
+
+      const { path } = await mint({ objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
+      const page = await open(path);
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain('<input id="file" type="file" multiple>');
+      expect(html).toContain('Pick up to 10');
+
+      const picks = threeInvoices();
+      const res = await putForm(path, picks);
+      const body: any = await res.json();
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      const fileIds = body.data.fileIds as string[];
+      expect(fileIds).toHaveLength(3);
+      expect(body.data.files).toEqual(fileIds.map((fileId, i) => ({ fileId, size: picks[i]!.bytes.length })));
+      expect(await invoicesOf(claimId)).toEqual(fileIds);
+      for (const [i, fileId] of fileIds.entries()) {
+        expect(await fileRow(fileId)).toMatchObject({ status: 'committed', name: picks[i]!.name, ref_object: UPLOAD_CLAIM, ref_id: claimId, ref_field: 'invoices' });
+        const read = await ok(memberToken, 'read_file', { objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices', fileId });
+        expect(read.content.map((c: any) => c.text ?? '').join('\n')).toContain(['Hotel', 'Taxi', 'Meal'][i]);
+      }
+      // One send spent the link.
+      expect((await putForm(path, picks.slice(0, 1))).status).toBe(404);
+    });
+
+    it('a claim not yet created: count 3 answers three ids, one send fills them, create_record names all three', async () => {
+      const { path, answer } = await mint({ objectName: UPLOAD_CLAIM, field: 'invoices', count: 3 });
+      expect(answer.fileIds).toHaveLength(3);
+      expect(answer.instructions).toContain('pick all 3 files');
+      const page = await (await open(path)).text();
+      expect(page).toContain('3 files were asked for');
+
+      const res = await putForm(path, threeInvoices());
+      const body: any = await res.json();
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      expect(body.data.fileIds).toEqual(answer.fileIds);
+
+      const { json } = await ok(memberToken, 'create_record', {
+        objectName: UPLOAD_CLAIM,
+        data: { name: 'Trip to Genoa', status: 'draft', invoices: answer.fileIds },
+      });
+      const claimId = String(json.id ?? json.record?.id);
+      expect(await invoicesOf(claimId)).toEqual(answer.fileIds);
+    });
+
+    it('one PDF of three the size limit refuses: nothing lands and the same link then takes the three', async () => {
+      const users = (await ql.find('sys_user', { where: { email: MEMBER_EMAIL }, ...SYS })) as Array<{ id: string }>;
+      const created = await ql.insert(UPLOAD_CLAIM, { name: 'Trip to Bari', status: 'draft', created_by: users[0]!.id, owner_id: users[0]!.id }, SYS);
+      const claimId = String(created?.id ?? created?.record?.id ?? created);
+      const { path } = await mint({ objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 0.002, authored: true } });
+      try {
+        const picks = threeInvoices();
+        picks[1] = { name: 'big-invoice.pdf', bytes: Buffer.concat([picks[1]!.bytes, Buffer.alloc(4096, 32)]) };
+        const res = await putForm(path, picks);
+        const body: any = await res.json();
+        expect(res.status, JSON.stringify(body)).toBe(413);
+        expect(await invoicesOf(claimId)).toEqual([]);
+        expect(await ql.find('sys_file', { where: { name: { $in: picks.map((p) => p.name) } }, ...SYS })).toEqual([]);
+      } finally {
+        storage.setLimitsSnapshot({});
+      }
+      const res = await putForm(path, threeInvoices());
+      expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
+      expect(await invoicesOf(claimId)).toHaveLength(3);
     });
   });
 });
