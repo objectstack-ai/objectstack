@@ -2089,6 +2089,7 @@ export class AuthManager {
       getAudience: (...a) => this.getAudience(...a),
       getCanonicalOrigin: (...a) => this.getCanonicalOrigin(...a),
       getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
+      getDataEngine: (...a) => this.getDataEngine(...a),
       getEmailService: (...a) => this.getEmailService(...a),
       hasExistingUserFor: (...a) => this.hasExistingUserFor(...a),
       get idpLocale() { return readIdpLocale(); },
@@ -2100,6 +2101,7 @@ export class AuthManager {
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
       isSsoDomainVerificationEnabled: (...a) => this.isSsoDomainVerificationEnabled(...a),
       isSsoWired: (...a) => this.isSsoWired(...a),
+      isSsoOnlyMode: (...a) => this.isSsoOnlyMode(...a),
       linkingContext: (...a) => this.linkingContext(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
       recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
@@ -5274,6 +5276,16 @@ export class AuthManager {
    */
   private resolveSsoOnly(): boolean {
     return readSsoOnlyEnv() ?? (this.config.ssoOnlyMode ?? false);
+  }
+
+  /**
+   * Is SSO-only mode on ({@link resolveSsoOnly}, read live)? The doors that
+   * give a user a local password ask it: under it an IdP-provisioned user is
+   * given none, except a platform administrator setting their own
+   * (`sso-only-local-password.ts`).
+   */
+  public isSsoOnlyMode(): boolean {
+    return this.resolveSsoOnly();
   }
 
   /**
