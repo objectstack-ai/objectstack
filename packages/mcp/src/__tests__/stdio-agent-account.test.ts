@@ -142,7 +142,7 @@ describe('[ADR-0151 D3] stdio: an AI service account\'s key admits the account i
     expect(context.isSystem).toBe(false);
   });
 
-  it('[ADR-0151 D3 rule 3] stdio serves an account no action door, so no stdio call confirms an action for it', async () => {
+  it('[ADR-0151 D3 rule 3] the data bridge stdio registers carries no action seam (listActions, runAction, resumeRun)', async () => {
     // The account rule lives at the action doors (`run_action`, `resume_run`,
     // REST `/actions`, a host door), pinned in `@objectstack/runtime`. Over
     // stdio the account's tools are the bridge registered here; this holds

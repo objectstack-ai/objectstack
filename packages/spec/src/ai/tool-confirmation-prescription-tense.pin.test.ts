@@ -86,6 +86,22 @@ const GATE_SOURCE = join(REPO_ROOT, 'packages', 'runtime', 'src', 'action-execut
 const REST_ACTIONS_SOURCE = join(REPO_ROOT, 'packages', 'runtime', 'src', 'domains', 'actions.ts');
 /** [#31923] The one admitted sequence the REST door, MCP `run_action` and `dispatchAction` share. */
 const SEQUENCE_SOURCE = join(REPO_ROOT, 'packages', 'runtime', 'src', 'action-dispatch.ts');
+/** [ADR-0151 D3 rule 3] The published request/refusal contract the prescription cites as enforced. */
+const CONTRACT_SOURCE = join(HERE, '..', 'contracts', 'ai-service.ts');
+
+/**
+ * One contract docblock's prose, its comment gutters folded into spaces: from
+ * the `/**` opening the docblock above `start` to the first `end` after it.
+ */
+function contractProse(start: string, end: string): string {
+  const source = readFileSync(CONTRACT_SOURCE, 'utf8');
+  const at = source.indexOf(start);
+  expect(at, `\`${start}\` moved — re-anchor this pin`).toBeGreaterThan(-1);
+  const open = source.lastIndexOf('/**', at);
+  const close = source.indexOf(end, at);
+  expect(close, `\`${end}\` moved — re-anchor this pin`).toBeGreaterThan(at);
+  return source.slice(open, close).replace(/\n\s*\*\s?/g, ' ').replace(/\s+/g, ' ');
+}
 
 /** One top-level function's text, from its signature to the next top-level declaration. */
 function topLevelBody(file: string, signature: string): string {
@@ -306,6 +322,29 @@ describe('the confirmation-gate prescriptions match the door that runs', () => {
       expect(text, `${name} no longer says the account is refused at REST too`).toMatch(/REST `\/actions` included/);
       expect(text, `${name} dropped the unverifiable-claim caveat`).toMatch(/unverifiable caller claim/);
     }
+  });
+
+  it('the published contract states the account rule beside the member it gates', () => {
+    // [ADR-0151 D3 rule 3] `AIActionConfirmation` and
+    // `ActionConfirmationRequiredDetails` are the normative text the door is
+    // cited against. They may not say the member is the ONLY predicate, or
+    // promise every caller a retry that succeeds, now that the door refuses an
+    // AI service account whatever it sends.
+    const confirmation = contractProse('export interface AIActionConfirmation', 'confirm?: boolean;');
+    expect(confirmation.length, '`AIActionConfirmation` docblock read empty').toBeGreaterThan(2000);
+    expect(confirmation, 'the contract dropped the AI service account rule').toMatch(
+      /AI service account[^.]*does not confirm an action for itself/,
+    );
+    expect(confirmation, 'the contract makes the member the only predicate again').not.toMatch(/when, and only when/i);
+    expect(confirmation, 'the contract promises every always-confirming client success again').not.toMatch(
+      /a client that always confirms/i,
+    );
+
+    const details = contractProse(
+      'export interface ActionConfirmationRequiredDetails',
+      'confirmationMember: typeof AI_ACTION_CONFIRMATION_MEMBER',
+    );
+    expect(details, 'the refusal details promise every caller a retry again').toMatch(/AI service account/);
   });
 
   it('moves NO accept set — the same metadata is accepted and refused as before', () => {

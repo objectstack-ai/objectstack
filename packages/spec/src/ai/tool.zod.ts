@@ -76,7 +76,8 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   //
   // [ADR-0151 D3 rule 3] The first bound carries the account rule: an AI
   // service account never confirms for itself, so the gate refuses it at every
-  // door, REST included, and the REST carve-out is a person's alone.
+  // door, REST included; the REST carve-out holds for every other caller (a
+  // person, or an agent with `onBehalfOf`).
   //
   // The ids stay in this comment and out of the string: `check:doc-authoring`
   // reds on an internal tracker id inside a customer-facing prescription.

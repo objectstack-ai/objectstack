@@ -2898,7 +2898,8 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
  * shape — an explicit confirmation on the request, a loud registered refusal
  * when it is absent, and NO approval queue. Nothing is parked, nothing is held
  * for an operator to find later, and there is no resume path: a refused call
- * simply did not run, and the caller confirms and retries.
+ * simply did not run, and a caller acting for a person confirms with its
+ * human and retries (an AI service account cannot: see below).
  *
  * ## Which predicate gates the refusal — the DECLARED flag, never the heuristic
  *
@@ -2917,7 +2918,8 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
  * So `ai.requiresConfirmation: false` never refuses whatever the action looks
  * like, and an undeclared `mode: 'delete'` action is listed as
  * `requiresConfirmation: true` while remaining invokable without the member.
- * A client that confirms whenever the listing says `true` is always correct;
+ * A client acting for a person that confirms whenever the listing says `true`
+ * is always correct (an AI service account is refused whatever it sends);
  * the reverse inference is sound only because the listing predicate is wider.
  *
  * ## Only the boolean `true` is an attestation
