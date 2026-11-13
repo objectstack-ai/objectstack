@@ -29,6 +29,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { I18nProvider, createI18n } from '@object-ui/i18n';
+// The surface reaches `@objectstack/lint` through dynamic imports: its first load is paid at collection.
+import '@objectstack/lint';
 // objectstack#29727 — the zh pins read the studio zh catalogue, which loads lazily.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 await loadStudioCatalogue('zh');
