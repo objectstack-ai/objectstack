@@ -2089,6 +2089,7 @@ export class AuthManager {
       isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
       isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
+      isSsoDomainVerificationEnabled: (...a) => this.isSsoDomainVerificationEnabled(...a),
       isSsoWired: (...a) => this.isSsoWired(...a),
       linkingContext: (...a) => this.linkingContext(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
@@ -5603,7 +5604,9 @@ export class AuthManager {
   /**
    * Whether opt-in DNS domain-verification (ADR-0135 D6) is wired — i.e. the
    * `/sso/request-domain-verification` + `/sso/verify-domain` endpoints are
-   * mounted (and the hard "domain must be verified to log in" gate is active).
+   * mounted, a provider signs nobody in until its listed domains are verified,
+   * and a provider creates an account only for an email address at a domain it
+   * has proven (`sso-account-at-proven-domain.ts`, which asks this method).
    * Resolved with the EXACT logic `buildPluginList` uses for the `sso()`
    * `domainVerification.enabled` option, so the bridge can return a clear
    * "not enabled for this environment" instead of a bare 404 when off.

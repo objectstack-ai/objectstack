@@ -2056,6 +2056,383 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
 });
 
 /**
+ * [#32791; ADR-0150 D3/D4, regression of #32560] On a host that declares its
+ * package, the boot priming pass stamps a package-less stored row with the
+ * host's package before it registers it (`applyProtection`), so the registry
+ * holds that row in the host's slot. A read naming no package of an action
+ * name is judged over the registry and the loaders (#32560's
+ * `judgesLoaderSlots`), and the loaders still store the row package-less: one
+ * row was counted twice, as the host's package and as the environment, and
+ * the refusal named a holder that does not exist. The judged view now files
+ * that row as the store files a write that carries no package
+ * (`packagelessWriteKeyOf`: the name's one holder's customization, else the
+ * environment's own item), with the write order of the slot it came from.
+ * Only a row stamped with its slot's package is filed so, and not one whose
+ * registration replaced an item registered in memory (that item's package
+ * holds the name: epic ruling B).
+ *
+ * BEFORE (`main` with #32676): each case below not marked CONTROL was refused
+ * naming `com.host.app`. The CONTROLs answer on that `main` as here; the two
+ * marked with a review finding were red on this branch at an earlier head.
+ * The boot state only: after a write that carries no package the host is
+ * named again (#32812), and a removal naming no package still names it
+ * (#32813).
+ */
+describe('[#32791] a stored package-less row the boot pass files under the host\'s package is one holder of an action name, not two', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  const HOST = 'com.host.app';
+  const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  let driver: IDataDriver;
+
+  /** A row of `helper` bound to `packageId` by the column, or package-less for `null`. */
+  const seed = (type: string, packageId: string | null, version: number, body: Record<string, unknown> = {}) =>
+    driver.create('sys_metadata', {
+      id: `${type}_${packageId ?? 'env'}_${version}`, type, name: 'helper', state: 'active', version, checksum: `${type}_${packageId ?? 'env'}_${version}`,
+      source: 'database', package_id: packageId, metadata: JSON.stringify({ name: 'helper', label: packageId ?? 'env', ...body }),
+    });
+  /**
+   * The real pass (`MetadataPlugin._loadFromFileSystem`) over one database
+   * loader, on a host that declares `hostPackage`; `inMemory` packages' items
+   * of `helper` are registered in memory before it. `passes` runs it that
+   * many times on the same manager, the loader's cache kept between runs or
+   * dropped (`keepCache`).
+   */
+  const bootPass = async (hostPackage?: string, inMemory: InMemory[] = [], passes = 1, keepCache = false) => {
+    const plugin = new MetadataPlugin({ ...(hostPackage ? { packageId: hostPackage } : {}), watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    const loader = new DatabaseLoader({ driver });
+    m.registerLoader(loader);
+    for (const item of inMemory) registerOwn(m, item);
+    for (let pass = 0; pass < passes; pass++) {
+      if (pass > 0 && !keepCache) loader.invalidateAll();
+      await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    }
+    return m;
+  };
+  /** A package's own item of `helper` in memory: the package, or the package and the object it binds. */
+  type InMemory = string | readonly [packageId: string, objectName: string];
+  /** `item`'s package's own item of `helper`, registered in memory (code), bound to its object when it names one. */
+  const registerOwn = (m: MetadataManager, item: InMemory) => {
+    const [packageId, objectName] = typeof item === 'string' ? [item] : item;
+    return m.registerInMemory('action', 'helper', { name: 'helper', label: `${packageId} code`, _packageId: packageId, ...(objectName ? { objectName } : {}) });
+  };
+  /** What a read answers: the item's label, or the refusal's code, status, reason and candidates, in the order the refusal names them. */
+  const answerOf = async (read: () => Promise<unknown>) => {
+    try {
+      const data = await read();
+      const item = data !== null && typeof data === 'object' && 'degraded' in data ? (data as { data?: unknown }).data : data;
+      return (item as { label?: string } | undefined)?.label;
+    } catch (e: any) {
+      return [e?.code, e?.status, e?.refusal?.reason, ...(e?.refusal?.candidates ?? []).map((c: any) => c.packageId ?? c.kind)];
+    }
+  };
+  const answer = (m: MetadataManager, type: string, packageId?: string) => answerOf(() => m.get(type, 'helper', packageId));
+  /** The bare read, and `getDiagnosed`'s, which agree. */
+  const bareAnswers = async (m: MetadataManager) => [await answer(m, 'action'), await answerOf(() => m.getDiagnosed('action', 'helper'))];
+  type Row = readonly [packageId: string | null, objectName?: string];
+  /** Seeds `rows` of `helper` in save order (the version), each bound to its object when it names one. */
+  const seedRows = async (rows: readonly Row[]) => {
+    for (const [i, [packageId, objectName]] of rows.entries()) await seed('action', packageId, i + 1, objectName ? { objectName } : {});
+  };
+  const REFUSED = (...candidates: string[]) => ['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', ...candidates];
+  const registryKeys = (m: MetadataManager, type: string) => [...((m as any).registry.get(type)?.keys() ?? [])].sort();
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('action, one package\'s row and a package-less row saved last (that holder\'s customization), on a host declaring another package: the bare read answers the package-less row, and getDiagnosed agrees (BEFORE: 409 naming the holder, the host and the environment)', async () => {
+    await seed('action', ALPHA, 1);
+    await seed('action', null, 2);
+    const m = await bootPass(HOST);
+    expect(registryKeys(m, 'action'), 'the pass files the row in the host\'s slot, as before').toEqual([`${HOST}\u0000helper`]);
+    expect(await answer(m, 'action')).toBe('env');
+    const diagnosed = await m.getDiagnosed('action', 'helper');
+    expect([(diagnosed.data as { label?: string } | undefined)?.label, diagnosed.degraded]).toEqual(['env', false]);
+    expect(await answer(m, 'action', ALPHA), 'a read naming the holder, as before').toBe(ALPHA);
+    expect(await answer(m, 'action', HOST), 'a read naming the host, as before').toBe('env');
+  });
+
+  /**
+   * Which slots the pass fills for a name two packages hold is the pass's own
+   * rule (#32676's pass primes every holder and leaves the package-less row
+   * package-less); the read's holders are what this case pins.
+   */
+  it('CONTROL action, two packages\' rows (or a package\'s and the host\'s own) and a package-less row saved last: the bare read is refused naming both and the environment, never a host that holds nothing', async () => {
+    const cells: Array<[string, readonly Row[], unknown]> = [
+      [HOST, [[ALPHA], [BETA], [null]], REFUSED(ALPHA, BETA, 'environment')],
+      [HOST, [[ALPHA, 'account'], [BETA, 'account'], [null, 'account']], REFUSED(ALPHA, BETA, 'environment')],
+      [HOST, [[ALPHA, 'account'], [BETA, 'contact'], [null]], REFUSED(ALPHA, BETA, 'environment')],
+      [ALPHA, [[ALPHA, 'account'], [BETA, 'contact'], [null]], REFUSED(ALPHA, BETA, 'environment')],
+      [HOST, [[ALPHA], [HOST], [null]], REFUSED(ALPHA, HOST, 'environment')],
+    ];
+    const seen: unknown[] = [];
+    for (const [hostPackage, rows] of cells) {
+      driver = createMockDriver();
+      await seedRows(rows);
+      seen.push(await bareAnswers(await bootPass(hostPackage)));
+    }
+    expect(seen).toEqual(cells.map(([, , expected]) => [expected, expected]));
+  });
+
+  it('action, a package\'s row bound to an object and an object-less package-less row saved last, on a host declaring another package: the bare read answers the environment\'s own item (BEFORE: 409 naming the package and the host)', async () => {
+    await seed('action', ALPHA, 1, { objectName: 'account' });
+    await seed('action', null, 2);
+    const m = await bootPass(HOST);
+    expect(registryKeys(m, 'action')).toEqual([`${HOST}\u0000helper`]);
+    expect(await bareAnswers(m)).toEqual(['env', 'env']);
+  });
+
+  /**
+   * [#32791, review B1] One package binding the name to two objects is one
+   * holder, and the read answers its item written last (#32244) — here the
+   * package-less row, that holder's customization of the object it binds, so
+   * the row filed in the judged view keeps the write order of the registry
+   * slot the pass filled. BEFORE (this branch at `003d6480`, the row filed
+   * with no order): the package's other row; on main: `409` naming the host.
+   */
+  it('action, one package binding the name to two objects and a package-less row saved last, on a host declaring another package: the bare read answers the package-less row, the row written last, in either order of the package\'s rows', async () => {
+    const seen: unknown[] = [];
+    for (const rows of [
+      [[ALPHA, 'account'], [ALPHA, 'contact'], [null, 'account']],
+      [[ALPHA, 'contact'], [ALPHA, 'account'], [null, 'account']],
+      [[ALPHA], [ALPHA, 'account'], [null]],
+      [[ALPHA, 'account'], [ALPHA], [null]],
+    ] as const) {
+      driver = createMockDriver();
+      await seedRows(rows);
+      seen.push(await bareAnswers(await bootPass(HOST)));
+    }
+    expect(seen).toEqual([['env', 'env'], ['env', 'env'], ['env', 'env'], ['env', 'env']]);
+  });
+
+  /**
+   * [#32791] A package-less row bound to an object, beside one package's row
+   * on a host declaring another package: counted once, as the store files it
+   * — the holder's customization of the object it binds, or the
+   * environment's own item where the package binds the name otherwise.
+   */
+  it('action, a package-less row bound to an object beside one package\'s row, on a host declaring another package: the bare read answers the package-less row, and getDiagnosed agrees', async () => {
+    const seen: unknown[] = [];
+    for (const rows of [[[ALPHA, 'account'], [null, 'account']], [[ALPHA], [null, 'account']]] as const) {
+      driver = createMockDriver();
+      await seedRows(rows);
+      seen.push(await bareAnswers(await bootPass(HOST)));
+    }
+    expect(seen).toEqual([['env', 'env'], ['env', 'env']]);
+  });
+
+  /**
+   * [#32791, review B2] On a host declaring no package the pass stamps
+   * nothing, and the registry's own write rule files the package-less row in
+   * the slot of the name's one holder then (D4: its customization). That slot
+   * is a holder — only a slot whose package the row is stamped with is the
+   * row. BEFORE (this branch at `003d6480`): the package-less row, a pick
+   * between two packages; main answers as here.
+   */
+  it('CONTROL action, a package\'s item in memory before the pass, a package-less row and a second package\'s item, on a host declaring no package: the bare read is refused naming both packages and the environment', async () => {
+    await seedRows([[BETA], [null]]);
+    const stored = await bootPass(undefined, [ALPHA]);
+    expect(await answer(stored, 'action', ALPHA), 'the row is ALPHA\'s customization').toBe('env');
+    expect(await bareAnswers(stored)).toEqual([REFUSED(ALPHA, BETA, 'environment'), REFUSED(ALPHA, BETA, 'environment')]);
+
+    driver = createMockDriver();
+    await seedRows([[null]]);
+    const inMemory = await bootPass(undefined, [ALPHA]);
+    registerOwn(inMemory, BETA);
+    expect(await bareAnswers(inMemory)).toEqual([REFUSED(ALPHA, BETA, 'environment'), REFUSED(ALPHA, BETA, 'environment')]);
+  });
+
+  /** One composition: the host's package, the stored rows, items in memory before the pass, and after it. */
+  type InMemoryCell = [hostPackage: string | undefined, rows: Row[], before: InMemory[], after: InMemory[]];
+  const bareAfterPass = async ([hostPackage, rows, before, after]: InMemoryCell, passes = 1, keepCache = false) => {
+    driver = createMockDriver();
+    await seedRows(rows);
+    const m = await bootPass(hostPackage, before, passes, keepCache);
+    for (const item of after) registerOwn(m, item);
+    return bareAnswers(m);
+  };
+  /**
+   * Each cell's bare reads after the pass ran twice on one manager, the
+   * loader's cache dropped and then kept between the runs, beside the
+   * refusal naming the cell's candidates, which each read should give.
+   */
+  const afterTwoPasses = async (cells: [InMemoryCell, string[]][]) => {
+    const seen: unknown[] = [];
+    const expected: unknown[] = [];
+    for (const keepCache of [false, true]) {
+      for (const [cell, candidates] of cells) {
+        seen.push(await bareAfterPass(cell, 2, keepCache));
+        expected.push([REFUSED(...candidates), REFUSED(...candidates)]);
+      }
+    }
+    return { seen, expected };
+  };
+
+  /**
+   * [#32791] A package's item registered in memory, and the package-less row
+   * the pass stamped with the host's package into a slot no other item held:
+   * the row is counted once, as the store files it beside that one holder
+   * (its customization). BEFORE (main): refused naming the host's package too.
+   */
+  it('action, one package\'s item in memory beside the package-less row the pass stamped into an empty slot: the row is counted once', async () => {
+    const cells: InMemoryCell[] = [
+      [HOST, [[null]], [], [ALPHA]],
+      [HOST, [[null]], [ALPHA], []],
+      [ALPHA, [[null]], [HOST], []],
+    ];
+    const seen: unknown[] = [];
+    for (const cell of cells) seen.push(await bareAfterPass(cell));
+    expect(seen).toEqual(cells.map(() => ['env', 'env']));
+  });
+
+  it('action, two packages\' items in memory beside the package-less row the pass stamped, in either order: the bare read is refused naming both and the environment, never the host (BEFORE: the host named too)', async () => {
+    const seen: unknown[] = [];
+    for (const cell of [
+      [HOST, [[BETA], [null]], [ALPHA], []],
+      [HOST, [[null]], [ALPHA], [BETA]],
+      [HOST, [[null]], [ALPHA, BETA], []],
+    ] as InMemoryCell[]) seen.push(await bareAfterPass(cell));
+    const refused = REFUSED(ALPHA, BETA, 'environment');
+    expect(seen).toEqual([[refused, refused], [refused, refused], [refused, refused]]);
+  });
+
+  /**
+   * [#32791, epic ruling B] The pass's own write of the stamped row can
+   * replace an item the host's package held in memory before it. That item's
+   * package held the name, so its slot is a holder, not only the row: beside
+   * a second package's row or item the name has two holders and the bare
+   * read is refused, as on main (D4 makes the row a customization only of a
+   * name exactly one package holds). Beside no other package, the row is
+   * the one holder's. BEFORE (this branch at `031037638d`, the slot set
+   * aside): the package-less row, a pick between two packages.
+   */
+  it('CONTROL action, the stamped row replacing the host\'s package\'s item in memory, beside a second package\'s row or item in either order: the bare read is refused naming both packages and the environment', async () => {
+    const seen: unknown[] = [];
+    for (const cell of [
+      [ALPHA, [[BETA], [null]], [ALPHA], []],
+      [ALPHA, [[null], [BETA]], [ALPHA], []],
+      [ALPHA, [[null]], [ALPHA], [BETA]],
+      [ALPHA, [[null]], [ALPHA, BETA], []],
+      [ALPHA, [[null]], [BETA, ALPHA], []],
+      [HOST, [[ALPHA], [null]], [HOST], []],
+    ] as InMemoryCell[]) seen.push(await bareAfterPass(cell));
+    const refused = (...candidates: string[]) => [REFUSED(...candidates), REFUSED(...candidates)];
+    expect(seen).toEqual([
+      refused(ALPHA, BETA, 'environment'),
+      refused(ALPHA, BETA, 'environment'),
+      refused(ALPHA, BETA, 'environment'),
+      refused(ALPHA, BETA, 'environment'),
+      refused(BETA, ALPHA, 'environment'),
+      refused(HOST, ALPHA, 'environment'),
+    ]);
+  });
+
+  /**
+   * [#32791, review S3] The pass run again on the same manager hands out a
+   * new row object, which replaces the marked row in the host's slot. The
+   * new row carries the mark, so ruling B's compositions (and r1's S1(c)
+   * cell, in either save order) stay refused, with the loader's cache kept
+   * or dropped between the runs, as on main. Without the carried mark the
+   * slot was set aside and the read answered the package-less row.
+   */
+  it('CONTROL action, the pass run twice on the same manager after the stamped row replaced the host\'s package\'s item in memory, beside a second package\'s row or item: still refused naming both packages and the environment (review S3)', async () => {
+    const cells: [InMemoryCell, string[]][] = [
+      [[ALPHA, [[BETA], [null]], [ALPHA], []], [ALPHA, BETA, 'environment']],
+      [[ALPHA, [[null], [BETA]], [ALPHA], []], [ALPHA, BETA, 'environment']],
+      [[ALPHA, [[null]], [ALPHA], [BETA]], [ALPHA, BETA, 'environment']],
+      [[ALPHA, [[null]], [ALPHA, BETA], []], [ALPHA, BETA, 'environment']],
+      [[ALPHA, [[null]], [BETA, ALPHA], []], [BETA, ALPHA, 'environment']],
+      [[HOST, [[ALPHA], [null]], [HOST], []], [HOST, ALPHA, 'environment']],
+      [[HOST, [[null], [ALPHA]], [HOST], []], [HOST, ALPHA, 'environment']],
+    ];
+    const { seen, expected } = await afterTwoPasses(cells);
+    expect(seen).toEqual(expected);
+  });
+
+  /**
+   * [#32791, review S3, epic ruling of 22:50Z] The same two runs of the pass
+   * on one manager, over the shapes the epic read measured beside ruling
+   * B's: the packages swapped (a host declaring BETA), the rows and the
+   * host's package's item bound to objects (ALPHA's item and the package-less
+   * row on `account`, BETA's row on `contact`), and review B2's two cells on
+   * a host declaring no package. Each is refused as after one pass, and as
+   * on main. Without the carried mark the first two answered the package-less
+   * row; B2's two are held by the carried mark and by the stamp condition
+   * alike, so they answered the row only with both removed.
+   */
+  it('CONTROL action, the pass run twice on the same manager with the packages swapped, with the rows and the item in memory bound to objects, and in review B2\'s two cells on a host declaring no package: still refused (review S3)', async () => {
+    const { seen, expected } = await afterTwoPasses([
+      [[BETA, [[ALPHA], [null]], [BETA], []], [BETA, ALPHA, 'environment']],
+      [[ALPHA, [[BETA, 'contact'], [null, 'account']], [[ALPHA, 'account']], []], [ALPHA, BETA]],
+      [[undefined, [[BETA], [null]], [ALPHA], []], [ALPHA, BETA, 'environment']],
+      [[undefined, [[null]], [ALPHA], [BETA]], [ALPHA, BETA, 'environment']],
+    ]);
+    expect(seen).toEqual(expected);
+  });
+
+  it('CONTROL action, the pass run twice on the same manager after the stamped row replaced the host\'s package\'s item in memory, beside no other package: the bare read still answers the package-less row (review S3)', async () => {
+    const seen: unknown[] = [];
+    for (const keepCache of [false, true]) seen.push(await bareAfterPass([ALPHA, [[null]], [ALPHA], []], 2, keepCache));
+    expect(seen).toEqual([['env', 'env'], ['env', 'env']]);
+  });
+
+  it('CONTROL action, the stamped row replacing the host\'s package\'s item in memory, beside no other package: the bare read answers the package-less row', async () => {
+    expect(await bareAfterPass([ALPHA, [[null]], [ALPHA], []])).toEqual(['env', 'env']);
+  });
+
+  /**
+   * [#32791, review N1] The row is counted once only while a loader still
+   * stores it: removed from the table behind the manager, the registry's
+   * slot is counted as before (after the removal main answers the same).
+   */
+  it('action, the package-less row removed from the table behind the manager after the pass: the row is no longer counted once, and the host\'s slot is a holder again', async () => {
+    await seedRows([[ALPHA], [null]]);
+    const m = await bootPass(HOST);
+    expect(await bareAnswers(m)).toEqual(['env', 'env']);
+    await driver.delete('sys_metadata', 'action_env_2');
+    for (const loader of (m as any).loaders.values()) (loader as DatabaseLoader).invalidateAll();
+    expect(await bareAnswers(m)).toEqual([REFUSED(HOST, ALPHA), REFUSED(HOST, ALPHA)]);
+  });
+
+  it('CONTROL every by-package type, one package\'s row and a package-less row: the bare read answers the row the pass registered — the package-less row saved last, the holder\'s row saved last — on a host declaring no package, the holder, or another (action\'s package-less row saved last on another host: the first case)', async () => {
+    const seen: unknown[] = [];
+    const cells = (type: string, order: string) =>
+      [undefined, ALPHA, HOST].filter((hostPackage) => !(type === 'action' && order === 'package-less row saved last' && hostPackage === HOST));
+    for (const type of UNBUNDLED) {
+      for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
+        for (const hostPackage of cells(type, order)) {
+          driver = createMockDriver();
+          if (order === 'package-less row saved last') {
+            await seed(type, ALPHA, 1);
+            await seed(type, null, 2);
+          } else {
+            await seed(type, null, 1);
+            await seed(type, ALPHA, 2);
+          }
+          seen.push([type, order, hostPackage ?? 'no host package', await answer(await bootPass(hostPackage), type)]);
+        }
+      }
+    }
+    expect(seen).toEqual(UNBUNDLED.flatMap((type) => [
+      ...cells(type, 'package-less row saved last').map((hostPackage) => [type, 'package-less row saved last', hostPackage ?? 'no host package', 'env']),
+      ...cells(type, 'package-less row saved first').map((hostPackage) => [type, 'package-less row saved first', hostPackage ?? 'no host package', ALPHA]),
+    ]));
+    expect(seen).toHaveLength(UNBUNDLED.length * 6 - 1);
+  });
+
+  it('CONTROL action, the host\'s own item registered in memory beside one package\'s stored row: the host is a holder — the bare read is refused naming both', async () => {
+    await seed('action', ALPHA, 1);
+    const m = await bootPass(HOST);
+    registerOwn(m, HOST);
+    expect(registryKeys(m, 'action')).toEqual([`${ALPHA}\u0000helper`, `${HOST}\u0000helper`]);
+    expect(await bareAnswers(m)).toEqual([REFUSED(ALPHA, HOST), REFUSED(ALPHA, HOST)]);
+  });
+});
+
+/**
  * [#32458; #31699 R4-B's shape, epic ruling 6799056319] Every unbundled type
  * stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES` less the bundled
  * ones): `MetadataManager.loadMany` hands a row bound to its package by the
@@ -2437,22 +2814,12 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
             await seed(type, ALPHA, 2);
           }
           const m = await bootPass(hostPackage);
-          let bare = await answer(m, type, 'helper');
-          // [#32791] On main since #32719 (card #32560), a bare action read
-          // judges the loaders' slots beside the registry's, and this one cell
-          // (the package-less row saved last, a host declaring another package)
-          // is refused naming the holder, the environment AND the host: one
-          // stored row counted twice. The extra `com.host.app` is #32791's
-          // regression, fixed there (epic seat ruling); this PR neither accepts
-          // nor declares it. Held loosely until then: a 409 naming the holder
-          // and the environment. Tighten this cell back to 'env' once #32791 lands.
-          if (type === 'action' && order === 'package-less row saved last' && hostPackage === HOST) {
-            expect(Array.isArray(bare)).toBe(true);
-            const refusal = bare as unknown[];
-            expect(refusal.slice(0, 3)).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
-            expect(refusal).toEqual(expect.arrayContaining([ALPHA, 'environment']));
-            bare = 'env';
-          }
+          // [#32791] Fixed: the action cell of the package-less row saved last
+          // on a host declaring another package (a bare read judged over the
+          // loaders counted the one stored row twice, as the host's package and
+          // as the environment, between #32719 and #32791) answers its table
+          // row again.
+          const bare = await answer(m, type, 'helper');
           seen.push([
             order, hostPackage ?? 'no host package',
             labels(await new DatabaseLoader({ driver }).loadMany(type)),

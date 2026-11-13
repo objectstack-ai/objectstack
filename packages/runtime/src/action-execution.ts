@@ -71,7 +71,7 @@ import {
 // Who may START a flow by name — the one rule the trigger door, this door and
 // the declared endpoint share (the maintainer's rulings, letters B and A, and
 // the flow's own `requiredPermissions`).
-import { flowDeclaredRecordReads, flowRunsElevated, flowStartRefusal, type FlowWalkReads } from './flow-start-admission.js';
+import { flowDeclaredRecordReads, flowRunsElevated, flowStartRefusal, isAiServiceAccount, type FlowWalkReads } from './flow-start-admission.js';
 // [#31696] A flow action's `target` resolves from the action's own package,
 // and its start admission walks callees from the calling flow's package.
 import { flowServiceForCaller, flowWalkReads } from './flow-slot-view.js';
@@ -133,6 +133,22 @@ export function isSystemObjectName(name: string): boolean {
 }
 
 /**
+ * [ADR-0011] Whether the action's author opted it into the AI surface:
+ * `ai: { exposed: true, … }`, the literal `true` and nothing else.
+ *
+ * ONE reading of the opt-in for every site that asks it: the MCP door's
+ * exposure gate ({@link actionAiExposureError}), its `sys_*` gate
+ * ({@link systemObjectActionExposureError}), the listing's attestation
+ * ({@link summarizeAction}), and the flow start admission's AI service account
+ * rule, which the action door hands it to ({@link dispatchFlowAction};
+ * `flow-start-admission.ts`, ADR-0151 Non-goals). ⛔ A second spelling at any
+ * of them is two rules that agree today.
+ */
+export function actionIsAiExposed(action: any): boolean {
+    return action?.ai?.exposed === true;
+}
+
+/**
  * [#27681 / ADR-0011] The `sys_*` gate of the MCP action surface, PER ACTION.
  * Returns a human-readable refusal for an action on a system object that its
  * author did not opt into the AI surface, or `null` when the action may pass
@@ -169,7 +185,7 @@ export function systemObjectActionExposureError(_deps: ActionExecutionDeps, acti
             `and is never exposed via MCP — read and change those through the metadata API`
         );
     }
-    if (action?.ai?.exposed === true) return null;
+    if (actionIsAiExposed(action)) return null;
     return (
         `Action '${action?.name ?? 'unknown'}' is on a system object ('${objectName}') and is not exposed via MCP — ` +
         `a system object's action is reachable here only when its author declares \`ai: { exposed: true, description: … }\` on it`
@@ -1124,7 +1140,7 @@ export function disabledActionRefusal(
  * default.
  */
 export function actionAiExposureError(_deps: ActionExecutionDeps, actionDef: any, objectName?: string): string | null {
-    if (actionDef?.ai?.exposed === true) return null;
+    if (actionIsAiExposed(actionDef)) return null;
     const on = objectName ? ` on '${objectName}'` : '';
     return (
         `Action '${actionDef?.name ?? 'unknown'}'${on} is not exposed to AI — ` +
@@ -1975,11 +1991,31 @@ export async function resolveInProcessRequest(
     return null;
 }
 
-/** The 503 for a kernel that cannot forward (no raw app to inject into). */
-export function apiActionForwardUnavailableError(action: any): string {
-    return (
+/**
+ * The 503 for a kernel that cannot forward (no raw app to inject into).
+ *
+ * [#32658] At the host door (`dispatchAction`) the kernel is the one the host
+ * handed in, so the sentence names the call's remedy as well as the
+ * operator's: an environment's own kernel on a multi-kernel host owns no
+ * socket, and the host's kernel, which registers `kernel-resolver`, is the one
+ * whose door forwards for it.
+ */
+export function apiActionForwardUnavailableError(action: any, door?: 'rest' | 'mcp' | 'host'): string {
+    const opening =
         `Action '${action?.name ?? 'unknown'}' is a same-origin \`type: 'api'\` action whose \`target\` ` +
-        `(${typeof action?.target === 'string' ? `'${action.target}'` : 'endpoint'}) this door forwards to in-process, ` +
+        `(${typeof action?.target === 'string' ? `'${action.target}'` : 'endpoint'}) this door forwards to in-process, `;
+    if (door === 'host') {
+        return (
+            opening +
+            `but the kernel dispatchAction was handed exposes no in-process request path (IHttpServer.getRawApp). ` +
+            `Pass dispatchAction the kernel your HTTP door is served from: on a multi-kernel host, the kernel that ` +
+            `registers \`kernel-resolver\`, with the call's \`environmentId\` (an environment's own kernel owns no ` +
+            `socket). On a single kernel, run an HTTP server plugin that implements getRawApp. The action is not ` +
+            `dispatched around the door.`
+        );
+    }
+    return (
+        opening +
         `but this deployment's HTTP server exposes no in-process request path (IHttpServer.getRawApp). ` +
         `Operator: run an HTTP server plugin that implements getRawApp; the action is not dispatched around the door.`
     );
@@ -2724,7 +2760,15 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     // flow's declaration: an action that names a gated flow is gated by it
     // even when the action declares nothing. An action that declares its own
     // list has been answered upstream, so a caller here needs both lists.
-    const startRefusal = await flowStartRefusal(automation, action.target, ec);
+    //
+    // [ADR-0151 Non-goals; ruling record 6812617393, letter C] Between the
+    // two, the check asks the AI service account rule, and this door states
+    // the one fact it needs: whether THIS action carries its author's
+    // `ai.exposed` opt-in. The MCP entrance has asked that of every action
+    // upstream (`actionAiExposureError`), so the rule changes nothing there;
+    // at the REST entrance it is what an account starting an elevated flow is
+    // held to, by the same reading (`actionIsAiExposed`).
+    const startRefusal = await flowStartRefusal(automation, action.target, ec, { aiExposed: actionIsAiExposed(action) });
     if (startRefusal) {
         throw Object.assign(new Error(startRefusal.message), {
             status: startRefusal.status,
@@ -2791,7 +2835,7 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         // without the kind it would be evaluated as a person's (the member
         // baseline, no agent ceiling). Only the account (`agent` with no
         // `onBehalfOf`); an OAuth-delegated agent is forwarded as before.
-        ...(ec?.principalKind === 'agent' && !ec?.onBehalfOf ? { principalKind: 'agent' as const } : {}),
+        ...(isAiServiceAccount(ec) ? { principalKind: 'agent' as const } : {}),
         // [#22450] The caller's already-resolved language, the trigger door's
         // twin (`buildAutomationContext`): a refused run's message renders in
         // it. See `AutomationContext.locale`.
@@ -2938,7 +2982,10 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
  * REST `/actions` (`domains/actions.ts`) is NOT `ai.exposed`-gated and sits
  * OUTSIDE this gate: an API-key agent on REST is understood to be outside it
  * rather than silently assumed inside it. Widening the set is its own decision,
- * not a thing to infer from this comment.
+ * not a thing to infer from this comment. The one place REST reads the opt-in
+ * — an AI service account starting a `runAs: 'system'` flow
+ * (`flow-start-admission.ts`, rule 2) — asks for the opt-in alone and does not
+ * move this gate: no confirmation is asked there.
  *
  * Returns `undefined` when the call may proceed.
  */
@@ -3030,7 +3077,7 @@ export function summarizeAction(
         // through its own fail-closed filter (`allowSystemObjects` off): it
         // never sees the declaration, so this is the only way the per-action
         // flag reaches it. Emitted only when declared, like `operation`.
-        ...(action?.ai?.exposed === true ? { aiExposed: true } : {}),
+        ...(actionIsAiExposed(action) ? { aiExposed: true } : {}),
         ...(params.length > 0 ? { params } : {}),
     };
 }

@@ -60,6 +60,7 @@ import { ENVIRONMENT_ADDRESS_SEGMENT, readNamespacePositionSegment } from '@obje
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import type { ProtocolHost } from './protocol-host.js';
+import type { ServedOverrideRow } from './served-override.js';
 
 /**
  * The registry reads the exact qualifier judges a qualified read with: who
@@ -372,7 +373,10 @@ export function disabledExactAddressHolder(
  * no package) of a name two or more packages hold is no holder's own, for a
  * type whose by-name readers consult `(package, name)` or whose one-holder
  * rule has narrowed to the namespace ({@link packageLessRowOwners}, epic
- * ruling on #31699, #32407): refused naming every holder.
+ * ruling on #31699, #32407): refused naming every holder. That is an overlay
+ * type's row; a sealed type's is declined before it reaches here
+ * ({@link declinesPackageLessRowAt}, {@link declinedCopyReplaced}, epic ruling
+ * 6817768147 on #32568).
  *
  * @returns the item to serve (unchanged when it is the address's).
  */
@@ -401,7 +405,10 @@ export function exactQualifierItem(
         }
         return item;
     }
-    if (served === address.packageId || address.registryHolders.includes(served)) return item;
+    // [#32501] An item of one of TWO admitted bases (two modules of one App
+    // sharing its pair) is no more the address's than the other's: it falls
+    // through to the refusal naming both below, never the first registered.
+    if (served === address.packageId || (address.registryHolders.length === 1 && address.registryHolders[0] === served)) return item;
     // [#32076] A pair of the package the address names, or of a base it admitted, serves on that base's address
     // when the row is that base's (epic ruling on #31699 F2; {@link pairRowOnAddress}, the one owner check).
     const installed = installedManifestsOfEngine(host.engine);
@@ -425,6 +432,71 @@ export function exactQualifierItem(
     }
     const [holder] = address.registryHolders;
     return holder === undefined ? undefined : registry.getPackageScopedItem(request.type, request.name, holder, member);
+}
+
+/**
+ * [ADR-0126 Regime C, ADR-0150 D4; epic ruling 6817768147 on #32568] Is a
+ * package-less row of `(type, name)` met at a holder's exact address declined
+ * there: a type ADR-0150 addresses by `(package, name)` whose stored row of
+ * the name the reads decline ({@link ProtocolHost.declinesStoredRow}: a sealed
+ * managed item, unless the row is the shipping package's declared override)?
+ * ⛔ Not a flow: its reads keep their own Regime C rule (#20946, #21002), which
+ * reports a declined row as a shadowed `overlay` layer.
+ *
+ * Such a row customizes nothing: it is no holder's customization, so D4 has
+ * no ambiguity to report for it, and the address serves its holder's own
+ * item, as with no row stored. Declined on every read at the address, in
+ * every hydration state: the active read and its registry or service copy,
+ * the strict draft read, `previewDrafts`, the layered read and its `draft`
+ * layer. Only the five overlay types' package-less rows are a holder's
+ * customization, judged by {@link packageLessRowOwners} (D4).
+ */
+export function declinesPackageLessRowAt(
+    host: Pick<ProtocolHost, 'declinesStoredRow'>,
+    type: string,
+    name: string,
+    row?: ServedOverrideRow,
+): boolean {
+    return isPackageScopedType(type) && type !== 'flow' && host.declinesStoredRow(type, name, row);
+}
+
+/** Is `row` a stored row bound to no package (its `package_id` column empty)? */
+export function isPackageLessRow(row: unknown): boolean {
+    const bound = (row as { package_id?: unknown } | null | undefined)?.package_id;
+    return bound === undefined || bound === null || bound === '';
+}
+
+/**
+ * [Epic ruling 6817768147 on #32568] The item an exact address serves in
+ * place of a package-less registry or service copy of a row it declines
+ * ({@link declinesPackageLessRowAt}): the copy a hydration put in the
+ * registry's bare slot (stamped `''` or `sys_metadata`, tenant-marked) is the
+ * declined row, so the admitted holder's own shipped item is served, as
+ * before the hydration. Read from the artifact set (`lookupArtifactItem`),
+ * never the registry's package-scoped read, which answers the bare slot over
+ * a lone holder's composite (the ADR-0005 overlay). Two bases the package is
+ * a pair of, both holding the name, are refused naming both. `item` is
+ * returned unchanged when it is not such a copy.
+ */
+export function declinedCopyReplaced(
+    host: Pick<ProtocolHost, 'isStoredEntryOfDeclinedName' | 'lookupArtifactItem'>,
+    request: { type: string; name: string },
+    address: ExactQualifierAddress,
+    item: unknown,
+    wantedMember: string | undefined,
+): unknown {
+    if (item === undefined || item === null || typeof item !== 'object') return item;
+    const served = (item as { _packageId?: unknown })._packageId;
+    // Package-less only: `''` and the provenance sentinel `sys_metadata` are no package, as in {@link exactQualifierItem}.
+    if (typeof served === 'string' && served !== '' && served !== 'sys_metadata') return item;
+    // A flow's copy is its own read's ({@link ProtocolHost.isStoredFlowEntryOfShippedName}).
+    if (!isPackageScopedType(request.type) || request.type === 'flow' || !host.isStoredEntryOfDeclinedName(request.type, item)) return item;
+    if (address.registryHolders.length > 1) {
+        throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
+            address.registryHolders.map((holder) => ({ kind: 'package' as const, packageId: holder })));
+    }
+    const [holder] = address.registryHolders;
+    return holder === undefined ? undefined : host.lookupArtifactItem(request.type, request.name, holder, wantedMember);
 }
 
 /**

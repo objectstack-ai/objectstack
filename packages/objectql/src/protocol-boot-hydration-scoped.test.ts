@@ -179,9 +179,11 @@ describe('loadMetaFromDb — ADR-0048 package-scoped protection graft at boot (#
         expect(direct._provenance).toBe('org');
     });
 
-    it('keeps the legacy best-effort graft for package-less (global) rows', async () => {
-        // A row with no package binding keeps the pre-existing unscoped
-        // first-match semantics — identical to the read-side hydration.
+    // [#32568, epic ruling 6817768147] The legacy best-effort graft for a
+    // package-less row (an unscoped lookup: the FIRST package's envelope) is
+    // retired for the types ADR-0150 addresses by `(package, name)`: it laid
+    // the row into that holder's slot as its own item.
+    it('a package-less row of a sealed type two packages ship is not registered: each holder keeps its own', async () => {
         const registry = new SchemaRegistry({ multiTenant: false });
         registry.logLevel = 'silent';
         registry.registerItem('page', artifactPage(PKG_A, 'A Home'), 'name', PKG_A);
@@ -199,12 +201,11 @@ describe('loadMetaFromDb — ADR-0048 package-scoped protection graft at boot (#
 
         await protocol.loadMetaFromDb();
 
-        const direct: any = registry.getItem('page', 'home');
-        expect(direct.label).toBe('Global overlay');
-        // Best-effort first-match: SOME package's envelope is grafted
-        // (legacy behaviour, unchanged by #4624 — do not over-pin which).
-        expect([PKG_A, PKG_B]).toContain(direct._packageId);
-        expect(direct._lock).toBe('full');
+        // Before: `getItem('page', 'home')` answered 'Global overlay' under
+        // the first-registered package's envelope.
+        expect((registry.getItem('page', 'home', PKG_A) as any).label).toBe('A Home');
+        expect((registry.getItem('page', 'home', PKG_B) as any).label).toBe('B Home');
+        expect((registry.getItem('page', 'home') as any).label).not.toBe('Global overlay');
     });
 });
 

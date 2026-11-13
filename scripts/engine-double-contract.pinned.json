@@ -5723,8 +5723,18 @@
     },
     {
       "file": "packages/services/service-messaging/src/messaging-service.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/messaging-service.test.ts",
       "verb": "findOne",
-      "pinned": 6
+      "pinned": 7
+    },
+    {
+      "file": "packages/services/service-messaging/src/messaging-service.test.ts",
+      "verb": "update",
+      "pinned": 1
     },
     {
       "file": "packages/services/service-messaging/src/notification-delivery-retention-sweep.test.ts",
