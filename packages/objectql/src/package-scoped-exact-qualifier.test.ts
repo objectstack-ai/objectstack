@@ -1981,7 +1981,7 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
     // read's code step judged as the plain read judges it: the copy is
     // declined there too, never the holder's `code` (one holder) nor a 409
     // naming both (two).
-    for (const type of ['action', 'queue']) {
+    for (const type of ['action', 'queue', 'tool']) {
       for (const holders of [[A], [A, B]]) {
         it(`${type}, ${holders.length} holder(s): a service copy of the package-less row is declined on the plain read and the layered read's code layer alike`, async () => {
           for (const p of holders) shipSealed(type, p);
@@ -2037,7 +2037,7 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
     // environment's row as its own until the next unscoped hydration (the
     // re-enable heal, a follow-up under #32568).
     const BOTH = [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }];
-    for (const type of ['email_template', 'action', 'queue']) {
+    for (const type of ['email_template', 'action', 'queue', 'tool']) {
       it(`${type}, two holders, one disabled while the read-side hydrator runs, then re-enabled: one answer per state on the exact read`, async () => {
         const overlay = type === 'email_template';
         if (overlay) {
