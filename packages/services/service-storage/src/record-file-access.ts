@@ -7,6 +7,7 @@ import type {
   AttachFileInput,
   IApprovalService,
   IDataEngine,
+  II18nService,
   ISecurityService,
   IStorageService,
 } from '@objectstack/spec/contracts';
@@ -15,8 +16,10 @@ import {
   FILE_REFERENCE_TYPES,
   RAW_FILE_VALUES_CONTEXT_KEY,
   isFileIdToken,
+  resolveDisplayField,
   type DroppedFieldsEvent,
 } from '@objectstack/spec/data';
+import { translateObject, type ObjectLike, type TranslationBundle } from '@objectstack/spec/system';
 import {
   StorageMetadataStore,
   updateFileIfUnchanged,
@@ -270,10 +273,35 @@ export interface UploadLinkGrant {
   field?: string;
 }
 
+/**
+ * [#32712] Ruling B′: what the page names for the link's own user, every name
+ * read as that user when the page opens (`inspectUploadLink`'s `names`
+ * option). Each member is present only when that user may read it, and in the
+ * page's language; a missing one is not shown. ⛔ Never an id, an API name, a
+ * user or an organization.
+ */
+export interface UploadLinkNames {
+  /** The object's label. Absent when the object declares none: the API name is never shown in its place. */
+  objectLabel?: string;
+  /**
+   * The record's title as that user's own read serves it, unmasked; only
+   * beside `objectLabel`. Absent for a link that names no record.
+   */
+  recordTitle?: string;
+  /** The file field's label, for a field link whose field that user may read. */
+  fieldLabel?: string;
+}
+
 /** What the link's page may show: that it is usable, until when, and where the file lands. */
 export interface UploadLinkView {
   expiresAt: string;
   target: 'field' | 'attachments';
+  /**
+   * [#32712] The names the page shows its user (ruling B′), present only when
+   * asked for (the page's `GET`) and readable; absent, the page names nothing,
+   * as before.
+   */
+  names?: UploadLinkNames;
   /** [#32686] The link names no record: the file waits for the record the agent creates. */
   newRecord?: true;
   /**
@@ -381,8 +409,12 @@ export interface ICallerRecordFileService {
  * the one unusable-link refusal, and the link is not spent.
  */
 export interface UploadLinkDoor {
-  /** The link's view, or the one unusable-link refusal. Writes nothing. */
-  inspectUploadLink(token: string, callerUserId: string): Promise<UploadLinkView>;
+  /**
+   * The link's view, or the one unusable-link refusal. Writes nothing.
+   * [#32712] `options.names` asks for the names the page shows, read as the
+   * link's own user, in `options.names.lang`.
+   */
+  inspectUploadLink(token: string, callerUserId: string, options?: UploadLinkInspectOptions): Promise<UploadLinkView>;
   /** Spend the link on `upload`, landing it where the link is bound. */
   consumeUploadLink(token: string, upload: UploadLinkUpload, callerUserId: string): Promise<UploadLinkOutcome>;
   /**
@@ -394,6 +426,12 @@ export interface UploadLinkDoor {
     uploads: UploadLinkUpload[],
     callerUserId: string,
   ): Promise<UploadLinkFilesOutcome>;
+}
+
+/** [#32712] What {@link UploadLinkDoor.inspectUploadLink} is asked for beyond the link's view. */
+export interface UploadLinkInspectOptions {
+  /** The names the page shows (ruling B′), in the page's language (`lang`, a locale code). */
+  names?: { lang: string };
 }
 
 /** The data-engine surface these verbs use: the reads and writes every engine has, plus its schema read. */
@@ -440,9 +478,16 @@ export interface RecordFileAccessDeps {
   getBasePath(): string;
   getSharing?(): AttachmentSharingLike | null | undefined;
   getSecurity?():
-    | (AttachmentSecurityLike & Partial<Pick<ISecurityService, 'getWritableFields' | 'explain'>>)
+    | (AttachmentSecurityLike &
+        Partial<Pick<ISecurityService, 'getWritableFields' | 'explain' | 'getReadableFields' | 'getQueryableFields'>>)
     | null
     | undefined;
+  /**
+   * [#32712] The i18n service, for the object and field labels the page shows
+   * in its language. Absent, or answering nothing for the language: the
+   * labels as the object declares them.
+   */
+  getI18n?(): UploadLinkLabelI18n | null | undefined;
   /**
    * [#32734] The approvals service, for whether a pending approval locks the
    * record a field link would write. Absent (no approvals plugin), or without
@@ -454,6 +499,10 @@ export interface RecordFileAccessDeps {
   /** Clock (tests). */
   now?(): number;
 }
+
+/** [#32712] The i18n surface the page's labels are translated through (`II18nService`'s reads). */
+export type UploadLinkLabelI18n = Pick<II18nService, 'getLocales' | 'getTranslations'> &
+  Partial<Pick<II18nService, 'getFallbackLocale' | 'getDefaultLocale'>>;
 
 /** [#32747] One upload of a submit, its media type settled. */
 type TypedUpload = UploadLinkUpload & { mimeType: string };
@@ -636,6 +685,31 @@ function sameDigest(a: string, b: string): boolean {
   const left = Buffer.from(a, 'hex');
   const right = Buffer.from(b, 'hex');
   return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
+}
+
+/**
+ * [#32712] A record's title as the page may show it: a scalar, not blank, and
+ * never the record's own id. Anything else is no title.
+ */
+function titleOf(value: unknown, recordId: string): string | undefined {
+  if (value === null || value === undefined || typeof value === 'object') return undefined;
+  const title = String(value).trim();
+  return title && title !== recordId ? title : undefined;
+}
+
+/**
+ * [#32712] The i18n service's translations as one bundle keyed by locale, the
+ * shape `translateObject` reads (the glue `RestServer.buildTranslationBundle`
+ * and the analytics service's label pass build the same way); `undefined`
+ * when it holds none.
+ */
+function translationBundleOf(i18n: UploadLinkLabelI18n): TranslationBundle | undefined {
+  const bundle: Record<string, unknown> = {};
+  for (const locale of i18n.getLocales()) {
+    const data = i18n.getTranslations(locale);
+    if (data && typeof data === 'object') bundle[locale] = data;
+  }
+  return Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined;
 }
 
 /** The stored file ids a file field's raw value holds (one id, or an array of them). */
@@ -1105,14 +1179,164 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     return { row, state };
   }
 
-  async inspectUploadLink(token: string, callerUserId: string): Promise<UploadLinkView> {
+  async inspectUploadLink(
+    token: string,
+    callerUserId: string,
+    options: UploadLinkInspectOptions = {},
+  ): Promise<UploadLinkView> {
     const engine = this.engineOrRefuse();
     const { state } = await this.openLink(new StorageMetadataStore(engine), token, callerUserId);
-    return {
+    const view: UploadLinkView = {
       expiresAt: state.expires_at,
       target: state.target,
       ...(state.record_id === undefined ? { newRecord: true as const } : {}),
       files: this.fileRangeOf(engine, state),
+    };
+    if (!options.names) return view;
+    const names = await this.namesForLinkUser(engine, state, options.names.lang);
+    return names ? { ...view, names } : view;
+  }
+
+  /**
+   * [#32712] Ruling B′: the names the page shows the link's own user, read as
+   * that user now — asked only once {@link openLink} has found the link open,
+   * unexpired and that user's, so whoever else holds the token gets the one
+   * refusal before anything is read.
+   *
+   *  - **The user** is resolved as the upload resolves them
+   *    ({@link RecordFileAccessDeps.resolveUserContext}); ⛔ nothing here reads
+   *    as the system.
+   *  - **The record** is read through the engine as that user, the read
+   *    {@link readRecordAs} does for `read_file`: the engine's own security
+   *    answers which rows and fields they are served. A record they cannot
+   *    read now — the read answers none, or refuses `403` / `404` — and a user
+   *    who can no longer act in the link's organization answer the one
+   *    unusable-link refusal, exactly as a stranger's request does.
+   *  - **The title** is the object's display field (`resolveDisplayField`,
+   *    ADR-0079) as that read serves it, shown only when the security service
+   *    answers it queryable for that user (readable and not masked, the
+   *    `getQueryableFields` rule); never the id, and never a blank.
+   *  - **The field's label** only when the field is readable for that user
+   *    (`getReadableFields`). A security service that cannot answer either
+   *    question shows less, never more. No security service: no field-level
+   *    rule exists, and what the read serves is the answer.
+   *  - **Labels** are the object's and the field's own, in `lang`
+   *    (`translateObject`); a missing one is left out, ⛔ never replaced by an
+   *    API name.
+   *
+   * Any other failure answers `undefined`: the page names nothing, as before.
+   */
+  private async namesForLinkUser(
+    engine: RecordFileEngine,
+    state: UploadLinkState,
+    lang: string,
+  ): Promise<UploadLinkNames | undefined> {
+    const degrade = (what: string, err: unknown): undefined => {
+      this.deps.logger.warn(
+        `[storage] upload-link page names nothing: ${what} failed (${err instanceof Error ? err.message : String(err)})`,
+      );
+      return undefined;
+    };
+    let user: ExecutionContext | null;
+    try {
+      user = await this.deps.resolveUserContext(state.user_id, state.organization_id ?? null);
+    } catch (err) {
+      return degrade("resolving the link's user", err);
+    }
+    if (!user) refuseUnusableLink();
+
+    let record: Record<string, unknown> | null = null;
+    if (state.record_id !== undefined) {
+      try {
+        record = await engine.findOne(state.object, { where: { id: state.record_id } }, { context: user });
+      } catch (err) {
+        const status = (err as { status?: unknown })?.status;
+        if (status === 403 || status === 404) refuseUnusableLink();
+        return degrade('reading the record as its user', err);
+      }
+      if (!record) refuseUnusableLink();
+    }
+
+    try {
+      const schema = engine.getObject?.(state.object) as
+        | { label?: unknown; fields?: Record<string, { label?: unknown }> }
+        | undefined;
+      const labels = this.labelsIn(schema, state.object, state.field, lang);
+      const names: UploadLinkNames = {};
+      if (labels.objectLabel !== undefined) {
+        names.objectLabel = labels.objectLabel;
+        const titleField = resolveDisplayField(schema as never);
+        const title = record && titleField ? titleOf(record[titleField], state.record_id as string) : undefined;
+        if (title !== undefined && titleField !== 'id' && titleField !== '_id') {
+          if (await this.servedUnmasked(state.object, titleField as string, user)) names.recordTitle = title;
+        }
+      }
+      if (state.target === 'field' && labels.fieldLabel !== undefined) {
+        if (await this.servedReadable(state.object, state.field as string, user)) names.fieldLabel = labels.fieldLabel;
+      }
+      return names;
+    } catch (err) {
+      return degrade('reading the names', err);
+    }
+  }
+
+  /** [#32712] Is `field` served to `user` unmasked? The security service's queryable set says. */
+  private async servedUnmasked(object: string, field: string, user: ExecutionContext): Promise<boolean> {
+    const security = this.deps.getSecurity?.();
+    if (!security) return true;
+    if (typeof security.getQueryableFields !== 'function') return false;
+    const queryable = await security.getQueryableFields(object, user as never);
+    return Array.isArray(queryable) && queryable.includes(field);
+  }
+
+  /** [#32712] Is `field` readable for `user`? The security service's readable set says. */
+  private async servedReadable(object: string, field: string, user: ExecutionContext): Promise<boolean> {
+    const security = this.deps.getSecurity?.();
+    if (!security) return true;
+    if (typeof security.getReadableFields !== 'function') return false;
+    const readable = await security.getReadableFields(object, user as never);
+    return Array.isArray(readable) && readable.includes(field);
+  }
+
+  /**
+   * [#32712] The object's label, and the file field's, in `lang`: the
+   * translator `GET /meta/object/:name` serves labels through
+   * (`translateObject`), over the i18n service's bundle; without one, the
+   * labels as declared. A label that is not a non-empty string is absent.
+   */
+  private labelsIn(
+    schema: { label?: unknown; fields?: Record<string, { label?: unknown }> } | undefined,
+    object: string,
+    field: string | undefined,
+    lang: string,
+  ): { objectLabel?: string; fieldLabel?: string } {
+    const declared = (value: unknown) => (typeof value === 'string' && value.trim() ? value : undefined);
+    const objectLabel = declared(schema?.label);
+    const fieldLabel = field !== undefined ? declared(schema?.fields?.[field]?.label) : undefined;
+    const doc: ObjectLike = {
+      name: object,
+      ...(objectLabel !== undefined ? { label: objectLabel } : {}),
+      fields: field !== undefined ? { [field]: { name: field, ...(fieldLabel !== undefined ? { label: fieldLabel } : {}) } } : {},
+    };
+    const i18n = this.deps.getI18n?.();
+    const bundle = i18n ? translationBundleOf(i18n) : undefined;
+    if (!i18n || !bundle) return { objectLabel, fieldLabel };
+    const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+    const defaultLocale = typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+    const translated = translateObject(doc, bundle, {
+      locale: lang,
+      ...(fallback ? { fallbackChain: [fallback] } : {}),
+      ...(defaultLocale ? { defaultLocale } : {}),
+    });
+    const fields = translated.fields as Record<string, { label?: unknown }> | Array<{ name?: string; label?: unknown }> | undefined;
+    const translatedField = field === undefined
+      ? undefined
+      : Array.isArray(fields)
+        ? fields.find((f) => f?.name === field)
+        : fields?.[field];
+    return {
+      objectLabel: objectLabel !== undefined ? (declared(translated.label) ?? objectLabel) : undefined,
+      fieldLabel: fieldLabel !== undefined ? (declared(translatedField?.label) ?? fieldLabel) : undefined,
     };
   }
 

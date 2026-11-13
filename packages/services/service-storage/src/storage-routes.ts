@@ -1858,7 +1858,12 @@ export function registerStorageFamily(
       }
       let view: UploadLinkView;
       try {
-        view = await door.inspectUploadLink(String(req.params.token ?? ''), caller.userId as string);
+        // [#32712] Ruling B′: the page names the record and the field for the
+        // link's own user, read as that user now, in the page's language. A
+        // record they can no longer read answers the one unusable-link page.
+        view = await door.inspectUploadLink(String(req.params.token ?? ''), caller.userId as string, {
+          names: { lang: copy.lang },
+        });
       } catch (err) {
         if (isUnusableUploadLink(err)) {
           sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS, copy);
