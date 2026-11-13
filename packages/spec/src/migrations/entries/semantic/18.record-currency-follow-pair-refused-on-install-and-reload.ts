@@ -15,13 +15,20 @@ export const entry: SemanticMigration = {
     + 'version, a first install or an upgrade) and the artifact hot reload. Two pairs: a record-mode amount whose '
     + '`currencyField` is the path `MASTER_DETAIL.CODE` where CODE names no field of the master_detail target, or a field '
     + 'that holds no ISO 4217 code; and a `summary` declaring `currencyMode: \'record\'` that rolls up a child amount '
-    + 'following no record\'s currency. Not the cold boot',
+    + 'following no record\'s currency. A pair is judged when the install registers only ONE end of it: a package that '
+    + 'holds just the parent, or just the child, is refused over the other end that another package or the '
+    + 'environment holds, also when its own objects did not change. Not the cold boot',
   replacement:
     'For a following amount, name in the second segment of `currencyField` a field of the master_detail target that '
     + 'declares `valueDomain: \'iso_4217_currency\'` (the refusal lists the candidates), or add that field to the parent '
     + 'in the same package, in another package of the same artifact, or through `objectExtensions`. For a `record` '
     + 'roll-up, make the child amount follow the parent (`currencyField: \'MASTER_DETAIL_FIELD.CODE_FIELD\'`), or drop '
-    + '`currencyMode: \'record\'` from the summary',
+    + '`currencyMode: \'record\'` from the summary. The refusal names the object and the field that hold the declaration. '
+    + 'When that object is not one of the package being installed (a child of its parent, or the parent of its child, '
+    + 'held by another package or by the environment), the correction is that holder\'s: it upgrades its package, or '
+    + 'saves the environment\'s object, with the declaration corrected as above, and the refused package is then '
+    + 'installed again unchanged; or the refused package\'s author supplies what the other end names (the code field '
+    + 'a child follows, or an amount that follows the parent)',
   reason:
     '`defineStack` refuses both pairs where one stack holds both objects, and a single save, a publish and the batch '
     + 'writers refuse them on a running server. A code package installed, upgraded or reloaded on a running server was '
@@ -35,7 +42,9 @@ export const entry: SemanticMigration = {
     + 'installed version serving. A refused reload keeps every definition that was served and logs `reload refused` '
     + 'with the pair, so one bad pair in any package of the reloaded artifact holds back that whole reload until it is '
     + 'corrected. Packages installed before this release: a package holding such a pair still loads at every boot, '
-    + 'which is not asked, and serves as it did; its next upgrade or reload is refused until the pair is corrected. '
+    + 'which is not asked, and serves as it did; its next upgrade or reload is refused until the pair is corrected, '
+    + 'and so is the next upgrade or reload of a package that holds only the other end of that pair, although nothing '
+    + 'in that package is wrong. '
     + 'There is no mechanical rewrite: only the author knows which parent field holds the code',
   acceptanceCriteria:
     'Run `objectstack validate` over the stack that holds both objects and confirm no record-currency path finding. '

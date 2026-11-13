@@ -120,11 +120,13 @@ it was, and the unmanaged install and the publish are refused whole. A code pack
 installed, upgraded or reloaded on a running server is judged once, when everything it
 registers is registered (each package of the artifact with its object extensions and
 nested plugins, and the artifact's own objects), so a pair one of them completes for
-another passes. A refused pair refuses the whole install with **`INVALID_METADATA` / 422**
-(a local install reports it as **`PLUGIN_REGISTER_FAILED` / 422** with the same message)
-and nothing of it stays registered; a refused reload keeps every definition that was
-served and logs the pair. Objects registered while the server boots are not judged this
-way.
+another passes. The other end of a pair is read from what is already registered: a package
+that holds only the parent is refused over a child another package or the environment
+holds, and the correction is then that holder's. A refused pair refuses the whole install
+with **`INVALID_METADATA` / 422** (a local install reports it as
+**`PLUGIN_REGISTER_FAILED` / 422** with the same message) and nothing of it stays
+registered; a refused reload keeps every definition that was served and logs the pair.
+Objects registered while the server boots are not judged this way.
 
 ### Writing a record
 

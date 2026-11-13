@@ -207,6 +207,7 @@ async function bootWith(atBoot: unknown[]) {
   ql.registry.logLevel = 'silent';
   return {
     ql,
+    manifest: kernel.getService<ManifestService>('manifest'),
     warn,
     warnings: () => warn.mock.calls.map((c) => String(c[0])),
     reload: (m: unknown) => trigger!('metadata:reloaded', { metadata: m }),
@@ -383,6 +384,11 @@ const SUBTOTAL = {
 const ledger = (codeField?: string) => ({
   id: LEDGER, name: 'ledger', namespace: 'ledger', version: '1.0.0', type: 'module', objects: [invoice(codeField)],
 });
+/** Another vendor's package, holding only the child. */
+const BILLING = 'com.probe.billing';
+const billing = (objects: unknown[], version = '1.0.0') => ({
+  id: BILLING, name: 'billing', namespace: 'billing', version, type: 'module', objects,
+});
 /** The first member with `objects` beside its own. */
 const coreWith = (version: string, objects: unknown[], extra: Record<string, unknown> = {}) =>
   core(version, { objects: [object('suite_core_thing', { label: `core ${version}` }), ...objects], ...extra });
@@ -546,6 +552,51 @@ describe('a running install is asked the record-currency follow door once, at th
     expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'amount' });
     expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('1.0.0');
     expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('a package that holds only the parent is refused over a child another package holds, though its upgrade changes nothing in the pair', async () => {
+    // The other package's child got in at a cold boot, which is not asked: it
+    // follows `currency_code`, and the ledger's parent holds no such field.
+    const { ql, manifest } = await bootWith([ledger(), billing([line('invoice.currency_code')])]);
+    expect(followedBy(ql)).toBe('invoice.currency_code');
+
+    // The ledger's next version re-registers the same parent.
+    const err = await refusal(() => manifest.register({ ...ledger(), version: '2.0.0' }));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'amount' });
+    expect(String(err?.message)).toContain("'suite_invoice' does not hold the code a registered amount follows");
+    expect(String(err?.message)).toContain("'suite_invoice' declares no field 'currency_code'");
+    expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('1.0.0');
+    expect(ql.registry.getObjectOwner('suite_line')?.packageId).toBe(BILLING);
+
+    // The correction is the child's holder's: once its amount follows nothing
+    // the parent lacks, the ledger's upgrade installs unchanged.
+    await manifest.register(billing([line()], '1.1.0'));
+    await manifest.register({ ...ledger(), version: '2.0.0' });
+
+    expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('2.0.0');
+  });
+
+  it('…and a package that holds only the child is refused over a `record` roll-up another package holds', async () => {
+    // At the cold boot the ledger's parent totals, in its own currency, an
+    // amount of the other package's child that follows no record's currency.
+    const { ql, manifest } = await bootWith([
+      billing([line()]),
+      { ...ledger(), objects: [invoice('currency_code', SUBTOTAL)] },
+    ]);
+    expect(fieldOf(ql, 'suite_invoice', 'subtotal')?.currencyConfig?.currencyMode).toBe('record');
+
+    // The child's package re-registers the same child.
+    const err = await refusal(() => manifest.register(billing([line()], '1.1.0')));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_invoice', fieldName: 'subtotal' });
+    expect(ql.registry.getPackage(BILLING)?.manifest?.version).toBe('1.0.0');
+
+    // Here the refused package can supply what the other end names: an amount that follows the parent.
+    await manifest.register(billing([line('invoice.currency_code')], '1.1.0'));
+
+    expect(ql.registry.getPackage(BILLING)?.manifest?.version).toBe('1.1.0');
+    expect(followedBy(ql)).toBe('invoice.currency_code');
   });
 
   it('an upgrade whose new child follows a code field the tenant\'s overlay does not hold is refused: the pair is judged against the served parent, as a single save judges it', async () => {
