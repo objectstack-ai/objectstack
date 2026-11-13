@@ -650,6 +650,37 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect(await openLinkRows()).toBe(before);
     });
 
+    // [#32768] The issue-time half of the `readonlyWhen` refusal: the engine's
+    // own write-free verdict (`judgeFieldWriteLock`), asked before any link row
+    // is written, in the words the update's strict refusal uses for the lock.
+    it('minting refuses a field whose readonlyWhen holds now 403 FIELD_NOT_ACCESSIBLE, in the update\'s words, and writes no link', async () => {
+      const id = await draftClaim('approved before mint');
+      await engine.update('claim', { status: 'approved' }, { where: { id }, context: SYS } as never);
+      const before = await openLinkRows();
+      const r = await refusalOf(files.createUploadLinkAs('claim', id, { field: 'invoices' }, OWNER as never));
+      expect(r).toMatchObject({ code: 'FIELD_NOT_ACCESSIBLE', status: 403 });
+      expect(r?.message).toBe(
+        "You cannot attach a file to claim.invoices: the field is read-only in the target record's current state " +
+          '(a TRUE `readonlyWhen` predicate).',
+      );
+      expect(await openLinkRows()).toBe(before);
+    });
+
+    it('the same field while its readonlyWhen is false gets a link; a static readonly field keeps its refusal; the attachments list is not judged', async () => {
+      const draft = await draftClaim('draft at mint');
+      const grant = await files.createUploadLinkAs('claim', draft, { field: 'invoices' }, OWNER as never);
+      expect(grant.path).toBe(`${BASE}/upload-links/${grant.token}`);
+
+      const r = await refusalOf(files.createUploadLinkAs('claim', draft, { field: 'stamp' }, OWNER as never));
+      expect(r).toMatchObject({ code: 'FIELD_NOT_ACCESSIBLE', status: 403 });
+      expect(r?.message).toBe('You cannot attach a file to claim.stamp: the field is read-only.');
+
+      const approved = await draftClaim('approved, attachments');
+      await engine.update('claim', { status: 'approved' }, { where: { id: approved }, context: SYS } as never);
+      const attach = await files.createUploadLinkAs('claim', approved, { attachments: true }, OWNER as never);
+      expect(attach.path).toBe(`${BASE}/upload-links/${attach.token}`);
+    });
+
     it('minting refuses a record a pending approval locks 409 RECORD_LOCKED and writes no link; once unlocked, it mints', async () => {
       const id = await draftClaim('locked at mint');
       locked.add(id);

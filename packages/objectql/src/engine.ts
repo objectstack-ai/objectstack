@@ -276,6 +276,9 @@ import { collectCascadeDeleteSet, deleteRestrictedError, recordReferenceCheckEle
 // members it reads (`ValidateHost`). Imported after every module that body
 // imports, so the engine's module evaluation order is what it was.
 import { validate } from './engine-validate.js';
+// [#32768] The write-free `readonlyWhen` judgement's body; `judgeFieldWriteLock`
+// below hands it the members it reads (`FieldWriteLockHost`).
+import { judgeFieldWriteLock, type FieldWriteLock } from './engine-field-write-lock.js';
 // [#25522 cut 20] The `where`-lowering bodies (`QueryLoweringHost`), imported
 // after every module they import, so module evaluation order is unchanged.
 import { lowerRelationConditions, resolveSearchQueryableFields, resolveWhereTokens } from './engine-query-lowering.js';
@@ -4582,6 +4585,46 @@ export class ObjectQL implements IObjectQLEngine {
       buildDriverOptions: (...a) => this.buildDriverOptions(...a),
     };
     return validate.call(host, object, data, options);
+  }
+
+  /**
+   * [#32768] Is `field` writable on the record `id` names NOW, as far as its
+   * `readonlyWhen` lock goes — judged without writing anything.
+   *
+   * Answers `null` when an update by this caller would keep the field, and a
+   * {@link FieldWriteLock} when the update's conditional strip would take it
+   * back out: `reason` is the `DroppedFieldsEvent['reason']` the update
+   * reports it under (`'readonly_when'`), `phrase` the words its strict
+   * refusal (`ReadonlyFieldRejectedError`) names that reason with.
+   *
+   * The verdict is the update's own: the same strip, over the same stored row
+   * (the update's prior-row read), master-detail header and gate, with the
+   * field carrying the value it holds now. A predicate that faults refuses as
+   * the write refuses it; an unbound root holds the lock. A row the caller
+   * cannot read through the read door answers as not found, as the by-id
+   * update answers it. A field with no `readonlyWhen` reads nothing.
+   *
+   * Named limits: `beforeUpdate` hooks are not run, so a hook that rewrites a
+   * field a predicate reads moves the write's verdict and not this one; static
+   * `readonly`, permissions and validation rules are not judged here. See
+   * `engine-field-write-lock.ts`.
+   */
+  async judgeFieldWriteLock(
+    object: string,
+    id: unknown,
+    field: string,
+    options?: { context?: ExecutionContext },
+  ): Promise<FieldWriteLock | null> {
+    // [#32768] The body lives in `engine-field-write-lock.ts` (see `FieldWriteLockHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof judgeFieldWriteLock> = {
+      resolveObjectName: (...a) => this.resolveObjectName(...a),
+      get _registry() { return readRegistry(); },
+      findOne: (...a) => this.findOne(...a),
+      readUpdatePriorRow: (...a) => this.readUpdatePriorRow(...a),
+      resolveMasterDetailParent: (...a) => this.resolveMasterDetailParent(...a),
+    };
+    return judgeFieldWriteLock.call(host, object, id, field, options);
   }
 
   private updateByIdExpecting(
