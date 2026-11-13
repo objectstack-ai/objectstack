@@ -4217,20 +4217,20 @@
       "title": "Packages that share a namespace keep each behavioural name unique across it: a second co-owner holding a sharing rule, queue, assignment rule, hook, job, app, page, dashboard, report, book, cube or tool name is refused at os validate, os build and install, while base, system and sys are exempt",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["developer at the CLI", "admin (the seeded admin): the install leg"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages that both declare namespace qa_n (ids com.qa.n-one and com.qa.n-two), each holding a page qa_board; and a defineStack with packages[] whose residual top-level items hold a page qa_board under the same namespace as one of its packages",
+          "two scratch packages that both declare namespace qa_n (ids com.qa.n-one and com.qa.n-two), each holding a page qa_board; com.qa.n-two is built twice for the install leg, once with no dependencies and once declaring com.qa.n-one in manifest.dependencies (a declared dependency co-owns the namespace, ADR-0141 D5); and a defineStack with packages[] whose residual top-level items hold a page qa_board under the same namespace as one of its packages",
           "a boot of the showcase with com.qa.n-one installed"
         ]
       },
       "steps": [
         "os validate and objectstack build on a stack that composes both qa_n packages; record exit codes and output",
-        "install com.qa.n-two into the boot that holds com.qa.n-one; record status and body",
+        "install each build of com.qa.n-two into the boot that holds com.qa.n-one; record status and body for each, then GET /api/v1/packages",
         "os validate the packages[] stack whose residual items repeat qa_board",
         "repeat the install with both packages in a shareable namespace (base) instead; record the answer"
       ],
@@ -4242,10 +4242,10 @@
           "evidence": "both outputs and exit codes"
         },
         {
-          "clause": "the install door refuses the second co-owner with 422 naming page qa_board and both packages, and installs nothing",
+          "clause": "the install door refuses com.qa.n-two before the co-owner judgement and installs nothing: without a dependency the namespace gate answers, with one the override write gate does",
           "oracle": "api",
-          "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is 422 NAMESPACE_CONFLICT with conflicts[]: packages/objectql/src/namespace-co-owner-names.ts#namespaceNameConflicts, #namespaceNameConflictMessage); com.qa.n-two is absent from GET /api/v1/packages",
-          "evidence": "the 422 body and the package list"
+          "verify": "with no dependency, os package install answers 422 PLUGIN_REGISTER_FAILED whose message carries the namespace gate's sentence (namespace \"qa_n\" is already owned by package \"com.qa.n-one\"; packages/objectql/src/registry.ts#NamespaceConflictError, ADR-0048 Phase 1); declaring com.qa.n-one as a dependency, it answers 403 NOT_OVERRIDABLE naming page qa_board and both packages (packages/cloud-connection/src/marketplace-install-local-plugin.ts#overrideGateRefusalBody, the override write gate, ADR-0146 D2). The co-owner refusal itself (422 NAMESPACE_CONFLICT with conflicts[]: packages/objectql/src/namespace-co-owner-names.ts#namespaceNameConflicts) is not reached from this door; packages/objectql/src/registry-namespace-co-owner-names.test.ts pins it at registration. com.qa.n-two is absent from GET /api/v1/packages after both",
+          "evidence": "both refusal bodies and the package list"
         },
         {
           "clause": "a packages[] stack's residual top-level items are judged with the namespace they fall under",
@@ -4262,7 +4262,8 @@
       ],
       "negative": [
         "a second co-owner installed with a duplicate qa_board is a FAIL: the address qa_n/qa_board must name one item (ADR-0150 D2)",
-        "the same name held in two different namespaces refused is a FAIL: the rule is per namespace"
+        "the same name held in two different namespaces refused is a FAIL: the rule is per namespace",
+        "reading the install door's 422 namespace-ownership answer or its 403 NOT_OVERRIDABLE as a missing co-owner refusal is wrong: both gates answer before the co-owner judgement, and either way nothing installs"
       ],
       "variants": [
         "the twelve judged types (packages/objectql/src/namespace-co-owner-names.ts#NAMESPACE_UNIQUE_TYPES); a run drives page and names the others it did not drive"
@@ -4275,6 +4276,7 @@
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D2 (co-owners keep each behavioural name unique, ruled)",
         "packages/objectql/src/namespace-co-owner-names.ts#NAMESPACE_UNIQUE_TYPES and #namespaceNameConflicts",
         "packages/cli/src/utils/namespace-co-owner-names.ts#findNamespaceNameRefusals",
+        "packages/objectql/src/registry.ts#NamespaceConflictError (the namespace gate) and packages/cloud-connection/src/marketplace-install-local-plugin.ts#overrideGateRefusalBody (the override write gate, ADR-0146 D2): the two refusals the install door answers first",
         "#31717 (N), #31767 (residual items of a packages[] stack)"
       ],
       "history": [
@@ -4289,6 +4291,12 @@
           "date": "2026-11-10",
           "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.n-one, com.qa.n-two) everywhere this item names them (fixtures, steps and acceptance), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The shared namespace qa_n and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
           "ref": "#32330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-13",
+          "change": "stale-spec re-point of acceptance[1] (with fixtures.requires[0], steps[1], a negative and a source line). The install door never reaches the co-owner refusal: without a dependency the ADR-0048 namespace gate answers 422 PLUGIN_REGISTER_FAILED (packages/objectql/src/registry.ts#NamespaceConflictError), and with com.qa.n-one declared as a dependency the ADR-0146 D2 override write gate answers 403 NOT_OVERRIDABLE naming page qa_board and both packages (packages/cloud-connection/src/marketplace-install-local-plugin.ts#overrideGateRefusalBody). The clause now names the gate that answers at each build; the co-owner refusal stays with the CLI legs and its registry pin. acceptance[2] is untouched here (its own card). Found by the 18.4.0 acceptance run #32940 (F-7, R5; wave anchor #32908): both answers, nothing installed, 2 reproductions. Re-read at main 25ee5076. Card #32946",
+          "ref": "#32946"
         }
       ]
     },
@@ -4447,36 +4455,36 @@
     },
     {
       "id": "platform-core.bare-name-one-holder-refusal",
-      "title": "A covered bare name has one package holder: installing a second package that holds a picklist, mapping, dataset, api, object-less action, function, flow, webhook, connector, email template or tool name is refused 422 naming both, agent and skill names are held per namespace, and a clash an earlier deployment already holds boots with a warning",
+      "title": "A covered bare name has one package holder: installing a second package that holds a webhook, connector or tool name is refused 422 naming both, the narrowed types (picklist, mapping, dataset, api, object-less action, function, flow, email template, agent and skill) are held per namespace, and a clash an earlier deployment already holds boots with a warning",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (the seeded admin): every install"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Both hold a flow qa_sync and an agent qa_helper; qa_a also holds an email template auth.password_reset (a name the platform's email service ships as an overridable baseline)",
-          "for the cold-boot leg: a scratch app that registers two code packages which both hold the flow qa_sync (the doors judge nothing during a boot, so both register), booted on its own port and file DB"
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Both hold a webhook qa_hook (declared inactive, isActive: false, so nothing is ever posted), a flow qa_sync and an agent qa_helper; qa_a also holds an email template auth.password_reset (a name the platform's email service ships as an overridable baseline)",
+          "for the cold-boot leg: a scratch app that registers two code packages which both hold the webhook qa_hook (the doors judge nothing during a boot, so both register), booted on its own port and file DB"
         ]
       },
       "steps": [
         "install qa_a, then qa_b; record each answer and GET /api/v1/packages",
-        "rebuild qa_b without the flow qa_sync (keep the agent qa_helper) and install it again; record the answer",
-        "boot the cold-boot app and read the boot log; then POST /api/v1/automation/qa_sync/trigger and record the answer"
+        "rebuild qa_b without the webhook qa_hook (keep the flow qa_sync and the agent qa_helper) and install it again; record the answer",
+        "boot the cold-boot app and read the boot log"
       ],
       "acceptance": [
         {
           "clause": "the second package holding a covered name is refused 422 naming both packages and a rename, and leaves nothing installed",
           "oracle": "api",
-          "verify": "installing qa_b answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal naming flow qa_sync, com.qa.addr-a, com.qa.addr-b and a rename (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is packages/objectql/src/registry.ts#BareNameConflictError, 422 NAMESPACE_CONFLICT; packages/objectql/src/bare-name-one-holder.ts#suggestedBareNameRename); qa_b is absent from the package list",
+          "verify": "installing qa_b answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal naming webhook qa_hook, com.qa.addr-a, com.qa.addr-b and a rename (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is packages/objectql/src/registry.ts#BareNameConflictError, 422 NAMESPACE_CONFLICT; packages/objectql/src/bare-name-one-holder.ts#suggestedBareNameRename). webhook is not in packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, so two namespaces do not lift it; qa_b is absent from the package list",
           "evidence": "the 422 body and the package list"
         },
         {
-          "clause": "agent and skill names are held per namespace: two packages in two namespaces may each hold the agent qa_helper",
+          "clause": "the narrowed types are held per namespace: two packages in two namespaces may each hold the flow qa_sync and the agent qa_helper",
           "oracle": "api",
-          "verify": "the rebuilt qa_b installs 200 while both hold qa_helper (packages/objectql/src/bare-name-one-holder.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, #31973); tool is still one holder per deployment",
+          "verify": "the rebuilt qa_b installs 200 while both hold qa_sync and qa_helper (packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, re-exported by packages/objectql/src/bare-name-one-holder.ts: agent and skill #31973, flow #31696); webhook, connector and tool are still one holder per deployment",
           "evidence": "the 200 answer"
         },
         {
@@ -4486,18 +4494,19 @@
           "evidence": "the install answer"
         },
         {
-          "clause": "a clash the deployment already holds does not stop the boot: it boots, warns once naming both holders and the rename, and the name is not armed for a caller with no package",
+          "clause": "a clash the deployment already holds does not stop the boot: it boots and warns once naming both holders and the rename, changing nothing about which holder each caller is served",
           "oracle": "log",
-          "verify": "the boot log carries one warning naming qa_sync and both packages (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE is 'warn'); the trigger call answers a refusal naming both packages and starts no run",
-          "evidence": "the warning line and the trigger answer"
+          "verify": "the boot log carries one 'Bare-name conflict at boot' warning naming the webhook qa_hook, both packages and the rename (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE is 'warn'; packages/objectql/src/registry.ts#sealBareNameHoldersAtColdBoot and #bareNameColdBootWarning)",
+          "evidence": "the warning line"
         }
       ],
       "negative": [
-        "the second install answering 200 and the flow name then serving one of the two is a FAIL",
-        "a cold boot refused because of a pre-existing clash is a FAIL while the mode is warn"
+        "the second install answering 200 and the webhook name then serving one of the two is a FAIL",
+        "a cold boot refused because of a pre-existing clash is a FAIL while the mode is warn",
+        "reading the rebuilt qa_b's 200 beside qa_a's flow qa_sync as a defect is wrong: flow is held per namespace since #31696, and the bare flow address answers 409 naming both"
       ],
       "variants": [
-        "the covered types (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_REGISTRY_TYPES); a run drives flow and agent and names the types it did not drive"
+        "the covered types (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_REGISTRY_TYPES); a run drives webhook (one holder per deployment) and flow and agent (per namespace), and names the types it did not drive"
       ],
       "automated": {
         "kind": "unit",
@@ -4505,10 +4514,10 @@
       },
       "source": [
         "packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE (the cold boot, and why the doors judge nothing during it)",
-        "packages/objectql/src/bare-name-one-holder.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES (agent and skill narrowed per namespace)",
+        "packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES (the types narrowed per namespace; objectql's bare-name-one-holder.ts re-exports it)",
         "packages/objectql/src/registry.ts#BareNameConflictError (422 NAMESPACE_CONFLICT)",
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D9 (phase 1 stands until each child B narrows it)",
-        "#30836, #31006, #31093, #31375, #31661 (phase 1, all after 18.3.0), #31973 (agent and skill per namespace)"
+        "#30836, #31006, #31093, #31375, #31661 (phase 1, all after 18.3.0), #31973 (agent and skill per namespace), #31696 (flow per namespace)"
       ],
       "history": [
         {
@@ -4522,6 +4531,12 @@
           "date": "2026-11-10",
           "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures and acceptance), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
           "ref": "#32330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-13",
+          "change": "stale-spec re-point of acceptance[0] and acceptance[3] (with the title, fixtures, steps, acceptance[1], negative[0], variants and source that carried the same type). flow joined the namespace-scoped bare-name types (#31696; packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES), so two namespaces may each hold flow qa_sync and the cold boot has no flow clash to warn about. Both clauses now drive the webhook qa_hook, a covered type still one holder per deployment (absent from that list; the flow-family pin's control cases in packages/objectql/src/registry-bare-name-one-holder-flow-family.test.ts hold it so); acceptance[1] gains flow beside agent; acceptance[3] drops the trigger leg, since the warn mode changes nothing about which holder a caller is served. Found by the 18.4.0 acceptance run #32940 (F-10, R5; wave anchor #32908): qa_b installed 200 holding flow qa_sync, 2 reproductions. Re-read at main 25ee5076. Card #32946",
+          "ref": "#32946"
         }
       ]
     },

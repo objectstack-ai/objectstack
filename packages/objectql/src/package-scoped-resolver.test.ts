@@ -443,6 +443,344 @@ describe('ADR-0150 D4 — the per-package overlay slot', () => {
   });
 });
 
+/**
+ * [#32408, epic ruling 6761802819 on #31699 F2] An App's customization pair is
+ * shared by every package of the App (ADR-0146 D3), so a row stored there is
+ * bound by the exact read's one owner check (`pairRowOnAddress`,
+ * metadata-protocol): bound to X → only X; unbound with two packages of the
+ * App holding the name → neither; unbound with one → that one; the App's own
+ * address keeps #28390 ruling A. Every reader of the registry's overlay slot
+ * reads the same binding — the holder set, a holder's bundle members (which
+ * decide whether a holding is a bundle addition), a package's item and the
+ * environment's item. Before this, they read the pair's per-package base only:
+ * the row was the pair's own item (a third holder) or the App's, whatever it
+ * declared. Ablated once (the binding put back to the per-package base): the
+ * readings are in the PR body.
+ */
+describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exact read does', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Y = 'com.acme.suitey';
+  const PAIR = `${APP}.custom`;
+  /** The App and its packages X and Y: each a `module` declaring the App. */
+  const installSuite = () => {
+    install(APP);
+    for (const id of [X, Y]) {
+      registry.installPackage({ ...(manifest(id, [APP]) as object), type: 'module' } as never, 'code');
+    }
+  };
+  /** A row Studio saved into the App's pair, hydrated into the bare slot. */
+  const pairRow = (type: string, nameOf: string, tag: string, declared?: string, locale?: string) => registry.registerItem(type, {
+    ...body(type, nameOf, tag), ...(locale ? { locale } : {}), _packageId: PAIR, _provenance: 'org',
+    ...(declared ? { overrides: { package: declared } } : {}),
+  }, 'name' as never);
+  const pageOf = (packageId: string) => registry.getPackageScopedItem<{ label: string }>('page', 'home', packageId)?.label;
+  const templateOf = (packageId: string, member: string) =>
+    registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', packageId, member)?.label;
+
+  beforeEach(installSuite);
+
+  it('bound to X → only X: X\'s address serves it, Y\'s serves its own, the pair is no holder (BASE: the pair\'s own item, a third holder)', () => {
+    ship('page', 'home', X);
+    ship('page', 'home', Y);
+    pairRow('page', 'home', 'pair', X);
+    expect(pageOf(X)).toBe('pair page');
+    expect(pageOf(Y)).toBe('suitey page');
+    expect(pageOf(PAIR)).toBeUndefined();
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([X, Y]);
+    expect(registry.getEnvironmentScopedItem('page', 'home')).toBeUndefined();
+  });
+
+  it('bound to X beside the App holding the name → only X, never the App (BASE: the App\'s, whatever it declared)', () => {
+    ship('page', 'home', APP);
+    ship('page', 'home', X);
+    pairRow('page', 'home', 'pair', X);
+    expect(pageOf(X)).toBe('pair page');
+    expect(pageOf(APP)).toBe('suite page');
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([APP, X]);
+  });
+
+  it('bound to X, a bundle member: X holds it, the App does not, so X\'s locale stays an addition to the App\'s template (BASE: the App held it, and the bare read was refused naming both)', () => {
+    ship('email_template', 'welcome', APP);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'suitex'), locale: 'fr-FR' }, 'name' as never, X);
+    pairRow('email_template', 'welcome', 'pair', X, 'fr-FR');
+    expect(templateOf(X, 'fr-FR')).toBe('pair template');
+    expect(templateOf(APP, 'fr-FR')).toBeUndefined();
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([APP]);
+    expect(label(resolve('email_template', 'welcome'))).toBe('suite template');
+    expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'fr-FR')).toBeUndefined();
+  });
+
+  it('NARROWING — a later package whose only locale is the one the App\'s pair overrides for X is an addition to the App\'s template, refused naming the App (BASE: admitted, the pair\'s locale counted as the App\'s)', () => {
+    ship('email_template', 'welcome', APP);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'suitex'), locale: 'fr-FR' }, 'name' as never, X);
+    pairRow('email_template', 'welcome', 'pair', X, 'fr-FR');
+    registry.sealBareNameHolders();
+    const Z = 'com.acme.zeta';
+    registry.installPackage({ ...(manifest(Z, [APP]) as object), type: 'module' } as never, 'code');
+    expect(() => registry.registerItem('email_template', { ...body('email_template', 'welcome', 'zeta'), locale: 'fr-FR' }, 'name' as never, Z))
+      .toThrow(`already held by package "${APP}"`);
+  });
+
+  // [contract review F2] A package W of another namespace on X, shipping only
+  // the locale a row of the App's pair stores, while the App holds no item of
+  // the name. Each door is read, and the cold boot's seal over the same state.
+  // "W of the App" is a module whose parents reach the App; "W outside the
+  // App" is an App of its own on X.
+  const W = 'com.other.wolf';
+  const WOLF_DE = { ...body('email_template', 'welcome', 'wolf'), locale: 'de-DE' };
+  type Door = 'item door' | 'package door' | 'cold boot';
+  type Answer = { refusal?: string; conflicts?: unknown[] };
+  const wManifest = (wType: 'module' | 'app', extra: object = {}) =>
+    ({ ...(manifest(W, [X]) as object), type: wType, ...extra }) as never;
+  const arrive = (door: Door, wType: 'module' | 'app' = 'module'): Answer => {
+    if (door !== 'cold boot') registry.sealBareNameHolders();
+    try {
+      if (door === 'package door') {
+        registry.installPackage(wManifest(wType, { emailTemplates: [WOLF_DE] }), 'code');
+        // The engine then registers the declared item; the door's claim holds the name.
+        registry.registerItem('email_template', WOLF_DE, 'name' as never, W);
+      } else {
+        registry.installPackage(wManifest(wType), 'code');
+        registry.registerItem('email_template', WOLF_DE, 'name' as never, W);
+      }
+    } catch (err) {
+      return { refusal: (err as Error).message };
+    }
+    return door === 'cold boot' ? { conflicts: registry.sealBareNameHolders() } : {};
+  };
+  // [epic red-line read 6838271054, must-fix 3] The reverse order: W holds the
+  // locale first, then X arrives with its own.
+  const X_EN = body('email_template', 'welcome', 'suitex');
+  const arriveX = (door: Door): Answer => {
+    if (door !== 'cold boot') registry.sealBareNameHolders();
+    try {
+      if (door === 'package door') {
+        registry.installPackage({ ...(manifest(X, [APP]) as object), type: 'module', emailTemplates: [X_EN] } as never, 'code');
+        registry.registerItem('email_template', X_EN, 'name' as never, X);
+      } else {
+        registry.registerItem('email_template', X_EN, 'name' as never, X);
+      }
+    } catch (err) {
+      return { refusal: (err as Error).message };
+    }
+    return door === 'cold boot' ? { conflicts: registry.sealBareNameHolders() } : {};
+  };
+  // [epic ruling 6838245909, option B] Row 12 withdrawn: where the pair-row
+  // binding moved the row to X, the bare-name gate lends its locale to no
+  // holder, so every shape of it keeps main's answer.
+  const ROW_12_SHAPES = [
+    { shape: 'a row declaring X, W of the App', declared: X, wType: 'module' },
+    { shape: 'a row declaring X, W outside the App', declared: X, wType: 'app' },
+    { shape: 'an undeclared row X alone owns, W outside the App', declared: undefined, wType: 'app' },
+  ] as const;
+
+  for (const door of ['item door', 'package door', 'cold boot'] as const) {
+    for (const { shape, declared, wType } of ROW_12_SHAPES) {
+      it(`ROW 12 WITHDRAWN (epic ruling B), ${door}, ${shape} — the gate lends the row's locale to no holder, so W shipping only that locale is an addition to X, refused or reported as on main, and X keeps the row`, () => {
+        ship('email_template', 'welcome', X);
+        pairRow('email_template', 'welcome', 'pair', declared, 'de-DE');
+        const answer = arrive(door, wType);
+        if (door === 'cold boot') {
+          expect(answer.conflicts).toEqual([expect.objectContaining({
+            type: 'email_template', name: 'welcome', incomingPackageId: W, existingHolder: { kind: 'package', packageId: X },
+          })]);
+        } else {
+          expect(answer.refusal).toContain(`already held by package "${X}"`);
+          expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X]);
+          expect(templateOf(X, 'de-DE')).toBe('pair template');
+        }
+      });
+
+      it(`REVERSE ORDER (epic red-line read must-fix 3), ${door}, ${shape} — W holds the locale first, then X arrives: the doors refuse X naming W and the seal reports X against W, as on main (head before: the seal reported nothing)`, () => {
+        registry.installPackage(wManifest(wType), 'code');
+        registry.registerItem('email_template', WOLF_DE, 'name' as never, W);
+        pairRow('email_template', 'welcome', 'pair', declared, 'de-DE');
+        const answer = arriveX(door);
+        if (door === 'cold boot') {
+          expect(answer.conflicts).toEqual([expect.objectContaining({
+            type: 'email_template', name: 'welcome', incomingPackageId: X, existingHolder: { kind: 'package', packageId: W },
+          })]);
+        } else {
+          expect(answer.refusal).toContain(`already held by package "${W}"`);
+          expect(registry.packageScopedHoldersOf('email_template', 'welcome')).not.toContain(X);
+        }
+      });
+    }
+
+    it(`UNCHANGED at the door (contract review F2), ${door} — an undeclared row of the App's pair, X its one owner, of the very locale the arriving package of the App ships: the gate lends the row's locale to no holder (epic ruling B), so the arrival is an addition to X, refused or reported as before, and X keeps the row`, () => {
+      ship('email_template', 'welcome', X);
+      pairRow('email_template', 'welcome', 'pair', undefined, 'de-DE');
+      const answer = arrive(door);
+      if (door === 'cold boot') {
+        expect(answer.conflicts).toEqual([expect.objectContaining({
+          type: 'email_template', name: 'welcome', incomingPackageId: W, existingHolder: { kind: 'package', packageId: X },
+        })]);
+      } else {
+        expect(answer.refusal).toContain(`already held by package "${X}"`);
+        expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X]);
+        expect(templateOf(X, 'de-DE')).toBe('pair template');
+      }
+    });
+
+    it(`NARROWING (delta review N1), ${door} — a package-less row of locale L over a name X alone holds is X's member only while X is the one package holding it: the arriving package on X shipping only L makes two, so the row binds to neither and the arrival is an addition to X, refused or reported, and X keeps the row (BASE: admitted at the doors, after which the row bound to neither and the seal reported the arrival)`, () => {
+      ship('email_template', 'welcome', X);
+      registry.registerItem('email_template', { ...body('email_template', 'welcome', 'env'), locale: 'de-DE', _provenance: 'org' }, 'name' as never);
+      expect(templateOf(X, 'de-DE')).toBe('env template');
+      const answer = arrive(door);
+      if (door === 'cold boot') {
+        expect(answer.conflicts).toEqual([expect.objectContaining({
+          type: 'email_template', name: 'welcome', incomingPackageId: W, existingHolder: { kind: 'package', packageId: X },
+        })]);
+      } else {
+        expect(answer.refusal).toContain(`already held by package "${X}"`);
+        expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X]);
+        expect(templateOf(X, 'de-DE')).toBe('env template');
+      }
+    });
+  }
+
+  it('unbound with two packages of the App holding the name → neither, and the pair is no holder (BASE: the pair\'s own item, a third holder)', () => {
+    ship('page', 'home', X);
+    ship('page', 'home', Y);
+    pairRow('page', 'home', 'pair');
+    ship('email_template', 'welcome', X);
+    ship('email_template', 'welcome', Y);
+    pairRow('email_template', 'welcome', 'pair', undefined, 'fr-FR');
+    expect([pageOf(X), pageOf(Y), pageOf(PAIR)]).toEqual(['suitex page', 'suitey page', undefined]);
+    expect([templateOf(X, 'fr-FR'), templateOf(Y, 'fr-FR'), templateOf(PAIR, 'fr-FR')]).toEqual([undefined, undefined, undefined]);
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([X, Y]);
+    expect(resolve('page', 'home')).toMatchObject({
+      status: 'refused', reason: 'ambiguous-in-environment',
+      candidates: [{ kind: 'package', packageId: X }, { kind: 'package', packageId: Y }],
+    });
+    expect(registry.getEnvironmentScopedItem('page', 'home')).toBeUndefined();
+    expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'fr-FR')).toBeUndefined();
+  });
+
+  it('unbound, beside a bundle addition of another package of the App → the one package holding the name, as `?package=X` reads it (contract review F1; BASE: the pair\'s own item)', () => {
+    const Z = 'com.acme.zeta';
+    registry.installPackage({ ...(manifest(Z, [APP, X]) as object), type: 'module' } as never, 'code');
+    ship('email_template', 'welcome', X);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'zeta'), locale: 'fr-FR' }, 'name' as never, Z);
+    pairRow('email_template', 'welcome', 'pair', undefined, 'de-DE');
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X]);
+    expect(templateOf(X, 'de-DE')).toBe('pair template');
+    expect(templateOf(Z, 'de-DE')).toBeUndefined();
+    expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'de-DE')).toBeUndefined();
+  });
+
+  it('CONTROL — unbound, of the very locale a bundle addition of another package of the App ships → no package: the row may customize that package\'s member (never a guess)', () => {
+    const Z = 'com.acme.zeta';
+    registry.installPackage({ ...(manifest(Z, [APP, X]) as object), type: 'module' } as never, 'code');
+    ship('email_template', 'welcome', X);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'zeta'), locale: 'fr-FR' }, 'name' as never, Z);
+    pairRow('email_template', 'welcome', 'pair', undefined, 'fr-FR');
+    expect(templateOf(X, 'fr-FR')).toBeUndefined();
+    expect(templateOf(Z, 'fr-FR')).toBe('zeta template');
+  });
+
+  it('unbound, beside a package of the App that a pair row binds a member another holder ships → no package, as `?package=X` refuses it naming both (contract review F4 b; BASE at d9d3621f: X)', () => {
+    // The declared en-US row is admitted while Z ships en-US and outlives an upgrade of Z that drops it (measured at the save door).
+    const Z = 'com.acme.zeta';
+    registry.installPackage({ ...(manifest(Z, [APP, X]) as object), type: 'module' } as never, 'code');
+    ship('email_template', 'welcome', X);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'zeta'), locale: 'fr-FR' }, 'name' as never, Z);
+    pairRow('email_template', 'welcome', 'pairz', Z, 'en-US');
+    pairRow('email_template', 'welcome', 'pair', undefined, 'de-DE');
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X, Z]);
+    expect(templateOf(Z, 'en-US')).toBe('pairz template');
+    expect([templateOf(X, 'de-DE'), templateOf(Z, 'de-DE')]).toEqual([undefined, undefined]);
+    expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'de-DE')).toBeUndefined();
+  });
+
+  it('unbound, beside an addition of a package of the App to a holder outside the App → the one package of the App holding the name, as `?package=X` reads it (contract review F4 a; BASE at d9d3621f: no package)', () => {
+    const W = 'com.other.west';
+    const Z = 'com.acme.zeta';
+    install(W);
+    // Z reaches two Apps; its namespace picks the App A (`appOf`), so A's pair customizes it.
+    registry.installPackage({ ...(manifest(Z, [APP, W], 'suite') as object), type: 'module' } as never, 'code');
+    ship('email_template', 'welcome', X);
+    ship('email_template', 'welcome', W);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'zeta'), locale: 'fr-FR' }, 'name' as never, Z);
+    pairRow('email_template', 'welcome', 'pair', undefined, 'de-DE');
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X, W]);
+    expect(metadataCore.appOf(Z, metadataCore.installedManifestsOf(registry)), 'Z is a package of the App').toBe(APP);
+    expect(templateOf(X, 'de-DE')).toBe('pair template');
+    expect([templateOf(Z, 'de-DE'), templateOf(W, 'de-DE')]).toEqual([undefined, undefined]);
+  });
+
+  it('CONTROL — unbound, while another App\'s pair stores an undeclared row of the name → no package: the count would wait on that pair\'s (contract review F6, epic seat 1\'s ruling; BASE at a8b63c29: Y)', () => {
+    // App B: P ships en-US, Q (on P) ships de-DE; B's pair stores an undeclared fr-FR row (owners P and Q).
+    // App A: U (on A and P, A's namespace) ships fr-FR, Y ships it-IT; A's pair stores an undeclared es-ES row.
+    // Both undeclared rows are admitted at the save door (measured).
+    const B = 'com.beta.base';
+    const P = 'com.beta.basep';
+    const Q = 'com.beta.baseq';
+    const U = 'com.acme.suiteu';
+    install(B);
+    registry.installPackage({ ...(manifest(P, [B]) as object), type: 'module' } as never, 'code');
+    registry.installPackage({ ...(manifest(Q, [B, P]) as object), type: 'module' } as never, 'code');
+    registry.installPackage({ ...(manifest(U, [APP, P], 'suite') as object), type: 'module' } as never, 'code');
+    ship('email_template', 'welcome', P);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'baseq'), locale: 'de-DE' }, 'name' as never, Q);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'suiteu'), locale: 'fr-FR' }, 'name' as never, U);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'suitey'), locale: 'it-IT' }, 'name' as never, Y);
+    registry.registerItem('email_template', {
+      ...body('email_template', 'welcome', 'bpair'), locale: 'fr-FR', _packageId: `${B}.custom`, _provenance: 'org',
+    }, 'name' as never);
+    pairRow('email_template', 'welcome', 'pair', undefined, 'es-ES');
+    // Each pair's row would wait on the other pair's count, so neither binds (the exact read serves both: #32561).
+    expect(registry.getPackageScopedItem('email_template', 'welcome', P, 'fr-FR')).toBeUndefined();
+    expect([templateOf(U, 'es-ES'), templateOf(Y, 'es-ES')]).toEqual([undefined, undefined]);
+    expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'es-ES')).toBeUndefined();
+  });
+
+  it('unbound with one package of the App holding the name → that one (BASE: the pair\'s own item, and the bare read refused naming both)', () => {
+    ship('page', 'home', X);
+    pairRow('page', 'home', 'pair');
+    ship('email_template', 'welcome', X);
+    pairRow('email_template', 'welcome', 'pair', undefined, 'fr-FR');
+    expect(pageOf(X)).toBe('pair page');
+    expect(templateOf(X, 'fr-FR')).toBe('pair template');
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([X]);
+    expect(label(resolve('page', 'home'))).toBe('pair page');
+    expect(registry.getEnvironmentScopedItem('page', 'home')).toBeUndefined();
+  });
+
+  it('a row declaring a package that holds no item of the name binds to no package: the App keeps its own item, X its own (BASE: the App\'s address served the row)', () => {
+    ship('page', 'home', APP);
+    ship('page', 'home', X);
+    pairRow('page', 'home', 'pair', Y);
+    expect([pageOf(APP), pageOf(X), pageOf(Y)]).toEqual(['suite page', 'suitex page', undefined]);
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([APP, X]);
+    expect(registry.getEnvironmentScopedItem('page', 'home')).toBeUndefined();
+  });
+
+  it('CONTROL — two real holders (two independent Apps, no shared pair) still refuse the bare read naming both, with or without a pair row beside them', () => {
+    install(A);
+    install(B);
+    ship('page', 'home', A);
+    ship('page', 'home', B);
+    const refusedNamingBoth = {
+      status: 'refused', reason: 'ambiguous-in-environment',
+      candidates: [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }],
+    };
+    expect(resolve('page', 'home')).toMatchObject(refusedNamingBoth);
+    registry.registerItem('page', { ...body('page', 'home', 'alpha-pair'), _packageId: `${A}.custom`, _provenance: 'org' }, 'name' as never);
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([A, B]);
+    expect(resolve('page', 'home')).toMatchObject(refusedNamingBoth);
+  });
+
+  it('CONTROL — the App\'s own address keeps #28390 ruling A: an unbound row of its pair is the App\'s, beside a package of the App', () => {
+    ship('page', 'home', APP);
+    ship('page', 'home', X);
+    pairRow('page', 'home', 'pair');
+    expect([pageOf(APP), pageOf(X)]).toEqual(['pair page', 'suitex page']);
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([APP, X]);
+  });
+});
+
 describe('phase 1 parity — under the one-holder rule the resolver answers as `getItem` does (red line 3)', () => {
   const NAME = 'shared_name';
 

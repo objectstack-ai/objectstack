@@ -399,7 +399,7 @@ export async function judgeRuntimeAuthoringRules(
     // `sys_metadata` read and they do not depend on one another, so the
     // store leg costs one round trip of latency for the whole context
     // instead of five.
-    const [restoredCredentialPaths, objects, permissions, books, datasets] = await Promise.all([
+    const [restoredCredentialPaths, objects, permissions, books, datasets, flows] = await Promise.all([
         // [#20611] The host's half of the redaction context — positions
         // only, read from the row at rest; see the evt field.
         evt.restoredCredentialPaths?.(),
@@ -416,6 +416,15 @@ export async function judgeRuntimeAuthoringRules(
         // enforce-or-remove, so no runtime-crossed rule reads `stack.pages`
         // and this publish no longer pays a `sys_metadata` round trip for a
         // collection nothing would consult.
+        //
+        // [#32666] The written package's live flows, on an OBJECT write only:
+        // the subjects `flow-update-readonly-field` judges against the object
+        // (RuntimeStackContext.flows). Every other write type pays nothing for
+        // it, and a flow write is handed none, so its findings stay positional.
+        // Flows of other packages are out of scope (the ruling's own bound).
+        singular === 'object'
+            ? listCollection('flow', 'flows').then((all) => flowsOfWrittenPackage(all, evt.packageId))
+            : undefined,
     ]);
 
     // [#9612] The closure this write is judged against. Resolved from the
@@ -474,6 +483,7 @@ export async function judgeRuntimeAuthoringRules(
         permissions,
         books,
         datasets,
+        ...(flows !== undefined ? { flows } : {}),
         // [#10377] The batch's own pending drafts join the
         // collections above. Absent on every non-batch door.
         ...(evt.pending !== undefined ? { pending: evt.pending } : {}),
@@ -497,6 +507,26 @@ export async function judgeRuntimeAuthoringRules(
         ...(packagedRuleCopyRefusal !== undefined ? { packagedRuleCopyRefusal } : {}),
     });
     return verdict;
+}
+
+/**
+ * [#32666] The flows of the package an object write belongs to — the subjects
+ * the object write is judged against (`RuntimeStackContext.flows`).
+ *
+ * A flow belongs to the package its `_packageId` provenance names, the stamp
+ * the registry and the stored-row fold both put on a package's items. An
+ * object write with no package (absent, empty, or the `sys_metadata` overlay
+ * sentinel) belongs to the package-less overlay, and so does a flow carrying
+ * none of those: the two meet there, so a tenant authoring without packages is
+ * judged too. Flows of any OTHER package are out of scope, by ruling.
+ */
+function flowsOfWrittenPackage(flows: readonly unknown[], packageId: string | null | undefined): unknown[] {
+    const ownerOf = (id: unknown): string | undefined =>
+        typeof id === 'string' && id !== '' && id !== 'sys_metadata' ? id : undefined;
+    const written = ownerOf(packageId);
+    return flows.filter((flow) =>
+        flow !== null && typeof flow === 'object'
+        && ownerOf((flow as { _packageId?: unknown })._packageId) === written);
 }
 
 /**

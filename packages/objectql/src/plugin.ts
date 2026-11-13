@@ -35,6 +35,7 @@ import { StorageNameMapping } from '@objectstack/spec/system';
 import { applyProtection } from '@objectstack/spec/shared';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
 import { isFederatedObject } from './federated-object.js';
+import { RecordCurrencyFollowRefusedError } from './record-currency-aggregate-door.js';
 // [#22070] The builtin audit stamps are wrapped like a bound hook but registered in code.
 import { wrapDeclarativeHook } from './hook-wrappers.js';
 import { announceStoredExpressionHoles } from './stored-expression-backfill.js';
@@ -1028,6 +1029,15 @@ export class ObjectQLPlugin implements Plugin {
         // in the running kernel while the install door answered the refusal
         // and ledgered nothing. A single-package artifact is the one-body run
         // `registerApp` opens on its own, answered as before.
+        // [ADR-0144 D2 and D6, amended] Once the cold boot has sealed the
+        // registry, the run ends by asking the record-currency follow door of
+        // every object layer it registered — each body's objects and
+        // extensions, its nested plugins' objects, the residual's objects —
+        // with all of them registered, so a pair one member completes for
+        // another is judged whole, and never against the version an upgrade
+        // is replacing (`SchemaRegistry.restoringOnRefusal`). A refusal there
+        // is one more refusal of this run: everything is put back and it
+        // propagates, 422 `INVALID_METADATA`, to the install door's report.
         // [ADR-0150 D2, #31720] The residual as one holder of the stack's
         // namespace — judged below, recorded once the artifact has registered.
         const residualHolder = residualNamespacePackageOf(artifact, residualAnswer);
@@ -1434,7 +1444,9 @@ export class ObjectQLPlugin implements Plugin {
         //      {@link refreshReloadedPackages}.
         // [#31700, epic seat ruling R3-C] A reload the picklist re-judge refused
         // is refused whole: its objects are not ingested either.
-        if (this.refreshReloadedPackages(ctx, payload) !== 'refused') this.ingestReloadedObjects(ctx, payload);
+        // [ADR-0144 D2 and D6, amended] Both steps are ONE registration run,
+        // judged once at its end. See {@link registerReloadedArtifact}.
+        this.registerReloadedArtifact(ctx, payload);
         if (this.skipSchemaSync) {
             // DDL is managed out-of-band here, but the objects this reload just
             // ingested still have to be TOLD to the driver, or every JSON /
@@ -1784,13 +1796,14 @@ export class ObjectQLPlugin implements Plugin {
    * Items removed from the artifact stay registered until restart, the
    * lifecycle {@link ingestReloadedObjects} keeps for objects. A body that
    * fails to register is named and skipped: the reload goes on, and that
-   * package keeps serving what it served before. Answers `'refused'` when the
-   * picklist re-judge refused the reload whole.
+   * package keeps serving what it served before (inside the reload's run its
+   * own nested run puts back only itself). Answers `'refused'` when the
+   * picklist re-judge refused the reload whole, else the ids it re-registered.
    */
-  private refreshReloadedPackages(ctx: PluginContext, payload: unknown): 'refused' | undefined {
-    if (!this.ql) return undefined;
+  private refreshReloadedPackages(ctx: PluginContext, payload: unknown): 'refused' | string[] {
+    if (!this.ql) return [];
     const metadata = (payload as { metadata?: unknown } | undefined)?.metadata as Record<string, any> | undefined;
-    if (!metadata || typeof metadata !== 'object') return undefined;
+    if (!metadata || typeof metadata !== 'object') return [];
     // The shape `AppPlugin` hands the `manifest` service: the manifest's
     // fields with the collections spread over them.
     const artifact = metadata.manifest && typeof metadata.manifest === 'object'
@@ -1805,7 +1818,7 @@ export class ObjectQLPlugin implements Plugin {
       ctx.logger.warn('[ObjectQLPlugin] reload could not read the artifact\'s packages — registry entries keep their previous definitions', {
         error: e?.message,
       });
-      return undefined;
+      return [];
     }
     const scope = {
       packageIds: entries
@@ -1846,16 +1859,66 @@ export class ObjectQLPlugin implements Plugin {
         }
       }
     });
+    return refreshed;
+  }
+
+  /**
+   * [ADR-0144 D2 and D6, amended] One reload is one registration run: every
+   * package it re-registers ({@link refreshReloadedPackages}), then every
+   * object it ingests ({@link ingestReloadedObjects}), as before.
+   *
+   * What the run adds is its end. Once the cold boot has sealed the registry,
+   * the registry asks the record-currency follow door of every object layer
+   * the reload registered, with all of them registered
+   * (`SchemaRegistry.restoringOnRefusal`). Each `registerApp` used to be a run
+   * of its own; asked there, a reload that adds the code field in one package
+   * and makes another package's amount follow it would be judged against the
+   * version that served, and half of it refused. Refused at the end, the
+   * reload is refused whole, as a reload the picklist re-judge refuses is
+   * (`refusePicklistArrival`, above): every package and object keeps the
+   * definition it served, and the log names the pair.
+   *
+   * What does not change: a package that cannot re-register is named and
+   * skipped while the others reload, and so is an object that cannot be
+   * ingested. Any other error leaves through this method as it did, with the
+   * run put back.
+   */
+  private registerReloadedArtifact(ctx: PluginContext, payload: unknown): void {
+    const registry = this.ql?.registry;
+    if (!registry) return;
+    let refreshed: string[] = [];
+    let ingested = 0;
+    try {
+      registry.restoringOnRefusal(() => {
+        const packages = this.refreshReloadedPackages(ctx, payload);
+        if (packages === 'refused') return;
+        refreshed = packages;
+        ingested = this.ingestReloadedObjects(ctx, payload);
+      });
+    } catch (e) {
+      if (!(e instanceof RecordCurrencyFollowRefusedError)) throw e;
+      ctx.logger.warn('[ObjectQLPlugin] reload refused — every package and object keeps its previous definition', {
+        packageIds: refreshed,
+        error: e.message,
+      });
+      return;
+    }
+    // Said once the run has ended: a refused reload refreshed and ingested nothing.
     if (refreshed.length > 0) {
       ctx.logger.info('[ObjectQLPlugin] reload refreshed the registry entries of its packages', { packageIds: refreshed });
     }
-    return undefined;
+    if (ingested > 0) {
+      ctx.logger.info('[ObjectQLPlugin] reload ingested object definitions into the registry', {
+        count: ingested,
+      });
+    }
   }
 
-  private ingestReloadedObjects(ctx: PluginContext, payload: unknown): void {
-    if (!this.ql) return;
+  /** Answers how many objects it registered; {@link registerReloadedArtifact} reports them. */
+  private ingestReloadedObjects(ctx: PluginContext, payload: unknown): number {
+    if (!this.ql) return 0;
     const objects = (payload as any)?.metadata?.objects;
-    if (!Array.isArray(objects) || objects.length === 0) return;
+    if (!Array.isArray(objects) || objects.length === 0) return 0;
     let ingested = 0;
     for (const obj of objects) {
       const name = (obj as any)?.name;
@@ -1878,11 +1941,7 @@ export class ObjectQLPlugin implements Plugin {
         });
       }
     }
-    if (ingested > 0) {
-      ctx.logger.info('[ObjectQLPlugin] reload ingested object definitions into the registry', {
-        count: ingested,
-      });
-    }
+    return ingested;
   }
 
   /**
