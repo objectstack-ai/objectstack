@@ -675,6 +675,7 @@
     "data/Object:publicSharing",
     "data/Object:relatedLists",
     "data/Object:requiredPermissions",
+    "data/Object:schemaReadDelegate",
     "data/Object:searchableFields",
     "data/Object:sharing",
     "data/Object:sharingModel",
