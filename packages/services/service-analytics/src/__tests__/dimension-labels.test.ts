@@ -5,6 +5,7 @@ import { DatasetSchema } from '@objectstack/spec/ui';
 import { AnalyticsService } from '../analytics-service.js';
 import {
   resolveDimensionLabels,
+  createOrderLabelResolver,
   pickDisplayField,
   formatDateBucket,
   type DimensionLabelDeps,
@@ -356,6 +357,34 @@ describe('pickDisplayField', () => {
     expect(pickDisplayField({ amount: { type: 'number' } })).toBeUndefined();
     expect(pickDisplayField(undefined)).toBeUndefined();
   });
+
+  // The target's declared title (ADR-0079 `nameField`) comes first.
+  const ORDER_FIELDS: Record<string, FieldMetaLite> = {
+    // The platform-injected ownership column: text, ahead of the title, null
+    // on every row — what the convention alone picks.
+    queue: { type: 'text' },
+    order_number: { type: 'autonumber' },
+    amount: { type: 'number' },
+  };
+  it('reads the declared nameField before the convention (an autonumber title)', () => {
+    expect(pickDisplayField(ORDER_FIELDS)).toBe('queue');
+    expect(pickDisplayField(ORDER_FIELDS, 'order_number')).toBe('order_number');
+    // …over a `name` field too: the declaration names the record's title.
+    expect(pickDisplayField({ name: { type: 'text' }, code: { type: 'text' } }, 'code')).toBe('code');
+  });
+  it('CONTROL — a nameField naming the `name` field, or none at all, picks as before', () => {
+    const fields = { title: { type: 'text' }, name: { type: 'text' } };
+    expect(pickDisplayField(fields, 'name')).toBe('name');
+    expect(pickDisplayField(fields, undefined)).toBe('name');
+    expect(pickDisplayField(fields, '')).toBe('name');
+  });
+  it('falls through to the convention when the nameField is not in the field map', () => {
+    expect(pickDisplayField(ORDER_FIELDS, 'ghost')).toBe('queue');
+  });
+  it('falls through to the convention for a formula title: no column for the label read to group by', () => {
+    const fields = { first_name: { type: 'text' }, full_name: { type: 'formula' } };
+    expect(pickDisplayField(fields, 'full_name')).toBe('first_name');
+  });
 });
 
 describe('AnalyticsService.queryDataset — label resolution (integration)', () => {
@@ -489,5 +518,66 @@ describe('AnalyticsService.queryDataset — label resolution (integration)', () 
     const res = await svc.queryDataset(labelledDataset, { dimensions: ['status'], measures: ['spent_sum'] });
     const field = res.fields.find((f) => f.name === 'spent_sum');
     expect(field).toMatchObject({ name: 'spent_sum', label: 'Total Spent', format: '$0,0' });
+  });
+});
+
+// ── a relationship-path dimension reads its column on the hop object ────
+//
+// `columnObject` is what the service hands in: the object the path's last hop
+// reaches, named by the hop resolver the query joins with (`columnObjectOf`).
+// The label passes read the column's meta there; they walk no path themselves.
+describe('relationship-path dimensions — labelled from the column on the hop object', () => {
+  const HOP_FIELDS: Record<string, FieldMetaLite> = {
+    task: { account: { type: 'lookup', reference: 'crm_account' } },
+    crm_account: {
+      name: { type: 'text' },
+      owner: { type: 'user' },
+      tier: { type: 'select', options: [{ value: 'gold', label: 'Gold' }] },
+    },
+  };
+  const hopDeps = (overrides: Partial<DimensionLabelDeps> = {}) =>
+    deps({ getObjectFields: (obj) => HOP_FIELDS[obj], ...overrides });
+
+  it('maps `account.owner` (a user column on the hop object) id → the user\'s name', async () => {
+    const rows = [{ owner: 'usr_ada', n: 1 }];
+    await resolveDimensionLabels(
+      'task', [{ name: 'owner', field: 'account.owner', columnObject: 'crm_account' }], rows, hopDeps(),
+    );
+    expect(rows).toEqual([{ owner: 'Ada Lovelace', n: 1 }]);
+  });
+
+  it('maps a select column on the hop object, translated under THAT object and column', async () => {
+    const asked: string[] = [];
+    const rows = [{ tier: 'gold' }];
+    await resolveDimensionLabels(
+      'task', [{ name: 'tier', field: 'account.tier', columnObject: 'crm_account' }], rows,
+      hopDeps({
+        translateSelectOptions: (object, field, options) => {
+          asked.push(`${object}.${field}`);
+          return options.map((o) => ({ ...o, label: `${o.label} (zh)` }));
+        },
+      }),
+      undefined,
+      { locale: 'zh-CN' } as never,
+    );
+    expect(asked).toEqual(['crm_account.tier']);
+    expect(rows).toEqual([{ tier: 'Gold (zh)' }]);
+  });
+
+  it('leaves a path no one resolved (no `columnObject`) as its stored id', async () => {
+    const rows = [{ owner: 'usr_ada' }];
+    await resolveDimensionLabels('task', [{ name: 'owner', field: 'account.owner' }], rows, hopDeps());
+    expect(rows).toEqual([{ owner: 'usr_ada' }]);
+  });
+
+  it('the sort-key pass reads the same column: label-bearing, and keyed by the user\'s name', async () => {
+    const order = createOrderLabelResolver(
+      'task', [{ name: 'owner', field: 'account.owner', columnObject: 'crm_account' }], hopDeps(),
+    );
+    expect(order.isLabelBearing('owner')).toBe(true);
+    expect(await order.resolveLabels('owner', ['usr_ada'])).toEqual(new Map([['usr_ada', 'Ada Lovelace']]));
+    // Without the hop object, the path is not label-bearing (the stored value sorts).
+    const unresolved = createOrderLabelResolver('task', [{ name: 'owner', field: 'account.owner' }], hopDeps());
+    expect(unresolved.isLabelBearing('owner')).toBe(false);
   });
 });
