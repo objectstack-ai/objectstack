@@ -105,6 +105,39 @@ export default {
     sharingModel: 'private',
     fields: { title: { type: 'text', label: 'Title' } },
   }],
+  // A host plugin that writes through every console channel from a tool-call
+  // interceptor — the seam a host audits its calls through. Inert for the
+  // #7915 case below, which makes no tool call. FX_HOLD_FOR_CALL is set only by
+  // the console describe: it holds the boot (and so serve's boot-quiet window)
+  // open until a call has been served, so the call provably lands INSIDE the
+  // window instead of racing it.
+  plugins: [{
+    name: 'fx.console-probe',
+    version: '1.0.0',
+    init: async () => {
+      console.log('[fx-boot-chatter] from init');
+    },
+    start: async (ctx) => {
+      let served;
+      const firstCall = new Promise((resolveCall) => { served = resolveCall; });
+      ctx.getService('mcp').setToolInterceptor(async (call, next) => {
+        const tag = call.transport + ':' + call.toolName;
+        console.log('[fx-call] console.log ' + tag);
+        console.info('[fx-call] console.info ' + tag);
+        console.debug('[fx-call] console.debug ' + tag);
+        console.warn('[fx-call] console.warn ' + tag);
+        console.error('[fx-call] console.error ' + tag);
+        process.stdout.write('[fx-call] process.stdout.write ' + tag + String.fromCharCode(10));
+        served();
+        return next();
+      });
+      if (process.env.FX_HOLD_FOR_CALL === '1') {
+        ctx.hook('kernel:ready', async () => {
+          await Promise.race([firstCall, new Promise((r) => setTimeout(r, 30000))]);
+        });
+      }
+    },
+  }],
 };
 `;
 
@@ -304,90 +337,91 @@ function parseFrame(line: string): Record<string, unknown> | undefined {
   }
 }
 
-describe('#7915: a stdio MCP boot writes nothing but protocol frames to stdout', () => {
-  beforeAll(async () => {
-    // Build prerequisite first: the spawns below resolve `serve` from `dist/`.
-    requireBuiltCli(RUN_JS_RESOLVES_FROM_DIST);
+// Shared by both describes below: one minting boot, one key, one database.
+beforeAll(async () => {
+  // Build prerequisite first: the spawns below resolve `serve` from `dist/`.
+  requireBuiltCli(RUN_JS_RESOLVES_FROM_DIST);
 
-    dir = mkdtempSync(join(tmpdir(), 'mcp-stdout-purity-e2e-'));
-    writeFileSync(join(dir, 'objectstack.config.ts'), CONFIG, 'utf8');
-    writeFileSync(
-      join(dir, 'package.json'),
-      JSON.stringify({ name: 'mcp-stdout-purity-e2e-fixture', private: true, type: 'module' }, null, 2),
-      'utf8',
+  dir = mkdtempSync(join(tmpdir(), 'mcp-stdout-purity-e2e-'));
+  writeFileSync(join(dir, 'objectstack.config.ts'), CONFIG, 'utf8');
+  writeFileSync(
+    join(dir, 'package.json'),
+    JSON.stringify({ name: 'mcp-stdout-purity-e2e-fixture', private: true, type: 'module' }, null, 2),
+    'utf8',
+  );
+
+  // Boot 1 — mint a real key through the product route, against a FILE db so
+  // boot 2 sees the same row (`:memory:` would not survive the restart).
+  const first = await boot({ OS_DATABASE_URL: join(dir, 'probe.db') }, /Server is ready/);
+  const base = `http://localhost:${first.port}/api/v1`;
+
+  // ⭐ #15898 — the fifth and last file of the family #15653 repaired.
+  // `boot()`'s `child.on('exit')` handler feeds the READINESS promise ONLY — it
+  // returns early once `settled` — so a death AFTER readiness is invisible to
+  // it, and the two requests below used to reach vitest as a bare
+  // `TypeError: fetch failed` with no exit code, no stdout and no stderr: the
+  // unattributable failure #15545 recorded once and could not diagnose.
+  // `probeThroughChild()` is where the child's fate is read instead; its own
+  // section in `helpers/serve-process.ts` carries the measurement, the bound
+  // and the fences (⛔ no skip, no quarantine, no timeout bump).
+  //
+  // Read at THROW time, so a failure carries what the child printed on its way
+  // down rather than the buffer as it stood at ready.
+  const transcript = () =>
+    `\n--- child stdout ---\n${first.stdout()}\n--- child stderr ---\n${first.stderr()}`;
+  const probe = <T>(what: string, request: () => Promise<T>): Promise<T> =>
+    probeThroughChild(
+      {
+        child: first.child,
+        transcript,
+        label: 'serve-stdio-stdout-purity',
+        what: `${what} on port ${first.port}`,
+      },
+      request,
     );
 
-    // Boot 1 — mint a real key through the product route, against a FILE db so
-    // boot 2 sees the same row (`:memory:` would not survive the restart).
-    const first = await boot({ OS_DATABASE_URL: join(dir, 'probe.db') }, /Server is ready/);
-    const base = `http://localhost:${first.port}/api/v1`;
-
-    // ⭐ #15898 — the fifth and last file of the family #15653 repaired.
-    // `boot()`'s `child.on('exit')` handler feeds the READINESS promise ONLY — it
-    // returns early once `settled` — so a death AFTER readiness is invisible to
-    // it, and the two requests below used to reach vitest as a bare
-    // `TypeError: fetch failed` with no exit code, no stdout and no stderr: the
-    // unattributable failure #15545 recorded once and could not diagnose.
-    // `probeThroughChild()` is where the child's fate is read instead; its own
-    // section in `helpers/serve-process.ts` carries the measurement, the bound
-    // and the fences (⛔ no skip, no quarantine, no timeout bump).
-    //
-    // Read at THROW time, so a failure carries what the child printed on its way
-    // down rather than the buffer as it stood at ready.
-    const transcript = () =>
-      `\n--- child stdout ---\n${first.stdout()}\n--- child stderr ---\n${first.stderr()}`;
-    const probe = <T>(what: string, request: () => Promise<T>): Promise<T> =>
-      probeThroughChild(
-        {
-          child: first.child,
-          transcript,
-          label: 'serve-stdio-stdout-purity',
-          what: `${what} on port ${first.port}`,
-        },
-        request,
-      );
-
-    // ⛔ The body read is INSIDE the thunk and cannot throw: a connection torn
-    // down mid-body rejects out of `res.json()` rather than out of `fetch()`, and
-    // the guard reads any throw as a transport failure — so an ASSERTION must
-    // never live in here or a wrong answer would be reported as a dropped socket.
-    const signIn = await probe('the sign-in probe', async () => {
-      const res = await fetch(`${base}/auth/sign-in/email`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        // `serve --dev` seeds this admin on an empty DB.
-        body: JSON.stringify({ email: 'admin@objectos.ai', password: 'admin123' }),
-      });
-      let body: unknown = null;
-      try { body = await res.json(); } catch { /* non-JSON error body */ }
-      return { status: res.status, body };
+  // ⛔ The body read is INSIDE the thunk and cannot throw: a connection torn
+  // down mid-body rejects out of `res.json()` rather than out of `fetch()`, and
+  // the guard reads any throw as a transport failure — so an ASSERTION must
+  // never live in here or a wrong answer would be reported as a dropped socket.
+  const signIn = await probe('the sign-in probe', async () => {
+    const res = await fetch(`${base}/auth/sign-in/email`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      // `serve --dev` seeds this admin on an empty DB.
+      body: JSON.stringify({ email: 'admin@objectos.ai', password: 'admin123' }),
     });
-    expect(signIn.status).toBe(200);
-    const token = (signIn.body as { token?: string } | null)?.token;
-    expect(token).toBeTruthy();
+    let body: unknown = null;
+    try { body = await res.json(); } catch { /* non-JSON error body */ }
+    return { status: res.status, body };
+  });
+  expect(signIn.status).toBe(200);
+  const token = (signIn.body as { token?: string } | null)?.token;
+  expect(token).toBeTruthy();
 
-    const minted = await probe('the key-mint probe', async () => {
-      const res = await fetch(`${base}/keys`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: 'mcp-stdout-purity-e2e' }),
-      });
-      let body: unknown = null;
-      try { body = await res.json(); } catch { /* non-JSON error body */ }
-      return { status: res.status, body };
+  const minted = await probe('the key-mint probe', async () => {
+    const res = await fetch(`${base}/keys`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name: 'mcp-stdout-purity-e2e' }),
     });
-    expect(minted.status).toBe(201);
-    apiKey = String((minted.body as { data: { key: string } }).data.key);
-    expect(apiKey.startsWith('osk_')).toBe(true);
+    let body: unknown = null;
+    try { body = await res.json(); } catch { /* non-JSON error body */ }
+    return { status: res.status, body };
+  });
+  expect(minted.status).toBe(201);
+  apiKey = String((minted.body as { data: { key: string } }).data.key);
+  expect(apiKey.startsWith('osk_')).toBe(true);
 
-    await stop(first.child);
-  }, 240_000);
+  await stop(first.child);
+}, 240_000);
 
-  afterAll(async () => {
-    for (const child of children) await stop(child);
-    if (dir) rmSync(dir, { recursive: true, force: true });
-  }, 60_000);
+afterAll(async () => {
+  for (const child of children) await stop(child);
+  if (dir) rmSync(dir, { recursive: true, force: true });
+}, 60_000);
 
+describe('#7915: a stdio MCP boot writes nothing but protocol frames to stdout', () => {
   it('keeps stdout free of every non-frame byte, and keeps the diagnostics on stderr', async () => {
     // Wait for the banner's LAST line, not for `[MCP] Server started`. The
     // transport attaches inside `runtime.start()`, which the banner follows —
@@ -491,6 +525,161 @@ describe('#7915: a stdio MCP boot writes nothing but protocol frames to stdout',
     expect(stderr, `kernel log records are not reaching stderr${seen}`).toMatch(
       /INFO .*\[MCP\] Server started \(transport: stdio/,
     );
+
+    await stop(booted.child);
+  }, 240_000);
+});
+
+/**
+ * #32942 — with the stdio MCP transport on, what a host plugin writes to the
+ * console while SERVING a call reaches stderr, never stdout.
+ *
+ * ## The defect, measured on `origin/main` before the fix
+ *
+ * A stdio client writes `initialize` at spawn and its first `tools/call` the
+ * moment that is answered. The transport attaches inside `runtime.start()`, so
+ * those calls are served while `serve`'s boot-quiet window is still open — and
+ * the window dropped `console.log` / `console.debug` outright and filtered
+ * `process.stdout.write` (so `console.info` too) down to kernel-logger records.
+ * A host interceptor's audit line therefore reached NEITHER stream, while
+ * `console.warn` / `console.error` (stderr) and the same plugin over HTTP were
+ * fine. A plugin that logs from a timer after the banner never showed it: the
+ * defect is the window, not the redirect.
+ *
+ * ## What is pinned
+ *
+ *   1. under stdio, a call served inside the window — `FX_HOLD_FOR_CALL` holds
+ *      the boot open until it is, and the line is asserted to precede the
+ *      banner — puts every console channel's line on stderr;
+ *   2. stdout carries nothing but JSON-RPC frames, every line parsed;
+ *   3. the window still holds back the boot's own chatter up to the claim
+ *      (`[fx-boot-chatter]` from `init()`), on both streams;
+ *   4. CONTROL: an HTTP boot (no stdio claim) keeps its window as before — the
+ *      boot chatter held back, a post-boot HTTP call's lines on stderr, stdout
+ *      empty.
+ *
+ * `OS_LOG_LEVEL: 'warn'` on both boots: the #7915 case runs at `info`, which is
+ * a verbose level, and at a verbose level `serve` never opens the window — the
+ * defect would be unreachable.
+ */
+describe('#32942: a stdio call\'s console output reaches stderr, never stdout, even inside the boot-quiet window', () => {
+  /** Every console channel the interceptor writes through, as it tags them. */
+  const CHANNELS = ['console.log', 'console.info', 'console.debug', 'console.warn', 'console.error', 'process.stdout.write'];
+
+  it('stdio: the call\'s lines are on stderr before the banner, stdout is frames only, boot chatter still held', async () => {
+    const child = spawn(process.execPath, [CLI, 'serve', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
+      cwd: dir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: childEnv({
+        NO_COLOR: '1',
+        OS_LOG_LEVEL: 'warn',
+        OS_DISABLE_CONSOLE: '1',
+        OS_SECRET_KEY: E2E_SECRET_KEY,
+        NODE_ENV: undefined,
+        OS_DATABASE_URL: join(dir, 'probe.db'),
+        OS_MCP_STDIO_ENABLED: 'true',
+        OS_MCP_STDIO_API_KEY: apiKey,
+        FX_HOLD_FOR_CALL: '1',
+      }),
+    }) as ChildProcessWithoutNullStreams;
+    children.push(child);
+
+    let stdout = '';
+    let stderr = '';
+    let called = false;
+    const send = (msg: unknown) => child.stdin.write(`${JSON.stringify(msg)}\n`);
+    const ready = new Promise<boolean>((settle) => {
+      const timer = setTimeout(() => settle(false), 150_000);
+      child.stdout.on('data', (d) => {
+        stdout += String(d);
+        // The SDK client's shape: the first call goes out the moment the
+        // `initialize` answer is read — the banner has not printed yet.
+        if (!called && stdout.split('\n').slice(0, -1).some((line) => parseFrame(line)?.id === 1)) {
+          called = true;
+          send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+          send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_objects', arguments: {} } });
+        }
+      });
+      child.stderr.on('data', (d) => {
+        stderr += String(d);
+        if (/Press Ctrl\+C to stop/.test(stderr)) { clearTimeout(timer); settle(true); }
+      });
+      child.on('exit', () => { clearTimeout(timer); settle(false); });
+    });
+    // AT SPAWN, as an MCP client does.
+    send({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'objectstack-e2e', version: '0.0.0' } },
+    });
+    const booted = await ready;
+    await new Promise((r) => setTimeout(r, 750));
+    const seen = `\n--- stdout ---\n${stdout.slice(0, 4000)}\n--- stderr ---\n${stderr.slice(-6000)}`;
+    expect(booted, `serve never printed its banner${seen}`).toBe(true);
+
+    // The call was answered on the channel.
+    const lines = stdout.split('\n').slice(0, -1).filter((line) => line.length > 0);
+    const answer = lines.map(parseFrame).find((msg) => msg?.id === 2);
+    expect(answer, `list_objects was never answered${seen}`).toBeTruthy();
+    expect(answer!.error, `list_objects answered an error${seen}`).toBeUndefined();
+
+    // 2. stdout: every line a JSON-RPC frame.
+    expect(lines.filter((line) => parseFrame(line) === undefined), `stdout carries non-frame lines${seen}`).toEqual([]);
+
+    // 1. every channel's line is on stderr — and ahead of the banner, so it was
+    // written while the window was open rather than after it closed.
+    const banner = stderr.indexOf('Server is ready');
+    for (const channel of CHANNELS) {
+      const at = stderr.indexOf(`[fx-call] ${channel} stdio:list_objects`);
+      expect(at, `the ${channel} line of the stdio call is missing from stderr${seen}`).toBeGreaterThanOrEqual(0);
+      expect(at, `the ${channel} line landed after the banner, so the call missed the window${seen}`).toBeLessThan(banner);
+    }
+
+    // 3. the boot's own chatter, before the transport claimed stdout, is still held back.
+    expect(stderr + stdout, `the window no longer holds back boot chatter${seen}`).not.toContain('[fx-boot-chatter]');
+
+    await stop(child);
+  }, 240_000);
+
+  it('CONTROL — HTTP: the window holds boot chatter as before, a call\'s lines reach stderr, stdout stays empty', async () => {
+    const booted = await boot(
+      { OS_LOG_LEVEL: 'warn', OS_DATABASE_URL: join(dir, 'probe.db') },
+      /Press Ctrl\+C to stop/,
+    );
+    const url = `http://localhost:${booted.port}/api/v1/mcp`;
+    const call = await probeThroughChild(
+      {
+        child: booted.child,
+        transcript: () => `\n--- child stdout ---\n${booted.stdout()}\n--- child stderr ---\n${booted.stderr()}`,
+        label: 'serve-stdio-stdout-purity',
+        what: `the HTTP list_objects call on port ${booted.port}`,
+      },
+      async () => {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_objects', arguments: {} } }),
+        });
+        let text = '';
+        try { text = await res.text(); } catch { /* torn-down body */ }
+        return { status: res.status, text };
+      },
+    );
+    await new Promise((r) => setTimeout(r, 750));
+    const seen = `\n--- HTTP ${call.status} ${call.text.slice(0, 400)}\n--- stdout ---\n${booted.stdout().slice(0, 2000)}\n--- stderr ---\n${booted.stderr().slice(-6000)}`;
+    expect(call.status, `the HTTP call failed${seen}`).toBe(200);
+
+    const stderr = booted.stderr();
+    for (const channel of CHANNELS) {
+      expect(stderr, `the ${channel} line of the HTTP call is missing from stderr${seen}`).toContain(`[fx-call] ${channel} http:list_objects`);
+    }
+    expect(booted.stdout(), `an HTTP boot wrote to stdout${seen}`).toBe('');
+    expect(stderr + booted.stdout(), `the window no longer holds back boot chatter${seen}`).not.toContain('[fx-boot-chatter]');
 
     await stop(booted.child);
   }, 240_000);

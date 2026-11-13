@@ -179,8 +179,9 @@ export interface McpDataBridge {
    * `validate_expression` hands it to the shared validator as
    * `ExprSchemaHint.optionFields`, so the tool refuses the `label()` call the
    * object save door refuses, in the same words. It is a member of its own,
-   * not a key on {@link describeObject}'s answer, so `describe_object` serves
-   * what it served before.
+   * not a key on {@link describeObject}'s answer: `describe_object` already
+   * serves each field's `options`, and this list names the fields that carry
+   * them without a second copy of the object.
    *
    * OPTIONAL, like {@link listObjectsDiagnosed}: a bridge that omits it gets
    * no `label()` target check, exactly as before (the validator's opt-in).
@@ -2401,8 +2402,12 @@ export function registerObjectTools(
       {
         description:
           'Get the schema of a data object as you may read it, with what a write needs. Each field: name, type, label, '
-          + 'required, readonly (a write to it is dropped), system (a platform-injected column), options (value + label; '
-          + 'send the value) on a field that offers a fixed set, and defaultValue when an insert applies one. '
+          + 'required, readonly (a write never sets it: declared read-only, or a value the platform computes, such as a '
+          + 'formula, an autonumber or a field with an expression; leave it out of a write), system (a platform-injected '
+          + 'column), options (value + label; send the value) on a field that offers a fixed set, and defaultValue when '
+          + 'an insert applies one. A defaultValue may be a token the server resolves (NOW(), current_user) or an '
+          + 'expression object: to get it, omit the field, never copy the value. readonly is the schema\'s, not your '
+          + 'edit permission: a field you may read but not edit shows readonly false, and a write naming it is refused. '
           + 'validations: each active rule\'s name, type, message, severity, events and the fields it names (the '
           + 'message is what a refused write answers). Also the enabled features.',
         inputSchema: strictToolInput(
@@ -3543,10 +3548,13 @@ export function registerFileTools(
       note('create_upload_link'),
       {
         description:
-          'Create a link through which the user uploads one file onto a record: into a file field (field) or ' +
-          'as an attachment (attachments: true). Give the link to the user to open in a browser where they are ' +
-          'signed in to this deployment as themselves; it works only for them, once, for this record and this ' +
-          'field (or its attachments) only, and expires (see expiresAt). The upload is stored as the user, so they ' +
+          'Create a link through which the user uploads a file onto a record: into a file field (field) or ' +
+          'as an attachment (attachments: true). A link for a multi-file field takes several files, up to 10, ' +
+          'picked and sent together; a single-file field or the attachments take one. Give the link to the user to ' +
+          'open in a browser where they are signed in to this deployment as themselves; it works only for them, ' +
+          'once (one send, however many files it carries), for this record and this field (or its attachments) ' +
+          'only, and expires (see expiresAt). One file the field does not take refuses the whole send, and nothing ' +
+          'is attached. The upload is stored as the user, so they ' +
           'must be able to edit the record. A field link also needs a field they may write, and gets no link for ' +
           'a field declared read-only (readonly), a field read-only on this record in its current state ' +
           '(readonlyWhen), or a record a pending approval locks. An attachments link asks only what attaching ' +
@@ -3556,9 +3564,11 @@ export function registerFileTools(
           (newRecordLinkFn
             ? ' For a record you have not created yet (a required file field), omit recordId and name the field: ' +
               'the user must be able to create such records, and the answer carries fileIds, the id(s) the upload ' +
-              'is stored under. Once the user has uploaded, create the record with the field set to fileIds[0] ' +
-              '(the array, for a multi-file field). The id works only for this user\'s own write into that field ' +
-              'of that object, in one record, within an hour of the upload.'
+              'is stored under. For several files into a multi-file field, send count (how many, up to 10): ' +
+              'fileIds then holds that many ids, and the user must pick exactly that many. Once the user has ' +
+              'uploaded, create the record with the field set to fileIds[0] (the array fileIds, for a multi-file ' +
+              'field). Each id works only for this user\'s own write into that field of that object, in one ' +
+              'record, within an hour of the upload.'
             : ''),
         inputSchema: strictToolInput(
           {
@@ -3579,15 +3589,39 @@ export function registerFileTools(
               .literal(true)
               .optional()
               .describe('true to attach the upload to the record instead of filling a field'),
+            ...(newRecordLinkFn
+              ? {
+                  // 10 is the storage door's UPLOAD_LINK_MAX_FILES; the mint refuses more.
+                  count: z
+                    .number()
+                    .int()
+                    .min(1)
+                    .max(10)
+                    .optional()
+                    .describe(
+                      'For a record not yet created (no recordId), with a multi-file field: how many files the user ' +
+                        'will upload, up to 10 (default 1). The answer carries that many fileIds.',
+                    ),
+                }
+              : {}),
           },
         ),
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, recordId, field, attachments }) => {
+      async ({ objectName, recordId, field, attachments, ...rest }) => {
+        // [#32747] Listed only where a link can name no record; validated by the listed schema.
+        const count = (rest as { count?: number }).count;
         const bad = guard(objectName);
         if (bad) return errorResult(bad);
         if ((field === undefined) === (attachments === undefined)) {
           return errorResult('Say where the upload lands: either field (a file field of the record) or attachments: true.');
+        }
+        // [#32747] count names the ids a link for a record not yet created answers.
+        if (count !== undefined && recordId !== undefined) {
+          return errorResult(
+            'count is for a record not yet created (no recordId), whose file ids are answered up front. A link for ' +
+              'an existing record\'s multi-file field takes up to 10 files without it.',
+          );
         }
         if (recordId === undefined) {
           // [#32686] No record yet: a file field only, where the bridge serves it.
@@ -3599,7 +3633,8 @@ export function registerFileTools(
           }
           if (!newRecordLinkFn) return errorResult('recordId is required: name the record the upload lands on.');
           try {
-            const link = await newRecordLinkFn(objectName, { field });
+            const link = await newRecordLinkFn(objectName, { field, ...(count !== undefined ? { count } : {}) });
+            const several = link.fileIds.length > 1;
             return textResult({
               url: link.url,
               expiresAt: link.expiresAt,
@@ -3609,9 +3644,14 @@ export function registerFileTools(
               fileIds: link.fileIds,
               instructions:
                 'Give this link to the user to open in a browser where they are signed in to this deployment, and ' +
-                'pick the file. It works only for them, once, until expiresAt. Once they have uploaded, create the ' +
-                `record with ${field} set to fileIds[0] (the array, for a multi-file field). Before the upload, ` +
-                'that create is refused as an upload that never completed.',
+                (several
+                  ? `pick all ${link.fileIds.length} files and send them together. `
+                  : 'pick the file. ') +
+                'It works only for them, once, until expiresAt. Once they have uploaded, create the ' +
+                (several
+                  ? `record with ${field} set to fileIds (all ${link.fileIds.length}). `
+                  : `record with ${field} set to fileIds[0] (the array, for a multi-file field). `) +
+                'Before the upload, that create is refused as an upload that never completed.',
             });
           } catch (err) {
             return errorResultWithCode(err);
@@ -3629,7 +3669,8 @@ export function registerFileTools(
             ...(field !== undefined ? { field } : { attachments: true }),
             instructions:
               'Give this link to the user to open in a browser where they are signed in to this deployment, and ' +
-              'pick the file. It works only for them, once, until expiresAt.',
+              'pick the file (for a multi-file field, up to 10 files, sent together). It works only for them, ' +
+              'once, until expiresAt.',
           });
         } catch (err) {
           return errorResultWithCode(err);

@@ -54,6 +54,7 @@ function doorsThrowing(thrown: unknown) {
   const door: UploadLinkDoor = {
     inspectUploadLink: async () => { throw thrown; },
     consumeUploadLink: async () => { throw thrown; },
+    consumeUploadLinkFiles: async () => { throw thrown; },
   };
   registerStorageFamily(
     http as any,

@@ -41,6 +41,13 @@
  * console-style upload and save is taken as before. The create verdict is a
  * `security` service stood in for the span of the case that asks it.
  *
+ * #32747 — one link, several files (ruling A): a link for a multi-file field
+ * takes up to the cap in one submit, a form of `file0` … `fileN-1` and
+ * `count`; every file is judged before the link is spent, and the submit
+ * lands all or nothing. A link that names no record answers every id when it
+ * is minted, reserving the later ones as rows no write takes before the
+ * upload. A single-file field link and an attachments link still take one.
+ *
  * #32712 — the page, and the refusals it shows, in the request's language:
  * `Accept-Language`, else the workspace default, else English. The workspace
  * default is the fixture's `settings` service, answering the `localization`
@@ -65,7 +72,8 @@ import { installDefaultOrganization, DEFAULT_ORGANIZATION_ID } from './default-o
 import { UPLOAD_LINK_TTL_SECONDS } from './record-file-access.js';
 import { PRE_RECORD_CLAIM_WINDOW_SECONDS } from './pre-record-upload.js';
 import { resolveThrownHttpError } from '@objectstack/types';
-import { UPLOAD_LINK_UNUSABLE_MESSAGE } from './upload-link-wire.js';
+import { UPLOAD_LINK_MAX_FILES, UPLOAD_LINK_UNUSABLE_MESSAGE } from './upload-link-wire.js';
+import { uploadSizeRefusal } from './storage-limits.js';
 import { UPLOAD_LINK_COPY } from './upload-link-copy.js';
 
 const BASE = '/api/v1/storage';
@@ -217,6 +225,8 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
           status: { name: 'status', type: 'text' },
           invoices: { name: 'invoices', label: 'Invoices', type: 'file', multiple: true, readonlyWhen: "record.status == 'approved'" },
           stamp: { name: 'stamp', label: 'Stamp', type: 'file', readonly: true },
+          // [#32747] A multi-file field that takes only PDFs: invoices for one claim.
+          scans: { name: 'scans', label: 'Scans', type: 'file', multiple: true, accept: ['application/pdf', '.pdf'] },
         },
       }, {
         // [#32686] The measured case: an expense line whose e-invoice is required.
@@ -475,7 +485,10 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
         'x-object': 'claim', 'x-record-id': ids.claimA, 'x-field': 'photos', 'x-user-id': OUTSIDER.userId,
       });
       expect(res._status, JSON.stringify(res._json)).toBe(200);
-      expect(res._json).toEqual({ success: true, data: { fileId: expect.any(String), size: 11, field: 'policy' } });
+      expect(res._json).toEqual({
+        success: true,
+        data: { fileId: expect.any(String), fileIds: [expect.any(String)], size: 11, field: 'policy' },
+      });
       const fileId = res._json.data.fileId as string;
       expect((await claim(ids.claimB)).policy).toBe(fileId);
       expect((await claim(ids.claimA)).policy).not.toBe(fileId);
@@ -988,7 +1001,7 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       // The browser upload: the bytes land under the id the link answered, on no record.
       const res = await useLink(tokenOf(grant.path), Buffer.from('%PDF-1.4 taxi receipt'));
       expect(res._status, JSON.stringify(res._json)).toBe(200);
-      expect(res._json).toEqual({ success: true, data: { fileId, size: 21, field: 'invoice' } });
+      expect(res._json).toEqual({ success: true, data: { fileId, fileIds: [fileId], size: 21, field: 'invoice' } });
       const landed = await fileRow(fileId);
       expect(landed).toMatchObject({
         status: 'committed', owner_id: OWNER.userId, size: 21, name: 'scan 1.pdf', mime_type: 'application/pdf',
@@ -1177,6 +1190,439 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect(await fileRow(grant.fileIds[0])).toMatchObject({ status: 'pending', name: 'upload-link' });
       const small = await useLink(tokenOf(grant.path), Buffer.from('ok'));
       expect(small._status, JSON.stringify(small._json)).toBe(200);
+    });
+  });
+
+  describe('#32747 — one link, several files: a multi-file field takes them in one submit, all or nothing', () => {
+    type Pick = { name: string; bytes: Buffer; type?: string };
+    const pdf = (name: string, text = `%PDF-1.4 ${name}`): Pick => ({ name, bytes: Buffer.from(text), type: 'application/pdf' });
+    /** The page's several-file submit: one form, `count` and `file0` … `fileN-1`, each name URI-encoded. */
+    const useLinkForm = (token: string, picks: Pick[], user: string | null = OWNER.userId, extra: Record<string, unknown> = {}) => {
+      const body: Record<string, unknown> = { count: String(picks.length), ...extra };
+      picks.forEach((pick, i) => {
+        body[`file${i}`] = new File([new Uint8Array(pick.bytes)], encodeURIComponent(pick.name), { type: pick.type ?? 'application/pdf' });
+      });
+      return call('PUT', `${BASE}/upload-links/:token`, {
+        params: { token },
+        headers: { 'content-type': 'multipart/form-data; boundary=----os', 'x-upload-link-form': 'several', ...sessionOf(user) },
+        body,
+        // A transport hands the body's bytes too; a link that reads no form takes them.
+        rawBody: async () => Buffer.from('------os--\r\n'),
+      });
+    };
+    const failureOf = (write: Promise<unknown>) => write.then(() => null, (e: unknown) => resolveThrownHttpError(e));
+    /** A form body sent exactly as given (parts, `count`), with extra headers. */
+    const putForm = (token: string, body: Record<string, unknown>, headers: Record<string, string> = {}) =>
+      call('PUT', `${BASE}/upload-links/:token`, {
+        params: { token },
+        headers: { 'content-type': 'multipart/form-data; boundary=----os', 'x-upload-link-form': 'several', ...headers, ...sessionOf(OWNER.userId) },
+        body,
+        rawBody: async () => Buffer.from('------os--\r\n'),
+      });
+    /** File parts `file0` … that count how often their bytes are read. */
+    const countedParts = (n: number) => {
+      const reads = { count: 0 };
+      const parts: Record<string, unknown> = {};
+      for (let i = 0; i < n; i++) {
+        const file = new File([new Uint8Array(Buffer.from(`%PDF-1.4 cp-${i}`))], `cp-${i}.pdf`, { type: 'application/pdf' });
+        parts[`file${i}`] = {
+          name: file.name,
+          type: file.type,
+          arrayBuffer: () => {
+            reads.count += 1;
+            return file.arrayBuffer();
+          },
+        };
+      }
+      return { reads, parts };
+    };
+    /** The `sys_file` rows named one of `names`: a submit's files, by the unique names a case picks. */
+    const rowsNamed = async (names: string[]) =>
+      ((await engine.find('sys_file', { where: { name: { $in: names } }, context: SYS } as never)) as Array<Record<string, any>>);
+    const newClaim = async (name: string) =>
+      String((await engine.insert('claim', { name, owner: OWNER.userId, organization_id: ORG }, { context: SYS } as never)).id);
+
+    it('a record link: three PDFs in one submit land as three files on the field, in one write, as the minting user\'s', async () => {
+      const id = await newClaim('three');
+      const kept = await uploadThroughLink({ field: 'scans' }, Buffer.from('%PDF-1.4 kept'), id);
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'scans' }, OWNER as never);
+      const res = await useLinkForm(tokenOf(grant.path), [pdf('inv-1.pdf'), pdf('inv-2.pdf'), pdf('inv-3.pdf')]);
+      expect(res._status, JSON.stringify(res._json)).toBe(200);
+      const fileIds = res._json.data.fileIds as string[];
+      expect(fileIds).toHaveLength(3);
+      expect(res._json.data).toEqual({
+        fileId: fileIds[0],
+        fileIds,
+        files: fileIds.map((fileId) => ({ fileId, size: 18 })),
+        field: 'scans',
+      });
+      expect((await claim(id)).scans).toEqual([kept.fileId, ...fileIds]);
+      for (const [i, fileId] of fileIds.entries()) {
+        expect(await fileRow(fileId)).toMatchObject({
+          status: 'committed', owner_id: OWNER.userId, name: `inv-${i + 1}.pdf`, mime_type: 'application/pdf', size: 18,
+          ref_object: 'claim', ref_id: id, ref_field: 'scans',
+        });
+      }
+      // One submit spent it: the next use is the one unusable-link answer.
+      const again = await useLinkForm(tokenOf(grant.path), [pdf('inv-4.pdf')]);
+      expect(again._status).toBe(404);
+      expect(again._json.error.code).toBe('RESOURCE_NOT_FOUND');
+    });
+
+    it('a link that names no record: count 3 answers three ids, the submit fills them, and the create takes all three', async () => {
+      const grant = await files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count: 3 }, OWNER as never);
+      expect(grant.fileIds).toHaveLength(3);
+      expect(grant.fileIds[0]).toBe(grant.token.split('.')[0]);
+      for (const reserved of grant.fileIds.slice(1)) {
+        // A row that holds nothing, owned by the minting user: the pending-upload retention reaps it.
+        expect(await fileRow(reserved)).toMatchObject({ status: 'pending', owner_id: OWNER.userId, name: 'upload-link (reserved)', size: 0 });
+      }
+      const res = await useLinkForm(tokenOf(grant.path), [pdf('pre-1.pdf'), pdf('pre-2.pdf'), pdf('pre-3.pdf')]);
+      expect(res._status, JSON.stringify(res._json)).toBe(200);
+      expect(res._json.data.fileIds).toEqual(grant.fileIds);
+      for (const [i, fileId] of grant.fileIds.entries()) {
+        const row = await fileRow(fileId);
+        expect(row).toMatchObject({ status: 'committed', owner_id: OWNER.userId, name: `pre-${i + 1}.pdf`, ref_id: null });
+        expect(JSON.parse(row.metadata)).toMatchObject({ kind: 'pre_record_upload', object: 'claim', field: 'scans', user_id: OWNER.userId });
+      }
+      // Each id is claimable only by that user, into that field.
+      expect(await failureOf(engine.insert('claim', { name: 'R', owner: REVIEWER.userId, scans: [grant.fileIds[1]] }, { context: REVIEWER } as never)))
+        .toMatchObject({ status: 400, code: 'VALIDATION_FAILED' });
+      const created = await engine.insert('claim', { name: 'C', owner: OWNER.userId, scans: grant.fileIds }, { context: OWNER } as never);
+      expect((await claim(String(created.id))).scans).toEqual(grant.fileIds);
+      for (const fileId of grant.fileIds) {
+        expect(await fileRow(fileId)).toMatchObject({ ref_object: 'claim', ref_id: String(created.id), ref_field: 'scans' });
+      }
+    });
+
+    it('before its upload, a reserved id is refused to every write, the uploader\'s own included, and nothing serves it', async () => {
+      const grant = await files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count: 2 }, OWNER as never);
+      const reserved = grant.fileIds[1];
+      // The uploader: an upload that never completed (the incomplete-upload arm).
+      expect(await failureOf(engine.insert('claim', { name: 'O', owner: OWNER.userId, scans: [reserved] }, { context: OWNER } as never)))
+        .toMatchObject({
+          status: 400,
+          code: 'VALIDATION_FAILED',
+          details: { fields: [{ field: 'scans', code: 'invalid_value', message: `Scans cannot reference file ${reserved}: its upload was never completed. Complete the upload, then save again.` }] },
+        });
+      // Another user and a system write: a file they cannot open (the not-yours arm).
+      const unreadable = 'Scans cannot reference this file: it is not a file you can open. Choose a file you can open, or upload it again.';
+      for (const who of [REVIEWER, SYS]) {
+        expect(await failureOf(engine.insert('claim', { name: 'X', owner: OWNER.userId, scans: [reserved] }, { context: who } as never)))
+          .toMatchObject({ status: 400, code: 'VALIDATION_FAILED', details: { fields: [{ field: 'scans', message: unreadable }] } });
+      }
+      // The download door serves no pending row, to its owner either.
+      const url = await call('GET', `${BASE}/files/:fileId/url`, { params: { fileId: reserved }, headers: sessionOf(OWNER.userId) });
+      expect(url._status, JSON.stringify(url._json)).toBe(404);
+      expect(url._json.error.code).toBe('FILE_NOT_FOUND');
+      // It is no link: its own id with any secret is the one unusable-link answer.
+      const asLink = await useLinkForm(`${reserved}.${grant.token.split('.')[1]}`, [pdf('x.pdf')]);
+      expect(asLink._status).toBe(404);
+      expect(await fileRow(reserved)).toMatchObject({ status: 'pending', name: 'upload-link (reserved)', ref_id: null });
+    });
+
+    it('the cap: more than ten files is refused 400 VALIDATION_ERROR before the spend; nothing is stored and the link still takes ten', async () => {
+      const id = await newClaim('cap');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'scans' }, OWNER as never);
+      const eleven = Array.from({ length: UPLOAD_LINK_MAX_FILES + 1 }, (_, i) => pdf(`cap-${i}.pdf`));
+      const refused = await useLinkForm(tokenOf(grant.path), eleven);
+      expect(refused._status, JSON.stringify(refused._json)).toBe(400);
+      expect(refused._json.error.code).toBe('VALIDATION_ERROR');
+      expect(refused._json.error.message).toContain(`takes up to ${UPLOAD_LINK_MAX_FILES} files`);
+      expect(await rowsNamed(eleven.map((p) => p.name))).toEqual([]);
+      expect((await claim(id)).scans ?? null).toBeNull();
+      const ten = await useLinkForm(tokenOf(grant.path), eleven.slice(0, UPLOAD_LINK_MAX_FILES));
+      expect(ten._status, JSON.stringify(ten._json)).toBe(200);
+      expect((await claim(id)).scans).toHaveLength(UPLOAD_LINK_MAX_FILES);
+    });
+
+    it('a link that names no record takes exactly its count: two of three is refused before the spend, three land', async () => {
+      const grant = await files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count: 3 }, OWNER as never);
+      const short = await useLinkForm(tokenOf(grant.path), [pdf('ex-1.pdf'), pdf('ex-2.pdf')]);
+      expect(short._status, JSON.stringify(short._json)).toBe(400);
+      expect(short._json.error).toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(short._json.error.message).toContain('takes exactly 3 files');
+      expect(await fileRow(grant.fileIds[0])).toMatchObject({ status: 'pending', name: 'upload-link' });
+      const full = await useLinkForm(tokenOf(grant.path), [pdf('ex-1.pdf'), pdf('ex-2.pdf'), pdf('ex-3.pdf')]);
+      expect(full._status, JSON.stringify(full._json)).toBe(200);
+    });
+
+    it('control: a single-file field link and an attachments link still take one file; a second is refused, and the one lands', async () => {
+      for (const target of [{ field: 'policy' }, { attachments: true as const }]) {
+        const grant = await files.createUploadLinkAs('claim', ids.claimB, target, OWNER as never);
+        // The door never reads a form for such a link (below); the service it
+        // spends through refuses two files before the spend all the same.
+        const two = [pdf('one-a.pdf'), pdf('one-b.pdf')].map((p) => ({ filename: p.name, mimeType: 'application/pdf', data: p.bytes }));
+        expect(await refusalOf(files.consumeUploadLinkFiles(tokenOf(grant.path), two, OWNER.userId)))
+          .toMatchObject({ code: 'VALIDATION_ERROR', status: 400, message: expect.stringContaining('takes one file') });
+        expect(await rowsNamed(['one-a.pdf', 'one-b.pdf'])).toEqual([]);
+        const one = await useLink(tokenOf(grant.path), Buffer.from('%PDF-1.4 one'));
+        expect(one._status, JSON.stringify(one._json)).toBe(200);
+        // And once used, a second file through it is the one unusable-link answer, as before.
+        const second = await useLink(tokenOf(grant.path), Buffer.from('%PDF-1.4 two'));
+        expect(second._status).toBe(404);
+      }
+      // A link naming no record for a single-file field: count above one is refused when minted.
+      expect(await refusalOf(files.createUploadLinkForNewRecordAs('claim', { field: 'policy', count: 2 }, OWNER as never)))
+        .toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+      for (const count of [0, UPLOAD_LINK_MAX_FILES + 1, 1.5]) {
+        expect(await refusalOf(files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count }, OWNER as never)))
+          .toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+      }
+    });
+
+    it('another signed-in user cannot use a several-file link: the one 404, nothing spent, and the minting user then uses it', async () => {
+      const id = await newClaim('stranger');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'scans' }, OWNER as never);
+      const stranger = await useLinkForm(tokenOf(grant.path), [pdf('st-1.pdf'), pdf('st-2.pdf')], REVIEWER.userId);
+      expect(stranger._status).toBe(404);
+      expect(stranger._json.error.code).toBe('RESOURCE_NOT_FOUND');
+      expect(await rowsNamed(['st-1.pdf', 'st-2.pdf'])).toEqual([]);
+      const owner = await useLinkForm(tokenOf(grant.path), [pdf('st-1.pdf'), pdf('st-2.pdf')]);
+      expect(owner._status, JSON.stringify(owner._json)).toBe(200);
+    });
+
+    it('file 2 of 3 the field does not take: the whole submit is refused before the spend, the record unchanged, nothing stored', async () => {
+      const id = await newClaim('accept');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'scans' }, OWNER as never);
+      const picks = [pdf('acc-1.pdf'), { name: 'acc-2.png', bytes: Buffer.from('png'), type: 'image/png' }, pdf('acc-3.pdf')];
+      const refused = await useLinkForm(tokenOf(grant.path), picks);
+      expect(refused._status, JSON.stringify(refused._json)).toBe(400);
+      expect(refused._json.error.code).toBe('ERR_FILE_CONSTRAINT');
+      expect((await claim(id)).scans ?? null).toBeNull();
+      expect(await rowsNamed(picks.map((p) => p.name))).toEqual([]);
+      // Not spent: the same link takes the three PDFs.
+      const ok = await useLinkForm(tokenOf(grant.path), [pdf('acc-1.pdf'), pdf('acc-2.pdf'), pdf('acc-3.pdf')]);
+      expect(ok._status, JSON.stringify(ok._json)).toBe(200);
+    });
+
+    it('file 2 of 3 failing in the storage write after the spend: the record is unchanged and no row or bytes of the submit are left', async () => {
+      const id = await newClaim('store-fail');
+      const kept = await uploadThroughLink({ field: 'scans' }, Buffer.from('%PDF-1.4 kept'), id);
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'scans' }, OWNER as never);
+      const upload = storage.upload.bind(storage);
+      const keys: string[] = [];
+      const tried: string[] = [];
+      let calls = 0;
+      vi.spyOn(storage, 'upload').mockImplementation(async (key, data, opts) => {
+        calls += 1;
+        tried.push(key);
+        if (calls === 2) throw new Error('disk full');
+        keys.push(key);
+        return upload(key, data, opts);
+      });
+      const deleted = vi.spyOn(storage, 'delete');
+      const picks = [pdf('sf-1.pdf'), pdf('sf-2.pdf'), pdf('sf-3.pdf')];
+      const res = await useLinkForm(tokenOf(grant.path), picks);
+      expect(res._status).toBe(500);
+      expect((await claim(id)).scans).toEqual([kept.fileId]);
+      expect(await rowsNamed(picks.map((p) => p.name))).toEqual([]);
+      expect(keys).toHaveLength(1);
+      expect(await storage.exists(keys[0])).toBe(false);
+      // The upload that threw may have written part of its bytes: its key is deleted too.
+      expect(tried).toHaveLength(2);
+      expect(deleted.mock.calls.map(([key]) => key)).toEqual(tried);
+      vi.restoreAllMocks();
+      // A link naming no record: every id of the submit is gone, the reserved ones not reached included.
+      const pre = await files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count: 3 }, OWNER as never);
+      calls = 0;
+      keys.length = 0;
+      tried.length = 0;
+      vi.spyOn(storage, 'upload').mockImplementation(async (key, data, opts) => {
+        calls += 1;
+        tried.push(key);
+        if (calls === 2) throw new Error('disk full');
+        keys.push(key);
+        return upload(key, data, opts);
+      });
+      const preDeleted = vi.spyOn(storage, 'delete');
+      const preRes = await useLinkForm(tokenOf(pre.path), [pdf('spf-1.pdf'), pdf('spf-2.pdf'), pdf('spf-3.pdf')]);
+      expect(preRes._status).toBe(500);
+      for (const fileId of pre.fileIds) expect(await fileRow(fileId)).toBeUndefined();
+      expect(await storage.exists(keys[0])).toBe(false);
+      expect(tried).toHaveLength(2);
+      expect(preDeleted.mock.calls.map(([key]) => key)).toEqual(tried);
+    });
+
+    it('the record\'s write refusing after the spend (a lock): 409, the record unchanged, none of the files kept', async () => {
+      const id = await newClaim('lock-after');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'scans' }, OWNER as never);
+      locked.add(id);
+      try {
+        const picks = [pdf('lk-1.pdf'), pdf('lk-2.pdf'), pdf('lk-3.pdf')];
+        const res = await useLinkForm(tokenOf(grant.path), picks);
+        expect(res._status, JSON.stringify(res._json)).toBe(409);
+        expect(res._json.error.code).toBe('RECORD_LOCKED');
+        expect((await claim(id)).scans ?? null).toBeNull();
+        expect(await rowsNamed(picks.map((p) => p.name))).toEqual([]);
+      } finally {
+        locked.delete(id);
+      }
+    });
+
+    it('a form that lost a part is refused 400 INVALID_REQUEST and spends nothing', async () => {
+      const id = await newClaim('lost-part');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'scans' }, OWNER as never);
+      const lost = await useLinkForm(tokenOf(grant.path), [pdf('lp-1.pdf'), pdf('lp-2.pdf')], OWNER.userId, { count: '3' });
+      expect(lost._status, JSON.stringify(lost._json)).toBe(400);
+      expect(lost._json.error.code).toBe('INVALID_REQUEST');
+      const ok = await useLinkForm(tokenOf(grant.path), [pdf('lp-1.pdf'), pdf('lp-2.pdf')]);
+      expect(ok._status, JSON.stringify(ok._json)).toBe(200);
+    });
+
+    it('a multi-file field\'s record link judges the field\'s accept before the spend for one file too: refused, nothing stored, the link unspent', async () => {
+      const id = await newClaim('one-png');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'scans' }, OWNER as never);
+      const png = { name: 'one.png', bytes: Buffer.from('png'), type: 'image/png' };
+      for (const refused of [
+        await useLinkForm(tokenOf(grant.path), [png]),
+        await useLink(tokenOf(grant.path), Buffer.from('png'), { 'content-type': 'image/png', 'x-file-name': 'one.png' }),
+      ]) {
+        expect(refused._status, JSON.stringify(refused._json)).toBe(400);
+        expect(refused._json.error.code).toBe('ERR_FILE_CONSTRAINT');
+      }
+      expect((await claim(id)).scans ?? null).toBeNull();
+      expect(await rowsNamed(['one.png'])).toEqual([]);
+      const ok = await useLinkForm(tokenOf(grant.path), [pdf('one-ok.pdf')]);
+      expect(ok._status, JSON.stringify(ok._json)).toBe(200);
+    });
+
+    it('a link that takes one file takes its body as the file whatever its content type, a multipart body included, under the one-file limit, as before', async () => {
+      const multipart = 'multipart/form-data; boundary=----os';
+      const raw = Buffer.from('------os\r\nContent-Disposition: form-data; name="count"\r\n\r\n1\r\n------os--\r\n');
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 1, authored: true } } as never);
+      try {
+        for (const target of [{ field: 'policy' }, { attachments: true as const }]) {
+          const grant = await files.createUploadLinkAs('claim', ids.claimB, target, OWNER as never);
+          const token = tokenOf(grant.path);
+          // Declared over the one-file limit but within a form's allowance for
+          // one file: refused, with the one-file words, before anything is read.
+          const over = await useLink(token, raw, { 'content-type': multipart, 'content-length': String(MIB + 1) });
+          expect(over._status, JSON.stringify(over._json)).toBe(413);
+          expect(over._json.error.message).toBe(uploadSizeRefusal(MIB + 1, MIB, (n) => `The upload body is ${n} bytes`));
+          // So is the page's own form, header and all: such a link reads no form.
+          const marked = await putForm(token, { count: '1', ...countedParts(1).parts }, { 'content-length': String(MIB + 1) });
+          expect(marked._status, JSON.stringify(marked._json)).toBe(413);
+          expect(marked._json.error.message).toBe(over._json.error.message);
+          // The body is the file: stored as sent, its size the body's length.
+          const res = await useLink(token, raw, { 'content-type': multipart });
+          expect(res._status, JSON.stringify(res._json)).toBe(200);
+          expect(res._json.data.size).toBe(raw.length);
+          expect(res._json.data.fileIds).toEqual([res._json.data.fileId]);
+          expect((await useLink(token, raw, { 'content-type': multipart }))._status).toBe(404);
+        }
+      } finally {
+        storage.setLimitsSnapshot({} as never);
+      }
+    });
+
+    it('a multipart body without the form header is the file on every link, a multi-file field\'s and a count-1 link\'s included, under the one-file limit, as before', async () => {
+      const multipart = 'multipart/form-data; boundary=----os';
+      const raw = Buffer.from('------os\r\nContent-Disposition: form-data; name="file0"; filename="a.pdf"\r\n\r\n%PDF-1.4\r\n------os--\r\n');
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 1, authored: true } } as never);
+      try {
+        const record = await files.createUploadLinkAs('claim', await newClaim('raw-multipart'), { field: 'scans' }, OWNER as never);
+        const pre = await files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count: 1 }, OWNER as never);
+        for (const grant of [record, pre]) {
+          const token = tokenOf(grant.path);
+          const over = await useLink(token, raw, { 'content-type': multipart, 'content-length': String(MIB + 1) });
+          expect(over._status, JSON.stringify(over._json)).toBe(413);
+          expect(over._json.error.message).toBe(uploadSizeRefusal(MIB + 1, MIB, (n) => `The upload body is ${n} bytes`));
+          // Even a body shaped like the form (`count`, `file0`) is the file when it does not say it is the form.
+          const res = await call('PUT', `${BASE}/upload-links/:token`, {
+            params: { token },
+            headers: { 'content-type': multipart, 'x-file-name': encodeURIComponent('scan 1.pdf'), ...sessionOf(OWNER.userId) },
+            body: { count: '1', ...countedParts(1).parts },
+            rawBody: async () => raw,
+          });
+          expect(res._status, JSON.stringify(res._json)).toBe(200);
+          expect(res._json.data.size).toBe(raw.length);
+          expect(res._json.data.fileIds).toEqual([res._json.data.fileId]);
+        }
+      } finally {
+        storage.setLimitsSnapshot({} as never);
+      }
+    });
+
+    it('a form to a link that cannot be used takes the one-file path: over the one-file limit it is refused 413 with the one-file words, as before', async () => {
+      const grant = await files.createUploadLinkAs('claim', ids.claimB, { field: 'policy' }, OWNER as never);
+      expect((await useLink(tokenOf(grant.path), Buffer.from('%PDF-1.4 used')))._status).toBe(200);
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 1, authored: true } } as never);
+      try {
+        const over = await putForm(tokenOf(grant.path), { count: '1', ...countedParts(1).parts }, { 'content-length': String(MIB + 1) });
+        expect(over._status, JSON.stringify(over._json)).toBe(413);
+        expect(over._json.error.message).toBe(uploadSizeRefusal(MIB + 1, MIB, (n) => `The upload body is ${n} bytes`));
+      } finally {
+        storage.setLimitsSnapshot({} as never);
+      }
+      expect((await putForm(tokenOf(grant.path), { count: '1', ...countedParts(1).parts }))._status).toBe(404);
+    });
+
+    it('a link whose reserved ids name a file twice, or its own id, is the one unusable link', async () => {
+      for (const forge of ['twice', 'own'] as const) {
+        const grant = await files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count: 3 }, OWNER as never);
+        const [linkId, first] = grant.fileIds;
+        const row = await fileRow(linkId);
+        const state = JSON.parse(row.metadata);
+        state.reserved_ids = forge === 'twice' ? `${first},${first}` : `${linkId},${first}`;
+        await engine.update('sys_file', { metadata: JSON.stringify(state) }, { where: { id: linkId }, context: SYS } as never);
+        const res = await useLinkForm(tokenOf(grant.path), [pdf(`fg-${forge}-1.pdf`), pdf(`fg-${forge}-2.pdf`), pdf(`fg-${forge}-3.pdf`)]);
+        expect(res._status, `${forge}: ${JSON.stringify(res._json)}`).toBe(404);
+        expect(res._json.error.message).toBe(UPLOAD_LINK_UNUSABLE_MESSAGE);
+        expect(await rowsNamed([`fg-${forge}-1.pdf`, `fg-${forge}-2.pdf`, `fg-${forge}-3.pdf`])).toEqual([]);
+      }
+    });
+
+    it('a form on a multi-file field\'s link declares up to that link\'s files, each within the limit', async () => {
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 1, authored: true } } as never);
+      try {
+        const several = await files.createUploadLinkAs('claim', await newClaim('declared'), { field: 'scans' }, OWNER as never);
+        const two = await putForm(tokenOf(several.path), { count: '2', ...countedParts(2).parts }, { 'content-length': String(2 * MIB) });
+        expect(two._status, JSON.stringify(two._json)).toBe(200);
+      } finally {
+        storage.setLimitsSnapshot({} as never);
+      }
+    });
+    it('a form is refused before any part is read: a count over the link\'s cap, parts that disagree with count, a part missing', async () => {
+      const grant = await files.createUploadLinkAs('claim', await newClaim('unread'), { field: 'scans' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const over = countedParts(UPLOAD_LINK_MAX_FILES + 1);
+      const tooMany = await putForm(token, { count: String(UPLOAD_LINK_MAX_FILES + 1), ...over.parts });
+      expect(tooMany._status, JSON.stringify(tooMany._json)).toBe(400);
+      expect(tooMany._json.error.code).toBe('VALIDATION_ERROR');
+      expect(tooMany._json.error.message).toContain(`takes up to ${UPLOAD_LINK_MAX_FILES} files`);
+      expect(over.reads.count).toBe(0);
+      const huge = countedParts(2);
+      const hugeCount = await putForm(token, { count: '999', ...huge.parts });
+      expect(hugeCount._json.error.code).toBe('VALIDATION_ERROR');
+      expect(huge.reads.count).toBe(0);
+      const lost = countedParts(2);
+      const lostRes = await putForm(token, { count: '3', ...lost.parts });
+      expect(lostRes._json.error.code).toBe('INVALID_REQUEST');
+      expect(lost.reads.count).toBe(0);
+      const gap = countedParts(3);
+      const gapRes = await putForm(token, { count: '2', file0: gap.parts.file0, file2: gap.parts.file2 });
+      expect(gapRes._json.error.code).toBe('INVALID_REQUEST');
+      expect(gap.reads.count).toBe(0);
+      const ok = countedParts(2);
+      expect((await putForm(token, { count: '2', ...ok.parts }))._status).toBe(200);
+      expect(ok.reads.count).toBe(2);
+    });
+
+    it('the page: a multi-file field link picks several, a link naming no record asks for its count, a single-file link picks one', async () => {
+      const id = await newClaim('page');
+      const several = await openLink(tokenOf((await files.createUploadLinkAs('claim', id, { field: 'scans' }, OWNER as never)).path));
+      expect(several._status).toBe(200);
+      expect(String(several._sent)).toContain('<input id="file" type="file" multiple>');
+      expect(String(several._sent)).toContain(UPLOAD_LINK_COPY.en.wantedSeveral(UPLOAD_LINK_MAX_FILES));
+      // The page's form says it is the form; nothing else is read as one.
+      expect(String(several._sent)).toContain('headers:{"x-upload-link-form":"several"},body:form');
+      const exact = await openLink(tokenOf((await files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count: 3 }, OWNER as never)).path));
+      expect(String(exact._sent)).toContain(UPLOAD_LINK_COPY.en.wantedExactly(3));
+      expect(String(exact._sent)).toContain('multiple');
+      const single = await openLink(tokenOf((await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never)).path));
+      expect(String(single._sent)).toContain('<input id="file" type="file">');
+      expect(String(single._sent)).not.toContain('multiple');
     });
   });
 });
