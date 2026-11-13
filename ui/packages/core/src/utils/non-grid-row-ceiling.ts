@@ -114,14 +114,30 @@ export const NON_GRID_ROW_CEILING = 2000;
  * cap must not raise this one unmeasured.
  *
  * Measured the same way as the table above (this repo's DOM test lane,
- * `@testing-library/react`, the real `GanttView`, inline `value` provider,
- * mount to settled paint), on the same box in one sitting, plus a real
- * Chromium reading (first paint of a page that mounts `ObjectGantt` over the
- * same rows). The table and its budget are on the pull request that set this
- * constant; they are a reading taken once, and nothing re-derives them.
+ * `@testing-library/react`, `ObjectGantt` over the real `GanttView`, mount to
+ * settled paint), the gantt alone, on one box in one sitting. "adapter" is
+ * the same mount through a `find()` that parses the rows from a JSON wire
+ * string, the fetch's deserialisation half; "Chromium" is headless Chromium
+ * on the Console's Vite dev server, mount to the first frame after the rows
+ * reach the DOM:
  *
- * The budget is ruling a′'s, applied to the gantt: DOM elements stay far
- * inside ~10,000, and mount stays inside the ~3s the tree is held to.
+ * | rows   | DOM lane, inline | DOM lane, adapter          | Chromium      |
+ * |-------:|-----------------:|---------------------------:|--------------:|
+ * |  2,000 |    726 · 137ms   | 732 · 111ms (0.2 MB, 3ms)  | 623 · 396ms   |
+ * |  4,000 |    726 · 146ms   | 732 · 132ms (0.4 MB, 4ms)  | 623 · 466ms   |
+ * | 10,000 |    726 · 197ms   | 732 · 235ms (1.0 MB, 20ms) | 623 · 436ms   |
+ *
+ * The DOM stays flat (the task list and the timeline both window), and the
+ * cost in rows is the O(n) transform: 10,000 gantt rows mount in a tenth of
+ * the time 2,000 tree rows take in the table above. Ruling a′'s budget
+ * applied to the gantt — DOM elements far inside ~10,000, mount inside the
+ * ~3s the tree is held to — holds at 10,000 with room, so the target is the
+ * value. Past it (10,500 rows) the probe row cuts at 10,000 and
+ * `NonGridRowCeilingNote` shows, as below the shared ceiling.
+ *
+ * ⚠️ As with the table above: SHARED-BOX seconds and a reading taken once,
+ * when objectstack#32421 landed; nothing re-derives it. The DOM counts are
+ * the environment-independent half.
  */
 export const GANTT_ROW_CEILING = 10000;
 
