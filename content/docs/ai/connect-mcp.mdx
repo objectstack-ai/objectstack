@@ -336,8 +336,11 @@ can reach is the **default exposure policy (v1)**:
   as you under every gate a read already runs (your permissions, row-level
   security, the object's own read rules, field masking); no write tool opens
   it, and the stored-metadata tables stay refused. `sys_approval_request`
-  declares it, so an agent can list the approvals waiting on you where your
-  permissions let you read that object.
+  declares it: every signed-in member reads the requests they take part in
+  (submitted, waiting on them, or acted on) and no others, so an agent can
+  list the approvals waiting on you with `pending_approvers` contains
+  `{current_user_id}` — answered for a slot that names you by email, position
+  or team too, not only by user id.
 - **Actions require the author's opt-in**: `ai: { exposed: true }` plus an
   `ai.description` of at least 40 characters, and the action must be callable
   without a UI. In the open framework that means three types — `script`
