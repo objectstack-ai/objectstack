@@ -410,6 +410,47 @@ describe('query_dataset', () => {
     ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
   });
 
+  // A selection naming no measure has nothing to project. The spec selection
+  // accepts `measures: []`, so it used to reach `service.queryDataset`, whose
+  // SELECT had an empty projection: the SQL driver answered 500
+  // `DATABASE_ERROR` with its own text, and with dimensions the tool served
+  // group rows carrying no measure. The tool now refuses it before anything is
+  // read, with the REST door's answer to the same selection
+  // (`POST /analytics/dataset/query`: 400 `VALIDATION_FAILED`, the same
+  // sentence). Both faces this executor serves are pinned: the direct member
+  // the MCP bridge calls, and `execute`, the registry face the product AI's
+  // chat tool calls. The dogfood suite holds the REST door and the MCP tool to
+  // one answer for one caller.
+  it.each([
+    ['without dimensions', { measures: [] }],
+    ['with dimensions', { measures: [], dimensions: ['stage'] }],
+  ])('refuses measures: [] %s 400 VALIDATION_FAILED in the REST door\'s words, on both faces, reading nothing', async (_case, selection) => {
+    const { service, reads } = await bootWired();
+    const spy = vi.spyOn(service, 'queryDataset');
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    const input = { datasetName: 'pipeline', selection };
+    const direct = await tools.queryDataset(input, ME).catch((e) => e);
+    const chat = await tools.execute({ toolName: 'query_dataset', input }, ME).catch((e) => e);
+    for (const e of [direct, chat]) {
+      expect(e).toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+      expect(messageOf(e)).toBe('body.selection.measures must be a non-empty array of measure names.');
+    }
+    expect(spy).not.toHaveBeenCalled();
+    expect(reads).toEqual([]);
+  });
+
+  it('CONTROL: a selection naming a measure, with dimensions, is served on both faces as before', async () => {
+    const { service } = await bootWired([{ stage: 'won', revenue: 100 }]);
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    const input = { datasetName: 'pipeline', selection: { measures: ['revenue'], dimensions: ['stage'] } };
+    const direct = await tools.queryDataset(input, ME);
+    const chat = await tools.execute({ toolName: 'query_dataset', input }, ME);
+    for (const out of [direct, chat] as Array<{ rows: unknown[]; rowCount: number }>) {
+      expect(out.rows).toEqual([{ stage: 'won', revenue: 100 }]);
+      expect(out.rowCount).toBe(1);
+    }
+  });
+
   it('dispatches by tool name through execute, and refuses an unknown one', async () => {
     const { service } = await bootWired();
     const tools = service.datasetTools({ loadDatasets: loadSaved });
