@@ -222,6 +222,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/mcp/src/stdio-data-bridge.object-schema-mask.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/mcp/src/stdio-tenancy-posture-api-key-matrix.test.ts",
       "verb": "delete",
       "pinned": 1

@@ -4515,8 +4515,9 @@ export class RestServer {
         // [decision 6840464379] Where an object's declared `schemaReadDelegate`
         // is found: the request's environment's engine and kernel, the ones
         // `security` was resolved from. Built once per request, and resolved
-        // only when an object the read check refused needs it; a lookup that
-        // fails is the posture's 5xx fault, never a false absence.
+        // only when an object the read check refused needs it. A lookup that
+        // throws is the posture's 5xx fault; one that finds nothing registered
+        // applies no exception, and the object stays absent.
         let envId: Promise<string | undefined> | undefined;
         const requestEnvironment = () => (envId ??= this.resolveRequestEnvironmentId(environmentId, req));
         const schemaReadDelegates = objectSchemaReadDelegateSource({

@@ -1,6 +1,6 @@
 # ADR-0106: Metadata-Plane Field-Level Security — Per-Caller Masking of Object Schemas
 
-**Status**: Accepted (2026-07-27; implemented 2026-08-08 — #3682) · **Amended** (2026-11-11, ruling record 6787890900 — an object the caller may not read is absent from every schema-serving outlet; see "Amendment (2026-11-11): object-level visibility"; its one exception, by maintainer decision 6840464379 on 2026-11-13, is an owner-declared `schemaReadDelegate` — see "Exception (2026-11-13)")
+**Status**: Accepted (2026-07-27; implemented 2026-08-08 — #3682) · **Amended** (2026-11-11, ruling record 6787890900 — an object the caller may not read is absent from every schema-serving outlet; see "Amendment (2026-11-11): object-level visibility"; its one exception, maintainer decision 6840464379 of 2026-11-13, serves the definitions of `sys_approval_request` and `sys_approval_action`, never their rows, to the callers admitted by the `schemaReadDelegate` their owner declares — see "Exception (2026-11-13)")
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove, fail-posture discipline), [ADR-0066](./0066-unified-authorization-model.md) (unified authz; D3 field `requiredPermissions` — mask on read, deny on write), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) (permission set as the only capability container; `readable`/`editable` FLS bits), [ADR-0046](./0046-package-docs-as-metadata.md) (§6.7 audience gate — the existing per-caller metadata read gate this ADR generalizes from)
 **Tracking**: #3661 (steps ① ② shipped client-side as objectui#2866; this ADR is step ③)
@@ -324,35 +324,51 @@ complementary by design.
   navigation entries that name an object, and the object state-machine read's
   field level — it applies the object-level rule, not the field projection.
 
-#### Exception (2026-11-13): objects whose rows reach callers through a service's own door
+#### Exception (2026-11-13): two approval definitions, through an owner-declared delegate
 
 *Maintainer decision 6840464379, an exception to ruling record 6787890900.*
 
-- An object whose rows reach callers only through a service's own door, not
-  the data door, may name that service in its definition's
-  `schemaReadDelegate`. The declaration belongs to the object's owner; the
-  object-level rule carries no list of names.
-- The delegate is asked only after the object read check has refused the
-  caller, and only when the caller's field posture is determined. Only a
-  `true` verdict admits, and it admits the definition alone: served exactly
-  as to a reader of the object, listed and read by name, projected by the
-  caller's own field-level security. The data door's answer about the rows
-  does not move.
-- The delegate answers for the objects it owns and refuses any other name. A
-  declared delegate that is missing or incomplete leaves the object absent
-  (said once, at warn); a delegate or a lookup that throws is the D6 tier-3
-  fault (5xx), never a false absence.
-- Every schema-serving outlet resolves the exception inside the same posture
-  resolution, so list and item reads, the REST and dispatcher `/meta` doors,
-  and both MCP transports give one answer. An outlet that cannot reach the delegate applies no exception and
-  fails closed.
-- First declaration: `sys_approval_request` and `sys_approval_action` name
-  `approvals`. Their rows reach a member only through `/api/v1/approvals/*`,
-  and the request page that door links to needs both definitions. The
-  service admits the callers its door serves at least one request to in
-  their organization (the rule its request read applies: a current
-  approver, the submitter, a past actor, or the override holder). A member
-  party to no request in their organization keeps the absent answer.
+- The definitions of `sys_approval_request` and `sys_approval_action` are
+  served to the callers the approvals door admits. Both objects are closed on
+  the data door to ordinary members, and the request page the approvals door
+  links to renders from both definitions. Every other object keeps the
+  amendment's answer.
+- The object's owner declares the exception; the object-level rule carries no
+  list of names. Each definition names a kernel service in
+  `schemaReadDelegate`, here `approvals`, and that service's
+  `authorizeSchemaRead` answers for the caller. The declaration is read from
+  the object's registered definition at each resolution.
+- The delegate is asked inside the posture resolution that decides the
+  object-level rule, so no outlet decides the exception for itself. It is
+  asked after the D8 switch and the D4 exemptions, only for a caller the
+  object read check did not admit, whatever the reason, and never on an
+  undetermined field posture (D6 tier 2), which would serve the definition
+  unmasked: the object stays absent then. Only a verdict of `true` admits.
+- A `true` verdict serves the definition alone, exactly as a reader of the
+  object is served it: listed, read by name, under the caller's own field
+  projection, and never more. It opens no row: the data door still refuses
+  the caller, and the rows reach them only through `/api/v1/approvals/*`.
+- What is enforced when the delegate cannot answer: an outlet that gives the
+  resolution no way to find the delegate, and a named service that is not
+  registered or lacks `authorizeSchemaRead` (said once per object, at warn),
+  leave the object absent. A delegate or a lookup that throws answers the D6
+  tier-3 fault (5xx); a fault that a delegate folds into its refusal, or a
+  transport's service lookup into "not registered", is answered as the
+  object not existing, which fails closed.
+- A delegate answers by its own door's rule, and only for the objects it
+  owns: any definition may name it, and the posture resolution does not check
+  the pairing. `approvals` refuses every other name. It admits its door's
+  override holder, and a caller the door serves at least one request, pending
+  or closed, as submitter, current approver or past actor, inside the
+  organization scope its request read keeps. That is narrower than the door:
+  the opt-in record-reader tier, which is evaluated only against a named
+  record, is not counted. A member party to no such request keeps the absent
+  answer.
+- The key is not a general opt-out from the object-level rule. A later
+  declaration, whether another object names a delegate or another service
+  answers as one, moves an object off the amendment's answer: it is a further
+  exception to ruling record 6787890900, recorded here and reviewed against
+  every rule above before it ships.
 
 ---
 

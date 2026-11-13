@@ -38,7 +38,11 @@ import {
   securityDoubleFor,
   type ObjectSchemaMaskCase,
 } from '@objectstack/metadata-core/testing';
-import { OBJECT_SCHEMA_MASK_DISABLE_ENV, type ObjectSchemaReadDelegateSource } from '@objectstack/metadata-core';
+import {
+  OBJECT_SCHEMA_MASK_DISABLE_ENV,
+  assertEngineUpdateDispatch,
+  type ObjectSchemaReadDelegateSource,
+} from '@objectstack/metadata-core';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
 import { registerObjectTools } from './mcp-http-tools.js';
 import { MCPServerPlugin } from './plugin.js';
@@ -281,7 +285,10 @@ describe('[ADR-0106] MCPServerPlugin hands the stdio bridge and the object resou
         if (object === 'sys_user') return query?.where?.id === 'usr_stdio' ? [{ id: 'usr_stdio' }] : [];
         return [];
       }),
-      update: vi.fn(async () => ({})),
+      update: vi.fn(async (_o: string, data: Record<string, unknown>, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
+        return {};
+      }),
       // [decision 6840464379] The registered definition the delegate source reads.
       getSchema: vi.fn((name: string) => (name === OBJECT && opts.delegate ? { ...account(), schemaReadDelegate: 'owner_door' } : undefined)),
     };
