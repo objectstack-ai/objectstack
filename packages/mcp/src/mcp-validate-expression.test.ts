@@ -54,8 +54,12 @@ function mcpRequest(body: unknown): Request {
   });
 }
 
-async function call(runtime: MCPServerRuntime, body: unknown, bridge?: unknown) {
-  const res = await runtime.handleHttpRequest(mcpRequest(body), { bridge, parsedBody: body } as never);
+async function call(runtime: MCPServerRuntime, body: unknown, bridge?: unknown, allowSystemObjects?: boolean) {
+  const res = await runtime.handleHttpRequest(mcpRequest(body), {
+    bridge,
+    parsedBody: body,
+    ...(allowSystemObjects !== undefined ? { toolOptions: { allowSystemObjects } } : {}),
+  } as never);
   const json = res.status === 202 ? null : await res.json();
   return { status: res.status, json };
 }
@@ -64,8 +68,13 @@ const toolsCall = (id: number, name: string, args: Record<string, unknown>) => (
   jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args },
 });
 
-async function validate(runtime: MCPServerRuntime, bridge: McpDataBridge, args: Record<string, unknown>) {
-  const { json } = await call(runtime, toolsCall(1, 'validate_expression', args), bridge);
+async function validate(
+  runtime: MCPServerRuntime,
+  bridge: McpDataBridge,
+  args: Record<string, unknown>,
+  allowSystemObjects?: boolean,
+) {
+  const { json } = await call(runtime, toolsCall(1, 'validate_expression', args), bridge, allowSystemObjects);
   return JSON.parse(json.result.content[0].text);
 }
 
@@ -442,11 +451,15 @@ describe("validate_expression answers the gate's own passes at validation and fo
         balance: { type: 'lookup', label: 'Balance', reference: 'gp_bal' },
         meta: { type: 'lookup', label: 'Meta', reference: 'sys_metadata' },
         header: { type: 'master_detail', label: 'Header', reference: 'gp_bal' },
+        approver: { type: 'lookup', label: 'Approver', reference: 'sys_user' },
       },
       // The object's own rule is the gate's business at its own door, never this call's.
       validations: [{ name: 'own', type: 'script', condition: 'record.days > 3', message: 'm' }],
     },
     gp_bal: { name: 'gp_bal', fields: { remaining: { type: 'number', label: 'Remaining', required: true } } },
+    // A system object the bridge serves, which the tool's object-name guard
+    // does not expose unless the server sets `allowSystemObjects`.
+    sys_user: { name: 'sys_user', fields: { email: { type: 'text', label: 'Email', required: true } } },
     gp_ext: {
       name: 'gp_ext',
       external: { remoteName: 'customers' },
@@ -551,7 +564,24 @@ describe("validate_expression answers the gate's own passes at validation and fo
     expect([r.ok, r.errors, r.warnings]).toEqual([true, [], []]);
   });
 
-  it('leaves a flow condition and a template to the shared validator, as the gate does', async () => {
+  it('a hop target follows the same system-object fence as describe_object', async () => {
+    const args = { objectName: 'gp_req', expression: 'record.approver.nope > 1', site: 'validation' };
+    // The gate refuses the hop; a server that exposes system objects says so.
+    expect(gateOn('validation', 'gp_req', args.expression).map(([level]) => level)).toEqual(['error']);
+    const exposed = await validate(runtime, gateBridge(), args, true);
+    expect(exposed.ok).toBe(false);
+    expect(verdicts(exposed).some(([, message]) => message!.includes('nope'))).toBe(true);
+    expect(reads).toEqual(['gp_req', 'sys_user']);
+    // By default the target is neither read nor judged: the answer is the one
+    // a bridge serving no definition gives, as `describe_object` refuses it.
+    reads.length = 0;
+    const fenced = await validate(runtime, gateBridge(), args);
+    expect(reads).toEqual(['gp_req']);
+    expect(fenced).toEqual(await validate(runtime, gateBridge(false), args));
+    expect(verdicts(fenced).some(([, message]) => message!.includes('nope'))).toBe(false);
+  });
+
+  it('does not judge a flow condition or a template: no definition is read there', async () => {
     await validate(runtime, gateBridge(), { objectName: 'gp_req', expression: 'days > 3', site: 'flow_condition' });
     await validate(runtime, gateBridge(), { objectName: 'gp_req', expression: '{{record.title}}', site: 'template' });
     expect(reads).toEqual([]);

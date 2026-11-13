@@ -141,8 +141,10 @@ create/update payload.
   (text/boolean fields misused in arithmetic; an error at a \`validation\` site,
   worded for the rule's \`severity\`, and at a \`flow_condition\` of a
   record-triggered or time-relative flow, where it fails the run; a warning on
-  any other flow; a read of an external object's unprovisioned system column),
-  plus the fields and stdlib functions in scope. \`site\` is \`formula\` | \`validation\` |
+  any other flow; at a \`formula\` or \`validation\` site, a read of an
+  external object's unprovisioned system column), plus the fields and stdlib
+  functions in scope. A hop target follows the same system-object fence as
+  \`describe_object\`. \`site\` is \`formula\` | \`validation\` |
   \`flow_condition\` | \`template\` (default \`formula\`). Pass the rule's
   \`severity\` or the flow's \`triggerKind\` (\`record_change\` by default) to
   get the verdict the publish gate gives that rule or flow; for a

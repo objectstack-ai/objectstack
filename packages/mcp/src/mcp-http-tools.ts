@@ -89,7 +89,8 @@ import {
 } from '@objectstack/formula';
 // [#32872] The publish gate's own passes at a validation rule and a formula
 // field, run over the served definitions (see `VALIDATE_SITE_MAP.gatePasses`).
-import { authoredExpressionHopTargets, judgeAuthoredSiteExpression, type AuthoredExpressionSite } from '@objectstack/lint';
+// [#32872] Types only: the entry itself is loaded lazily, in `gatePassFindings`.
+import type { AuthoredExpressionSite } from '@objectstack/lint';
 // [#16913] The unknown-key error map every `strictToolInput` shape below is
 // built with. Imported, never re-implemented: #4001 is this repo's ruling on
 // silent key stripping and its explicit instruction is that the parts already
@@ -1716,8 +1717,10 @@ function jsonText(value: unknown): string {
  * `@objectstack/lint`'s walk. There the tool asks the gate itself
  * (`judgeAuthoredSiteExpression`) over the served definitions
  * (`McpDataBridge.servedObjectDefinitionOf`) and adds its findings to the
- * validator's; a flow condition and a template are judged by the validator
- * alone at the gate too.
+ * validator's. A flow condition and a template are not judged by this: the
+ * gate's own passes there (the unprovisioned-anchor warning on an
+ * object-bound flow predicate, the null-guard gate on a record-triggered
+ * flow's conditions) are not run by the tool.
  */
 const VALIDATE_SITE_MAP: Record<
   string,
@@ -1789,9 +1792,19 @@ const NO_GATE_PASS_FINDINGS: { errors: GatePassFinding[]; warnings: GatePassFind
  * the subject's, and each object the expression reads through. A bridge
  * without `servedObjectDefinitionOf`, or an object it does not serve, adds
  * none; a target it does not serve is not judged, as at the gate.
+ *
+ * A hop target follows the same system-object fence as `describe_object`:
+ * `exposed` is the tool's object-name guard, and a target it refuses is
+ * neither read nor judged, so a hop into a system object is judged only
+ * where the server exposes system objects (`allowSystemObjects`).
+ *
+ * `@objectstack/lint`'s root entry is loaded here, on the first call that
+ * needs it, never at module load: the boot path reaches lint only through
+ * its `/runtime` entry, as every other server-side consumer does.
  */
 async function gatePassFindings(
   bridge: McpDataBridge,
+  exposed: (objectName: string) => boolean,
   site: AuthoredExpressionSite,
   objectName: string,
   expression: string,
@@ -1800,9 +1813,10 @@ async function gatePassFindings(
   if (!bridge.servedObjectDefinitionOf) return NO_GATE_PASS_FINDINGS;
   const subject = await bridge.servedObjectDefinitionOf(objectName);
   if (!subject) return NO_GATE_PASS_FINDINGS;
+  const { authoredExpressionHopTargets, judgeAuthoredSiteExpression } = await import('@objectstack/lint');
   const targets: Array<Record<string, unknown>> = [];
   for (const target of authoredExpressionHopTargets(subject, expression)) {
-    if (target === objectName) continue;
+    if (target === objectName || !exposed(target)) continue;
     const def = await bridge.servedObjectDefinitionOf(target);
     if (def) targets.push(def);
   }
@@ -2368,9 +2382,10 @@ export function registerObjectTools(
           '`validation` site an unguarded nullable field or a read of `parent`) and advisory warnings ' +
           '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
           '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
-          'a warning on any other flow; date-equality pitfalls; a read of an external object\'s unprovisioned system ' +
-          'column), plus the fields and stdlib ' +
-          'functions in scope so you can self-correct. `site` says where the expression will live: a `formula` ' +
+          'a warning on any other flow; date-equality pitfalls; at a `formula` or `validation` site, a read of an ' +
+          'external object\'s unprovisioned system column), plus the fields and stdlib ' +
+          'functions in scope so you can self-correct. A hop target follows the same system-object fence as ' +
+          '`describe_object`. `site` says where the expression will live: a `formula` ' +
           'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions). ' +
           'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition), so the verdict is ' +
           'the one the publish gate gives that rule or flow. A time-relative flow\'s conditions read a row of the object ' +
@@ -2500,7 +2515,7 @@ export function registerObjectTools(
           // [#32872] …and, at a validation rule or a formula field, every other
           // pass the gate runs there, in the gate's own words.
           const gate = slotParse.success && gatePasses
-            ? await gatePassFindings(bridge, gatePasses, objectName, expression, severity)
+            ? await gatePassFindings(bridge, (name) => guard(name) === undefined, gatePasses, objectName, expression, severity)
             : NO_GATE_PASS_FINDINGS;
           const inScope = introspectScope(role, hint);
           const inferredType =

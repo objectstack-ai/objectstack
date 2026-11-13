@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { applyInjectedSystemColumns } from '@objectstack/metadata-core';
 import { describe, expect, it } from 'vitest';
 
@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 // `scripts/js-comment-mask.d.mts` beside it is the hand-written declaration
 // that gives `maskCommentsAndLiterals` its type, so this test's typecheck
 // verdict reads that file too.
-import { maskCommentsAndLiterals } from '../../../scripts/js-comment-mask.mjs';
+import { maskComments, maskCommentsAndLiterals } from '../../../scripts/js-comment-mask.mjs';
 
 import {
   AUTHORED_FORMULA_FIELD_NAME,
@@ -33,6 +33,23 @@ import { validateStackExpressions } from './validate-expressions.js';
  *  2. Per pass: the entry's findings on the fixture are the gate's findings
  *     on the same rule or field, whole, and name the subject the pass judges.
  *     A CONTROL rule and field answer nothing.
+ *
+ * What the enumeration READS, and so what it reds on:
+ *  - inside each site's regions (`SITE_REGIONS`): every call by bare name
+ *    (`fn(`, `...fn(`), and every member call by its method name (`x.fn(`);
+ *  - across the whole walk (`runStackExpressionPasses`): every pass that
+ *    hands its findings to the walk as `issues.push(fn(` or
+ *    `issues.push(...fn(`, member names included (`WALK_PUSHES`) — the
+ *    shape of the walk's whole-stack passes at its tail.
+ * What it does NOT see: a pass outside the regions that pushes its findings
+ * by any other shape (an inline `issues.push({ … })`, a loop over a
+ * helper's result, a helper that pushes into `issues` itself), and a pass
+ * handed by reference (`.map(fn)`). Such a pass is still carried by
+ * construction when it locates its finding on the judged rule's key path
+ * (`objects[0].validations[0].`) or the judged field's `where`, since the
+ * entry runs the whole walk and keeps exactly those; what no pin here
+ * catches is a pass located elsewhere, or one needing an input the tool is
+ * not handed. Read the gate when merging a change to the walk.
  */
 
 const GATE_SOURCE = readFileSync(new URL('./validate-expressions.ts', import.meta.url), 'utf8');
@@ -54,6 +71,49 @@ function bareCalls(code: string): string[] {
   const names = [...code.matchAll(/(?<![\w$])(?<![^.]\.)([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]!);
   return [...new Set(names)].filter((n) => !KEYWORDS.has(n)).sort();
 }
+
+/** The method names a region calls on a receiver (`x.fn(`, `a.b.fn(`). */
+function memberCalls(code: string): string[] {
+  const names = [...code.matchAll(/(?<![\w$])[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\.([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]!);
+  return [...new Set(names)].sort();
+}
+
+/** The gate's whole walk, comments and literal bodies blanked. */
+function walk(): string {
+  return region('export function runStackExpressionPasses(', '\n}\n');
+}
+
+/** The passes the walk pushes whole into its findings: `issues.push(fn(` / `issues.push(...fn(`, member names whole. */
+function walkPushes(code: string): string[] {
+  const names = [...code.matchAll(/(?<![\w$])issues\.push\(\s*(?:\.\.\.)?\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(/g)]
+    .map((m) => m[1]!);
+  return [...new Set(names)].sort();
+}
+
+/** The method names called on a receiver at each site, each plumbing: none of them judges an expression. */
+const SITE_MEMBER_CALLS: Record<AuthoredExpressionSite, Record<string, string>> = {
+  validation: {
+    get: 'a Map read (the object index, the field definitions)',
+    indexOf: 'a string offset, reading the slot key',
+    isArray: '`Array.isArray`',
+    push: "appends a finding to the walk's list",
+  },
+  formula: {
+    get: 'a Map read (the object index, the field definitions)',
+    push: "appends a finding to the walk's list",
+  },
+};
+
+/**
+ * The passes the walk hands its findings whole, outside both sites' regions,
+ * and why none of them can judge the tool's rule or field. A new one reds
+ * here until it is classified: one that judges a validation rule or a
+ * formula field belongs in a site's regions or in this entry's filter.
+ */
+const WALK_PUSHES: Record<string, string> = {
+  bulkConfirmTextIssues: "a list view's bulk `confirmText` template slots: no rule or field expression",
+  actionCopyTemplateIssues: "an action's copy template slots: no rule or field expression",
+};
 
 /** Where each site's calls are read: the rule loop and the `check` helper it calls; the field-formula pass and what follows the fields loop. */
 const SITE_REGIONS: Record<AuthoredExpressionSite, Array<[string, string]>> = {
@@ -175,6 +235,11 @@ describe('judgeAuthoredSiteExpression — every gate pass at each site is listed
       expect(calls).toEqual(Object.keys(SITE_CALLS[site]).sort());
     });
 
+    it(`site ${site}: every member call the gate makes there is classified`, () => {
+      const calls = memberCalls(SITE_REGIONS[site].map(([start, end]) => region(start, end)).join('\n'));
+      expect(calls).toEqual(Object.keys(SITE_MEMBER_CALLS[site]).sort());
+    });
+
     for (const [name, classified] of Object.entries(SITE_CALLS[site])) {
       if (classified.kind === 'pass') {
         const { objects, expression, severity, names } = classified.fixture;
@@ -204,6 +269,12 @@ describe('judgeAuthoredSiteExpression — every gate pass at each site is listed
       expect(entryOn(site, [REQ, BAL], expression)).toEqual([]);
     });
   }
+
+  it('every pass the whole walk pushes as a whole is classified', () => {
+    const pushes = walkPushes(walk());
+    expect(pushes.length, 'the scan read nothing — the walk marker moved').toBeGreaterThan(0);
+    expect(pushes).toEqual(Object.keys(WALK_PUSHES).sort());
+  });
 
   it("leaves the shared validator's findings to the caller", () => {
     // An unknown field is the validator's verdict: the gate gives it, the entry does not.
@@ -241,6 +312,49 @@ describe('judgeAuthoredSiteExpression — every gate pass at each site is listed
   it('answers nothing when the object is not among the definitions', () => {
     expect(judgeAuthoredSiteExpression({ site: 'validation', objectName: 'nope', expression: 'record.days > 3', objects: [REQ] }))
       .toEqual([]);
+  });
+});
+
+// The gate's option that skips the shared validator must reach no gate run.
+// `runStackExpressionPasses` and its options type are on none of the
+// package's entries, so only this package's own source can pass it: read
+// every source file of it (tests aside), comments and literals blanked, and
+// hold the option's spellings to the declaration, the one read, and the one
+// passer.
+describe('sharedValidatorRunByCaller reaches no gate run (#32872)', () => {
+  const SRC = new URL('./', import.meta.url);
+  const sources = (dir: URL, rel = ''): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory()
+        ? sources(new URL(`${e.name}/`, dir), `${rel}${e.name}/`)
+        : /\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name) ? [`${rel}${e.name}`] : [],
+    );
+
+  it('is spelled in code only where it is declared, read, and passed by this entry', () => {
+    const spelled: Record<string, number> = {};
+    for (const file of sources(SRC)) {
+      const code = maskCommentsAndLiterals(readFileSync(new URL(file, SRC), 'utf8'));
+      const n = code.match(/(?<![\w$])sharedValidatorRunByCaller(?![\w$])/g)?.length ?? 0;
+      if (n > 0) spelled[file] = n;
+    }
+    expect(spelled).toEqual({
+      // The option's declaration, and the walk's one read of it.
+      'validate-expressions.ts': 2,
+      // The one passer.
+      'authored-site-expression.ts': 1,
+    });
+  });
+
+  it('is on none of the package entries: the walk and its options type are not exported', () => {
+    // Comments blanked, literals kept: a module specifier is a literal.
+    const entries = Object.fromEntries(['index.ts', 'runtime.ts', 'rule-explanations.ts']
+      .map((entry) => [entry, maskComments(readFileSync(new URL(entry, SRC), 'utf8'))]));
+    // The scan reads what it means to: the root entry re-exports from the walk's module by name.
+    expect(entries['index.ts']).toMatch(/export \{[^}]*validateStackExpressions[^}]*\} from '\.\/validate-expressions\.js'/);
+    for (const [entry, code] of Object.entries(entries)) {
+      expect(code, entry).not.toMatch(/(?<![\w$])(runStackExpressionPasses|StackExpressionOptions)(?![\w$])/);
+      expect(code, entry).not.toMatch(/export\s*\*\s*from\s*['"]\.\/validate-expressions/);
+    }
   });
 });
 
