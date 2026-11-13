@@ -7,6 +7,7 @@ import type {
   AuthoredRowWriteVerdict,
   AuthoredRowWriteOperation,
   OwnershipFloorAlternate,
+  PlatformBaselineSetContribution,
   ControlledByParentWriteOutcome,
   ControlledByParentWriteDenialLeg,
   ControlledByParentWriteUnresolvedReason,
@@ -666,6 +667,48 @@ describe('Security Service Contract', () => {
       operation: 'all',
     };
     expect(notOneLimb.operation).toBe('all');
+  });
+
+  it('contributePlatformBaselineSet is OPTIONAL — absence is typed, and a contribution carries read and create only', () => {
+    // A security service without the seam still satisfies the contract.
+    // Absence leaves the baseline as it was, which is the fail-closed
+    // direction: members hold no grant on the contributor's objects.
+    const withoutIt: ISecurityService = makeService();
+    expect(typeof withoutIt.contributePlatformBaselineSet).toBe('undefined');
+
+    const set: PlatformBaselineSetContribution = {
+      name: 'storage_attachment_member',
+      label: 'Attachments',
+      objects: { sys_attachment: { allowRead: true, allowCreate: true } },
+    };
+
+    // The unguarded call does not compile. Never invoked.
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a contributor must feature-detect first
+      withoutIt.contributePlatformBaselineSet('com.example.service', set);
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    const contribute = (svc: ISecurityService) => {
+      if (typeof svc.contributePlatformBaselineSet !== 'function') return 'no-seam';
+      return svc.contributePlatformBaselineSet('com.example.service', set).joined ? 'joined' : 'not-joined';
+    };
+    expect(contribute(withoutIt)).toBe('no-seam');
+    const withIt = makeService({ contributePlatformBaselineSet: (_c, s) => ({ name: s.name, joined: true }) });
+    expect(contribute(withIt)).toBe('joined');
+
+    // The type admits read and create only; an elevated bit and a row policy do not compile.
+    const withEdit: PlatformBaselineSetContribution = {
+      ...set,
+      // @ts-expect-error `allowEdit` is not a bit a platform baseline set carries
+      objects: { sys_attachment: { allowRead: true, allowEdit: true } },
+    };
+    expect(withEdit.name).toBe(set.name);
+    const withRowPolicy: PlatformBaselineSetContribution = {
+      ...set,
+      // @ts-expect-error a platform baseline set carries no row policy
+      rowLevelSecurity: [],
+    };
+    expect(withRowPolicy.name).toBe(set.name);
   });
 
   it('checkControlledByParentWrite is OPTIONAL — absence is typed, and it means no master check, not allow', async () => {
