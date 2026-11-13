@@ -19,7 +19,8 @@
  * Each bridge answers `optionFieldsOf(name)` from the object `describeObject`
  * reads, through `@objectstack/formula`'s `declaresOptions`, and the tool
  * hands that list to the validator on the `formula` site, the one site the
- * door judges it on. `describe_object` serves what it served before.
+ * door judges it on. The list is a member of its own, not a key on
+ * `describe_object`'s answer.
  *
  * Which predicate: measured on real kernels (`ObjectKernel` + `MetadataPlugin`
  * + `ObjectQLPlugin`, with and without an `environmentId`), the protocol's
