@@ -22,6 +22,7 @@ import { AuthManager } from './auth-manager';
 import {
   loginEventFor,
   logoutEventFor,
+  SAML_SIGN_OUT_PATH,
   SIGN_OUT_PATH,
   type AuthSessionAuditEventInput,
 } from './auth-session-audit';
@@ -273,6 +274,11 @@ describe('[#8144] the mapping refuses to invent an actor', () => {
 
   it('logoutEventFor: right path, no subject → null', () => {
     expect(logoutEventFor({ id: 'ses_1' }, SIGN_OUT_PATH)).toBeNull();
+  });
+
+  it('logoutEventFor: the SAML SP-initiated single logout is a sign-out too', () => {
+    expect(logoutEventFor(SESSION, SAML_SIGN_OUT_PATH)).toMatchObject({ action: 'logout', userId: SESSION.userId });
+    expect(logoutEventFor(SESSION, '/sso/saml2/sp/slo/:providerId')).toBeNull();
   });
 
   it('logoutEventFor: right subject, wrong path → null', () => {

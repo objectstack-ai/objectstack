@@ -1039,7 +1039,7 @@ export async function runUpdateSsoProviderFromForm(
       if ('refusal' in read) return updateRefusal(400, 'INVALID_REQUEST', read.refusal, 'logoutUrl');
       const idp = isPlainObject(saml!.idpMetadata) ? saml!.idpMetadata : {};
       const current = Array.isArray(idp.singleLogoutService) ? idp.singleLogoutService : [];
-      const same = current.length === 1 && (current[0] as { Location?: unknown })?.Location === read.service[0]!.Location;
+      const same = current.length === read.service.length && current.every((c) => (c as { Location?: unknown })?.Location === read.service[0]!.Location);
       if (!same) {
         samlUpdate.idpMetadata = { ...(isPlainObject(samlUpdate.idpMetadata) ? samlUpdate.idpMetadata : {}), singleLogoutService: read.service };
         updated.push('logoutUrl');

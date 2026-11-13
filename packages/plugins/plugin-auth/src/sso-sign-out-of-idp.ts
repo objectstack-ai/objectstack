@@ -66,8 +66,6 @@ import {
 /** better-auth's sign-out endpoint. */
 export const SIGN_OUT_ENDPOINT_PATH = '/sign-out';
 
-/** The vendor's SP-initiated single logout endpoint (POST, a session). */
-export const SAML_SP_LOGOUT_PATH = '/sso/saml2/logout/:providerId';
 const SAML_SP_LOGOUT_PATH_PREFIX = '/sso/saml2/logout/';
 /** The vendor's endpoint the identity provider posts or redirects its logout messages to. */
 const SAML_IDP_LOGOUT_PATH_PREFIX = '/sso/saml2/sp/slo/';
@@ -84,8 +82,9 @@ export const OIDC_SESSION_BY_ID_PREFIX = 'oidc-session-by-id:';
 /** Where the OIDC `end_session_endpoint` is kept in the provider's `oidc_config` blob. */
 export const OIDC_END_SESSION_ENDPOINT_KEY = 'endSessionEndpoint';
 
-/** The binding the `logoutUrl` field stores its address under. */
+/** The bindings the `logoutUrl` field stores its address under. */
 export const SAML_HTTP_REDIRECT_BINDING = 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect';
+export const SAML_HTTP_POST_BINDING = 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST';
 
 /** The request-body member the switch is written as. */
 export const SIGN_OUT_OF_IDP_BODY_KEY = 'signOutOfIdp';
@@ -164,7 +163,9 @@ export function samlConfigHasLogoutAddress(samlConfig: unknown): boolean {
 
 /**
  * The `logoutUrl` field as the vendor's `singleLogoutService`, or a refusal
- * message when it is not an http(s) URL.
+ * message when it is not an http(s) URL. One address, under both bindings:
+ * the vendor sends its own LogoutRequest in the HTTP-Redirect binding, and
+ * answers the identity provider's LogoutRequest in the binding it came in.
  */
 export function samlLogoutServiceOf(logoutUrl: string): { service: Array<{ Binding: string; Location: string }> } | { refusal: string } {
   let url: URL;
@@ -176,7 +177,12 @@ export function samlLogoutServiceOf(logoutUrl: string): { service: Array<{ Bindi
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     return { refusal: 'logoutUrl must be an http(s) URL: the identity provider’s SAML single logout (redirect) endpoint.' };
   }
-  return { service: [{ Binding: SAML_HTTP_REDIRECT_BINDING, Location: url.toString() }] };
+  return {
+    service: [
+      { Binding: SAML_HTTP_REDIRECT_BINDING, Location: url.toString() },
+      { Binding: SAML_HTTP_POST_BINDING, Location: url.toString() },
+    ],
+  };
 }
 
 // ── The better-auth members this module reads ───────────────────────────────
