@@ -54,6 +54,24 @@
 
 import { platformLocaleTagOf, type PlatformLocaleTag } from '@objectstack/spec/system';
 import { SECURITY_POSTURE_USER_TEXT } from './validate-security-posture.user-text.js';
+import { APPROVAL_APPROVERS_USER_TEXT } from './validate-approval-approvers.user-text.js';
+import { FLOW_TRIGGER_READINESS_USER_TEXT } from './validate-flow-trigger-readiness.user-text.js';
+import { FLOW_TEMPLATE_PATHS_USER_TEXT } from './validate-flow-template-paths.user-text.js';
+import { FLOW_NODE_WRITES_USER_TEXT } from './validate-flow-node-writes.user-text.js';
+import { READONLY_FLOW_WRITES_USER_TEXT } from './validate-readonly-flow-writes.user-text.js';
+import { FLOW_CREDENTIAL_LITERALS_USER_TEXT } from './lint-flow-credential-literals.user-text.js';
+import { WIDGET_BINDINGS_USER_TEXT } from './validate-widget-bindings.user-text.js';
+import { CHART_BINDINGS_USER_TEXT } from './validate-chart-bindings.user-text.js';
+import { AUTONUMBER_FORMATS_USER_TEXT } from './lint-autonumber-formats.user-text.js';
+import { SORTABLE_FIELDS_USER_TEXT } from './validate-sortable-fields.user-text.js';
+import { SEARCHABLE_FIELDS_USER_TEXT } from './validate-searchable-fields.user-text.js';
+import { OBJECT_REFERENCES_USER_TEXT } from './validate-object-references.user-text.js';
+import { FORM_LAYOUT_USER_TEXT } from './validate-form-layout.user-text.js';
+import { VISIBILITY_PREDICATES_USER_TEXT } from './validate-visibility-predicates.user-text.js';
+import { PAGE_FIELD_BINDINGS_USER_TEXT } from './validate-page-field-bindings.user-text.js';
+import { CONNECTOR_CREDENTIAL_LITERALS_USER_TEXT } from './lint-connector-credential-literals.user-text.js';
+import { RETIRED_PERMISSION_RESIDUE_USER_TEXT } from './validate-retired-permission-residue.user-text.js';
+import { PREDICATE_PATH_REFS_USER_TEXT } from './validate-predicate-path-refs.user-text.js';
 
 /**
  * The names a finding's user sentence interpolates — object, field and
@@ -153,7 +171,31 @@ export function mergeUserTextCatalogs(...catalogs: readonly UserTextCatalog[]): 
  * Every rule's user sentences, merged from the producers' own catalogs. A
  * producer that starts authoring user sentences adds its catalog here.
  */
-export const FINDING_USER_TEXT_CATALOG: UserTextCatalog = mergeUserTextCatalogs(SECURITY_POSTURE_USER_TEXT);
+export const FINDING_USER_TEXT_CATALOG: UserTextCatalog = mergeUserTextCatalogs(
+  SECURITY_POSTURE_USER_TEXT,
+  // The automation writes: approval, flow trigger and flow node advisories.
+  APPROVAL_APPROVERS_USER_TEXT,
+  FLOW_TRIGGER_READINESS_USER_TEXT,
+  FLOW_TEMPLATE_PATHS_USER_TEXT,
+  FLOW_NODE_WRITES_USER_TEXT,
+  READONLY_FLOW_WRITES_USER_TEXT,
+  FLOW_CREDENTIAL_LITERALS_USER_TEXT,
+  // The dashboard writes: widget and chart binding advisories.
+  WIDGET_BINDINGS_USER_TEXT,
+  CHART_BINDINGS_USER_TEXT,
+  AUTONUMBER_FORMATS_USER_TEXT,
+  SORTABLE_FIELDS_USER_TEXT,
+  SEARCHABLE_FIELDS_USER_TEXT,
+  OBJECT_REFERENCES_USER_TEXT,
+  FORM_LAYOUT_USER_TEXT,
+  VISIBILITY_PREDICATES_USER_TEXT,
+  PAGE_FIELD_BINDINGS_USER_TEXT,
+  // The connector, permission and form-view writes: the connector credential,
+  // retired permission key and form predicate advisories.
+  CONNECTOR_CREDENTIAL_LITERALS_USER_TEXT,
+  RETIRED_PERMISSION_RESIDUE_USER_TEXT,
+  PREDICATE_PATH_REFS_USER_TEXT,
+);
 
 /**
  * A finding's user-facing sentence in the first of `locales` its rule has a

@@ -12,6 +12,8 @@ import { isMcpServerEnabled } from '@objectstack/types';
 import { MCP_OAUTH_SCOPES, deriveAiFaceName } from '@objectstack/spec/ai';
 import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
+// [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
+import { isAiReadExposed } from '@objectstack/spec/data';
 import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
 import {
     FEDERATION_READ_CAPABILITY,
@@ -275,10 +277,14 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
     }
 
     // [#30892] The file pair is taught where the bridge would carry it.
-    const fileTools = (await resolveMcpRecordFileService(deps, context)) !== undefined;
+    const recordFiles = await resolveMcpRecordFileService(deps, context);
+    const fileTools = recordFiles !== undefined;
+    // [#32686] …and the upload link for a record not yet created, where the
+    // storage plugin serves it.
+    const newRecordUploadLinks = typeof recordFiles?.createUploadLinkForNewRecordAs === 'function';
     // [ADR-0149 D2] …and the dataset pair, with the D3 selection rule.
     const datasetTools = (await resolveMcpDatasetToolsService(deps, context)) !== undefined;
-    const markdown: string = mcp.renderSkill({ mcpUrl, fileTools, datasetTools });
+    const markdown: string = mcp.renderSkill({ mcpUrl, fileTools, newRecordUploadLinks, datasetTools });
     // Raw text must NOT ride the `response` channel — `sendResult` JSON-
     // encodes those bodies unconditionally. The `result` stream channel is
     // the one raw pipe through every adapter (string events are written
@@ -748,6 +754,9 @@ export function buildMcpBridge(
      * judges against: from the listing {@link readMergedObjects} reads, or the
      * metadata service's by-name read on a host with none.
      */
+    /** {@link readMergedObjects}, read once per bridge for the `aiReadExposed` asks. */
+    let mergedForAiRead: Promise<any[] | undefined> | undefined;
+
     const readServedObject = async (name: string): Promise<any> => {
         const merged = await readMergedObjects();
         return merged !== undefined
@@ -925,6 +934,26 @@ export function buildMcpBridge(
         // can describe, and a name the listing omits (a disabled package's
         // object among them) is "not found" here too.
         // [ADR-0106 D1/D5] …as this caller is served it ({@link readObjectForCaller}).
+        /**
+         * [#32442, ruling A] The read opt-in of a system object, judged by
+         * `isAiReadExposed` over its WHOLE served definition (the read that
+         * judges a call, not the masked one this caller is served): the
+         * stored-metadata family is refused before the key is read, and only
+         * `enable.aiReadable: true` opens. The read tools then read the object
+         * through {@link callData} as the caller, under every gate they always
+         * ran (permissions, RLS, the object's own read middleware, field
+         * masking), so this admits the object and nothing else.
+         */
+        aiReadExposed: async (name: string): Promise<boolean> => {
+            // `list_objects` asks once per listed `sys_*` object: one merged
+            // read serves every ask this bridge (one request) makes.
+            mergedForAiRead ??= readMergedObjects();
+            const merged = await mergedForAiRead;
+            const def = merged !== undefined
+                ? merged.find((o: any) => o?.name === name)
+                : await ((await getMeta()) as any)?.getObject?.(name);
+            return isAiReadExposed(def);
+        },
         describeObject: async (name: string) => {
             const def: any = await readObjectForCaller(name);
             if (!def) return null;
@@ -942,6 +971,15 @@ export function buildMcpBridge(
             return Object.entries(def.fields ?? {})
                 .filter(([, f]) => declaresOptions(f))
                 .map(([k]) => k);
+        },
+        // [#32872] The object `describeObject` reads, whole: what
+        // `validate_expression` hands the publish gate's own passes at a
+        // validation rule or a formula field. Rendered to nobody; the tool
+        // answers the gate's findings only.
+        // [ADR-0106 D1] …the same caller's object, so no field it cannot read is judged.
+        servedObjectDefinitionOf: async (name: string): Promise<Record<string, unknown> | null> => {
+            const def: any = await readObjectForCaller(name);
+            return def ?? null;
         },
         query: async (object: string, o: any) => {
             const query: any = {};
@@ -1124,7 +1162,17 @@ export function buildMcpBridge(
                 // [#28943] …and one the target's per-object gate refuses for
                 // that credential (a `sys_api_key` write under an API key),
                 // marked with that gate's own code and sentence.
-                const refusal = actionExec.apiForwardCredentialRefusal(context, action);
+                // [ADR-0151 D3 rule 3] …and one declaring `ai.requiresConfirmation:
+                // true` for an AI service account, which never confirms for
+                // itself: `run_action` refuses it whatever the call sends, with
+                // the gate's own code and sentence. That gate runs in the
+                // admission sequence, ahead of the forward, so where both
+                // apply it is the refusal the mark carries. Asked only for an
+                // account: a person and a delegated agent confirm and run.
+                const confirmation = actionExec.isAiServiceAccountCaller(ec)
+                    ? actionExec.actionConfirmationRefusal(deps, action, undefined, objectName, ec)
+                    : undefined;
+                const refusal = confirmation ?? actionExec.apiForwardCredentialRefusal(context, action);
                 // [ADR-0106 D1] Summarised against the object as this caller is
                 // served it, and not listed where `/meta` withholds it.
                 const served = await servedActionObject(action, objectName, obj, objectsByName);
@@ -1371,6 +1419,16 @@ export interface McpRecordFileService {
         target: { field: string } | { attachments: true },
         context: unknown,
     ): Promise<{ path: string; expiresAt: string }>;
+    /**
+     * [#32686] A link for a file field of a record not yet created, with the
+     * file id(s) the upload is stored under. Optional: a storage plugin that
+     * predates it serves links for existing records only.
+     */
+    createUploadLinkForNewRecordAs?(
+        object: string,
+        target: { field: string },
+        context: unknown,
+    ): Promise<{ path: string; expiresAt: string; fileIds: string[] }>;
 }
 
 /**
@@ -1455,6 +1513,8 @@ function recordFileMembers(
             });
         }
     };
+    const newRecordLinkAs =
+        typeof service.createUploadLinkForNewRecordAs === 'function' ? service.createUploadLinkForNewRecordAs.bind(service) : undefined;
     return {
         listRecordFiles: async (object: string, recordId: string) => {
             await readRecordFirst(object, recordId);
@@ -1479,6 +1539,20 @@ function recordFileMembers(
             const grant = await service.createUploadLinkAs(object, recordId, target, ec);
             return { url: absoluteUrl(grant.path, await publicOrigin(deps, context)), expiresAt: grant.expiresAt };
         },
+        // [#32686] No record to read first: the storage service asks the
+        // object's create verdict and the field's writability for the caller.
+        ...(newRecordLinkAs
+            ? {
+                createUploadLinkForNewRecord: async (object: string, target: { field: string }) => {
+                    const grant = await newRecordLinkAs(object, target, ec);
+                    return {
+                        url: absoluteUrl(grant.path, await publicOrigin(deps, context)),
+                        expiresAt: grant.expiresAt,
+                        fileIds: [...grant.fileIds],
+                    };
+                },
+            }
+            : {}),
     };
 }
 

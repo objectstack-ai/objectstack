@@ -34,6 +34,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 import { AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
 
+import { HttpDispatcher } from './http-dispatcher.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import {
     invokeBusinessAction,
@@ -42,6 +43,7 @@ import {
     isAiServiceAccountCaller,
     ACTION_CONFIRMATION_REQUIRED_CODE,
     ACTION_CONFIRMATION_REQUIRED_STATUS,
+    apiActionIdentityRouteKeyRefusal,
 } from './action-execution.js';
 
 const OBJECT = 'crm_lead';
@@ -307,6 +309,131 @@ describe('[ADR-0151 D3 rule 3] an AI service account does not confirm an action 
         expect(isAiServiceAccountCaller(ACCOUNT_EC)).toBe(true);
         for (const caller of [PERSON_EC, DELEGATED_EC, { principalKind: 'service' }, undefined, null, { isSystem: true }]) {
             expect(isAiServiceAccountCaller(caller), JSON.stringify(caller)).toBe(false);
+        }
+    });
+});
+
+// [ADR-0151 D3 rule 3] `list_actions` answers what `run_action` answers: an
+// AI service account is refused every action declaring
+// `ai.requiresConfirmation: true`, whatever it sends, so the listing marks
+// those rows `unavailable` with that refusal's own code and sentence. Each
+// case pairs the listing with the run door on the same bridge, so the pin is
+// the agreement, not either half alone.
+describe('[ADR-0151 D3 rule 3] `list_actions` marks a confirmation-gated action unavailable for an AI service account', () => {
+    /** Ungated and plain: the account runs it, so its row stays bare. */
+    const PLAIN = {
+        name: 'touch_lead', label: 'Touch Lead', objectName: OBJECT, type: 'script',
+        target: 'touch_lead_impl', ai: { exposed: true, description: 'Touch a lead.' },
+    };
+    /**
+     * Gated AND refused by the forward-credential table for an API key (an
+     * identity route): the run door's confirmation gate sits in the admission
+     * sequence, ahead of the forward, so that refusal is the one it answers.
+     */
+    const GATED_IDENTITY_API = {
+        name: 'ban_lead_owner', label: 'Ban Owner', objectName: OBJECT, type: 'api', method: 'POST',
+        target: '/api/v1/auth/admin/ban-user',
+        ai: { exposed: true, description: 'Ban the lead owner.', requiresConfirmation: true },
+    };
+
+    function bridgeFor(executionContext: unknown, opts: { apiKey?: boolean } = {}) {
+        const objectDef = { name: OBJECT, label: 'Lead', fields: {}, actions: [GATED, LOOKS_DESTRUCTIVE, DECLARED_SAFE, PLAIN, GATED_IDENTITY_API] };
+        // ONE handler Map answers both the listing's probe and the run door.
+        const handlers = new Set(['archive_lead_impl', 'delete_lead_impl', 'purge_lead_impl', 'touch_lead_impl']);
+        const executeAction = vi.fn(async () => ({ ran: 'script' }));
+        const find = vi.fn(async () => [{ id: 'lead_1' }]);
+        const ql: any = {
+            registry: { getObject: () => objectDef, getItem: () => undefined },
+            getSchema: () => objectDef,
+            find, insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
+            executeAction,
+            listRegisteredActions: () => [...handlers].map((actionName) => ({ objectName: OBJECT, actionName })),
+        };
+        const metadata: any = {
+            load: vi.fn(async () => null),
+            loadDiagnosed: vi.fn(async () => ({ data: null, degraded: false, errors: [] })),
+            loadMany: vi.fn(async () => []),
+            listObjects: vi.fn(async () => [objectDef]),
+            getObject: vi.fn(async () => objectDef),
+        };
+        const resolve = (n: string) => (n === 'objectql' || n === 'data' ? ql : n === 'metadata' ? metadata : null);
+        const kernel: any = { getService: resolve, getServiceAsync: async (n: string) => resolve(n), context: { getService: resolve } };
+        const ctx: any = {
+            request: { headers: opts.apiKey ? { 'x-api-key': 'osk_bot_key' } : {} },
+            environmentId: 'platform',
+            executionContext,
+            ...(opts.apiKey ? { admission: { credential: 'api_key', authGate: undefined } } : {}),
+        };
+        const bridge = (new HttpDispatcher(kernel) as any).buildMcpBridge(ctx);
+        return { bridge, executeAction, find };
+    }
+    const listedByName = async (bridge: any): Promise<Record<string, any>> =>
+        Object.fromEntries(((await bridge.listActions()) as any[]).map((a) => [a.name, a]));
+
+    const ACCOUNT = { ...ACCOUNT_EC, systemPermissions: [] };
+    const DELEGATED = { ...DELEGATED_EC, systemPermissions: [] };
+    const PERSON = { ...PERSON_EC, systemPermissions: [] };
+
+    it('THE GAP — the account\'s gated row carries the refusal `run_action` answers it: same code, same sentence', async () => {
+        const { bridge, executeAction, find } = bridgeFor(ACCOUNT);
+
+        const listed = await listedByName(bridge);
+        const expected = actionConfirmationRefusal({} as any, GATED, undefined, OBJECT, ACCOUNT)!;
+        expect(listed[GATED.name]?.unavailable).toEqual({ code: expected.code, reason: expected.message });
+        expect(listed[GATED.name].unavailable.code).toBe('ACTION_CONFIRMATION_REQUIRED');
+        expect(listed[GATED.name].unavailable.reason).toContain('An AI service account does not confirm an action for itself');
+        // Still listed, still summarised: only the marker is new.
+        expect(listed[GATED.name]).toMatchObject({ name: GATED.name, objectName: OBJECT, requiresConfirmation: true });
+
+        // The run door, on the same bridge, answers exactly the marked refusal
+        // — with the member and without it — and runs and reads nothing.
+        for (const input of [{ recordId: 'lead_1' }, { recordId: 'lead_1', [AI_ACTION_CONFIRMATION_MEMBER]: true }]) {
+            const thrown: any = await bridge.runAction(GATED.name, input).catch((e: unknown) => e);
+            expect(thrown?.code).toBe(listed[GATED.name].unavailable.code);
+            expect(thrown?.status).toBe(ACTION_CONFIRMATION_REQUIRED_STATUS);
+            expect(String(thrown?.message)).toBe(listed[GATED.name].unavailable.reason);
+        }
+        expect(executeAction).not.toHaveBeenCalled();
+        expect(find).not.toHaveBeenCalled();
+    });
+
+    it('follows the DECLARED flag, not the listing heuristic: a destructive-looking or declared-`false` row stays bare, and runs', async () => {
+        const { bridge, executeAction } = bridgeFor(ACCOUNT);
+
+        const listed = await listedByName(bridge);
+        for (const action of [LOOKS_DESTRUCTIVE, DECLARED_SAFE, PLAIN]) {
+            expect(listed[action.name], action.name).toBeDefined();
+            expect(listed[action.name].unavailable, action.name).toBeUndefined();
+        }
+        // The heuristic still answers `requiresConfirmation` on the listing face.
+        expect(listed[LOOKS_DESTRUCTIVE.name].requiresConfirmation).toBe(true);
+        await expect(bridge.runAction(LOOKS_DESTRUCTIVE.name, { recordId: 'lead_1' })).resolves.toMatchObject({ ok: true });
+        expect(executeAction).toHaveBeenCalledTimes(1);
+    });
+
+    it('where the forward-credential refusal applies too, the mark is the one `run_action` answers first: the confirmation gate', async () => {
+        const account = bridgeFor(ACCOUNT, { apiKey: true });
+
+        const listed = await listedByName(account.bridge);
+        const thrown: any = await account.bridge.runAction(GATED_IDENTITY_API.name, { recordId: 'lead_1' }).catch((e: unknown) => e);
+        expect(thrown?.code).toBe(ACTION_CONFIRMATION_REQUIRED_CODE);
+        expect(listed[GATED_IDENTITY_API.name]?.unavailable).toEqual({ code: thrown.code, reason: String(thrown.message) });
+
+        // CONTROL: a person on the same key keeps the forward-credential mark.
+        const person = await listedByName(bridgeFor(PERSON, { apiKey: true }).bridge);
+        expect(person[GATED_IDENTITY_API.name]?.unavailable).toEqual({
+            code: 'UNAUTHENTICATED',
+            reason: apiActionIdentityRouteKeyRefusal(GATED_IDENTITY_API, GATED_IDENTITY_API.target),
+        });
+    });
+
+    it('CONTROL: a person, a delegated agent and the system context see the gated row with no marker', async () => {
+        for (const caller of [PERSON, DELEGATED, { isSystem: true, systemPermissions: [] }]) {
+            const listed = await listedByName(bridgeFor(caller).bridge);
+            const label = JSON.stringify(caller);
+            expect(listed[GATED.name], label).toBeDefined();
+            expect(listed[GATED.name].unavailable, label).toBeUndefined();
+            expect(Object.values(listed).filter((a: any) => a.unavailable), label).toEqual([]);
         }
     });
 });

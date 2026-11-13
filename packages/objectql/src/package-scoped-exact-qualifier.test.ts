@@ -468,9 +468,11 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
       expect(thrown?.message).toContain(`has no package-scoped resolver for '${type}' items`);
     });
 
-    it('CONTROL: a covered type not narrowed (tool) keeps `getItem` on the same view', async () => {
-      shipValid('tool', 'solo', A);
-      expect(labelOf(await readsNothingByPackage.getMetaItem({ type: 'tool', name: 'solo' }))).toBe('alpha tool');
+    // [#31985] `tool` has narrowed, so the CONTROL is a package-scoped type no
+    // one-holder rule covers: no child B card ever narrows it.
+    it('CONTROL: a package-scoped type not narrowed (dashboard) keeps `getItem` on the same view', async () => {
+      shipValid('dashboard', 'solo', A);
+      expect(labelOf(await readsNothingByPackage.getMetaItem({ type: 'dashboard', name: 'solo' }))).toBe('alpha dashboard');
     });
 
     it('CONTROL: the registry WITH the resolver reads the narrowed AI types by package and serves them', async () => {
@@ -918,6 +920,182 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     expect(bare?.item).toBeUndefined();
     const atZ = await read(Z, 'de-DE') as { item?: unknown; packageId?: string };
     expect([atZ?.item, atZ?.packageId]).toEqual([undefined, X]);
+  });
+
+  describe('[#32561] the exact read adopts the registry\'s binding of an undeclared pair row: no owner\'s row where the registry binds it to no package', () => {
+    const Z = 'com.acme.zeta';
+    const installZ = () => registry.installPackage({ ...(memberOf(Z) as object), dependencies: { [APP]: '^1.0.0', [X]: '^1.0.0' } } as never, 'code');
+    const hydratePairRow = () => registry.registerItem('email_template', {
+      name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', _packageId: PAIR, _provenance: 'org',
+    }, 'name' as never);
+    /** Each address answers its own shipped item; the pair's own address still serves the row. */
+    const expectNoOwnersRow = async () => {
+      expect(registry.getPackageScopedItem('email_template', 'welcome', X, 'fr-FR'), 'the registry binds it to no package').toBeUndefined();
+      expect((await read(X, 'fr-FR'))?.item, '`?package=X`: X ships no fr-FR').toBeUndefined();
+      expect(labelOf(await read(Z, 'fr-FR')), '`?package=Z`: Z\'s own fr-FR').toBe('zeta fr-FR');
+      expect(labelOf(await read(PAIR, 'fr-FR')), '`?package=A.custom` still serves the row').toBe('pair fr-FR');
+      expect(await listed(X), 'X\'s list leaves it out').not.toContain('pair fr-FR');
+      expect(await forSend(X), 'X\'s execution list leaves it out').not.toContain('pair fr-FR');
+      // CONTROL: X's own member is still its own.
+      expect(labelOf(await read(X, 'en-US'))).toBe('suitex en-US');
+    };
+
+    it('NARROWING — an undeclared row of the very locale a bundle addition of another package of the App ships, addition installed first (residual 1; BASE at 075fb3188: `?package=X` served the row)', async () => {
+      installZ();
+      tpl('en-US', X);
+      tpl('fr-FR', Z);
+      pairRow();
+      hydratePairRow();
+      await expectNoOwnersRow();
+    });
+
+    it('NARROWING — the same row stored before the addition is installed: once the addition ships the row\'s locale, X\'s address no longer serves it (residual 1, the other order)', async () => {
+      tpl('en-US', X);
+      pairRow();
+      hydratePairRow();
+      expect(labelOf(await read(X, 'fr-FR')), 'CONTROL — before the addition, X is the one owner').toBe('pair fr-FR');
+      installZ();
+      tpl('fr-FR', Z);
+      await expectNoOwnersRow();
+    });
+
+    it('CONTROL — a row that declares X keeps X\'s address beside the addition, as declared', async () => {
+      installZ();
+      tpl('en-US', X);
+      tpl('fr-FR', Z);
+      pairRow({ overrides: { package: X } });
+      registry.registerItem('email_template', {
+        name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', overrides: { package: X }, _packageId: PAIR, _provenance: 'org',
+      }, 'name' as never);
+      expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', X, 'fr-FR')?.label).toBe('pair fr-FR');
+      expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+      expect(labelOf(await read(PAIR, 'fr-FR'))).toBe('pair fr-FR');
+    });
+
+    it('NARROWING — an undeclared row while another App\'s pair stores an undeclared row of the name: neither address serves it, as the registry binds neither (residual 2, contract review F6; BASE at 075fb3188: `?package=Y` served es-ES, `?package=P` fr-FR)', async () => {
+      // App B: P ships en-US, Q (on P) ships de-DE; B's pair stores an undeclared fr-FR row.
+      // App A: U (on A and P, A's namespace) ships fr-FR, Y ships it-IT; A's pair stores an undeclared es-ES row.
+      const BAPP = 'com.beta.base';
+      const P = 'com.beta.basep';
+      const Q = 'com.beta.baseq';
+      const U = 'com.acme.suiteu';
+      const BPAIR = `${BAPP}.custom`;
+      const module = (id: string, deps: string[], namespace = id.split('.').pop()!) => registry.installPackage({
+        id, name: id, version: '1.0.0', type: 'module', namespace, dependencies: Object.fromEntries(deps.map((d) => [d, '^1.0.0'])),
+      } as never, 'code');
+      registry.installPackage(manifest(BAPP), 'code');
+      module(P, [BAPP]);
+      module(Q, [BAPP, P]);
+      module(U, [APP, P], 'suite');
+      tpl('en-US', P);
+      tpl('de-DE', Q);
+      tpl('fr-FR', U);
+      tpl('it-IT', Y);
+      const stored = (pairId: string, locale: string, label: string) => {
+        const body = { name: 'welcome', label, locale, subject: label, bodyHtml: '<p>p</p>' };
+        rows.push({ id: `row_${label}`, type: 'email_template', name: 'welcome', state: 'active', package_id: pairId, bundle_member: locale, metadata: JSON.stringify(body) });
+        registry.registerItem('email_template', { ...body, _packageId: pairId, _provenance: 'org' }, 'name' as never);
+      };
+      stored(BPAIR, 'fr-FR', 'bpair fr-FR');
+      stored(PAIR, 'es-ES', 'pair es-ES');
+      expect(registry.getPackageScopedItem('email_template', 'welcome', P, 'fr-FR'), 'the registry binds neither row').toBeUndefined();
+      expect(registry.getPackageScopedItem('email_template', 'welcome', Y, 'es-ES')).toBeUndefined();
+      expect((await read(Y, 'es-ES'))?.item, '`?package=Y`: Y ships no es-ES').toBeUndefined();
+      expect((await read(P, 'fr-FR'))?.item, '`?package=P`: P ships no fr-FR').toBeUndefined();
+      expect(labelOf(await read(PAIR, 'es-ES')), 'each pair\'s own address still serves its row').toBe('pair es-ES');
+      expect(labelOf(await read(BPAIR, 'fr-FR'))).toBe('bpair fr-FR');
+      // CONTROL: each holder's own member is still its own.
+      expect(labelOf(await read(Y, 'it-IT'))).toBe('suitey it-IT');
+      expect(labelOf(await read(P, 'en-US'))).toBe('basep en-US');
+    });
+
+    // [#32561 residual 3, epic ruling R4-A] The adoption counts the served
+    // holders, as the exact read counts its own: a disabled package holds no
+    // name (ADR-0150 D3). With one of two holders disabled, the undeclared
+    // row stays the enabled holder's on its address, in its list and in its
+    // execution list, while the registry's own binding, over every holder,
+    // binds it to no package (a disable never moves it). Re-enabled, refused
+    // naming both. Every-holder adoption would withhold it at X: ablation.
+    it.each([['enabled holder first', [X, Y]], ['disabled holder first', [Y, X]]] as const)('CONTROL — one of the two holders disabled (%s): the enabled holder\'s address keeps the undeclared row the registry binds to no package; re-enabled, refused naming both', async (_order, order) => {
+      for (const id of order) tpl('en-US', id);
+      const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
+      rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+      registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+      registry.disablePackage(Y);
+      expect(registry.getPackageScopedItem('email_template', 'welcome', X, 'de-DE'), 'the registry\'s own binding counts every holder').toBeUndefined();
+      expect(registry.overlayRowBinding('email_template', 'welcome', { ...pairDe, _packageId: PAIR }), 'the adoption counts the served holders').toBe(X);
+      expect(labelOf(await read(X, 'de-DE'))).toBe('pair de-DE');
+      expect(await listed(X)).toContain('pair de-DE');
+      expect(await forSend(X)).toContain('pair de-DE');
+      registry.enablePackage(Y);
+      const err = await refusalOf(() => read(X, 'de-DE'));
+      expect([err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()]).toEqual([409, [X, Y]]);
+      expect(await listed(X)).not.toContain('pair de-DE');
+    });
+
+    // [#32561 contract review M1] The adoption settles the bundle-addition
+    // rule over every holder and leaves the disabled ones out afterwards, the
+    // order `packageScopedHoldersOf` counts the exact read's owner in: a
+    // disable never promotes a dependent's addition to an owner. Z (on the
+    // App and on Y) ships only fr-FR, an addition to Y; with Y disabled the
+    // exact read counts X alone, and the adoption binds the undeclared de-DE
+    // row to X too, so X keeps it. Z ships no de-DE, so this is not residual
+    // 1. Settling the rule over the served holders only (Y gone, Z an
+    // addition to nothing) makes X and Z two owners: X would lose the row.
+    it.each([['enabled holder first', [X, Y]], ['disabled holder first', [Y, X]]] as const)('CONTROL — one of the two holders disabled is the base of a bundle addition (%s): the addition stays one, so the enabled holder\'s address and lists keep the undeclared row; re-enabled, refused naming both', async (_order, order) => {
+      registry.installPackage({ ...(memberOf(Z) as object), dependencies: { [APP]: '^1.0.0', [Y]: '^1.0.0' } } as never, 'code');
+      for (const id of order) tpl('en-US', id);
+      tpl('fr-FR', Z);
+      const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
+      rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+      registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+      registry.disablePackage(Y);
+      expect(registry.packageScopedHoldersOf('email_template', 'welcome'), 'the exact read\'s owner count: Z stays an addition to Y').toEqual([X]);
+      expect(registry.overlayRowBinding('email_template', 'welcome', { ...pairDe, _packageId: PAIR }), 'the adoption counts as the exact read does').toBe(X);
+      expect(labelOf(await read(X, 'de-DE'))).toBe('pair de-DE');
+      expect(await listed(X)).toContain('pair de-DE');
+      expect(await forSend(X)).toContain('pair de-DE');
+      expect(labelOf(await read(Z, 'fr-FR')), 'CONTROL: Z\'s own fr-FR').toBe('zeta fr-FR');
+      registry.enablePackage(Y);
+      const err = await refusalOf(() => read(X, 'de-DE'));
+      expect([err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()]).toEqual([409, [X, Y]]);
+      expect(await listed(X)).not.toContain('pair de-DE');
+    });
+
+    // [#32561 contract review n1] The adoption counts the holders as
+    // `packageScopedHoldersOf` counts the exact read's owner: every composite
+    // slot, then the package a bare-slot entry binds to. X holding the name
+    // only through its own stored row (a row with `package_id` X hydrated
+    // into the bare slot, no composite slot) is still X's holding, so the
+    // App's undeclared de-DE pair row is X's member on X's address, as on
+    // main. Counting composite slots only leaves X out, the row binds to the
+    // pair, and X's address would lose it: ablation.
+    for (const holding of ['its own stored row in the bare slot', 'CONTROL: its composite slot'] as const) {
+      it.each([['holding first', true], ['pair row first', false]] as const)(`${holding === 'CONTROL: its composite slot' ? 'CONTROL' : 'UNCHANGED'} — X holds the name through ${holding} (%s): X's address and lists keep the App's undeclared pair row`, async (_order, holdingFirst) => {
+        const xEn = { name: 'welcome', label: 'suitex en-US', locale: 'en-US', subject: 'suitex en-US', bodyHtml: '<p>x</p>' };
+        const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
+        const registerHolding = () => {
+          if (holding === 'CONTROL: its composite slot') { tpl('en-US', X); return; }
+          rows.push({ id: 'row_x', type: 'email_template', name: 'welcome', state: 'active', package_id: X, bundle_member: 'en-US', metadata: JSON.stringify(xEn) });
+          registry.registerItem('email_template', { ...xEn, _packageId: X, _provenance: 'org' }, 'name' as never);
+        };
+        const registerPairRow = () => {
+          rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+          registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+        };
+        if (holdingFirst) { registerHolding(); registerPairRow(); } else { registerPairRow(); registerHolding(); }
+        expect(registry.overlayRowBinding('email_template', 'welcome', { ...pairDe, _packageId: PAIR }), 'the adoption counts X as the exact read does').toBe(X);
+        expect(labelOf(await read(X, 'de-DE'))).toBe('pair de-DE');
+        expect(labelOf(await read(X, 'en-US'))).toBe('suitex en-US');
+        // The lists are pinned for the composite slot only: with X holding through its stored row alone, X's
+        // lists leave the row out on main and here alike (the list door's own count, outside this card).
+        if (holding === 'CONTROL: its composite slot') {
+          expect(await listed(X)).toContain('pair de-DE');
+          expect(await forSend(X)).toContain('pair de-DE');
+        }
+      });
+    }
+
   });
 
   it('a sole owner keeps its member: another package of the pair does not serve it (delta review S2; through the doors the qualifier refuses the non-holder first)', async () => {
@@ -1939,7 +2117,12 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
       }
     };
 
-    for (const type of ['action', 'queue']) {
+    // [#31985, epic ruling 3 on 6840825374] `tool` is sealed too (its registry
+    // entry has `allowEnvironmentOverlay: false`), and its narrowing makes two
+    // namespaces' holders of one name reachable, so the sealed-type rule is
+    // pinned for it by name: each holder's exact address serves its own, in
+    // every hydration state and both registration orders.
+    for (const type of ['action', 'queue', 'tool']) {
       for (const order of [[A, B], [B, A]]) {
         for (const state of STATES) {
           it(`${type}, two holders (${order.map((p) => p.split('.').pop()).join(' then ')}), ${state}: each exact address serves its own; the layered read reports no overlay (BASE: in the describe header)`, async () => {
@@ -1974,7 +2157,7 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
     // read's code step judged as the plain read judges it: the copy is
     // declined there too, never the holder's `code` (one holder) nor a 409
     // naming both (two).
-    for (const type of ['action', 'queue']) {
+    for (const type of ['action', 'queue', 'tool']) {
       for (const holders of [[A], [A, B]]) {
         it(`${type}, ${holders.length} holder(s): a service copy of the package-less row is declined on the plain read and the layered read's code layer alike`, async () => {
           for (const p of holders) shipSealed(type, p);
@@ -2023,14 +2206,11 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
     // row is that holder's customization (served at its address, and laid in
     // under its envelope), and a sealed type's row is declined. Re-enabled,
     // the protocol's exact read answers one thing per state: the overlay row
-    // is refused naming both, and each sealed holder serves its own. Not
-    // pinned here, and not healed by this card: an overlay type's copy stays
-    // in the enabled holder's registry slot after the re-enable, so that
-    // slot, the list scoped to it and its execution list answer the
-    // environment's row as its own until the next unscoped hydration (the
-    // re-enable heal, a follow-up under #32568).
+    // is refused naming both, and each sealed holder serves its own. The
+    // registry slot the hydrator laid the overlay row into is healed on the
+    // enable, pinned under `[#32820]` below.
     const BOTH = [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }];
-    for (const type of ['email_template', 'action', 'queue']) {
+    for (const type of ['email_template', 'action', 'queue', 'tool']) {
       it(`${type}, two holders, one disabled while the read-side hydrator runs, then re-enabled: one answer per state on the exact read`, async () => {
         const overlay = type === 'email_template';
         if (overlay) {
@@ -2063,6 +2243,129 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
       expect(labelOf(await read('email_template', 'welcome', A))).toBe('env en-US');
       expect((registry.getPackageScopedItem('email_template', 'welcome', A) as { label?: string; _packageId?: string })).toMatchObject({ label: 'env en-US', _packageId: A });
     });
+  });
+});
+
+/**
+ * [#32820, ADR-0150 D4] A package-less overlay row the read-side hydrator lays
+ * in while one of two holders is disabled wears the served holder's envelope:
+ * that holder's slot answers it as its own. Enabling the other holder builds
+ * the entry again for the holders served now, so each holder's slot, the list
+ * scoped to it and the registry's execution list answer the holder's own item,
+ * as when the hydrator ran with both served.
+ */
+describe('[#32820] re-enabling a holder: the package-less overlay row the hydrator laid into the other holder\'s slot leaves it', () => {
+  const body = (type: string, label: string) => (type === 'email_template'
+    ? { name: 'welcome', label, locale: 'en-US', subject: 's', bodyHtml: '<p>x</p>' }
+    : { name: 'welcome', label });
+  const holderOwn = (type: string, id: string) => registry.registerItem(type, body(type, `${id.split('.').pop()} own`), 'name' as never, id);
+  const storeEnvRow = (type: string) => rows.push({
+    id: `${type}_env`, type, name: 'welcome', state: 'active', package_id: null, bundle_member: null,
+    metadata: JSON.stringify(body(type, 'env row')),
+  });
+  /** The three registry readers of a holder's item, and the slot's stamp. */
+  const readers = async (type: string, at: string) => {
+    const slot = registry.getPackageScopedItem(type, 'welcome', at) as { label?: string; _packageId?: string } | undefined;
+    const scoped = ((await protocol.getMetaItems({ type, packageId: at } as never)) as { items?: Array<{ name?: string; label?: string }> })
+      .items?.filter((i) => i.name === 'welcome').map((i) => i.label);
+    const execution = (registry.listItems(type, at) as Array<{ name?: string; label?: string }>)
+      .filter((i) => i.name === 'welcome').map((i) => i.label);
+    return { slot: slot?.label, stamp: slot?._packageId, scoped, execution };
+  };
+  const own = (id: string) => {
+    const label = `${id.split('.').pop()} own`;
+    return { slot: label, stamp: id, scoped: [label], execution: [label] };
+  };
+
+  for (const type of ['email_template', 'dashboard', 'report']) {
+    for (const order of [[A, B], [B, A]]) {
+      it(`${type}, registered ${order.map((id) => id.split('.').pop()).join(' then ')}: B disabled while the hydrator runs, then enabled: A's slot, A's scoped list and A's execution list answer A's own (BASE: the environment's row, listed beside A's own)`, async () => {
+        for (const id of order) holderOwn(type, id);
+        storeEnvRow(type);
+        registry.disablePackage(B);
+        await protocol.getMetaItems({ type } as never);
+        // The disabled period: A is the one served holder, so the row is its customization.
+        expect((await readers(type, A)).slot, 'B disabled').toBe('env row');
+        registry.enablePackage(B);
+        expect(await readers(type, A), 'B enabled').toEqual(own(A));
+        expect(await readers(type, B), 'B enabled').toEqual(own(B));
+        // The protocol's exact read is unchanged: refused naming both.
+        const err = await refusalOf(() => protocol.getMetaItem({ type, name: 'welcome', packageId: A } as never));
+        expect([err.status, err.refusal.reason]).toEqual([409, 'ambiguous-in-closure']);
+      });
+    }
+  }
+
+  it('CONTROL — the slot after the heal is the one the hydrator builds with both holders served', async () => {
+    holderOwn('email_template', A);
+    holderOwn('email_template', B);
+    storeEnvRow('email_template');
+    await protocol.getMetaItems({ type: 'email_template' } as never);
+    const hydrated = await readers('email_template', A);
+    expect(hydrated).toEqual(own(A));
+    const bare = registry.getItem('email_template', 'welcome', undefined, 'en-US');
+    registry.disablePackage(B);
+    await protocol.getMetaItems({ type: 'email_template' } as never);
+    registry.enablePackage(B);
+    expect(await readers('email_template', A)).toEqual(hydrated);
+    expect(registry.getItem('email_template', 'welcome', undefined, 'en-US')).toEqual(bare);
+  });
+
+  it('CONTROL — an enable that leaves A the one served holder keeps the row as A\'s customization', async () => {
+    holderOwn('email_template', A);
+    storeEnvRow('email_template');
+    registry.disablePackage(C);
+    await protocol.getMetaItems({ type: 'email_template' } as never);
+    const before = await readers('email_template', A);
+    expect([before.slot, before.stamp]).toEqual(['env row', A]);
+    registry.enablePackage(C);
+    expect(await readers('email_template', A)).toEqual(before);
+  });
+
+  it('CONTROL — an entry written over the slot after the hydration is the slot\'s: the enable does not touch it', async () => {
+    holderOwn('email_template', A);
+    holderOwn('email_template', B);
+    storeEnvRow('email_template');
+    registry.disablePackage(B);
+    await protocol.getMetaItems({ type: 'email_template' } as never);
+    const written = { ...body('email_template', 'written later'), _packageId: A };
+    registry.registerItem('email_template', written, 'name' as never);
+    registry.enablePackage(B);
+    expect(registry.getItem('email_template', 'welcome', undefined, 'en-US')).toBe(written);
+  });
+
+  it('the holder set moves from A alone to B alone, then to both: the entry is built again under B\'s envelope, then under none (review s2)', async () => {
+    holderOwn('email_template', A);
+    holderOwn('email_template', B);
+    storeEnvRow('email_template');
+    registry.disablePackage(B);
+    await protocol.getMetaItems({ type: 'email_template' } as never);
+    const slotAt = (at: string) => {
+      const slot = registry.getPackageScopedItem('email_template', 'welcome', at) as { label?: string; _packageId?: string } | undefined;
+      return [slot?.label, slot?._packageId];
+    };
+    expect(slotAt(A), 'B disabled, hydrated: A alone served').toEqual(['env row', A]);
+    registry.disablePackage(A);
+    registry.enablePackage(B);
+    // B is now the one served holder: the row is its customization, recorded again under its envelope.
+    expect(slotAt(B), 'A disabled, B enabled: B alone served').toEqual(['env row', B]);
+    registry.enablePackage(A);
+    // Both served: the second heal builds it under no holder's envelope.
+    expect(await readers('email_template', A), 'both enabled').toEqual(own(A));
+    expect(await readers('email_template', B), 'both enabled').toEqual(own(B));
+  });
+
+  it('a package-less permission row is not recorded: an enable leaves the hydrated slot as the hydrator laid it (review s1; the heal moves only the three declared overlay types)', async () => {
+    admitSecondPermissionHolder();
+    holderOwn('permission', A);
+    holderOwn('permission', B);
+    storeEnvRow('permission');
+    registry.disablePackage(B);
+    await protocol.getMetaItems({ type: 'permission' } as never);
+    const hydrated = registry.getItem('permission', 'welcome') as { label?: string } | undefined;
+    expect(hydrated?.label, 'B disabled, hydrated: the row in A\'s slot').toBe('env row');
+    registry.enablePackage(B);
+    expect(registry.getItem('permission', 'welcome')).toBe(hydrated);
   });
 });
 

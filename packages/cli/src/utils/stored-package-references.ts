@@ -666,7 +666,8 @@ export async function bindStoredPackageReference(
   }
   if (reason === 'outside-closure') {
     return refuse('outside-closure', `${answer.message} Binding it would resolve past the package's declared dependencies, `
-      + 'which the rule never does (ADR-0150 D3 (c)): declare the dependency instead. Nothing written.', candidates);
+      + 'which the rule never does (ADR-0150 D3 (c)): declare the dependency instead, or, where the holder already depends '
+      + 'on the package (a cycle), make the move the sentence names. Nothing written.', candidates);
   }
   const chosen = candidates.find((c) => c.holder === 'package' && c.packageId === request.packageId);
   if (!chosen) {

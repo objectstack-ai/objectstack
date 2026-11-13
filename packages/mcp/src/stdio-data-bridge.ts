@@ -129,6 +129,8 @@ import {
 } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { resolveObjectSortability } from '@objectstack/spec/api';
+// [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
+import { isAiReadExposed } from '@objectstack/spec/data';
 // [commit 4810dd628] The repo's ONE single-record 404 (#4435/#5138/#7867). Imported from
 // `@objectstack/core` rather than re-minted here or reached via
 // `@objectstack/metadata-protocol`'s re-export: this package already declares
@@ -1156,6 +1158,15 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       return { objects, degraded, errors };
     },
 
+    // [#32442, ruling A] The read opt-in of a system object, judged by
+    // `isAiReadExposed` over its whole definition (the view the gates read,
+    // not the masked one discovery serves), as on the HTTP bridge. The read
+    // tools then read it through the engine as the principal, under every
+    // gate below, so this admits the object and nothing else.
+    async aiReadExposed(name: string): Promise<boolean> {
+      return isAiReadExposed(await objectView.getObject(name));
+    },
+
     // [#25138] Answered from the listing `list_objects` serves
     // ({@link readMergedObjects}), so every object an agent is listed it can
     // describe, and a name the listing omits (a disabled package's object among
@@ -1182,6 +1193,16 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       return Object.entries(def.fields ?? {})
         .filter(([, f]) => declaresOptions(f))
         .map(([key]) => key);
+    },
+
+    // [#32872] The object `describeObject` reads, whole: what
+    // `validate_expression` hands the publish gate's own passes at a
+    // validation rule or a formula field. Rendered to nobody; the tool answers
+    // the gate's findings only.
+    // [ADR-0106 D1] …the principal's object, so no field it cannot read is judged.
+    async servedObjectDefinitionOf(name: string): Promise<Record<string, unknown> | null> {
+      const def = (await servedView.getObject(name)) as Record<string, unknown> | undefined;
+      return def ?? null;
     },
 
     async query(object, opts) {
