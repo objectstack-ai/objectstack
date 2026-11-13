@@ -40,7 +40,7 @@ import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 import { splitWaitingOnCaller } from './request-read-gate.js';
-import type { EngineQueryOptions } from '@objectstack/spec/data';
+import type { EngineAggregateOptions, EngineCountOptions, EngineQueryOptions } from '@objectstack/spec/data';
 
 const REQUEST = 'sys_approval_request';
 const OBJECT = 'exam_sheet';
@@ -139,17 +139,17 @@ describe('[#32442] the request read gate answers "waiting on me" with the approv
     expect(stored[0].pending_approvers).toBe(`position:${LEAD_POSITION}`);
 
     expect(idsOf(await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: lead } satisfies EngineQueryOptions))).toEqual([rig.ids.byPosition]);
-    expect(await rig.engine.count(REQUEST, { where: WAITING_ON_ME, context: lead } satisfies EngineQueryOptions)).toBe(1);
+    expect(await rig.engine.count(REQUEST, { where: WAITING_ON_ME, context: lead } satisfies EngineCountOptions)).toBe(1);
     const groups = await rig.engine.aggregate(REQUEST, {
       where: WAITING_ON_ME, groupBy: ['status'], aggregations: [{ function: 'count', alias: 'n' }], context: lead,
-    } satisfies EngineQueryOptions) as any[];
+    } satisfies EngineAggregateOptions) as any[];
     expect(groups.map((g) => [g.status, Number(g.n)])).toEqual([['pending', 1]]);
   });
 
   it('a member on no request gets nothing, and the submitter gets nothing waiting on them', async () => {
     const rig = await boot();
     expect(await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: asUser(OUTSIDER) } satisfies EngineQueryOptions)).toEqual([]);
-    expect(await rig.engine.count(REQUEST, { where: WAITING_ON_ME, context: asUser(OUTSIDER) } satisfies EngineQueryOptions)).toBe(0);
+    expect(await rig.engine.count(REQUEST, { where: WAITING_ON_ME, context: asUser(OUTSIDER) } satisfies EngineCountOptions)).toBe(0);
     expect(await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: asUser(SUBMITTER) } satisfies EngineQueryOptions)).toEqual([]);
     // Control: the submitter's untargeted read serves both requests they filed.
     expect(idsOf(await rig.engine.find(REQUEST, { context: asUser(SUBMITTER) } satisfies EngineQueryOptions)))
