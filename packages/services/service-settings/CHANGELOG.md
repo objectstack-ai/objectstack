@@ -1,5 +1,726 @@
 # @objectstack/service-settings
 
+## 18.4.0
+
+### Patch Changes
+
+- 8d5aab3: fix(cli): `os dev` and `os start` share one data-key file, so a secret saved under `npm run dev` reads back under `os start`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/cli`.** Both commands open the same project database, but `os start` used to mint its own data key under its own home (`PROJECT/.objectstack/dev-crypto-key` in project mode) while `os dev` kept the key at `$HOME/.objectstack/dev-crypto-key` (or `$OS_HOME`'s). Every secret written during development then read back as unset under `os start`. Both commands now resolve the key file the way `os dev` always has (`os start --home` counts as `OS_HOME`) and hand it to their `serve` child on the internal `OS_INTERNAL_CRYPTO_KEY_FILE` channel. The project-local file an earlier `os start` minted is not orphaned: when it alone holds a key it is still read, and the boot says which file; when it and the shared file hold different keys, the shared one is used and a warning names both paths. An explicit `OS_SECRET_KEY` / `OS_DEV_CRYPTO_KEY` still wins, unchanged.
+  - **`@objectstack/service-settings`.** New exports `resolvePersistedKeyFile` (the one resolution both commands take, beside the provider's own key-file path) and `KEY_FILE_CHANNEL_ENV`; the local crypto provider's file tier reads the file that channel names, ahead of `OS_HOME`.
+- f6f663a: fix(cli): when two data-key files hold different keys, `os start` and `os dev` read with the one that opens the project's stored secrets, or a production boot refuses
+  
+  Clause-②: yes (narrowing) — a production `os start` / `os serve` boot whose two candidate key files (the shared `$HOME/.objectstack/dev-crypto-key` or `$OS_HOME`'s, and the project's `.objectstack/dev-crypto-key`) both fail to open the database's newest stored secret now refuses to start, naming both files; it used to start and serve every stored secret as unset. The widening half: `@objectstack/service-settings` gains new exports (`chooseKeyFileByTrialOpen`, `settleKeyFileChannel`, `storedSecretReaderOverEngine`, `deferredLocalCryptoProvider`, `DataKeyOpensNothingError`, `KEY_FILE_CANDIDATE_CHANNEL_ENV` and their types).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema, export or stored row changes shape: the refusal is a boot posture over which key file opens existing ciphertext. No ciphertext is rewritten, so there is nothing at rest for a migration to move. -->
+  
+  **BREAKING** boot narrowing (`@objectstack/cli`, `@objectstack/service-settings`): a production boot whose candidate data keys open none of the stored secrets refuses to start.
+  
+  - **`@objectstack/cli`.** When the shared key file and the project's own key file (the one an earlier `os start` minted) hold different keys, the CLI no longer picks one. It hands the `serve` child both, and the child decides once the database is open: it opens the newest stored `sys_secret` value under each key and reads with the key that opens it, and the boot says which file it took. A project that only ever ran `os start`, on a machine whose home holds a key from `os dev` in another project, reads its secrets back again. With no stored secret yet, the shared file is used, as before. When neither key opens the stored secrets, a production boot (`os start`, `os serve`) refuses to start and names both files; a development boot (`os dev`) starts and prints a boot error naming both files. The one-shot commands (`os migrate`, `os secret rewrap`, `os secret orphans`, `os storage orphans`) now read the same file by the same rules: the project's own file when it alone holds a key, and the key that opens a stored secret when both do.
+  - **`@objectstack/service-settings`.** The settings service makes that choice in its `start()`, before any reader decrypts, when the CLI names a second candidate on the internal `OS_INTERNAL_CRYPTO_KEY_FILE_CANDIDATE` channel. A leading `~` in `OS_HOME` (or `OBJECTSTACK_HOME`) is now the home directory when the provider finds its key file, as `os start` already read it; it used to name a directory called `~` under the working directory.
+  
+  **The remedy.** If a production boot refuses with "neither data key opens this database's stored secrets", find the key those secrets were sealed under (a backup of either file, or the `OS_SECRET_KEY` the deployment once ran with), keep a copy of both files, and put that key at the shared file the message names, or set `OS_SECRET_KEY` to it.
+  
+  Supersedes, in the same release: the note for #29934 says that when the shared file and the project's file hold different keys, the shared one is used and a warning names both paths. After this change the boot uses whichever of the two opens the stored secrets, and refuses in production when neither does.
+- 159930a: fix(service-settings): when two data-key files hold different keys, the boot judges the newest stored secrets as a page, not only the newest one, and reports a database split between the two keys
+  
+  Clause-②: no — an internal boot heuristic and its notice text. The shapes it changes (`StoredSecretReader` now answers the page, `KeyFileChoice` gains the `mixed` reason and a `tally`, `DataKeyOpensNothingError` gains `judged`) were added by #30042, whose note is still pending, so they first ship together in this release; no released export changes.
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-settings`.** When the shared key file and the project's own key file hold different keys, the boot now trial-opens each of the newest stored `sys_secret` rows (up to ten) under both keys and reads with the key that opens more of them, on a tie the one that opens the newest. A row that opens under neither key (a corrupt or foreign row) no longer decides the boot: if an older row opens under one key, that key is used, and only a page where no row opens under either key keeps the production refusal. When each key opens some of the rows, the database holds secrets under both keys: the boot uses the key that opens more of them and prints an error naming both files, how many rows each key opened, and the fix. The boot's notices now say what was measured ("opens the 3 newest stored secrets", "opens 2 of the 3 newest stored secrets") instead of claiming the chosen file opens all of the database's stored secrets.
+  - **`@objectstack/cli`.** The one-shot commands (`os migrate`, `os secret rewrap`, `os secret orphans`, `os storage orphans`) share the same trial, so they make the same choice.
+  
+  **The remedy for a split database.** Keep a copy of both files, then save again each secret that reads as unset: it is sealed under the key the boot uses. Once nothing reads as unset, put that key at the shared file (or set `OS_SECRET_KEY` to it).
+  
+  Supersedes, in the same release: the note for #30042 says the boot opens the newest stored secret under each key and quotes the refusal as "neither data key opens this database's stored secrets". After this change the boot judges the newest rows as a page, and the refusal reads "neither data key opens any of the N newest stored secrets".
+- a77c2e9: fix(cli): the official image refuses to start on a disk it would lose; every other production `os start` says what it keeps there, and administrators see it in the Console
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/cli` (the official image).** With `OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED=true`, which the official image now sets in its `ENV`, `os start` exits 1 unless `OS_DATABASE_URL`, `OS_AUTH_SECRET` and `OS_SECRET_KEY` are all set explicitly (their legacy names count, and so do `--database` / `--auth-secret` and a database the project config declares). It names the missing ones before it writes a database file or a secret, and says how a deployment already running on generated values carries them over: the files in the container's home, and which of them the container holds. An explicit `OS_DATABASE_URL=file:/path/on/a/volume/app.db` passes. A value of the switch that is not `true`/`false`/`1`/`0` is refused rather than read as off. **Upgrading an image deployment that ran on its defaults:** read `auth-secret` and `dev-crypto-key` (and `data/objectstack.db`) out of the old container's `/home/node/.objectstack` and set them before you start the new one.
+  - **`@objectstack/cli` (every other `os start`).** Unchanged: it keeps booting. In production mode, when it keeps its database, its sign-in secret or its data key on its own disk because nobody set them, it prints a block naming each file and the variable that moves it off that disk, and hands the same facts to the server process on the internal `OS_INTERNAL_DEPLOYMENT_FINDINGS` channel.
+  - **`@objectstack/service-settings`.** Two routes behind the settings door, for callers holding `manage_platform_settings`: `GET /api/settings/deployment/notice` answers what this production deployment keeps on its own disk (the database file, the generated sign-in secret, the data key file) plus two lower-severity lines (uploads on the local disk; no email service that delivers), and `POST /api/settings/deployment/notice/hide` records an administrator's acknowledgement of exactly what they read as a `config_change` row on `sys_audit_log`. A member is refused `403`, the state is not on the public auth config, a hide is refused `409` where no audit log is mounted or the notice changed since it was read, and outside production mode the notice is empty. No package export is added.
+- 870ebce: fix(plugin-auth)!: saving the auth settings refuses to turn off the last way to sign in (#30202)
+  
+  Clause-②: yes (narrowing) — a save an administrator could make before is now refused at the settings save door with the existing `SETTINGS_VALIDATION` / `invalid_value` field error: a save after which email and password is off and nothing else signs anyone in, judged on the whole save, including the Google change that removes the last provider while email and password is off. No new error code or settings key. The widening half: `SettingsWritePredicateInput`, exported from `@objectstack/service-settings`, gains an optional `batch` field, the whole write a predicate is asked about.
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches `auth.email_password_enabled` or the settings write predicate; `content/docs/deployment/environment-variables.mdx` already names the `OS_AUTH_EMAIL_PASSWORD_ENABLED` override used for recovery below.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: auth.email_password_enabled and the auth.google_* keys keep their declarations, and the save door now refuses only the save that leaves no way to sign in. The predicate input's new batch field is optional and additive. A value stored before is not rewritten (the existing OS_AUTH_EMAIL_PASSWORD_ENABLED override recovers it), so there is nothing at rest for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the auth settings save door (`PUT /api/settings/auth`, `SettingsService.setMany('auth', …)`): a save that would leave no way to sign in is refused, where it was saved before.
+  
+  - **Before.** Setup → Settings → Authentication, "Enable email/password login" off, save: "Settings saved", with no social provider and SSO off. After the next sign-out nobody could sign in, the administrator included.
+  - **Now.** A save after which email and password is off and no other way in is in force answers `400 SETTINGS_VALIDATION`. The field error sits at `email_password_enabled` (`code: invalid_value`, `constraint.lastSignInMethod: email_password`), and its message, in the caller's language (en, zh-CN, ja-JP, es-ES), says to keep or set up another sign-in method before or in that save. Nothing in that batch is written, and email and password stays on.
+  - **The whole save is judged.** `{ email_password_enabled: false, google_enabled: false }` (or with `google_client_secret` cleared) on a deployment signing in with email and password plus Google is refused, with a field error at each of the two keys. Google filled in (switch, client ID and secret) in the same save that turns email and password off is accepted, and so is the switch alone over a client ID and secret already stored.
+  - **What counts as another way in.** A social or OIDC provider in force whose client ID and client secret are both set; enterprise SSO switched on with at least one identity provider registered (the switch alone does not count); phone-number sign-in; a host sign-in handoff the host declared. `ssoOnlyMode` alone, magic link, passkeys, and a provider listed without its credentials do not count.
+  - **The other direction.** While email and password is off, `google_enabled: false`, or clearing `google_client_id` / `google_client_secret` when no environment variable or stack config supplies it, is refused (`constraint.lastSignInMethod: google`) if Google is the last way in.
+  - **Already locked out.** Set `OS_AUTH_EMAIL_PASSWORD_ENABLED=true` and restart: the environment override wins over the stored `false`, and email and password sign-in comes back. Then set up another method before turning it off again.
+  - **For a write predicate's author (`@objectstack/service-settings`).** `SettingsWritePredicateInput.batch` holds every key the write sets in the namespace, the asked key among them, with the value it would store (`null` clears). `setMany` always passes it, frozen. A rule over several keys judges the state after the whole write from it instead of one key against the rest as they stand. Existing predicates need no change.
+- d1d90b7: fix(plugin-auth)!: clearing the allowed IP ranges applies at once, and a console save that leaves out the saving address is refused
+  
+  Clause-②: yes (narrowing) — a settings console save (`PUT /api/settings/auth`) of an `allowed_ip_ranges` list none of whose entries matches the saving request's own address is refused, where it was stored before; and `@objectstack/service-settings` widens its published surface: three new exported types (`SettingsWriteOptions`, `SettingsRequestTransport`, `SettingsWritePredicateOptions`), `setMany`'s fourth parameter accepts `SettingsWriteOptions`, `registerWritePredicate` takes an optional fourth `options`, and `SettingsWritePredicateInput` gains an optional `transport`.
+  Metadata-protocol: none
+  Skills-docs: none — `skills/**` teaches no `allowed_ip_ranges`; `content/docs/permissions/authentication.mdx` describes the setting and does not yet state the save refusal or the recovery, which ship here in the refusal text and this entry (the page is outside this change's surface and is named for a follow-up).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata an author writes changes and no stored row is rewritten: a console save of a setting value is refused when it would lock out the saving request -->
+  
+  **BREAKING** for an administrator who saves, through the settings console, an allowed-IP list (ADR-0069 D5) that does not include the address they are connected from.
+  
+  - **Clearing applies at once.** The console sends an emptied field as `null`, which resolves with source `default`, and the settings binding used to skip a default-sourced `allowed_ip_ranges`: the last stored list kept refusing sign-in (`403 IP_NOT_ALLOWED`) until a restart while the field showed empty. A cleared or restored-default value now hands the gate back to the deployment's own declaration in the same pass: no list when it declared none, the `allowedIpRanges` the plugin options or an `auth:configure` handler declared otherwise.
+  - **The save is refused.** A list no entry of which matches the saving request's address is refused with `400 SETTINGS_VALIDATION`, `invalid_value` at `allowed_ip_ranges`, the address in `constraint.clientAddress`, and a message in the caller's language that names it. The address is the one the gate judges at sign-in: the transport's peer address, or the forwarded one when the stack declares `server.trustProxy`. When the server cannot establish the address, every non-empty list is refused, because the gate would refuse that request too. Clearing the list is never refused, and an in-process write (boot, seed, migration) carries no request and is not judged.
+  - **Recovery when already locked out.** Start the server with `OS_AUTH_ALLOWED_IP_RANGES` set to an empty value. The settings env override wins over the stored list and opens the gate; remove it once the list is fixed.
+  - **`@objectstack/service-settings`.** `setMany`'s options (`SettingsWriteOptions`) and a write predicate's input gain an optional `transport` (`SettingsRequestTransport`: the transport's peer address and request headers), which the settings routes set on a save so a write predicate can judge the change against the caller's own connection. A predicate sees only the headers it names at registration (`registerWritePredicate(…, { requestHeaders })`, `SettingsWritePredicateOptions`), so a credential header never reaches one that did not ask for it. The transport identifies and authorizes nothing and is never stored.
+  - **Who moves.** An administrator adds their own address or range to the list, or saves it from an address inside it.
+- 977be38: fix(service-settings)!: Setup no longer offers a Feature Flags page whose four toggles changed nothing (#30204)
+  
+  Clause-②: no (narrowing) — removes the four settable keys of the `feature_flags` settings namespace (`ai_enabled`, `kanban_swimlanes`, `realtime_cursors`, `inline_comments`), the namespace itself (left empty by their removal), its Setup entry and the `featureFlagsSettingsManifest` export. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/service-settings#featureFlagsSettingsManifest) The one author-reachable removal is a runtime export: the `feature_flags` settings manifest constant leaves `@objectstack/service-settings`'s published entry and `builtinSettingsManifests`. A settings key is a value an administrator saves, not metadata an author writes: no spec key, authorable spelling, object definition or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** for an administrator who saved one of the four Feature Flags toggles, and for a host that imports `featureFlagsSettingsManifest`.
+  
+  - **Why.** No code read any of the four keys, so turning one on changed nothing (ADR-0049 enforce-or-remove). A flag comes back with the feature that reads it.
+  - **Removed keys.** `feature_flags.ai_enabled`, `feature_flags.kanban_swimlanes`, `feature_flags.realtime_cursors` and `feature_flags.inline_comments`: removed; each had no effect. The in-app AI panel is decided elsewhere and is unchanged.
+  - **The namespace.** `feature_flags` is no longer registered, so `GET` and `PUT /api/settings/feature_flags` answer `404 UNKNOWN_NAMESPACE`, and `SettingsService.getManifest('feature_flags')` throws `UnknownNamespaceError` (`SETTINGS_UNKNOWN_NAMESPACE`). Setup's Configuration group no longer lists Feature Flags (`@objectstack/platform-objects`, entry `nav_settings_feature_flags` and its four locale labels).
+  - **Stored values.** A `sys_setting` row saved under `feature_flags` and an `OS_FEATURE_FLAGS_*` environment variable are left in place and become inert: nothing registers the namespace, so nothing resolves them. They are not cleaned up; delete them at will.
+  
+  The one-line fix for a host:
+  
+  - FROM `featureFlagsSettingsManifest` TO nothing: drop it from the host's `SettingsServicePlugin({ manifests })` list; `builtinSettingsManifests` no longer carries it.
+- 243eba1: feat(spec): a `map` settings specifier for keyed rows; the data lifecycle retention overrides, row quotas and per-class quota defaults use it, and both settings doors judge them
+  
+  Clause-②: yes (widening) — `SpecifierType` gains a member; the save and env doors also start refusing malformed values for the three keys (a narrowing on values that never took effect, named in the PR's BREAKING note)
+  Metadata-protocol: added — a package author can now declare a `map` specifier in a settings manifest (a new accepted value of `SpecifierType`)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is removed, renamed or re-shaped: `SpecifierType` gains `map` and `Specifier` gains the optional `keyColumn` and `columns`. The three lifecycle keys keep their stored shape, their env variable names and their cascade. What narrows is the set of values the settings doors accept for those three keys: a stored value is runtime state in `sys_setting` / `sys_platform_setting` and an `OS_LIFECYCLE_*` override is a deployment's environment, so there is nothing for a migration to rewrite, and every refused value is one the sweep never applied. -->
+  
+  **New: the `map` specifier** (`@objectstack/spec`, ADR-0007 as amended 2026-11-08). A setting whose value is keyed rows declares `type: 'map'` with a `keyColumn` (its header) and `columns` (`{ name, label, kind }`, `kind` is `duration` or `positive_integer`). One value column stores `Record<key, value>`; several store `Record<key, { [column]: value }>`. The keys a map admits are served at run time by an option source the settings service registers for the key, never listed in the manifest. `json` stays for raw config.
+  
+  **`lifecycle.retention_overrides`, `lifecycle.quotas` and `lifecycle.quota_defaults` are `map` specifiers** (`@objectstack/objectql`). Stored values, `OS_LIFECYCLE_*` names and the env, global, organization cascade are unchanged, and the sweep reads the same shapes. Their keys are served from the running system: the objects that declare a lifecycle class other than `record` for the first two, the lifecycle classes other than `record` for `quota_defaults`.
+  
+  **BREAKING** accept-set narrowing at the settings doors (`@objectstack/service-settings`), for those three keys only.
+  
+  - **Before.** `PUT /api/settings/lifecycle` and `OS_LIFECYCLE_*` accepted any object under them: a misspelt object (`sys_audit_logs`), a quota written as text (`"1e6"`) or zero, a window written as `30 days`, a column misspelt (`max_age`). Each was stored, answered "saved", and the sweep silently applied nothing for it.
+  - **Now.** The save door refuses such a value with `400 SETTINGS_VALIDATION` and one field error for the key, which names the entry and the expected form: `invalid_option` for a key the running system does not have, `invalid_shape` for a cell that is not a duration such as `7y` or a whole number above 0, `unknown_field` for a property no column declares, `invalid_type` for a value that is not an object (JSON text included). The env door rejects such an override with one `error` line, and the key resolves from the next layer of the cascade. A value already stored is not judged until a save touches its key.
+  - **Who moves.** Nobody whose values took effect. A script or a deployment that wrote one of the refused values was configuring nothing; the refusal now says so. Durations take `h`, `d`, `w` or `y` (`90d`, `7y`), quotas a whole number above 0, and keys are the object names (or classes) the refusal lists.
+  
+  **The remedy.** Send keys the deployment has and cells in their column's form: `{ "quotas": { "sys_audit_log": 1000000 } }`, `{ "retention_overrides": { "sys_job_run": { "maxAge": "90d" } } }`; for an override, `OS_LIFECYCLE_QUOTAS='{"sys_audit_log":1000000}'`.
+  
+  **The console.** Until its `map` control lands (a separate change), Setup → Data Lifecycle draws these three keys as an unsupported specifier type; env overrides and the API are unaffected.
+- 05a30e6: feat(service-settings,plugin-audit,plugin-sharing): a config_change ledger row names the settings row it changed, an audit row's record page lists the other changes to the same record, and a queue's record page lists its members
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-settings`: the `config_change` row's shape changes (not breaking).** A settings write's `config_change` row in `sys_audit_log` now sets `record_id` to the id of the stored settings row the write changed (`sys_setting`, or `sys_platform_setting` for a global value), beside the `object_name` it already named; before, `record_id` was always null. `metadata` and the digest in `new_value` are unchanged, and an in-memory settings store still writes null. Rows written before this release keep their null `record_id`.
+  - **Who can read those rows narrows.** Because a `config_change` row now names a record, the ledger's parent-record read gate judges it by that settings row: a reader holding only the ledger's own read grant, who cannot read the settings store, no longer sees new `config_change` rows. Holders of the ledger's audit capability (`view_all_audit_log`, administrators by default) still see every row. Older rows with a null `record_id` are still served under the ledger grant. Nothing becomes visible to a reader who could not see it before.
+  - **`@objectstack/plugin-audit`: `sys_audit_log` gets a default record page** (`sys_audit_log_detail`) that shows the row's fields and lists every other ledger row with the same `record_id`, newest first. Beside a `config_change` row that list holds the CRUD mirror's create and update rows for the same settings row, which carry a non-secret value in plain text; a secret's mirror row carries neither the value nor its handle. The list has no "New". The page label ships in all eleven locales.
+  - **`@objectstack/plugin-sharing`: `sys_queue` gets a default record page** (`sys_queue_detail`) whose members list reads `sys_queue_member` where `queue` equals this queue's `name`, and whose "New" opens the member form with `queue` filled in with that name. `sys_queue_member.queue` is unchanged. Declared queues have no `sys_queue` row, so they have no page. The page label ships in the plugin's four locales.
+- db04e5c: fix(plugin-email,service-settings): mail whose sender has no From name goes out under the product name, not "ObjectStack"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Now.** A default sender with no display name of its own goes out under the product name the auth mails' subject and body already use: the Setup → Branding product name when an administrator set one, else the deployment's name (`OS_APP_NAME`, then `config.email.appName`, `config.email.defaultTemplateContext.appName` and the top-level `appName`), else `ObjectStack`. A Branding save renames the sender on the next mail, with no restart. The "Send test email" button sends under the same name.
+  - **Which senders.** The sender saved in Setup → Mail with the From name left empty, and a sender declared at boot without a name (`OS_EMAIL_FROM=no-reply@acme.com`, or `config.email.defaultFrom` with an `address` alone). Before, the first went out as `ObjectStack <…>` and the second with no display name.
+  - **Unchanged.** A From name somebody set always wins: one saved in Setup → Mail, or one declared at boot (`OS_EMAIL_FROM="Acme <no-reply@acme.com>"`, `config.email.defaultFrom.name`). A sender a send names itself, and a template's own sender, are never renamed. Under a walled tenancy posture, where Setup → Branding is not offered, the deployment's name applies.
+  - **`@objectstack/service-settings`.** Setup → Mail → From name no longer has the default `ObjectStack`: an unsaved field reads empty, and `GET /api/settings/mail` answers `from_name` as `value: null`, `source: 'default'`. The field's help says that an empty value uses the product name. A From name saved earlier is kept and still wins; clear the field to follow the product name.
+- bee9836: fix(service-settings)!: Setup's default language (`localization.locale`) offers and accepts the languages the deployment supports, not four hard-coded ones (#30286)
+  
+  Clause-②: yes (narrowing) — `SettingsService` gains `registerOptionSource(namespace, key, source)` and the package exports the `SettingsOptionSource`, `SettingsOptionSourceAnswer` and `SettingsServedOption` types; `getNamespace` takes an optional third `display` argument. The save of `localization.locale` (`PUT /api/settings/localization`, `SettingsService.setMany`) and an `OS_LOCALIZATION_LOCALE` override now accept the i18n service's locale list instead of the declared `en-US`, `zh-CN`, `ja-JP`, `es-ES`: a language the deployment supports is accepted where it was refused (`fr-FR`, `vi-VN`), and one of the four the deployment does not support is refused where it was accepted (`ja-JP` on an app that declares `i18n.supportedLocales: ['en', 'zh-CN']`).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime accept set on one settings key, `localization.locale`, judged against the deployment's i18n locale list at save time; a stored value outside it is kept, read and applied as before, and the remedy for a refused write is a deployment change (ship the language, or declare it in `i18n.supportedLocales`), which no ledger entry can derive. The other categories are closed on facts: the bumped package publishes (not unpublished); no ADR-0087 id covers this key and this diff adds none (not registered, not already-registered); the exports this diff adds are additions and no published export is removed or retyped, so no interface or type narrows (not runtime-export-retired, runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing on the `localization.locale` settings save (Setup → Localization → Default language, `PUT /api/settings/localization`, `SettingsService.setMany`) and on an `OS_LOCALIZATION_LOCALE` override, on a deployment whose language list leaves out one of `en-US`, `zh-CN`, `ja-JP`, `es-ES`.
+  
+  - **Before.** Default language offered English (US), 简体中文, 日本語 and Español (España), and the save accepted exactly those four, whatever the deployment shipped. A French pack, or a Vietnamese translation item the user's language menu already offered, could not be chosen as the organization's default.
+  - **Now.** The options and the accepted values are the i18n service's locale list, the one `GET /api/v1/i18n/locales` and the user's language menu read (the app's declared `i18n.supportedLocales`, else every locale a bundle or translation item has loaded), asked at each save and page read, so a translation item added at runtime is offered at once. Each option is named in its own language (the platform locale table's name, else `Intl.DisplayNames` in that language, else the code). A stored spelling of an offered language is still accepted and shown chosen (`en-US` where `en` is offered, `zh-CN` where `zh-Hans` is). A value outside the list is refused `400 SETTINGS_VALIDATION` with `invalid_option` at `locale`, listing the offered values. With no i18n service in the composition the declared four stand.
+  - **Unchanged.** A value stored before this release that the deployment no longer offers stays in effect and readable: the page offers it, named as no longer offered in the reader's language, and a save of other keys passes it by; only a save that writes it again is judged. Every reader of the setting (formatting, auth email and SMS, seeds, activity titles) reads it as before.
+  
+  **The remedy.** To keep offering a language the deployment refuses, ship it: add the language to the app's `i18n.supportedLocales` (and its translations), then pick it in Setup.
+- 2445cb4: fix(service-settings): a clear of an env-pinned setting clears the stored value beneath the pin, so the allowed-IP lockout recovery holds once the variable is removed
+  
+  Clause-②: yes (widening) — `SettingsService.setMany` / `set` (and `PUT /api/settings/:namespace`) accept a clear (`null` / `undefined`) of a key an `OS_*` override in force pins, where every write to such a key was refused `409 SETTINGS_LOCKED`; every other write is still refused. No export, type or error code changes.
+  Metadata-protocol: none
+  
+  - **A clear goes through an env pin.** An `OS_*` override in force decides the value in force and still refuses every write but a clear. A clear (`null` / `undefined`, never a value such as `''` that a key would store) clears the value stored beneath the pin, so the key falls back to its default once the override is removed. It changes nothing in force: the answer still reads the env value with `source: 'env'` and `locked: true`. It meets every judgment a clear meets without a pin: a locked row at an upper scope, or a locked row at the write's own scope for a caller that is not the platform, still refuses it `SETTINGS_LOCKED` (`locked-by-<scope>`), and the key's write predicates still run.
+  - **Why.** The override hides the stored value from every read, and used to refuse every write to it, so an operator who pinned a key to recover from a bad stored value got the same value back the moment the pin was lifted. For `auth.allowed_ip_ranges` that meant the documented recovery (`OS_AUTH_ALLOWED_IP_RANGES` set empty) opened the gate only until the variable was removed, and the next restart locked the administrator out again.
+  - **Recovery when locked out by `allowed_ip_ranges` (`@objectstack/plugin-auth`).** Start the server with `OS_AUTH_ALLOWED_IP_RANGES` set to an empty value, sign in, clear the stored list with a settings request that sets `allowed_ip_ranges` to `null` (`PUT /api/settings/auth`), then remove the variable. The save refusal's message names these four steps in all four of its languages. This supersedes the recovery sentence of the earlier entry for the allowed-IP save refusal ("remove it once the list is fixed"): removing the variable without the clear brings the stored list back at the next restart. The Setup console still shows a pinned field read-only, so the clear is a settings API request for now.
+- 590724f: feat: a settings toggle can declare the question asked before it is turned off (`confirmOffText`), and Setup's email and password sign-in toggle declares one
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - `SpecifierSchema` (`@objectstack/spec/system`) gains an optional `confirmOffText: I18nLabel`: the confirm dialog text shown before a toggle's value changes to off. Omitted, nothing is asked, so every existing manifest reads as before. The name mirrors the `confirmText` an `action_button` handler already declares.
+  - Only a `toggle` may declare it. On any other specifier type the parse refuses it at `confirmOffText`, naming the type, because nothing would ever ask the question there.
+  - The platform translation bundle carries it at the toggle's own address, beside its label: `settings.<namespace>.keys.<key>.confirmOffText`.
+  - `@objectstack/service-settings`: the `auth` manifest's `email_password_enabled` toggle declares "People who sign in with a password will need another way in.", with zh-CN, ja-JP and es-ES text in the shipped bundles. The settings translation coverage test now holds a declared `confirmOffText` to the same per-locale coverage as the toggle's label.
+  - The console asking the question before save is a separate change; until it lands, the key is declared and parsed but not yet shown.
+- b55d6ab: fix(service-settings): the settings manifest list serves a sourced select's options, the table the save judges against, as the namespace read does
+  
+  Clause-②: no — the manifest list now states the table the save already enforces; nothing a caller sends is refused differently.
+  Metadata-protocol: none
+  
+  A select key whose options come from the running system (`localization.locale`: the languages the deployment's i18n service reports) was served its live options only by the namespace read (`GET /api/settings/:namespace`). `SettingsService.getManifest()`, `SettingsService.listManifests()` and `GET /api/settings` still carried the declared table (the four codes `en-US`, `zh-CN`, `ja-JP`, `es-ES`), so a reader of the manifest list (the Setup hub, an SDK caller) was told a table that is not the one a save is judged against.
+  
+  - **Now.** All three are served through the same resolution as the namespace read: a sourced key carries its source's options; every other key, and a sourced key whose source has no answer (no i18n service in the composition), carries the declared table as before. `getManifest(namespace, display?)` and `listManifests(ctx?, display?)` take an optional display language; `GET /api/settings` passes the request's. The registered manifest is never changed.
+  - **Spec.** The `valueDomain` description in `settings-manifest.zod.ts` names the runtime option source beside `valueDomain` as the other mover of a select's enforcement boundary: where a source answers, the declared `options` are the fallback.
+- 1c5cee6: fix(service-settings): an `OS_LOCALIZATION_LOCALE` naming a language the boot is still loading is no longer dropped, and Setup's default language accepts by the same locale matcher as the IdP locale claim (#30456)
+  
+  Clause-②: yes (widening) — `@objectstack/core` exports `resolveOfferedLocale(requested, offered)`; `SettingsService` gains `holdOptionSourceVerdicts()` and `sealOptionSources()`. The save of `localization.locale` (`PUT /api/settings/localization`, `SettingsService.setMany`) and an `OS_LOCALIZATION_LOCALE` override now also accept a region or base of an offered language (`fr-FR` where `fr` is offered, `fr` where `fr-FR` is) and another case of an offered code (`zh-cn` for `zh-CN`); nothing accepted before is refused. The IdP locale claim (`resolveIdpLocale`) lands a script or region spelling on the offered code the platform locale table says it means (`zh-TW` on `zh-Hant`, not on a `zh-Hans` listed first).
+  Metadata-protocol: none
+  
+  - **The boot window.** The deployment's locale list fills during the boot: the app's authored translations arrive at `kernel:ready`. A `kernel:ready` reader of `localization.locale` (auth's mail and SMS default language) could ask before the language an `OS_LOCALIZATION_LOCALE` override names was in the list; the override was then reported `IGNORED` and the reader kept the next layer's value, though the boot went on to offer that language. `SettingsServicePlugin` now holds the option verdict on a sourced key until `kernel:bootstrapped`: while held, an override the list does not admit yet is in force and not reported; at `kernel:bootstrapped` it is judged again, and one the list still does not admit is reported once, as before, and a settings change is emitted for `localization.locale` so a reader that applied it reads the key again. The other value checks (pattern, domain, bounds, format) are judged at once, as ever. A `SettingsService` constructed without the plugin judges at once, as it always has.
+  - **One matcher.** Setup's default language and the IdP locale claim now both ask `resolveOfferedLocale` (`@objectstack/core`): `resolveLocale`'s exact and case-insensitive steps, then the platform locale table's language (`zh-TW` is `zh-Hant`, `en-US` is `en`), then `resolveLocale`'s base-language and variant steps. A language one door takes, the other takes too.
+  - **Comment.** `AUTH_EMAIL_TEMPLATE_LOCALES` (plugin-auth) no longer claims to be the setting's options: since #30286 the setting offers the deployment's locale list, and the two ends agree through `normalizeAuthEmailLocale`'s pass-through and the email service's `en-US` fallback.
+- 0e88208: i18n(service-settings): the built-in Setup settings pages ship in Traditional Chinese, Arabic, French and Brazilian Portuguese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The built-in settings pages (Mail, SMS, Branding, Company, Localization, Authentication, File Storage, AI & Embedder, Knowledge, and the Data Lifecycle page `@objectstack/objectql` registers) now carry `zh-Hant`, `ar`, `fr` and `pt-BR` beside the existing `en`, `zh-CN`, `ja-JP` and `es-ES`: page titles and descriptions, group headings, field labels and help, option labels, banners, action buttons and the source badges. An administrator reading Setup in one of those languages sees these pages in their own language instead of English. Country pickers name each country in the reader's language through `Intl.DisplayNames`, as the existing locales do. The settings coverage test now holds each new locale to the same full coverage. First half of package 6 of #30512; `ru`, `de` and `ko` follow in the second half.
+- 33043bd: i18n(service-settings): the built-in Setup settings pages ship in Russian, German and Korean
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The built-in settings pages (Mail, SMS, Branding, Company, Localization, Authentication, File Storage, AI & Embedder, Knowledge, and the Data Lifecycle page `@objectstack/objectql` registers) now carry `ru`, `de` and `ko` beside the existing eight locales: page titles and descriptions, group headings, field labels and help, option labels, banners, action buttons and the source badges. An administrator reading Setup in one of those languages sees these pages in their own language instead of English. Country pickers name each country in the reader's language through `Intl.DisplayNames`, as the existing locales do. The settings coverage test now holds each new locale to the same full coverage. Second half of package 6 of #30512; with it every built-in settings page carries all eleven platform locales.
+- deabe3b: fix(settings): settings refusals, live statements and action answers are written in every platform language, and `zh-TW` reads Traditional Chinese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Every module-local settings copy table carries the eleven platform languages** (the platform locale table: English, Simplified and Traditional Chinese, Spanish, Arabic, French, Brazilian Portuguese, Russian, German, Japanese, Korean). Before, they carried four (Setup → Email's live statement two), so a caller in any other language read English. Covered: the allowed-IP-ranges save refusal, the sign-in method floor refusals, the `auth.mfa_required` refusal and the organization MFA refusal and save notice (`@objectstack/plugin-auth`); Setup → Email's live-transport statement and "Send test email" answers (`@objectstack/plugin-email`); the default-currency lock and the "no longer offered" locale option (`@objectstack/service-settings`).
+  - **`zh-TW`, `zh-HK` and `zh-MO` callers read Traditional Chinese.** Each table looks the caller's code up with core's `resolveLocale`, which reads it through the platform locale table's read aliases; a code naming no language on the table is answered in English, as before.
+  - **"Send test SMS" (`sms/test`, `@objectstack/service-sms`) answers in the caller's language** (`Accept-Language`, else `?locale`), like the mail and storage connection tests. It read no locale before and answered English in every console language. A provider's own error text still passes through verbatim.
+  - **The two answers `SettingsService.runAction` writes itself** (the built-in `reset` result and the refusal for an action with no registered handler) are written in the caller's language. With no locale, or one off the platform table, every sentence is the English one callers read before.
+- a255a62: fix(service-settings): a namespace reset clears the value stored beneath an env pin, so the old value does not come back when the variable is removed
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The reset clears beneath a pin.** `SettingsService.resetNamespace` and the built-in `reset` settings action skipped every key an `OS_*` override in force pins, so a value stored beneath the pin survived the reset and took over again the day the variable was removed. The reset now clears that stored value too, with the same clear a single `null` write to a pinned key makes: it changes nothing in force (the key still answers the env value, `source: 'env'`, `locked: true`), it records the same `reset` audit row and change event, and once the variable is removed the key reads its default. A pinned key with nothing stored beneath it is left alone, and a key no variable pins is reset as before.
+  - **The count includes those keys.** `resetNamespace` returns the number of keys it cleared, pinned ones included.
+  - **The reset's answer says what is still pinned.** When an environment variable still pins some of the namespace's keys, the `reset` action's message adds one sentence with their number ("2 setting(s) remain pinned by environment variables."), in all eleven languages the answer is written in. A namespace no variable pins gets the same message as before.
+- 87fc795: feat(service-settings): the namespace read lists what is stored beneath a field an `OS_*` variable pins, so Setup can tell whether "clear the saved value" has anything to clear
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Now.** `getNamespace()`, the read `GET /api/settings/:namespace` serves, answers a key whose `OS_*` override is in force with the same `value`, `source: 'env'`, `locked: true` and `lockedReason` as before, and its `cascadeChain` now lists, below the `env` entry, the entries the key's read carries with no override in force: the stored rows the caller's cascade draws on (`global`, `tenant`, `user`, each with its own lock), then `default`. The `env` entry stays first and is still the only one flagged `effective`. An entry at the key's declared scope with a non-null value is the value a clear (`null`, accepted through a pin since the ADR-0007 D6 amendment) removes; after that clear the entry reads `null`.
+  - **Secrets.** A secret key's entries beneath a pin carry the read mask when a value is stored and `null` when none is, in process too; the stored secret is never decrypted for them, so a key pinned because its stored secret no longer decrypts still reads.
+  - **Unchanged.** `get()` and `getMany()` still answer an override in force from the env alone, without reading the store: they are the reads request paths call. An override whose value coerces to `null` keeps its single `env` entry, because any non-null entry listed below it would read as the effective one.
+  - **Cost.** A pinned key joins the namespace read's existing grouped row load, so the read costs one more load only when every key of a group is pinned.
+- b5696b4: feat(plugin-auth, service-settings)!: the access policy is set per organization, and the multi-factor requirement has three levels
+  
+  Clause-②: yes (narrowing) — a new `access_policy` settings namespace (scope `tenant`) carries each organization's allowed IP ranges, idle, absolute and concurrent session limits and multi-factor requirement; `auth.mfa_required` changes from a toggle to the levels `off` / `administrators` / `everyone`, `sys_organization.require_mfa` is no longer writable, and `AuthManagerOptions.mfaRequired` becomes `mfaRequirement`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-auth/src/auth-manager.ts#AuthManagerOptions) the narrowed operands are a runtime option of the auth manager (`AuthManagerOptions.mfaRequired`, which the compiler names at every caller), a settings value (`auth.mfa_required`, rewritten from a stored toggle to a level by plugin-auth at boot) and a platform object column's editability (`sys_organization.require_mfa`, whose stored value plugin-auth moves into the organization's access policy at boot); no packages/spec schema, registered node type or ADR-0087 conversion surface names any of them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING.** The access policy is set per organization (rulings of record on objectstack-ai/cloud#3668: 「支持按组织（推荐）」, 「可以，按三档做（推荐）」). Each organization sets its own allowed IP ranges, session idle timeout, absolute session lifetime, concurrent-session cap and multi-factor requirement in **Settings → Access policy** (the `access_policy` namespace, one row per organization, written by its administrators). The deployment's values in **Settings → Authentication** are the default and the floor: an organization may tighten and never loosen.
+  
+  The rule per key — a value weaker than the deployment's is refused at the save, and enforcement holds the floor whatever is stored:
+  
+  - `allowed_ip_ranges`: each range must lie inside a deployment range (any range when the deployment sets none), and the list must admit the address it is saved from. A request must pass both lists. A session is scoped to an organization only from an address its list admits: the sign-in is refused with `403 IP_NOT_ALLOWED` when the organization the session would be scoped to does not admit the address, and so is a switch of the active organization. A session the organization's list no longer admits (it roamed, or the list was tightened) is signed out on its next session read through the auth routes. Sign-in itself, before any organization is chosen, is judged by the deployment's list alone. A platform administrator is held by the deployment's list only, so an organization that locks out its own administrators can be reopened, and the save check does not refuse a platform administrator's save from outside an organization's list.
+  - `session_idle_timeout_minutes`, `session_absolute_max_hours`: `0` keeps the deployment's limit; a positive value may not exceed the deployment's. The shorter of the two applies to every session scoped to the organization. A switch of the active organization is judged against the target organization's limits before it lands, from the session's last request in any organization; a session past either is signed out and the switch refused.
+  - `max_concurrent_sessions_per_user`: `0` keeps the deployment's cap; a positive value may not exceed the deployment's. The deployment's cap still counts every session of the user, in any organization; an organization's cap counts only the user's sessions in that organization and signs out only those, oldest first. Both are checked at sign-in and when a session switches into the organization.
+  - `mfa_required`: `off` keeps the deployment's level; a level may not be weaker than the deployment's. The stronger of the two applies. `administrators` holds platform administrators, the organization's own administrators (owner or admin membership) and delegated administrators (a permission set with an `adminScope`), and lets everyone else through.
+  
+  What to do on upgrade:
+  
+  - `auth.mfa_required` saved as on now reads `everyone`, and as off `off`. A stored toggle is rewritten at the first boot; the `OS_AUTH_MFA_REQUIRED` env override still reads `true`/`false` with a warning for one major release — set it to `off`, `administrators` or `everyone`. A **write** of `true` or `false` to `auth.mfa_required` is now refused by the setting's option table (`invalid_option`): write `everyone` or `off`. Consumer: objectstack-ai/cloud's `apps/cloud/test/settings-cross-org-doors.test.ts` (`:533` writes `true`, `:552` expects it back) must be rewritten to `everyone` when the framework pin moves past this release.
+  - An organization whose `sys_organization.require_mfa` was on now carries `access_policy.mfa_required` set to `everyone`. Moved at the first boot (unless the organization already chose a level), and the column is cleared once the row lands; a move that fails is logged at `error` and retried at the next boot. The column is now readonly: a data-API write to it is refused like any other non-editable column.
+  - A host that passed the auth manager or plugin option `mfaRequired: true` passes `mfaRequirement: 'everyone'` (or `'administrators'`) instead. A host still passing `mfaRequired` is refused at construction (and on `applyConfigPatch`) with an error naming the replacement, never run without the requirement.
+  
+  What does not change: with no organization policy saved, every deployment enforces exactly what it enforced before, and the deployment's own keys keep their names.
+- 616311c: fix(service-settings): a settings `config_change` audit row records the value before and after the change, with secrets kept as digests
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A settings write's `config_change` row on `sys_audit_log` recorded who changed which key and when, plus a digest of the new value. It had no `old_value`, and its `new_value` held no readable value, so the row could not show what a policy setting (for example `auth.allowed_ip_ranges`) was changed from or to. ADR-0007 (Audit & history) asks for both, with an encrypted value recorded only as a placeholder and a checksum.
+  
+  - **`@objectstack/service-settings`.** `new_value` is `{ namespace, key, scope, value, digest }`. `old_value` has the same shape for the value the same stored settings row held before the write. It is `null` when that row held no value: a first write at that scope, or a row an earlier reset cleared. A reset now records its before value in `old_value`, and its `new_value` stays `null`. A secret-valued key, which is one the manifest declares `encrypted: true` (`type: 'password'` forces it), carries no `value` on either side. Each side carries only its masked digest, `<encrypted:hmac-sha256:…>`, or `<encrypted>` when no keyed digest is available. That is the same `new_value` such rows had before, so readers that parse it keep working. A row stored encrypted is never shown either, even if the key is no longer declared secret. `metadata` is unchanged and carries no value. `SettingsAuditSink.record` gets two optional entry fields, `value` and `previous`, and a host sink that ignores them works as before.
+  - **`@objectstack/plugin-audit`.** The ledger's read-side field redaction now also applies to a `config_change` row about a settings store (`sys_setting`, or `sys_platform_setting` for a global value). If a reader's field-level security masks that store's `value` field, the reader gets neither the value nor its digest on either side. They still see which setting changed. The CRUD mirror's row about the same write is narrowed the same way. Readers who can see the field get the row exactly as stored.
+- 6ee8c61: fix(service-settings)!: a `json` setting persists a JSON object or array, and the console sends one; data lifecycle quotas and retention overrides saved as text are read and applied
+  
+  Clause-②: yes (narrowing) — the settings save door and the env door start refusing a `json` value that is not a JSON object or array, which they accept today; ADR-0007:123 already declares `json` persists an object, so the narrowing enforces the declared contract and widens nothing
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes. What narrows is the value a settings door accepts for a `json` key: a stored value is runtime state in `sys_setting` / `sys_platform_setting` and an `OS_*` override is a deployment's environment, so there is nothing for a migration to rewrite. Values already stored as JSON text are handled by their one reader (`LifecycleService`): quota text is read as the object it holds, with a warning, and retention-override text waits for an administrator's save. -->
+  
+  **BREAKING** accept-set narrowing at the settings doors (`@objectstack/service-settings`): a `json` key takes a JSON object or array, as ADR-0007 declares.
+  
+  - **Before.** `PUT /api/settings/:namespace` stored any value under a `json` key. The console's `json` field sent the textarea's text, so Setup → Data Lifecycle saved `lifecycle.quotas`, `lifecycle.quota_defaults` and `lifecycle.retention_overrides` as strings, answered "saved", and the lifecycle sweep read every quota and override as absent: no `quota-exceeded` alert, no override applied, nothing logged.
+  - **Now.** The save door refuses a string, number or boolean under a `json` key with `400 SETTINGS_VALIDATION` and one `invalid_type` field error for the key, and stores nothing. An object, an array and `null` (a clear) are accepted. A value already stored under a key the save does not touch does not block it. An `OS_*` override for a `json` key whose text does not parse to an object or array is not in force: one `error` line names the variable, and the key resolves from the next layer of the cascade.
+  - **Who moves.** The console now parses the text at Save: valid JSON is sent as the object or array, blank text as a clear, and text that does not parse blocks Save on that row with "Invalid JSON". A `json` value the page loads as text (and is not locked) is put in the draft as it stands, so the page opens with one unsaved change per such key and a note on its row saying the value is stored as text; Save sends the object. A script that PUTs JSON text for a `json` key gets the 400.
+  
+  **The remedy.** Send the parsed value, not its text: `{ "quotas": { "sys_audit_log": 1000 } }`, not `{ "quotas": "{\"sys_audit_log\": 1000}" }`. For an `OS_*` override, set JSON text of an object, such as `OS_LIFECYCLE_QUOTAS='{"sys_audit_log":1000}'`.
+  
+  **Values saved as text before this release** (`@objectstack/objectql`). A deployment that saved the Data Lifecycle page through the old console holds JSON text, which applied nothing. After the upgrade the lifecycle service treats the three keys by what they drive:
+  
+  - `quotas` and `quota_defaults` only raise alerts, so text that holds a JSON object is read as that object and applied, with one warning per stored value: `lifecycle.quotas is stored as JSON text, not an object … Save the Data Lifecycle settings page again to store it as an object.`
+  - `retention_overrides` drives the reaper and the archiver, which delete rows, so its text is **not** applied: the declared retention windows stay in force and no row is reaped or archived on the old windows. One error per stored value names the key (and the organization, for an organization's own value) and the fix: open Setup → Data Lifecycle, check the value and save the page once. The page opens with the stored text already marked as an unsaved change and sends it as an object, so that one Save, with no edit, is what puts the window in force.
+  
+  A stored value that is not a JSON object still applies nothing, as before, and is now reported once at `error`.
+- dc8479e: fix(service-settings): a `map` setting refuses every key when its key source answers an empty list
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped and no stored row is read differently: the narrowing is one runtime refusal at the settings save door and the OS_* env door, for a map key on a host whose key source answers no keys, and its remedy is to clear the value, so there is nothing for `objectstack migrate meta` to rewrite. A value already stored is not re-judged. -->
+  
+  A `map` specifier's keys are judged against the key's option source (`registerOptionSource`), the list the running system answers, such as the lifecycle-declared objects for `lifecycle.quotas` and `lifecycle.retention_overrides`. When that source answered an empty list, the key check was skipped and any key was saved and put in force from `OS_*`. It now refuses each key with `invalid_option` at the save door and logs the override as not in force at the env door, as for any key the list does not hold. This narrows what is accepted: on a host with no lifecycle-declared object, a non-empty value for those keys, saved or set in `OS_LIFECYCLE_*`, was accepted before and is refused now; no such key could name an object the sweep reads. An empty map still saves. A key whose source could not answer, or which has no source, is still judged against its declared options and admits any key when it declares none.
+- 76e4c2c: feat: a settings `map` specifier's column headers can be translated, and Data Lifecycle's three map tables ship translated headers
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - `PlatformTranslationDataSchema` (`@objectstack/spec/system`): the platform bundle's `settings.<namespace>.keys.<key>` entry gains two optional groups, spelled as the `map` specifier spells its headers. `keyColumn` translates the key column and `columns.<name>` each value column, keyed by the column's `name`. Each carries `label` (the header) and `help` (the column's `description`, shown as the header's hover text), and is strict like its siblings: an undeclared leaf is refused, with `description` → `help` and `title` → `label` named, and `headers` / `columnLabels` → `columns`, `keyHeader` → `keyColumn` named on the setting entry. A bundle written before this change parses exactly as it did. `settings` stays platform-only, so no application bundle can write these groups.
+  - `@objectstack/service-settings`: every shipped non-English bundle (zh-CN, zh-Hant, ja-JP, ko, es-ES, pt-BR, fr, de, ru, ar) translates the five headers of `lifecycle.retention_overrides`, `lifecycle.quotas` and `lifecycle.quota_defaults` (`Object`, `Keep rows for`, `Expire rows after`, `Max rows`, `Lifecycle class`). The settings translation coverage test now holds each `map` header to the same per-locale coverage as the setting's label, and refuses header copy for a setting that is not a map or a column the map does not declare.
+  - `@object-ui/console`: the Settings page's map table reads the two groups. A header with no translation keeps the manifest's text, as every other settings string does. The key column now shows its declared `description` as hover text, as the value columns already did.
+  - Stored values, the save door and the manifest shape do not change.
+- 158cc2a: fix(service-settings): a select, radio or multiselect setting refuses every value when its option source answers an empty list
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped and no stored row is read differently: the narrowing is one runtime refusal at the settings save door and the OS_* env door, for a select-family key whose registered option source answers an empty list, and its remedy is a value the source offers once it offers one, so there is nothing for `objectstack migrate meta` to rewrite. A value already stored is not re-judged. -->
+  
+  A select, radio or multiselect key whose options come from a registered option source (`registerOptionSource`) was judged against that list only when the list had entries. When the source answered an empty list, any value was saved and any `OS_*` override was put in force. Now no value is admitted then: the save door refuses it with `invalid_option` ("… offers no value to choose from right now."), and the env door logs the override as not in force, as #31422 made the `map` family judge its keys. This narrows what is accepted. During the boot, while the option verdicts are held (`holdOptionSourceVerdicts`, sealed at `kernel:bootstrapped`), an override is still taken in force and judged at the seal, so a list the boot is still filling refuses nothing early. A key with no source, or whose source cannot answer, is judged against its declared options as before. Also, the env door's "said once" record now keys a structured value by a stable serialisation, so a second, different bad map under one `OS_*` variable is reported too (before, every map counted as the same value).
+- 01cbbba: feat(cluster): a settings change on one replica reaches every replica
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Multi-replica deployments on the `redis` cluster driver only. The single-node default (no declared replicas, or any driver but `redis`) emits exactly what it emitted before.
+  
+  `settings:changed` is an in-process subscriber set, and its subscribers rebuild the auth posture, password / session / MFA policy, organization access policy, mail, SMS, storage and the AI provider. Under round-robin only the replica that took the write rebuilt; every peer kept the old configuration, security posture included, until it restarted.
+  
+  - **A fifth cluster lane (`@objectstack/service-cluster`).** `MetadataClusterBridgePlugin` attaches the settings service to the cluster bus on the `settings.changed` channel, only where the deployment declares several replicas (`OS_CLUSTER_REPLICAS` greater than 1, or `OS_EXPECT_MULTI_NODE=true`) over the `redis` driver (`declaresMultiReplicaOnRedis`). The split-brain guard is unchanged.
+  - **The message is an address, never a value (`@objectstack/service-settings`).** A write publishes the namespace, key, scope, action and time of the change. A peer emits its own local `settings:changed`, so each subscriber re-reads the shared store. A received change is never published again, and the writer's own message is dropped by its node id. New exports: `SETTINGS_CHANGE_CLUSTER_CHANNEL` and the `ClusterSettingsChangePayload` type; new methods `SettingsService.attachSettingsChangePubSub()`, `detachSettingsChangePubSub()` and `resyncSettingsChangePubSub()`.
+  - **Joins `cluster.resync`.** When the cluster driver's connection returns after an outage, every registered namespace is announced locally once (`key: '*'`), so a change whose message was lost during the outage still takes effect without a restart.
+- f00fb1b: fix(core)!: every door that admits an API key records where the use came from on the `credential_use` row (#31898)
+  
+  Clause-②: yes (narrowing) — `RequestExecutionContextInput.transport` in `@objectstack/core` becomes a required key, typed `{ remoteAddress } | undefined`: a caller of `resolveRequestExecutionContext` now states the transport's peer address, or states that it hands none.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/request-execution-context.ts#RequestExecutionContextInput) the narrowed member is an input key of a runtime TypeScript interface, which the compiler names at every caller (TS2741); no packages/spec schema, registered node type, stored row or ADR-0087 conversion surface names it, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a TypeScript caller of `resolveRequestExecutionContext`.
+  
+  Since #31821 the `credential_use` audit row records the client address and user agent of the use that opened the window, but only REST, the runtime dispatcher (its `/mcp` face included) and the stdio MCP transport handed their client facts over. An API key admitted at any other door wrote `metadata.ip_address_absent: 'not_supplied'`. Every door that can admit an API key now hands them over, so no door writes `not_supplied`:
+  
+  - the storage family (its sign-in gate reader, the parent-governed download authorizer and the upload attacher), the settings routes, the sharing-rule shareable-objects list, the share-link routes, the notification preference options, the datasource admin routes, the print route, the own-row delete routes, the organization settings door, the cloud-connection status and setup doors, and the marketplace local-plugin install.
+  
+  Each door hands only its transport's own peer address and the request headers. The address recorded is the one the deployment establishes under its one client-address trust rule (`IAuthService.resolveClientAddress`): `X-Forwarded-For` / `X-Real-IP` only when `server.trustProxy` is declared, otherwise the peer. No door reads a forwarded header itself. `@objectstack/core` exports the one helper the doors use, `credentialUseClientFor(authService, { headers, remoteAddress })`, and `transportPeerAddressOf(c)` for a Hono door's socket peer.
+  
+  Which credentials a door admits does not change. Doors that read only a session (`credentials: 'session-only'`) read no key and write no row; they state `transport: undefined`.
+  
+  What to do on upgrade:
+  
+  - A caller of `resolveRequestExecutionContext` that omitted `transport` no longer compiles (`TS2741: Property 'transport' is missing`). Pass `transport: { remoteAddress }` with the transport's own peer address (`undefined` when it has none), or `transport: undefined` for a call that hands no client facts, such as a `'session-only'` call. Never pass a forwarded header as `remoteAddress`: the auth service applies the trust rule.
+- 09bf7de: fix(service-settings)!: Setup → AI shows no provider until one is configured, and no longer offers or saves the Memory echo provider (#31960)
+  
+  Clause-②: no (narrowing) — four served answers narrow, and one widens. Narrowing: `PUT /api/settings/ai` (`SettingsService.setMany('ai', …)`) with `provider: 'memory'` answered 200 and now answers `400 SETTINGS_VALIDATION` with the existing `invalid_option` field error at `provider`. `POST /api/settings/ai/test` on the built-in Test connection handler (the one in force when no AI runtime replaces it) with no provider answered 200 `ok: true` and now answers `400 SETTINGS_ACTION_FAILED` saying no provider is configured. `OS_AI_PROVIDER=memory` was in force and is now reported IGNORED, so `ai.provider` resolves from the next layer. With no provider stored (or `memory` stored), a `PUT` of `temperature`, `max_tokens`, `request_timeout_ms` or `title_max_length` outside its declared window answered 200 (those fields were hidden and not validated) and now answers `400 SETTINGS_VALIDATION` (`min_value` / `max_value`). Widening: `provider` is no longer required, so a `PUT` with `provider: ''` answered `400 SETTINGS_VALIDATION` (`required`) and is now stored, and reads as not configured. `GET /api/settings/ai` on an install with nothing stored serves `values.provider` as `{ value: null, source: 'default' }` instead of `'memory'`, and the served manifest's `provider` select carries no `default` and no `memory` option. A real provider saves, reads and tests exactly as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema, export or metadata type changes: ai.provider keeps its declaration and loses one option value and its default. A provider row already stored as memory is not rewritten; it is served as stored, as any stored value outside a narrowed option table is, so there is nothing at rest for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the AI settings doors.
+  
+  - **Before.** On a host with no AI provider configured, Setup → AI & Embedder showed "Memory (echo — testing only)" as the chosen provider while the AI runtime reported AI as disabled. Saving Memory answered "Settings saved", and chat still answered that AI is not configured.
+  - **Now.** The provider select is empty until a provider is chosen. Memory is not offered, and saving it is refused.
+  - FROM `provider: 'memory'` (Setup, `PUT /api/settings/ai`, or `OS_AI_PROVIDER=memory`) TO a real provider (`gateway`, `openai`, `anthropic`, `google`, `deepseek`, `dashscope`, `cloudflare`, `siliconflow` or `openrouter`) with its API key, or no provider at all: the Memory echo adapter never enabled AI on a server.
+  - FROM reading `ai.provider` as `'memory'` when nothing is configured TO reading `null` (`source: 'default'`).
+  - FROM `provider` required TO not required: unset is a served state, so the Embedder and Observability sections, and the generation defaults of a provider configured by boot environment variables, save with no provider chosen. `provider: null` in a save clears it to unset; `provider: ''` is stored as an empty value (it was refused `required`), which the page and Test connection read as not configured.
+  - FROM `temperature`, `max_tokens`, `request_timeout_ms` and `title_max_length` saved unchecked while the provider was unset or Memory (the fields were hidden) TO refused outside their declared windows (0–2, 1–1048576, 1000–600000, 8–80), as for any other provider. Send a value inside the window.
+  - **Already saved Memory.** The stored row is kept and served as stored. Other AI settings still save. Choose a real provider, or use "Reset to environment defaults", to replace it.
+  - The generation-default and conversation-title fields no longer hide when the provider is Memory; they always show.
+- f75466c: fix(console): a clean self-hosted install reads as a first run — the sign-in page leads with creating the owner account, sign-up says every problem inline at once, Home says each item once, and a wrong password on a box with no mail points to the administrator
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  What a visitor and an administrator see on a fresh deployment (objectstack#32021):
+  
+  - **Sign-in on a box nobody has an account on.** The page asked the first visitor "Welcome back". When `GET /api/v1/auth/bootstrap-status` answers `hasOwner: false` (the probe that already switched the card's footer between "Sign up" and "Have an invitation?"), the card is now titled "Set up this deployment" and leads with a "Create the owner account" button, with the sign-in form below it. The probe now runs for every posture that offers a form to a visitor not invited, not only `invite_only`. A probe that fails, or a box that has an owner, keeps "Welcome back" exactly as before.
+  - **Sign-up.** `RegisterForm` is `noValidate` and checks every field on submit, so the browser's one-at-a-time bubble (in the browser's language) is gone, and a short password that also does not match shows both messages together, each under its own field with `aria-invalid` and `aria-describedby`. Three new labels, `nameRequiredError`, `emailRequiredError` and `emailInvalidError`, carry the empty-name, empty-email and malformed-email messages; the minimum stays 8, as the auth config serves none. The banner still carries what the server refuses.
+  - **Home.** "No email service is set up" and "Connect an AI assistant" are each said once: the deployment notice keeps its email line (what it says and who sees it are ruled, objectstack#30120), and the first-run checklist leaves its Email delivery row out while that line is drawn; the checklist's assistant row, while it is not done, stands in for Home's Connect an AI Assistant card, which members (who get no checklist) still see. The notice now uses the same 1120px width as the rest of Home, and the checklist sits closer under it, so "Your apps" is not pushed below the fold.
+  - **The checklist's assistant row** says it is about an external AI assistant over MCP, and that the built-in AI is set up separately.
+  - **A wrong password with no mail transport.** When `/api/v1/auth/config` reports `features.emailDelivery: false`, the refusal says to ask the administrator to reset the password, instead of pointing to a reset email that never arrives.
+  - **zh-CN wording.** The checklist names the current language and country in the reader's language; the managed-by note says 账号系统 instead of 「经身份服务写入」; and the AI settings page translates Embedder, Trace, Prompt and PII (向量化, 请求追踪, 提示词, 个人敏感信息).
+  
+  New `@object-ui/i18n` keys, in every pack: `auth.login.firstOwner.{title,description,createButton,signInDivider}`, `auth.login.errors.invalidCredentialsNoMail`, `auth.register.{nameRequiredError,emailRequiredError,emailInvalidError}` and `auth.register.firstOwner.{title,description}`. Nothing is removed or renamed.
+- ff04ad8: feat(service-settings, spec): a settings page read serves the values its keys have in the running system, as the runtime that owns them states them
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `GET /api/settings/:namespace` now answers an optional `live` field beside `values`: `{ provider: { value: 'openai', source: 'environment' } }`. `values` says what the settings resolve; `live` says what is in use, which can come from elsewhere. With nothing saved, the AI runtime detects its provider from its own boot environment, so `values.provider` reading `null` never meant the built-in AI was off. `source` is `settings`, `environment` or `none`. A key absent from `live`, or no `live` at all, means not stated (unknown), which is not `none`. The field sits behind the page's own read permission (`manage_platform_settings` for `ai`).
+  
+  A runtime fills it through the existing live-status seam: `registerLiveStatus(namespace, provider)` answers may now carry `values: { KEY: { value, source } }` (type `SettingsLiveValue`). Only an option-bearing key may be named, and only with a value its option table admits, so a served value is always one of the page's own options and never a credential. Only `value` and `source` are served. An entry that breaks this is left out and logged once per read without its value; the banner and the other entries stand. `SettingsService.liveStatementOf` returns the banner and the live values from one provider call; `liveStatusOf` still returns the banner alone.
+  
+  `SettingsNamespacePayloadSchema` gains the optional `live` field. A page with no live-status provider, or one that states only a banner, answers exactly as before.
+- c147fc2: fix(i18n): the Metadata Commit object reads in Chinese, Japanese and Spanish, and the zh-CN authentication settings use full-width punctuation
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_metadata_commit`, the package commit log, was missing from the platform-objects translation extract while its three `sys_metadata*` siblings were in it, so a zh-CN, ja-JP or es-ES admin read its label, plural and field labels in English ("Metadata Commit"). It is now extracted into every locale bundle and translated in zh-CN (元数据提交), ja-JP and es-ES; the other locales carry the English source until they are translated.
+  
+  The zh-CN copy of the Authentication settings page mixed ASCII `, ; : ( )` into Chinese sentences (「认证限流:最大请求数」, 「密码有效期(天)」). Those marks are now full-width; ASCII stays inside codes, addresses and English names (`203.0.113.0/24`, `acme.com`, `ISO 8601`).
+- 4c30b9c: fix(service-settings): the deployment notice no longer reports an unset mail transport
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /api/settings/deployment/notice` used to add an `email_not_configured` finding whenever the email service did not report a configured transport. Mail is an optional setting, and the notice should speak about mail only when something needs mail and cannot send it; nothing states that today, and the flows that send mail, such as invitations and password reset, already read the transport themselves. The finding is gone: a production deployment without mail gets no mail line, and the notice's `fingerprint` no longer names it.
+  
+  Configuring mail therefore no longer changes the fingerprint, so a notice an administrator hid stays hidden when mail is set up later. One-time effect of the upgrade: a hide recorded against a fingerprint that still named `email_not_configured` no longer matches, so that notice shows once more on its remaining findings until it is hidden again. The Console stopped drawing this finding in an earlier change; no other platform reader names it.
+- bdbaf80: fix: Setup's form help speaks to an administrator, and the queue pages, the mail status banner and the test-email toast read in Chinese on a zh-CN console
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Field help (English source and zh-CN):** the permission set and position assignment forms, the out-of-office (approval delegation) rule, and the business unit, organization and user forms no longer describe the implementation. Gone: "fail-closed", "half-open [from, until)", "agent grants", "graph semantics", "expanded by graph queries", "Null = root of tenant", "HRIS", "When true / When false" (zh-CN 「为 true 时」 now reads 「开启后」) and an HTTP status code. The help now says when an assignment starts and ends, what turning a switch on does, and what to fill in. Text only: no field name, key, option value or behaviour changes.
+  - **`@objectstack/plugin-sharing`:** `sys_queue` and `sys_queue_member` join the plugin's translation bundle, with zh-CN text, so the 队列 and 队列成员 pages, their columns, help and the 新建 button read in Chinese. ja-JP and es-ES carry English fills for now.
+  - **`@objectstack/plugin-email`:** the live-status statement at the top of Setup → Email and the "Send test email" answer (sent, failed, logged only) are written in the caller's display language, en and zh-CN today; another language gets English.
+  - **`@objectstack/service-settings`:** a settings action handler (`SettingsActionHandler`) receives an optional `locale`, the caller's display language read from the request the same way the live-status statement's is (`Accept-Language`, else `?locale`); `runAction` takes it as a fifth `display` argument. Existing handlers compile and behave unchanged.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [f6a429b]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [8fed00f]
+- Updated dependencies [25fea77]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [740edc5]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [6a8f415]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [eb68b98]
+- Updated dependencies [1ebe0c5]
+- Updated dependencies [2f05a46]
+- Updated dependencies [b126c13]
+- Updated dependencies [a11ef71]
+- Updated dependencies [deac7f4]
+- Updated dependencies [2ae3e30]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [ed4b832]
+- Updated dependencies [8c9260f]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [f5e23e2]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [d36d4ad]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [e735425]
+- Updated dependencies [1f37085]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [f4b4c8a]
+- Updated dependencies [db50231]
+- Updated dependencies [0e1311d]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [b6e6545]
+- Updated dependencies [90457e7]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [59630d9]
+- Updated dependencies [5e85952]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [96b9350]
+- Updated dependencies [d9a232f]
+- Updated dependencies [3487ccc]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [5b7269f]
+- Updated dependencies [2735ca4]
+- Updated dependencies [6dd196d]
+- Updated dependencies [d834a36]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [b96b875]
+- Updated dependencies [c62e72a]
+- Updated dependencies [450bfb6]
+- Updated dependencies [5defbfe]
+- Updated dependencies [f56354c]
+- Updated dependencies [e55347d]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [36a8700]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [5a8dbc7]
+- Updated dependencies [fb94249]
+- Updated dependencies [98ba756]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [8fca8f7]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [d9f626b]
+- Updated dependencies [1a66fcf]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [f00fb1b]
+- Updated dependencies [c655af8]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [aad7d2f]
+- Updated dependencies [4f6fb53]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [f75466c]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [9bff554]
+- Updated dependencies [1368536]
+- Updated dependencies [02498c9]
+- Updated dependencies [7aab601]
+- Updated dependencies [2830f31]
+- Updated dependencies [c419609]
+- Updated dependencies [e34723f]
+- Updated dependencies [9052363]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [e267b96]
+- Updated dependencies [1e474e3]
+- Updated dependencies [7575116]
+- Updated dependencies [0763bf6]
+- Updated dependencies [2b11a71]
+- Updated dependencies [de6d893]
+- Updated dependencies [c147fc2]
+- Updated dependencies [5192297]
+- Updated dependencies [326453e]
+- Updated dependencies [6d6f86b]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [0115280]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [cac0f1a]
+- Updated dependencies [3c18783]
+- Updated dependencies [e336a33]
+- Updated dependencies [3452dec]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [5694bf5]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [070e879]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [28a1527]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [d4b14a8]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [e542831]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [44a030b]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [1f3e6fd]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/platform-objects@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes
