@@ -484,6 +484,35 @@ describe('[#32613] two packages ship one name, each with its declared override: 
                     .toEqual([`action:${SHARED_ACTION}`]);
             }
         });
+
+        // The served holder set (#32497): with one holder disabled, the
+        // enabled holder's override is the one listed and served at its
+        // address, whichever holder is disabled (the first to register, which
+        // the by-name lookup names, included); re-enabled, each holder's own.
+        it(`flow and action, ${first} registered first, one holder disabled then re-enabled: the enabled holder's own override`, async () => {
+            const protocol = await bootHolders(order);
+            const registry = (protocol as any).engine.registry;
+            const p: any = protocol;
+            for (const type of ['flow', 'action'] as const) await overrideEach(protocol, type, [ALPHA, BETA]);
+            const byName = async (type: 'flow' | 'action', pkg: string) => (await p.getMetaItem({
+                type, name: type === 'flow' ? FLOW : SHARED_ACTION, packageId: pkg,
+            })).item.label;
+            for (const [disabled, enabled, label] of [[BETA, ALPHA, 'OVR-A'], [ALPHA, BETA, 'OVR-B']] as const) {
+                registry.disablePackage(disabled);
+                for (const type of ['flow', 'action'] as const) {
+                    for (const face of ['served', 'execution'] as const) {
+                        expect(await entries(protocol, type, face), `${type} ${face}, ${disabled} disabled`).toEqual([`${enabled}:${label}`]);
+                    }
+                    expect(await byName(type, enabled), `${type} at ${enabled}, ${disabled} disabled`).toBe(label);
+                }
+                registry.enablePackage(disabled);
+                for (const type of ['flow', 'action'] as const) {
+                    for (const face of ['served', 'execution'] as const) {
+                        expect(await entries(protocol, type, face), `${type} ${face}, re-enabled`).toEqual([`${ALPHA}:OVR-A`, `${BETA}:OVR-B`]);
+                    }
+                }
+            }
+        });
     }
 
     it('CONTROL: one package ships the name, with its declared override: listed once, as before', async () => {
