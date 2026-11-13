@@ -49,6 +49,7 @@ import {
   readHeldDrops,
   type HeldDrops,
 } from '../../utils/apply-drop-gates.js';
+import { collectSchemaSyncIndexes, renderSchemaSyncIndexes } from '../../utils/schema-sync-indexes.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -374,6 +375,20 @@ export default class MigrateApply extends Command {
         // --allow-destructive. [#24958] Nor does an entry a gate holds: it
         // names what it waits for.
         await renderPendingSchemaWork(pending);
+        // [#32653] The runtime-owned indexes this run's flush builds once the
+        // held-back DDL is done (today the permission-set grant's package-less
+        // guard), listed as `os migrate plan` lists them (#32460) and in the
+        // same place: after the held-back work, before the drift, the order the
+        // apply performs them in. Without it the prompt below under-reports DDL
+        // the confirmed run then sends. The flush runs only when this run
+        // performs something (`totalIntended` below), so the drift counted is
+        // the drift this run applies, not the destructive entries it skips.
+        for (const line of renderSchemaSyncIndexes(await collectSchemaSyncIndexes({
+          schemaSync: stack.schemaSync,
+          applyPerformsWork: intended.length > 0 || pending.length > 0,
+          pending,
+          engine: () => kernel.getService?.call(kernel, 'objectql'),
+        }))) console.log(line);
         renderPlan(drift, await describeDriftEntries(limits, gateHeld));
         if (pending.length > 0) printInfo(await summarizePendingSchemaWork(pending));
         printInfo(summarize(drift));

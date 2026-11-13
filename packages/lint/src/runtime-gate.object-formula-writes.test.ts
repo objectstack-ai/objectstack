@@ -41,6 +41,7 @@ import { describe, expect, it } from 'vitest';
 import { EXPRESSION_INVALID, runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 import { runStackExpressionPasses, validateStackExpressions } from './validate-expressions.js';
+import { STORED_EXPRESSION_CROSS_RECORD_INPUT, STORED_EXPRESSION_VOLATILE_INPUT } from './stored-expression-inputs.js';
 
 /** The card's object, with the formula under test. `sharingModel` keeps `security-owd-unset` quiet. */
 const fxSqrt = (expression: string, over: Record<string, unknown> = {}) => ({
@@ -262,5 +263,76 @@ describe('#22019 / #22032 — every pass over the object\'s body judges on this 
     const onObjectWrite = runStackExpressionPasses(stack, { runtimeWriteType: 'object' });
     expect(onObjectWrite.map((i) => i.where)).toEqual(LIFTED_SITES);
     expect(onObjectWrite).toEqual(all.filter((i) => LIFTED_SITES.includes(i.where)));
+  });
+});
+
+describe('#32529 / #32554 — the object door judges a stored expression\'s inputs as the build does', () => {
+  /** The related record, delivered by the stored universe the door reads. */
+  const employee = {
+    name: 'fx_employee', label: 'Employee', sharingModel: 'private',
+    fields: { daily_hours: { type: 'number', label: 'Daily Hours' } },
+  };
+  /** The written object, with one stored computed field `hours` (a `number`, not a `formula`). */
+  const leave = (expression: string, type = 'number') => ({
+    name: 'fx_leave',
+    label: 'Leave',
+    sharingModel: 'private',
+    fields: {
+      employee: { type: 'lookup', label: 'Employee', reference: 'fx_employee' },
+      days: { type: 'number', label: 'Days' },
+      hours: { type, label: 'Hours', expression },
+    },
+  });
+  const LEAVE_WHERE = "object 'fx_leave' · field 'hours' expression";
+  const gateLeave = (expression: string, type?: string) =>
+    runRuntimeAuthoringRules({ type: 'object', item: leave(expression, type), context: { objects: [employee] } });
+  const ofRule = <T extends { rule: string }>(rule: string, fs: readonly T[]): T[] => fs.filter((f) => f.rule === rule);
+
+  it('⭐ LIT — a stored expression reading another record is an ADVISORY at the door, under its own rule id, never a 422', () => {
+    const result = gateLeave('record.days * record.employee.daily_hours');
+
+    const advised = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.advisories);
+    expect(advised, dump(result)).toHaveLength(1);
+    expect(advised[0]).toMatchObject({ severity: 'warning', where: LEAVE_WHERE, path: LEAVE_WHERE });
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('⭐ LIT — a hop through the injected `owner_id` is advised too, on an object that does not declare it', () => {
+    const result = gateLeave("record.?owner_id.?name.orValue('')", 'text');
+
+    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.advisories), dump(result)).toHaveLength(1);
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('⭐ LIT — a re-save of an object STORED with the hop still saves: the advisory is repeated, nothing is refused', () => {
+    const stored = leave('record.days * record.employee.daily_hours');
+    const result = runRuntimeAuthoringRules({ type: 'object', item: stored, context: { objects: [employee, stored] } });
+
+    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.advisories), dump(result)).toHaveLength(1);
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('⭐ LIT — a stored expression reading the clock is an ADVISORY at the door, never a refusal', () => {
+    const result = gateLeave('today()', 'date');
+
+    expect(ofRule(STORED_EXPRESSION_VOLATILE_INPUT, result.advisories), dump(result)).toHaveLength(1);
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('⭐ CONTROL — a same-row stored expression, and a `formula` reading the hop, publish clean', () => {
+    for (const result of [gateLeave('record.days * 8'), gateLeave('record.days * record.employee.daily_hours', 'formula')]) {
+      expect(result.errors, dump(result)).toEqual([]);
+      expect(result.advisories, dump(result)).toEqual([]);
+    }
+  });
+
+  it('⭐ PARITY — the door finding IS the build finding for the same body', () => {
+    const body = leave('record.days * record.employee.daily_hours');
+    const atDoor = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, gateLeave('record.days * record.employee.daily_hours').advisories);
+    const stack = { objects: [employee, body] };
+    const atBuild = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, runAuthoringRules('build', { normalized: stack, parsed: stack }));
+
+    expect(atBuild).toHaveLength(1);
+    expect(atDoor).toEqual(atBuild);
   });
 });

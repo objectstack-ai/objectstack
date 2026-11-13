@@ -151,7 +151,7 @@ Re-verified in this worktree, not taken from the proposal:
 | Uninstall is **per package**, not a namespace sweep | `packages/objectql/src/registry.ts#unregisterObjectsByPackage` (`unregisterObjectsByPackage`) |
 | The one place a second package is refused | `packages/objectql/src/registry.ts#installPackage` — the gate and the throw are inside it |
 | The load-time call site that registers exactly one manifest | `packages/objectql/src/plugin.ts` (`ql.registerApp(manifest)`) |
-| `validateSingleApp` constrains only `type: 'app'` — it returns `[]` for every other type | `packages/spec/src/stack.zod.ts#validateSingleApp` |
+| `validateSingleApp` constrains only `type: 'app'` — it returns `[]` for every other type. ⚠️ **A reading of 2026-09-01, no longer true since 2026-11-12** ([#32586](https://github.com/objectstack-ai/objectstack/issues/32586), merged as `9ae829108c`): the function also holds a `type: 'module'` package to at most one app, under [ADR-0019](./0019-app-as-consumer-unit.md) D3 as amended, and returns `[]` for every type but those two. | `packages/spec/src/stack.zod.ts#validateSingleApp` |
 | Shareable namespaces are `{base, system}` plus `sys` | `packages/objectql/src/registry.ts#isShareableNamespace` + `packages/objectql/src/registry.ts#isShareableNamespace` (`isShareableNamespace`) |
 | The artifact's `manifest` key is **singular and optional** on the schema `os compile` validates and writes | `packages/spec/src/stack.zod.ts`; `packages/cli/src/commands/compile.ts` (parse) and `packages/cli/src/commands/compile.ts` (write); `os build` is an alias of `os compile` (`packages/cli/src/commands/build.ts`) |
 
