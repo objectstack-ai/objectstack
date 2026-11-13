@@ -109,18 +109,18 @@ function measure(cell: DialectCell): void {
     });
 
     it('a filter by that day finds every row written as that day', async () => {
-      const eq = await driver.find(TABLE, { where: { due: DAY } } as any);
+      const eq = await driver.find(TABLE, { where: { due: DAY } });
       expect(labelsOf(eq as any[])).toEqual(expect.arrayContaining(['created', 'updated']));
-      const range = await driver.find(TABLE, { where: { due: { $gte: DAY, $lte: DAY } } } as any);
+      const range = await driver.find(TABLE, { where: { due: { $gte: DAY, $lte: DAY } } });
       expect(labelsOf(range as any[])).toEqual(expect.arrayContaining(['created', 'updated']));
-      const before = await driver.find(TABLE, { where: { due: { $lt: DAY } } } as any);
+      const before = await driver.find(TABLE, { where: { due: { $lt: DAY } } });
       expect(labelsOf(before as any[])).not.toContain('created');
     });
 
     it('a `datetime` field beside it still reads and filters as its instant', async () => {
       const row: any = await driver.findOne(TABLE, { where: { id: ids.created } });
       expect(row.seen).toBe(SEEN);
-      const hit = await driver.find(TABLE, { where: { seen: SEEN } } as any);
+      const hit = await driver.find(TABLE, { where: { seen: SEEN } });
       expect(labelsOf(hit as any[])).toEqual(['created']);
     });
 
@@ -128,13 +128,13 @@ function measure(cell: DialectCell): void {
       const era: any = await driver.findOne(TABLE, { where: { id: ids.era } });
       expect(era.due).toBe(DAY);
 
-      const eq = await driver.find(TABLE, { where: { due: DAY } } as any);
+      const eq = await driver.find(TABLE, { where: { due: DAY } });
       expect(labelsOf(eq as any[])).toEqual(['created', 'era', 'updated']);
 
       const grouped = await driver.aggregate(TABLE, {
         groupBy: [{ field: 'due', dateGranularity: 'day' }],
         aggregations: [{ function: 'count', alias: 'n' }],
-      } as any);
+      });
       expect((grouped as any[]).map((g) => [g.due, Number(g.n)])).toEqual([[DAY, 3]]);
     });
 
