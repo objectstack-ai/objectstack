@@ -223,7 +223,10 @@ export async function globalBeforeHook(
           });
         }
         const unreadable = identitySourceUnreadable('this SSO-only environment may reset your password here');
-        throw new APIError('SERVICE_UNAVAILABLE', unreadable.body.error);
+        throw new APIError('SERVICE_UNAVAILABLE', {
+          message: unreadable.body.error.message,
+          code: 'SERVICE_UNAVAILABLE',
+        });
       }
     }
   }
