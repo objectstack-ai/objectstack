@@ -336,3 +336,119 @@ describe('#32529 / #32554 — the object door judges a stored expression\'s inpu
     expect(atDoor).toEqual(atBuild);
   });
 });
+
+describe('#33072 — the object_extension door judges an extension field\'s formula as the build does', () => {
+  /** The extended object, as the door's live universe carries it. */
+  const target = {
+    name: 'fx_ticket',
+    label: 'Ticket',
+    sharingModel: 'private',
+    fields: {
+      employee: { type: 'lookup', label: 'Employee', reference: 'fx_staff' },
+      amount: { type: 'number', label: 'Amount' },
+    },
+  };
+  const staff = {
+    name: 'fx_staff', label: 'Staff', sharingModel: 'private',
+    fields: { daily_hours: { type: 'number', label: 'Daily Hours' } },
+  };
+  /** One extension of `fx_ticket` adding the given fields. */
+  const extension = (fields: Record<string, unknown>) => ({ extend: 'fx_ticket', fields });
+  const scoreOf = (expression: string) => extension({ score: { type: 'formula', label: 'Score', expression } });
+  const EXT_WHERE = (field: string) => `object 'fx_ticket' · objectExtensions[0] · field '${field}' expression`;
+  const gateExtension = (item: unknown, objects: unknown[] = [target, staff]) =>
+    runRuntimeAuthoringRules({ type: 'object_extension', item, context: { objects } });
+  const ofRule = <T extends { rule: string }>(rule: string, fs: readonly T[]): T[] => fs.filter((f) => f.rule === rule);
+
+  it('`validateStackExpressions` is on the object_extension door, beside the vocabulary freeze', () => {
+    expect(runtimeAuthoringRulesFor('object_extension').map((r) => r.name))
+      .toEqual(['validateStackExpressions', 'validateSecurityRoleWord']);
+  });
+
+  it('⭐ LIT — an extension formula calling an unregistered function (`sqrt`) is REFUSED, at the entry the build names', () => {
+    const result = gateExtension(scoreOf('sqrt(record.amount)'));
+
+    expect(result.rulesRun).toContain('validateStackExpressions');
+    const errs = expressionFindings(result.errors);
+    expect(errs, dump(result)).toHaveLength(1);
+    expect(errs[0]).toMatchObject({ severity: 'error', where: EXT_WHERE('score'), path: EXT_WHERE('score') });
+  });
+
+  it('⭐ LIT — an extension formula reading a field the extended object does not serve is REFUSED', () => {
+    const result = gateExtension(scoreOf('record.amont * 2'));
+
+    const errs = expressionFindings(result.errors);
+    expect(errs, dump(result)).toHaveLength(1);
+    expect(errs[0]!.where).toBe(EXT_WHERE('score'));
+    expect(errs[0]!.message).toContain('amont');
+  });
+
+  it('⭐ LIT — a stored extension field reading another record is an ADVISORY, never a 422', () => {
+    const result = gateExtension(extension({
+      hours: { type: 'number', label: 'Hours', expression: 'record.amount * record.employee.daily_hours' },
+    }));
+
+    const advised = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.advisories);
+    expect(advised, dump(result)).toHaveLength(1);
+    expect(advised[0]).toMatchObject({ severity: 'warning', where: EXT_WHERE('hours') });
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('⭐ PARITY — on one shared input, the door finding IS the build finding', () => {
+    for (const item of [
+      scoreOf('sqrt(record.amount)'),
+      extension({ hours: { type: 'number', label: 'Hours', expression: 'record.amount * record.employee.daily_hours' } }),
+    ]) {
+      const atDoor = gateExtension(item);
+      const stack = { objects: [target, staff], objectExtensions: [item] };
+      const atBuild = runAuthoringRules('build', { normalized: stack, parsed: stack })
+        .filter((f) => f.where.includes('objectExtensions'));
+
+      expect(atBuild.length, dump(atBuild)).toBe(1);
+      expect([...atDoor.errors, ...atDoor.advisories]).toEqual(atBuild);
+    }
+  });
+
+  it('⭐ CONTROL — a valid extension formula, and one reading a field the same extension adds, publish clean', () => {
+    for (const item of [
+      scoreOf('floor(record.amount)'),
+      extension({
+        bonus: { type: 'number', label: 'Bonus' },
+        total: { type: 'formula', label: 'Total', expression: 'record.amount + record.bonus' },
+      }),
+    ]) {
+      const result = gateExtension(item);
+      expect(result.errors, dump(result)).toEqual([]);
+      expect(result.advisories, dump(result)).toEqual([]);
+      expect(result.rulesRun).toEqual(['validateStackExpressions', 'validateSecurityRoleWord']);
+    }
+  });
+
+  it('an extension of an object the door does not carry is judged on what does not depend on its fields', () => {
+    expect(expressionFindings(gateExtension(scoreOf('sqrt(record.amount)'), []).errors)).toHaveLength(1);
+    const read = gateExtension(scoreOf('record.amount * 2'), []);
+    expect(read.errors, dump(read)).toEqual([]);
+  });
+
+  it('a stored object\'s own broken formula is not the extension write\'s to answer for (the differential)', () => {
+    const broken = { ...target, fields: { ...target.fields, bad: { type: 'formula', label: 'Bad', expression: 'sqrt(record.amount)' } } };
+    const result = gateExtension(scoreOf('floor(record.amount)'), [broken, staff]);
+
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('on an extension write only the extension walk judges: no pass over the objects the door carries', () => {
+    const broken = { ...target, fields: { ...target.fields, bad: { type: 'formula', label: 'Bad', expression: 'sqrt(record.amount)' } } };
+    const stack = { objects: [broken, staff], objectExtensions: [scoreOf('floor(record.amount)')] };
+    // The build judges the declared formula…
+    expect(validateStackExpressions(stack).map((i) => i.where)).toEqual(["object 'fx_ticket' · field 'bad' expression"]);
+    // …the extension door's pass reads only the written entry.
+    expect(runStackExpressionPasses(stack, { runtimeWriteType: 'object_extension' })).toEqual([]);
+  });
+
+  it('CONTROL — the object save door is unchanged: it judges the object\'s own formula and no extension field', () => {
+    const result = gateObject(fxSqrt('sqrt(record.amount)'));
+    expect(expressionFindings(result.errors).map((f) => f.where)).toEqual([WHERE]);
+    expect(runtimeAuthoringRulesFor('object').map((r) => r.name)).toContain('validateStackExpressions');
+  });
+});
