@@ -400,7 +400,8 @@ create/update payload.
 
 ## Tools
 
-- **list_objects()** — list available objects (system \`sys_*\` objects are hidden).
+- **list_objects()** — list available objects. System \`sys_*\` objects are hidden,
+  except the few declared readable by agents, such as \`sys_user\` (read only).
 - **describe_object({ objectName })** — an object's fields and features.
 - **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
@@ -483,6 +484,13 @@ ${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.feder
 - **Writes are real and immediate.** There is no implicit dry-run. Confirm
   destructive actions (\`delete_record\`, bulk updates) with the user.
 - **Page large reads.** Use \`limit\`/\`offset\` rather than asking for everything.
+- **People are \`sys_user\` records.** A person field (owner, approver,
+  employee) holds a user id. Find it with \`query_records\` on \`sys_user\`:
+  \`where: { "email": "..." }\` for exactly one person, or
+  \`{ "name": { "$contains": "..." } }\`. Names repeat: when several people
+  share a name, tell them apart by email, and ask your human which one if
+  unsure. You see the colleagues your console's person picker shows you (your
+  organization, directory fields), and \`sys_user\` is read only.
 - **Prefer actions over hand-edits.** When \`list_actions\` offers an action for
   the task (approve, convert, close, …), call it instead of updating the
   records yourself — actions carry the app's validation and side effects.

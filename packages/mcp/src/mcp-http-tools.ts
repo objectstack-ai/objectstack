@@ -2607,7 +2607,14 @@ export function registerObjectTools(
           // participant read alone also serves requests the caller submitted
           // or already decided, so an agent must not guess "mine" from it.
           'For example, where the app runs approvals, the ones waiting on you: objectName "sys_approval_request", where ' +
-          '{"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}; decide one with run_action.',
+          '{"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}; decide one with run_action. ' +
+          // [ruling 6844187236, B] A person field (owner, approver, employee)
+          // holds a user id: the agent finds it on `sys_user`, which serves
+          // the caller the colleagues their console person picker does.
+          // Names repeat (ruling 6867150851), so the text says to tell
+          // namesakes apart by email.
+          'To fill a person field, find the colleague\'s id: objectName "sys_user", where {"email":"..."} for exactly ' +
+          'one person, or {"name":{"$contains":"..."}}; names repeat, so tell people who share a name apart by email.',
         inputSchema: strictToolInput(
           {
             surface: 'this query_records call',
