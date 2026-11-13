@@ -88,6 +88,23 @@ describe('[#32929] the outside-closure sentence names both fixes', () => {
     );
   });
 
+  it('[#32967] an environment-only holder: no package to depend on, so the sentence names only the move into the caller', () => {
+    const answer = resolvePackageScopedHolders({ type: 'dataset', name: 'n', callerPackageId: P }, packageScopedHolderSource([[null, 'env']]), closure([]));
+    expect(answer).toMatchObject({ status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'environment' }] });
+    const message = (answer as { message: string }).message;
+    expect(message).toContain(`move the dataset into "${P}"`);
+    expect(message).not.toContain('Declare a dependency');
+    expect(message).not.toContain('that package');
+  });
+
+  it('[#32967] two package holders: the dependency asked for is ONE of them, never every one', () => {
+    const answer = resolvePackageScopedHolders({ type: 'dataset', name: 'n', callerPackageId: P }, packageScopedHolderSource([[A, 'a'], [B, 'b']]), closure([]));
+    expect(answer).toMatchObject({ status: 'refused', reason: 'outside-closure' });
+    const message = (answer as { message: string }).message;
+    expect(message).toContain('the one package whose dataset is meant');
+    expect(message).not.toContain('the package that holds it');
+  });
+
   it('names the type in its own words', () => {
     const answer = resolvePackageScopedHolders({ type: 'email_template', name: 'n', callerPackageId: P }, packageScopedHolderSource([[A, 'a']]), closure([]));
     expect((answer as { message: string }).message).toContain(`or move the email template into "${P}"`);

@@ -264,8 +264,11 @@ function datasetNotProbed(refused: PackageScopedRefusal, dsName: string): { why:
         return {
             why: `dataset "${dsName}" is held only outside the declared dependencies of package "${caller}" `
                 + `(${holders.join(', ')}), so the dashboard's read of it is refused`,
+            // [#32967] The runtime sentence's second fix too: a holder that
+            // already depends on the caller cannot be declared back (a cycle).
             fix: `Declare package "${caller}"'s dependency on the package whose dataset "${dsName}" the widget means, `
-                + `or hold the dataset in "${caller}" itself, then republish.`,
+                + `or hold the dataset in "${caller}" itself; if that package already depends on "${caller}", the `
+                + 'dependency would be a cycle, so move the dashboard into that package or hold the dataset here. Then republish.',
         };
     }
     if (caller !== null) {
