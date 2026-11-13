@@ -31,6 +31,13 @@ function sentencesOf(copy: UploadLinkCopy): Record<string, string> {
       out.expires = copy.expires('UNTIL');
     } else if (key === 'refused') {
       out.refused = copy.refused('REASON');
+    } else if (key === 'wantedSeveral') {
+      out.wantedSeveral = copy.wantedSeveral(7);
+    } else if (key === 'wantedExactly') {
+      out.wantedExactly = copy.wantedExactly(7);
+    } else if (key === 'pickCount') {
+      out['pickCount(exact)'] = copy.pickCount(7, 7);
+      out['pickCount(up to)'] = copy.pickCount(1, 7);
     } else {
       out[key] = value as string;
     }
@@ -49,6 +56,10 @@ describe('#32712 — the upload-link page\'s sentences', () => {
       for (const [name, text] of Object.entries(sentences)) expect(text.trim(), `${tag} ${name}`).not.toBe('');
       expect(sentences.expires, tag).toContain('UNTIL');
       expect(sentences.refused, tag).toContain('REASON');
+      // [#32747] The several-file lines say how many.
+      for (const name of ['wantedSeveral', 'wantedExactly', 'pickCount(exact)', 'pickCount(up to)']) {
+        expect(sentences[name], `${tag} ${name}`).toContain('7');
+      }
     }
   });
 
