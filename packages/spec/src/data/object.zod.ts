@@ -47,6 +47,9 @@ import { externalBindingDatasourceRefusal } from './external-binding-datasource'
 // The one-name-per-action predicate, shared with the v18 stored-row listing.
 // Internal to the spec.
 import { duplicateActionNames } from './duplicate-action-names';
+// The read-only AI exposure refusal (`enable.aiReadable`). Public, with its one
+// reading `isAiReadExposed`: re-exported from `@objectstack/spec/data`.
+import { aiReadExposureRefusal } from './ai-read-exposure';
 // The object's default row scope (the RLS policy shape without `object`) and the
 // roster object's declarative membership keys. No cycle: `security/rls.zod`
 // imports only zod, `shared/` and the resolver contract's constants.
@@ -223,6 +226,30 @@ const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
  * `PerOperationRequiredPermissionsSchema` in this same file rather than
  * deleting the assertion, exactly as that test's own note instructs.
  */
+/**
+ * [ruling A on the read half of #32442] `enable.aiReadable` is READ-ONLY, and
+ * has no write arm: an agent writes to a system object only through an action
+ * the object declares with `ai.exposed` (ADR-0011). These are the names an
+ * author reaches for when they want the write arm, or when they carry an
+ * action's `ai.exposed` over to the object; each is refused with that
+ * prescription rather than renamed, because none of them means what
+ * `aiReadable` means. Declared above `ObjectCapabilities` for the order reason
+ * its docblock gives.
+ */
+const AI_READ_EXPOSURE_WRITE_ARM =
+  'AI exposure of an object is read-only: `enable.aiReadable: true`, on a system (`sys_`) object, opens '
+  + 'its records to the AI read tools (query, get one, aggregate, describe, list) and never to a write. '
+  + 'An agent writes only through an action the object declares with `ai: { exposed: true, description }` '
+  + '(ADR-0011), which carries its own permissions and confirmation.';
+
+const CAPABILITIES_AI_WRITE_ARM_GUIDANCE: Record<string, string> = {
+  aiExposed: AI_READ_EXPOSURE_WRITE_ARM,
+  aiWritable: AI_READ_EXPOSURE_WRITE_ARM,
+  aiWrite: AI_READ_EXPOSURE_WRITE_ARM,
+  aiEditable: AI_READ_EXPOSURE_WRITE_ARM,
+  ai: AI_READ_EXPOSURE_WRITE_ARM,
+};
+
 const CAPABILITIES_HISTORY =
   'Until this shape was closed an unknown flag was dropped without a word — the object '
   + 'shipped as if the author had never written it; `enable` is a closed vocabulary '
@@ -270,7 +297,8 @@ const CAPABILITIES_HISTORY =
 export const ObjectCapabilities = strictObject({
   surface: '`enable`',
   history: CAPABILITIES_HISTORY,
-  guidance: CAPABILITIES_RETIRED_KEY_GUIDANCE,
+  aliases: { aiRead: 'aiReadable', aiReadEnabled: 'aiReadable', aiReadExposed: 'aiReadable', mcpReadable: 'aiReadable' },
+  guidance: { ...CAPABILITIES_RETIRED_KEY_GUIDANCE, ...CAPABILITIES_AI_WRITE_ARM_GUIDANCE },
 }, {
   /**
    * History tracking (Audit Trail) master switch — opt-in.
@@ -308,6 +336,29 @@ export const ObjectCapabilities = strictObject({
   apiMethods: (z.preprocess((raw) => stripLegacyApiMethods(raw), z.array(ApiMethod))
     .optional() as unknown as z.ZodOptional<z.ZodType<ApiMethod[], ApiMethod[]>>)
     .describe('Whitelist of allowed API operations (six primitives; undefined = all, [] = none)'),
+
+  /**
+   * Per-object, READ-ONLY AI exposure of a system object — opt-in, absent by
+   * default (ruling A on the read half of #32442). The read counterpart of an
+   * action's `ai.exposed` (ADR-0011), declared by the system object's own
+   * author.
+   *
+   * Contract: the AI read tools (query, get one, aggregate, describe, list)
+   * refuse every `sys_*` object by name, fail closed; `true` lets them reach
+   * this one, with every gate after admission unchanged — the caller's
+   * permissions, row-level security, field masking and this block's API
+   * exposure. It never opens a write: a write stays on the object's actions,
+   * each opened by its own `ai.exposed`. No deployment switch opens a system
+   * object instead of this declaration.
+   *
+   * Refused at parse ({@link aiReadExposureRefusal}, `ai-read-exposure.ts`,
+   * judged in `ObjectSchema`'s refinement): on any object that is not a
+   * `sys_*` object, where the AI read tools already read records as the
+   * caller and the key would change nothing; and on the stored-metadata family
+   * (`STORED_METADATA_BODY_OBJECTS`), judged before the key is read, which no
+   * declaration opens. The one reading is {@link isAiReadExposed}.
+   */
+  aiReadable: z.boolean().optional().describe('Read-only AI exposure of a system (sys_) object, opt-in: true lets the AI read tools (query, get one, aggregate, describe, list) reach its records, under the caller\'s permissions and row-level security as before. Never opens a write: writes stay on actions declared with ai.exposed. Refused on any object whose name does not start with sys_, and on the stored-metadata family (sys_metadata, sys_metadata_history)'),
 
   /**
    * Generic Attachments panel (Salesforce "Notes & Attachments" parity) —
@@ -3169,6 +3220,24 @@ function refuseWriteLockedUserActions(
 }
 
 /**
+ * [ruling A on the read half of #32442] `enable.aiReadable` is declared only
+ * where it has a reader: a `sys_*` object outside the stored-metadata family.
+ * One located issue at `['enable', 'aiReadable']`; the family is judged before
+ * the key is read, and any declared value is judged, `false` included.
+ *
+ * Refused at parse on every door, not only at `create()`: the key is new, so
+ * no stored object carries it. Kept in the existing callback beside
+ * {@link refuseExternalBindingOnPrimaryDatasource} so it adds no check node the
+ * JSON Schema projection would have to drop. Predicate and message:
+ * `ai-read-exposure.ts` ({@link aiReadExposureRefusal}).
+ */
+function refuseMisplacedAiReadExposure(objectName: unknown, enable: unknown, ctx: z.RefinementCtx): void {
+  const refusal = aiReadExposureRefusal(objectName, enable);
+  if (refusal === undefined) return;
+  ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
+}
+
+/**
  * [#26725] An object's `actions` array declares each action name once. One
  * located issue per repeated name, at `['actions', <index>]` of its SECOND
  * declaration, naming the name and every index. Before this, the object save
@@ -4420,6 +4489,10 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a declared field.
   // See the helper's docblock.
   refuseUndeclaredSealValueFields(object.lifecycle, object.fields, ctx);
+  // [ruling A on the read half of #32442] `enable.aiReadable` only on a `sys_*`
+  // object, never on the stored-metadata family — the same door: only the
+  // object knows its name. See the helper's docblock.
+  refuseMisplacedAiReadExposure(object.name, object.enable, ctx);
 }).overwrite((object) => {
   // [#23065] A `tree` that names no `reference` references this object, and the
   // parse writes that down after the refinements above judged what the author
