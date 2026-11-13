@@ -327,12 +327,15 @@ record means no file**, refused with the same `RECORD_NOT_FOUND`.
   `fileIds[0]`, or the array for a multi-file field; before the upload that
   create is refused as an upload that never completed. The field's own
   `accept` and `maxSize` are checked when the file arrives, before the link is
-  spent. The id is good for one hour after the upload, in one record, and
-  only for that user's own `create_record` or `update_record` into that field
-  of that object: another user's or a system write, another field or object,
-  a second record, or a write after the hour is refused at the field with the
-  reason. Until a record holds the file, only the user who uploaded it can
-  download it.
+  spent. Until a record holds the file, the id works only for that user's own
+  `create_record` or `update_record` into that field of that object, within
+  one hour of the upload: the uploader's write into another field or object,
+  or after the hour, is refused at the field with the reason, and another
+  user's or a system write is refused as a file they cannot open. Within the
+  hour, a second record naming it while the first holds it is refused too.
+  After that it is the record's file like any other, and a file the record
+  lets go is judged as any released file. Until a record has held the file,
+  only the user who uploaded it can download it.
 
 Reading a PDF or Word document's text runs on a pool of worker threads, so the
 server keeps answering other requests while it does. Two host settings bound it, so

@@ -109,6 +109,8 @@ export type { FileReferenceReadAuthorizer } from './referenceable-file.js';
  * it; once a record holds it, no user's write puts it in a second record
  * until the deadline. Every refusal is one `invalid_value` entry at the
  * field, and a writer who is not the uploader gets the unreadable-file words.
+ * Once a record has let the file go, the binding no longer applies: the file
+ * is that record's released file, judged as the section below says.
  *
  * ### A released file keeps its record's rule
  *

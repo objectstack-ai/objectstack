@@ -132,13 +132,15 @@ import { assertFileConstraints } from './file-reference-lifecycle.js';
  *    are judged by the create itself. Only a file field: an attachment needs
  *    its record.
  *  - **The file id is the link row's id**, answered at once (`fileIds`), so
- *    the flow is two calls and one upload. Until the upload, a write naming it
- *    is refused as an upload that never completed.
+ *    the flow is two calls and one upload. Until the upload, the uploader's
+ *    write naming it is refused as an upload that never completed, and every
+ *    other write, a system one included, as a file it cannot open.
  *  - **Using it** stores the bytes and turns the link row into the user's
  *    committed file, which no record holds, carrying the binding a write is
  *    judged by (`pre-record-upload.ts`): only that user's write, into that
  *    object and field, within {@link PRE_RECORD_CLAIM_WINDOW_SECONDS} of the
- *    upload, and into one record. The field's `accept` / `maxSize` are
+ *    upload, and into one record. Once a record has let it go, it is that
+ *    record's released file like any other. The field's `accept` / `maxSize` are
  *    judged when the bytes arrive, so a file the field cannot take is refused
  *    then, and nothing is stored.
  *  - **What reclaims it**: a link never used is a `pending` row, reaped by

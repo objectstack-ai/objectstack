@@ -94,6 +94,46 @@ describe('preRecordReferenceRefusal — a file a record holds', () => {
   });
 });
 
+describe('preRecordReferenceRefusal — a file a record held and let go (#26046)', () => {
+  const letGo = bound({ released_ref_object: 'expense_line', released_ref_id: 'r1' });
+
+  it('is that record\'s released file: the binding refuses no write, within the window or after it', () => {
+    expect(preRecordReferenceRefusal(letGo, SLOT, 'u1', NOW)).toBeNull();
+    expect(preRecordReferenceRefusal(letGo, SLOT, 'u2', NOW)).toBeNull();
+    expect(preRecordReferenceRefusal(letGo, SLOT, null, NOW)).toBeNull();
+    expect(preRecordReferenceRefusal(letGo, { ...SLOT, field: 'receipt' }, 'u1', NOW)).toBeNull();
+    expect(preRecordReferenceRefusal(letGo, SLOT, 'u1', Date.parse(LATER) + 1)).toBeNull();
+  });
+
+  it('and is not uploader-only: the download doors read it by the releasing record\'s rule', () => {
+    expect(isUploaderOnlyFile(letGo)).toBe(false);
+  });
+});
+
+describe('preRecordReferenceRefusal — the pending row a link with no record reserved, before the upload', () => {
+  const reserved = {
+    id: 'f1',
+    owner_id: 'u1',
+    status: 'pending',
+    ref_id: null,
+    metadata: JSON.stringify({ kind: 'upload_link', target: 'field', object: 'expense_line', field: 'invoice' }),
+  };
+
+  it('refuses a system or context-less write and another user, as a file they cannot open', () => {
+    expect(preRecordReferenceRefusal(reserved, SLOT, null, NOW)).toEqual({ kind: 'not_yours' });
+    expect(preRecordReferenceRefusal(reserved, SLOT, 'u2', NOW)).toEqual({ kind: 'not_yours' });
+  });
+
+  it('leaves its uploader\'s write to the incomplete-upload check', () => {
+    expect(preRecordReferenceRefusal(reserved, SLOT, 'u1', NOW)).toBeNull();
+  });
+
+  it('says nothing about a link row for a record', () => {
+    const recordLink = { ...reserved, metadata: JSON.stringify({ kind: 'upload_link', target: 'field', record_id: 'r1', field: 'invoice' }) };
+    expect(preRecordReferenceRefusal(recordLink, SLOT, null, NOW)).toBeNull();
+  });
+});
+
 describe('a file with no binding', () => {
   it('is judged as before, by every write and door', () => {
     const plain = { id: 'f2', owner_id: 'u1', status: 'committed', ref_id: null, metadata: null };

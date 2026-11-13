@@ -27,8 +27,19 @@
  *    write puts it in a second record until the deadline; after that it is
  *    that record's file like any other.
  *  - **The download doors** (`storage-service-plugin.ts`): while no record
- *    holds it, only its uploader may read it. The deadline does not change
+ *    has held it, only its uploader may read it. The deadline does not change
  *    that.
+ *
+ * The binding governs only until a record has held the file. A record that
+ * lets it go (its field cleared or replaced, or the record deleted) leaves
+ * `released_ref_*` on the row (#26046), and from then on the binding is
+ * ignored: the file is that record's released file, read by that record's
+ * rule and taken again by whoever may read it, exactly as any other. The
+ * binding itself is never rewritten, so it records what the upload was for.
+ *
+ * Before the upload, the id the link answered is the link's own `pending`
+ * row. No write takes it but its uploader's own, which the incomplete-upload
+ * check refuses until the upload completes.
  *
  * Every value is a string because `sys_file.metadata` is a JSON object of
  * strings. No secret is kept: the link's own secret is gone once it is used.
@@ -112,6 +123,24 @@ function unheld(row: Record<string, unknown>): boolean {
 }
 
 /**
+ * Whether a record held the file and let it go (#26046: `releaseOwnership`
+ * keeps the record, `claimFile` clears it when another record takes the
+ * file). A released file is that record's file to judge, never the upload's.
+ */
+function released(row: Record<string, unknown>): boolean {
+  return nonEmptyValue(row.released_ref_id) || nonEmptyValue(row.released_ref_object);
+}
+
+function nonEmptyValue(value: unknown): boolean {
+  return value != null && value !== '';
+}
+
+/** Whether no record holds the file now and none has held it since the upload. */
+function neverHeld(row: Record<string, unknown>): boolean {
+  return unheld(row) && !released(row);
+}
+
+/**
  * Whether `row` is an open or spent upload link that names no record: the
  * `pending` row a link without a record reserves as its file (its id is the
  * file id the link answered), before the upload turns it into the file.
@@ -129,12 +158,13 @@ function isPreRecordLinkRow(row: Record<string, unknown>): boolean {
 
 /**
  * Whether a file uploaded before its record, or the row its link reserved,
- * is read only by its uploader now: while no record holds it. The download
+ * is read only by its uploader now: while no record has held it. The download
  * doors ask this after their uploader arm, so a `true` here means "deny
- * everyone else". Every other file is judged as before.
+ * everyone else". Every other file, a released one included, is judged as
+ * before.
  */
 export function isUploaderOnlyFile(row: Record<string, unknown>): boolean {
-  return unheld(row) && (preRecordBindingOf(row) !== null || isPreRecordLinkRow(row));
+  return neverHeld(row) && (preRecordBindingOf(row) !== null || isPreRecordLinkRow(row));
 }
 
 /** Why a write may not put a bound file in a field. */
@@ -150,11 +180,11 @@ export type PreRecordReferenceRefusal =
 
 /**
  * May this write put `row` (a file it names) into `object`.`field`? `null`
- * admits it, or says nothing about it (a file with no binding); otherwise the
- * reason it is refused. `heldHere` is whether this very slot already holds the
- * file (an update rewriting its own value), which takes nothing and is always
- * admitted. `writerUserId` is the user the write runs as; a system or
- * context-less write has none.
+ * admits it, or says nothing about it (a file with no binding, or one a
+ * record has let go); otherwise the reason it is refused. `heldHere` is
+ * whether this very slot already holds the file (an update rewriting its own
+ * value), which takes nothing and is always admitted. `writerUserId` is the
+ * user the write runs as; a system or context-less write has none.
  */
 export function preRecordReferenceRefusal(
   row: Record<string, unknown>,
@@ -162,8 +192,20 @@ export function preRecordReferenceRefusal(
   writerUserId: string | null,
   now: number,
 ): PreRecordReferenceRefusal | null {
+  if (target.heldHere) return null;
   const binding = preRecordBindingOf(row);
-  if (!binding || target.heldHere) return null;
+  if (!binding) {
+    // The link's own `pending` row, before the upload: its uploader's write
+    // is refused by the incomplete-upload check; every other writer, a
+    // system or context-less write included, is refused here, so the
+    // published id reserves nothing for anyone else.
+    if (isPreRecordLinkRow(row) && neverHeld(row) && (writerUserId === null || String(row.owner_id ?? '') !== writerUserId)) {
+      return { kind: 'not_yours' };
+    }
+    return null;
+  }
+  // A record held it and let it go: that record's released file (#26046).
+  if (unheld(row) && released(row)) return null;
   const deadline = Date.parse(binding.claim_until);
   const open = Number.isFinite(deadline) && now < deadline;
   if (!unheld(row)) {

@@ -1062,6 +1062,38 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect(await refOf(fileId)).toEqual(UNCLAIMED);
     });
 
+    it('a record that lets the file go keeps it as any released file: its readers read it, and the binding no longer applies', async () => {
+      const { fileId } = await uploadForNewRecord('claim', 'policy');
+      const first = await insertAs(OWNER, 'claim', { name: 'held', owner: OWNER.userId, policy: fileId });
+      // The record lets it go: its field cleared.
+      await updateAs(OWNER, 'claim', String(first.id), { policy: null });
+      const letGo = await fileRow(fileId);
+      expect(letGo).toMatchObject({ ref_id: null, released_ref_object: 'claim', released_ref_id: String(first.id) });
+      // #26046: the releasing record's readers still read it (the reviewer reads every claim).
+      const read = await downloadUrlAs(fileId, REVIEWER.userId);
+      expect(read._status, JSON.stringify(read._json)).toBe(200);
+      // Past the hour, the uploader's restore and a second record take it as they take any released file.
+      const binding = JSON.parse(letGo.metadata);
+      await engine.update('sys_file', { metadata: JSON.stringify({ ...binding, claim_until: new Date(Date.now() - 1_000).toISOString() }) }, { where: { id: fileId }, context: SYS } as never);
+      const second = await insertAs(OWNER, 'claim', { name: 'second', owner: OWNER.userId, policy: fileId });
+      expect(await refOf(fileId)).toEqual(['claim', String(second.id), 'policy']);
+      expect((await claim(String(second.id))).policy).toBe(fileId);
+    });
+
+    it('before the upload, the id it answered takes no write but its uploader\'s: a system write and another user are refused, and the upload still lands', async () => {
+      const grant = await files.createUploadLinkForNewRecordAs('claim', { field: 'policy' }, OWNER as never);
+      const fileId = grant.fileIds[0] as string;
+      expect(await failureOf(insertAs(SYS, 'claim', { name: 'S', owner: OWNER.userId, policy: fileId })))
+        .toMatchObject(refusedAt('policy', 'Policy', unreadable('Policy')));
+      expect(await failureOf(insertAs(REVIEWER, 'claim', { name: 'R', owner: REVIEWER.userId, policy: fileId })))
+        .toMatchObject(refusedAt('policy', 'Policy', unreadable('Policy')));
+      expect(await fileRow(fileId)).toMatchObject({ status: 'pending', ref_object: null, ref_id: null, ref_field: null });
+      const res = await useLink(tokenOf(grant.path), Buffer.from('%PDF-1.4 hotel'));
+      expect(res._status, JSON.stringify(res._json)).toBe(200);
+      const taken = await insertAs(OWNER, 'claim', { name: 'O', owner: OWNER.userId, policy: fileId });
+      expect(await refOf(fileId)).toEqual(['claim', String(taken.id), 'policy']);
+    });
+
     it('the uploader\'s update of an existing record takes it as the create does', async () => {
       const id = (await engine.insert('claim', { name: 'U', owner: OWNER.userId, organization_id: ORG }, { context: SYS } as never)).id;
       const { fileId } = await uploadForNewRecord('claim', 'policy');
@@ -1075,6 +1107,7 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect((await downloadUrlAs(fileId, OWNER.userId))._status).toBe(200);
       const denied = await downloadUrlAs(fileId, REVIEWER.userId);
       expect(denied._status, JSON.stringify(denied._json)).toBe(403);
+      expect(denied._json).toMatchObject({ success: false, error: { code: 'FILE_DOWNLOAD_DENIED' } });
       // Claimed: the record's read rule, and the reviewer reads every claim.
       await insertAs(OWNER, 'claim', { name: 'D', owner: OWNER.userId, policy: fileId });
       expect((await downloadUrlAs(fileId, REVIEWER.userId))._status).toBe(200);

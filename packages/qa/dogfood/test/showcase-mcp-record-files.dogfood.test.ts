@@ -578,7 +578,10 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       expect(JSON.stringify(error)).toContain('it is not a file you can open');
       expect(await fileRow(fileId)).toMatchObject({ status: 'committed', ref_id: null });
       // Nor can that user download it while no record holds it.
-      expect((await stack.apiAs(adminToken, 'GET', `/storage/files/${fileId}/url`)).status).not.toBe(200);
+      const download = await stack.apiAs(adminToken, 'GET', `/storage/files/${fileId}/url`);
+      const downloadBody: any = await download.json();
+      expect(download.status, JSON.stringify(downloadBody)).toBe(403);
+      expect(downloadBody.error?.code).toBe('FILE_DOWNLOAD_DENIED');
 
       // The member's own create still takes it.
       const { json } = await ok(memberToken, 'create_record', { objectName: EXPENSE_LINE, data: { invoice_no: 'FP-0002', invoice: fileId } });
