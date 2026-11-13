@@ -20,6 +20,9 @@ import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObje
 import {
   PublishMetaItemResponseSchema,
   PublishPackageDraftsResponseSchema,
+  RevertPackageCommitResponseSchema,
+  RollbackMetaItemResponseSchema,
+  RollbackToPackageCommitResponseSchema,
   SaveMetaItemResponseSchema,
 } from '@objectstack/spec/api';
 import { ObjectQL } from './engine.js';
@@ -506,62 +509,64 @@ function makeDoorDriver() {
   };
 }
 
+// The rig both door describes below drive: the REAL protocol on a REAL engine.
+const PKG = 'app.leave';
+const OBJ = 'leave_request';
+const DAYS = cel('record.end_day - record.start_day');
+const objectBody = (days: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+  name: OBJ,
+  label: 'Leave Request',
+  sharingModel: 'public_read_write',
+  fields: {
+    title: { name: 'title', label: 'Title', type: 'text' },
+    start_day: { name: 'start_day', label: 'Start', type: 'number' },
+    end_day: { name: 'end_day', label: 'End', type: 'number' },
+    // The stamp the fill keeps, and the one its write is conditional on.
+    updated_at: { name: 'updated_at', label: 'Updated', type: 'datetime' },
+    days: { name: 'days', label: 'Days', ...days },
+    ...extra,
+  },
+});
+const FORMULA = { type: 'formula', returnType: 'number', expression: DAYS };
+const STORED = { type: 'number', expression: DAYS };
+
+async function makeRig() {
+  const engine = new ObjectQL();
+  const mem = makeDoorDriver();
+  engine.registerDriver(mem.driver, true);
+  await engine.init();
+  engine.registry.registerObject(sysMetadataObject as any, 'test-package');
+  for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+    engine.registry.registerObject(o as any, 'test-package');
+  }
+  engine.registry.installPackage({ id: PKG, name: 'Leave', version: '1.0.0' } as never, 'code');
+  const protocol = new ObjectStackProtocolImplementation(engine);
+  const save = (days: Record<string, unknown>, mode?: 'draft', extra?: Record<string, unknown>) =>
+    (protocol as any).saveMetaItem({ type: 'object', name: OBJ, item: objectBody(days, extra), packageId: PKG, ...(mode ? { mode } : {}) });
+  return { engine, protocol, save, ...mem };
+}
+
+/** A live object whose `days` is a formula, holding three requests of 1 + 2 + 3 = 6 days. */
+async function populated() {
+  const rig = await makeRig();
+  await rig.save(FORMULA);
+  for (const [start, end] of [[1, 2], [3, 5], [10, 13]]) {
+    await rig.engine.insert(OBJ, { title: `r${start}`, start_day: start, end_day: end }, { context: { isSystem: true } });
+  }
+  // Each row as stored carries its stamp (this bare engine runs no audit writer that would stamp one).
+  let day = 0;
+  for (const row of rig.storeFor(OBJ).values()) row.updated_at = `2026-01-0${++day}T00:00:00.000Z`;
+  rig.updates.length = 0;
+  return rig;
+}
+
+const stored = async (rig: Awaited<ReturnType<typeof makeRig>>) =>
+  Array.from(rig.storeFor(OBJ).values()).map((r) => r.days ?? null);
+const total = async (rig: Awaited<ReturnType<typeof makeRig>>) =>
+  (await stored(rig)).reduce<number>((n, v) => n + (typeof v === 'number' ? v : 0), 0);
+const notices = (res: any, rule: string) => (res.advisories ?? []).filter((a: any) => a.rule === rule);
+
 describe('[#32527] the save and publish doors fill a stored computed field the change made live', () => {
-  const PKG = 'app.leave';
-  const OBJ = 'leave_request';
-  const DAYS = cel('record.end_day - record.start_day');
-  const objectBody = (days: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
-    name: OBJ,
-    label: 'Leave Request',
-    sharingModel: 'public_read_write',
-    fields: {
-      title: { name: 'title', label: 'Title', type: 'text' },
-      start_day: { name: 'start_day', label: 'Start', type: 'number' },
-      end_day: { name: 'end_day', label: 'End', type: 'number' },
-      // The stamp the fill keeps, and the one its write is conditional on.
-      updated_at: { name: 'updated_at', label: 'Updated', type: 'datetime' },
-      days: { name: 'days', label: 'Days', ...days },
-      ...extra,
-    },
-  });
-  const FORMULA = { type: 'formula', returnType: 'number', expression: DAYS };
-  const STORED = { type: 'number', expression: DAYS };
-
-  async function makeRig() {
-    const engine = new ObjectQL();
-    const mem = makeDoorDriver();
-    engine.registerDriver(mem.driver, true);
-    await engine.init();
-    engine.registry.registerObject(sysMetadataObject as any, 'test-package');
-    for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
-      engine.registry.registerObject(o as any, 'test-package');
-    }
-    engine.registry.installPackage({ id: PKG, name: 'Leave', version: '1.0.0' } as never, 'code');
-    const protocol = new ObjectStackProtocolImplementation(engine);
-    const save = (days: Record<string, unknown>, mode?: 'draft', extra?: Record<string, unknown>) =>
-      (protocol as any).saveMetaItem({ type: 'object', name: OBJ, item: objectBody(days, extra), packageId: PKG, ...(mode ? { mode } : {}) });
-    return { engine, protocol, save, ...mem };
-  }
-
-  /** A live object whose `days` is a formula, holding three requests of 1 + 2 + 3 = 6 days. */
-  async function populated() {
-    const rig = await makeRig();
-    await rig.save(FORMULA);
-    for (const [start, end] of [[1, 2], [3, 5], [10, 13]]) {
-      await rig.engine.insert(OBJ, { title: `r${start}`, start_day: start, end_day: end }, { context: { isSystem: true } });
-    }
-    // Each row as stored carries its stamp (this bare engine runs no audit writer that would stamp one).
-    let day = 0;
-    for (const row of rig.storeFor(OBJ).values()) row.updated_at = `2026-01-0${++day}T00:00:00.000Z`;
-    rig.updates.length = 0;
-    return rig;
-  }
-
-  const stored = async (rig: Awaited<ReturnType<typeof makeRig>>) =>
-    Array.from(rig.storeFor(OBJ).values()).map((r) => r.days ?? null);
-  const total = async (rig: Awaited<ReturnType<typeof makeRig>>) =>
-    (await stored(rig)).reduce<number>((n, v) => n + (typeof v === 'number' ? v : 0), 0);
-  const notices = (res: any, rule: string) => (res.advisories ?? []).filter((a: any) => a.rule === rule);
   /**
    * [#32732] A write that bypasses the engine: it replaces the stored row (never mutates the object a page read
    * handed out) and computes nothing.
@@ -818,5 +823,220 @@ describe('[#32527] the save and publish doors fill a stored computed field the c
     const [warning] = notices(res, 'stored-expression-fill-incomplete');
     expect(warning.message).toContain('were NOT filled');
     expect(notices(res, 'stored-expression-filled')).toEqual([]);
+  });
+});
+
+describe('[#32700] a rollback or revert that makes a changed stored computed field live fills it as the save door does', () => {
+  const TIMES_EIGHT = { type: 'number', expression: cel('(record.end_day - record.start_day) * 8') };
+  const rollback = (rig: Awaited<ReturnType<typeof makeRig>>, toVersion: number) =>
+    (rig.protocol as any).rollbackMetaItem({ type: 'object', name: OBJ, toVersion });
+  /** The history version the live row of the object holds now. */
+  const liveVersion = async (rig: Awaited<ReturnType<typeof makeRig>>) =>
+    Number(Array.from(rig.storeFor('sys_metadata').values())
+      .find((r) => r.type === 'object' && r.name === OBJ && r.state === 'active')!.version);
+  /** The object's body with `days` left out: the version a field the change brings back is absent from. */
+  const withoutDays = () => {
+    const body: any = objectBody(STORED);
+    delete body.fields.days;
+    return body;
+  };
+
+  it('a rollback to an earlier expression rewrites every row the expression it rolled away from computed', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    const v2 = await liveVersion(rig);
+    await rig.save(TIMES_EIGHT);
+    expect(await stored(rig)).toEqual([8, 16, 24]);
+    rig.updates.length = 0;
+
+    const res = await rollback(rig, v2);
+
+    expect(res.success).toBe(true);
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    expect(await total(rig)).toBe(6);
+    expect(rig.updates).toHaveLength(3);
+    expect(notices(res, 'stored-expression-filled')).toEqual([expect.objectContaining({
+      severity: 'info',
+      path: `objects.${OBJ}.fields.days`,
+      where: `object "${OBJ}" · field "days"`,
+    })]);
+    expect(notices(res, 'stored-expression-filled')[0].message).toContain('3 rows of 3 written');
+    // The declared answer carries the notice through parse unstripped.
+    expect(RollbackMetaItemResponseSchema.parse(res).advisories).toEqual(res.advisories);
+  });
+
+  it('a rollback that turns a formula back into a stored field fills the rows written while it was a formula', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    const v2 = await liveVersion(rig);
+    // `force`: the save door's own data-loss guard asks for it on a stored field turned formula.
+    await (rig.protocol as any).saveMetaItem({ type: 'object', name: OBJ, item: objectBody(FORMULA), packageId: PKG, force: true });
+    // Written while `days` is a formula: the column is not computed, so it keeps what it held.
+    const [first] = Array.from(rig.storeFor(OBJ).keys());
+    await rig.engine.update(OBJ, { id: first, end_day: 4 }, { context: { isSystem: true } });
+    await rig.engine.insert(OBJ, { title: 'r20', start_day: 20, end_day: 24 }, { context: { isSystem: true } });
+    expect(await stored(rig)).toEqual([1, 2, 3, null]);
+
+    const res = await rollback(rig, v2);
+
+    expect(await stored(rig)).toEqual([3, 2, 3, 4]);
+    expect(notices(res, 'stored-expression-filled')[0].message).toContain('2 rows of 4 written');
+  });
+
+  it('a rollback that computes nothing new writes no row, and its answer carries no advisories key', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    const v2 = await liveVersion(rig);
+    await rig.save({ ...STORED, label: 'Days off' });
+    rig.updates.length = 0;
+
+    const res = await rollback(rig, v2);
+
+    expect(res.success).toBe(true);
+    expect(rig.updates).toEqual([]);
+    expect('advisories' in res).toBe(false);
+  });
+
+  it('a rollback whose storage sync is refused writes no row, and says so per field', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    const v2 = await liveVersion(rig);
+    await rig.save(TIMES_EIGHT);
+    rig.updates.length = 0;
+    (rig.engine as any).syncObjectSchema = async () => { throw new Error('the datasource is read-only'); };
+
+    const res = await rollback(rig, v2);
+
+    expect(res.success).toBe(true);
+    expect(rig.updates).toEqual([]);
+    expect(notices(res, 'object-storage-sync-refused')).toHaveLength(1);
+    expect(notices(res, 'stored-expression-fill-incomplete')[0].message).toContain('were NOT filled');
+    expect(RollbackMetaItemResponseSchema.parse(res).advisories).toEqual(res.advisories);
+  });
+
+  it('a revert of a package commit that changed the expression fills the rows back, and reports on the revert answer', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    await rig.save(TIMES_EIGHT, 'draft');
+    const published = await rig.protocol.publishPackageDrafts({ packageId: PKG });
+    expect(published.commitId).toBeTruthy();
+    expect(await stored(rig)).toEqual([8, 16, 24]);
+    rig.updates.length = 0;
+
+    const res: any = await rig.protocol.revertCommit({ commitId: published.commitId!, packageId: PKG });
+
+    expect(res.reverted).toEqual([{ type: 'object', name: OBJ, action: 'restored' }]);
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    expect(rig.updates).toHaveLength(3);
+    expect(notices(res, 'stored-expression-filled')[0].message).toContain('3 rows of 3 written');
+    expect(RevertPackageCommitResponseSchema.parse(res).advisories).toEqual(res.advisories);
+  });
+
+  it('a revert records its own commit row before the fill walks the rows', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    await rig.save(TIMES_EIGHT, 'draft');
+    const published = await rig.protocol.publishPackageDrafts({ packageId: PKG });
+    const revertRows = () => Array.from(rig.storeFor('sys_metadata_commit').values())
+      .filter((r) => r.operation === 'revert' && r.parent_commit_id === published.commitId);
+    let recordedWhenTheFillRead: number | undefined;
+    rig.afterFirstPage(async () => { recordedWhenTheFillRead = revertRows().length; });
+
+    const res: any = await rig.protocol.revertCommit({ commitId: published.commitId!, packageId: PKG });
+
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    expect(recordedWhenTheFillRead, 'the revert commit row, when the fill read its first page').toBe(1);
+    expect(res.revertCommitId).toBeTruthy();
+  });
+
+  it('a revert whose storage sync is refused writes no row, and says so per field', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    await rig.save(TIMES_EIGHT, 'draft');
+    const published = await rig.protocol.publishPackageDrafts({ packageId: PKG });
+    rig.updates.length = 0;
+    (rig.engine as any).syncObjectSchema = async () => { throw new Error('the datasource is read-only'); };
+
+    const res: any = await rig.protocol.revertCommit({ commitId: published.commitId!, packageId: PKG });
+
+    expect(res.reverted).toEqual([{ type: 'object', name: OBJ, action: 'restored' }]);
+    expect(rig.updates).toEqual([]);
+    expect(notices(res, 'object-storage-sync-refused')).toHaveLength(1);
+    expect(notices(res, 'stored-expression-fill-incomplete')[0].message).toContain('were NOT filled');
+    expect(RevertPackageCommitResponseSchema.parse(res).advisories).toEqual(res.advisories);
+  });
+
+  it('a package rollback through a commit that changed the expression carries the step\'s fill notice on its own answer', async () => {
+    const rig = await populated();
+    await rig.save(STORED, 'draft');
+    const target = await rig.protocol.publishPackageDrafts({ packageId: PKG });
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    // The rollback reverts the commits strictly NEWER than its target, by instant.
+    await new Promise((r) => setTimeout(r, 5));
+    await rig.save(TIMES_EIGHT, 'draft');
+    await rig.protocol.publishPackageDrafts({ packageId: PKG });
+    expect(await stored(rig)).toEqual([8, 16, 24]);
+
+    const res: any = await rig.protocol.rollbackToPackageCommit({ commitId: target.commitId!, packageId: PKG });
+
+    expect(res.revertedCommits).toHaveLength(1);
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    expect(notices(res, 'stored-expression-filled')).toEqual([expect.objectContaining({
+      severity: 'info',
+      path: `objects.${OBJ}.fields.days`,
+    })]);
+    expect(notices(res, 'stored-expression-filled')[0].message).toContain('3 rows of 3 written');
+    expect(RollbackToPackageCommitResponseSchema.parse(res).advisories).toEqual(res.advisories);
+  });
+
+  it('a revert of a commit that removed the stored field brings it back filled on the rows written without it', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    await (rig.protocol as any).saveMetaItem({ type: 'object', name: OBJ, item: withoutDays(), packageId: PKG, mode: 'draft', force: true });
+    const published = await rig.protocol.publishPackageDrafts({ packageId: PKG });
+    await rig.engine.insert(OBJ, { title: 'r20', start_day: 20, end_day: 24 }, { context: { isSystem: true } });
+    expect((await stored(rig))[3]).toBeNull();
+
+    const res: any = await rig.protocol.revertCommit({ commitId: published.commitId!, packageId: PKG });
+
+    expect(await stored(rig)).toEqual([1, 2, 3, 4]);
+    expect(notices(res, 'stored-expression-filled')[0].message).toContain('1 row of 4 written');
+  });
+
+  it('a revert that removes the package\'s own object extension hands the owner\'s expression back, and fills it', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    // An extension of the package's own object re-declaring `days` with another expression (ADR-0146 D10 judges
+    // only another package's extension): its fields are merged over the owner's.
+    await (rig.protocol as any).saveMetaItem({
+      type: 'object_extension', name: OBJ, packageId: PKG, mode: 'draft',
+      item: { extend: OBJ, fields: { days: { name: 'days', label: 'Days', ...TIMES_EIGHT } } },
+    });
+    const published = await rig.protocol.publishPackageDrafts({ packageId: PKG });
+    expect(await stored(rig)).toEqual([8, 16, 24]);
+    rig.updates.length = 0;
+
+    const res: any = await rig.protocol.revertCommit({ commitId: published.commitId!, packageId: PKG });
+
+    expect(res.reverted).toEqual([{ type: 'object_extension', name: OBJ, action: 'removed' }]);
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    expect(rig.updates).toHaveLength(3);
+    expect(notices(res, 'stored-expression-filled')[0].message).toContain('3 rows of 3 written');
+  });
+
+  it('a revert of a commit that added the stored field computes nothing new: no row written, no advisories key', async () => {
+    const rig = await makeRig();
+    await (rig.protocol as any).saveMetaItem({ type: 'object', name: OBJ, item: withoutDays(), packageId: PKG });
+    await rig.engine.insert(OBJ, { title: 'r1', start_day: 1, end_day: 2 }, { context: { isSystem: true } });
+    await rig.save(STORED, 'draft');
+    const published = await rig.protocol.publishPackageDrafts({ packageId: PKG });
+    expect(await stored(rig)).toEqual([1]);
+    rig.updates.length = 0;
+
+    const res: any = await rig.protocol.revertCommit({ commitId: published.commitId!, packageId: PKG });
+
+    expect(res.reverted).toEqual([{ type: 'object', name: OBJ, action: 'restored' }]);
+    expect(rig.updates).toEqual([]);
+    expect('advisories' in res).toBe(false);
   });
 });
