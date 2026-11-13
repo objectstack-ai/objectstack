@@ -82,8 +82,17 @@ vi.mock('../../chrome/OnboardingWalkthrough', () => ({ OnboardingWalkthrough: ()
 vi.mock('../../views/RecordFormPage', () => ({
   RecordFormPage: () => <div data-testid="record-form-page" />,
 }));
+// objectstack#33111 — the record page's Edit and a drawer level's Edit over
+// it, as the real header calls the host's `onEdit`: the record, then the
+// object it belongs to (`RecordDetailView.drawerLevelEdit-33111` pins that
+// call on both hosts).
 vi.mock('../../views/RecordDetailView', () => ({
-  RecordDetailView: () => <div data-testid="record-page" />,
+  RecordDetailView: ({ onEdit }: { onEdit: (record: { id: string }, objectName?: string) => void }) => (
+    <div data-testid="record-page">
+      <button type="button" data-testid="page-edit" onClick={() => onEdit({ id: 'a1' }, 'crm_account')} />
+      <button type="button" data-testid="page-level-edit" onClick={() => onEdit({ id: 'c1' }, 'crm_contact')} />
+    </div>
+  ),
 }));
 
 // The list's record drawer, as `ObjectView` mounts it
@@ -93,11 +102,11 @@ vi.mock('../../views/RecordDetailView', () => ({
 // mounted, only the list (`ObjectView.tsx`, objectstack#27058).
 vi.mock('../../views/ObjectView', async () => {
   const { useMemo, useState, useEffect: useMountEffect } = await import('react');
-  const { useSearchParams } = await import('react-router-dom');
-  const { RecordStackDrawer, useRecordDrawerStack } = await import('../../views/recordDrawerStack');
+  const { useLocation: useMockLocation, useSearchParams } = await import('react-router-dom');
+  const { RecordStackDrawer, readRestoredPath, useRecordDrawerStack } = await import('../../views/recordDrawerStack');
   const { usePhoneViewport } = await import('../../hooks/usePhoneViewport');
   return {
-    ObjectView: ({ objects }: { objects: ReadonlyArray<unknown> }) => {
+    ObjectView: ({ objects, onEdit }: { objects: ReadonlyArray<unknown>; onEdit: (record: { id: string }, objectName?: string) => void }) => {
       if (probe.suspend && !probe.suspend.done) throw probe.suspend.promise;
       const [searchParams] = useSearchParams();
       const recordId = searchParams.get('recordId');
@@ -108,7 +117,10 @@ vi.mock('../../views/ObjectView', async () => {
         const timer = setTimeout(() => setOpen(true), 30);
         return () => clearTimeout(timer);
       }, [recordId]);
-      const stack = useRecordDrawerStack({ root });
+      // A stack handed back in the history state (the ↗ round trip) opens
+      // its levels over the root.
+      const restoredPath = readRestoredPath(useMockLocation().state);
+      const stack = useRecordDrawerStack({ root, restoredPath });
       const phone = usePhoneViewport();
       if (phone) return <div data-testid="list" />;
       return (
@@ -118,7 +130,12 @@ vi.mock('../../views/ObjectView', async () => {
           objects={objects}
           mainContent={<div data-testid="list" />}
           onClose={() => probe.events.push('drawer:close')}
-          renderRecord={(level) => <div data-testid="record-body">{level.recordId}</div>}
+          renderRecord={(level) => (
+            <div data-testid="record-body">
+              {level.recordId}
+              <button type="button" data-testid="level-edit" onClick={() => onEdit({ id: level.recordId }, level.objectName)} />
+            </div>
+          )}
         />
       );
     },
@@ -345,5 +362,65 @@ describe('#32750 — on a phone the related-record form a drawer link carries st
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(document.querySelector('[data-testid="modal-form-footer"]')).toBeNull();
     expect(probe.where).toBe('/apps/crm/crm_account/record/a1');
+  });
+});
+
+/**
+ * objectstack#33111 — a drawer level's Edit edits the level's record as a
+ * record of the level's object: the form is that object's child task over the
+ * route (`formObject`), on the list's drawer and on the record page's. Before,
+ * the host dropped the object and opened the route object's form with the
+ * child's id ("Edit Account" / "Record not found").
+ * CONTROL: the route object's own Edit (the page's, and a level of the route's
+ * object) is a top-level task and leaves no `formObject`, a stale one included.
+ */
+describe('#33111 — a drawer level’s Edit opens the form of the level’s object', () => {
+  /** The record the form loaded once it opened: `[object, id]`. */
+  const formLoaded = async (objectName: string, id: string) => {
+    await waitFor(() => expect(document.querySelector('[data-testid="modal-form-footer"]')).not.toBeNull(), { timeout: 5000 });
+    await waitFor(() =>
+      expect(dataSourceStub.findOne.mock.calls.some((call: unknown[]) => call[0] === objectName && call[1] === id)).toBe(true),
+    );
+  };
+  // `handleEdit` reads the live `window.location`, as the browser router keeps it.
+  const at = (url: string) => window.history.replaceState(null, '', url);
+  afterEach(() => at('/'));
+
+  it('the list drawer: a child level’s Edit writes formObject = the child, and the form is the child’s', async () => {
+    mountAt('/apps/crm/crm_account?recordId=a1');
+    await screen.findByTestId('record-body');
+    // The child level, as a related row opens it over the account.
+    act(() => nav.current!('/apps/crm/crm_account?recordId=a1', { state: { recordDrawerRestore: [{ objectName: 'crm_account', recordId: 'a1' }, { objectName: 'crm_contact', recordId: 'c1' }] } }));
+    await waitFor(() => expect(screen.getByTestId('record-body')).toHaveTextContent('c1'));
+    at('/apps/crm/crm_account?recordId=a1');
+    fireEvent.click(screen.getByTestId('level-edit'));
+    await waitFor(() => expect(probe.where).toBe('/apps/crm/crm_account?recordId=a1&form=c1&formObject=crm_contact'));
+    await formLoaded('crm_contact', 'c1');
+  });
+
+  it('the record page: a level’s Edit over the page writes formObject = the child', async () => {
+    mountAt('/apps/crm/crm_account/record/a1');
+    await screen.findByTestId('record-page', {}, { timeout: 5000 });
+    at('/apps/crm/crm_account/record/a1');
+    fireEvent.click(screen.getByTestId('page-level-edit'));
+    await waitFor(() => expect(probe.where).toBe('/apps/crm/crm_account/record/a1?form=c1&formObject=crm_contact'));
+    await formLoaded('crm_contact', 'c1');
+  });
+
+  it('CONTROL: the route object’s own Edit leaves no formObject, a stale one dropped', async () => {
+    mountAt('/apps/crm/crm_account/record/a1?formObject=crm_contact&formLink=account%3Aa1');
+    await screen.findByTestId('record-page', {}, { timeout: 5000 });
+    at('/apps/crm/crm_account/record/a1?formObject=crm_contact&formLink=account%3Aa1');
+    fireEvent.click(screen.getByTestId('page-edit'));
+    await waitFor(() => expect(probe.where).toBe('/apps/crm/crm_account/record/a1?form=a1'));
+    await formLoaded('crm_account', 'a1');
+  });
+
+  it('CONTROL: the list drawer’s root level (the route’s object) leaves no formObject', async () => {
+    mountAt('/apps/crm/crm_account?recordId=a1');
+    await screen.findByTestId('record-body');
+    at('/apps/crm/crm_account?recordId=a1');
+    fireEvent.click(screen.getByTestId('level-edit'));
+    await waitFor(() => expect(probe.where).toBe('/apps/crm/crm_account?recordId=a1&form=a1'));
   });
 });

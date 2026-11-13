@@ -72,7 +72,7 @@ import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, 
 import { enterAppBundle, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import { packagedAutomationStudioPath, setupMetadataRest, setupMetadataStudioPath } from '../views/studio-design/setupMetadataRedirect.js';
-import { NO_RECORD_DRAWERS_OPENING, RecordDrawerOpeningProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening } from '../views/recordDrawerStack.js';
+import { NO_RECORD_DRAWERS_OPENING, NO_RECORD_PAGE_DRAWERS_OPEN, RecordDrawerOpeningProvider, RecordPageDrawerOpenProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening, type RecordPageDrawersOpen } from '../views/recordDrawerStack.js';
 import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
 
 // Route-based code splitting — lazy-load less-frequently-used routes.
@@ -542,7 +542,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // reads the same object definition before, during and after it, so opening
   // or closing a record re-reads none of its rows (the skeleton this used to
   // show remounted the list on every first open).
-  const drawerReadsRegistry = !!objectScope && searchParamsHasRecordDrawer(location.search);
+  // objectstack#33112 — and so does a drawer open over a record page, whose
+  // levels live in its component state rather than the URL: they report here.
+  const [recordPageDrawersOpen, setRecordPageDrawersOpen] = useState<RecordPageDrawersOpen>(NO_RECORD_PAGE_DRAWERS_OPEN);
+  const drawerReadsRegistry =
+    !!objectScope && (searchParamsHasRecordDrawer(location.search) || recordPageDrawersOpen.size > 0);
   const drawerRegistrySettled = useLazyMetadataSettled(drawerReadsRegistry ? 'object' : '', ensureType, getTypeStatus);
   const scopeObjects: any[] | undefined = objectScope?.objects;
   const registryObjects: any[] | undefined = drawerReadsRegistry && drawerRegistrySettled ? metadata.objects : undefined;
@@ -1096,13 +1100,25 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     objects: allObjects,
   });
 
-  const handleEdit = (record: any) => {
+  const handleEdit = (record: any, objectName?: string) => {
+    // objectstack#33111 — a record drawer level edits a record of ITS object,
+    // which is not always the route's: the level names it, and the form is
+    // then that object's child task (`formObject`, the record-form URL
+    // contract above). Beside the record, never in it: the record doubles as
+    // a create's seed values (`recordFormCreateValues`).
+    const childObjectName =
+      typeof objectName === 'string' && objectName !== '' && objectName !== currentObjectDef?.name
+        ? objectName
+        : undefined;
+    const editObjectDef = childObjectName
+      ? allObjects.find((o: any) => o.name === childObjectName)
+      : currentObjectDef;
     // Page-mode opt-in: when the object metadata declares
     // `editMode: 'page'`, route to the full-screen create/edit page instead
     // of opening the global ModalForm. Default behavior (modal) is
     // preserved for any object without the flag.
     const target = resolveRecordFormTarget({
-      objectDef: currentObjectDef as any,
+      objectDef: editObjectDef as any,
       baseUrl: appSegment ? `/apps/${appSegment}` : '',
       record,
     });
@@ -1115,9 +1131,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     const rawId = record?.id ?? record?._id;
     const sp = new URLSearchParams(window.location.search);
     sp.set(RECORD_FORM_PARAM, rawId != null && rawId !== '' ? String(rawId) : 'new');
-    // Top-level task on the route's own object — drop any stale child-task
-    // overrides (see the record-form URL contract above).
-    sp.delete(RECORD_FORM_OBJECT_PARAM);
+    // A level's object names the form's; a top-level task on the route's own
+    // object drops any stale child-task overrides (see the record-form URL
+    // contract above).
+    if (childObjectName) sp.set(RECORD_FORM_OBJECT_PARAM, childObjectName);
+    else sp.delete(RECORD_FORM_OBJECT_PARAM);
     sp.delete(RECORD_FORM_LINK_PARAM);
     // objectui#12291 — a new record that arrives carrying values (the
     // calendar's empty-day hand-off sends the day clicked) opens the create
@@ -1531,6 +1549,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         currentOrgId={activeOrganization?.id ?? null}
       >
       <RecordDrawerOpeningProvider value={setRecordDrawersOpening}>
+      <RecordPageDrawerOpenProvider value={setRecordPageDrawersOpen}>
       <ConsoleLayout
         activeAppName={activeApp.name}
         activeApp={activeApp}
@@ -1773,6 +1792,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
             />
           )}
       </ConsoleLayout>
+      </RecordPageDrawerOpenProvider>
       </RecordDrawerOpeningProvider>
       </FilterScopeProvider>
     </ExpressionProvider>

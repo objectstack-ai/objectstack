@@ -235,7 +235,8 @@ describe('RecordDetailView — a print page draws the record’s header actions 
     expect(rowNames).toEqual(['Submit for Sign-off', 'Edit', 'More actions']);
     // Edit is the system set's own handler, as on any record page.
     fireEvent.click(within(toolbar).getByRole('button', { name: 'Edit' }));
-    expect(onEdit).toHaveBeenCalledWith({ id: RECORD_ID });
+    // It names the record's object beside the record (objectstack#33111).
+    expect(onEdit).toHaveBeenCalledWith({ id: RECORD_ID }, OBJECT_NAME);
     expect(await openOverflow(toolbar)).toEqual(['Add to favorites', 'Share', 'Delete']);
   });
 

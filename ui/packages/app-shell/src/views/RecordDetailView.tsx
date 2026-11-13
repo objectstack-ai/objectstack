@@ -111,7 +111,12 @@ import { useObjectPresence } from '../hooks/useObjectPresence.js';
 interface RecordDetailViewProps {
   dataSource: any;
   objects: any[];
-  onEdit: (record: any) => void;
+  /**
+   * Opens the record form for `record`. `objectName` names the object the
+   * record belongs to, which inside a drawer level is the level's and not
+   * always the route's (objectstack#33111).
+   */
+  onEdit: (record: any, objectName?: string) => void;
   /**
    * When provided, this object name overrides the value derived from the
    * current URL (`useParams()`). Used when rendering the detail inside a
@@ -4678,7 +4683,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // header by the `editLockedByState` badge, as the lock band explains
         // the approval lock.
         disabled: approvalLocked || editDisabledByPredicate || editLockedByState,
-        onClick: () => onEdit({ id: pureRecordId }),
+        onClick: () => onEdit({ id: pureRecordId }, objectName),
       } as any);
     }
     // The record's favorites entry (objectui#12427), in the `⋯` overflow ahead
