@@ -78,6 +78,9 @@ export const AI_NAMESPACE = 'ai';
 /** The `ai` key whose value in the running system the server states (`live.provider`). */
 export const AI_PROVIDER_KEY = 'provider';
 
+/** The `mail` key whose value in the running system the server states (`live.provider`). */
+export const MAIL_PROVIDER_KEY = 'provider';
+
 /** The key the localization cascade resolves the workspace's zone from. */
 export const TIMEZONE_KEY = 'timezone';
 
@@ -120,7 +123,7 @@ export type ChecklistRowId =
  * 设置邮箱。我觉得这个不应该是必须的设置」. A deployment whose applications send
  * no mail has nothing to set up, and a hosted tenant has no transport of its
  * own to set up, so a required mail row kept the checklist open for good. A
- * mail setup that delivers still reads done ({@link isMailConfigured}).
+ * mail setup that delivers still reads done ({@link isMailDelivering}).
  */
 export const OPTIONAL_ROWS: ReadonlySet<string> = new Set<ChecklistRowId>(['mail']);
 
@@ -490,6 +493,29 @@ export function isMailConfigured(values: Record<string, ResolvedSettingValue>): 
   return true;
 }
 
+/**
+ * The mail row from the `mail` namespace's payload: done when the running
+ * system delivers mail.
+ *
+ * The server's statement (`live.provider` of `GET /api/settings/mail`) decides
+ * first: a provider in use, taken from the settings or from the deployment's
+ * own boot environment, is done; `source: 'none'` (the development log, which
+ * delivers nothing) is not done, whatever was saved. Mail set up through the
+ * environment saves nothing, so the saved values alone would keep that row not
+ * done for good. A payload without the statement (a server older than it, or
+ * one that cannot state the provider) falls back to the saved values
+ * ({@link isMailConfigured}), never to "not set".
+ */
+export function isMailDelivering(payload: Pick<SettingsNamespacePayload, 'values' | 'live'>): boolean {
+  const stated = payload.live?.[MAIL_PROVIDER_KEY];
+  if (stated && typeof stated === 'object') {
+    const { value, source } = stated;
+    if (source === 'none') return false;
+    if (source === 'settings' || source === 'environment') return typeof value === 'string' && value !== '';
+  }
+  return isMailConfigured(payload.values);
+}
+
 /** Has the organization been given a name of its own? */
 export function isOrganizationNamed(name: unknown): boolean {
   if (typeof name !== 'string') return false;
@@ -594,8 +620,7 @@ export async function readChecklistSettings(
   const mailListed = manifests.find((m) => m.namespace === MAIL_NAMESPACE);
   if (mailListed && mayWrite(mailListed, systemPermissions)) {
     try {
-      const mail = await getSettingsNamespace(MAIL_NAMESPACE);
-      state.mail = { done: isMailConfigured(mail.values) };
+      state.mail = { done: isMailDelivering(await getSettingsNamespace(MAIL_NAMESPACE)) };
     } catch {
       // A mail read that fails leaves the row out: the checklist says nothing
       // about a setting it could not read, rather than "not set".

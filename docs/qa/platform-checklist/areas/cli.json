@@ -2916,7 +2916,7 @@
       "title": "os deploy to a self-hosted runtime builds, previews the upgrade plan and installs: --dry-run prints the plan and installs nothing, --json writes one document to stdout with every human line on stderr, and an install that needs a confirmation says so and how",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2926,7 +2926,7 @@
         "app": "showcase",
         "requires": [
           "a showcase boot as the target runtime: `pnpm dev -- --fresh -p PORT --seed-admin`, and an osk_ admin key minted on it via POST /api/v1/keys",
-          "a scratch app directory outside examples/ holding a defineStack project (manifest id com.qa.deploy, version 1.0.0, one object qa_deploy_item with fields name and note) that `objectstack build` compiles; v1.1.0 of it drops the note field",
+          "a scratch app directory outside examples/ holding a defineStack project (manifest id com.qa.deploy, version 1.0.0, one object qa_deploy_item with fields name and note) that `objectstack build` compiles; v1.1.0 of it renames the note field to memo with no renamedFrom (note removed and memo added on one object: a suspected rename)",
           "`os environments use-runtime http://localhost:PORT --token osk_…` run once in the scratch directory, so os deploy targets the runtime"
         ]
       },
@@ -2934,7 +2934,7 @@
         "run `os deploy --dry-run` at v1.0.0; then GET /api/v1/packages",
         "run `os deploy --dry-run --json`, keeping stdout and stderr apart",
         "run `os deploy` (off a TTY); GET /api/v1/packages and the qa_deploy_item list",
-        "create two qa_deploy_item rows with a note; bump to v1.1.0; run `os deploy --dry-run`, then `os deploy --json` off a TTY"
+        "create two qa_deploy_item rows with a note; bump to v1.1.0 (note renamed memo); run `os deploy --dry-run`, then `os deploy --json` off a TTY"
       ],
       "acceptance": [
         {
@@ -2958,7 +2958,7 @@
         {
           "clause": "an upgrade that needs a confirmation is previewed as stopping, and refused off a TTY with the command that confirms it",
           "oracle": "log",
-          "verify": "the dry run warns 'Deploying this build would stop for your confirmation — N finding(s):' with the dropped field; the --json run exits non-zero with result 'refused', the runtime's refusal verbatim and confirm 'os deploy --confirm-upgrade FINDINGSET'; no question is asked off a TTY",
+          "verify": "the dry run warns 'Deploying this build would stop for your confirmation — 1 finding(s):' with the suspected rename (qa_deploy_item.note is removed while qa_deploy_item.memo is added, and no `renamedFrom` links them); the --json run exits non-zero with result 'refused', the runtime's 409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED refusal verbatim and confirm 'os deploy --confirm-upgrade FINDINGSET'; no question is asked off a TTY (packages/metadata-core/src/package-upgrade-verdict.ts#schemaUpgradeVerdict: a suspected rename, or a needs_confirm or destructive type change, stops; a removed field keeps its column and is refused by nothing)",
           "evidence": "both outputs and the exit codes"
         },
         {
@@ -2970,7 +2970,7 @@
       ],
       "negative": [
         "a dry run that installs, or a --json run whose stdout carries a human line, is a FAIL",
-        "an off-TTY run that waits on a question is a FAIL"
+        "an off-TTY run that waits on a question is a FAIL; a v1.1.0 that only drops a field is a fixture error, never a verdict: the field's column stays, so nothing asks for a confirmation and the --json run installs"
       ],
       "traps": [
         "stale-dist"
@@ -2991,6 +2991,12 @@
           "date": "2026-11-10",
           "change": "initial — os deploy to a self-hosted runtime: the plan, --dry-run and --json. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-13",
+          "change": "assertion-defect correction of acceptance[3] (with fixtures.requires[1], steps[3] and a negative). The fixture's v1.1.0 dropped the note field, and a removed field keeps its column, so the upgrade verdict finds nothing to confirm and the --json run installs (packages/metadata-core/src/package-upgrade-verdict.ts#schemaUpgradeVerdict). v1.1.0 now renames note to memo with no renamedFrom, a suspected rename, which the runtime stops with 409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED and the confirm command; the clause names that finding and that refusal. Found by the 18.4.0 acceptance run #32940 (F-4 to F-8 and its R4/R5 comments; wave anchor #32908). Re-read at main cf1b55c0. Card #32945",
+          "ref": "#32945"
         }
       ]
     },

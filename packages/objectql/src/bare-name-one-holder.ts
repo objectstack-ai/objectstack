@@ -50,9 +50,10 @@
  *    FIRST-registered package's declaration, so the body the designer opens
  *    and the body that runs can come from two packages (since narrowed to the
  *    namespace: "The narrowing");
- *  - `webhook` — the dispatcher's declared-webhook reader keeps the
- *    FIRST-registered package's declaration per name and never subscribes
- *    the other, and `/meta/webhook/NAME` serves the same one;
+ *  - `webhook` — the dispatcher's declared-webhook reader kept the
+ *    FIRST-registered package's declaration per name and never subscribed
+ *    the other, and `/meta/webhook/NAME` served the same one (both since
+ *    narrowed to the namespace: "The narrowing");
  *  - `connector` — `/meta/connector/NAME` (the by-name door the designer's
  *    connector picker reads) serves the FIRST-registered package's
  *    declaration; a provider-bound instance is the engine's one connector
@@ -187,6 +188,14 @@
  * a plugin or the host registers is the platform's holder: never judged at
  * the bind, and refused beside a package holder at the read (ADR-0150 D2,
  * epic seat ruling 6729484996).
+ *
+ * `webhook` followed (#31699 PR 2): the dispatcher subscribes each holder's
+ * declaration in its own slot (`declared:PKG/NAME`), each switched by its own
+ * activation row (`(package, name)`), and the redelivery veto judges a
+ * delivery by the slot its `ref_id` names. `/meta/webhook/NAME`, the
+ * activation door's bare `webhook/NAME` and the dispatcher's by-name read
+ * refuse a name two packages hold, naming both; the door's
+ * `webhook/NS/NAME` reaches each.
  *
  * Two holdings still meet under a narrowed type, whatever the namespaces:
  *

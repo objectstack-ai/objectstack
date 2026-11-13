@@ -163,6 +163,7 @@ import {
   resolveObjectSchemaMaskPosture,
   type ObjectSchemaMaskPosture,
   type ObjectSchemaMaskSecuritySurface,
+  type ObjectSchemaReadDelegateSource,
 } from '@objectstack/metadata-core';
 
 /**
@@ -225,6 +226,11 @@ export interface StdioDataBridgeDeps {
    * every other object-schema exit.
    */
   security?: () => ObjectSchemaMaskSecuritySurface | undefined;
+  /**
+   * [decision 6840464379] Where the object-schema mask finds an object's
+   * declared `schemaReadDelegate` ({@link CallerObjectViewDeps.schemaReadDelegates}).
+   */
+  schemaReadDelegates?: ObjectSchemaReadDelegateSource;
   /**
    * [#21207] The registered crypto provider's keyed digest
    * (`ICryptoProvider.keyedDigest`, reached through the engine's
@@ -488,6 +494,15 @@ export interface CallerObjectViewDeps {
   resolvePrincipal: () => Promise<ExecutionContext>;
   /** The `security` service, resolved at each use ({@link StdioDataBridgeDeps.security}). */
   security?: () => ObjectSchemaMaskSecuritySurface | undefined;
+  /**
+   * [decision 6840464379] Where the posture finds an object's declared
+   * `schemaReadDelegate` and the service it names — the host's engine and
+   * kernel, as the `/meta` doors find them, so an object its owner opens to
+   * the callers its door admits is served to this principal when the REST and
+   * HTTP MCP doors serve it. Absent, no exception applies: the object stays
+   * absent for a principal the read check refuses, which fails closed.
+   */
+  schemaReadDelegates?: ObjectSchemaReadDelegateSource;
 }
 
 /**
@@ -553,6 +568,7 @@ export function callerObjectView(view: McpObjectView, deps: CallerObjectViewDeps
           security,
           enabled,
           telemetry: OBJECT_SCHEMA_MASK_TELEMETRY,
+          schemaReadDelegates: deps.schemaReadDelegates,
         });
       } catch (error) {
         if (error instanceof ObjectSchemaMaskEvaluationError) throw fieldVisibilityRefusal(objectName);
@@ -1102,7 +1118,7 @@ function enforceApiKeyManagementCredential(object: string, action: string): void
  * honoured rather than re-decided.
  */
 export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge {
-  const { engine, metadataService, protocol, resolvePrincipal, keyedDigest, security } = deps;
+  const { engine, metadataService, protocol, resolvePrincipal, keyedDigest, security, schemaReadDelegates } = deps;
   // [#25138] One definition source for the gate, the relation-target gate and
   // the write-response strip, and one listing for discovery.
   const reads: StdioObjectReads = { metadataService, protocol };
@@ -1110,7 +1126,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   const objectView = stdioObjectView(reads);
   // [ADR-0106 D1/D5] …served to the principal through the object-schema mask:
   // the view discovery answers from. The gates below read `objectView` whole.
-  const servedView = callerObjectView(objectView, { resolvePrincipal, security });
+  const servedView = callerObjectView(objectView, { resolvePrincipal, security, schemaReadDelegates });
 
   const bridge: McpDataBridge = {
     async listObjects(): Promise<McpObjectSummary[]> {

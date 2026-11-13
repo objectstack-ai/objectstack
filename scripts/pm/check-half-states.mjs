@@ -15499,7 +15499,7 @@ export function h68ClassBWithoutSeamLine(issue) {
 }
 
 // ---------------------------------------------------------------------------
-// H70 + H71 (#28642) — a project seat's hourly patrol, and the card its absence
+// H70 + H71 (#28642) — a project seat's patrol routine, and the card its absence
 // leaves waiting.
 //
 // The seating rule (seat-lifecycle.md 〈座位贴协议〉) makes taking a project
@@ -15531,7 +15531,12 @@ export function h68ClassBWithoutSeamLine(issue) {
 // readings the patrols act on, never a merge gate (the card's triage ruling).
 // ---------------------------------------------------------------------------
 
-/** H71's clock — the card's own figure: an on-duty lane should claim within the hour its patrol fires, so two hours is one missed fire plus slack. */
+/**
+ * H71's clock — the in-flight figure: a seat with cards in flight patrols every 45 minutes or less
+ * (execution-duties.md 〈收集〉 ②), so two hours is two missed patrols plus slack. A seat on standby
+ * wakes on mailbox and PR events plus a 4–6 h fallback patrol, and no seat post states standby
+ * machine-readably — so the clock stays at the in-flight figure and the row names the standby reading.
+ */
 export const QUEUE_ON_DUTY_UNCLAIMED_HOURS = 2;
 
 /**
@@ -15564,7 +15569,8 @@ export function h70HeldSeatWithoutPatrol(issue) {
   if (hasPatrolLine(issue.body)) return null;
   return (
     '`pm:seat` HELD by a login with no `Patrol:` line in its body — taking a project seat creates ONE ' +
-    'self-bound hourly patrol routine in the same act and records it on the stub as `Patrol: TRIGGER_ID · ' +
+    'self-bound patrol routine in the same act (every 45 minutes or less while cards are in flight, a 4–6 h ' +
+    'fallback patrol on standby) and records it on the stub as `Patrol: TRIGGER_ID · ' +
     'CRON` (seat-lifecycle.md 〈座位贴协议〉, seat-post-protocol.md 〈座位 Routine 创建〉). Without the line ' +
     'nobody can see whether this seat has a patrol at all: a seat with none wakes only on PR subscriptions and ' +
     'relays, and stops looking once its queue empties — the measured shape a p1 card waited 4.5 h behind. ' +
@@ -15604,8 +15610,10 @@ export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
       : `no activity for ~${Math.round(ageHours)}h (threshold ${QUEUE_ON_DUTY_UNCLAIMED_HOURS}h; a lower bound on its time in the queue)`;
   return (
     `\`pm:queue\`, open and unassigned, with ${reading}, on a lane a 🟢 seat holds: ${seats}. A seat on duty ` +
-    'runs an hourly patrol whose first act is to claim up to its `batch` limit, so a card this old on its lane ' +
-    'usually means the patrol is not running (H70 names a held post with no `Patrol:` line) or the seat is full. ' +
+    'with cards in flight patrols every 45 minutes or less, and a patrol\'s first act is to claim up to its ' +
+    '`batch` limit, so a card this old on its lane usually means the patrol is not running (H70 names a held ' +
+    'post with no `Patrol:` line) or the seat is full. ⚠️ A seat on STANDBY wakes on mailbox and PR events plus ' +
+    'a 4–6 h fallback patrol: on such a lane a card under ~6 h old may only be waiting for that patrol. ' +
     'Remedy — WHO and HOW: that seat claims it, or says on its post why not (in hand at its limit, or the card ' +
     'is not ready). ⚠️ Spare concurrency is NOT judged: no seat post states it machine-readably, so a full seat ' +
     'reads the same as an idle one here. ⛔ Report-only: no label or assignee is written from this script. Out ' +

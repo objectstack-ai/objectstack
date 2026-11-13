@@ -204,6 +204,11 @@ const NON_PROVIDERS_IN_SPAN = [
     label: 'requestEnvResolver',
     why: '`RestRequestEnvResolver` — a resolver instance, not a slot provider',
   },
+  {
+    index: 22,
+    label: 'kernelServiceProvider',
+    why: '`(name, environmentId?) => Promise<unknown>` — a BY-NAME lookup for the service an object declares as its `schemaReadDelegate` (decision 6840464379), so it names no slot of its own; pinned by its own case below',
+  },
 ] as const;
 
 /**
@@ -376,6 +381,20 @@ describe('[#4251 B4] rest-api-plugin slot lookups', () => {
     expect(exists('nope-not-registered')).toBe(false);
   });
 
+  it('looks up a declared schemaReadDelegate service by name, on the kernel of the environment asked for (decision 6840464379)', async () => {
+    const services = allServices();
+    const { args } = await boot(services);
+    const km = services['kernel-manager'] as ReturnType<typeof envKernelManager>;
+    const byName = args[22] as (name: string, environmentId?: string) => Promise<unknown>;
+
+    expect(typeof byName, 'kernelServiceProvider must be wired at argument 22').toBe('function');
+    await expect(byName('approvals', 'env_1')).resolves.toBe(km.occupantOf('env_1', 'approvals'));
+    await expect(byName('approvals')).resolves.toBe(services.approvals);
+    await expect(byName('approvals', 'platform')).resolves.toBe(services.approvals);
+    // A name nothing registers is no service: the object stays absent, no throw.
+    await expect(byName('nope-not-registered')).resolves.toBeUndefined();
+  });
+
   it('asks for exactly the slots it declares, and no others', async () => {
     const services = allServices();
     const { args, asked } = await boot(services);
@@ -416,6 +435,7 @@ describe('[#4251 B4] rest-api-plugin slot lookups', () => {
     expect(args[4]).toBeUndefined();
     expect((args[5] as () => string | undefined)()).toBeUndefined();
     expect((args[16] as (name: string) => boolean)('analytics')).toBe(false);
+    await expect((args[22] as (name: string, environmentId?: string) => Promise<unknown>)('approvals', 'env_1')).resolves.toBeUndefined();
   });
 });
 

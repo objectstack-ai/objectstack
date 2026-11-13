@@ -28,6 +28,12 @@
  *    bridge's invokability check (`isHeadlessInvokableAction`): a script action
  *    with no handler binding is not run for an agent.
  *
+ * One rule holds under BOTH postures: an AI service account (`principalKind:
+ * 'agent'`, no `onBehalfOf`) never confirms an action for itself (ADR-0151 D3
+ * rule 3), so the `ai.requiresConfirmation` gate refuses it at every door,
+ * whatever the request carries. For a person and a delegated agent the gate
+ * stays an `ai`-posture rule.
+ *
  * Every other refusal is the REST door's under both postures, at the REST
  * door's point in the order, so a `url` action whose caller lacks its declared
  * capability is `403` for an agent too, never a type sentence that tells it
@@ -445,12 +451,16 @@ async function admitResolvedAction(
     const paramError = actionExec.enforceActionParams(deps, actionDef, actionSchema, params, { objectName, actionName });
     if (paramError) return refuse({ message: paramError, status: 400 });
 
-    // [#15942 / #16293] CONFIRMATION GATE (`ai` posture) — the last pre-dispatch
-    // check: after the param contract, so a malformed bag still gets its
-    // located 400; before the subject load, so a refusal reads and writes
-    // nothing.
-    if (posture === 'ai') {
-        const confirmationRefusal = actionExec.actionConfirmationRefusal(deps, actionDef, call.confirmation ?? {}, objectName);
+    // [#15942 / #16293] CONFIRMATION GATE — the last pre-dispatch check: after
+    // the param contract, so a malformed bag still gets its located 400; before
+    // the subject load, so a refusal reads and writes nothing. [ADR-0151 D3
+    // rule 3] Asked under BOTH postures for an AI service account, which never
+    // confirms an action for itself; under `ai` only for everyone else, so REST
+    // stays outside the gate for a person and a delegated agent.
+    if (posture === 'ai' || actionExec.isAiServiceAccountCaller(wiring.ec)) {
+        const confirmationRefusal = actionExec.actionConfirmationRefusal(
+            deps, actionDef, call.confirmation ?? {}, objectName, wiring.ec,
+        );
         if (confirmationRefusal) {
             return refuse({
                 message: confirmationRefusal.message,
@@ -1052,7 +1062,9 @@ const hostDispatchers = new WeakMap<object, HttpDispatcher>();
  *
  * `posture` picks the rules (see {@link ActionDispatchPosture}): a door an
  * agent drives takes `'ai'`, which adds the `sys_*` exposure, `ai.exposed`
- * and `ai.requiresConfirmation` gates the MCP `run_action` tool enforces.
+ * and `ai.requiresConfirmation` gates the MCP `run_action` tool enforces. An
+ * AI service account meets the `ai.requiresConfirmation` gate under either
+ * posture, and `confirm` never satisfies it for one (ADR-0151 D3 rule 3).
  *
  * `kernel` is the kernel the host's HTTP door is served from — on a
  * multi-kernel host, the one that registers the `kernel-resolver` service.

@@ -36,7 +36,7 @@ import { MCPServerRuntime, setRuntimeObjectView, setRuntimeStdioPrincipal } from
 import { PACKAGE_VERSION, DEFAULT_SERVER_VERSION } from './package-version.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
-import type { ObjectSchemaMaskSecuritySurface } from '@objectstack/metadata-core';
+import { objectSchemaReadDelegateSource, type ObjectSchemaMaskSecuritySurface } from '@objectstack/metadata-core';
 import {
   callerObjectView,
   createStdioDataBridge,
@@ -519,6 +519,21 @@ export class MCPServerPlugin implements Plugin {
         return undefined;
       }
     };
+    // [decision 6840464379] Where the object-schema mask finds an object's
+    // declared `schemaReadDelegate` and the service it names: this host's
+    // engine and kernel, as the `/meta` doors find them. A name this host does
+    // not register is no exception (the object stays absent), never a fault.
+    const optionalService = (name: string): unknown => {
+      try {
+        return ctx.getService<unknown>(name) ?? undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const schemaReadDelegates = objectSchemaReadDelegateSource({
+      engine: () => optionalService('objectql'),
+      service: optionalService,
+    });
     // [ADR-0106 D1/D5] The stdio principal, once this transport has one: the
     // object resources below serve their schemas to it through the same mask
     // `list_objects` / `describe_object` do.
@@ -795,6 +810,7 @@ export class MCPServerPlugin implements Plugin {
           protocol: protocolReads,
           resolvePrincipal,
           security: securityReads,
+          schemaReadDelegates,
           keyedDigest: storedHashDigest,
           // [ADR-0149 D2] Read here, in `start()`: every plugin's services are
           // registered during `init()`, so an absence now is final (ADR-0116),
@@ -885,7 +901,7 @@ export class MCPServerPlugin implements Plugin {
       setRuntimeObjectView(
         this.runtime,
         schemaPrincipal
-          ? callerObjectView(objectView, { resolvePrincipal: schemaPrincipal, security: securityReads })
+          ? callerObjectView(objectView, { resolvePrincipal: schemaPrincipal, security: securityReads, schemaReadDelegates })
           : objectView,
       );
       this.runtime.bridgeResources(metadataService, getRecord);

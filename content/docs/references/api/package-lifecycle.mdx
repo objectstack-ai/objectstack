@@ -417,6 +417,7 @@ Whole-deployment export, the answer of `GET /packages/export` (`os package expor
 | **reverted** | `{ type: string; name: string; action: Enum<'removed' \| 'restored'> }[]` | ✅ | Every item the revert touched. |
 | **failed** | `{ type: string; name: string; error: string; code?: string }[]` | ✅ | Every item the revert could not touch. |
 | **revertCommitId** | `string` | optional | Id of the commit the revert itself created, when one was written. |
+| **advisories** | `{ rule: string; path: string; where: string; message: string; … }[]` | optional | What the revert did beyond restoring its items, for each object an item restored, in the same element shape and omitted-when-empty discipline as `SaveMetaItemResponseSchema.advisories`. Present ONLY when at least one entry was raised: an empty array is never emitted, so a clean answer's bytes are unchanged and a caller that ignores this key behaves exactly as before. Three rules ride it: `object-storage-sync-refused` (`warning`), the restored object's storage sync was refused; and, per stored computed field (a non-`formula` field declaring `expression`) the restore makes compute something new (added back, turned from a formula or a plain field, or its expression, stored type or scale changed), the fill of the object's existing rows the save door also runs: `stored-expression-filled` (`info`, the rows written) or `stored-expression-fill-incomplete` (`warning`, what is left and how to fill it). The items it names reverted either way. |
 
 ### Nested Shape: `RevertPackageCommitResponse.reverted[number]`
 
@@ -435,6 +436,18 @@ Whole-deployment export, the answer of `GET /packages/export` (`os package expor
 | **error** | `string` | ✅ | Why the revert failed for this item. |
 | **code** | `string` | optional | Machine-readable failure code, when one was recorded. |
 
+### Nested Shape: `RevertPackageCommitResponse.advisories[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rule** | `string` | ✅ | Stable diagnostic rule id (`flow-multi-write-unfiltered`, `approval-expression-invalid`, …). Machine-readable and stable across releases — the key a renderer groups or suppresses by. |
+| **path** | `string` | ✅ | Config path inside the SUBMITTED body (`flows[0].nodes[1].config.multi`), so an editor can jump to the offending key. May be empty when the finding is about the item as a whole. The TOP-LEVEL collection entry follows one rule. The gate evaluates against a private per-write snapshot whose indexes no caller can resolve; a collection-resident write type is one whose collection that snapshot fills with the tenant's other stored items beside the written one, and there the entry is keyed by NAME, never by an array index — for example `objects.acme_invoice.sharingModel` (an `object` write) or `datasets.acme_invoice_metrics.dimensions[0].field` (a `dataset` write). Every other write type is the sole member of its own collection in that snapshot, so its `[0]` IS the written item and stays positional (for example `flows[0]...`). Which write types are collection-resident is derived, never listed: `@objectstack/lint`'s runtime gate computes the set (`NAME_KEYED_STACK_KEYS`) as the collections it carries as resolution context that a gated write type also lands in, so it changes with the gate, not with this text. An entry whose name cannot be spliced into a dotted path keeps its index. Nested positions inside one named item stay positional (`objects.acme_invoice.indexes[1]`): they index the author's own document. |
+| **where** | `string` | ✅ | Human-readable location — `flow "leave_approval" · node "approve"`. Prose for a person; use `path` for anything mechanical. |
+| **message** | `string` | ✅ | What is wrong, in the rule author's own words. |
+| **hint** | `string` | ✅ | How to fix it. |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | How the gate treated this finding. `error` means the write was REFUSED (these appear on the 422, never on a 2xx); `warning` / `info` are advisory — the write succeeded and the finding is FYI. |
+| **userMessage** | `string` | optional | The finding's user-facing sentence, composed by its producer in the request's locale (else the workspace default locale, else `en`) — the same field name and producer-marked meaning as `ApiErrorSchema.userMessage`. Present only when the producer authors a user sentence for this `rule`; absent, a consumer renders `message` as before. Consumers render it as received; `rule` stays the stable id and `message` / `hint` stay the developer-facing text. |
+
 
 ---
 
@@ -447,6 +460,7 @@ Whole-deployment export, the answer of `GET /packages/export` (`os package expor
 | **success** | `boolean` | ✅ | True exactly when nothing failed. |
 | **revertedCommits** | `string[]` | ✅ | Ids of the commits that were rolled back, in the order they were reverted. |
 | **failed** | `{ commitId: string; error: string }[]` | ✅ | Every commit the rollback could not revert. |
+| **advisories** | `{ rule: string; path: string; where: string; message: string; … }[]` | optional | Every reverted commit's own `advisories` (`RevertPackageCommitResponseSchema.advisories`: a refused storage sync, and the fill of each restored object's changed stored computed fields), in the order the commits were reverted. Present ONLY when at least one step raised one: an empty array is never emitted, so a clean answer's bytes are unchanged. |
 
 ### Nested Shape: `RollbackToPackageCommitResponse.failed[number]`
 
@@ -454,6 +468,18 @@ Whole-deployment export, the answer of `GET /packages/export` (`os package expor
 | :--- | :--- | :--- | :--- |
 | **commitId** | `string` | ✅ | The commit that could not be reverted. |
 | **error** | `string` | ✅ | Why reverting it failed. |
+
+### Nested Shape: `RollbackToPackageCommitResponse.advisories[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rule** | `string` | ✅ | Stable diagnostic rule id (`flow-multi-write-unfiltered`, `approval-expression-invalid`, …). Machine-readable and stable across releases — the key a renderer groups or suppresses by. |
+| **path** | `string` | ✅ | Config path inside the SUBMITTED body (`flows[0].nodes[1].config.multi`), so an editor can jump to the offending key. May be empty when the finding is about the item as a whole. The TOP-LEVEL collection entry follows one rule. The gate evaluates against a private per-write snapshot whose indexes no caller can resolve; a collection-resident write type is one whose collection that snapshot fills with the tenant's other stored items beside the written one, and there the entry is keyed by NAME, never by an array index — for example `objects.acme_invoice.sharingModel` (an `object` write) or `datasets.acme_invoice_metrics.dimensions[0].field` (a `dataset` write). Every other write type is the sole member of its own collection in that snapshot, so its `[0]` IS the written item and stays positional (for example `flows[0]...`). Which write types are collection-resident is derived, never listed: `@objectstack/lint`'s runtime gate computes the set (`NAME_KEYED_STACK_KEYS`) as the collections it carries as resolution context that a gated write type also lands in, so it changes with the gate, not with this text. An entry whose name cannot be spliced into a dotted path keeps its index. Nested positions inside one named item stay positional (`objects.acme_invoice.indexes[1]`): they index the author's own document. |
+| **where** | `string` | ✅ | Human-readable location — `flow "leave_approval" · node "approve"`. Prose for a person; use `path` for anything mechanical. |
+| **message** | `string` | ✅ | What is wrong, in the rule author's own words. |
+| **hint** | `string` | ✅ | How to fix it. |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | How the gate treated this finding. `error` means the write was REFUSED (these appear on the 422, never on a 2xx); `warning` / `info` are advisory — the write succeeded and the finding is FYI. |
+| **userMessage** | `string` | optional | The finding's user-facing sentence, composed by its producer in the request's locale (else the workspace default locale, else `en`) — the same field name and producer-marked meaning as `ApiErrorSchema.userMessage`. Present only when the producer authors a user sentence for this `rule`; absent, a consumer renders `message` as before. Consumers render it as received; `rule` stays the stable id and `message` / `hint` stay the developer-facing text. |
 
 
 ---
