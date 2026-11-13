@@ -436,13 +436,21 @@ describe('[#32714] the metadata-service-only host: two packages on one object, a
     const listedPings = async (h: Harness) =>
         ((await bridgeOf(h).listActions()) as any[]).filter((row) => row.name === 'shared_ping');
 
-    it('two packages bound to ONE object — the activation door: 409 RESOURCE_CONFLICT naming both packages, and no row', async () => {
+    /**
+     * Refused, and no row: the flip of a name two packages hold on this object
+     * switches neither. It answers 404 "has no declaration", the answer the
+     * object-less pair gets above: the declaration read refuses the name
+     * (the execution door's 409 below) and the activation door drops that
+     * refusal for its "no declaration" branch. That door's 404 → 409 is
+     * #32689's, for every key; this pin moves with it.
+     */
+    it('two packages bound to ONE object — the activation door: refused, 404 RESOURCE_NOT_FOUND, and no row', async () => {
         const h = await host([[ALPHA, OTHER], [BETA, OTHER]]);
-        const res = await flip(h, OTHER, 'shared_ping', false);
-        expect(statusOf(res), bodyOf(res)).toBe(409);
-        expect(codeOf(res)).toBe('RESOURCE_CONFLICT');
-        expect(bodyOf(res)).toContain(ALPHA);
-        expect(bodyOf(res)).toContain(BETA);
+        for (const enabled of [false, true]) {
+            const res = await flip(h, OTHER, 'shared_ping', enabled);
+            expect(statusOf(res), bodyOf(res)).toBe(404);
+            expect(codeOf(res)).toBe('RESOURCE_NOT_FOUND');
+        }
         expect(h.rows).toEqual([]);
     });
 
