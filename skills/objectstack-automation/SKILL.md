@@ -140,7 +140,7 @@ fan-out.
 
 ### Flow Variables
 
-`variables` is an **array** of `{ name, type, isInput, isOutput }` entries —
+`variables` is an **array** —
 not a name-keyed map; a variable has no `label`: `variables: [{ name: 'case_id',
 type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOutput: true }]`.
 
@@ -226,7 +226,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 
 ## Valid-but-silently-wrong (passes build, fails at runtime)
 
-Legal metadata authors get wrong; most are caught by `objectstack build`:
+Most are caught by `objectstack build`:
 
 1. **A value slot takes a literal or a CEL envelope — never a `{…}` token.**
    In `assignments.*`, `fields.*`, `subflow` / `map` `input.*`, `script`
@@ -278,7 +278,7 @@ Legal metadata authors get wrong; most are caught by `objectstack build`:
 
    ```ts
    { id: 'ai', type: 'script', config: {
-       function: 'helpdesk.aiTriageStub',     // returns { ai_category, ai_sentiment, … }
+       function: 'helpdesk.aiTriageStub',
        inputs: { ticketId: { dialect: 'cel', source: 'record.id' } },
        outputVariable: 'ai',
    } },
