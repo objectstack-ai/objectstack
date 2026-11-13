@@ -9,6 +9,7 @@
 '@objectstack/plugin-audit': patch
 '@objectstack/plugin-security': patch
 '@object-ui/app-shell': patch
+'@object-ui/i18n': patch
 ---
 
 feat(runtime): a script body sends mail and adds a timeline entry through platform doors that stamp who sent it
@@ -29,4 +30,4 @@ Metadata-protocol: added
 - **`@objectstack/plugin-email`:** a mail-log row the mail service did not write is delivered from the configured sender, with no sender header of its own (see BREAKING above). `send()` honours `requireLogRow`: when the row cannot be written, it refuses with `503 SERVICE_UNAVAILABLE` and delivers nothing.
 - **`@objectstack/plugin-audit`:** the activity feed owns the door's writer, `appendAppActivity` on the `audit` service. An app's entry may not use a platform-only type or a platform metadata key, and may not be about an object the feed does not show or an append-only object. `sys_activity` gains a read-only `origin` column, empty on an entry not written through the activity door.
 - **`@objectstack/plugin-security`:** inserting into an append-only object from app automation that runs as system is deprecated, and says so once per kind and object, naming the two doors.
-- **`@object-ui/app-shell`:** the script capability picker lists both capabilities with their calls; on a hook it does not offer `email.send`, and flags a stored grant.
+- **`@object-ui/app-shell`:** the script capability picker lists both capabilities with their calls; on a hook it does not offer `email.send`, and flags a stored grant. `@object-ui/i18n` carries the flag's text in the studio catalogue (en, zh).
