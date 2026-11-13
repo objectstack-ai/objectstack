@@ -277,6 +277,36 @@ describe('delegated writes roll their drops up onto the parent\'s answer (#33019
         expect(done.droppedFields).toEqual(STATUS_DROP);
     });
 
+    it('map: an item that completed BEFORE a later item paused keeps its drop (the map\'s paused exit)', async () => {
+        const engine = makeEngine();
+        // Item `a` drops synchronously; item `b` pauses and, resumed, drops
+        // nothing — so the parent can only learn of `a`'s drop from the step
+        // the map wrote when `b` suspended it.
+        engine.registerNodeExecutor({
+            type: 'item_step',
+            descriptor: defineActionDescriptor({ type: 'item_step', version: '1.0.0', name: 'Item step', supportsPause: true, resumeAuthority: 'any' }),
+            async execute(_node: unknown, _vars: unknown, context: AutomationContext) {
+                if ((context as { params?: { tag?: string } }).params?.tag === 'b') return { success: true, suspend: true, correlation: 'held' };
+                return { success: true, droppedFields: [{ object: 'expense_line', fields: ['amount'], reason: 'readonly' }] };
+            },
+        } as NodeExecutor);
+        engine.registerFlow('one_item', chain('one_item', [{ id: 'step', type: 'item_step', label: 'Step' }]));
+        engine.registerFlow('process_each', chain('process_each', [
+            { id: 'each', type: 'map', label: 'Each', config: { flowName: 'one_item', collection: ['a', 'b'], input: { tag: { dialect: 'cel', source: 'item' } } } },
+            { id: 'confirm', type: 'hold', label: 'Confirm' },
+        ]));
+
+        const parked = await engine.execute('process_each', CALLER);
+        expect(parked.status).toBe('paused');
+        const itemB = await childRunOf(engine, parked.runId!, 'map:');
+        const itemDone = await engine.resume(itemB);
+        expect('droppedFields' in itemDone).toBe(false); // `b` itself dropped nothing
+
+        const done = await engine.resume(parked.runId!);
+        expect(done.success).toBe(true);
+        expect(done.droppedFields).toEqual([{ object: 'expense_line', fields: ['amount'], reason: 'readonly' }]);
+    });
+
     it('subflow: a child that paused, resumed through the PARENT\'s run id (the delegated leg), rolls its drop up', async () => {
         const engine = makeEngine();
         engine.registerFlow('pause_then_submit', PAUSE_THEN_SUBMIT);
