@@ -243,7 +243,15 @@ jobs:
   patrol:
     name: Live half-state sweep
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25, re-measured (#32991). Once the hang in the sweeper's near-miss regex
+    # was fixed, this job's own pull_request run 43379300629 took 13m30s against
+    # the old cap of 15: under 2 minutes of headroom, on a job that took 6m28s
+    # (run 42173539847, 2026-11-06). The sweep step went from 4m27s to 6m42s and
+    # the citation census from 41s to 5m26s over that week. 25 is about 1.85x
+    # the measured job. ⛔ Don't raise this cap to make a run that HANGS go
+    # green. A hang shows up as requests stopping while the CPU stays pinned,
+    # and that is the defect to fix (#32991 was one regex on one comment line).
+    timeout-minutes: 25
     steps:
       # The patrol reads the SWEPT repo's own checkout for the passes that
       # classify its workflows and its tracked files, so the checkout is the
