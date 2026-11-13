@@ -8,7 +8,7 @@
  * its throw read the way the MCP tool reads one: `actionsDoorAnswerOf`, with
  * a refusal's `details`).
  *
- * Four groups:
+ * Five groups:
  *
  *  1. `dispatchAction` answers what the REST door answers for the same call,
  *     byte for byte — a gated action and an elevated flow, refused and
@@ -18,6 +18,10 @@
  *  1b. On a two-kernel host, `dispatchAction` runs a call on the kernel the
  *     REST door's scoped path is served from, through the same placement
  *     step, and a failing resolver refuses it at both doors.
+ *  1c. On a hosted environment kernel, a same-origin `type: 'api'` action's
+ *     forward is placed in the environment the call ran in, through both
+ *     doors; an environment's own kernel, handed to `dispatchAction`, has no
+ *     socket to forward through and is refused 503.
  *  2. The MCP refusals that change because the bridge now runs the REST
  *     door's sequence (the PR's "Served refusal codes that change"): each
  *     was refused before and stays refused; only the code, or the detail
@@ -459,6 +463,127 @@ describe('dispatchAction on a multi-kernel host runs on the environment\'s own k
         expect({ status: host.status, code: host.body.error?.code }).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
         expect(h.host.ran()).toBe(0);
         expect(h.env.ran()).toBe(0);
+    });
+});
+
+/**
+ * A HOSTED environment kernel (#32658): the host kernel owns the socket — its
+ * `http.server` and the raw app behind it — and the `kernel-resolver`; the
+ * environment's own kernel owns neither. The resolver is a hosting
+ * distribution's strategy in miniature: the environment's bound hostname, else
+ * the `X-Environment-Id` header, else the scoped-URL hint. The host's raw app
+ * places every request it receives with that same resolver and serves the
+ * probe target on the kernel it answers, where the caller's session is read: a
+ * request the raw app places anywhere else reaches a kernel nobody signed in
+ * to (the host kernel is a routing shell), and the target answers 401.
+ *
+ * The REST door is the real `dispatch()` on the host kernel, for a request
+ * that arrived on the environment's hostname with the caller's session.
+ */
+describe('a same-origin api action on a hosted environment kernel forwards as the REST door forwards it', () => {
+    const ENV_T = 'env_t';
+    const TENANT_HOST = 'acme.example.test';
+    const SESSION = 'os.session=member';
+    const probe = { name: 'probe_api', label: 'Probe', type: 'api', target: '/api/v1/probe/echo', method: 'POST', ai: EXPOSED };
+    const auth = { api: { getSession: async () => ({ user: { id: MEMBER_EC.userId } }) } };
+
+    function hostedEnvironment() {
+        const env = makeRig([probe], { services: { auth } });
+        const place = (ctx: any) => {
+            const headers = ctx.request?.headers ?? {};
+            const named = headers.host === TENANT_HOST || headers['x-environment-id'] === ENV_T || ctx.urlEnvironmentId === ENV_T;
+            if (!named) return undefined;
+            ctx.environmentId = ENV_T;
+            return env.kernel;
+        };
+        /** Every request the host's raw app received: its URL, its headers, and whether it was placed in the environment. */
+        const forwards: Array<{ url: string; headers: Record<string, string>; placed: boolean }> = [];
+        const request = async (url: string, init: RequestInit) => {
+            const headers: Record<string, string> = { ...(init.headers as Record<string, string>), host: new URL(url).host };
+            const placed = place({ request: { headers } }) === env.kernel;
+            forwards.push({ url, headers, placed });
+            const signedIn = placed && headers.cookie === SESSION;
+            const body = signedIn
+                ? { success: true, data: { echoed: JSON.parse(String(init.body ?? 'null')) } }
+                : { success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required' } };
+            return new Response(JSON.stringify(body), { status: signedIn ? 200 : 401, headers: { 'content-type': 'application/json' } });
+        };
+        const host = makeRig([], {
+            services: { 'kernel-resolver': { resolveKernel: async (ctx: any) => place(ctx) }, 'http.server': { getRawApp: () => ({ request }) } },
+        });
+        const viaRest = async () => ((await new HttpDispatcher(host.kernel).dispatch(
+            'POST', `/actions/${OBJECT}/${probe.name}`, {}, {}, { request: { headers: { host: TENANT_HOST, cookie: SESSION } } } as any,
+        )) as any).response as { status: number; body: any };
+        const viaHost = (kernel: unknown, call: Partial<ActionDispatchRequest> = {}) => dispatchAction(kernel as any, {
+            executionContext: MEMBER_EC as any, objectName: OBJECT, actionName: probe.name, credentialHeaders: { cookie: SESSION }, ...call,
+        });
+        return { env, host, forwards, viaRest, viaHost };
+    }
+
+    it('a call naming the environment on the host kernel forwards into that environment and answers what the REST door answers, with its invocation row', async () => {
+        const h = hostedEnvironment();
+
+        const rest = await h.viaRest();
+        const restForward = h.forwards.splice(0);
+        const host = await h.viaHost(h.host.kernel, { environmentId: ENV_T });
+        const hostForward = h.forwards.splice(0);
+
+        expect({ status: rest.status, data: rest.body.data }).toEqual({ status: 200, data: { echoed: {} } });
+        expect({ status: host.status, data: host.body.data }).toEqual({ status: rest.status, data: rest.body.data });
+        // Each door's forward reached the host's raw app once and was placed
+        // in the environment the call ran in: the REST door's by the hostname
+        // its request arrived on, the host door's by the environment header.
+        expect(restForward.map((f) => f.placed)).toEqual([true]);
+        expect(hostForward.map((f) => ({ placed: f.placed, environment: f.headers['x-environment-id'] })))
+            .toEqual([{ placed: true, environment: ENV_T }]);
+        // Both calls ran on the environment's kernel, and each wrote its row there.
+        expect(h.env.rows.map((r) => r.outcome)).toEqual(['succeeded', 'succeeded']);
+        expect(h.host.rows).toEqual([]);
+    });
+
+    it('the forward is placed where the call ran: an environment header among the credential headers does not move it', async () => {
+        const h = hostedEnvironment();
+
+        const host = await h.viaHost(h.host.kernel, {
+            environmentId: ENV_T,
+            credentialHeaders: { cookie: SESSION, 'X-Environment-Id': 'env_elsewhere' },
+        });
+
+        expect({ status: host.status, data: host.body.data }).toEqual({ status: 200, data: { echoed: {} } });
+        expect(h.forwards.map((f) => ({ placed: f.placed, environment: f.headers['x-environment-id'] })))
+            .toEqual([{ placed: true, environment: ENV_T }]);
+    });
+
+    it('an environment\'s own kernel cannot forward: the host door refuses 503 and nothing reaches the raw app', async () => {
+        const h = hostedEnvironment();
+
+        const answer = await h.viaHost(h.env.kernel, { environmentId: ENV_T });
+
+        expect({ status: answer.status, code: answer.body.error?.code }).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(answer.body.error?.message).toContain(probe.target);
+        expect(h.forwards).toEqual([]);
+    });
+
+    // Nothing placed the call in an environment, so there is nothing to route:
+    // a single kernel (the named environment is the scope of the call's
+    // lookups, not a placement), and a resolver that answers the control plane.
+    it.each([
+        ['a single kernel', {}],
+        ['a resolver that places the call in the control plane', {
+            'kernel-resolver': { resolveKernel: async (ctx: any) => { ctx.environmentId = 'platform'; return undefined; } },
+        }],
+    ])('on %s the forward carries no environment header', async (_label, services: Record<string, unknown>) => {
+        const request = vi.fn(async (_url: string, _init: RequestInit) =>
+            new Response(JSON.stringify({ success: true, data: { ok: 1 } }), { status: 200, headers: { 'content-type': 'application/json' } }));
+        const single = makeRig([probe], { services: { ...services, 'http.server': { getRawApp: () => ({ request }) } } });
+
+        const answer = await single.viaHost(MEMBER_EC, probe.name, { environmentId: 'env_named' });
+
+        expect({ status: answer.status, data: answer.body.data }).toEqual({ status: 200, data: { ok: 1 } });
+        expect(request).toHaveBeenCalledTimes(1);
+        const [url, init] = request.mock.calls[0];
+        expect(url).toBe(`http://localhost${probe.target}`);
+        expect(Object.keys(init.headers as Record<string, string>)).not.toContain('x-environment-id');
     });
 });
 

@@ -521,7 +521,7 @@ async function dispatchAdmittedAction(
             }
             const inject = await actionExec.resolveInProcessRequest(deps, requestContext, envId);
             if (!inject) {
-                return { kind: 'refused', refusal: { message: actionExec.apiActionForwardUnavailableError(actionDef), status: 503 } };
+                return { kind: 'refused', refusal: { message: actionExec.apiActionForwardUnavailableError(actionDef, door), status: 503 } };
             }
             // [#28657] On a denied load the request is built from the
             // `recordId` alone — ⛔ never from a row the caller could not read.
@@ -911,6 +911,14 @@ function actionRoutePath(namespace: string | undefined, objectName: string, acti
 }
 
 /**
+ * The declared environment header (`X-Environment-Id`, lower-case as the
+ * forward's header bag spells it), which a host's `kernel-resolver` reads to
+ * place a request in its environment and which the api forward carries across
+ * from its request (`action-execution.ts`'s forward allow-list).
+ */
+const FORWARD_ENVIRONMENT_HEADER = 'x-environment-id';
+
+/**
  * The host door over a dispatcher's deps: the REST door's sequence for a
  * call that arrived as values, not as a path. Writes the invocation row with
  * no `surface` (a host's call came through neither REST nor MCP).
@@ -970,6 +978,24 @@ export async function dispatchActionRequest(
         });
     } catch (err) {
         return deps.errorFromThrown(err, 500);
+    }
+    // [#32658] THE FORWARD'S ROUTING IDENTITY. A same-origin `type: 'api'`
+    // action forwards into the host's raw app, which places the forwarded
+    // request as it places any request it receives. A REST request placed by
+    // its hostname or its `X-Environment-Id` carries that signal into its
+    // forward, so the forward lands in the environment the call ran in. This
+    // door's request carries neither: on a multi-kernel host its forward
+    // reached the raw app as `Host: localhost`, which places it in no
+    // environment, and the target answered the caller 401. The environment the
+    // host's resolver placed the call in is written as the declared
+    // environment header, so the forward is placed where the call ran. It is
+    // the resolver's answer, never the caller's: it replaces any spelling the
+    // credential headers carried. Read before the no-resolver fallbacks below
+    // write an environment, so a host that placed nothing (a single kernel)
+    // routes nothing; `platform` is the control plane, not an environment.
+    const placedEnvironment = context.environmentId;
+    if (typeof placedEnvironment === 'string' && placedEnvironment !== '' && placedEnvironment !== 'platform') {
+        headers[FORWARD_ENVIRONMENT_HEADER] = placedEnvironment;
     }
     // On a host with NO resolver nothing places the call, so the environment
     // the host named is carried as it always was — never silently dropped for
@@ -1044,6 +1070,13 @@ const hostDispatchers = new WeakMap<object, HttpDispatcher>();
  * multi-kernel host, the one that registers the `kernel-resolver` service.
  * The call is placed by the dispatcher's own placement step, asked what the
  * scoped REST request asks, so both doors run the call on the same kernel.
+ *
+ * A same-origin `type: 'api'` action forwards into the raw app of the
+ * kernel's HTTP server, as at the REST door, and on a multi-kernel host the
+ * forward carries the environment the resolver placed the call in
+ * (`X-Environment-Id`), so the raw app places it in that same environment.
+ * An environment's own kernel owns no socket: handed one, the door has
+ * nothing to forward through and refuses the action `503`.
  *
  * What `dispatch()` runs after placement and this door does NOT, so it stays
  * the host's job before it calls:

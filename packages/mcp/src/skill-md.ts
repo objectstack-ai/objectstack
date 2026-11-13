@@ -118,6 +118,24 @@ export interface RenderSkillOptions {
    * renderer cannot see the bridge, so the host says so.
    */
   datasetTools?: boolean;
+  /**
+   * [#32766] The text a host that mounts a build door adds to the DATA-ONLY
+   * skill — the same string it passes as `dataOnlyInstructions` on the
+   * authoring injection of `handleHttpRequest`, so `initialize` and this file
+   * say the same thing (for example, that building needs an OAuth connection
+   * with `metadata:write`). Markdown, rendered verbatim as its own block
+   * after the tool list.
+   *
+   * It renders only when {@link authoringTools} names at least one tool (the
+   * host has a build door to point at) AND {@link grantedScopes} do NOT admit
+   * the family (`grantsAuthoringTools`): the exact complement of the
+   * authoring section, so a skill carries one or the other and never both. A
+   * host that injects no authoring tools — and the public `GET /mcp/skill`
+   * route of this framework, which passes none — renders the data skill
+   * byte-identical to before (cloud#4329, ruled B: the hint only where a
+   * build door is mounted).
+   */
+  dataOnlyInstructions?: string;
 }
 
 const URL_PLACEHOLDER = '<YOUR_ENV_MCP_URL>'; // e.g. https://<env>.objectos.app/api/v1/mcp
@@ -270,6 +288,13 @@ export function renderSkillMarkdown(options: RenderSkillOptions = {}): string {
       ? options.authoringTools
       : undefined;
   const description = authoringTools ? OBJECTSTACK_SKILL_DESCRIPTION_WITH_AUTHORING : OBJECTSTACK_SKILL_DESCRIPTION;
+  // [#32766] The host's data-only text: only beside a build door it injected
+  // tools for, and only where the authoring section does not render.
+  const dataOnlyText = options.dataOnlyInstructions?.trim();
+  const dataOnlyBlock =
+    !authoringTools && dataOnlyText && options.authoringTools && options.authoringTools.length > 0
+      ? `\n${dataOnlyText}\n`
+      : '';
   // Mirrors the native data gate in `wireBridgeTools` (`!scopes || scopes.includes(data:read)`).
   const describeObjectRegistered = !options.grantedScopes || options.grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
 
@@ -409,7 +434,7 @@ create/update payload.
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
   (including \`confirm: true\` for an action flagged \`requiresConfirmation\`).
-${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}
+${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}${dataOnlyBlock}
 ## Conventions & gotchas
 
 - **Permissions/RLS apply to every call.** Fewer rows than expected, or a
