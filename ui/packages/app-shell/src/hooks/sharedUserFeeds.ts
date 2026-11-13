@@ -86,6 +86,18 @@
  * off and the realtime service names no route) — so the 60 s fallback is what
  * runs. The activity feed is not polled and has no push half.
  *
+ * ## A poll that finds nothing new asks less often (objectstack#32627)
+ *
+ * Each poll tick whose answer equals the value already on screen doubles the
+ * delay before the next tick, up to `MAX_IDLE_POLL_MS`; the first answer that
+ * differs puts the feed back on its cadence at once. So a console left open on
+ * a quiet inbox asks for it every 60 s, then 120 s, then every 3 minutes,
+ * instead of every 60 s for as long as it stays open. Nothing the user should
+ * see is dropped: every tick still reads the whole window, an arrival is on
+ * screen at the next tick, and coming back to the tab (or a push channel
+ * changing) reads at once and restores the cadence. An unchanged answer keeps
+ * the value already published, so its consumers do not re-render either.
+ *
  * @module
  */
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
@@ -146,6 +158,22 @@ const HIDDEN_POLL_MS = 180_000;
  * hammering the server at its foreground cadence.
  */
 const MAX_BACKOFF_MS = 120_000;
+/**
+ * Ceiling for the IDLE backoff (objectstack#32627, "A poll that finds nothing
+ * new asks less often" above): a visible tab whose feed keeps answering the
+ * same value polls no slower than a backgrounded one does.
+ */
+const MAX_IDLE_POLL_MS = HIDDEN_POLL_MS;
+
+/** Whether two answers of a feed carry the same value. Answers are plain JSON data. */
+function sameAnswer(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
 /**
  * How long a fetched value stays authoritative. It is the dedupe window: a
  * second consumer mounting inside it is served the cached value instead of
@@ -289,6 +317,11 @@ class SharedFeed<T> {
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** Current inter-poll delay: `pollMs`, doubled per failure, capped. */
   private backoffMs: number;
+  /**
+   * The delay earned by answers that changed nothing: `pollMs`, doubled per
+   * unchanged poll tick, capped at `MAX_IDLE_POLL_MS` (objectstack#32627).
+   */
+  private idleMs: number;
   private visibilityBound = false;
   private pushBound = false;
 
@@ -302,6 +335,7 @@ class SharedFeed<T> {
     this.snapshot = { value: empty, status: 'idle' };
     this.idleSnapshot = this.snapshot;
     this.backoffMs = pollMs;
+    this.idleMs = pollMs;
   }
 
   subscribe = (onStoreChange: () => void): (() => void) => {
@@ -337,6 +371,7 @@ class SharedFeed<T> {
       this.probesLeft = UNAVAILABLE_PROBE_LIMIT;
       this.fetchedAt = 0;
       this.backoffMs = this.pollMs;
+      this.idleMs = this.pollMs;
       // A different key means the cached value belongs to someone else, and
       // so does the fact that it was an answer — back to `idle`, not `ready`.
       this.publish(this.empty, 'idle');
@@ -379,8 +414,10 @@ class SharedFeed<T> {
    * to collapse mounts, not to defeat the cadence). Concurrent callers are
    * collapsed by `inFlight`, which is set synchronously before the first
    * `await` — so two consumers attaching in the same commit issue one read.
+   * `pollTick` marks the cadence's own read: only that one, answering what is
+   * already on screen, lengthens the idle delay (objectstack#32627).
    */
-  private async refresh(force = false): Promise<void> {
+  private async refresh(force = false, pollTick = false): Promise<void> {
     const runner = this.runner;
     if (!runner || this.inFlight) return;
     // A retired feed is not dead, it is quiet: it still re-probes, a bounded
@@ -412,11 +449,17 @@ class SharedFeed<T> {
         // An answer with a value: the feed is alive, whatever it was before.
         // This is the ONLY way out of retirement, and it restores the full
         // budget — a feed that has answered once has earned the next lost race.
+        // An answer equal to the one on screen (objectstack#32627): a poll
+        // tick that found nothing new waits longer for the next one, and the
+        // value already published stays, so nobody re-renders for it.
+        const unchanged = this.snapshot.status === 'ready' && sameAnswer(next, this.snapshot.value);
+        if (!unchanged) this.idleMs = this.pollMs;
+        else if (pollTick && !probing) this.idleMs = Math.min(Math.max(this.idleMs, this.pollMs) * 2, MAX_IDLE_POLL_MS);
         this.unavailable = false;
         this.probesLeft = UNAVAILABLE_PROBE_LIMIT;
         this.fetchedAt = Date.now();
         this.backoffMs = this.pollMs;
-        this.publish(next, 'ready');
+        this.publish(unchanged ? this.snapshot.value : next, 'ready');
       } else if (failed) {
         // A probe that fails for some OTHER reason is still not an answer, and
         // it does not get to drag a retired feed into `error`: the surface has
@@ -502,8 +545,10 @@ class SharedFeed<T> {
     if (this.pushCovers()) return;
     // Backgrounded tabs poll at the slower cadence — but never FASTER than the
     // current backoff, so a failing feed stays backed off either way.
+    // Nor faster than the idle backoff a run of unchanged answers earned.
     const hidden = typeof document !== 'undefined' && document.hidden;
-    const delay = hidden ? Math.max(HIDDEN_POLL_MS, this.backoffMs) : this.backoffMs;
+    const base = Math.max(this.backoffMs, this.idleMs);
+    const delay = hidden ? Math.max(HIDDEN_POLL_MS, base) : base;
     this.timer = setTimeout(() => {
       this.timer = null;
       // A tick armed before the cut-off can come due after it; it sends
@@ -514,7 +559,7 @@ class SharedFeed<T> {
       // tick alike — one re-arm point, so a feed that changes state mid-read
       // (a poll that retires, a probe that revives) cannot end up scheduling
       // the cadence it just left.
-      void this.refresh(true);
+      void this.refresh(true, true);
     }, delay);
   }
 
@@ -541,6 +586,8 @@ class SharedFeed<T> {
     if (this.unavailable && !this.mayProbe()) return;
     this.stopPolling();
     if (!this.unavailable) this.backoffMs = this.pollMs;
+    // The user is looking again: back on the cadence (objectstack#32627).
+    this.idleMs = this.pollMs;
     void this.refresh(true);
   };
 
@@ -568,6 +615,7 @@ class SharedFeed<T> {
     this.stopPolling();
     if (this.pushCovers()) return;
     this.backoffMs = this.pollMs;
+    this.idleMs = this.pollMs;
     void this.refresh(true);
   };
 
@@ -619,6 +667,7 @@ class SharedFeed<T> {
     this.probesLeft = UNAVAILABLE_PROBE_LIMIT;
     this.fetchedAt = 0;
     this.backoffMs = this.pollMs;
+    this.idleMs = this.pollMs;
   }
 }
 
