@@ -40,8 +40,8 @@
 - 标题滞后是可修半状态,坐席时顺手修,⛔ 非阻塞;留守登记(谁、哪些尾巴)= 说明段一行。
 - 同席续班非交接:账号、贴、信箱 PR 不变;⛔ 不走下节清单、不发 `seat-offline`/`seat-online`。
 - 旧会话把判断写进贴;继任重订信箱 PR 与在飞 PR,存根换会话 ID、记 `Successor-of:` 旧会话。
-- 巡查改绑 = 继任自建自绑并删旧,`Patrol:` 换号;前任 `Claim:` 归继任不自退,旧会话即结束。
-- 上下文读数:`get_session`(无参)`external_metadata.context_usage.used_tokens`;读不到或 0 按固定波数。
+- 巡查改绑 = 继任自建自绑并删旧,`Patrol:` 换号;前任笔迹归继任不自退,旧会话即结束。
+- 上下文读数:`get_session`(无参)`external_metadata.context_usage.used_tokens`;读不到或 0 归协调者读。
 
 ## 交接收尾清单(漏一步就是留残缺现场)
 
