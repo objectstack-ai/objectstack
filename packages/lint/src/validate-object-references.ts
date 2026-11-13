@@ -87,6 +87,7 @@ import {
 import { referenceCarrierOf, referenceTargetOf } from '@objectstack/spec/data';
 
 import { closureDependencyRemedy, packagesOf, recordsOf, suggestName } from './object-graph.js';
+import type { UserTextParams } from './finding-user-text.js';
 
 /** Materialized once for the repeated edit-distance scans in `suggestName`. */
 const PLATFORM_NAMES: readonly string[] = [...PLATFORM_PROVIDED_OBJECT_NAMES];
@@ -122,6 +123,14 @@ export interface ObjectRefFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's user sentence interpolates
+   * (`validate-object-references.user-text.ts`): set on
+   * `object-reference-unregistered-platform` at the one site the publish door
+   * returns it from, a dataset's base object (a `dataset` write). The other
+   * sites and the error carry none.
+   */
+  userTextParams?: UserTextParams;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -238,6 +247,9 @@ export function validateObjectReferences(
    * `subject` describes the reference for the message ("record-picker target").
    * `remedy`, when a site has one sharper than the generic line (a view
    * container's namespace-prefixed spelling), is the whole `fix:` line.
+   * `userTextOf`, at a site the publish door reaches, names the site's own
+   * params for the advisory's user sentence; the resolved name joins them as
+   * `object`.
    *
    * [#22161] What a miss costs at each site used to close every hint; it is
    * the ids' `os explain` entries now (one paragraph, every site), so a hint is
@@ -249,6 +261,7 @@ export function validateObjectReferences(
     path: string,
     subject: string,
     remedy = '',
+    userTextOf?: UserTextParams,
   ) => {
     const name = strName(target);
     if (!name) return;
@@ -263,6 +276,7 @@ export function validateObjectReferences(
         rule: OBJECT_REFERENCE_UNREGISTERED_PLATFORM,
         where,
         path,
+        ...(userTextOf ? { userTextParams: { ...userTextOf, object: name } } : {}),
         // [#22161] One verdict sentence; the resolution ladder, where the
         // registry comes from and why this rung only advises is
         // `os explain object-reference-unregistered-platform`.
@@ -518,11 +532,14 @@ export function validateObjectReferences(
   for (let dsi = 0; dsi < datasets.length; dsi++) {
     const ds = datasets[dsi];
     if (!ds || typeof ds !== 'object') continue;
+    const dsName = strName(ds.name) ?? `#${dsi}`;
     check(
       strName(ds.object),
-      `dataset "${strName(ds.name) ?? `#${dsi}`}"`,
+      `dataset "${dsName}"`,
       `datasets[${dsi}].object`,
       'dataset base object',
+      '',
+      { dataset: dsName },
     );
   }
 
