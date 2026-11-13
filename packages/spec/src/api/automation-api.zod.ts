@@ -487,8 +487,8 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
     // data engine's `DroppedFieldsEventSchema`, so no new vocabulary.
     droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
       'Caller-supplied field values a write step of the run did not store (e.g. a `readonly` '
-      + 'field an `update_record` step wrote): the data engine\'s own drop events, in step '
-      + 'order. The steps still succeeded and the run\'s outcome is unchanged - this tells '
+      + 'field an `update_record` step wrote): the data engine\'s own drop events, one per object '
+      + 'and reason in first-seen order. The steps still succeeded and the run\'s outcome is unchanged - this tells '
       + 'the caller which values never landed. Set on a terminal success only, and only when '
       + 'a field was dropped.',
     ),

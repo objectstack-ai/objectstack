@@ -828,7 +828,9 @@ export interface AutomationResult {
      * #32861: the caller-supplied field values a write step of this run did
      * NOT store — each element the data engine's own
      * {@link DroppedFieldsEvent} (`object`, `fields`, `reason`), as the
-     * `create_record` / `update_record` step received it, in step order.
+     * `create_record` / `update_record` step received it — one event per
+     * `(object, reason)`, its `fields` the union in first-seen order, so a
+     * loop that drops `status` on thirty rows is one fact, not thirty.
      *
      * The step reports the strip as a warning and SUCCEEDS (#3407): a
      * `readonly` field the flow wrote was removed from the payload and the
