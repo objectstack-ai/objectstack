@@ -60,6 +60,8 @@ import { FLOW_TEMPLATE_PATHS_USER_TEXT } from './validate-flow-template-paths.us
 import { FLOW_NODE_WRITES_USER_TEXT } from './validate-flow-node-writes.user-text.js';
 import { READONLY_FLOW_WRITES_USER_TEXT } from './validate-readonly-flow-writes.user-text.js';
 import { FLOW_CREDENTIAL_LITERALS_USER_TEXT } from './lint-flow-credential-literals.user-text.js';
+import { WIDGET_BINDINGS_USER_TEXT } from './validate-widget-bindings.user-text.js';
+import { CHART_BINDINGS_USER_TEXT } from './validate-chart-bindings.user-text.js';
 
 /**
  * The names a finding's user sentence interpolates — object, field and
@@ -168,6 +170,9 @@ export const FINDING_USER_TEXT_CATALOG: UserTextCatalog = mergeUserTextCatalogs(
   FLOW_NODE_WRITES_USER_TEXT,
   READONLY_FLOW_WRITES_USER_TEXT,
   FLOW_CREDENTIAL_LITERALS_USER_TEXT,
+  // The dashboard writes: widget and chart binding advisories.
+  WIDGET_BINDINGS_USER_TEXT,
+  CHART_BINDINGS_USER_TEXT,
 );
 
 /**
