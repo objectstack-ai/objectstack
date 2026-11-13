@@ -47,6 +47,11 @@ import {
   // installed?" asks it, over this registry's installed manifests.
   pairsOf,
   installedManifestsOf,
+  // [ADR-0150 D4, #32408] …and which holders a pair's row is the
+  // customization of, the way the exact read's owner check reads it.
+  appOf,
+  isPairOf,
+  pairOf,
   // [ADR-0150 D3, #28802] The one closure walk: a dependent's bundle addition
   // under a dependency's name is no holder of that name for a bare read.
   packageDependencyClosure,
@@ -3720,6 +3725,36 @@ function bundleBaseKey(key: string): string {
 type BundleEntry = { key: string; item: any };
 
 /**
+ * [#32408, contract review F2, delta review N1] What a door's registration
+ * brings to a bundled name: the package and the members it adds to its
+ * composite slot.
+ */
+interface BundleArrival {
+  readonly packageId: string;
+  readonly members: ReadonlySet<string>;
+}
+
+/**
+ * `collection` with `arrival`'s members in its composite slot of `name`, as a
+ * copy (the registry's own map is never touched): a member already stored is
+ * kept as stored, a new one is a stub carrying its discriminator, which is
+ * all a holder's member read takes from it.
+ */
+function withArrivingMembers(
+  collection: Map<string, any>,
+  name: string,
+  disc: { field: string; canonical: string },
+  arrival: BundleArrival,
+): Map<string, any> {
+  const copy = new Map(collection);
+  for (const member of arrival.members) {
+    const key = withDiscriminator(`${arrival.packageId}:${name}`, member);
+    if (!copy.has(key)) copy.set(key, { name, [disc.field]: member });
+  }
+  return copy;
+}
+
+/**
  * The members of `(type, name)`'s bundle, grouped by the SAME precedence tiers
  * {@link SchemaRegistry.getItem} applies to an undiscriminated type — so
  * bundling changes WHICH ROWS EXIST, never which layer wins:
@@ -5186,6 +5221,9 @@ export class SchemaRegistry {
    * (`incomingNamespace`, the namespace the incoming package declares) —
    * unless one holding is an addition to the other's bundle
    * ({@link bareNameBundleAdditionMeets}; `incomingHolding`, read only then).
+   * `incomingArrival` is what the registration brings (the members it adds):
+   * a holder's members are read as if it were registered, so the door judges
+   * the state the cold boot's seal would judge (#32408, delta review N1).
    */
   private bareNameHoldersOtherThan(
     type: BareNameOneHolderType,
@@ -5195,6 +5233,7 @@ export class SchemaRegistry {
       builtIns: boolean;
       incomingNamespace: string | undefined;
       incomingHolding?: () => BundleHolding | undefined;
+      incomingArrival?: { readonly members: ReadonlySet<string> };
     },
   ): BareNameHolder[] {
     if (!this.bareNameHoldersSealed) return [];
@@ -5205,7 +5244,8 @@ export class SchemaRegistry {
     for (const packageId of packages) {
       if (
         !bareNameHoldersMeet(type, opts.incomingNamespace, this.bareNameHolderNamespace(packageId), name)
-        && !this.bareNameBundleAdditionMeets(type, name, opts.incomingHolding, packageId)
+        && !this.bareNameBundleAdditionMeets(type, name, opts.incomingHolding, packageId,
+          opts.incomingArrival && { packageId: incomingPackageId, ...opts.incomingArrival })
       ) continue;
       const holder: BareNameHolder = { kind: 'package', packageId };
       found.set(bareNameHolderKey(holder), holder);
@@ -5215,15 +5255,27 @@ export class SchemaRegistry {
 
   /**
    * [ADR-0150 D9, #31699] `packageId`'s holding of the bundled `(type, name)`
-   * as the registry holds it — the members its composite group and its bound
-   * overlays hold ({@link bundleMembersHeldBy}) and its declared dependency
-   * closure — or `undefined` for a type that is no bundle.
+   * as the bare-name gate reads it — the members its composite group and its
+   * bound overlays hold ({@link bundleMembersHeldBy}, a pair's row read by
+   * {@link gateSlotBinding}) and its declared dependency closure — or
+   * `undefined` for a type that is no bundle. Both doors and the cold boot's
+   * seal read a holding here, and nothing else does.
+   *
+   * With an `arrival` (a door judging a registration), the members are read
+   * as if the arrival were registered: its members in its composite slot. A
+   * package-less row binds to
+   * the one package holding the name only while there is one
+   * ({@link overlaySlotBinding}), so beside the arrival it binds to neither.
+   * Read without the arrival, the row would be the holder's member, the
+   * arrival no addition to the holder, and the door would admit what the seal
+   * then reports (#32408, delta review N1).
    */
-  private registeredBundleHolding(type: BareNameOneHolderType, name: string, packageId: string): BundleHolding | undefined {
+  private registeredBundleHolding(type: BareNameOneHolderType, name: string, packageId: string, arrival?: BundleArrival): BundleHolding | undefined {
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (!disc || !isBareNameRegistryType(type)) return undefined;
-    const collection = this.metadata.get(type) ?? new Map<string, any>();
-    const members = this.bundleMembersHeldBy(type, collection, name, packageId, new Set(this.compositeHoldersOf(collection, name)), disc);
+    const registered = this.metadata.get(type) ?? new Map<string, any>();
+    const collection = arrival === undefined ? registered : withArrivingMembers(registered, name, disc, arrival);
+    const members = this.bundleMembersHeldBy(type, collection, name, packageId, new Set(this.compositeHoldersOf(collection, name)), disc, true);
     return { packageId, members, reach: new Set(packageDependencyClosure(packageId, this)?.dependencies ?? []) };
   }
 
@@ -5240,10 +5292,11 @@ export class SchemaRegistry {
     name: string,
     incomingHolding: (() => BundleHolding | undefined) | undefined,
     holderPackageId: string,
+    arrival?: BundleArrival,
   ): boolean {
     if (!ITEM_KEY_DISCRIMINATORS[type] || !incomingHolding) return false;
     const incoming = incomingHolding();
-    const holder = this.registeredBundleHolding(type, name, holderPackageId);
+    const holder = this.registeredBundleHolding(type, name, holderPackageId, arrival);
     return incoming !== undefined && holder !== undefined && isBundleAdditionPair(incoming, holder);
   }
 
@@ -5290,6 +5343,7 @@ export class SchemaRegistry {
         builtIns: true,
         incomingNamespace,
         incomingHolding: () => this.declaredBundleHolding(manifest, selfId, type, name),
+        incomingArrival: { members: declaredBundleMembers(manifest, type, name) },
       })) {
         conflicts.push({
           type,
@@ -8387,6 +8441,8 @@ export class SchemaRegistry {
     // never judged; nor is a type's overridable baseline (the email service's
     // built-in templates), which holds nothing and is refused nothing.
     if (packageId && isBareNameRegistryType(type) && holdsBareName(type, item) && !isOverridableBaseline(type, packageId)) {
+      const gateDisc = ITEM_KEY_DISCRIMINATORS[type];
+      const arriving = gateDisc ? new Set([discriminatorValue(item, gateDisc.field) || gateDisc.canonical]) : undefined;
       const holders = this.bareNameHoldersOtherThan(type, baseName, packageId, {
         builtIns: false,
         incomingNamespace: this.bareNameHolderNamespace(packageId),
@@ -8394,10 +8450,12 @@ export class SchemaRegistry {
         // bundle, and the member this registration adds.
         incomingHolding: () => {
           const held = this.registeredBundleHolding(type, baseName, packageId);
-          const disc = ITEM_KEY_DISCRIMINATORS[type];
-          if (!held || !disc) return held;
-          return { ...held, members: new Set([...held.members, discriminatorValue(item, disc.field) || disc.canonical]) };
+          if (!held || arriving === undefined) return held;
+          return { ...held, members: new Set([...held.members, ...arriving]) };
         },
+        // [#32408, delta review N1] …and a holder's members read as if this
+        // member were registered.
+        incomingArrival: arriving === undefined ? undefined : { members: arriving },
       });
       if (holders.length > 0) {
         const rename = this.bareNameRenameFor(packageId, baseName);
@@ -8989,6 +9047,12 @@ export class SchemaRegistry {
    *    to no package and is no environment item either (never a guess);
    *  - a package that holds the name in its composite slot → that package
    *    (an ADR-0005 overlay of its item);
+   *  - a customization pair's row, when some holder of the name is a package
+   *    the pair customizes (`isPairOf`: the App's pair is shared by every
+   *    package of the App, ADR-0146 D3) → {@link pairRowBinding}, the exact
+   *    read's owner check (`pairRowOnAddress`, metadata-protocol): the holder
+   *    its `overrides.package` declares, else the App whose own pair it is
+   *    (#28390 ruling A), else its one owner, else no package;
    *  - a paired `<base>.custom` package holding no composite slot of the name,
    *    whose base does → the base (ADR-0146 D9: the pair's declared override
    *    customizes its base's item);
@@ -8997,7 +9061,7 @@ export class SchemaRegistry {
    * `holders` is the composite holder set, passed in when the caller already
    * has it.
    */
-  private overlaySlotBinding(item: unknown, name: string, collection: Map<string, any>, holders?: ReadonlySet<string>): string | null | undefined {
+  private overlaySlotBinding(type: string, item: unknown, name: string, collection: Map<string, any>, holders?: ReadonlySet<string>): string | null | undefined {
     const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
     const composite = holders ?? new Set(this.compositeHoldersOf(collection, name));
     if (typeof stamped !== 'string' || stamped === '' || stamped === 'sys_metadata') {
@@ -9005,9 +9069,139 @@ export class SchemaRegistry {
       return composite.size === 1 ? [...composite][0] : undefined;
     }
     if (composite.has(stamped)) return stamped;
+    const paired = this.pairRowBinding(type, stamped, item, name, collection, composite);
+    if (paired !== NOT_A_PAIR_ROW_OF_A_HOLDER) return paired;
     const base = customizationBasePackageId(stamped);
     if (base !== null && composite.has(base)) return base;
     return stamped;
+  }
+
+  /**
+   * [ADR-0150 D4, epic ruling 6761802819 on #31699 F2, #32408] The holder a
+   * customization pair's row `item` (stored under `pairId`, which holds no
+   * composite slot of the name) binds to, read as the exact read's one owner
+   * check reads it (`pairRowOnAddress`, `@objectstack/metadata-protocol`), so
+   * every reader of {@link overlaySlotBinding} — the holder set, a holder's
+   * bundle members, a package's item and the environment's item — answers
+   * the owner the exact address serves it to:
+   *
+   *  - the row declares the base it customizes (`overrides.package`, ADR-0146
+   *    D2) → that holder when the pair customizes it; a declared holder the
+   *    pair does not customize, or a declared package that holds no item of
+   *    the name, binds it to no package (it is never the declaring row of
+   *    another holder);
+   *  - else a holder that is the App whose own pair it is → that App (#28390
+   *    ruling A: the App's address keeps its pair's row);
+   *  - else exactly one holder the pair customizes → that holder;
+   *  - else two or more → no package (`undefined`): the row cannot say whose
+   *    it is, never a pick between them.
+   *
+   * The undeclared arms count the holders the exact read counts
+   * (`packageScopedHoldersOf`, which the exact read passes): for a bundled
+   * type, a package whose holding is a bundle ADDITION to another holder's
+   * bundle holds no name (#28802), so it is no second owner. The
+   * addition is judged as {@link packageScopedHoldersOf} judges it, over every
+   * holder of the name with every row bound to it ({@link ownersHoldingAName}):
+   * a row declaring a package as its base makes that package hold the row's
+   * member, so it is no addition when another holder ships that member (an
+   * undeclared row beside it is then no package's, as the exact read refuses
+   * it naming both). A row that declares an addition's package as its base is
+   * still that package's. When the count would read an undeclared row of
+   * another shared pair (a binding that waits on that pair's own count), the
+   * row binds to no package (epic seat 1's ruling; #32561 carries the shapes
+   * where the exact read answers otherwise).
+   *
+   * Every holder is counted, a disabled one included (`composite` is the
+   * holder set before {@link packageScopedHoldersOf} filters the served
+   * ones): a binding never moves with a reversible disable (ADR-0150 D3,
+   * #32183). The exact read counts the served holders, so with one of two
+   * owners disabled it serves a row this binds to no package (#32561).
+   *
+   * {@link NOT_A_PAIR_ROW_OF_A_HOLDER} when no holder of the name is a package
+   * `pairId` customizes: the row keeps the per-package reading of
+   * {@link overlaySlotBinding}.
+   */
+  private pairRowBinding(type: string, pairId: string, item: unknown, name: string, collection: Map<string, any>,
+    composite: ReadonlySet<string>): string | undefined | typeof NOT_A_PAIR_ROW_OF_A_HOLDER {
+    const settled = this.settledPairRowBinding(pairId, item, composite);
+    if (!Array.isArray(settled)) return settled as string | undefined | typeof NOT_A_PAIR_ROW_OF_A_HOLDER;
+    const named = this.ownersHoldingAName(type, name, collection, settled as readonly string[], item, composite, pairId);
+    return named.length === 1 ? named[0] : undefined;
+  }
+
+  /**
+   * [#32408] The arms of {@link pairRowBinding} that read the row and the
+   * holders alone: {@link NOT_A_PAIR_ROW_OF_A_HOLDER}, the declared holder (or
+   * `undefined` for a declared non-owner), or the App whose own pair it is.
+   * The owners, as an array, when none of those answers: the undeclared row
+   * of a pair two or more holders share, which only a count of the holders'
+   * members decides ({@link ownersHoldingAName}).
+   */
+  private settledPairRowBinding(pairId: string, item: unknown, composite: ReadonlySet<string>):
+    string | undefined | typeof NOT_A_PAIR_ROW_OF_A_HOLDER | readonly string[] {
+    if (customizationBasePackageId(pairId) === null) return NOT_A_PAIR_ROW_OF_A_HOLDER;
+    const installed = installedManifestsOf(this);
+    const owners = [...composite].filter((holder) => isPairOf(pairId, holder, installed));
+    if (owners.length === 0) return NOT_A_PAIR_ROW_OF_A_HOLDER;
+    const declared = declaredOverrideBase(item);
+    if (declared !== undefined) return owners.includes(declared) ? declared : undefined;
+    const app = owners.find((holder) => {
+      if (appOf(holder, installed) !== holder) return false;
+      const pair = pairOf(holder, installed);
+      return pair.ok && pair.value === pairId;
+    });
+    if (app !== undefined) return app;
+    return owners.length === 1 ? owners[0] : owners;
+  }
+
+  /**
+   * [#28802, #32408] `owners` less every one whose holding of the bundled
+   * `(type, name)` is an addition to another holder's bundle
+   * ({@link isBundleAddition}), judged as {@link packageScopedHoldersOf}
+   * judges it: over EVERY holder of the name (a package outside the App
+   * included, so an owner that adds to it is an addition), each holder's
+   * members being its composite members and the bare-slot rows that bind to
+   * it without this count ({@link bundleMembersHeldBy}) — a pair row
+   * declaring the holder, an App's own pair row (#28390 ruling A), a
+   * per-package pair's row, the holder's own stored row. The undeclared rows
+   * of `pairId`, the pair this arm decides, are left out, since the members
+   * they add are what it answers (the accepted residual, #32561). An
+   * undeclared row of ANOTHER shared pair would make this count wait on that
+   * pair's, which may wait on this one: then `owners` is answered whole, so
+   * the row binds to no package (never a guess; epic seat 1's ruling, the
+   * shapes where the exact read answers otherwise carried by #32561). An
+   * addition that ships the member `row` is ITS member too, so it stays an
+   * owner: the row may customize that package's member, and two owners bind
+   * it to no package. `owners` unchanged for a type that is no bundle, or with
+   * fewer than two.
+   */
+  private ownersHoldingAName(type: string, name: string, collection: Map<string, any>, owners: readonly string[],
+    row: unknown, composite: ReadonlySet<string>, pairId: string): readonly string[] {
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (!disc || owners.length < 2) return owners;
+    const bound = new Map<string, unknown[]>();
+    for (const { item } of this.bareSlotEntriesOf(type, collection, name)) {
+      const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+      const settled = typeof stamped === 'string' && !composite.has(stamped)
+        ? this.settledPairRowBinding(stamped, item, composite)
+        : NOT_A_PAIR_ROW_OF_A_HOLDER;
+      if (Array.isArray(settled)) {
+        if (stamped === pairId) continue;
+        return owners;
+      }
+      const holder = settled !== NOT_A_PAIR_ROW_OF_A_HOLDER
+        ? settled as string | undefined
+        : this.overlaySlotBinding(type, item, name, collection, composite);
+      if (typeof holder === 'string') bound.set(holder, [...(bound.get(holder) ?? []), item]);
+    }
+    const memberOf = (item: unknown) => discriminatorValue(item, disc.field) || disc.canonical;
+    const membersOf = new Map<string, Set<string>>();
+    for (const id of new Set([...composite, ...bound.keys()])) {
+      const { local } = collectBundle(collection, name, disc, id);
+      membersOf.set(id, new Set([...local.map((e) => e.item), ...(bound.get(id) ?? [])].map(memberOf)));
+    }
+    const rowMember = memberOf(row);
+    return owners.filter((id) => membersOf.get(id)!.has(rowMember) || !this.isBundleAddition(id, membersOf));
   }
 
   /**
@@ -9076,7 +9270,7 @@ export class SchemaRegistry {
     const holders = new Set(composite);
     const compositeSet = new Set(composite);
     for (const { item } of this.bareSlotEntriesOf(type, collection, name)) {
-      const bound = this.overlaySlotBinding(item, name, collection, compositeSet);
+      const bound = this.overlaySlotBinding(type, item, name, collection, compositeSet);
       if (typeof bound === 'string') holders.add(bound);
     }
     const served = (ids: string[]): string[] => options?.includeDisabledPackages === true
@@ -9092,14 +9286,47 @@ export class SchemaRegistry {
   /**
    * [#28802] The members (discriminator values) of `name`'s bundle that
    * `packageId` holds: its composite group's, and the bare-slot entries that
-   * bind to it ({@link overlaySlotBinding}).
+   * bind to it ({@link overlaySlotBinding}; with `atGate`, as the bare-name
+   * gate reads them, {@link gateSlotBinding}).
    */
   private bundleMembersHeldBy(type: string, collection: Map<string, any>, name: string, packageId: string,
-    holders: ReadonlySet<string>, disc: { field: string; canonical: string }): Set<string> {
+    holders: ReadonlySet<string>, disc: { field: string; canonical: string }, atGate = false): Set<string> {
     const { local } = collectBundle(collection, name, disc, packageId);
     const bound = this.bareSlotEntriesOf(type, collection, name)
-      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId);
+      .filter(({ item }) => (atGate
+        ? this.gateSlotBinding(type, item, name, collection, holders)
+        : this.overlaySlotBinding(type, item, name, collection, holders)) === packageId);
     return new Set([...local, ...bound].map((e) => discriminatorValue(e.item, disc.field) || disc.canonical));
+  }
+
+  /**
+   * [#32408, epic ruling 6838245909 option B] A bare-slot row's binding as the
+   * bare-name gate reads a holder's members ({@link registeredBundleHolding}:
+   * both doors and the cold boot's seal): {@link overlaySlotBinding}'s, except
+   * that a row of a customization pair lends its member to a holder only
+   * where the per-package reading binds it to that holder too (the pair's
+   * base when it holds the name in a composite slot, else the pair itself:
+   * the reading every reader applied before {@link pairRowBinding}).
+   *
+   * Where the pair-row binding moved the row (to X, a package of the App,
+   * from the App or from the pair), the gate counts it for no holder. The App
+   * no longer holds a locale it shipped none of through a row declared for X
+   * (the narrowing the changeset declares), and X does not gain the row's
+   * locale either: a package of another namespace on X that ships only that
+   * locale stays an addition to X's template, refused at both doors in either
+   * registration order and reported by the seal, as before the binding
+   * moved. Admitting it waits on the by-name read following the binding (a
+   * follow-up under #32408): in that state the by-name read answers by
+   * registration order. The reads keep {@link overlaySlotBinding}.
+   */
+  private gateSlotBinding(type: string, item: unknown, name: string, collection: Map<string, any>,
+    holders: ReadonlySet<string>): string | null | undefined {
+    const bound = this.overlaySlotBinding(type, item, name, collection, holders);
+    const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (typeof stamped !== 'string' || stamped === '' || stamped === 'sys_metadata' || holders.has(stamped)) return bound;
+    const base = customizationBasePackageId(stamped);
+    const perPackage = base !== null && holders.has(base) ? base : stamped;
+    return bound === perPackage ? bound : undefined;
   }
 
   /**
@@ -9128,10 +9355,14 @@ export class SchemaRegistry {
    * one package's item never shadows another package's same-named item, which
    * is the one difference from {@link getItem}'s bare-slot-first answer.
    *
-   * A paired `<base>.custom` row that declares another holder as the base it
-   * customizes (`overrides.package`, ADR-0146 D2; the App's pair shared by
-   * every package of the App) is that holder's, never the App's: the App's
-   * address skips it and falls to the App's own item (#31699, epic ruling).
+   * A row of the App's pair (shared by every package of the App) binds as the
+   * exact read binds it ({@link overlaySlotBinding}, `pairRowBinding`): a
+   * row declaring another holder as the base it customizes
+   * (`overrides.package`, ADR-0146 D2) is that holder's, so the App's address
+   * falls to the App's own item (#31699, epic ruling; #32408). A row of a
+   * `<base>.custom` pair that customizes none of the holders keeps the
+   * per-package reading, and one declaring another holder is skipped here
+   * (`pairRowDeclaresAnotherHolder`).
    *
    * @param member - As on {@link getItem}: one bundle member, for a type whose
    *   identity is a pair; omitted, the canonical member first.
@@ -9141,7 +9372,7 @@ export class SchemaRegistry {
     if (!collection) return undefined;
     const holders = new Set(this.compositeHoldersOf(collection, name));
     const bound = this.bareSlotEntriesOf(type, collection, name)
-      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId
+      .filter(({ item }) => this.overlaySlotBinding(type, item, name, collection, holders) === packageId
         && !pairRowDeclaresAnotherHolder(item, packageId, holders));
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (disc) {
@@ -9167,7 +9398,7 @@ export class SchemaRegistry {
     if (!collection) return undefined;
     const holders = new Set(this.compositeHoldersOf(collection, name));
     const unbound = this.bareSlotEntriesOf(type, collection, name)
-      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === null);
+      .filter(({ item }) => this.overlaySlotBinding(type, item, name, collection, holders) === null);
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (disc) return pickBundleMember<T>(unbound, disc, member);
     return unbound[0]?.item as T | undefined;
@@ -11405,8 +11636,17 @@ export class SchemaRegistry {
 function pairRowDeclaresAnotherHolder(item: unknown, packageId: string, holders: ReadonlySet<string>): boolean {
   const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
   if (typeof stamped !== 'string' || customizationBasePackageId(stamped) === null) return false;
-  const declaration = (item as { overrides?: unknown }).overrides;
-  if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return false;
-  const declared = (declaration as { package?: unknown }).package;
-  return typeof declared === 'string' && declared !== '' && declared !== packageId && holders.has(declared);
+  const declared = declaredOverrideBase(item);
+  return declared !== undefined && declared !== packageId && holders.has(declared);
 }
+
+/** The base a row's body declares it customizes (`overrides.package`, ADR-0146 D2), or `undefined`. */
+function declaredOverrideBase(item: unknown): string | undefined {
+  const declaration = (item as { overrides?: unknown } | null | undefined)?.overrides;
+  if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return undefined;
+  const declared = (declaration as { package?: unknown }).package;
+  return typeof declared === 'string' && declared !== '' ? declared : undefined;
+}
+
+/** {@link SchemaRegistry}'s `pairRowBinding` answer for a row no holder's pair stores: not its question. */
+const NOT_A_PAIR_ROW_OF_A_HOLDER: unique symbol = Symbol('not-a-pair-row-of-a-holder');
