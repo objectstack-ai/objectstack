@@ -115,6 +115,21 @@ const WALK_PUSHES: Record<string, string> = {
   actionCopyTemplateIssues: "an action's copy template slots: no rule or field expression",
 };
 
+/** The passes the walk pushes whole from INSIDE a site's regions: classified with that site's calls, in `SITE_CALLS`. */
+const WALK_PUSHES_IN_REGION: Record<string, AuthoredExpressionSite> = {
+  formulaCycleIssues: 'formula',
+};
+
+/** An object whose own formulas read each other: a cycle the gate refuses on each of its members. */
+const CYCLE = {
+  name: 'obj',
+  fields: {
+    f_x: { type: 'formula', label: 'X', expression: 'record.f_y + 1' },
+    f_y: { type: 'formula', label: 'Y', expression: 'record.f_x + 1' },
+    days: { type: 'number', label: 'Days', required: true },
+  },
+};
+
 /** Where each site's calls are read: the rule loop and the `check` helper it calls; the field-formula pass and what follows the fields loop. */
 const SITE_REGIONS: Record<AuthoredExpressionSite, Array<[string, string]>> = {
   validation: [
@@ -197,6 +212,18 @@ const SITE_CALLS: Record<AuthoredExpressionSite, Record<string, Classified>> = {
     refuseStoredMetadataBodyHop: { kind: 'pass', fixture: asValue(BODY_HOP) },
     refuseUndeclaredHopField: { kind: 'pass', fixture: asValue(HOP_FIELD) },
     warnUnprovisionedAnchors: { kind: 'pass', fixture: asValue(ANCHOR) },
+    // [#33100] The formula-cycle pass, after the fields loop. It locates each
+    // finding on a cycle member's own `expression`; the probe is named
+    // `__validate_expression__`, which no authored formula can read, so the
+    // probe is never on a cycle and nothing is located on it, at the gate or
+    // through the entry. The cycle verdict on the formula being authored
+    // needs that field's own name, which `validate_expression` is not handed:
+    // the tool cannot give it (a follow-up, not this pin's to hide).
+    formulaCycleIssues: {
+      kind: 'pass-silent-here',
+      why: "locates each finding on a cycle member's own `expression`; the probe is on no cycle",
+      fixture: { objects: [CYCLE], expression: 'record.f_x + record.days' },
+    },
     storedExpressionInputIssues: {
       kind: 'pass-silent-here',
       why: 'judges a STORED field\'s `expression` (any type but `formula`); the tool\'s formula site is a `formula` field',
@@ -273,7 +300,19 @@ describe('judgeAuthoredSiteExpression — every gate pass at each site is listed
   it('every pass the whole walk pushes as a whole is classified', () => {
     const pushes = walkPushes(walk());
     expect(pushes.length, 'the scan read nothing — the walk marker moved').toBeGreaterThan(0);
-    expect(pushes).toEqual(Object.keys(WALK_PUSHES).sort());
+    expect(pushes).toEqual([...Object.keys(WALK_PUSHES), ...Object.keys(WALK_PUSHES_IN_REGION)].sort());
+    for (const [name, site] of Object.entries(WALK_PUSHES_IN_REGION)) {
+      expect(Object.keys(SITE_CALLS[site]), `${name} is classified with the ${site} site's calls`).toContain(name);
+    }
+  });
+
+  it("formulaCycleIssues: the gate refuses the object's own cycle, and locates nothing on the probe", () => {
+    // Non-vacuous: on this stack the pass speaks, on the cycle's members.
+    const cycle = validateStackExpressions({ objects: [CYCLE] }).filter((i) => /f_x|f_y/.test(i.where));
+    expect(cycle.length).toBeGreaterThan(0);
+    // ...and neither the gate nor the entry puts a finding on the probe.
+    expect(gateOn('formula', [CYCLE], 'record.f_x + record.days')).toEqual([]);
+    expect(entryOn('formula', [CYCLE], 'record.f_x + record.days')).toEqual([]);
   });
 
   it("leaves the shared validator's findings to the caller", () => {
