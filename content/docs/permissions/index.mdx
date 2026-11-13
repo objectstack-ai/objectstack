@@ -129,7 +129,10 @@ organization or platform administrator's act; its owner or an administrator
 mints its API key. Its owner or an administrator suspends it (every key
 stops, nothing is revoked) or revokes one key; only an administrator resumes
 it, changes its owner or retires it. If its owner leaves the organization, it
-is suspended until an administrator names a new owner. It never signs in, and
+is suspended until an administrator names a new owner; if the organization's
+directory deactivates or deletes its owner, it is suspended until the owner is
+re-activated or a new owner is named, and then an administrator resumes it.
+It never signs in, and
 it is never counted among the administrators that keep an organization
 manageable. See
 [AI service account](/docs/ai/agents#connect-your-ai-byo-ai-over-mcp).

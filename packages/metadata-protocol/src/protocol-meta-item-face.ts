@@ -34,7 +34,16 @@
  * surface does not move.
  */
 
+import {
+    PackageScopedNameRefusedError,
+    packageScopedRefusalMessage,
+    type PackageScopedResolvableType,
+} from '@objectstack/core';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
+import { shippingPackageIds } from './protocol-environment-rows.js';
+import { resolveBundleMemberSelector } from './protocol-bundle-members.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
+import { pairsOf } from '@objectstack/metadata-core';
 import { disabledExactAddressHolder } from './protocol-exact-qualifier.js';
 import {
     isActionWithheldByDisabledPackage,
@@ -53,7 +62,16 @@ import {
 export interface MetaItemFaceHost {
     readonly engine: ObjectStackProtocolImplementation['engine'];
     readonly readMetaItem: ObjectStackProtocolImplementation['readMetaItem'];
+    readonly packagelessAddress: ObjectStackProtocolImplementation['packagelessAddress'];
+    readonly shippedArtifactsOf: ObjectStackProtocolImplementation['shippedArtifactsOf'];
+    readonly readItemActiveRows: ObjectStackProtocolImplementation['readItemActiveRows'];
+    readonly declinesStoredRow: ObjectStackProtocolImplementation['declinesStoredRow'];
+    readonly rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
 }
+
+/** The host {@link servedRowHolderOf} and {@link servedAddressJudgment} read. */
+type ServedRowHost = Pick<MetaItemFaceHost,
+    'engine' | 'packagelessAddress' | 'shippedArtifactsOf' | 'readItemActiveRows' | 'declinesStoredRow' | 'rethrowUnlessMetadataStoreUnprovisioned'>;
 
 /**
  * [#32183] The package holding `(type, name)` when every package that holds
@@ -105,6 +123,136 @@ export function servedHolderAddressOf(registry: any, type: string, name: string)
 }
 
 /**
+ * [#32354, ADR-0150 D3] The served holder of a name for a read naming no
+ * package, judged over the stored rows too: what {@link servedHolderAddressOf}
+ * answers from the registry alone, for the names whose holders live only in
+ * `sys_metadata`. The registry keeps one bare slot per name, so a stored row a
+ * package saved under a name no enabled package ships is in it only when it
+ * was the last one written or hydrated; the rows themselves name every
+ * package that holds the name ({@link packagelessAddress}'s candidates).
+ *
+ * Asked only when a package is disabled, of a type the registry reads by
+ * package, when an enabled package ships no code item of the name (otherwise
+ * the shipped item is the name's, ADR-0048 §3.3, and a row of another package
+ * never stands in for it: {@link servedHolderAddressOf} and
+ * `packagelessContentPackage` judge it), and when no package-less row and no
+ * environment item is stored (a customization of no one holder, judged as
+ * before). Then the holders are the registry's served holders and the
+ * packages the active rows are bound to, less every disabled package:
+ *
+ *  - one → `{ kind: 'served' }`, read at its address, as the registry's
+ *    served holder is;
+ *  - two or more → `{ kind: 'refused' }`, the by-name read's own refusal
+ *    (`ambiguous-in-environment`), naming only the served holders (epic ruling
+ *    on #32354, Q2): a disabled package is never named;
+ *  - none, or no disabled package among them → `undefined`, the read as it was.
+ *
+ * [#32354 contract review S4] A row the reads decline
+ * ({@link ObjectStackProtocolImplementation.declinesStoredRow}: a shipped flow
+ * name's undeclared row, a sealed managed name's row) serves nothing at its
+ * package's address, so it makes that package no holder here: counted, it
+ * re-addressed the read to an address that serves nothing, and two of them
+ * were refused naming two such addresses. It still counts toward whether a
+ * disabled package holds the name, and an unbound one still leaves the read
+ * as it was.
+ *
+ * [#32354 contract review N2, #32408] Nor does a row bound to a holder's
+ * customization pair (`pairsOf`): a pair row is bound over every holder it
+ * is a pair of, never a holder of its own, so a disable never moves it (a
+ * disabled holder's declared override row is that holder's item, ADR-0146
+ * D9, withheld with it). Counted for the enabled pair, it served a disabled
+ * holder's customization at the bare address, where the read answered the
+ * missing name.
+ *
+ * Every holder is judged by save order no more: the disabled package's row
+ * read first answered the missing name, the enabled one's served it.
+ */
+export async function servedRowHolderOf(
+    host: ServedRowHost,
+    type: string, name: string, member?: string,
+): Promise<{ kind: 'served'; packageId: string } | { kind: 'refused'; error: PackageScopedNameRefusedError } | undefined> {
+    const registry: any = host.engine?.registry;
+    if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
+    if (typeof registry.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
+    const disabled = (id: string): boolean => registry.isPackageDisabled(id) === true;
+    // No disabled package at all: no read moves, and no row is read for it.
+    // The predicate `isPackageDisabled` reads, asked of each installed record.
+    if (typeof registry.getAllPackages === 'function'
+        && !(registry.getAllPackages() as ReadonlyArray<{ enabled?: unknown; status?: unknown } | undefined>)
+            .some((pkg) => pkg?.enabled === false || pkg?.status === 'disabled')) {
+        return undefined;
+    }
+    if ([...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, member))].some((id) => !disabled(id))) return undefined;
+    if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, member) !== undefined) {
+        return undefined;
+    }
+    // The item's active rows, read once: every row binds a holder, and only
+    // the rows the reads serve make a served one (S4). An unprovisioned store
+    // holds no row.
+    let activeRows: Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>;
+    try {
+        activeRows = await host.readItemActiveRows(type, name);
+    } catch (error) {
+        host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        activeRows = [];
+    }
+    const rows = await host.packagelessAddress(type, name, member, 'active', activeRows);
+    if (rows.unbound) return undefined;
+    const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+    if (![...every, ...rows.candidates].some(disabled)) return undefined;
+    const installed = installedManifestsOfEngine(host.engine);
+    const pairRow = (row: { package_id?: unknown }): boolean =>
+        typeof row.package_id === 'string' && every.some((holder) => pairsOf(holder, installed).includes(row.package_id as string));
+    const servingRows = await host.packagelessAddress(type, name, member, 'active', activeRows.filter((row) =>
+        !host.declinesStoredRow(type, name, row) && !pairRow(row)));
+    const served = [...new Set([...(registry.packageScopedHoldersOf(type, name, null) ?? []), ...servingRows.candidates])]
+        .filter((id) => !disabled(id));
+    if (served.length === 1) return { kind: 'served', packageId: served[0] };
+    if (served.length === 0) return undefined;
+    const base = {
+        status: 'refused' as const,
+        reason: 'ambiguous-in-environment' as const,
+        type: type as PackageScopedResolvableType,
+        name,
+        callerPackageId: null,
+        candidates: served.sort().map((packageId) => ({ kind: 'package' as const, packageId })),
+    };
+    return { kind: 'refused', error: new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) }) };
+}
+
+/**
+ * [#32183, #32354] The judgment of the address a read naming no package takes
+ * for a name a disabled package also holds: the registry's served holder
+ * ({@link servedHolderAddressOf}), else the stored rows' ({@link
+ * servedRowHolderOf}), which may be the refusal naming two or more served
+ * holders; `undefined` leaves the read as it was. Answered, never thrown: the
+ * plain read throws the refusal ({@link servedAddressOf}); the layered read
+ * only re-addresses, and leaves the refusal to its door (contract review S1).
+ */
+export async function servedAddressJudgment(
+    host: ServedRowHost,
+    type: string, name: string, member?: string,
+): Promise<{ kind: 'served'; packageId: string } | { kind: 'refused'; error: PackageScopedNameRefusedError } | undefined> {
+    const registryAddress = servedHolderAddressOf(host.engine?.registry, type, name);
+    if (registryAddress !== undefined) return { kind: 'served', packageId: registryAddress };
+    return servedRowHolderOf(host, type, name, member);
+}
+
+/**
+ * [#32183, #32354] {@link servedAddressJudgment} for the plain read: the
+ * served address, or `undefined`; throws the refusal when two or more served
+ * packages hold the name.
+ */
+export async function servedAddressOf(
+    host: ServedRowHost,
+    type: string, name: string, member?: string,
+): Promise<string | undefined> {
+    const judged = await servedAddressJudgment(host, type, name, member);
+    if (judged?.kind === 'refused') throw judged.error;
+    return judged?.packageId;
+}
+
+/**
  * [#32183, contract review M4] Whether `copy`, the metadata service's copy of
  * a name read at `address` (the served holder {@link servedHolderAddressOf}
  * answers), is another holder's: stamped (`_packageId`) with a package that
@@ -127,7 +275,7 @@ export function isAnotherHoldersCopy(registry: any, type: string, name: string, 
 
 /** The body of `ObjectStackProtocolImplementation#readMetaItemFace`; the method's docblock there is its contract. */
 export async function readMetaItemFace(
-    this: Pick<MetaItemFaceHost, 'engine' | 'readMetaItem'>,
+    this: Pick<MetaItemFaceHost, 'readMetaItem'> & ServedRowHost,
     request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
@@ -139,8 +287,14 @@ export async function readMetaItemFace(
     }
     // [#32183] A name a disabled package also holds is read at the served
     // holder's address ({@link servedHolderAddressOf}), so no layer of the
-    // read can be the disabled holder's.
-    const servedAddress = request.packageId ? undefined : servedHolderAddressOf(this.engine?.registry, request.type, request.name);
+    // read can be the disabled holder's. [#32354] …judged over the stored
+    // rows too ({@link servedAddressOf}), so the answer never follows save order.
+    // [contract review N1] The member selector resolved once, as the layered
+    // read resolves it: a malformed one is the read's own 400, never a 409
+    // judged at a member nobody named.
+    const servedAddress = request.packageId
+        ? undefined
+        : await servedAddressOf(this, request.type, request.name, resolveBundleMemberSelector(request.type, request.member));
     const answer = await this.readMetaItem(servedAddress === undefined ? request : { ...request, packageId: servedAddress }, { face });
     // [#28877] The served read of an `action` also withholds one that launches
     // into a disabled package, as the served list does.

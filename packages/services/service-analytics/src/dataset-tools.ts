@@ -193,6 +193,18 @@ function refusal(code: string, status: number, message: string, details?: unknow
 }
 
 /**
+ * The sentence `query_dataset` refuses a selection naming no measure with: the
+ * REST door's answer to the same selection (`POST /analytics/dataset/query`,
+ * `answerDatasetQuery` in `@objectstack/rest`), with its code and status. The
+ * spec selection accepts `measures: []`, and a query with nothing to project
+ * reached the SQL driver as a SELECT with an empty projection (500
+ * `DATABASE_ERROR`, the driver's own text) or, with dimensions, served group
+ * rows carrying no measure. Neither package depends on the other, so the
+ * dogfood suite holds the two doors to one answer for one caller.
+ */
+const SELECTION_MEASURES_REQUIRED = 'body.selection.measures must be a non-empty array of measure names.';
+
+/**
  * [ADR-0149 D4] The plugin-wired service, or the refusal. `SERVICE_UNAVAILABLE`
  * / 503: nothing about the caller's request is wrong — the deployment cannot
  * serve this tool with every gate live, and saying so is the honest answer.
@@ -426,6 +438,10 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     // caller's own selection, never a parse output.
     const raw = input as { datasetName: string; selection: DatasetSelection };
     const datasetName = raw.datasetName;
+    // Judged before anything is read, as the REST door judges it before it
+    // resolves the dataset: a missing dataset with no measure is this 400 on
+    // both doors, never a 404 on one of them.
+    if (raw.selection.measures.length === 0) throw refusal('VALIDATION_FAILED', 400, SELECTION_MEASURES_REQUIRED);
 
     let loaded: LoadedDatasets;
     try {
