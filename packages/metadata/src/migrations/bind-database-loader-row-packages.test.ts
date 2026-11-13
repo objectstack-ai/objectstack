@@ -119,6 +119,20 @@ describe('migrateDatabaseLoaderRowPackages (ADR-0150 D4, #32246)', () => {
     expect(result).toEqual({ bound: [], left: [] });
   });
 
+  // [#31699 PR 2] Named, not derived from the set: with `webhook` taken out of
+  // the set (measured, same fixture) the run bound nothing and left nothing,
+  // the webhook rows not being candidates.
+  it('[#31699 PR 2, FROM left TO bound] a webhook loader row whose body names a package is bound to it; a package-less one is left', async () => {
+    const { store, packageOf } = rowStore([
+      row('stamp', 'webhook', { name: 'x', _packageId: A }),
+      { ...row('env', 'webhook', { name: 'z' }), name: 'third' },
+    ]);
+    const result = await migrateDatabaseLoaderRowPackages(store);
+    expect([packageOf('stamp'), packageOf('env')]).toEqual([A, null]);
+    expect(result.bound.map((bound) => [bound.id, bound.packageId])).toEqual([['stamp', A]]);
+    expect(result.left.map((left) => [left.id, left.reason])).toEqual([['env', 'package-less']]);
+  });
+
   it.each(SLOTTED)('%s: without it, `DatabaseLoader` reads a row written before #32246 by its body, and its next save of that package\'s item binds it', async (type) => {
     const { store, packageOf } = rowStore([row('legacy', type, { name: `shared_${type}`, label: 'old', _packageId: A })]);
     const loader = new DatabaseLoader({ driver: store as unknown as IDataDriver, trackHistory: false });

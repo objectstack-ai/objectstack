@@ -1386,6 +1386,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.hook.capabilities': '能力授权',
   'engine.inspector.hook.capabilitiesHint': '此函数体可调用的 ctx API。调用未授权的 API 会在钩子运行时抛错。',
   'engine.inspector.hook.capabilityUnknown': '（沙箱不授予此能力）',
+  'engine.inspector.hook.capabilityNotForHook': '（钩子函数体不能授予此能力；请从 action、job 或 flow 发送邮件）',
   'engine.inspector.hook.options': '选项',
   'engine.inspector.hook.priority': '优先级',
   'engine.inspector.hook.async': '异步运行（提交之后）',

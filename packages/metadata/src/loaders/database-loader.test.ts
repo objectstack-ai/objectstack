@@ -8,6 +8,7 @@ import { MetadataManager } from '../metadata-manager.js';
 import { MemoryLoader } from './memory-loader.js';
 import { MetadataPlugin } from '../plugin.js';
 import { PACKAGE_SLOTTED_STORE_TYPES, isBundledStoreType } from '../package-slotted-store.js';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { FilesystemLoader } from './filesystem-loader.js';
 import { JSONSerializer } from '../serializers/json-serializer.js';
 // Paid at collection, not inside a case's window: `plugin.ts` imports it lazily (check:test-source-alias).
@@ -2082,6 +2083,8 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
   const BETA = 'com.beta.app';
   const HOST = 'com.host.app';
   const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  /** [#31699 PR 2] The unbundled slotted types the boot pass reads: every one but `webhook`, which the registry the pass walks does not list. */
+  const BOOT_PASS_READS = UNBUNDLED.filter((type) => DEFAULT_METADATA_TYPE_REGISTRY.some((entry) => entry.type === type));
   let driver: IDataDriver;
 
   /** A row of `helper` bound to `packageId` by the column, or package-less for `null`. */
@@ -2400,7 +2403,7 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
     const seen: unknown[] = [];
     const cells = (type: string, order: string) =>
       [undefined, ALPHA, HOST].filter((hostPackage) => !(type === 'action' && order === 'package-less row saved last' && hostPackage === HOST));
-    for (const type of UNBUNDLED) {
+    for (const type of BOOT_PASS_READS) {
       for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
         for (const hostPackage of cells(type, order)) {
           driver = createMockDriver();
@@ -2415,11 +2418,41 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
         }
       }
     }
-    expect(seen).toEqual(UNBUNDLED.flatMap((type) => [
+    expect(seen).toEqual(BOOT_PASS_READS.flatMap((type) => [
       ...cells(type, 'package-less row saved last').map((hostPackage) => [type, 'package-less row saved last', hostPackage ?? 'no host package', 'env']),
       ...cells(type, 'package-less row saved first').map((hostPackage) => [type, 'package-less row saved first', hostPackage ?? 'no host package', ALPHA]),
     ]));
-    expect(seen).toHaveLength(UNBUNDLED.length * 6 - 1);
+    expect(seen).toHaveLength(BOOT_PASS_READS.length * 6 - 1);
+  });
+
+  /**
+   * [#31699 PR 2] `webhook` is slotted, but the pass registers none of its
+   * rows (`DEFAULT_METADATA_TYPE_REGISTRY` lists no `webhook`), so the case
+   * above, which asks for the row the pass registered, does not hold for it.
+   * Its bare read is the loader's own: the package's row, in either save
+   * order, on every host. FROM (`webhook` out of `PACKAGE_SLOTTED_STORE_TYPES`,
+   * as on main): the row saved first, so `ALPHA` when the package-less row
+   * was saved last and the package-less row when it was saved first.
+   */
+  it('CONTROL webhook, slotted but not a type the pass reads, one package\'s row and a package-less row: the pass registers neither, and the bare read answers the package\'s row in either save order on every host (FROM the row saved first)', async () => {
+    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook'));
+    const seen: unknown[] = [];
+    for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
+      for (const hostPackage of [undefined, ALPHA, HOST]) {
+        driver = createMockDriver();
+        if (order === 'package-less row saved last') {
+          await seed('webhook', ALPHA, 1);
+          await seed('webhook', null, 2);
+        } else {
+          await seed('webhook', null, 1);
+          await seed('webhook', ALPHA, 2);
+        }
+        const m = await bootPass(hostPackage);
+        seen.push([order, hostPackage ?? 'no host package', registryKeys(m, 'webhook'), await answer(m, 'webhook')]);
+      }
+    }
+    expect(seen).toEqual(['package-less row saved last', 'package-less row saved first'].flatMap((order) =>
+      ['no host package', ALPHA, HOST].map((host) => [order, host, [], ALPHA])));
   });
 
   it('CONTROL action, the host\'s own item registered in memory beside one package\'s stored row: the host is a holder — the bare read is refused naming both', async () => {
@@ -2452,6 +2485,12 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
   const BETA = 'com.beta.app';
   const HOST = 'com.host.app';
   const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  /**
+   * The ones the boot pass reads: it walks `DEFAULT_METADATA_TYPE_REGISTRY`, and `webhook` (#31699 PR 2)
+   * is slotted without being listed there, so the pass registers none of its rows and its reads stay
+   * the loader's, as before it was slotted.
+   */
+  const BOOT_PASS_READS = UNBUNDLED.filter((type) => DEFAULT_METADATA_TYPE_REGISTRY.some((entry) => entry.type === type));
   let driver: IDataDriver;
 
   // Bound by the `package_id` column; the body names no package (the protocol writes none).
@@ -2517,8 +2556,19 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
   });
 
   it('the types are taken from the tree', () => {
-    expect(UNBUNDLED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'action', 'permission']));
+    expect(UNBUNDLED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'action', 'permission', 'webhook']));
     expect(UNBUNDLED).not.toContain('email_template');
+    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook'));
+  });
+
+  it('CONTROL — webhook: the boot pass registers none of its rows, so a read stays the loader\'s, as before it was slotted', async () => {
+    await seed('webhook', ALPHA, 1);
+    await seed('webhook', BETA, 2);
+    const before = await stored('webhook');
+    const m = await bootPass();
+    expect([...((m as any).registry.get('webhook')?.keys() ?? [])]).toEqual([]);
+    expect(await stored('webhook')).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
   });
 
   it('a body whose name is another row\'s key is never stamped with that row\'s package (contract review F3)', async () => {
@@ -2537,6 +2587,7 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
         });
         // Main's answer for the name: the body `loadMany` keeps first, unstamped.
         expect(await manager().loadMany(type)).toEqual([{ name: 'a', label: 'stray' }]);
+        if (!BOOT_PASS_READS.includes(type)) continue;
         const m = await bootPass();
         expect([...((m as any).registry.get(type)?.keys() ?? [])]).toEqual(['a']);
       }
@@ -2574,7 +2625,7 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       expect(driver.update).not.toHaveBeenCalled();
     });
 
-    it(`${type}: the boot pass registers the row under its own package, never the host's or none (BEFORE: ALPHA's read served BETA's body)`, async () => {
+    if (BOOT_PASS_READS.includes(type)) it(`${type}: the boot pass registers the row under its own package, never the host's or none (BEFORE: ALPHA's read served BETA's body)`, async () => {
       await seed(type, ALPHA, 1);
       await seed(type, BETA, 2);
       const before = await stored(type);
@@ -2601,7 +2652,7 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       expect(driver.create).toHaveBeenCalledTimes(2);
     });
 
-    it(`${type}: one holder — the boot pass writes nothing, and a bare read answers the unique holder, now stamped with its package (BEFORE: unstamped)`, async () => {
+    if (BOOT_PASS_READS.includes(type)) it(`${type}: one holder — the boot pass writes nothing, and a bare read answers the unique holder, now stamped with its package (BEFORE: unstamped)`, async () => {
       await seed(type, ALPHA, 1);
       const before = await stored(type);
       const m = await bootPass();
@@ -2635,6 +2686,12 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
   const ALPHA = 'com.alpha.app';
   const BETA = 'com.beta.app';
   const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  /**
+   * [#31699 PR 2] The ones the pass reads: it walks `DEFAULT_METADATA_TYPE_REGISTRY`, and `webhook`
+   * is slotted without being listed there, so the pass primes none of its rows (as for #32548's
+   * cases above). Its reads after the pass are pinned by the webhook CONTROL below.
+   */
+  const BOOT_PASS_READS = UNBUNDLED.filter((type) => DEFAULT_METADATA_TYPE_REGISTRY.some((entry) => entry.type === type));
   let driver: IDataDriver;
 
   /** A row of `helper` bound to `packageId` by the column; `stamped` also names it in the body. */
@@ -2678,7 +2735,7 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
   });
 
   for (const type of UNBUNDLED) {
-    for (const [shape, body] of [['bound by the column only', {}], ['stamped in the body too', { _packageId: true }]] as const) {
+    if (BOOT_PASS_READS.includes(type)) for (const [shape, body] of [['bound by the column only', {}], ['stamped in the body too', { _packageId: true }]] as const) {
       it(`${type}, ${shape}: two holders — after the pass a bare read is refused 409 naming both, as without it, and list keeps both (BEFORE: BETA's body, list [BETA])`, async () => {
         await seed(type, ALPHA, 1, body._packageId ? { _packageId: ALPHA } : {});
         await seed(type, BETA, 2, body._packageId ? { _packageId: BETA } : {});
@@ -2775,7 +2832,7 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     ['package-less row saved first', HOST, [ALPHA], [`${ALPHA}\u0000helper`], ALPHA, ALPHA, undefined],
   ];
 
-  for (const type of UNBUNDLED) {
+  for (const type of BOOT_PASS_READS) {
     it(`CONTROL ${type}, one package's row and a package-less row of the name (that holder's customization, D4): every read after the pass answers what it answered before — the row saved last — with no host package, a host package equal to the holder, or another`, async () => {
       const seen: unknown[] = [];
       for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
@@ -2902,6 +2959,30 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
       }
     });
   }
+
+  it('CONTROL — webhook, slotted but not a type the pass reads: it primes none of the rows, and after it every read answers what it answers without it — two holders refused naming both, each its own, the package-less row kept, nothing written — on a host declaring no package, one of the holders, or another', async () => {
+    expect(UNBUNDLED).toContain('webhook');
+    expect(BOOT_PASS_READS).not.toContain('webhook');
+    for (const order of ['none', 'first', 'between the two', 'last'] as const) {
+      for (const hostPackage of [undefined, ALPHA, BETA, HOST]) {
+        driver = createMockDriver();
+        const writes = [(version: number) => seed('webhook', ALPHA, version), (version: number) => seed('webhook', BETA, version)];
+        if (order !== 'none') writes.splice(order === 'first' ? 0 : order === 'last' ? 2 : 1, 0, (version: number) => seedPackageless('webhook', version));
+        for (const [at, write] of writes.entries()) await write(at + 1);
+        const m = await bootPass(hostPackage);
+        const at = [order, hostPackage];
+        expect([...at, registryKeys(m, 'webhook')]).toEqual([...at, []]);
+        for (const packageId of [undefined, ALPHA, BETA, HOST]) {
+          expect([...at, packageId, await answer(m, 'webhook', 'helper', packageId)]).toEqual([...at, packageId, await answer(cold(), 'webhook', 'helper', packageId)]);
+        }
+        expect([...at, await answer(m, 'webhook', 'helper')]).toEqual([...at, REFUSED]);
+        expect([...at, await answer(m, 'webhook', 'helper', ALPHA), await answer(m, 'webhook', 'helper', BETA), await answer(m, 'webhook', 'helper', HOST)])
+          .toEqual([...at, ALPHA, BETA, undefined]);
+        expect([...at, labels(await m.list('webhook'))]).toEqual([...at, order === 'none' ? [ALPHA, BETA] : [ALPHA, BETA, 'env']]);
+        expect(driver.update).not.toHaveBeenCalled();
+      }
+    }
+  });
 
   it('agent, two holders of a name and another row\'s body that says the same name: no body of the name is stamped, so none takes a package its row is not bound to (contract review F3 of #32458)', async () => {
     await seed('agent', ALPHA, 1);
