@@ -349,6 +349,12 @@ function MarketplacePackagePageBody() {
   // = still reading. The confirm in front of a local Install draws it.
   const [previewRead, setPreviewRead] = useState<{ packageId: string; preview: InstallPreview | null } | null>(null);
   const [confirmLocalOpen, setConfirmLocalOpen] = useState(false);
+  // objectstack#31542 — the platform-object acknowledgment is given for one
+  // opening: however a surface closes (its own Close button included, which
+  // bypasses `onOpenChange`), the next opening asks again.
+  useEffect(() => {
+    if (!installOpen && !confirmLocalOpen) setExtensionsAcknowledged(false);
+  }, [installOpen, confirmLocalOpen]);
   // `undefined` until read, when the manifest declares none, or when it could
   // not be read: then no choice is drawn and no mode is sent, so the door's own
   // default and answer decide.
@@ -1816,7 +1822,7 @@ function MarketplacePackagePageBody() {
       {/* objectstack#30325 — the confirm in front of a local Install: what the
           install adds, read from the manifest it installs, and the grants it
           will suggest. Its Install runs the install as the button did. */}
-      <AlertDialog open={confirmLocalOpen} onOpenChange={(o) => { setConfirmLocalOpen(o); if (!o) setExtensionsAcknowledged(false); }}>
+      <AlertDialog open={confirmLocalOpen} onOpenChange={setConfirmLocalOpen}>
         <AlertDialogContent data-testid="install-preview-dialog">
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -1877,7 +1883,7 @@ function MarketplacePackagePageBody() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog open={installOpen} onOpenChange={(o) => { setInstallOpen(o); if (!o) { setInstallResult(null); setAcknowledged(false); setExtensionsAcknowledged(false); } }}>
+      <Dialog open={installOpen} onOpenChange={(o) => { setInstallOpen(o); if (!o) { setInstallResult(null); setAcknowledged(false); } }}>
         <DialogContent
           onCloseAutoFocus={(e) => {
             // The release-notes link closed the dialog: focus (and so scroll
