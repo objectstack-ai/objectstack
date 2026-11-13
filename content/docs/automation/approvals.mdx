@@ -589,6 +589,16 @@ requests, not every request in the tenant. Admins with override authority
 The same rule governs a decision's files: an attachment is exactly as readable
 as the decision it hangs off, never more (`sys_approval_action` delegates that
 question back to this service via `fileAccessDelegate`).
+
+So do the two objects' definitions. The metadata API answers an object the
+caller may not read as absent, and `sys_approval_request` and
+`sys_approval_action` are closed to ordinary members on the data side, yet the
+request page renders from both definitions. Both declare
+`schemaReadDelegate: 'approvals'`, so `GET /api/v1/meta/object/sys_approval_request`
+(and `…/sys_approval_action`, and the object list) serves them to a caller who
+can see at least one request by the rule above, projected by that caller's
+field-level security. A member who can see none is answered `404`, and the
+rows still reach anyone only through `/api/v1/approvals/*`.
 </Callout>
 
 <Callout type="info">
