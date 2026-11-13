@@ -405,7 +405,10 @@ export function exactQualifierItem(
         }
         return item;
     }
-    if (served === address.packageId || address.registryHolders.includes(served)) return item;
+    // [#32501] An item of one of TWO admitted bases (two modules of one App
+    // sharing its pair) is no more the address's than the other's: it falls
+    // through to the refusal naming both below, never the first registered.
+    if (served === address.packageId || (address.registryHolders.length === 1 && address.registryHolders[0] === served)) return item;
     // [#32076] A pair of the package the address names, or of a base it admitted, serves on that base's address
     // when the row is that base's (epic ruling on #31699 F2; {@link pairRowOnAddress}, the one owner check).
     const installed = installedManifestsOfEngine(host.engine);

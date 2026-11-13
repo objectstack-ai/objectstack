@@ -58,6 +58,7 @@ import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import {
     bundleMemberOf,
     envelopePackageId,
+    exactAddressArtifact,
     mergeArtifactProtection,
     withRowBinding,
 } from './protocol-package-bindings.js';
@@ -1214,9 +1215,16 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // [#23074] …and at the served item's own bundle member, whose artifact
     // alone may lend it an envelope ({@link mergeArtifactProtection}): a
     // member the package does not ship is served as the environment's own.
-    const artifactItem = host.lookupArtifactItem(
-        request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item),
-    );
+    // [#32501] …and, at an admitted exact address, at the package that
+    // address reads, strictly ({@link exactAddressArtifact}): never the
+    // first registered holder the pair id's lookup fell back to.
+    const artifactItem = exactAddress
+        ? exactAddressArtifact(exactAddress, (packageId) => host.lookupArtifactItem(
+            request.type, request.name, packageId, bundleMemberOf(request.type, item),
+        ))
+        : host.lookupArtifactItem(
+            request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item),
+        );
     // [#21738] The lock is the one item-lock resolution's, over the layers
     // this read resolved from its address: [#21803] every installed
     // package that ships the name ({@link artifactLockLayerAt}), never the

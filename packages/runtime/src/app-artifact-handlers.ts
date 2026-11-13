@@ -57,7 +57,10 @@
  * the engine, so no flow `script` node and no hook resolves to them; and a
  * function the new bind gives to another owner leaves the owner the previous
  * bind gave it, so one function is never held by two of the artifact's
- * packages (`releaseMovedFunctions`).
+ * packages (`releaseMovedFunctions`). Either way the old owner's bare-name
+ * claim on each function its package no longer holds in the engine goes with
+ * it (`releaseFunctionClaims`), so the registry's one-holder rule stops
+ * counting it as that function's holder.
  *
  * ## Each package's handlers under its own package (ADR-0150 D4)
  *
@@ -342,7 +345,14 @@ export function bindAppArtifactHandlers(
         const engine = ql as FunctionHoldingEngine;
         if (typeof engine.unregisterFunctionsByPackage === 'function') {
             const kept = new Set([owner, ...boundOwners]);
-            for (const each of previous.owners) if (!kept.has(each)) engine.unregisterFunctionsByPackage(each);
+            for (const each of previous.owners) {
+                if (kept.has(each)) continue;
+                engine.unregisterFunctionsByPackage(each);
+                // [#32534] …and its bare-name claims on the names it no longer
+                // holds, or the dropped body goes on holding names it no
+                // longer registers.
+                releaseFunctionClaims(engine, each);
+            }
             const givenTo = new Map<string, string>();
             for (const group of hookGroups) for (const name of Object.keys(group.functions)) givenTo.set(name, group.owner);
             for (const [each, names] of previous.functions) {
@@ -509,6 +519,8 @@ function recordBind(ql: object, owner: string, record: BoundRecord): void {
 
 /** The engine's function-holder seam the re-bind reads and writes (`ObjectQL`'s methods of these names). */
 interface FunctionHoldingEngine {
+    /** The engine's registry: the bare-name rule records a function's holder as a claim there (`claimBareNameFunctions`). */
+    readonly registry?: { releaseBareNameFunctions?(owner: string | undefined, stillHolds: (name: string) => boolean): void };
     unregisterFunctionsByPackage?(packageId: string): number;
     registerFunction?(name: string, handler: any, options?: { packageId?: string; effect?: unknown }): void;
     resolveFunctionEntry?(name: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined;
@@ -564,6 +576,33 @@ function releaseMovedFunctions(engine: FunctionHoldingEngine, holder: string, mo
             engine.registerFunction(name, bare.handler, { packageId: bare.packageId, ...(bare.effect ? { effect: bare.effect } : {}) });
         }
     }
+    // [#32534] The names `holder`'s package no longer holds, once what it
+    // keeps is back, leave its bare-name claims too, ahead of the gaining
+    // owner's bind: after the cold-boot seal that bind is refused over a claim
+    // the old owner still records, and its whole group is left unbound.
+    releaseFunctionClaims(engine, holder);
+}
+
+/**
+ * [#32534] Release `holder`'s bare-name claims on every function name its
+ * package no longer holds in the engine (`SchemaRegistry#releaseBareNameFunctions`),
+ * right after this re-bind has taken functions off it. The engine removes a
+ * function by the exact owner string and never reaches the claim the hook
+ * binder recorded at the bind (`claimBareNameFunctions`), which is how the
+ * bare-name rule knows a function's holder; so without it the old owner holds
+ * the name still, and a gaining owner's bind after the cold-boot seal is
+ * refused naming it. The engine's holder set decides, not this binder's record
+ * of its last bind: a name the package still holds under another owner
+ * spelling keeps its claim, and a name an earlier bind gave it that left with
+ * the removal is released too. An engine without the holder read, or a
+ * registry without the release (a host's own double), is left as it is.
+ */
+function releaseFunctionClaims(engine: FunctionHoldingEngine, holder: string): void {
+    const registry = engine.registry;
+    const holdersOf = engine.functionHoldersOf;
+    if (typeof registry?.releaseBareNameFunctions !== 'function' || typeof holdersOf !== 'function') return;
+    const packageId = handlerOwnerPackage(holder);
+    registry.releaseBareNameFunctions(holder, (name) => holdersOf.call(engine, name).packageItem(packageId) !== undefined);
 }
 
 /** The package an owner {@link appArtifactHandlerOwner} minted names, as the engine's holder set keys it. */
@@ -1303,6 +1342,22 @@ function jobNameCollisions(bundle: unknown, appId: string, jobs: readonly unknow
 }
 
 /**
+ * [#32572, ADR-0150 D3] The job names two or more ENABLED jobs of an artifact share, each with the refusal
+ * the binder ({@link scheduleAppArtifactJobs}) refuses it by at bind: {@link jobNameCollisions} itself, over
+ * the jobs the binder reads ({@link collectBundleJobs}), for the artifact scheduled as `appId`. One refusal
+ * per shared name, in the order the binder logs them, each naming every job of the name and its holders —
+ * every declaring package body and, when the artifact holds more jobs of the name than its bodies declare,
+ * its residual (`{ kind: 'residual', ownerId: appId }`).
+ *
+ * The install-local install route refuses a package by it (beside {@link collectJobsWithoutBody}), so the
+ * door and the binder cannot disagree about a shared name: before it, the door answered such a package 200
+ * and the binder then scheduled none of the name's jobs and cancelled the one an earlier version ran.
+ */
+export function collectJobNameCollisions(bundle: unknown, appId: string): PackageScopedRefusal[] {
+    return [...jobNameCollisions(bundle, appId, collectBundleJobs(bundle)).values()];
+}
+
+/**
  * [#32071] The refusal of a job name several package bodies declare: nothing picks one of them.
  * [#32355] With `residual`, the name the residual carries beside the bodies: it is named too.
  * [#32412] As a candidate of its own kind, after every declaring body: `{ kind: 'residual',
@@ -1597,7 +1652,11 @@ export interface AppArtifactJobScheduling {
  *     scheduled, nor is any job of that name: the job service keys a job by
  *     its name and would keep only the later one. Refused once per name at
  *     `error`, naming every job ({@link jobNameCollisions}); a job of that
- *     name this app scheduled before is cancelled with the rest;
+ *     name this app scheduled before is cancelled with the rest.
+ *     [#32572] Install-local refuses that shape up front
+ *     ({@link collectJobNameCollisions}, this same judgement), so on that
+ *     door this fires only on the rehydrate of an entry an earlier build
+ *     installed;
  *   - (#20281 stage ③) no `organization` on a deployment whose scheduled-work
  *     policy requires one (`isolated`, switch on) → NOT scheduled, at `error`
  *     ({@link describeMissingJobOrganization}), whatever its run form;
