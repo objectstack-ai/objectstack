@@ -1519,7 +1519,7 @@ describe('[#32530] describe_object serves readonly where a write never stands â€
     let services: Record<string, any>;
 
     /** Denied the edit of `locked_note` (it may still read it); every other field is open. */
-    const MEMBER = { userId: 'usr_ticket_member', positions: [] as string[], permissions: ['mcp_ticket_member'], systemPermissions: [] as string[] };
+    const MEMBER = { userId: 'usr_ticket_member', organizationId: 'org_ticket', tenantId: 'org_ticket', positions: [] as string[], permissions: ['mcp_ticket_member'], systemPermissions: [] as string[] };
 
     beforeAll(async () => {
         engine = new ObjectQL();

@@ -152,8 +152,9 @@ export interface McpDataBridge {
    * `validate_expression` hands it to the shared validator as
    * `ExprSchemaHint.optionFields`, so the tool refuses the `label()` call the
    * object save door refuses, in the same words. It is a member of its own,
-   * not a key on {@link describeObject}'s answer, so `describe_object` serves
-   * what it served before.
+   * not a key on {@link describeObject}'s answer: `describe_object` already
+   * serves each field's `options`, and this list names the fields that carry
+   * them without a second copy of the object.
    *
    * OPTIONAL, like {@link listObjectsDiagnosed}: a bridge that omits it gets
    * no `label()` target check, exactly as before (the validator's opt-in).
@@ -2250,8 +2251,12 @@ export function registerObjectTools(
       {
         description:
           'Get the schema of a data object as you may read it, with what a write needs. Each field: name, type, label, '
-          + 'required, readonly (a write to it is dropped), system (a platform-injected column), options (value + label; '
-          + 'send the value) on a field that offers a fixed set, and defaultValue when an insert applies one. '
+          + 'required, readonly (a write never sets it: declared read-only, or a value the platform computes, such as a '
+          + 'formula, an autonumber or a field with an expression; leave it out of a write), system (a platform-injected '
+          + 'column), options (value + label; send the value) on a field that offers a fixed set, and defaultValue when '
+          + 'an insert applies one. A defaultValue may be a token the server resolves (NOW(), current_user) or an '
+          + 'expression object: to get it, omit the field, never copy the value. readonly is the schema\'s, not your '
+          + 'edit permission: a field you may read but not edit shows readonly false, and a write naming it is refused. '
           + 'validations: each active rule\'s name, type, message, severity, events and the fields it names (the '
           + 'message is what a refused write answers). Also the enabled features.',
         inputSchema: strictToolInput(

@@ -34,6 +34,7 @@ import { readDispatchedBody } from '../deferred-request-body.js';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
+import { RUNTIME_OWNED_FIELD_TYPES, isVirtualSearchField } from '@objectstack/spec/data';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
 // engine result identically.
@@ -596,10 +597,11 @@ async function warnIfSkillListIncomplete(
  * that names a denied field anywhere, its message included) is not described.
  *
  * Per field: `required`, `readonly` and `system` (an auto-injected column such
- * as `created_at` is `readonly` and `system`), the allowed `options` as value +
- * label for a field that declares them (a picklist-bound field carries its
- * list's resolved options on the served object, `declaresOptions`), and the
- * `defaultValue` an INSERT applies. Per active validation rule: its name, kind,
+ * as `created_at` is `readonly` and `system`; [#32530] `readonly` is also true
+ * where a write never sets the value, {@link writeNeverSetsField}), the allowed
+ * `options` as value + label for a field that declares them (a picklist-bound
+ * field carries its list's resolved options on the served object,
+ * `declaresOptions`), and the `defaultValue` an INSERT applies. Per active validation rule: its name, kind,
  * message, severity, the write events it runs on, and the fields it names —
  * ⛔ never its condition, pattern or transition table: the rule's message is
  * what a refused write answers with, and its expression is server policy.
@@ -619,7 +621,7 @@ function describeServedObject(def: any): Record<string, unknown> {
             type: f?.type,
             label: f?.label ?? k,
             required: f?.required ?? false,
-            readonly: f?.readonly === true,
+            readonly: writeNeverSetsField(f),
             system: f?.system === true,
             ...(declaresOptions(f) ? { options: describedOptions(f.options) } : {}),
             ...(f?.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {}),
@@ -627,6 +629,36 @@ function describeServedObject(def: any): Record<string, unknown> {
         validations: describedRules(def.validations),
         enableFeatures: def.enable ?? {},
     };
+}
+
+/**
+ * [#32530] `readonly` as {@link describeServedObject} serves it: a caller's
+ * write can never set this field's value. True for the declared flag, and for
+ * a value the engine owns whatever the payload says:
+ *
+ * - a runtime-owned type (`RUNTIME_OWNED_FIELD_TYPES`, today `autonumber`):
+ *   the write path strips a caller's value even with no `readonly` flag, and a
+ *   hand-authored literal carries none (the field builder injects it);
+ * - a `formula`, virtual — computed on read, no column (`isVirtualSearchField`,
+ *   the spec's one statement of that set): the write path strips it;
+ * - a stored field declaring an `expression`: the engine computes it from the
+ *   row the write stores, so a client-sent value never stands (the spec's
+ *   `expression` contract).
+ *
+ * ⛔ Not the caller's field edit permission: a field the caller may read but
+ * not edit is served the schema's answer, and the write naming it is refused
+ * at the field-level write gate. The served object carries the read projection
+ * only ({@link servedToCaller}), and the `describe_object` description says so.
+ *
+ * The twin is `writeNeverSetsField` in `packages/mcp/src/mcp-server-runtime.ts`.
+ */
+function writeNeverSetsField(f: any): boolean {
+    if (!f || typeof f !== 'object') return false;
+    if (f.readonly === true) return true;
+    if (typeof f.type === 'string' && RUNTIME_OWNED_FIELD_TYPES.has(f.type)) return true;
+    if (isVirtualSearchField(f)) return true;
+    // Truthy, the engine's own test for a stored expression it plans.
+    return Boolean(f.expression);
 }
 
 /** A field's options as value + label: the stored value a write sends, and what a person reads. */
