@@ -169,6 +169,7 @@ import {
 } from './data-model-rules.js';
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { UserTextParams } from './finding-user-text.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -225,6 +226,15 @@ export interface AuthoringFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's USER-FACING sentence interpolates (object, field,
+   * permission-set names), present exactly when the rule's producer authors one
+   * in its `<rule file>.user-text.ts` catalog. The sentence itself is rendered
+   * per locale by `findingUserMessage` (`finding-user-text.ts`) at the door that
+   * holds the request: it is `RuntimeAuthoringIssueSchema.userMessage` on the
+   * wire. `message` / `hint` stay the developer-facing English.
+   */
+  userTextParams?: UserTextParams;
 }
 
 /**
@@ -808,7 +818,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     run: (stack, ctx) =>
       runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
         severity: i.severity ?? 'error',
-        rule: EXPRESSION_INVALID,
+        // [#32529, #32554] The stored-expression input member names its own
+        // two ids; every other finding of the pass is `expression-invalid`.
+        rule: i.rule ?? EXPRESSION_INVALID,
         where: i.where,
         // [#26858] The slot's key path where the pass spells one (a flow edge's
         // `condition`, #27828 a flow node's config value), so a draft's

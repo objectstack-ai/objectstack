@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DatabaseLoader } from './database-loader.js';
+import type { MetadataLoader } from './loader-interface.js';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { MetadataManager } from '../metadata-manager.js';
 import { MemoryLoader } from './memory-loader.js';
@@ -361,21 +362,26 @@ describe('DatabaseLoader', () => {
       expect(await loader.exists('agent', 'helper')).toBe(false);
     });
 
-    it('keeps a row per package, its own unscoped reads answer the one saved last, and a delete naming no package of a name two packages hold is refused (#32246)', async () => {
+    it('keeps a row per package, its plural unscoped reads answer one per package, and a delete naming no package of a name two packages hold is refused (#32246, #32521)', async () => {
       await loader.save('agent', 'helper', { name: 'helper', label: 'alpha', _packageId: 'com.acme.alpha' });
       await loader.save('agent', 'helper', { name: 'helper', label: 'beta', _packageId: 'com.acme.beta' });
       expect((await loader.loadSlots('agent', 'helper')).map((slot) => [slot.packageId, slot.data.label])).toEqual([
         ['com.acme.alpha', 'alpha'],
         ['com.acme.beta', 'beta'],
       ]);
-      // One item per name, the one saved last, as when the loader kept one row
-      // (`load` asks for the highest version; the endpoint pins read it on a
-      // driver that orders).
+      // `load` and `list` answer one per name, the one saved last, as when the
+      // loader kept one row (`load` asks for the highest version; the endpoint
+      // pins read it on a driver that orders). [#32521] `loadMany` and
+      // `loadManyKeyed` answer one per `(package, name)`, each slot's row saved
+      // last — BEFORE: one per name, `beta`, then `alpha again`.
       expect(await loader.list('agent')).toEqual(['helper']);
-      expect((await loader.loadMany('agent')).map((item: any) => item.label)).toEqual(['beta']);
-      expect((await loader.loadManyKeyed('agent')).map((entry) => [entry.name, entry.data.label])).toEqual([['helper', 'beta']]);
+      expect((await loader.loadMany('agent')).map((item: any) => item.label)).toEqual(['alpha', 'beta']);
+      expect((await loader.loadManyKeyed('agent')).map((entry) => [entry.name, entry.packageId, entry.data.label])).toEqual([
+        ['helper', 'com.acme.alpha', 'alpha'],
+        ['helper', 'com.acme.beta', 'beta'],
+      ]);
       await loader.save('agent', 'helper', { name: 'helper', label: 'alpha again', _packageId: 'com.acme.alpha' });
-      expect((await loader.loadManyKeyed('agent')).map((entry) => entry.data.label)).toEqual(['alpha again']);
+      expect((await loader.loadManyKeyed('agent')).map((entry) => entry.data.label)).toEqual(['alpha again', 'beta']);
 
       await expect(loader.delete('agent', 'helper')).rejects.toMatchObject({ status: 409 });
       expect(await loader.loadSlots('agent', 'helper')).toHaveLength(2);
@@ -2049,6 +2055,383 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
 });
 
 /**
+ * [#32791; ADR-0150 D3/D4, regression of #32560] On a host that declares its
+ * package, the boot priming pass stamps a package-less stored row with the
+ * host's package before it registers it (`applyProtection`), so the registry
+ * holds that row in the host's slot. A read naming no package of an action
+ * name is judged over the registry and the loaders (#32560's
+ * `judgesLoaderSlots`), and the loaders still store the row package-less: one
+ * row was counted twice, as the host's package and as the environment, and
+ * the refusal named a holder that does not exist. The judged view now files
+ * that row as the store files a write that carries no package
+ * (`packagelessWriteKeyOf`: the name's one holder's customization, else the
+ * environment's own item), with the write order of the slot it came from.
+ * Only a row stamped with its slot's package is filed so, and not one whose
+ * registration replaced an item registered in memory (that item's package
+ * holds the name: epic ruling B).
+ *
+ * BEFORE (`main` with #32676): each case below not marked CONTROL was refused
+ * naming `com.host.app`. The CONTROLs answer on that `main` as here; the two
+ * marked with a review finding were red on this branch at an earlier head.
+ * The boot state only: after a write that carries no package the host is
+ * named again (#32812), and a removal naming no package still names it
+ * (#32813).
+ */
+describe('[#32791] a stored package-less row the boot pass files under the host\'s package is one holder of an action name, not two', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  const HOST = 'com.host.app';
+  const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  let driver: IDataDriver;
+
+  /** A row of `helper` bound to `packageId` by the column, or package-less for `null`. */
+  const seed = (type: string, packageId: string | null, version: number, body: Record<string, unknown> = {}) =>
+    driver.create('sys_metadata', {
+      id: `${type}_${packageId ?? 'env'}_${version}`, type, name: 'helper', state: 'active', version, checksum: `${type}_${packageId ?? 'env'}_${version}`,
+      source: 'database', package_id: packageId, metadata: JSON.stringify({ name: 'helper', label: packageId ?? 'env', ...body }),
+    });
+  /**
+   * The real pass (`MetadataPlugin._loadFromFileSystem`) over one database
+   * loader, on a host that declares `hostPackage`; `inMemory` packages' items
+   * of `helper` are registered in memory before it. `passes` runs it that
+   * many times on the same manager, the loader's cache kept between runs or
+   * dropped (`keepCache`).
+   */
+  const bootPass = async (hostPackage?: string, inMemory: InMemory[] = [], passes = 1, keepCache = false) => {
+    const plugin = new MetadataPlugin({ ...(hostPackage ? { packageId: hostPackage } : {}), watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    const loader = new DatabaseLoader({ driver });
+    m.registerLoader(loader);
+    for (const item of inMemory) registerOwn(m, item);
+    for (let pass = 0; pass < passes; pass++) {
+      if (pass > 0 && !keepCache) loader.invalidateAll();
+      await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    }
+    return m;
+  };
+  /** A package's own item of `helper` in memory: the package, or the package and the object it binds. */
+  type InMemory = string | readonly [packageId: string, objectName: string];
+  /** `item`'s package's own item of `helper`, registered in memory (code), bound to its object when it names one. */
+  const registerOwn = (m: MetadataManager, item: InMemory) => {
+    const [packageId, objectName] = typeof item === 'string' ? [item] : item;
+    return m.registerInMemory('action', 'helper', { name: 'helper', label: `${packageId} code`, _packageId: packageId, ...(objectName ? { objectName } : {}) });
+  };
+  /** What a read answers: the item's label, or the refusal's code, status, reason and candidates, in the order the refusal names them. */
+  const answerOf = async (read: () => Promise<unknown>) => {
+    try {
+      const data = await read();
+      const item = data !== null && typeof data === 'object' && 'degraded' in data ? (data as { data?: unknown }).data : data;
+      return (item as { label?: string } | undefined)?.label;
+    } catch (e: any) {
+      return [e?.code, e?.status, e?.refusal?.reason, ...(e?.refusal?.candidates ?? []).map((c: any) => c.packageId ?? c.kind)];
+    }
+  };
+  const answer = (m: MetadataManager, type: string, packageId?: string) => answerOf(() => m.get(type, 'helper', packageId));
+  /** The bare read, and `getDiagnosed`'s, which agree. */
+  const bareAnswers = async (m: MetadataManager) => [await answer(m, 'action'), await answerOf(() => m.getDiagnosed('action', 'helper'))];
+  type Row = readonly [packageId: string | null, objectName?: string];
+  /** Seeds `rows` of `helper` in save order (the version), each bound to its object when it names one. */
+  const seedRows = async (rows: readonly Row[]) => {
+    for (const [i, [packageId, objectName]] of rows.entries()) await seed('action', packageId, i + 1, objectName ? { objectName } : {});
+  };
+  const REFUSED = (...candidates: string[]) => ['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', ...candidates];
+  const registryKeys = (m: MetadataManager, type: string) => [...((m as any).registry.get(type)?.keys() ?? [])].sort();
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('action, one package\'s row and a package-less row saved last (that holder\'s customization), on a host declaring another package: the bare read answers the package-less row, and getDiagnosed agrees (BEFORE: 409 naming the holder, the host and the environment)', async () => {
+    await seed('action', ALPHA, 1);
+    await seed('action', null, 2);
+    const m = await bootPass(HOST);
+    expect(registryKeys(m, 'action'), 'the pass files the row in the host\'s slot, as before').toEqual([`${HOST}\u0000helper`]);
+    expect(await answer(m, 'action')).toBe('env');
+    const diagnosed = await m.getDiagnosed('action', 'helper');
+    expect([(diagnosed.data as { label?: string } | undefined)?.label, diagnosed.degraded]).toEqual(['env', false]);
+    expect(await answer(m, 'action', ALPHA), 'a read naming the holder, as before').toBe(ALPHA);
+    expect(await answer(m, 'action', HOST), 'a read naming the host, as before').toBe('env');
+  });
+
+  /**
+   * Which slots the pass fills for a name two packages hold is the pass's own
+   * rule (#32676's pass primes every holder and leaves the package-less row
+   * package-less); the read's holders are what this case pins.
+   */
+  it('CONTROL action, two packages\' rows (or a package\'s and the host\'s own) and a package-less row saved last: the bare read is refused naming both and the environment, never a host that holds nothing', async () => {
+    const cells: Array<[string, readonly Row[], unknown]> = [
+      [HOST, [[ALPHA], [BETA], [null]], REFUSED(ALPHA, BETA, 'environment')],
+      [HOST, [[ALPHA, 'account'], [BETA, 'account'], [null, 'account']], REFUSED(ALPHA, BETA, 'environment')],
+      [HOST, [[ALPHA, 'account'], [BETA, 'contact'], [null]], REFUSED(ALPHA, BETA, 'environment')],
+      [ALPHA, [[ALPHA, 'account'], [BETA, 'contact'], [null]], REFUSED(ALPHA, BETA, 'environment')],
+      [HOST, [[ALPHA], [HOST], [null]], REFUSED(ALPHA, HOST, 'environment')],
+    ];
+    const seen: unknown[] = [];
+    for (const [hostPackage, rows] of cells) {
+      driver = createMockDriver();
+      await seedRows(rows);
+      seen.push(await bareAnswers(await bootPass(hostPackage)));
+    }
+    expect(seen).toEqual(cells.map(([, , expected]) => [expected, expected]));
+  });
+
+  it('action, a package\'s row bound to an object and an object-less package-less row saved last, on a host declaring another package: the bare read answers the environment\'s own item (BEFORE: 409 naming the package and the host)', async () => {
+    await seed('action', ALPHA, 1, { objectName: 'account' });
+    await seed('action', null, 2);
+    const m = await bootPass(HOST);
+    expect(registryKeys(m, 'action')).toEqual([`${HOST}\u0000helper`]);
+    expect(await bareAnswers(m)).toEqual(['env', 'env']);
+  });
+
+  /**
+   * [#32791, review B1] One package binding the name to two objects is one
+   * holder, and the read answers its item written last (#32244) — here the
+   * package-less row, that holder's customization of the object it binds, so
+   * the row filed in the judged view keeps the write order of the registry
+   * slot the pass filled. BEFORE (this branch at `003d6480`, the row filed
+   * with no order): the package's other row; on main: `409` naming the host.
+   */
+  it('action, one package binding the name to two objects and a package-less row saved last, on a host declaring another package: the bare read answers the package-less row, the row written last, in either order of the package\'s rows', async () => {
+    const seen: unknown[] = [];
+    for (const rows of [
+      [[ALPHA, 'account'], [ALPHA, 'contact'], [null, 'account']],
+      [[ALPHA, 'contact'], [ALPHA, 'account'], [null, 'account']],
+      [[ALPHA], [ALPHA, 'account'], [null]],
+      [[ALPHA, 'account'], [ALPHA], [null]],
+    ] as const) {
+      driver = createMockDriver();
+      await seedRows(rows);
+      seen.push(await bareAnswers(await bootPass(HOST)));
+    }
+    expect(seen).toEqual([['env', 'env'], ['env', 'env'], ['env', 'env'], ['env', 'env']]);
+  });
+
+  /**
+   * [#32791] A package-less row bound to an object, beside one package's row
+   * on a host declaring another package: counted once, as the store files it
+   * — the holder's customization of the object it binds, or the
+   * environment's own item where the package binds the name otherwise.
+   */
+  it('action, a package-less row bound to an object beside one package\'s row, on a host declaring another package: the bare read answers the package-less row, and getDiagnosed agrees', async () => {
+    const seen: unknown[] = [];
+    for (const rows of [[[ALPHA, 'account'], [null, 'account']], [[ALPHA], [null, 'account']]] as const) {
+      driver = createMockDriver();
+      await seedRows(rows);
+      seen.push(await bareAnswers(await bootPass(HOST)));
+    }
+    expect(seen).toEqual([['env', 'env'], ['env', 'env']]);
+  });
+
+  /**
+   * [#32791, review B2] On a host declaring no package the pass stamps
+   * nothing, and the registry's own write rule files the package-less row in
+   * the slot of the name's one holder then (D4: its customization). That slot
+   * is a holder — only a slot whose package the row is stamped with is the
+   * row. BEFORE (this branch at `003d6480`): the package-less row, a pick
+   * between two packages; main answers as here.
+   */
+  it('CONTROL action, a package\'s item in memory before the pass, a package-less row and a second package\'s item, on a host declaring no package: the bare read is refused naming both packages and the environment', async () => {
+    await seedRows([[BETA], [null]]);
+    const stored = await bootPass(undefined, [ALPHA]);
+    expect(await answer(stored, 'action', ALPHA), 'the row is ALPHA\'s customization').toBe('env');
+    expect(await bareAnswers(stored)).toEqual([REFUSED(ALPHA, BETA, 'environment'), REFUSED(ALPHA, BETA, 'environment')]);
+
+    driver = createMockDriver();
+    await seedRows([[null]]);
+    const inMemory = await bootPass(undefined, [ALPHA]);
+    registerOwn(inMemory, BETA);
+    expect(await bareAnswers(inMemory)).toEqual([REFUSED(ALPHA, BETA, 'environment'), REFUSED(ALPHA, BETA, 'environment')]);
+  });
+
+  /** One composition: the host's package, the stored rows, items in memory before the pass, and after it. */
+  type InMemoryCell = [hostPackage: string | undefined, rows: Row[], before: InMemory[], after: InMemory[]];
+  const bareAfterPass = async ([hostPackage, rows, before, after]: InMemoryCell, passes = 1, keepCache = false) => {
+    driver = createMockDriver();
+    await seedRows(rows);
+    const m = await bootPass(hostPackage, before, passes, keepCache);
+    for (const item of after) registerOwn(m, item);
+    return bareAnswers(m);
+  };
+  /**
+   * Each cell's bare reads after the pass ran twice on one manager, the
+   * loader's cache dropped and then kept between the runs, beside the
+   * refusal naming the cell's candidates, which each read should give.
+   */
+  const afterTwoPasses = async (cells: [InMemoryCell, string[]][]) => {
+    const seen: unknown[] = [];
+    const expected: unknown[] = [];
+    for (const keepCache of [false, true]) {
+      for (const [cell, candidates] of cells) {
+        seen.push(await bareAfterPass(cell, 2, keepCache));
+        expected.push([REFUSED(...candidates), REFUSED(...candidates)]);
+      }
+    }
+    return { seen, expected };
+  };
+
+  /**
+   * [#32791] A package's item registered in memory, and the package-less row
+   * the pass stamped with the host's package into a slot no other item held:
+   * the row is counted once, as the store files it beside that one holder
+   * (its customization). BEFORE (main): refused naming the host's package too.
+   */
+  it('action, one package\'s item in memory beside the package-less row the pass stamped into an empty slot: the row is counted once', async () => {
+    const cells: InMemoryCell[] = [
+      [HOST, [[null]], [], [ALPHA]],
+      [HOST, [[null]], [ALPHA], []],
+      [ALPHA, [[null]], [HOST], []],
+    ];
+    const seen: unknown[] = [];
+    for (const cell of cells) seen.push(await bareAfterPass(cell));
+    expect(seen).toEqual(cells.map(() => ['env', 'env']));
+  });
+
+  it('action, two packages\' items in memory beside the package-less row the pass stamped, in either order: the bare read is refused naming both and the environment, never the host (BEFORE: the host named too)', async () => {
+    const seen: unknown[] = [];
+    for (const cell of [
+      [HOST, [[BETA], [null]], [ALPHA], []],
+      [HOST, [[null]], [ALPHA], [BETA]],
+      [HOST, [[null]], [ALPHA, BETA], []],
+    ] as InMemoryCell[]) seen.push(await bareAfterPass(cell));
+    const refused = REFUSED(ALPHA, BETA, 'environment');
+    expect(seen).toEqual([[refused, refused], [refused, refused], [refused, refused]]);
+  });
+
+  /**
+   * [#32791, epic ruling B] The pass's own write of the stamped row can
+   * replace an item the host's package held in memory before it. That item's
+   * package held the name, so its slot is a holder, not only the row: beside
+   * a second package's row or item the name has two holders and the bare
+   * read is refused, as on main (D4 makes the row a customization only of a
+   * name exactly one package holds). Beside no other package, the row is
+   * the one holder's. BEFORE (this branch at `031037638d`, the slot set
+   * aside): the package-less row, a pick between two packages.
+   */
+  it('CONTROL action, the stamped row replacing the host\'s package\'s item in memory, beside a second package\'s row or item in either order: the bare read is refused naming both packages and the environment', async () => {
+    const seen: unknown[] = [];
+    for (const cell of [
+      [ALPHA, [[BETA], [null]], [ALPHA], []],
+      [ALPHA, [[null], [BETA]], [ALPHA], []],
+      [ALPHA, [[null]], [ALPHA], [BETA]],
+      [ALPHA, [[null]], [ALPHA, BETA], []],
+      [ALPHA, [[null]], [BETA, ALPHA], []],
+      [HOST, [[ALPHA], [null]], [HOST], []],
+    ] as InMemoryCell[]) seen.push(await bareAfterPass(cell));
+    const refused = (...candidates: string[]) => [REFUSED(...candidates), REFUSED(...candidates)];
+    expect(seen).toEqual([
+      refused(ALPHA, BETA, 'environment'),
+      refused(ALPHA, BETA, 'environment'),
+      refused(ALPHA, BETA, 'environment'),
+      refused(ALPHA, BETA, 'environment'),
+      refused(BETA, ALPHA, 'environment'),
+      refused(HOST, ALPHA, 'environment'),
+    ]);
+  });
+
+  /**
+   * [#32791, review S3] The pass run again on the same manager hands out a
+   * new row object, which replaces the marked row in the host's slot. The
+   * new row carries the mark, so ruling B's compositions (and r1's S1(c)
+   * cell, in either save order) stay refused, with the loader's cache kept
+   * or dropped between the runs, as on main. Without the carried mark the
+   * slot was set aside and the read answered the package-less row.
+   */
+  it('CONTROL action, the pass run twice on the same manager after the stamped row replaced the host\'s package\'s item in memory, beside a second package\'s row or item: still refused naming both packages and the environment (review S3)', async () => {
+    const cells: [InMemoryCell, string[]][] = [
+      [[ALPHA, [[BETA], [null]], [ALPHA], []], [ALPHA, BETA, 'environment']],
+      [[ALPHA, [[null], [BETA]], [ALPHA], []], [ALPHA, BETA, 'environment']],
+      [[ALPHA, [[null]], [ALPHA], [BETA]], [ALPHA, BETA, 'environment']],
+      [[ALPHA, [[null]], [ALPHA, BETA], []], [ALPHA, BETA, 'environment']],
+      [[ALPHA, [[null]], [BETA, ALPHA], []], [BETA, ALPHA, 'environment']],
+      [[HOST, [[ALPHA], [null]], [HOST], []], [HOST, ALPHA, 'environment']],
+      [[HOST, [[null], [ALPHA]], [HOST], []], [HOST, ALPHA, 'environment']],
+    ];
+    const { seen, expected } = await afterTwoPasses(cells);
+    expect(seen).toEqual(expected);
+  });
+
+  /**
+   * [#32791, review S3, epic ruling of 22:50Z] The same two runs of the pass
+   * on one manager, over the shapes the epic read measured beside ruling
+   * B's: the packages swapped (a host declaring BETA), the rows and the
+   * host's package's item bound to objects (ALPHA's item and the package-less
+   * row on `account`, BETA's row on `contact`), and review B2's two cells on
+   * a host declaring no package. Each is refused as after one pass, and as
+   * on main. Without the carried mark the first two answered the package-less
+   * row; B2's two are held by the carried mark and by the stamp condition
+   * alike, so they answered the row only with both removed.
+   */
+  it('CONTROL action, the pass run twice on the same manager with the packages swapped, with the rows and the item in memory bound to objects, and in review B2\'s two cells on a host declaring no package: still refused (review S3)', async () => {
+    const { seen, expected } = await afterTwoPasses([
+      [[BETA, [[ALPHA], [null]], [BETA], []], [BETA, ALPHA, 'environment']],
+      [[ALPHA, [[BETA, 'contact'], [null, 'account']], [[ALPHA, 'account']], []], [ALPHA, BETA]],
+      [[undefined, [[BETA], [null]], [ALPHA], []], [ALPHA, BETA, 'environment']],
+      [[undefined, [[null]], [ALPHA], [BETA]], [ALPHA, BETA, 'environment']],
+    ]);
+    expect(seen).toEqual(expected);
+  });
+
+  it('CONTROL action, the pass run twice on the same manager after the stamped row replaced the host\'s package\'s item in memory, beside no other package: the bare read still answers the package-less row (review S3)', async () => {
+    const seen: unknown[] = [];
+    for (const keepCache of [false, true]) seen.push(await bareAfterPass([ALPHA, [[null]], [ALPHA], []], 2, keepCache));
+    expect(seen).toEqual([['env', 'env'], ['env', 'env']]);
+  });
+
+  it('CONTROL action, the stamped row replacing the host\'s package\'s item in memory, beside no other package: the bare read answers the package-less row', async () => {
+    expect(await bareAfterPass([ALPHA, [[null]], [ALPHA], []])).toEqual(['env', 'env']);
+  });
+
+  /**
+   * [#32791, review N1] The row is counted once only while a loader still
+   * stores it: removed from the table behind the manager, the registry's
+   * slot is counted as before (after the removal main answers the same).
+   */
+  it('action, the package-less row removed from the table behind the manager after the pass: the row is no longer counted once, and the host\'s slot is a holder again', async () => {
+    await seedRows([[ALPHA], [null]]);
+    const m = await bootPass(HOST);
+    expect(await bareAnswers(m)).toEqual(['env', 'env']);
+    await driver.delete('sys_metadata', 'action_env_2');
+    for (const loader of (m as any).loaders.values()) (loader as DatabaseLoader).invalidateAll();
+    expect(await bareAnswers(m)).toEqual([REFUSED(HOST, ALPHA), REFUSED(HOST, ALPHA)]);
+  });
+
+  it('CONTROL every by-package type, one package\'s row and a package-less row: the bare read answers the row the pass registered — the package-less row saved last, the holder\'s row saved last — on a host declaring no package, the holder, or another (action\'s package-less row saved last on another host: the first case)', async () => {
+    const seen: unknown[] = [];
+    const cells = (type: string, order: string) =>
+      [undefined, ALPHA, HOST].filter((hostPackage) => !(type === 'action' && order === 'package-less row saved last' && hostPackage === HOST));
+    for (const type of UNBUNDLED) {
+      for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
+        for (const hostPackage of cells(type, order)) {
+          driver = createMockDriver();
+          if (order === 'package-less row saved last') {
+            await seed(type, ALPHA, 1);
+            await seed(type, null, 2);
+          } else {
+            await seed(type, null, 1);
+            await seed(type, ALPHA, 2);
+          }
+          seen.push([type, order, hostPackage ?? 'no host package', await answer(await bootPass(hostPackage), type)]);
+        }
+      }
+    }
+    expect(seen).toEqual(UNBUNDLED.flatMap((type) => [
+      ...cells(type, 'package-less row saved last').map((hostPackage) => [type, 'package-less row saved last', hostPackage ?? 'no host package', 'env']),
+      ...cells(type, 'package-less row saved first').map((hostPackage) => [type, 'package-less row saved first', hostPackage ?? 'no host package', ALPHA]),
+    ]));
+    expect(seen).toHaveLength(UNBUNDLED.length * 6 - 1);
+  });
+
+  it('CONTROL action, the host\'s own item registered in memory beside one package\'s stored row: the host is a holder — the bare read is refused naming both', async () => {
+    await seed('action', ALPHA, 1);
+    const m = await bootPass(HOST);
+    registerOwn(m, HOST);
+    expect(registryKeys(m, 'action')).toEqual([`${ALPHA}\u0000helper`, `${HOST}\u0000helper`]);
+    expect(await bareAnswers(m)).toEqual([REFUSED(ALPHA, HOST), REFUSED(ALPHA, HOST)]);
+  });
+});
+
+/**
  * [#32458; #31699 R4-B's shape, epic ruling 6799056319] Every unbundled type
  * stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES` less the bundled
  * ones): `MetadataManager.loadMany` hands a row bound to its package by the
@@ -2182,7 +2565,8 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       const before = await stored(type);
       const m = manager();
       const items = (await m.loadMany(type)) as Array<{ name: string; label: string; _packageId?: string }>;
-      expect(items.map((item) => [item._packageId, item.label])).toEqual([[BETA, BETA]]);
+      // [#32521] Both holders, each stamped with its own row's package (BEFORE #32521: BETA's alone).
+      expect(items.map((item) => [item._packageId, item.label])).toEqual([[ALPHA, ALPHA], [BETA, BETA]]);
       for (const item of items) await m.register(type, item.name, item, { notify: false });
       expect(await stored(type)).toEqual(before);
       expect((await stored(type)).filter(([packageId]) => packageId === null)).toEqual([]);
@@ -2196,8 +2580,10 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       const before = await stored(type);
       for (const host of [undefined, HOST]) {
         const m = await bootPass(host);
-        expect([...((m as any).registry.get(type)?.keys() ?? [])]).toEqual([`${BETA}\u0000helper`]);
-        expect(await read(m, type, ALPHA)).toEqual([null, ALPHA]);
+        // [#32521] Every holder is primed (BEFORE #32521: BETA's slot alone, and ALPHA's read
+        // answered its unstamped row through the loaders).
+        expect([...((m as any).registry.get(type)?.keys() ?? [])]).toEqual([`${ALPHA}\u0000helper`, `${BETA}\u0000helper`]);
+        expect(await read(m, type, ALPHA)).toEqual([ALPHA, ALPHA]);
         expect(await read(m, type, BETA)).toEqual([BETA, BETA]);
         expect(await read(m, type, HOST)).toBeUndefined();
       }
@@ -2226,4 +2612,321 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       expect(driver.update).not.toHaveBeenCalled();
     });
   }
+});
+
+/**
+ * [#32521; epic #31527 red lines 2 and 3, epic seat rulings 2026-11-12] The
+ * boot priming pass primes every holder of a name two packages hold: the
+ * plural reads hand on one item per `(package, name)` of such a name of every
+ * type stored per `(package, name)`, so after the pass a bare read of
+ * it is refused `409 ambiguous-in-environment` naming both, the same as without
+ * the pass, and an unfiltered `list` keeps both. A name one package holds —
+ * with or without a package-less row beside it, on any host — hands on one
+ * item and answers what it answered (the CONTROL pins).
+ *
+ * BEFORE (measured at efd4ea3a, #32458's head, same fixtures, the five
+ * unbundled types of that head alike; re-measured at main 34890e0e, after
+ * #32517, for all nine — `flow`, `picklist`, `mapping` and `dataset` too):
+ * `DatabaseLoader.loadMany` / `loadManyKeyed` kept one row per name (the
+ * highest version), so the pass registered BETA's row alone and a bare read
+ * answered BETA's body. `email_template` (bundled) already kept every row.
+ */
+describe('[#32521] the boot priming pass primes every holder of a name', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  let driver: IDataDriver;
+
+  /** A row of `helper` bound to `packageId` by the column; `stamped` also names it in the body. */
+  const seed = (type: string, packageId: string, version: number, body: Record<string, unknown> = {}) =>
+    driver.create('sys_metadata', {
+      id: `${type}_${packageId}_${version}`, type, name: 'helper', state: 'active', version, checksum: `${type}_${packageId}_${version}`,
+      source: 'database', package_id: packageId, metadata: JSON.stringify({ name: 'helper', label: packageId, ...body }),
+    });
+  const stored = async (type: string) =>
+    ((await driver.find('sys_metadata', { where: { type } } as never)) as Array<Record<string, any>>)
+      .map((row) => [row.package_id ?? null, JSON.parse(row.metadata).label, row.version])
+      .sort((a, b) => String(a).localeCompare(String(b)));
+  const cold = () => {
+    const m = new MetadataManager({ formats: ['json'], loaders: [] });
+    m.registerLoader(new DatabaseLoader({ driver }));
+    return m;
+  };
+  /** The real pass (`MetadataPlugin._loadFromFileSystem`) over one database loader, on a host that declares `hostPackage`. */
+  const bootPass = async (hostPackage?: string, loaders: MetadataLoader[] = [new DatabaseLoader({ driver })]) => {
+    const plugin = new MetadataPlugin({ ...(hostPackage ? { packageId: hostPackage } : {}), watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    for (const loader of loaders) m.registerLoader(loader);
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  /** What a read answers: the refusal's code, status, reason and holders, or the body's label. */
+  const answer = async (m: MetadataManager, type: string, name: string, packageId?: string) => {
+    try {
+      const item = (await m.get(type, name, packageId)) as { label?: string } | undefined;
+      return item?.label;
+    } catch (e: any) {
+      return [e?.code, e?.status, e?.refusal?.reason, ...(e?.refusal?.candidates ?? []).map((c: any) => c.packageId ?? c.kind).sort()];
+    }
+  };
+  const REFUSED = ['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', ALPHA, BETA];
+  const labels = (items: unknown[]) => (items as Array<{ label?: string }>).map((item) => item.label).sort();
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  for (const type of UNBUNDLED) {
+    for (const [shape, body] of [['bound by the column only', {}], ['stamped in the body too', { _packageId: true }]] as const) {
+      it(`${type}, ${shape}: two holders — after the pass a bare read is refused 409 naming both, as without it, and list keeps both (BEFORE: BETA's body, list [BETA])`, async () => {
+        await seed(type, ALPHA, 1, body._packageId ? { _packageId: ALPHA } : {});
+        await seed(type, BETA, 2, body._packageId ? { _packageId: BETA } : {});
+        const before = await stored(type);
+        expect(await answer(cold(), type, 'helper')).toEqual(REFUSED);
+        const m = await bootPass();
+        expect([...((m as any).registry.get(type)?.keys() ?? [])].sort()).toEqual([`${ALPHA}\u0000helper`, `${BETA}\u0000helper`]);
+        expect(await answer(m, type, 'helper')).toEqual(REFUSED);
+        expect(await answer(m, type, 'helper', ALPHA)).toBe(ALPHA);
+        expect(await answer(m, type, 'helper', BETA)).toBe(BETA);
+        expect(labels(await m.list(type))).toEqual([ALPHA, BETA]);
+        expect(await stored(type)).toEqual(before);
+        expect(driver.update).not.toHaveBeenCalled();
+      });
+    }
+
+    it(`${type}: one holder — after the pass a bare read answers it`, async () => {
+      await seed(type, ALPHA, 1);
+      const m = await bootPass();
+      expect(await answer(m, type, 'helper')).toBe(ALPHA);
+      expect(labels(await m.list(type))).toEqual([ALPHA]);
+    });
+
+    it(`${type}: the loaders-only plural reads keep one item per (package, name), the row saved last of each (BEFORE: one per name, BETA's)`, async () => {
+      // A legacy row (empty column, body naming ALPHA) is an older row of ALPHA's slot, never a third holder.
+      await driver.create('sys_metadata', {
+        id: `${type}_legacy`, type, name: 'helper', state: 'active', version: 0, checksum: `${type}_legacy`,
+        source: 'database', package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'alpha older', _packageId: ALPHA }),
+      });
+      await seed(type, ALPHA, 1);
+      await seed(type, BETA, 2);
+      const loader = new DatabaseLoader({ driver });
+      expect(labels(await loader.loadMany(type))).toEqual([ALPHA, BETA]);
+      expect((await loader.loadManyKeyed(type)).map((entry) => [entry.name, entry.packageId, (entry.data as any).label]))
+        .toEqual([['helper', ALPHA, ALPHA], ['helper', BETA, BETA]]);
+      const m = cold();
+      expect((await m.loadMany(type) as Array<Record<string, unknown>>).map((item) => [item._packageId, item.label]))
+        .toEqual([[ALPHA, ALPHA], [BETA, BETA]]);
+      expect((await m.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label]))
+        .toEqual([['helper', ALPHA], ['helper', BETA]]);
+    });
+  }
+
+  it('action, each package binding the name to its own object: after the pass a bare read is refused 409 naming both, as without it (BEFORE: BETA\'s action)', async () => {
+    await seed('action', ALPHA, 1, { objectName: 'account' });
+    await seed('action', BETA, 2, { objectName: 'contact' });
+    expect(await answer(cold(), 'action', 'helper')).toEqual(REFUSED);
+    const m = await bootPass();
+    expect(await answer(m, 'action', 'helper')).toEqual(REFUSED);
+    expect(await answer(m, 'action', 'helper', ALPHA)).toBe(ALPHA);
+    expect(labels(await m.list('action'))).toEqual([ALPHA, BETA]);
+  });
+
+  /** A package-less row of `helper` (no column, no stamp). */
+  const seedPackageless = (type: string, version: number) =>
+    driver.create('sys_metadata', {
+      id: `${type}_env_${version}`, type, name: 'helper', state: 'active', version, checksum: `${type}_env_${version}`,
+      source: 'database', package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'env' }),
+    });
+  const registryKeys = (m: MetadataManager, type: string) => [...((m as any).registry.get(type)?.keys() ?? [])].sort();
+  const HOST = 'com.host.app';
+  /** The real pass on a host declaring `hostPackage`, over its own file-system loader under `rootDir` and then a database loader. */
+  const bootOverFiles = async (rootDir: string, hostPackage: string) => {
+    const plugin = new MetadataPlugin({ rootDir, packageId: hostPackage, watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    const fileSystem = [...(m as any).loaders.values()];
+    (m as any).loaders.clear();
+    for (const loader of [...fileSystem, new DatabaseLoader({ driver })]) m.registerLoader(loader);
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  /**
+   * What the reads answer after the pass for one package's row and a
+   * package-less row of a name, measured at `efd4ea3a` (before this change)
+   * and unchanged by it: `[order, host package, DatabaseLoader.loadMany,
+   * registry keys, bare read, read naming ALPHA, read naming HOST]`.
+   */
+  /**
+   * The same across two loaders, one holding ALPHA's item and the other a
+   * package-less item of the name, measured at `efd4ea3a` and unchanged:
+   * `[which loader is earlier, MetadataManager.loadMany, loadManyKeyed,
+   * registry keys after the pass, bare read, read naming ALPHA]`.
+   */
+  const ONE_HOLDER_ACROSS_LOADERS = [
+    ['package-less item first', ['memory'], ['memory'], ['helper'], 'memory', 'memory'],
+    ['package item first', [ALPHA], [ALPHA], [`${ALPHA}\u0000helper`], ALPHA, ALPHA],
+  ];
+  const ONE_HOLDER_AND_A_PACKAGELESS_ROW = [
+    ['package-less row saved last', 'no host package', ['env'], ['helper'], 'env', 'env', 'env'],
+    ['package-less row saved last', ALPHA, ['env'], [`${ALPHA}\u0000helper`], 'env', 'env', undefined],
+    ['package-less row saved last', HOST, ['env'], [`${HOST}\u0000helper`], 'env', ALPHA, 'env'],
+    ['package-less row saved first', 'no host package', [ALPHA], [`${ALPHA}\u0000helper`], ALPHA, ALPHA, undefined],
+    ['package-less row saved first', ALPHA, [ALPHA], [`${ALPHA}\u0000helper`], ALPHA, ALPHA, undefined],
+    ['package-less row saved first', HOST, [ALPHA], [`${ALPHA}\u0000helper`], ALPHA, ALPHA, undefined],
+  ];
+
+  for (const type of UNBUNDLED) {
+    it(`CONTROL ${type}, one package's row and a package-less row of the name (that holder's customization, D4): every read after the pass answers what it answered before — the row saved last — with no host package, a host package equal to the holder, or another`, async () => {
+      const seen: unknown[] = [];
+      for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
+        for (const hostPackage of [undefined, ALPHA, HOST]) {
+          driver = createMockDriver();
+          if (order === 'package-less row saved last') {
+            await seed(type, ALPHA, 1);
+            await seedPackageless(type, 2);
+          } else {
+            await seedPackageless(type, 1);
+            await seed(type, ALPHA, 2);
+          }
+          const m = await bootPass(hostPackage);
+          // [#32791] Fixed: the action cell of the package-less row saved last
+          // on a host declaring another package (a bare read judged over the
+          // loaders counted the one stored row twice, as the host's package and
+          // as the environment, between #32719 and #32791) answers its table
+          // row again.
+          const bare = await answer(m, type, 'helper');
+          seen.push([
+            order, hostPackage ?? 'no host package',
+            labels(await new DatabaseLoader({ driver }).loadMany(type)),
+            registryKeys(m, type),
+            bare, await answer(m, type, 'helper', ALPHA), await answer(m, type, 'helper', HOST),
+          ]);
+          expect(driver.update).not.toHaveBeenCalled();
+        }
+      }
+      expect(seen).toEqual(ONE_HOLDER_AND_A_PACKAGELESS_ROW);
+    });
+
+    it(`CONTROL ${type}, one package's item in one loader and a package-less item of the name in another: loadMany hands on the earlier loader's alone, and every read after the pass answers what it answered before`, async () => {
+      const seen: unknown[] = [];
+      for (const earlier of ['package-less item first', 'package item first'] as const) {
+        driver = createMockDriver();
+        await seed(type, ALPHA, 1);
+        const memory = new MemoryLoader();
+        await memory.save(type, 'helper', { name: 'helper', label: 'memory' });
+        const loaders = () => {
+          const database = new DatabaseLoader({ driver });
+          return earlier === 'package-less item first' ? [memory, database] : [database, memory];
+        };
+        const plain = new MetadataManager({ formats: ['json'], loaders: [] });
+        for (const loader of loaders()) plain.registerLoader(loader);
+        const m = await bootPass(undefined, loaders());
+        seen.push([
+          earlier,
+          labels(await plain.loadMany(type)), (await plain.loadManyKeyed(type)).map((entry) => (entry.data as any).label),
+          registryKeys(m, type), await answer(m, type, 'helper'), await answer(m, type, 'helper', ALPHA),
+        ]);
+      }
+      expect(seen).toEqual(ONE_HOLDER_ACROSS_LOADERS);
+    });
+
+    for (const order of ['first', 'between the two', 'last'] as const) {
+      it(`${type}, two holders and a package-less row saved ${order}: after the pass a bare read is refused naming both, a read naming a package answers its own item (nothing for a package that holds none) and list keeps the package-less one, as without it, on a host declaring no package, one of the holders, or another (BEFORE: the row saved last)`, async () => {
+        for (const hostPackage of [undefined, ALPHA, BETA, HOST]) {
+          driver = createMockDriver();
+          const writes = [(version: number) => seed(type, ALPHA, version), (version: number) => seed(type, BETA, version)];
+          writes.splice(order === 'first' ? 0 : order === 'last' ? 2 : 1, 0, (version: number) => seedPackageless(type, version));
+          for (const [at, write] of writes.entries()) await write(at + 1);
+          const m = await bootPass(hostPackage);
+          for (const packageId of [undefined, ALPHA, BETA, HOST]) {
+            expect(await answer(m, type, 'helper', packageId)).toEqual(await answer(cold(), type, 'helper', packageId));
+          }
+          // [contract review F1] The host's package stamp is kept off the
+          // package-less row: stamped, it took ALPHA's slot on a host
+          // declaring ALPHA (a read naming ALPHA answered 'env' and list
+          // dropped ALPHA's item), and HOST's slot on a host declaring HOST
+          // (the bare refusal named three packages and a read naming HOST
+          // answered 'env').
+          // [#32551] An action's bare refusal also names its package-less holder.
+          expect([hostPackage, await answer(m, type, 'helper')]).toEqual([hostPackage, type === 'action' ? [...REFUSED, 'environment'] : REFUSED]);
+          expect([hostPackage, await answer(m, type, 'helper', ALPHA)]).toEqual([hostPackage, ALPHA]);
+          expect([hostPackage, await answer(m, type, 'helper', BETA)]).toEqual([hostPackage, BETA]);
+          expect([hostPackage, await answer(m, type, 'helper', HOST)]).toEqual([hostPackage, undefined]);
+          expect([hostPackage, labels(await m.list(type))]).toEqual([hostPackage, labels(await cold().list(type))]);
+          expect([hostPackage, labels(await m.list(type))]).toEqual([hostPackage, [ALPHA, BETA, 'env']]);
+          expect([hostPackage, registryKeys(m, type)]).toEqual([hostPackage, [`${ALPHA}\u0000helper`, `${BETA}\u0000helper`, 'helper']]);
+        }
+      });
+    }
+
+    // [contract review D1] The host's own file item keeps the host's package
+    // stamp under a name other packages hold: only a package-less STORED row
+    // stays the environment's own item. Unstamped, the file item went to the
+    // bare slot and was saved as a new package-less row, and the host's edit
+    // stopped reaching its own slot.
+    it(`${type}, the host's own file of a name another package holds, edited after a boot seeded the host's row: after the next pass a read naming the host answers the edited file, the host's row holds it and no package-less row is written, as on main`, async () => {
+      const rootDir = mkdtempSync(join(tmpdir(), 'i32521-d1-'));
+      try {
+        mkdirSync(join(rootDir, type));
+        const file = join(rootDir, type, `helper.${type}.yml`);
+        writeFileSync(file, 'name: helper\nlabel: file v1\n');
+        await bootOverFiles(rootDir, HOST);
+        expect(await stored(type)).toEqual([[HOST, 'file v1', 1]]);
+        await seed(type, BETA, 1);
+        writeFileSync(file, 'name: helper\nlabel: file v2\n');
+        const m = await bootOverFiles(rootDir, HOST);
+        expect(await answer(m, type, 'helper', HOST)).toBe('file v2');
+        expect(await answer(m, type, 'helper', BETA)).toBe(BETA);
+        expect((await stored(type)).map(([packageId, label]) => [packageId, label])).toEqual([[BETA, BETA], [HOST, 'file v2']]);
+        expect(registryKeys(m, type)).toEqual([`${BETA}\u0000helper`, `${HOST}\u0000helper`]);
+      } finally {
+        rmSync(rootDir, { recursive: true, force: true });
+      }
+    });
+
+    it(`${type}, the host's own file of a name two other packages hold, no row of the host's: after the pass a read naming the host answers the file and the host's row is seeded from it, as on main`, async () => {
+      const rootDir = mkdtempSync(join(tmpdir(), 'i32521-d1-'));
+      try {
+        mkdirSync(join(rootDir, type));
+        writeFileSync(join(rootDir, type, `helper.${type}.yml`), 'name: helper\nlabel: file\n');
+        await seed(type, ALPHA, 1);
+        await seed(type, BETA, 2);
+        const m = await bootOverFiles(rootDir, HOST);
+        expect(await answer(m, type, 'helper', HOST)).toBe('file');
+        expect(await answer(m, type, 'helper', ALPHA)).toBe(ALPHA);
+        expect(await answer(m, type, 'helper', BETA)).toBe(BETA);
+        expect((await stored(type)).map(([packageId, label]) => [packageId, label])).toEqual([[ALPHA, ALPHA], [BETA, BETA], [HOST, 'file']]);
+        expect(registryKeys(m, type)).toEqual([`${ALPHA}\u0000helper`, `${BETA}\u0000helper`, `${HOST}\u0000helper`]);
+      } finally {
+        rmSync(rootDir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it('agent, two holders of a name and another row\'s body that says the same name: no body of the name is stamped, so none takes a package its row is not bound to (contract review F3 of #32458)', async () => {
+    await seed('agent', ALPHA, 1);
+    await seed('agent', BETA, 2);
+    // Row keyed `stray` whose body says `name: 'helper'`, byte for byte ALPHA's row's body.
+    await driver.create('sys_metadata', {
+      id: 'agent_stray', type: 'agent', name: 'stray', state: 'active', version: 3, checksum: 'agent_stray',
+      source: 'database', package_id: null, metadata: JSON.stringify({ name: 'helper', label: ALPHA }),
+    });
+    const m = cold();
+    expect((await m.loadMany('agent') as Array<Record<string, unknown>>).map((item) => [item._packageId ?? null, item.label]))
+      .toEqual([[null, ALPHA]]);
+  });
+
+  it('CONTROL email_template (bundled): every row was already primed — a bare read is refused naming both, list keeps both', async () => {
+    for (const [packageId, version] of [[ALPHA, 1], [BETA, 2]] as const) {
+      await driver.create('sys_metadata', {
+        id: `et_${packageId}`, type: 'email_template', name: 'welcome', state: 'active', version, checksum: `et_${packageId}`,
+        source: 'database', package_id: packageId, metadata: JSON.stringify({ name: 'welcome', locale: 'en-US', subject: packageId, bodyHtml: '<p/>', label: packageId }),
+      });
+    }
+    expect(await answer(cold(), 'email_template', 'welcome')).toEqual(REFUSED);
+    const m = await bootPass();
+    expect(await answer(m, 'email_template', 'welcome')).toEqual(REFUSED);
+    expect(labels(await m.list('email_template'))).toEqual([ALPHA, BETA]);
+    expect((await new DatabaseLoader({ driver }).loadManyKeyed('email_template')).map((entry) => entry.packageId)).toEqual([ALPHA, BETA]);
+  });
 });

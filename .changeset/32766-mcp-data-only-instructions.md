@@ -1,0 +1,12 @@
+---
+'@objectstack/mcp': patch
+---
+
+feat(mcp): a host that mounts a build door can tell a connection that cannot build how to get one that can — `dataOnlyInstructions` on the authoring injection and on `renderSkillMarkdown` (#32766)
+
+Clause-②: yes (widening) — one optional member joins two exported shapes: `McpAuthoringInjection.dataOnlyInstructions` (the `authoring` option of `MCPServerRuntime.handleHttpRequest`) and `RenderSkillOptions.dataOnlyInstructions`. A host that passes neither gets the same tools, the same `SKILL.md` bytes and the same instructions selection as before; only the built-in default sentence changes (below).
+Metadata-protocol: none
+
+- **`initialize` instructions.** A request whose grant does not admit the authoring family (a `data:read`, `data:write` or `actions:execute` token, an empty grant, or the undefined grant of an API key or a session) is now answered with the injection's `dataOnlyInstructions` when the host supplies them. A request whose grant does admit the family still gets the injection's `instructions` and never sees the data-only text. Either one omitted or blank falls back to the runtime's configured `instructions`, then to the default. The text rides the authoring injection on purpose: only a host that injects an authoring registry, that is, one that mounts a build door, can serve it. To reach API-key and session requests, such a host passes the injection on every request it serves; for those grants the registry registers nothing and the injection's `principal` is not read.
+- **`SKILL.md`.** `renderSkillMarkdown({ dataOnlyInstructions })` renders the host's text as its own block after the tool list, only when `authoringTools` names at least one tool and `grantedScopes` do not admit the family: the exact complement of the authoring section. Without authoring tools, which is how the public `GET /mcp/skill` route renders it, the skill is byte-identical to before.
+- **Default instructions over HTTP.** With no host text and no configured text, `initialize` now answers "ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted." The old sentence said every connection could query and modify data, which a `data:read` token cannot modify and a `metadata:write`-only or `actions:execute`-only token cannot even query. The new one promises no building, so it stays true on a deployment without a build door. A host that pinned the old sentence should configure `instructions` explicitly.

@@ -175,7 +175,7 @@ import {
 // `previewTimeConvergence`): the read-only plan of what the deferred schema sync would do.
 // [#25521 cut 19] And the declared column DEFAULT emission (`nowColumnDefault`, `applyDeclaredColumnDefault`):
 // what a field's `defaultValue` becomes in the DDL of a fresh or rebuilt column.
-import { applyDeclaredColumnDefault, applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyMigrationEntriesKeepingDeferral, applyNullSafeUniquePreflight, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, nowColumnDefault, planMediaColumnMove, previewDatetimeConvergence, previewDeferredSchemaWork, previewTimeConvergence, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
+import { applyDeclaredColumnDefault, applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyMigrationEntriesKeepingDeferral, applyNullSafeUniquePreflight, applyPublishedColumnChanges, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, nowColumnDefault, planMediaColumnMove, previewDatetimeConvergence, previewDeferredSchemaWork, previewTimeConvergence, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
 import type { ConcurrentIndexDeferral } from './pg-concurrent-index.js';
 // [#25521 cut 11] The autonumber sequence path (`getNextSequenceValue`, `fillAutoNumberFields`,
 // `issueAutonumbers`, `maxAutonumberCounter`, and the #5495 collision re-seed `collidingAutoNumberReservations`
@@ -5633,6 +5633,52 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#32590] Bring one PUBLISHED object's table to its declaration, for every
+   * column divergence that cannot lose data and cannot fail on existing rows:
+   * the `safe` column entries — a `date` column under a field now declared
+   * `datetime` (`widen_date_to_datetime`), a varchar narrower than a declared
+   * `maxLength` (`widen_varchar`), a runtime-token column DEFAULT
+   * (`drop_column_default`) — and a NOT NULL column under a field that
+   * declares `storage: { notNull: false }` in words (`relax_not_null`, which
+   * stays `needs_confirm` for dev auto-reconcile, ADR-0113 D5: the publish of
+   * that declaration is the deliberate relax). Index entries are left to the
+   * sync's own index work and to `os migrate apply`.
+   *
+   * The metadata publish calls it after the object's storage sync
+   * (`ObjectQL.syncObjectSchema` with `applyPublishedColumnChanges`), so the
+   * change table's "passes cleanly" holds for the table and not only for the
+   * save. It is NOT the boot's reconcile ({@link reconcileAndWarnDrift}), and
+   * it does not read `autoMigrate` or `NODE_ENV`: a boot never alters an
+   * existing column in production, because nobody asked it to; a publish is
+   * the author asking, for this object, and only for the changes above. Any
+   * other `needs_confirm` entry (a NOT NULL nobody declared either way) and
+   * every `destructive` one are never applied here.
+   *
+   * Through the public {@link applyMigrationEntries}, so a face that applies
+   * over another transport (the Turso REMOTE face) answers for itself. Like
+   * any explicit run, that closes the concurrent index builds' deferral window
+   * (#31901): the next concurrent build waits its bound once more.
+   *
+   * @returns the entries applied and those skipped — the dialect cannot
+   *   perform the op (the Turso REMOTE transport cannot rebuild a table), or
+   *   its DDL failed — which the publish reports to its caller.
+   */
+  applyPublishedColumnChanges(
+    obj: { name: string; fields?: Record<string, any>; indexes?: any[] },
+  ): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
+    // The body is in `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readDeferredDdl = () => this.deferredDdl;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof applyPublishedColumnChanges> = {
+      applyMigrationEntries: (...a) => this.applyMigrationEntries(...a),
+      get deferredDdl() { return readDeferredDdl(); },
+      detectManagedDrift: (...a) => this.detectManagedDrift(...a),
+      get logger() { return readLogger(); },
+    };
+    return applyPublishedColumnChanges.call(host, obj);
+  }
+
+  /**
    * {@link applyMigrationEntries} without its reset of the concurrent index
    * builds' deferral window (#31901), for the boot's own drift reconcile
    * ({@link reconcileAndWarnDrift}), which runs once per object inside one sync.
@@ -5711,6 +5757,7 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readKnex = () => this.knex;
     const readLogger = () => this.logger;
+    const readManagedObjectFields = () => this.managedObjectFields;
     const host: ThisParameterType<typeof applyDriftOpInPlace> = {
       applyIndexDriftOp: (...a) => this.applyIndexDriftOp(...a),
       get dialectName() { return readDialectName(); },
@@ -5718,6 +5765,8 @@ export class SqlDriver implements IDataDriver {
       get isPostgres() { return readIsPostgres(); },
       get knex() { return readKnex(); },
       get logger() { return readLogger(); },
+      get managedObjectFields() { return readManagedObjectFields(); },
+      nowColumnDefault: (...a) => this.nowColumnDefault(...a),
     };
     return applyDriftOpInPlace.call(host, op);
   }

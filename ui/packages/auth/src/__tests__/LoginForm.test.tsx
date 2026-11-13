@@ -9,7 +9,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import { AuthProvider } from '../AuthProvider';
 import { LoginForm, type LoginFormProps } from '../LoginForm';
 import type { AuthClient, AuthPublicConfig } from '../types';
@@ -496,5 +496,58 @@ describe('LoginForm — "Sign in with SSO" with no email (objectstack#32087)', (
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+});
+
+// objectstack#32432 — a refusal is mapped by `code` and `details.cause`, never by
+// the message: `errorMessages` is read under `CODE:cause` first, then `CODE`,
+// then the server's message is shown. The SCIM deactivation and an
+// administrator's ban share `403 BANNED_USER`; only `details.cause` tells them
+// apart.
+describe('LoginForm — a refusal with a cause is mapped by CODE:cause (objectstack#32432)', () => {
+  const BAN_MESSAGE =
+    'You have been banned from this application. Please contact support if you believe this is an error.';
+  const DEACTIVATED = 'Your account has been deactivated by your organization. Contact your administrator.';
+
+  function refusal(details?: unknown): Error {
+    const err = new Error(BAN_MESSAGE) as Error & { code?: string; details?: unknown };
+    err.code = 'BANNED_USER';
+    if (details !== undefined) err.details = details;
+    return err;
+  }
+
+  async function bannerAfterRefusal(err: Error, errorMessages: Record<string, string>): Promise<string> {
+    const signIn = vi.fn().mockRejectedValue(err);
+    renderLogin(createMockClient({}, { signIn }), { errorMessages });
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'dana@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+    return (await screen.findByRole('alert')).textContent ?? '';
+  }
+
+  it('details.cause scim_deactivated shows the CODE:cause sentence', async () => {
+    const text = await bannerAfterRefusal(refusal({ cause: 'scim_deactivated' }), {
+      'BANNED_USER:scim_deactivated': DEACTIVATED,
+    });
+    expect(text).toBe(DEACTIVATED);
+  });
+
+  it('an administrator\'s ban (no details) keeps the ban wording', async () => {
+    const text = await bannerAfterRefusal(refusal(), { 'BANNED_USER:scim_deactivated': DEACTIVATED });
+    expect(text).toBe(BAN_MESSAGE);
+  });
+
+  it('CODE:cause wins over the bare CODE entry; with no cause the bare CODE entry answers', async () => {
+    const map = { BANNED_USER: 'Banned (host text).', 'BANNED_USER:scim_deactivated': DEACTIVATED };
+    expect(await bannerAfterRefusal(refusal({ cause: 'scim_deactivated' }), map)).toBe(DEACTIVATED);
+    cleanup();
+    expect(await bannerAfterRefusal(refusal(), map)).toBe('Banned (host text).');
+  });
+
+  it('CONTROL: a cause the map has no entry for answers as a refusal with no cause', async () => {
+    const text = await bannerAfterRefusal(refusal({ cause: 'some_other_cause' }), {
+      'BANNED_USER:scim_deactivated': DEACTIVATED,
+    });
+    expect(text).toBe(BAN_MESSAGE);
   });
 });

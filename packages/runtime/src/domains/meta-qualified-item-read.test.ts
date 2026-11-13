@@ -396,11 +396,11 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
                 expect(JSON.stringify(answer.body ?? null)).not.toContain(A);
                 expect(JSON.stringify(answer.body ?? null)).not.toContain(`beta ${type}`);
             }
-            // CONTROL — the enabled holder's pair serves its item. Enabled first
-            // only: registered second, the pair address's envelope is looked up
-            // at the pair id and falls back to the first holder that ships the
-            // name, the disabled one (a separate defect, reported on the card).
-            if (order[0] === A) expect(labelOf(await read(`/${type}/shared`, { package: `${A}.custom` }))).toBe(`alpha ${type}`);
+            // CONTROL — the enabled holder's pair serves its item, in both
+            // orders. [#32501] Registered second, the pair address's envelope
+            // was looked up at the pair id and fell back to the first holder
+            // that ships the name, the disabled one, so it answered 404.
+            expect(labelOf(await read(`/${type}/shared`, { package: `${A}.custom` }))).toBe(`alpha ${type}`);
         });
 
         // [epic ruling R4-B2] `_env` is held at `main`'s answer: with no served
@@ -974,4 +974,112 @@ describe('#32365 — the bare action read weighs the package-less holder on the 
         const answer = await read('/action/approve');
         expect([answer.status, labelOf(answer)], JSON.stringify(answer.body)).toEqual([200, 'alpha']);
     });
+});
+
+/**
+ * [#32501, ADR-0150 D5, epic red line 2] An exact address reads one package,
+ * and its answer names that package: its envelope (`_packageId`) and, on
+ * `/layers`, its body. Never the package that registered the name first.
+ *
+ * BASE (main 874166b6 and #32183's head 6655b742, line-identical, every live
+ * type but `permission`, which the probe did not lift the security seam for):
+ *  - `?package=<base>.custom`, two enabled holders, the other registered first:
+ *    200, the base's body under the OTHER holder's `_packageId`;
+ *  - the same with the other holder disabled: 404 (the face withheld the
+ *    item by the misstamped envelope);
+ *  - `/layers?package=<base>.custom`: `code` and `effective` were the first
+ *    registered holder's body;
+ *  - `?package=<App>.custom` and its `/layers`, two enabled modules of the App
+ *    holding the name: the first registered module's item.
+ *
+ * Re-measured on main 2f80f2897 (#32497 landed): the `/layers` code layer at
+ * `?package=<base>.custom` already answers the base's (#32497 judges it
+ * through `exactQualifierItem`), so that half of the two-holder pin holds on
+ * `main`; its plain-read envelope does not. Every other line stands.
+ */
+describe('#32501 — a pair address reads the package it names, never the first registered holder', () => {
+    const P = 'com.acme.app';
+    const M1 = 'com.acme.mone';
+    const M2 = 'com.acme.mtwo';
+    const admitSecondPermissionHolder = (type: string) => {
+        if (type === 'permission') {
+            vi.spyOn(registry as unknown as { securityCatalogHoldersOtherThan: () => unknown[] }, 'securityCatalogHoldersOtherThan')
+                .mockReturnValue([]);
+        }
+    };
+    const itemOf = (answer: { body?: any }) => answer.body?.data?.item ?? answer.body?.item;
+    const layersOf = (answer: { body?: any }) => answer.body?.data ?? answer.body;
+    const servedAs = (answer: { status?: number; body?: any }, label: string, packageId: string) => {
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect([itemOf(answer)?.label, itemOf(answer)?._packageId]).toEqual([label, packageId]);
+    };
+    const refusedNaming = (answer: { status?: number; body?: any }, named: string[]) => {
+        expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        for (const id of named) expect(answer.body?.error?.message).toContain(`package "${id}"`);
+    };
+    beforeEach(() => {
+        registry.installPackage({ id: P, name: P, version: '1.0.0', type: 'app', namespace: 'app' } as never, 'code');
+        for (const id of [M1, M2]) {
+            registry.installPackage({
+                id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop()!, dependencies: { [P]: '^1.0.0' },
+            } as never, 'code');
+        }
+    });
+
+    for (const type of PACKAGE_SCOPED_READ_TYPES) {
+        it.each([['alpha first', [A, B]], ['beta first', [B, A]]] as const)(`${type}: two enabled holders (%s) — each pair address wears its base's envelope, on the plain read and /layers`, async (_order, order) => {
+            admitSecondPermissionHolder(type);
+            for (const id of order) ship(type, 'shared', id);
+            for (const [pair, label, base] of [[`${A}.custom`, `alpha ${type}`, A], [`${B}.custom`, `beta ${type}`, B]] as const) {
+                servedAs(await read(`/${type}/shared`, { package: pair }), label, base);
+                const layers = await read(`/${type}/shared/layers`, { package: pair });
+                expect(layers.status, JSON.stringify(layers.body)).toBe(200);
+                const layered = layersOf(layers);
+                expect([layered?.code?.label, layered?.code?._packageId, layered?.effective?.label, layered?.packageId])
+                    .toEqual([label, base, label, base]);
+            }
+        });
+
+        it.each([['disabled first', [B, A]], ['enabled first', [A, B]]] as const)(`${type}: the other holder disabled (%s) — the enabled base's pair serves its item`, async (_order, order) => {
+            admitSecondPermissionHolder(type);
+            for (const id of order) ship(type, 'shared', id);
+            registry.disablePackage(B);
+            const answer = await read(`/${type}/shared`, { package: `${A}.custom` });
+            servedAs(answer, `alpha ${type}`, A);
+            expect(JSON.stringify(answer.body)).not.toContain(B);
+            // …and `/layers` at the same address (was 404 with the disabled holder registered first).
+            const layers = await read(`/${type}/shared/layers`, { package: `${A}.custom` });
+            expect(layers.status, JSON.stringify(layers.body)).toBe(200);
+            expect([layersOf(layers)?.code?.label, layersOf(layers)?.packageId]).toEqual([`alpha ${type}`, A]);
+        });
+
+        it.each([['mone first', [M1, M2]], ['mtwo first', [M2, M1]]] as const)(`${type}: two enabled modules of one App hold the name (%s) — the App's pair is refused naming both, on the plain read and /layers`, async (_order, order) => {
+            admitSecondPermissionHolder(type);
+            for (const id of order) ship(type, 'shared', id);
+            refusedNaming(await read(`/${type}/shared`, { package: `${P}.custom` }), [M1, M2]);
+            refusedNaming(await read(`/${type}/shared/layers`, { package: `${P}.custom` }), [M1, M2]);
+            // CONTROL — each module's own address serves its own item.
+            servedAs(await read(`/${type}/shared`, { package: M1 }), `mone ${type}`, M1);
+            servedAs(await read(`/${type}/shared`, { package: M2 }), `mtwo ${type}`, M2);
+        });
+
+        it(`${type}: one module disabled and registered first — the App's pair serves the enabled module's item, under its envelope`, async () => {
+            admitSecondPermissionHolder(type);
+            ship(type, 'shared', M2);
+            ship(type, 'shared', M1);
+            registry.disablePackage(M2);
+            servedAs(await read(`/${type}/shared`, { package: `${P}.custom` }), `mone ${type}`, M1);
+            // …and `/layers` at the App's pair (was 404).
+            const layers = await read(`/${type}/shared/layers`, { package: `${P}.custom` });
+            expect(layers.status, JSON.stringify(layers.body)).toBe(200);
+            expect([layersOf(layers)?.code?.label, layersOf(layers)?.code?._packageId]).toEqual([`mone ${type}`, M1]);
+        });
+
+        it(`${type}: CONTROL — a single holder's pair address answers as before`, async () => {
+            ship(type, 'solo', A);
+            servedAs(await read(`/${type}/solo`, { package: `${A}.custom` }), `alpha ${type}`, A);
+            const layers = layersOf(await read(`/${type}/solo/layers`, { package: `${A}.custom` }));
+            expect([layers?.code?.label, layers?.packageId]).toEqual([`alpha ${type}`, A]);
+        });
+    }
 });
