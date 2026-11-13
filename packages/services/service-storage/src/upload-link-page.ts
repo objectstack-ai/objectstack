@@ -137,7 +137,9 @@ export function sendUploadLinkPage(res: IHttpResponse, view: UploadLinkView, cop
     '<p id="status" role="status" aria-live="polite"></p>';
   const text = scriptLiteral({
     uploading: copy.uploading,
-    attached: copy.attached,
+    // [#32686] A link that names no record attaches nothing: the file waits
+    // for the record the assistant creates.
+    attached: view.newRecord === true ? copy.received : copy.attached,
     failed: copy.failed,
     connectionLost: copy.connectionLost,
   });

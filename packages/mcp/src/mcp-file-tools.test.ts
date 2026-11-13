@@ -472,6 +472,104 @@ describe('create_upload_link', () => {
   });
 });
 
+/** [#32686] A bridge that also serves a link for a record not yet created. */
+function newRecordBridge() {
+  const bridge = fullBridge();
+  Object.assign(bridge, {
+    async createUploadLinkForNewRecord(object: string, target: { field: string }) {
+      bridge.calls.push(['createUploadLinkForNewRecord', object, target]);
+      if (object === 'locked') {
+        throw Object.assign(new Error('You cannot upload a file for a new locked: you cannot create locked records.'), {
+          code: 'PERMISSION_DENIED',
+          status: 403,
+        });
+      }
+      return {
+        url: 'https://acme.test/api/v1/storage/upload-links/f9.sec',
+        expiresAt: '2026-11-13T12:10:00.000Z',
+        fileIds: ['f9'],
+      };
+    },
+  } satisfies McpFileBridge);
+  return bridge;
+}
+
+async function uploadLinkSchema(runtime: MCPServerRuntime, bridge: unknown) {
+  const json = await rpc(runtime, bridge, undefined, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  const tool = (json.result?.tools ?? []).find((t: { name: string }) => t.name === 'create_upload_link');
+  return tool as { description: string; inputSchema: { required?: string[]; properties: Record<string, unknown> } };
+}
+
+describe('[#32686] create_upload_link for a record not yet created', () => {
+  let runtime: MCPServerRuntime;
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 'file-tools', version: '0.0.0' });
+  });
+
+  it('with no recordId and a field, mints through the bridge and answers the file id the create names', async () => {
+    const bridge = newRecordBridge();
+    const result = await callTool(runtime, bridge, 'create_upload_link', { objectName: 'expense_line', field: 'invoice' });
+    expect(result.isError).toBeFalsy();
+    expect(bridge.calls).toEqual([['createUploadLinkForNewRecord', 'expense_line', { field: 'invoice' }]]);
+    const facts = factsOf(result);
+    expect(facts).toMatchObject({
+      url: 'https://acme.test/api/v1/storage/upload-links/f9.sec',
+      expiresAt: '2026-11-13T12:10:00.000Z',
+      singleUse: true,
+      objectName: 'expense_line',
+      field: 'invoice',
+      fileIds: ['f9'],
+    });
+    expect(facts).not.toHaveProperty('recordId');
+    expect(facts.instructions).toContain('fileIds[0]');
+  });
+
+  it('with a recordId, still asks for that record\'s link, never the new-record one', async () => {
+    const bridge = newRecordBridge();
+    await callTool(runtime, bridge, 'create_upload_link', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+    expect(bridge.calls).toEqual([['createUploadLink', 'claim', 'c1', { field: 'policy' }]]);
+  });
+
+  it('refuses an attachments link with no record before asking the bridge', async () => {
+    const bridge = newRecordBridge();
+    const result = await callTool(runtime, bridge, 'create_upload_link', { objectName: 'claim', attachments: true });
+    expect(result.isError).toBe(true);
+    expect(textOf(result.content[0])).toContain('An attachment needs its record');
+    expect(bridge.calls).toEqual([]);
+  });
+
+  it('relays the minting refusal with its code', async () => {
+    const result = await callTool(runtime, newRecordBridge(), 'create_upload_link', { objectName: 'locked', field: 'invoice' });
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(textOf(result.content[0])).error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  it('lists recordId as optional, and says how, only where the bridge serves it', async () => {
+    const served = await uploadLinkSchema(runtime, newRecordBridge());
+    expect(served.inputSchema.required ?? []).not.toContain('recordId');
+    expect(served.description).toContain('omit recordId and name the field');
+    const notServed = await uploadLinkSchema(runtime, fullBridge());
+    expect(notServed.inputSchema.required).toContain('recordId');
+    expect(notServed.description).not.toContain('omit recordId');
+  });
+
+  it('a bridge without it refuses a call with no recordId, asking nothing', async () => {
+    const bridge = fullBridge();
+    const result = await callTool(runtime, bridge, 'create_upload_link', { objectName: 'expense_line', field: 'invoice' });
+    expect(result.isError).toBe(true);
+    expect(bridge.calls).toEqual([]);
+  });
+
+  it('the skill teaches the two-call flow only where the host says the bridge serves it, and only with data:write', () => {
+    const marker = 'omit `recordId` and name `field`';
+    expect(renderSkillMarkdown({ fileTools: true, newRecordUploadLinks: true })).toContain(marker);
+    expect(renderSkillMarkdown({ fileTools: true })).not.toContain(marker);
+    expect(renderSkillMarkdown({ fileTools: true, newRecordUploadLinks: true, grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] })).not.toContain(marker);
+    expect(renderSkillMarkdown({ fileTools: true, newRecordUploadLinks: true, grantedScopes: [MCP_OAUTH_SCOPE_DATA_WRITE] })).toContain(marker);
+    expect(renderSkillMarkdown({ newRecordUploadLinks: true })).not.toContain(marker);
+  });
+});
+
 describe('the skill teaches the file tools exactly where they register', () => {
   it('names both for a host that carries them, and each only for the scope that registers it', () => {
     const all = renderSkillMarkdown({ fileTools: true });

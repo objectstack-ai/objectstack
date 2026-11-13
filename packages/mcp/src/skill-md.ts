@@ -110,6 +110,14 @@ export interface RenderSkillOptions {
    */
   fileTools?: boolean;
   /**
+   * [#32686] Whether the host's bridge also serves an upload link for a
+   * record not yet created (`createUploadLinkForNewRecord`), so
+   * `create_upload_link` takes no `recordId` with a `field`. Renders only
+   * with `create_upload_link`'s own entry ({@link fileTools}, `data:write`).
+   * Default false: the renderer cannot see the bridge, so the host says so.
+   */
+  newRecordUploadLinks?: boolean;
+  /**
    * [ADR-0149 D2] Whether the host's bridge carries the dataset pair
    * (`list_datasets` / `query_dataset`, `registerDatasetTools`). The entries,
    * and the D3 selection rule that teaches a client when to use them, render
@@ -221,6 +229,21 @@ const UPLOAD_LINK_TOOL_LINES = `- **create_upload_link({ objectName, recordId, f
 `;
 
 /**
+ * [#32686] The two-call flow for a record whose file field must be filled
+ * when it is created, rendered under `create_upload_link`'s entry where the
+ * bridge serves a link with no record.
+ */
+const NEW_RECORD_UPLOAD_LINK_LINES = `  For a record you have not created yet (a required file field, such as an
+  expense line's invoice), omit \`recordId\` and name \`field\`: the answer
+  carries \`fileIds\`. Once the user has uploaded, call \`create_record\` with
+  the field set to \`fileIds[0]\` (the array, for a multi-file field); before
+  the upload, that create is refused as an upload that never completed. The
+  id goes only into that field of that object, in one record, by this
+  user's own write, within an hour of the upload. The user must be able to
+  create such records.
+`;
+
+/**
  * [ADR-0149 D2/D3] The dataset pair's entries and the selection rule that
  * tells a client when a governed metric answers instead of an object query.
  * The rule is ADR-0149 D3's, in the client's terms: an exact word match
@@ -267,7 +290,10 @@ function renderFileToolLines(options: RenderSkillOptions): string {
   // Mirrors the gates in `registerFileTools` (`!scopes || scopes.includes(…)`).
   const read = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
   const write = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_WRITE);
-  return (read ? READ_FILE_TOOL_LINES : '') + (write ? UPLOAD_LINK_TOOL_LINES : '');
+  return (
+    (read ? READ_FILE_TOOL_LINES : '') +
+    (write ? UPLOAD_LINK_TOOL_LINES + (options.newRecordUploadLinks === true ? NEW_RECORD_UPLOAD_LINK_LINES : '') : '')
+  );
 }
 
 /**
