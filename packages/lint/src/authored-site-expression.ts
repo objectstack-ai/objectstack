@@ -27,6 +27,7 @@
  */
 
 import { analyzeRelationshipTraversals } from '@objectstack/formula';
+import { stripInjectedSystemColumns } from '@objectstack/metadata-core';
 import { referenceTargetOf } from '@objectstack/spec/data';
 
 import { recordsOf } from './object-graph.js';
@@ -51,6 +52,14 @@ export interface AuthoredSiteExpression {
    * those of the objects its references name that the expression reads
    * through ({@link authoredExpressionHopTargets}). A target left out is not
    * judged, as the gate does not judge a target outside the stack it reads.
+   *
+   * Served, a definition carries the system columns the registry injects as
+   * declared fields; the gate judges the body as authored, so each is read
+   * through `stripInjectedSystemColumns` (`@objectstack/metadata-core`, the
+   * write path's own strip of exactly those) and the walk re-derives the
+   * injected columns itself. Unstripped, the null-guard gate would judge
+   * `created_at` as a declared nullable field and an external object's
+   * anchors would read as columns its author vouches for.
    */
   objects: readonly AnyRec[];
 }
@@ -100,9 +109,10 @@ export function judgeAuthoredSiteExpression({
   severity,
   objects,
 }: AuthoredSiteExpression): ExprIssue[] {
-  const served = objects.find((o) => o?.name === objectName);
+  const authored = objects.map((o) => stripInjectedSystemColumns(o));
+  const served = authored.find((o) => o?.name === objectName);
   if (!served) return [];
-  const others = objects.filter((o) => o !== served && o?.name !== objectName);
+  const others = authored.filter((o) => o !== served && o?.name !== objectName);
   const { validations: _servedRules, ...body } = served;
   const subject = site === 'validation'
     ? {

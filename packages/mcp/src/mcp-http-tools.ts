@@ -2362,11 +2362,14 @@ export function registerObjectTools(
       {
         description:
           'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns ' +
-          'build-time errors (bare field refs, unknown fields, unknown functions; at a `formula` or `validation` site, a ' +
-          'reference field read both through the relationship and as a plain value, or more than one hop) and advisory warnings ' +
+          'build-time errors (bare field refs, unknown fields, unknown functions; at a `formula` or `validation` site, every ' +
+          'other refusal the publish gate gives there: a reference field read both through the relationship and as a plain ' +
+          'value, more than one hop, a hop to a field the target does not declare or into a stored-metadata table, and at a ' +
+          '`validation` site an unguarded nullable field or a read of `parent`) and advisory warnings ' +
           '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
           '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
-          'a warning on any other flow; date-equality pitfalls), plus the fields and stdlib ' +
+          'a warning on any other flow; date-equality pitfalls; a read of an external object\'s unprovisioned system ' +
+          'column), plus the fields and stdlib ' +
           'functions in scope so you can self-correct. `site` says where the expression will live: a `formula` ' +
           'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions). ' +
           'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition), so the verdict is ' +

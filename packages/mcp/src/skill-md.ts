@@ -379,11 +379,16 @@ create/update payload.
 - **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
-  unknown fields/functions) and advisory warnings (text/boolean fields misused
-  in arithmetic; an error at a \`validation\` site, worded for the rule's
-  \`severity\`, and at a \`flow_condition\` of a record-triggered or
-  time-relative flow, where it fails the run; a warning on any other flow), plus the fields and
-  stdlib functions in scope. \`site\` is \`formula\` | \`validation\` |
+  unknown fields/functions; at a \`formula\` or \`validation\` site, every other
+  refusal the publish gate gives there: a reference read both through the
+  relationship and as a value, more than one hop, a hop to a field the target
+  does not declare or into a stored-metadata table, and at a \`validation\` site
+  an unguarded nullable field or a read of \`parent\`) and advisory warnings
+  (text/boolean fields misused in arithmetic; an error at a \`validation\` site,
+  worded for the rule's \`severity\`, and at a \`flow_condition\` of a
+  record-triggered or time-relative flow, where it fails the run; a warning on
+  any other flow; a read of an external object's unprovisioned system column),
+  plus the fields and stdlib functions in scope. \`site\` is \`formula\` | \`validation\` |
   \`flow_condition\` | \`template\` (default \`formula\`). Pass the rule's
   \`severity\` or the flow's \`triggerKind\` (\`record_change\` by default) to
   get the verdict the publish gate gives that rule or flow; for a

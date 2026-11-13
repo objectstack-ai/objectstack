@@ -7,7 +7,9 @@ import {
   TYPED_EXPRESSION_SOURCE_REQUIRED,
 } from '@objectstack/spec/shared';
 
-import { validateStackExpressions } from '@objectstack/lint';
+import { AUTHORED_FORMULA_FIELD_NAME, AUTHORED_RULE_NAME, validateStackExpressions } from '@objectstack/lint';
+
+import { applyInjectedSystemColumns } from '@objectstack/metadata-core';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
@@ -302,8 +304,10 @@ describe('validate_expression MCP tool (#1928)', () => {
 describe('validate_expression answers the gate on relationship traversal (#32640)', () => {
   const REQ = 'rtbw_leave_req';
   const BAL = 'rtbw_leave_bal';
-  // Required, so the gate's null-guard pass (which the tool does not run)
-  // has nothing to say and the two verdicts compare whole.
+  // Required, so the gate's null-guard pass has nothing to say and the two
+  // verdicts compare whole. (This bridge serves no definition, so the tool
+  // runs the shared validator alone: the gate's other passes are pinned in
+  // the #32872 block below.)
   const reqFields = {
     leave_type: { type: 'text', label: 'Leave type', required: true },
     days: { type: 'number', label: 'Days', required: true },
@@ -416,5 +420,140 @@ describe('validate_expression answers the gate on relationship traversal (#32640
     }));
     expect(gate.filter(([, m]) => /read BOTH through the relationship/.test(m!))).toEqual([]);
     expect(verdicts(r).filter(([, m]) => /read BOTH through the relationship/.test(m!))).toEqual([]);
+  });
+});
+
+// [#32872] At a validation rule and a formula field the publish gate judges
+// with passes of its own beyond the shared validator, each private to
+// `@objectstack/lint`'s walk. The tool asks the gate itself for them
+// (`judgeAuthoredSiteExpression`) over the definitions the bridge serves
+// (`servedObjectDefinitionOf`), so for each member below the tool refuses
+// (or warns) where it answered `ok: true` before, in the gate's words, read
+// off `validateStackExpressions` on the same rule or field. The list of the
+// gate's passes at each site, and the pin that a new one cannot be added
+// without this entry, is `packages/lint/src/authored-site-expression.test.ts`.
+describe("validate_expression answers the gate's own passes at validation and formula sites (#32872)", () => {
+  const OBJECTS: Record<string, Record<string, any>> = {
+    gp_req: {
+      name: 'gp_req',
+      fields: {
+        days: { type: 'number', label: 'Days' },
+        title: { type: 'text', label: 'Title', required: true },
+        balance: { type: 'lookup', label: 'Balance', reference: 'gp_bal' },
+        meta: { type: 'lookup', label: 'Meta', reference: 'sys_metadata' },
+        header: { type: 'master_detail', label: 'Header', reference: 'gp_bal' },
+      },
+      // The object's own rule is the gate's business at its own door, never this call's.
+      validations: [{ name: 'own', type: 'script', condition: 'record.days > 3', message: 'm' }],
+    },
+    gp_bal: { name: 'gp_bal', fields: { remaining: { type: 'number', label: 'Remaining', required: true } } },
+    gp_ext: {
+      name: 'gp_ext',
+      external: { remoteName: 'customers' },
+      fields: { email: { type: 'text', label: 'Email', required: true } },
+    },
+  };
+  /** As the registry serves it: the injected system columns are declared fields; `describeObject` projects them. */
+  const served = (name: string) => (OBJECTS[name] ? applyInjectedSystemColumns(OBJECTS[name]) : null);
+  const reads: string[] = [];
+  const gateBridge = (withDefinitions = true): McpDataBridge => ({
+    ...makeBridge(),
+    async listObjects() {
+      return Object.keys(OBJECTS).map((name) => ({ name }));
+    },
+    async describeObject(name: string) {
+      const def = served(name);
+      if (!def) return null;
+      return { name, fields: Object.entries(def.fields).map(([n, f]) => ({ name: n, ...(f as object) })) };
+    },
+    ...(withDefinitions
+      ? {
+          async servedObjectDefinitionOf(name: string) {
+            reads.push(name);
+            return served(name);
+          },
+        }
+      : {}),
+  });
+  const verdicts = (r: { errors: { message: string }[]; warnings: { message: string }[] }) => [
+    ...r.errors.map((e) => ['error', e.message]),
+    ...r.warnings.map((w) => ['warning', w.message]),
+  ];
+  /** The gate's verdicts on the same rule or field, the object's own rules left out as the tool leaves them. */
+  const gateOn = (site: 'validation' | 'formula', objectName: string, expression: string) => {
+    const { validations: _own, ...subject } = OBJECTS[objectName]!;
+    const judged = site === 'validation'
+      ? { ...subject, validations: [{ name: AUTHORED_RULE_NAME, type: 'script', condition: expression, message: 'm' }] }
+      : { ...subject, fields: { ...subject.fields, [AUTHORED_FORMULA_FIELD_NAME]: { type: 'formula', label: 'F', expression } } };
+    const others = Object.keys(OBJECTS).filter((n) => n !== objectName).map((n) => OBJECTS[n]!);
+    const name = site === 'validation' ? AUTHORED_RULE_NAME : AUTHORED_FORMULA_FIELD_NAME;
+    return validateStackExpressions({ objects: [judged, ...others] })
+      .filter((i) => i.where.includes(`'${name}'`))
+      .map((i) => [i.severity ?? 'error', i.message]);
+  };
+  const sorted = (v: unknown[][]) => [...v].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+
+  let runtime: MCPServerRuntime;
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
+    reads.length = 0;
+  });
+
+  // [member, site, object, expression, severity, the subject the finding names]
+  const MEMBERS: Array<[string, 'validation' | 'formula', string, string, 'error' | 'warning', string]> = [
+    ['null-guard gate', 'validation', 'gp_req', 'record.days > 3', 'error', 'days'],
+    ['undeclared field one hop away', 'validation', 'gp_req', 'record.balance.nope > 1', 'error', 'nope'],
+    ['undeclared field one hop away', 'formula', 'gp_req', 'record.balance.nope > 1 ? 1 : 0', 'error', 'nope'],
+    ['hop into a stored-metadata table', 'validation', 'gp_req', "record.meta.name == 'x'", 'error', 'sys_metadata'],
+    ['hop into a stored-metadata table', 'formula', 'gp_req', "record.meta.name == 'x' ? 1 : 0", 'error', 'sys_metadata'],
+    ['a validation rule reading `parent`', 'validation', 'gp_req', 'parent.remaining > 1', 'error', 'parent'],
+    ['unprovisioned anchor (warning)', 'validation', 'gp_ext', "record.owner_id == 'u1'", 'warning', 'owner_id'],
+    ['unprovisioned anchor (warning)', 'formula', 'gp_ext', "record.owner_id == 'u1' ? 1 : 0", 'warning', 'owner_id'],
+  ];
+
+  it('judges the authored body: an injected column is no declared nullable field', async () => {
+    const expression = "record.created_at > timestamp('2020-01-01T00:00:00Z')";
+    expect(gateOn('validation', 'gp_req', expression)).toEqual([]);
+    const r = await validate(runtime, gateBridge(), { objectName: 'gp_req', expression, site: 'validation' });
+    expect([r.ok, r.errors, r.warnings]).toEqual([true, [], []]);
+  });
+
+  for (const [member, site, objectName, expression, severity, names] of MEMBERS) {
+    it(`site ${site}: ${member} — the tool gives the gate's verdict`, async () => {
+      const gate = gateOn(site, objectName, expression);
+      expect(gate.map(([level]) => level)).toEqual([severity]);
+      const r = await validate(runtime, gateBridge(), { objectName, expression, site });
+      expect(r.ok).toBe(severity !== 'error');
+      expect(sorted(verdicts(r))).toEqual(sorted(gate));
+      expect(verdicts(r).some(([, message]) => message!.includes(names))).toBe(true);
+    });
+  }
+
+  it('reads the definition of each object the expression reads through, and no other', async () => {
+    await validate(runtime, gateBridge(), { objectName: 'gp_req', expression: 'record.balance.nope > 1', site: 'validation' });
+    expect(reads).toEqual(['gp_req', 'gp_bal']);
+  });
+
+  it('CONTROL — a clean rule and formula answer ok with the shape they always had', async () => {
+    const expression = "record.title == 'x' && record.balance.remaining > 1";
+    for (const [site, source] of [['validation', expression], ['formula', `${expression} ? 1 : 0`]] as const) {
+      expect(gateOn(site, 'gp_req', source)).toEqual([]);
+      const withGate = await validate(runtime, gateBridge(), { objectName: 'gp_req', expression: source, site });
+      const before = await validate(runtime, gateBridge(false), { objectName: 'gp_req', expression: source, site });
+      expect(withGate.ok).toBe(true);
+      expect([withGate.errors, withGate.warnings]).toEqual([[], []]);
+      expect(withGate).toEqual(before);
+    }
+  });
+
+  it('a bridge that serves no definition answers the shared validator alone, as before', async () => {
+    const r = await validate(runtime, gateBridge(false), { objectName: 'gp_req', expression: 'record.days > 3', site: 'validation' });
+    expect([r.ok, r.errors, r.warnings]).toEqual([true, [], []]);
+  });
+
+  it('leaves a flow condition and a template to the shared validator, as the gate does', async () => {
+    await validate(runtime, gateBridge(), { objectName: 'gp_req', expression: 'days > 3', site: 'flow_condition' });
+    await validate(runtime, gateBridge(), { objectName: 'gp_req', expression: '{{record.title}}', site: 'template' });
+    expect(reads).toEqual([]);
   });
 });
