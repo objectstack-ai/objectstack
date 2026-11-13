@@ -334,10 +334,13 @@ export interface McpActionSummary {
    * credential before running it: an `api` action whose target endpoint does
    * not accept the credential the caller connected with (an OAuth access token
    * is honoured on the MCP endpoint only, so an endpoint outside it cannot read
-   * it). The action is still listed, so an agent can tell its user why it
-   * cannot run it; `code` is the standard error code `run_action` answers with
-   * (`UNAUTHENTICATED`), `reason` the sentence it carries, including what would
-   * let the action run. Absent when the action can be run.
+   * it), or an action declaring `ai.requiresConfirmation: true` listed for an
+   * AI service account, which never confirms an action for itself (ADR-0151 D3
+   * rule 3). The action is still listed, so an agent can tell its user why it
+   * cannot run it; `code` is the error code `run_action` answers with
+   * (`UNAUTHENTICATED` for the endpoint, `ACTION_CONFIRMATION_REQUIRED` for the
+   * account), `reason` the sentence it carries, including what would let the
+   * action run. Absent when the action can be run.
    */
   unavailable?: McpActionUnavailable;
 }
