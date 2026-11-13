@@ -1504,7 +1504,15 @@ export const CEILINGS = new Map([
   // the possible-data-leak reach exception left the exceptions line in place,
   // so the measured delta is +1.
   // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 67],
+  // 67 → 79 (#32997): an ordinary ruled raise under letter B (record
+  // 6184799323). The ruling of record is the maintainer's 2026-11-13 grading
+  // ruling quoted verbatim in the card body (「只是读代码得出的最高 p2。这个没必要吧，
+  // 我们的客户不多。」 and 「不需要限额，也不需要自动关。其他同意。」; triage audit
+  // 6846766675), which orders the nine adopted grading rules into 〈定级判据〉.
+  // Under the 120-byte line cap they take 14 lines; the old focus-raise and
+  // reach-cap lines fold into rules 8 and 2 and are deleted, so the measured
+  // delta is +12. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 79],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
