@@ -45,6 +45,7 @@ import { authIdentityObjects } from './manifest.js';
 import { REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED } from '@objectstack/spec/system';
 import { assertPasswordResetEndsSessions } from './password-reset-ends-sessions.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
+import { SSO_ONLY_REFUSAL_MESSAGES } from './sso-only-local-password.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 import { sqliteEnginePool } from './__tests__/sqlite-engine-pool.testkit';
 // better-auth's first module load is paid here, at module load, not inside the
@@ -699,6 +700,27 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the r
     process.env[SSO_ONLY_ENV] = 'true';
   };
 
+  /**
+   * The refusal a reset door answers. These doors are better-auth's own, so
+   * the refusal leaves in the vendor's flat `{ code, message }` body, the shape
+   * its other refusals on these doors (`INVALID_TOKEN`, `INVALID_OTP`) take.
+   */
+  async function expectSsoOnlyRefusal(res: Response): Promise<void> {
+    const text = await res.clone().text();
+    const body = JSON.parse(text) as { code?: unknown; message?: unknown };
+    expect({ status: res.status, code: body.code, message: body.message }, text).toEqual({
+      status: 409,
+      code: 'RESOURCE_CONFLICT',
+      message: SSO_ONLY_REFUSAL_MESSAGES.resetPassword,
+    });
+  }
+
+  /** Status and code of a vendor answer, in its flat body. */
+  async function vendorAnswer(res: Response): Promise<{ status: number; code?: unknown }> {
+    const body = (await res.clone().json().catch(() => null)) as { code?: unknown } | null;
+    return { status: res.status, code: body?.code };
+  }
+
   /** Who the reset doors judge a platform administrator: pinned per case, not inferred from staging. */
   const platformAdmin = (standing: boolean) =>
     vi
@@ -728,7 +750,7 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the r
     await a.engine.update('sys_user', { id, source: 'idp_provisioned' }, SYS);
     if (!opts.holdsPassword) {
       const credential = await credentialOf(a.engine);
-      await a.engine.delete('sys_account', { where: { id: credential!.id }, ...SYS });
+      await a.engine.delete('sys_account', { where: { id: credential!.id }, context: { isSystem: true } } as never);
       expect(await credentialOf(a.engine), 'fixture invariant: the managed user holds no credential').toBeUndefined();
     }
   }
@@ -742,7 +764,7 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the r
       ssoOnly();
 
       const reset = await post(a.manager, '/reset-password', { token, newPassword: SECOND });
-      expect(await answer(reset)).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+      await expectSsoOnlyRefusal(reset);
       expect(await credentialOf(a.engine)).toBeUndefined();
     }, 60_000);
 
@@ -754,7 +776,7 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the r
       ssoOnly();
 
       const reset = await post(a.manager, '/reset-password', { token, newPassword: SECOND });
-      expect(await answer(reset)).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+      await expectSsoOnlyRefusal(reset);
       const signIn = await post(a.manager, '/sign-in/email', { email: EMAIL, password: FIRST });
       expect(signIn.status, await signIn.clone().text()).toBe(200);
     }, 60_000);
@@ -787,10 +809,11 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the r
       platformAdmin(false);
       await requestResetToken(a);
 
-      const off = await answer(await post(a.manager, '/reset-password', { token: 'not-the-issued-token', newPassword: SECOND }));
+      const off = await vendorAnswer(await post(a.manager, '/reset-password', { token: 'not-the-issued-token', newPassword: SECOND }));
       ssoOnly();
-      const on = await answer(await post(a.manager, '/reset-password', { token: 'not-the-issued-token', newPassword: SECOND }));
+      const on = await vendorAnswer(await post(a.manager, '/reset-password', { token: 'not-the-issued-token', newPassword: SECOND }));
       expect(off.status).toBe(400);
+      expect(typeof off.code, 'the vendor names its refusal').toBe('string');
       expect(on).toEqual(off);
     }, 60_000);
 
@@ -839,7 +862,7 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the r
       ssoOnly();
 
       const reset = await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: SECOND });
-      expect(await answer(reset)).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+      await expectSsoOnlyRefusal(reset);
       expect(await credentialOf(a.engine)).toBeUndefined();
     }, 60_000);
 
@@ -850,14 +873,15 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the r
       const otp = await requestCode();
       const wrong = otp === '000000' ? '111111' : '000000';
 
-      const off = await answer(
+      const off = await vendorAnswer(
         await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp: wrong, newPassword: SECOND }),
       );
       ssoOnly();
-      const on = await answer(
+      const on = await vendorAnswer(
         await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp: wrong, newPassword: SECOND }),
       );
       expect(off.status).toBe(400);
+      expect(typeof off.code, 'the vendor names its refusal').toBe('string');
       expect(on).toEqual(off);
       expect(await credentialOf(a.engine)).toBeUndefined();
     }, 60_000);
