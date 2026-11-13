@@ -4217,7 +4217,7 @@
       "title": "Packages that share a namespace keep each behavioural name unique across it: a second co-owner holding a sharing rule, queue, assignment rule, hook, job, app, page, dashboard, report, book, cube or tool name is refused at os validate, os build and install, while base, system and sys are exempt",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["developer at the CLI", "admin (the seeded admin): the install leg"],
@@ -4231,7 +4231,7 @@
       "steps": [
         "os validate and objectstack build on a stack that composes both qa_n packages; record exit codes and output",
         "install each build of com.qa.n-two into the boot that holds com.qa.n-one; record status and body for each, then GET /api/v1/packages",
-        "os validate the packages[] stack whose residual items repeat qa_board",
+        "os validate the packages[] stack whose residual items repeat qa_board; record the exit code and output",
         "repeat the install with both packages in a shareable namespace (base) instead; record the answer"
       ],
       "acceptance": [
@@ -4248,10 +4248,10 @@
           "evidence": "both refusal bodies and the package list"
         },
         {
-          "clause": "a packages[] stack's residual top-level items are judged with the namespace they fall under",
+          "clause": "a packages[] stack's residual top-level items are judged with the namespace they fall under, at the manifest service and not at the CLI",
           "oracle": "build",
-          "verify": "os validate exits non-zero naming qa_board (packages/objectql/src/namespace-co-owner-names.ts#residualNamespacePackageOf, #31767)",
-          "evidence": "the output"
+          "verify": "os validate exits 0 on step 3's stack, by design: the CLI does not judge the residual, because inside one artifact a residual never shares a covered name with one of the stack's bodies (a body holding the name claims the slot, so the item is not residual) and the packages other artifacts installed are invisible there (packages/objectql/src/namespace-co-owner-names.ts, its 'The residual' section; packages/cli/src/utils/namespace-co-owner-names.ts, its stated bounds). The judgement is the manifest service's (SchemaRegistry.refuseResidualNamespaceNameConflicts over packages/objectql/src/namespace-co-owner-names.ts#residualNamespacePackageOf, #31767): score it from packages/objectql/src/manifest-service-residual-namespace-name.test.ts, 'is refused at the manifest service, naming both holders, and the artifact is put back whole', which reports ≥1 test and 0 failed at the run subject sha",
+          "evidence": "the os validate exit code and output, and the pin file's vitest summary line with the subject sha"
         },
         {
           "clause": "the shareable namespaces base, system and sys are not judged",
@@ -4263,14 +4263,14 @@
       "negative": [
         "a second co-owner installed with a duplicate qa_board is a FAIL: the address qa_n/qa_board must name one item (ADR-0150 D2)",
         "the same name held in two different namespaces refused is a FAIL: the rule is per namespace",
-        "reading the install door's 422 namespace-ownership answer or its 403 NOT_OVERRIDABLE as a missing co-owner refusal is wrong: both gates answer before the co-owner judgement, and either way nothing installs"
+        "reading the install door's 422 namespace-ownership answer or its 403 NOT_OVERRIDABLE as a missing co-owner refusal is wrong: both gates answer before the co-owner judgement, and either way nothing installs; reading step 3's os validate exit 0 as a missing residual refusal is wrong too: the CLI does not judge the residual"
       ],
       "variants": [
         "the twelve judged types (packages/objectql/src/namespace-co-owner-names.ts#NAMESPACE_UNIQUE_TYPES); a run drives page and names the others it did not drive"
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/objectql/src/registry-namespace-co-owner-names.test.ts, packages/cli/src/utils/namespace-co-owner-names.test.ts"
+        "ref": "packages/objectql/src/registry-namespace-co-owner-names.test.ts, packages/objectql/src/manifest-service-residual-namespace-name.test.ts, packages/cli/src/utils/namespace-co-owner-names.test.ts"
       },
       "source": [
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D2 (co-owners keep each behavioural name unique, ruled)",
@@ -4297,6 +4297,12 @@
           "date": "2026-11-13",
           "change": "stale-spec re-point of acceptance[1] (with fixtures.requires[0], steps[1], a negative and a source line). The install door never reaches the co-owner refusal: without a dependency the ADR-0048 namespace gate answers 422 PLUGIN_REGISTER_FAILED (packages/objectql/src/registry.ts#NamespaceConflictError), and with com.qa.n-one declared as a dependency the ADR-0146 D2 override write gate answers 403 NOT_OVERRIDABLE naming page qa_board and both packages (packages/cloud-connection/src/marketplace-install-local-plugin.ts#overrideGateRefusalBody). The clause now names the gate that answers at each build; the co-owner refusal stays with the CLI legs and its registry pin. acceptance[2] is untouched here (its own card). Found by the 18.4.0 acceptance run #32940 (F-7, R5; wave anchor #32908): both answers, nothing installed, 2 reproductions. Re-read at main 25ee5076. Card #32946",
           "ref": "#32946"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-13",
+          "change": "assertion-defect correction of acceptance[2] (with steps[2], its evidence, a negative and automated.ref). os validate on a packages[] stack with a residual qa_board exits 0 by design: the CLI does not judge the residual (packages/objectql/src/namespace-co-owner-names.ts, 'The residual'), and the manifest service does. The clause now records that exit 0 and scores the judgement from its pin, packages/objectql/src/manifest-service-residual-namespace-name.test.ts. Found by the 18.4.0 acceptance run #32940 (F-4 to F-8 and its R4/R5 comments; wave anchor #32908). Re-read at main cf1b55c0. Card #32945",
+          "ref": "#32945"
         }
       ]
     },
@@ -4305,21 +4311,21 @@
       "title": "A namespace never equals an object name: defineStack, os validate, os build, the install door and the publish doors all refuse a package whose namespace spells an installed object's name (or the reverse), naming both spellings",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["developer at the CLI", "admin (the seeded admin): the install and publish legs"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a scratch app directory whose manifest namespace is qa_k and which declares an object qa_k_case, plus a second scratch package (namespace qa_k_case) that is otherwise valid; and a scratch app (namespace qa_k) that declares an object qa_k_custom, whose short name is custom; for the save leg, an authored (writable) scratch package created with POST /api/v1/packages (id com.qa.w, namespace qa_w) and an installed scratch package whose namespace is qa_w_desk (it installs: no object carries that name yet)",
+          "a scratch app directory whose manifest namespace is qa_k and which declares an object qa_k_case, plus a second scratch package (namespace qa_k_case) that is otherwise valid, and a defineStack whose packages[] composes both (the qa_k_case directory alone validates: the clash needs both packages in one artifact); and a scratch app (namespace qa_k) that declares an object qa_k_custom, whose short name is custom; for the save leg, an authored (writable) scratch package created with POST /api/v1/packages (id com.qa.w, namespace qa_w) and an installed scratch package whose namespace is qa_w_desk (it installs: no object carries that name yet)",
           "a boot of the showcase with the qa_k app installed (os package install DIR/dist/objectstack.json)"
         ]
       },
       "steps": [
-        "in the qa_k_case package directory: os validate, then objectstack build; record exit codes and output",
+        "in the directory of the stack that composes both packages: os validate, then objectstack build; record exit codes and output",
         "try to install a compiled qa_k_case artifact into the boot that holds qa_k: os package install FILE (or POST /api/v1/marketplace/install-local with the file); record status and body",
-        "save an object qa_w_desk on com.qa.w through the metadata door in publish mode (PUT /api/v1/meta/object/qa_w_desk?package=com.qa.w), then save it as a draft and publish the package's drafts (POST /api/v1/packages/com.qa.w/publish); record each answer",
+        "save an object qa_w_desk on com.qa.w through the metadata door in publish mode (PUT /api/v1/meta/object/qa_w_desk?package=com.qa.w); then save it as a draft, publish that one draft (POST /api/v1/meta/object/qa_w_desk/publish?package=com.qa.w), and publish the package's drafts (POST /api/v1/packages/com.qa.w/publish-drafts); record each answer, then read the draft",
         "os validate the app that declares the object custom"
       ],
       "acceptance": [
@@ -4336,10 +4342,10 @@
           "evidence": "the 422 body and the package list"
         },
         {
-          "clause": "the publish doors refuse the clash too: a publish-mode save, a per-item publish and POST /packages/:id/publish answer 422 NAMESPACE_CONFLICT",
+          "clause": "the publish doors refuse the clash too: a publish-mode save and a per-item publish answer 422 NAMESPACE_CONFLICT, and the drafts door refuses the batch and keeps the draft",
           "oracle": "api",
-          "verify": "each answers 422 naming the namespace and the object (packages/metadata-protocol/src/protocol.namespace-object-name-doors.test.ts; packages/runtime/src/package-door-namespace-object-name.test.ts)",
-          "evidence": "each refusal body"
+          "verify": "the save and the per-item publish answer 422 NAMESPACE_CONFLICT naming the namespace and the object; POST /api/v1/packages/com.qa.w/publish-drafts answers 200 with success false, outcome 'refused', publishedCount 0 and failed[0] { type 'object', name 'qa_w_desk', code 'NAMESPACE_CONFLICT' } carrying the same sentence, and the draft is still a draft (packages/metadata-protocol/src/protocol.namespace-object-name-doors.test.ts, 'the batch publish refuses it in its pre-flight'). POST /api/v1/packages/:id/publish is not the drafts door: it publishes the package items the metadata service holds, so on this fixture it answers 200 success false 'No metadata items found for package' (packages/metadata/src/metadata-manager.ts); its own 422 arm is pinned by packages/runtime/src/package-door-namespace-object-name.test.ts",
+          "evidence": "each answer body and the draft read"
         },
         {
           "clause": "an object whose short name is custom is refused",
@@ -4350,7 +4356,7 @@
       ],
       "negative": [
         "a clash accepted at install and only refused when an action path is called is a FAIL: /actions/crm_lead/convert_lead/REC1 would read as qualified, which is the ambiguity Q3 closed",
-        "a refusal that names only one of the two spellings is a FAIL"
+        "a refusal that names only one of the two spellings is a FAIL; publish-drafts answering 200 is not an acceptance: the refusal is its outcome and failed[], and the draft must stay a draft"
       ],
       "automated": {
         "kind": "unit",
@@ -4368,6 +4374,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child K, a namespace never equals an object name (#31887). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-13",
+          "change": "assertion-defect correction of acceptance[2] (with fixtures.requires[0], steps[0], steps[2], acceptance[2]'s evidence and a negative). POST /api/v1/packages/:id/publish publishes the package items the metadata service holds, not drafts: on this fixture it answers 200 success false 'No metadata items found'. The drafts door is POST /api/v1/packages/:id/publish-drafts, which answers 200 with outcome refused and failed[0].code NAMESPACE_CONFLICT and keeps the draft (packages/metadata-protocol/src/protocol.namespace-object-name-doors.test.ts); the step and clause now name that route and that answer, with the per-item publish route spelled out. Clause 1's step now validates a stack composing both packages: the clashing directory alone validates 0. Found by the 18.4.0 acceptance run #32940 (F-4 to F-8 and its R4/R5 comments; wave anchor #32908). Re-read at main cf1b55c0. Card #32945",
+          "ref": "#32945"
         }
       ]
     },
