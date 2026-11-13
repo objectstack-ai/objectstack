@@ -407,7 +407,7 @@ export class ApprovalsServicePlugin implements Plugin {
         'ApprovalsServicePlugin: the ObjectQL engine has no middleware seam — reads of sys_approval_request, '
         + 'sys_approval_action and sys_approval_approver through the generic data door are NOT narrowed to the '
         + 'approval requests the caller may see. Grant no read on those objects to non-administrators on this stack, '
-        + 'and withdraw the member baseline\'s read on sys_approval_request (member_default, #32442).',
+        + 'and withdraw the member baseline\'s read on sys_approval_request (member_default).',
       );
     }
 
