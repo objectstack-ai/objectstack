@@ -2,6 +2,7 @@
 
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/core';
 import type { StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
+import type { PublishedColumnChanges } from './protocol-registry-hydration.js';
 
 /**
  * The engine surface the metadata protocol needs from its host (ADR-0076).
@@ -18,6 +19,16 @@ export interface MetadataHostEngine extends IDataEngine {
   registry: any;
   /** DDL: create/sync the physical table for an object schema. */
   syncObjectSchema(...args: any[]): Promise<any>;
+  /**
+   * [#32590] The publish's column half (`@objectstack/objectql`'s
+   * `applyPublishedColumnChanges`): after {@link syncObjectSchema}, bring an
+   * existing table's columns to the published declaration where that cannot
+   * lose data, and answer what was applied and what was not. Declared
+   * explicitly for the reason `transaction` is; optional because a host may be
+   * a test double or a metadata-only store, and degrading means the sync stays
+   * the additive one it always was.
+   */
+  applyPublishedColumnChanges?(objectName: string): Promise<PublishedColumnChanges | undefined>;
   /** DDL: drop the physical table for an object schema. */
   dropObjectSchema(...args: any[]): Promise<any>;
   /**

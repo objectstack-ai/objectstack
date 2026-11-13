@@ -10,9 +10,10 @@
  * grants and the explanation to the plugin's methods. It answers the write
  * bypass, the write scope, the delegation narrowing, the permission-set names
  * and the delegable scope in place, and it serves the audience-binding
- * suggestions through the suggestion surface. `Object.assign` adds the two
+ * suggestions through the suggestion surface. `Object.assign` adds the
  * members the published contract does not type: the metadata-plane readable
- * fields and the ownership-floor alternate seam.
+ * fields, the ownership-floor alternate seam, the platform baseline seam and
+ * the organization boundary.
  *
  * A MOVE, not a redesign. The function below is that one `try` statement of
  * `start()` as it stood, re-indented one level and otherwise unedited. It has
@@ -62,6 +63,8 @@ import type {
   IMetadataService,
   IObjectQLEngine,
   ISecurityService,
+  PlatformBaselineSetAdmission,
+  PlatformBaselineSetContribution,
 } from '@objectstack/spec/contracts';
 import type { ObjectAccessScope, PermissionSet } from '@objectstack/spec/security';
 import type { SecurityPlugin } from './security-plugin.js';
@@ -73,6 +76,7 @@ import {
 } from './explain-engine.js';
 import { organizationBoundaryFailure } from './delegated-admin-gate.js';
 import type { OwnershipFloorAlternate } from './platform-ownership-policies.js';
+import type { PlatformBaselineRegistry } from './platform-baseline-sets.js';
 import {
   listAudienceBindingSuggestions,
   confirmAudienceBindingSuggestion,
@@ -92,9 +96,13 @@ import {
  */
 export interface SecurityServiceHost {
   readonly acceptedDefaultPermissionSets: SecurityPlugin['acceptedDefaultPermissionSets'];
+  readonly baselinePermissionSets: SecurityPlugin['baselinePermissionSets'];
+  readonly bootstrapPermissionSets: SecurityPlugin['bootstrapPermissionSets'];
   readonly delegatedAdminGate: SecurityPlugin['delegatedAdminGate'];
   readonly logger: SecurityPlugin['logger'];
   readonly ownershipFloorAlternates: SecurityPlugin['ownershipFloorAlternates'];
+  readonly platformBaselineSets: SecurityPlugin['platformBaselineSets'];
+  readonly epoch: SecurityPlugin['epoch'];
   readonly permissionEvaluator: SecurityPlugin['permissionEvaluator'];
   readonly ql: SecurityPlugin['ql'];
   readonly tenancyPosture: SecurityPlugin['tenancyPosture'];
@@ -119,7 +127,7 @@ export interface SecurityServiceHost {
 
 /** The `security` service registration `SecurityPlugin#start` runs; the comment above its call there is its contract. */
 export function registerSecurityService(
-  this: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
+  this: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'epoch' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'platformBaselineSets' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
@@ -418,6 +426,38 @@ export function registerSecurityService(
               ? 'withdrawn'
               : alternates.map((a) => `${a.object}.${a.operation} (${a.name})`).join(', ')),
         );
+      },
+      // The platform baseline seam — how an always-on platform service hands
+      // the member baseline a set of its own (read and create on objects it
+      // registers), from the place it installs the row gates those objects
+      // rely on, during boot only. Same extension pattern as the one above.
+      // Throws on a contribution the seam refuses — see
+      // `platform-baseline-sets.ts` for the rules. Every contribution is said,
+      // the refused ones included.
+      contributePlatformBaselineSet: (contributor: string, set: PlatformBaselineSetContribution): PlatformBaselineSetAdmission => {
+        let admitted;
+        try {
+          admitted = this.platformBaselineSets.contribute(contributor, set, {
+            baseline: this.baselinePermissionSets,
+            shipped: this.bootstrapPermissionSets,
+            registry: (this.ql as { registry?: PlatformBaselineRegistry } | undefined)?.registry,
+          });
+        } catch (e) {
+          ctx.logger.warn((e as Error).message, { contributor });
+          throw e;
+        }
+        const grants = Object.entries(admitted.set.objects ?? {})
+          .map(([object, p]) => `${object} (${[p.allowRead ? 'read' : '', p.allowCreate ? 'create' : ''].filter(Boolean).join(', ')})`)
+          .join(', ');
+        ctx.logger.info(
+          `[security] platform baseline set '${admitted.set.name}' from '${admitted.contributor}': ${grants} — ` +
+            (admitted.joined
+              ? 'joined the member baseline every signed-in member holds through the everyone anchor.'
+              : 'registered, and handed to no one: this deployment declares no member baseline (fallbackPermissionSet: null).'),
+          { contributor: admitted.contributor, set: admitted.set.name, joined: admitted.joined },
+        );
+        if (admitted.joined) this.epoch.bump('metadata');
+        return { name: admitted.set.name, joined: admitted.joined };
       },
       // [ADR-0090 D12] The organization boundary, judged by the gate's own
       // predicate against this engine's security catalog: `null` when the set

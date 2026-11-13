@@ -292,11 +292,11 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       skills 卡拆前后两张(合一则 `Blocked-by:` 成环)。值走 `enumWithRetiredValues` 则绑定 stale,退役
       PR 照处方改指。顶层键墓碑仍算声明,删它欠维护者的 `NOT_AUTHORED` 行 ⇒ `needs_decision`。
       `_index.md`(`check:skill-refs`)随退役 PR 重生成;未标记块与不红表行无门禁,grep 后排退役后。
+      例外:改名替代者是顶层键或所绑活成员 ⇒ 其枚举行随退役 PR,上限照 `lanes/skills.md`。
 - [ ] **Docs** —— `content/docs/**` 的散文、表格与代码块 —— **除了
       `content/docs/releases/`,代码 PR 永不碰它**(AGENTS.md Documentation
-      Guardrails)。release notes 在发布时从 changesets + D2/D3 registry 集中编写,你的
-      changeset(下一项)才是通往它们的输入。`content/docs/**` 的其余部分:先 grep 键
-      名,再读周边文件 —— 被删的键会藏在离参考表三节远的一个 `defineFlow` 示例里。
+      Guardrails)。`content/docs/**` 的其余部分:先 grep 键名,再读周边文件 —— 被删的键
+      会藏在离参考表三节远的一个 `defineFlow` 示例里。
 - [ ] **Changeset** —— `@objectstack/spec` 用 `minor`,⛔ 不用 `major`:逐 PR 的 `Check Changeset` 跑
       `scripts/check-changeset-no-major.mjs`,发射窗口期内拒收 `major`,照抄即红。破坏性语义由 BREAKING
       banner 承载 —— AGENTS.md:breaking changeset 必须带 FROM → TO 映射与一行修复;它作为 npm 包里

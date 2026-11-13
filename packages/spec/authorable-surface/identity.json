@@ -57,6 +57,7 @@
     "identity/Position:name",
     "identity/Position:permissionSets",
     "identity/Position:protection",
+    "identity/Position:renamedFrom",
     "identity/SCIMAddress:country",
     "identity/SCIMAddress:formatted",
     "identity/SCIMAddress:locality",

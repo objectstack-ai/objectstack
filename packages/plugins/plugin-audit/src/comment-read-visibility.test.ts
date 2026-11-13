@@ -6,6 +6,7 @@ import {
   type CommentAccessEngine,
   type CommentReadMiddlewareCtx,
 } from './comment-access-hooks.js';
+import type { ParentRecordGateEngine } from './parent-record-read-gate.js';
 
 const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
 
@@ -73,6 +74,12 @@ function install(opts: {
   comments: Array<{ id?: string; thread_id: string } & Record<string, unknown>>;
   /** parentObject -> userId -> visible record ids */
   visible: Record<string, Record<string, string[]>>;
+  /**
+   * The registry view: by default one holding every parent object `visible`
+   * names, with no `enable` block (the data door serves each); `null`: none.
+   */
+  registry?: unknown;
+  logger?: ReturnType<typeof silentLogger>;
 }) {
   let mw!: (ctx: CommentReadMiddlewareCtx, next: () => Promise<void>) => Promise<void>;
   const calls = {
@@ -81,7 +88,12 @@ function install(opts: {
     parentFindContexts: [] as any[],
   };
 
-  const engine: CommentAccessEngine = {
+  const registry =
+    opts.registry === undefined
+      ? { getAllObjects: () => Object.keys(opts.visible).map((name) => ({ name })) }
+      : opts.registry;
+  const engine: CommentAccessEngine & { registry?: unknown } = {
+    ...(registry === null ? {} : { registry }),
     registerHook: () => {},
     registerMiddleware: (fn) => {
       mw = fn as any;
@@ -100,7 +112,7 @@ function install(opts: {
     },
     findOne: async () => null,
   };
-  installCommentReadVisibility(engine, silentLogger());
+  installCommentReadVisibility(engine as ParentRecordGateEngine, opts.logger ?? silentLogger());
   return {
     mw,
     calls,
@@ -356,5 +368,36 @@ describe('harness matcher — Filter Protocol semantics', () => {
   it('throws instead of silently ignoring an operator it does not implement', () => {
     expect(() => pick({ thread_id: { $gt: 'x' } })).toThrow(/unsupported operator \$gt/);
     expect(() => pick({ $nor: [{ thread_id: 'x' }] })).toThrow(/unsupported logical operator \$nor/);
+  });
+});
+
+describe('a parent the data door does not serve: the thread probe serves no comment on it', () => {
+  const comments = [
+    { id: 'k1', thread_id: 'crm_case:c1', body: 'on a case' },
+    { id: 'k2', thread_id: 'sys_oauth_client_resource:r1', body: 'on a resource link' },
+  ];
+  const visible = { crm_case: { rep2: ['c1'] }, sys_oauth_client_resource: { rep2: ['r1'] } };
+
+  it('a comment whose parent object the door refuses get for is not served, and its parent is never read as the caller', async () => {
+    const { mw, calls, selectIds } = install({
+      comments,
+      visible,
+      registry: {
+        getAllObjects: () => [{ name: 'crm_case' }, { name: 'sys_oauth_client_resource', enable: { apiEnabled: false, apiMethods: [] } }],
+      },
+    });
+    const { where } = await runRead(mw, {});
+    expect(selectIds(where)).toEqual(['k1']);
+    expect(calls.parentFinds.map((f) => f.object)).toEqual(['crm_case']);
+  });
+
+  it('with no registry view nothing is confirmed served: no comment is, and that is said once', async () => {
+    const logger = silentLogger();
+    const { mw, calls, selectIds } = install({ comments, visible, registry: null, logger });
+    expect(selectIds((await runRead(mw, {})).where)).toEqual([]);
+    await runRead(mw, {});
+    expect(calls.parentFinds).toEqual([]);
+    const said = logger.warn.mock.calls.filter(([line]) => String(line).includes('cannot say which parent objects the data door serves'));
+    expect(said).toHaveLength(1);
   });
 });
