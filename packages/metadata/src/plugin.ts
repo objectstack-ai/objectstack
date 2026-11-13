@@ -1687,7 +1687,7 @@ export class MetadataPlugin implements Plugin {
                             // by its write rule (`unstampedStoredRow`). The
                             // host's own file item is stamped as before.
                             applyProtection(meta, {
-                                packageId: unstampedStoredRow(entry.type, meta, this.manager.sourceLoaderOf(meta))
+                                packageId: unstampedStoredRow(entry.type, meta, this.manager.sourceLoaderProtocolOf(meta))
                                     ? undefined
                                     : this.options.packageId,
                             });
@@ -1723,14 +1723,15 @@ export class MetadataPlugin implements Plugin {
     }
 }
 
-/** The loader whose items are stored rows: `DatabaseLoader`'s `contract.name`. */
-const STORED_ROW_LOADER = 'database';
+/** The protocol of a loader whose items are stored rows: `DatabaseLoader`'s, and any loader's that declares it. */
+const STORED_ROW_PROTOCOL = 'datasource:';
 
 /**
  * [#32521, #32812; epic #31527 red line 2, ADR-0150 D4] Whether the boot
  * priming pass keeps the host's declared package off `item`: a package-less
- * STORED ROW (an item `DatabaseLoader` handed on that names no package, as
- * `loadMany` hands it on) of a type stored per `(package, name)`. Such a row is the
+ * STORED ROW (an item a `datasource:` loader, `DatabaseLoader` or another of
+ * that protocol, handed on that names no package, as `loadMany` hands it on)
+ * of a type stored per `(package, name)`. Such a row is the
  * environment's own item, or the customization of the one package that holds
  * its name (D4), and the store files it where it files any write that carries
  * no package. Stamped with the host's package, the registry filed it into the
@@ -1742,8 +1743,8 @@ const STORED_ROW_LOADER = 'database';
  * what it answers on a host that declares no package. The host's own file items, and every other
  * type's items, are stamped as before.
  */
-function unstampedStoredRow(type: string, item: unknown, loader: string | undefined): boolean {
-    return PACKAGE_SLOTTED_STORE_TYPES.has(type) && storedItemPackageId(item) === undefined && loader === STORED_ROW_LOADER;
+function unstampedStoredRow(type: string, item: unknown, protocol: string | undefined): boolean {
+    return PACKAGE_SLOTTED_STORE_TYPES.has(type) && storedItemPackageId(item) === undefined && protocol === STORED_ROW_PROTOCOL;
 }
 
 /**

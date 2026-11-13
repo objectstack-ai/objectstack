@@ -3713,6 +3713,18 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * [#32812] The protocol of the loader {@link loadMany} read `item` — that
+   * very object — from (`'datasource:'` for a loader of stored rows,
+   * `DatabaseLoader` or another that declares the protocol under its own
+   * name); `undefined` for an object it did not hand out. The boot priming
+   * pass asks it to keep the host's package off a package-less stored row
+   * (`MetadataPlugin`'s pass).
+   */
+  sourceLoaderProtocolOf(item: object): string | undefined {
+    return this.loadedFrom.get(item)?.contract.protocol;
+  }
+
+  /**
    * Load multiple metadata items from loaders.
    * Aggregates results from all loaders.
    */

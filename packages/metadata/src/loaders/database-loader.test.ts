@@ -2550,6 +2550,87 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
     }
     expect(seen).toEqual([[HOST, [`${ALPHA}\u0000helper`], 'env'], ['none', [`${ALPHA}\u0000helper`], 'env']]);
   });
+
+  /**
+   * [#32812, contract review r1 M1] A loader of stored rows is told by its
+   * protocol (`datasource:`), not by `DatabaseLoader`'s name: a loader that
+   * declares the protocol under another name hands out package-less rows the
+   * pass leaves unstamped too. FROM `main` `25ee5076`: right after the pass
+   * the bare read answered the package-less row (#32791's filing keyed on the
+   * protocol), and after a register with no package it was refused naming the
+   * host's package; at this PR's first head (keyed on the name) it was
+   * refused right after the pass as well. TO: the package-less row, then the
+   * written body, as through `DatabaseLoader`.
+   */
+  it('action, the card\'s composition through a stored-row loader that declares `datasource:` under another name: the pass leaves the row unstamped, and the bare read answers it, then the written body', async () => {
+    await seedRows([[ALPHA], [null]]);
+    const plugin = new MetadataPlugin({ packageId: HOST, watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    const loader = new DatabaseLoader({ driver });
+    (loader as any).contract = { ...loader.contract, name: 'tenant-rows' };
+    m.registerLoader(loader);
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    expect(registryKeys(m, 'action')).toEqual(['helper']);
+    expect(await bareAnswers(m)).toEqual(['env', 'env']);
+    await m.register('action', 'helper', { name: 'helper', label: 'written' });
+    expect(await bareAnswers(m)).toEqual(['written', 'written']);
+  });
+
+  /**
+   * [#32812, contract review r1 S1] The narrowing arm's own answers, on a host
+   * declaring another package beside one declaring none, after the pass: the
+   * served package-less row carries no `_packageId` or `_provenance`, `list`
+   * names it once, and the package-wide verbs naming the host's package do
+   * not take it. FROM `main` `25ee5076`: stamped with the host's package and
+   * `_provenance: 'package'`, listed twice beside the holder's row (its
+   * customization and the host's), dropped from the registry by
+   * `unregisterPackage` and published (its row rebound to the host's package)
+   * by `publishPackage`. TO: as on a host that declares no package. Whether a
+   * disabled host package hides the row is read by `@objectstack/core` and
+   * `@objectstack/runtime` off the served `_packageId`, not pinned here.
+   */
+  it('action, one package\'s row and a package-less row saved last: the served row carries no stamp, list names it once, and unregisterPackage or publishPackage naming the host\'s package leaves it, as on a host declaring none', async () => {
+    const seen: Record<string, unknown> = {};
+    for (const hostPackage of [HOST, undefined]) {
+      const stamps = async (m: MetadataManager) => {
+        const item = (await m.get('action', 'helper')) as Record<string, unknown> | undefined;
+        return [item?._packageId, item?._provenance];
+      };
+      const listed = async (m: MetadataManager) => ((await m.list('action')) as Array<{ label?: string }>).map((item) => item.label).sort();
+      const tableOf = async () => ((await driver.find('sys_metadata', { where: { type: 'action' } } as any)) as Array<Record<string, unknown>>)
+        .map((row) => [row.package_id ?? null, row.version]).sort();
+      driver = createMockDriver();
+      await seedRows([[ALPHA], [null]]);
+      const m = await bootPass(hostPackage);
+      const before = [await stamps(m), await listed(m)];
+      const published = await m.publishPackage(HOST).then((r: any) => r?.success, (e: any) => e?.code ?? 'threw');
+      const afterPublish = await tableOf();
+      await m.unregisterPackage(HOST);
+      seen[hostPackage ?? 'none'] = [...before, published, afterPublish, await bareAnswers(m), await tableOf()];
+    }
+    expect(seen[HOST]).toEqual(seen.none);
+    expect(seen.none).toEqual([[undefined, undefined], ['env'], false, [[null, 2], [ALPHA, 1]], ['env', 'env'], [[null, 2], [ALPHA, 1]]]);
+  });
+
+  /**
+   * [#32812, contract review r1 S1] A package-less `action` row alone,
+   * removed with no package after the pass: nothing of it is left to read.
+   * FROM `main` `25ee5076`: the row deleted, the registry's copy stamped with
+   * the host's package left in the host's slot, answering the bare read and
+   * `list` until a restart. TO: as on a host that declares no package.
+   */
+  it('action, a package-less row alone removed with no package after the pass: the bare read and list answer nothing, on a host declaring another package as on one declaring none', async () => {
+    const seen: unknown[] = [];
+    for (const hostPackage of [HOST, undefined]) {
+      driver = createMockDriver();
+      await seedRows([[null]]);
+      const m = await bootPass(hostPackage);
+      await m.unregister('action', 'helper');
+      seen.push([hostPackage ?? 'none', await answer(m, 'action'), (await m.list('action')).length, registryKeys(m, 'action')]);
+    }
+    expect(seen).toEqual([[HOST, undefined, 0, []], ['none', undefined, 0, []]]);
+  });
 });
 
 /**
