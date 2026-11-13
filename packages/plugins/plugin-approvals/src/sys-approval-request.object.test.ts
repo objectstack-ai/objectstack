@@ -23,7 +23,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { templateSlotSource } from '@objectstack/spec/automation';
+import { isAiReadExposed } from '@objectstack/spec/data';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
+import { SysApprovalAction } from './sys-approval-action.object.js';
 
 const actions = (SysApprovalRequest as any).actions as any[];
 const byName = (n: string) => actions.find((a) => a.name === n);
@@ -280,5 +282,16 @@ describe('sys_approval_request AI exposure (#32442)', () => {
 
   it('reassign tells the agent what `to` is', () => {
     expect(byName('approval_reassign').ai.paramHints?.to?.description).toMatch(/user id/);
+  });
+});
+
+describe('[#32442, ruling A] the AI read declaration', () => {
+  it('sys_approval_request opts its records into the AI read tools, and the decision trail does not', () => {
+    expect(SysApprovalRequest.enable?.aiReadable).toBe(true);
+    expect(isAiReadExposed(SysApprovalRequest)).toBe(true);
+    // Read only: the generic write methods stay closed, decisions go through
+    // the decide actions.
+    expect(SysApprovalRequest.enable?.apiMethods).toEqual(['get', 'list']);
+    expect(isAiReadExposed(SysApprovalAction)).toBe(false);
   });
 });

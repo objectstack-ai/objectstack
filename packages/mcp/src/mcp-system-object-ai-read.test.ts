@@ -15,9 +15,7 @@
  *
  * Driven through `MCPServerRuntime.handleHttpRequest` over JSON-RPC, the path
  * an external client hits. The runtime half (the bridge reading the
- * declaration) and the end-to-end gates are pinned in
- * `packages/runtime/src/mcp-system-object-ai-read.test.ts` and the dogfood
- * `approval-read-over-mcp.dogfood.test.ts`.
+ * declaration) is pinned in `packages/runtime/src/mcp-system-object-ai-read.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';
