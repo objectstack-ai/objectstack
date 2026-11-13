@@ -1122,14 +1122,6 @@ function connectorInstanceSignature(entry: {
 }
 
 /**
- * [#28591] The provider-bound instances a declaration asks the reconcile for,
- * as one comparable string: the name and {@link connectorInstanceSignature} of
- * every named, provider-bound entry not `enabled: false`, sorted. Two reads
- * with the same fingerprint ask for the same set of instances with the same
- * inputs. Credential and connection state are not in it: they are read by the
- * reconcile itself, not declared.
- */
-/**
  * [#33049] The protocol's flow view as one comparable string: each flow's
  * whole definition, order-free. Two reads of an unchanged view give the same
  * string, so the `kernel:bootstrapped` pass binds again only when a plugin
@@ -1139,6 +1131,14 @@ function flowViewFingerprint(defs: readonly unknown[]): string {
     return stableStringify(defs.map((def) => stableStringify(def)).sort());
 }
 
+/**
+ * [#28591] The provider-bound instances a declaration asks the reconcile for,
+ * as one comparable string: the name and {@link connectorInstanceSignature} of
+ * every named, provider-bound entry not `enabled: false`, sorted. Two reads
+ * with the same fingerprint ask for the same set of instances with the same
+ * inputs. Credential and connection state are not in it: they are read by the
+ * reconcile itself, not declared.
+ */
 function declaredInstanceFingerprint(declared: readonly unknown[]): string {
     const parts: string[] = [];
     for (const raw of declared) {
