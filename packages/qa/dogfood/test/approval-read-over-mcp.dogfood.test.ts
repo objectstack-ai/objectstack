@@ -32,7 +32,8 @@
 //   ⭐ the same query as the submitter returns nothing;
 //   ⭐ a member on no request reads nothing: by query, by id, by aggregate;
 //   ⭐ the snapshot field the approver may not read is not served to them,
-//      on the request row or in its activity rows;
+//      on the request row; the request's activity copies are written without
+//      the snapshot, and an older copy at rest reaches them on no read face;
 //   ⭐ the object is listed and described; no write tool opens it, and
 //      `sys_approval_action` stays refused;
 //   ⭐ the query tool's text names the "pending for me" filter shape;
@@ -349,20 +350,52 @@ describe('an approver\'s agent lists the approvals waiting on them over MCP (#32
     expect(own.text).toContain(STORED);
   });
 
-  it('⭐ the request\'s activity rows serve the approver no value they may not read', async () => {
-    // Control: the value is at rest.
-    const stored = rowsOf(await ql.find('sys_activity', {
+  it('⭐ the request\'s activity and audit copies are written without the subject snapshot', async () => {
+    const activity = rowsOf(await ql.find('sys_activity', {
       where: { object_name: REQUEST, record_id: first.requestId }, context: SYS.context,
     }));
-    expect(stored.length, 'the request\'s insert left an activity row').toBeGreaterThan(0);
-    expect(JSON.stringify(stored)).toContain(STORED);
-    // The approver reads those rows on the data door (their participant read
-    // of the parent admits them).
-    const res = await stack.api('/data/sys_activity', { headers: { Authorization: `Bearer ${approver}` } });
-    const text = await res.text();
-    expect(res.status, text).toBe(200);
-    expect(text, 'the approver reads the request\'s activity').toContain(first.requestId);
-    expect(text).not.toContain(STORED);
+    expect(activity.length, 'the request\'s insert left an activity row').toBeGreaterThan(0);
+    expect(JSON.stringify(activity)).not.toContain(STORED);
+    expect(JSON.stringify(activity)).not.toContain('payload_json');
+    // Control: the request row itself keeps it.
+    expect(String((await requestRow(first.requestId)).payload_json)).toContain(STORED);
+  });
+
+  it('⭐ a copy written before, still at rest, reaches the approver on no read face', async () => {
+    // A copy in the shape written before the writer omitted the snapshot.
+    const [row] = rowsOf(await ql.find('sys_activity', {
+      where: { object_name: REQUEST, record_id: second.requestId }, context: SYS.context,
+    }));
+    expect(row, 'the second request left an activity row').toBeTruthy();
+    const pair = JSON.parse(String(row.metadata));
+    pair.new = { ...(pair.new ?? {}), payload_json: JSON.stringify({ name: 'sunday shift', [MASKED]: STORED }) };
+    await ql.update('sys_activity', { id: row.id, metadata: JSON.stringify(pair) }, { context: { isSystem: true, preserveAudit: true } });
+    expect(JSON.stringify(rowsOf(await ql.find('sys_activity', { where: { id: row.id }, context: SYS.context })))).toContain(STORED);
+
+    const rest = async (method: string, path: string, body?: unknown) => {
+      const res = await stack.apiAs(approver, method, path, body);
+      return { status: res.status, text: await res.text() };
+    };
+    // The list face: the row is served, the snapshot is not.
+    const listed = await rest('GET', '/data/sys_activity');
+    expect(listed.status, listed.text).toBe(200);
+    expect(listed.text).toContain(second.requestId);
+    expect(listed.text).not.toContain(STORED);
+
+    const pinned = { object_name: REQUEST };
+    const faces: Array<[string, Record<string, unknown>]> = [
+      ['grouped', { where: pinned, groupBy: ['metadata'], aggregations: [{ function: 'count', alias: 'n' }] }],
+      ['contains, a right guess', { where: { $and: [pinned, { metadata: { $contains: STORED } }] } }],
+      ['contains, a wrong guess', { where: { $and: [pinned, { metadata: { $contains: 'SYNTH0000MISS' } }] } }],
+      ['count', { where: { $and: [pinned, { metadata: { $contains: STORED } }] }, aggregations: [{ function: 'count', alias: 'n' }] }],
+      ['sorted', { where: pinned, orderBy: [{ field: 'metadata', order: 'asc' }] }],
+      ['no parent named', { where: { metadata: { $contains: STORED } } }],
+    ];
+    for (const [face, query] of faces) {
+      const answer = await rest('POST', '/data/sys_activity/query', query);
+      expect(answer.status, `${face}: ${answer.text}`).toBe(403);
+      expect(answer.text, face).not.toContain(STORED);
+    }
   });
 
   it('⭐ the object is listed and described for the approver; no write tool opens it, and sys_approval_action stays refused', async () => {

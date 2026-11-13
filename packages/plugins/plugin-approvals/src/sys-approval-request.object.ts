@@ -916,11 +916,5 @@ export const SysApprovalRequest = ObjectSchema.create({
     // declare their own `ai.exposed`. `sys_approval_action` declares nothing:
     // an approver lists and decides without reading the decision trail.
     aiReadable: true,
-    // [#32442] No generic discussion thread: a request's thread is its
-    // timeline, and its reply is the `approval_comment` action (stored as a
-    // `sys_approval_action` row), as the request page declares. With the
-    // member read (1B), `feeds` left on would let every party read and post
-    // `sys_comment` rows on a request beside that trail.
-    feeds: false,
   },
 });

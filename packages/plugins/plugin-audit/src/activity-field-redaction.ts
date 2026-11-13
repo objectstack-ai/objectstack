@@ -187,6 +187,7 @@ import {
  * public names are unchanged.
  */
 export { resolveServedFields } from './served-fields.js';
+import { omitSideCopyFromCopy, sideCopyColumnsOf } from './side-copy-columns.js';
 
 const ACTIVITY_OBJECT = 'sys_activity';
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -514,28 +515,8 @@ export async function computeWithheldUpdateFilter(
   return branches.length === 1 ? branches[0] : { $or: branches };
 }
 
-/**
- * [#32442] Parent columns an activity row never serves in `metadata.old` /
- * `metadata.new`, by parent object: each holds another record's field values,
- * served on its own row through its owner's door. The value stays at rest.
- */
-export const ACTIVITY_SIDE_COPY_COLUMNS: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  sys_approval_request: Object.freeze(['payload_json']),
-});
-
-/** Drop the side-copy columns of `object` from one snapshot; whether any went. */
-function dropSideCopies(object: string, snapshot: Record<string, unknown>): boolean {
-  const columns = ACTIVITY_SIDE_COPY_COLUMNS[object];
-  if (!columns) return false;
-  let dropped = false;
-  for (const column of columns) {
-    if (column in snapshot) {
-      delete snapshot[column];
-      dropped = true;
-    }
-  }
-  return dropped;
-}
+/** [#32442] The listed columns (`side-copy-columns.ts`), re-exported for the activity pins. */
+export { SIDE_COPY_COLUMNS as ACTIVITY_SIDE_COPY_COLUMNS } from './side-copy-columns.js';
 
 /**
  * Redact the value-bearing columns of the activity rows one read is about to
@@ -574,14 +555,14 @@ export async function redactActivityRows(
       continue;
     }
     // [#32442] Ahead of the served-fields answer, for every reader.
-    if (ACTIVITY_SIDE_COPY_COLUMNS[object] && 'metadata' in row) {
+    if (sideCopyColumnsOf(object).length > 0 && 'metadata' in row) {
       // Stored as a JSON string; an already-parsed object is narrowed in place.
       const inPlace = isRecord(row.metadata);
       const copied = inPlace ? (row.metadata as Record<string, unknown>) : parseMetadata(row.metadata);
       let dropped = false;
       for (const side of ['old', 'new'] as const) {
         const snapshot = copied?.[side];
-        if (isRecord(snapshot) && dropSideCopies(object, snapshot)) dropped = true;
+        if (isRecord(snapshot) && omitSideCopyFromCopy(object, snapshot)) dropped = true;
       }
       if (dropped && !inPlace) row.metadata = JSON.stringify(copied);
     }

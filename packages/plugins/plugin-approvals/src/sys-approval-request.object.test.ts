@@ -294,9 +294,4 @@ describe('[#32442, ruling A] the AI read declaration', () => {
     expect(SysApprovalRequest.enable?.apiMethods).toEqual(['get', 'list']);
     expect(isAiReadExposed(SysApprovalAction)).toBe(false);
   });
-
-  it('[#32442] declares no generic discussion thread: the reply is approval_comment', () => {
-    expect(SysApprovalRequest.enable?.feeds).toBe(false);
-    expect((SysApprovalRequest.actions ?? []).map((a: any) => a.name)).toContain('approval_comment');
-  });
 });

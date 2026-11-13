@@ -22,6 +22,7 @@ import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields } from 
 import { maskMailLogBodyCopy } from './mail-log-body-mask.js';
 // The key-material columns no copy of a row carries (`key-material-copy.ts`).
 import { keyMaterialColumnsOf, omitKeyMaterialFromCopy } from './key-material-copy.js';
+import { omitSideCopyFromCopy } from './side-copy-columns.js';
 // [#7230] ADR-0079's record display-name contract, imported rather than
 // re-derived. `resolveDisplayField` IS the definition of "which field is this
 // object's human title" (`nameField` → deprecated `displayNameField` alias →
@@ -1934,6 +1935,10 @@ export function installAuditWriters(
     // copy records which row changed and how, never the material. One helper,
     // the one the at-rest rewrite of older copies applies.
     omitKeyMaterialFromCopy(objectName, out);
+    // [#32442] A column holding another record's field values
+    // (`side-copy-columns.ts`) is OMITTED on every side, by the list the
+    // at-rest rewrite of older copies applies.
+    omitSideCopyFromCopy(objectName, out);
     // [#21120] A stored metadata BODY (`sys_metadata` / `sys_metadata_history`)
     // is not a top-level secret field, so the mask above never touches it. The
     // audit copy is a credential read exit exactly like `/meta`, so the body is

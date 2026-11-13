@@ -109,6 +109,7 @@
  * read gate and the redaction.
  */
 
+import { SIDE_COPY_OBJECTS, sideCopyColumnsOf } from './side-copy-columns.js';
 import { FieldReferenceSchema } from '@objectstack/spec/data';
 import { ACTIVITY_STAMPED_COLUMNS } from './activity-changed-fields.js';
 import { resolveServedFields, type FieldRedactionLogger, type FieldVisibilitySource } from './served-fields.js';
@@ -155,6 +156,39 @@ export const AUDIT_LOG_QUERY_GUARD: ParentFieldQueryGuard = Object.freeze({
   columns: Object.freeze(['old_value', 'new_value']),
   remedy: remedy('A ledger snapshot column'),
 });
+
+/**
+ * [#32442] Per guarded object: the columns that hold a COPY of a parent row,
+ * the place a listed side-copy column (`side-copy-columns.ts`) sits in a row
+ * written before the writer omitted it.
+ */
+export const SIDE_COPY_CARRIER_COLUMNS: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
+  ['sys_activity', Object.freeze(['metadata'])],
+  ['sys_audit_log', Object.freeze(['old_value', 'new_value'])],
+]);
+
+/**
+ * [#32442] The carrier columns `named` holds when the query can reach a
+ * parent `side-copy-columns.ts` lists — the ONE parent it pins, or every
+ * parent when it pins none — or `null` when it names none or reaches none.
+ * Refused for every non-system reader, whatever their served fields, until
+ * the at-rest rewrite has removed the column from every copy.
+ */
+export function namedSideCopyCarriers(
+  guarded: string,
+  parent: string | null,
+  named: NamedValueBearingColumns,
+): NamedValueBearingColumns | null {
+  const carriers = SIDE_COPY_CARRIER_COLUMNS.get(guarded) ?? [];
+  if (carriers.length === 0) return null;
+  const reaches = parent === null ? SIDE_COPY_OBJECTS.length > 0 : sideCopyColumnsOf(parent).length > 0;
+  if (!reaches) return null;
+  const carried = {
+    aggregate: named.aggregate.filter((c) => carriers.includes(c)),
+    predicate: named.predicate.filter((c) => carriers.includes(c)),
+  };
+  return carried.aggregate.length > 0 || carried.predicate.length > 0 ? carried : null;
+}
 
 /** The value-bearing columns a query names, by the role it names them in. */
 export interface NamedValueBearingColumns {
@@ -386,6 +420,8 @@ function installParentFieldQueryGuard(
       const security = getSecurity();
       if (!security) return next();
       const parent = pinnedParentObject(ctx.ast.where, guard.object);
+      const carried = namedSideCopyCarriers(guard.object, parent, named);
+      if (carried) throw parentFieldQueryRefusal(guard, ctx.operation, carried);
       let refuse = true;
       try {
         if (parent !== null) {

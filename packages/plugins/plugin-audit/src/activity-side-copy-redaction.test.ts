@@ -20,7 +20,7 @@ const allServed = (fields: string[]) => ({
 
 describe('[#32442] activity rows do not serve the listed parent columns', () => {
   it('names exactly the request snapshot column', () => {
-    expect(ACTIVITY_SIDE_COPY_COLUMNS).toEqual({ sys_approval_request: ['payload_json'] });
+    expect([...ACTIVITY_SIDE_COPY_COLUMNS.entries()]).toEqual([['sys_approval_request', ['payload_json']]]);
   });
 
   it('drops payload_json from both sides for a reader served every request field, keeping the rest', async () => {
@@ -46,6 +46,12 @@ describe('[#32442] activity rows do not serve the listed parent columns', () => 
 
   it('leaves a same-named column on another object to the parent\'s served fields', async () => {
     const r = row('crm_note', JSON.stringify({ old: null, new: { payload_json: 'kept' } }));
+    await redactActivityRows([r], allServed(['payload_json']), reader);
+    expect(JSON.parse(r.metadata as string).new).toEqual({ payload_json: 'kept' });
+  });
+
+  it('reads an object_name that is an inherited property name as unlisted, without throwing', async () => {
+    const r = row('constructor', JSON.stringify({ old: null, new: { payload_json: 'kept' } }));
     await redactActivityRows([r], allServed(['payload_json']), reader);
     expect(JSON.parse(r.metadata as string).new).toEqual({ payload_json: 'kept' });
   });
