@@ -509,8 +509,10 @@ const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | '
   // Match `ctx.api.object(...)` directly OR a local alias like
   // `const api = ctx.api;` then `api.object(...)`. We accept any
   // identifier (or chain) ending in `.object(...)` followed by a known
-  // read/write method — over-inclusive but safe (false-positive caps
-  // get rejected at the runtime by the sandbox if not actually granted).
+  // read/write method — over-inclusive, and for these tokens harmless: an
+  // over-inferred grant is one the body never exercises, and the sandbox
+  // checks a grant only at a call. One token is the exception, see the door
+  // patterns at the end of this list.
   { rx: /\.object\s*\([^)]+\)\s*\.\s*(?:find|findOne|count|aggregate|get|list)\b/, cap: 'api.read' },
   { rx: /\.object\s*\([^)]+\)\s*\.\s*(?:insert|update|upsert|delete|patch|remove|create)\b/, cap: 'api.write' },
   { rx: /ctx\.crypto\.randomUUID\b/, cap: 'crypto.uuid' },
@@ -536,6 +538,17 @@ const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | '
   // grants a token the body may not use, which the sandbox simply never checks.
   { rx: /\.\s*title\s*\(\s*[^)\s]/, cap: 'api.read' },
   // The two platform doors: a call to the door is what its token grants.
+  //
+  // ⛔ An over-inferred `email.send` is NOT harmless on a hook. A hook body may
+  // not be granted it (ruling 6843314411 on #32004: a message cannot be taken
+  // back if the write that runs the hook rolls back), and the hook's parse
+  // refuses a body that carries it, so the build fails on a handler whose
+  // source merely spells `ctx.email.send` without calling it: a string, or a
+  // branch that never runs (a comment does not count; the lowered source
+  // carries none). That failure is the rule working: the remedy is
+  // to take the spelling out of the hook handler, and mail on a record change
+  // goes through an action, a job or a flow. An action or a job body is
+  // granted the token as before.
   { rx: /ctx\.email\.send\b/, cap: 'email.send' },
   { rx: /ctx\.activity\.append\b/, cap: 'activity.append' },
 ];

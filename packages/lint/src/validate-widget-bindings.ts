@@ -23,6 +23,7 @@ import {
   unprovisionedAnchorFix,
   unprovisionedAnchorVerdict,
 } from './system-fields.js';
+import type { UserTextParams } from './finding-user-text.js';
 
 /**
  * Build-time dashboard widget binding diagnostics (issues #1719, #1721).
@@ -506,6 +507,12 @@ export interface WidgetBindingFinding {
   message: string;
   /** How to fix (or deliberately suppress) it. */
   hint: string;
+  /**
+   * The names this finding's user-facing sentence interpolates, set by the
+   * advisory push sites whose rule has a sentence in
+   * `validate-widget-bindings.user-text.ts` (`AuthoringFinding.userTextParams`).
+   */
+  userTextParams?: UserTextParams;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -1222,6 +1229,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           push({
             severity: 'warning',
             rule: WIDGET_LEGACY_ANALYTICS_SHAPE,
+            userTextParams: { dashboard: dashName, widget: widgetId, keys: legacyUsed.join(', ') },
             message:
               `sets legacy analytics key${plural ? 's' : ''} ${keyList} that the ADR-0021 ` +
               `single-form cutover removed — the dashboard renderer ignores ${plural ? 'them' : 'it'}.`,
@@ -1445,6 +1453,9 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             push({
               severity: 'warning',
               rule: DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+              userTextParams: {
+                dashboard: dashName, widget: widgetId, filter: def.name, field: leafField, object: leafObject,
+              },
               message: `${provenance}${unprovisionedAnchorVerdict(leafObject, leafField)}, so the widget renders empty`,
               // [#22161] The shared one-line anchor fix; how to vouch for or
               // opt out of the anchor, the widget's `filterBindings` opt-out
@@ -1624,6 +1635,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           push({
             severity: 'warning',
             rule: CHART_FIELD_UNKNOWN,
+            userTextParams: { dashboard: dashName, widget: widgetId, dataset: dsName, field: xAxis.field, axis: 'x' },
             message:
               `chartConfig.xAxis.field "${xAxis.field}" is not a dimension of dataset "${dsName}" ` +
               `and is ignored anyway: the x-axis stays bound to this widget's first dimension (${list(dims)})`,
@@ -1662,6 +1674,9 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           push({
             severity: 'warning',
             rule: CHART_FIELD_UNKNOWN,
+            userTextParams: {
+              dashboard: dashName, widget: widgetId, dataset: dsName, field, axis: kind === 'series' ? 'series' : 'y',
+            },
             message: `${nameClause}, ${consequence}`,
             hint: `Delete the key: \`${key}\` is refused on a dataset-bound widget${instead}`,
           });
@@ -1726,6 +1741,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           push({
             severity: 'warning',
             rule: CHART_MEASURES_MISSING,
+            userTextParams: { dashboard: dashName, widget: widgetId, dataset: dsName },
             message:
               `'${w.type}' widget selects no measures (\`values\` is empty), so the renderer ` +
               `shows the "Pick measures (values) for this dataset widget." placeholder and no chart is drawn at all`,
@@ -1747,6 +1763,10 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           push({
             severity: 'warning',
             rule: WIDGET_MEASURES_MISSING,
+            userTextParams: {
+              dashboard: dashName, widget: widgetId, dataset: dsName,
+              shows: METRIC_WIDGET_TYPES.has(w.type as string) ? 'number' : 'table',
+            },
             message:
               `'${w.type}' widget selects no measures (\`values\` is empty), so the renderer ` +
               `shows the "Pick measures (values) for this dataset widget." placeholder and ${drawn}`,
@@ -1762,6 +1782,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           push({
             severity: 'warning',
             rule: CHART_DIMENSIONS_MISSING,
+            userTextParams: { dashboard: dashName, widget: widgetId, dataset: dsName },
             message:
               `'${w.type}' widget selects no dimensions, so the renderer draws a single KPI ` +
               `number instead of a '${w.type}' chart`,
@@ -1793,6 +1814,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       push({
         severity: 'warning',
         rule: TABLE_COUNT_ONLY,
+        userTextParams: { dashboard: dashName, widget: widgetId, dataset: dsName },
         message:
           `a '${w.type}' widget bound to dataset "${dsName}" selects only count ` +
           `measure(s) (${values.join(', ')}) and no dimensions, so it renders a ` +

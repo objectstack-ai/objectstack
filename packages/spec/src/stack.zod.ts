@@ -2541,6 +2541,12 @@ export interface DefineStackOptions {
  * Rules:
  * - When `manifest.namespace` is set, every `object.name` MUST start with
  *   `${namespace}_` (single underscore). Returns one error per offender.
+ * - What is judged against which namespace is what the load path registers
+ *   under each package ({@link namespacePrefixErrors}): a stack without
+ *   `packages[]` is its one package, so every top-level object is judged
+ *   against `manifest.namespace`; a stack with `packages[]` (ADR-0130 D4) is
+ *   judged per body, each body's objects against that body's own namespace,
+ *   and its top level by the residual rule.
  * - Names starting with `sys_` are platform-reserved and always allowed.
  * - Names containing `__` (legacy FQN double-underscore form) are flagged
  *   so authors migrate to the canonical single-prefix form.
@@ -2556,16 +2562,7 @@ export interface DefineStackOptions {
  * prefixed references will surface there once the objects are correct.
  */
 function validateNamespacePrefix(config: ObjectStackDefinition): string[] {
-  const errors: string[] = [];
-  const ns = config.manifest?.namespace;
-  if (ns && config.objects) {
-    // Single source of the per-object prefix rule — shared verbatim with the
-    // runtime publish enforcement in MetadataManager.publishPackage.
-    for (const obj of config.objects) {
-      const err = validateObjectNamespacePrefix(obj.name, ns);
-      if (err) errors.push(err);
-    }
-  }
+  const errors = namespacePrefixErrors(config as unknown as Record<string, unknown>);
 
   // [ADR-0150 D6, child K] …and a namespace never equals an object name, in
   // either direction, and no object is short-named `custom` (`NS_custom`, the
@@ -2596,6 +2593,66 @@ function validateNamespacePrefix(config: ObjectStackDefinition): string[] {
   }
   hold(config.manifest as Record<string, unknown> | undefined, config.objects);
   for (const clash of findNamespaceObjectNameClashes({ namespaces, objects })) errors.push(clash.message);
+  return errors;
+}
+
+/**
+ * The namespace-prefix rule ({@link validateObjectNamespacePrefix}, the single
+ * source shared verbatim with the runtime publish enforcement in
+ * `MetadataManager.publishPackage`) applied to each object under the namespace
+ * of the package the load path registers it under:
+ *
+ * - **A stack with no `packages[]`** is its one package, so every top-level
+ *   object is judged against `manifest.namespace`, and the finding is the
+ *   rule's own sentence.
+ * - **A stack with `packages[]`** (ADR-0130 D4) registers each body under its
+ *   own id, so each body's objects are judged against that body's own
+ *   `namespace`. A top-level object that no body declares is the stack's
+ *   residual, registered under `manifest.id` by the boot's residual rule
+ *   (`unclaimedTopLevel`, `@objectstack/metadata`, mirrored by
+ *   {@link isResidualTopLevelItem}), and is judged against
+ *   `manifest.namespace`. A top-level object a body declares is a copy of that
+ *   body's object (an additive artifact's merged collections, as
+ *   `resolveArtifactCollections` gives them) and is judged with that body
+ *   only, so a suite whose packages declare different namespaces is not
+ *   judged against one of them.
+ *
+ * A package with no `namespace` is a legacy package: its objects are not
+ * judged, the rule's own skip.
+ */
+function namespacePrefixErrors(config: Record<string, unknown>): string[] {
+  const manifest = isRecord(config.manifest) ? config.manifest : undefined;
+  const namespaceOf = (body: Record<string, unknown> | undefined): string | undefined =>
+    typeof body?.namespace === 'string' ? body.namespace : undefined;
+  const judge = (
+    objects: unknown,
+    namespace: string | undefined,
+    where: (i: number) => string,
+    judged?: (item: unknown) => boolean,
+  ): string[] => {
+    if (!namespace || !Array.isArray(objects)) return [];
+    return objects.flatMap((obj: unknown, i: number) => {
+      if (judged && !judged(obj)) return [];
+      const name = isRecord(obj) && typeof obj.name === 'string' ? obj.name : undefined;
+      const err = validateObjectNamespacePrefix(name, namespace);
+      return err ? [`${where(i)}${err}`] : [];
+    });
+  };
+  if (!Array.isArray(config.packages)) return judge(config.objects, namespaceOf(manifest), () => '');
+  const bodies: Record<string, unknown>[] = [];
+  const errors: string[] = [];
+  config.packages.forEach((entry: unknown, j: number) => {
+    const body = isRecord(entry) && isRecord(entry.manifest) ? entry.manifest : undefined;
+    if (body === undefined) return;
+    bodies.push(body);
+    errors.push(...judge(body.objects, namespaceOf(body),
+      (i) => `Package '${singleAppPackageLabel(body)}' (packages[${j}].manifest.objects[${i}]): `));
+  });
+  const isResidual = isResidualTopLevelItem(bodies);
+  errors.push(...judge(config.objects, namespaceOf(manifest),
+    (i) => `Top-level objects[${i}], which no package body declares, is registered under package ` +
+      `'${singleAppPackageLabel(manifest)}': `,
+    (obj) => isResidual('objects', obj)));
   return errors;
 }
 

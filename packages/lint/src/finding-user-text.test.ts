@@ -17,6 +17,7 @@ import {
   mergeUserTextCatalogs,
   renderUserText,
   userTextLocaleOf,
+  type UserTextCatalog,
   type UserTextEntry,
 } from './finding-user-text.js';
 import { SECURITY_POSTURE_USER_TEXT } from './validate-security-posture.user-text.js';
@@ -32,6 +33,40 @@ import {
   type SecurityFinding,
 } from './validate-security-posture.js';
 import { runRuntimeAuthoringRules } from './runtime-gate.js';
+import {
+  APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER,
+  APPROVAL_APPROVER_TYPE_DEPRECATED,
+  APPROVAL_APPROVER_TYPE_UNKNOWN,
+  APPROVAL_APPROVER_TYPE_UNSUPPORTED,
+  APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
+  APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
+  APPROVAL_EXPRESSION_INVALID,
+  APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
+  validateApprovalApprovers,
+} from './validate-approval-approvers.js';
+import { APPROVAL_APPROVERS_USER_TEXT } from './validate-approval-approvers.user-text.js';
+import {
+  FLOW_DRAFT_STATUS_AMBIGUOUS,
+  FLOW_INPUT_OBJECT_LESS,
+  FLOW_INPUT_RECORD_READ_AS_LIST,
+  FLOW_INPUT_UNKNOWN_OBJECT,
+  FLOW_TRIGGER_UNKNOWN_OBJECT,
+  validateFlowTriggerReadiness,
+} from './validate-flow-trigger-readiness.js';
+import { FLOW_TRIGGER_READINESS_USER_TEXT } from './validate-flow-trigger-readiness.user-text.js';
+import {
+  FLOW_TEMPLATE_FIELD_UNPROVISIONED,
+  FLOW_TEMPLATE_LOOKUP_TRAVERSAL,
+  FLOW_TEMPLATE_UNKNOWN_FIELD,
+  validateFlowTemplatePaths,
+} from './validate-flow-template-paths.js';
+import { FLOW_TEMPLATE_PATHS_USER_TEXT } from './validate-flow-template-paths.user-text.js';
+import { FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR, validateFlowNodeWrites } from './validate-flow-node-writes.js';
+import { FLOW_NODE_WRITES_USER_TEXT } from './validate-flow-node-writes.user-text.js';
+import { FLOW_UPDATE_READONLY_WHEN_FIELD, validateReadonlyFlowWrites } from './validate-readonly-flow-writes.js';
+import { READONLY_FLOW_WRITES_USER_TEXT } from './validate-readonly-flow-writes.user-text.js';
+import { FLOW_CREDENTIAL_LITERAL, lintFlowCredentialLiterals } from './lint-flow-credential-literals.js';
+import { FLOW_CREDENTIAL_LITERALS_USER_TEXT } from './lint-flow-credential-literals.user-text.js';
 
 describe('finding user text · the locale ladder (request locale, then workspace default, then en)', () => {
   /** A synthetic entry with two sentences: English and Simplified Chinese. */
@@ -418,5 +453,560 @@ describe('security-posture user text · from the runtime gate to the wire field'
     expect(issue.rule).toBe('security-private-no-readscope');
     expect(issue.userMessage).toContain('权限集“finance_user”');
     expect(issue.message).toBe(advisory!.message);
+  });
+});
+
+// ── The automation writes: approval, flow trigger and flow node advisories ──
+//
+// Six rule files' catalogs, pinned the way the security-posture catalog is
+// above: exact coverage, every push site rendered from the rule's REAL
+// findings in every platform locale, and each finding's flow written through
+// the runtime gate so the advisory the save door returns carries its params.
+// The ids pinned are the ones that reach the save door; the other advisory ids
+// of the automation family's write-body rules are judged on no runtime write.
+
+/** A finding as every rule here returns it. */
+type AutomationFinding = { rule: string; severity: string; userTextParams?: Readonly<Record<string, string>> };
+
+/** One advisory push site: a stack whose rule run draws exactly one finding of `rule`, with these params. */
+interface AdvisoryCase {
+  label: string;
+  rule: string;
+  stack: Record<string, unknown>;
+  params: Record<string, string>;
+}
+
+/** Params that pick a sentence's arm rather than name something the sentence must show. */
+const ARM_PARAMS: ReadonlySet<string> = new Set(['slate', 'locked', 'trigger', 'root', 'position']);
+
+const shownNamesOf = (params: Record<string, string>): string[] =>
+  Object.entries(params)
+    .filter(([key, value]) => !ARM_PARAMS.has(key) && value !== '')
+    .map(([, value]) => value);
+
+/** The catalog holds exactly `ids`, each in exactly the platform locales, and is the one the door renders from. */
+function pinCatalog(name: string, catalog: UserTextCatalog, ids: readonly string[]): void {
+  describe(`${name} user text · the catalog`, () => {
+    it('holds a sentence for exactly the rule\'s door-reaching advisory ids, in every platform locale and no other', () => {
+      expect(Object.keys(catalog).sort()).toEqual([...ids].sort());
+      for (const [rule, entry] of Object.entries(catalog)) {
+        expect(Object.keys(entry).sort(), rule).toEqual([...PLATFORM_LOCALE_TAGS].sort());
+      }
+    });
+
+    it('is merged into the one finding catalog the door renders from', () => {
+      for (const rule of ids) expect(FINDING_USER_TEXT_CATALOG[rule], rule).toBe(catalog[rule]);
+    });
+  });
+}
+
+/**
+ * Every case renders in every platform locale from the rule's real finding,
+ * and its flow, written through the runtime gate, returns that advisory with
+ * the same params and a `userMessage` the wire schema accepts.
+ */
+function pinCases(
+  name: string,
+  run: (stack: Record<string, unknown>) => readonly AutomationFinding[],
+  cases: readonly AdvisoryCase[],
+): void {
+  const findingOf = (c: AdvisoryCase): AutomationFinding => {
+    const found = run(c.stack).filter((f) => f.rule === c.rule);
+    expect(found, `${c.label}: exactly one ${c.rule} finding`).toHaveLength(1);
+    return found[0]!;
+  };
+
+  describe(`${name} user text · rendered from the rule's real findings`, () => {
+    it.each(cases.map((c) => [c.label, c] as const))('%s: carries its params and renders in every platform locale', (_label, c) => {
+      const finding = findingOf(c);
+      expect(finding.severity).not.toBe('error');
+      expect(finding.userTextParams).toEqual(c.params);
+
+      const english = findingUserMessage(finding, ['en'])!;
+      for (const tag of PLATFORM_LOCALE_TAGS) {
+        const text = findingUserMessage(finding, [tag]);
+        expect(text, `${c.rule} · ${tag}`).toBeTruthy();
+        expect(text, `${c.rule} · ${tag}`).not.toMatch(/undefined|\$\{/);
+        for (const shown of shownNamesOf(c.params)) expect(text, `${c.rule} · ${tag} names ${shown}`).toContain(shown);
+        // A real translation, not the English floor standing in for it.
+        if (tag !== 'en') expect(text, `${c.rule} · ${tag}`).not.toBe(english);
+      }
+    });
+
+    it('renders each rule\'s arms apart in every platform locale', () => {
+      const byRule = new Map<string, AdvisoryCase[]>();
+      for (const c of cases) byRule.set(c.rule, [...(byRule.get(c.rule) ?? []), c]);
+      for (const [rule, armCases] of byRule) {
+        if (armCases.length < 2) continue;
+        for (const tag of PLATFORM_LOCALE_TAGS) {
+          const texts = armCases.map((c) => findingUserMessage(findingOf(c), [tag])!);
+          expect(new Set(texts).size, `${rule} · ${tag}`).toBe(armCases.length);
+        }
+      }
+    });
+  });
+
+  describe(`${name} user text · from the runtime gate to the wire field`, () => {
+    it.each(cases.map((c) => [c.label, c] as const))('%s: the flow write returns the advisory with its params', (_label, c) => {
+      const flows = c.stack.flows as unknown[];
+      expect(flows, c.label).toHaveLength(1);
+      const result = runRuntimeAuthoringRules({
+        type: 'flow',
+        item: flows[0],
+        context: { objects: (c.stack.objects as unknown[] | undefined) ?? [] },
+      });
+      const advisory = result.advisories.find((f) => f.rule === c.rule);
+      expect(advisory, `${c.label}: the gate returns the ${c.rule} advisory`).toBeDefined();
+      expect(advisory!.userTextParams).toEqual(c.params);
+
+      // The element the save door's `advisories[]` carries, with the sentence
+      // the door renders for a zh-CN request beside the unchanged rule id.
+      const userMessage = findingUserMessage(advisory!, ['zh-CN', 'en']);
+      const issue = RuntimeAuthoringIssueSchema.parse({
+        rule: advisory!.rule,
+        path: advisory!.path,
+        where: advisory!.where,
+        message: advisory!.message,
+        hint: advisory!.hint,
+        severity: advisory!.severity,
+        userMessage,
+      });
+      expect(issue.rule).toBe(c.rule);
+      expect(issue.userMessage).toBe(findingUserMessage(advisory!, ['zh-Hans']));
+      expect(issue.message).toBe(advisory!.message);
+    });
+  });
+}
+
+// ── validate-approval-approvers ─────────────────────────────────────────────
+
+/** A one-node approval flow; `config` is merged into the approval node's. */
+const approvalStack = (approvers: unknown[], config: Record<string, unknown> = {}) => ({
+  flows: [{
+    name: 'expense_approval',
+    nodes: [
+      { id: 'start', type: 'start', config: {} },
+      { id: 'manager_review', type: 'approval', config: { approvers, ...config } },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'manager_review' }],
+  }],
+});
+const AT = { flow: 'expense_approval', node: 'manager_review' };
+
+const APPROVAL_CASES: readonly AdvisoryCase[] = [
+  {
+    label: 'an off-spec approver type with a canonical fix',
+    rule: APPROVAL_APPROVER_TYPE_UNKNOWN,
+    stack: approvalStack([{ type: 'business_unit', value: 'sales' }]),
+    params: { ...AT, type: 'business_unit', suggested: 'department' },
+  },
+  {
+    label: 'an off-spec approver type with no fix',
+    rule: APPROVAL_APPROVER_TYPE_UNKNOWN,
+    stack: approvalStack([{ type: 'robot', value: 'r1' }]),
+    params: { ...AT, type: 'robot', suggested: '' },
+  },
+  {
+    label: 'resolveAs on a non-expression approver',
+    rule: APPROVAL_EXPRESSION_INVALID,
+    stack: approvalStack([{ type: 'user', value: 'u_finance_lead', resolveAs: 'users' }]),
+    params: { ...AT, type: 'user' },
+  },
+  {
+    label: 'a position name authored as a membership level',
+    rule: APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER,
+    stack: approvalStack([{ type: 'org_membership_level', value: 'sales_manager' }]),
+    params: { ...AT, value: 'sales_manager' },
+  },
+  {
+    label: 'the deprecated role spelling',
+    rule: APPROVAL_APPROVER_TYPE_DEPRECATED,
+    stack: approvalStack([{ type: 'role', value: 'admin' }]),
+    params: { ...AT, type: 'role', replacement: 'org_membership_level' },
+  },
+  {
+    label: 'an all-position slate on a locking node',
+    rule: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
+    stack: approvalStack([{ type: 'position', value: 'finance_manager' }]),
+    params: { ...AT, slate: 'group', locked: 'yes' },
+  },
+  {
+    label: 'an all-position slate on a node that does not lock',
+    rule: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
+    stack: approvalStack([{ type: 'position', value: 'finance_manager' }], { lockRecord: false }),
+    params: { ...AT, slate: 'group', locked: 'no' },
+  },
+  {
+    label: 'an all-manager slate',
+    rule: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
+    stack: approvalStack([{ type: 'manager' }]),
+    params: { ...AT, slate: 'manager', locked: 'yes' },
+  },
+  {
+    label: 'an expression approver with no empty-slate policy',
+    rule: APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
+    stack: approvalStack([{ type: 'expression', value: 'current.approvers_dynamic' }]),
+    params: { ...AT },
+  },
+  {
+    label: 'a reassign escalation with no target',
+    rule: APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
+    stack: approvalStack([{ type: 'user', value: 'u_finance_lead' }], { escalation: { action: 'reassign' } }),
+    params: { ...AT },
+  },
+];
+
+pinCatalog('approval approvers', APPROVAL_APPROVERS_USER_TEXT, [
+  APPROVAL_APPROVER_TYPE_UNKNOWN,
+  APPROVAL_EXPRESSION_INVALID,
+  APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER,
+  APPROVAL_APPROVER_TYPE_DEPRECATED,
+  APPROVAL_APPROVER_TYPE_UNSUPPORTED,
+  APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
+  APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
+  APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
+]);
+pinCases('approval approvers', validateApprovalApprovers, APPROVAL_CASES);
+
+describe('approval approvers user text · the arms say what the finding found', () => {
+  const en = (label: string) => findingUserMessage(
+    validateApprovalApprovers(APPROVAL_CASES.find((c) => c.label === label)!.stack)
+      .find((f) => f.rule === APPROVAL_CASES.find((c) => c.label === label)!.rule)!,
+    ['en'],
+  )!;
+
+  it('offers the canonical type only where the rule has one', () => {
+    expect(en('an off-spec approver type with a canonical fix')).toContain('Change the type to "department"');
+    expect(en('an off-spec approver type with no fix')).toContain('Choose one of the approver types');
+  });
+
+  it('says the record stays locked only on a locking node, and names the cause of each slate', () => {
+    expect(en('an all-position slate on a locking node')).toContain('the record stays locked');
+    expect(en('an all-position slate on a node that does not lock')).not.toContain('locked');
+    expect(en('an all-manager slate')).toContain('has no manager set');
+  });
+
+  it('an expression-invalid refusal carries no params, so it never renders the advisory\'s sentence', () => {
+    const refusal = validateApprovalApprovers(approvalStack([{ type: 'expression', value: '' }]))
+      .find((f) => f.rule === APPROVAL_EXPRESSION_INVALID)!;
+    expect(refusal.severity).toBe('error');
+    expect(refusal.userTextParams).toBeUndefined();
+    expect(findingUserMessage(refusal, ['zh-CN'])).toBeUndefined();
+  });
+});
+
+// ── validate-flow-trigger-readiness ─────────────────────────────────────────
+
+const CANDIDATE = { name: 'app_candidate', label: 'Candidate', fields: { name: { type: 'text', label: 'Name' } } };
+
+/** A screen flow whose start input `variables` are declared; `nodes` follow its start node. */
+const inputFlowStack = (variables: unknown[], nodes: unknown[] = [], objects: unknown[] = [CANDIDATE]) => ({
+  objects,
+  flows: [{
+    name: 'review_candidates',
+    type: 'screen',
+    variables,
+    nodes: [{ id: 'start', type: 'start', config: {} }, ...nodes],
+    edges: [],
+  }],
+});
+
+const FLOW_TRIGGER_CASES: readonly AdvisoryCase[] = [
+  {
+    label: 'a record trigger on an object the stack does not define',
+    rule: FLOW_TRIGGER_UNKNOWN_OBJECT,
+    stack: {
+      objects: [CANDIDATE],
+      flows: [{
+        name: 'notify_on_hire',
+        type: 'record_change',
+        status: 'active',
+        nodes: [{ id: 'start', type: 'start', config: { triggerType: 'record-after-update', objectName: 'candidate' } }],
+        edges: [],
+      }],
+    },
+    params: { flow: 'notify_on_hire', object: 'candidate', trigger: 'record' },
+  },
+  {
+    label: 'a time-relative sweep of an object the stack does not define',
+    rule: FLOW_TRIGGER_UNKNOWN_OBJECT,
+    stack: {
+      objects: [CANDIDATE],
+      flows: [{
+        name: 'remind_before_interview',
+        type: 'schedule',
+        status: 'active',
+        nodes: [{
+          id: 'start',
+          type: 'start',
+          config: { timeRelative: { object: 'interview', dateField: 'scheduled_at', offset: { value: -1, unit: 'days' } } },
+        }],
+        edges: [],
+      }],
+    },
+    params: { flow: 'remind_before_interview', object: 'interview', trigger: 'schedule' },
+  },
+  {
+    label: 'a start input declared a record of an undefined object',
+    rule: FLOW_INPUT_UNKNOWN_OBJECT,
+    stack: inputFlowStack([{ name: 'candidateId', type: 'text', isInput: true, objectName: 'app_candidat' }]),
+    params: { flow: 'review_candidates', input: 'candidateId', object: 'app_candidat' },
+  },
+  {
+    label: 'a start input declared a record of the object-less placeholder',
+    rule: FLOW_INPUT_OBJECT_LESS,
+    stack: inputFlowStack(
+      [{ name: 'recordId', type: 'text', isInput: true, objectName: 'global' }],
+      [],
+      [CANDIDATE, { name: 'global', label: 'Global', fields: {} }],
+    ),
+    params: { flow: 'review_candidates', input: 'recordId' },
+  },
+  {
+    label: 'one declared record id read as a list',
+    rule: FLOW_INPUT_RECORD_READ_AS_LIST,
+    stack: inputFlowStack(
+      [{ name: 'candidateIds', type: 'text', isInput: true, objectName: 'app_candidate' }],
+      [{
+        id: 'load',
+        type: 'get_record',
+        label: 'Load candidates',
+        config: { objectName: 'app_candidate', filter: { id: { $in: { dialect: 'cel', source: 'candidateIds' } } } },
+      }],
+    ),
+    params: {
+      flow: 'review_candidates', input: 'candidateIds', object: 'app_candidate', node: 'Load candidates',
+      listObject: 'app_candidate',
+    },
+  },
+  {
+    label: 'an auto-triggered flow left in draft',
+    rule: FLOW_DRAFT_STATUS_AMBIGUOUS,
+    stack: {
+      objects: [CANDIDATE],
+      flows: [{
+        name: 'welcome_candidate',
+        type: 'record_change',
+        nodes: [{ id: 'start', type: 'start', config: { triggerType: 'record-after-create', objectName: 'app_candidate' } }],
+        edges: [],
+      }],
+    },
+    params: { flow: 'welcome_candidate' },
+  },
+];
+
+pinCatalog('flow trigger readiness', FLOW_TRIGGER_READINESS_USER_TEXT, [
+  FLOW_TRIGGER_UNKNOWN_OBJECT,
+  FLOW_INPUT_UNKNOWN_OBJECT,
+  FLOW_INPUT_OBJECT_LESS,
+  FLOW_INPUT_RECORD_READ_AS_LIST,
+  FLOW_DRAFT_STATUS_AMBIGUOUS,
+]);
+pinCases('flow trigger readiness', (stack) => validateFlowTriggerReadiness(stack), FLOW_TRIGGER_CASES);
+
+describe('flow trigger readiness user text · a refusal under a package closure renders no advisory sentence', () => {
+  it('the closure\'s unknown-object refusal carries no params', () => {
+    const refusal = validateFlowTriggerReadiness(FLOW_TRIGGER_CASES[0]!.stack, {
+      packageScope: { packageId: 'app_recruiting', dependencies: [] },
+    }).find((f) => f.rule === FLOW_TRIGGER_UNKNOWN_OBJECT)!;
+    expect(refusal.severity).toBe('error');
+    expect(refusal.userTextParams).toBeUndefined();
+    expect(findingUserMessage(refusal, ['zh-CN'])).toBeUndefined();
+  });
+});
+
+// ── validate-flow-template-paths ────────────────────────────────────────────
+
+const LEAD = {
+  name: 'crm_lead',
+  fields: {
+    company: { name: 'company', type: 'text' },
+    crm_account: { name: 'crm_account', type: 'lookup', reference: 'crm_account' },
+  },
+};
+const EXTERNAL_CUSTOMER = {
+  name: 'ext_customer',
+  external: { remoteName: 'customers' },
+  fields: { email: { name: 'email', type: 'text' } },
+};
+/** A record-change flow on `object` with one notify node carrying `title`; `extra` nodes follow it. */
+const templateStack = (object: { name: string }, title: string, extra: unknown[] = []) => ({
+  objects: [object, ...(object === LEAD ? [] : [LEAD])],
+  flows: [{
+    name: 'notify_owner',
+    type: 'record_change',
+    status: 'active',
+    nodes: [
+      { id: 'start', type: 'start', config: { objectName: object.name, triggerType: 'record-after-create' } },
+      ...extra,
+      { id: 'n1', type: 'notify', notify: { title, body: 'x' } },
+    ],
+    edges: [],
+  }],
+});
+
+const FLOW_TEMPLATE_CASES: readonly AdvisoryCase[] = [
+  {
+    label: 'a placeholder naming no field',
+    rule: FLOW_TEMPLATE_UNKNOWN_FIELD,
+    stack: templateStack(LEAD, 'New lead: {{ record.compnay }}'),
+    params: { flow: 'notify_owner', reference: 'record.compnay', field: 'compnay', object: 'crm_lead' },
+  },
+  {
+    label: 'a hop through the trigger record\'s lookup',
+    rule: FLOW_TEMPLATE_LOOKUP_TRAVERSAL,
+    stack: templateStack(LEAD, 'From {{ record.crm_account.name }}'),
+    params: {
+      flow: 'notify_owner', reference: 'record.crm_account.name', field: 'crm_account', object: 'crm_lead',
+      root: 'trigger',
+    },
+  },
+  {
+    label: 'a hop through a bound variable\'s lookup',
+    rule: FLOW_TEMPLATE_LOOKUP_TRAVERSAL,
+    stack: templateStack(LEAD, 'Account {{ lead.crm_account.name }}', [{
+      id: 'get_lead',
+      type: 'get_record',
+      config: { objectName: 'crm_lead', outputVariable: 'lead', filter: { id: { dialect: 'cel', source: 'record.id' } } },
+    }]),
+    params: {
+      flow: 'notify_owner', reference: 'lead.crm_account.name', field: 'crm_account', object: 'crm_lead',
+      root: 'variable',
+    },
+  },
+  {
+    label: 'a placeholder over an external object\'s unprovisioned anchor',
+    rule: FLOW_TEMPLATE_FIELD_UNPROVISIONED,
+    stack: templateStack(EXTERNAL_CUSTOMER, 'Owned by {{ record.owner_id }}'),
+    params: { flow: 'notify_owner', reference: 'record.owner_id', field: 'owner_id', object: 'ext_customer' },
+  },
+];
+
+pinCatalog('flow template paths', FLOW_TEMPLATE_PATHS_USER_TEXT, [
+  FLOW_TEMPLATE_UNKNOWN_FIELD,
+  FLOW_TEMPLATE_LOOKUP_TRAVERSAL,
+  FLOW_TEMPLATE_FIELD_UNPROVISIONED,
+]);
+pinCases('flow template paths', validateFlowTemplatePaths, FLOW_TEMPLATE_CASES);
+
+// ── validate-flow-node-writes · validate-readonly-flow-writes · lint-flow-credential-literals ──
+
+const WH_ORDER = {
+  name: 'wh_order',
+  datasource: 'warehouse',
+  external: { remoteName: 'fact_orders' },
+  fields: { order_id: { type: 'text' }, amount: { type: 'currency' } },
+};
+const DEAL = {
+  name: 'crm_deal',
+  fields: {
+    stage: { type: 'text' },
+    discount: { type: 'percent', readonlyWhen: "record.stage == 'closed_won'" },
+  },
+};
+/** A record-change flow whose second node is `node`. */
+const oneNodeFlowStack = (name: string, objects: unknown[], node: Record<string, unknown>) => ({
+  objects,
+  flows: [{
+    name,
+    type: 'record_change',
+    status: 'active',
+    runAs: 'user',
+    nodes: [{ id: 'start', type: 'start', config: {} }, node],
+    edges: [],
+  }],
+});
+
+const FLOW_NODE_WRITE_CASES: readonly AdvisoryCase[] = [
+  {
+    label: 'an update writing an external object\'s unprovisioned anchor',
+    rule: FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR,
+    stack: oneNodeFlowStack('stamp_owner', [WH_ORDER], {
+      id: 'mark',
+      type: 'update_record',
+      label: 'Stamp',
+      config: { objectName: 'wh_order', filter: { id: { dialect: 'cel', source: 'recordId' } }, fields: { owner_id: '{user.id}' } },
+    }),
+    params: { flow: 'stamp_owner', node: 'Stamp', field: 'owner_id', object: 'wh_order' },
+  },
+];
+
+const READONLY_FLOW_WRITE_CASES: readonly AdvisoryCase[] = [
+  {
+    label: 'an update writing a readonlyWhen field',
+    rule: FLOW_UPDATE_READONLY_WHEN_FIELD,
+    stack: oneNodeFlowStack('apply_discount', [DEAL], {
+      id: 'set_discount',
+      type: 'update_record',
+      label: 'Set discount',
+      config: { objectName: 'crm_deal', filter: { id: { dialect: 'cel', source: 'recordId' } }, fields: { discount: 10 } },
+    }),
+    params: { flow: 'apply_discount', node: 'Set discount', field: 'discount', object: 'crm_deal' },
+  },
+];
+
+/** A flow with one credential-shaped literal at `position`. */
+const credentialStack = (node: Record<string, unknown>) => ({
+  flows: [{
+    name: 'sync_invoices',
+    type: 'autolaunched',
+    status: 'active',
+    nodes: [{ id: 'start', type: 'start', label: 'Start' }, node],
+    edges: [],
+  }],
+});
+
+const FLOW_CREDENTIAL_CASES: readonly AdvisoryCase[] = [
+  {
+    label: 'a credential in an http header',
+    rule: FLOW_CREDENTIAL_LITERAL,
+    stack: credentialStack({
+      id: 'push_invoice', type: 'http',
+      config: { url: 'https://billing.invalid/invoices', method: 'POST', headers: { Authorization: 'Bearer user-text-probe-1' } },
+    }),
+    params: { flow: 'sync_invoices', node: 'push_invoice', name: 'Authorization', position: 'header' },
+  },
+  {
+    label: 'a credential in a url query parameter',
+    rule: FLOW_CREDENTIAL_LITERAL,
+    stack: credentialStack({
+      id: 'push_invoice', type: 'http',
+      config: { url: 'https://billing.invalid/invoices?api_key=user-text-probe-2', method: 'POST' },
+    }),
+    params: { flow: 'sync_invoices', node: 'push_invoice', name: 'api_key', position: 'query' },
+  },
+  {
+    label: 'a credential in a connector input',
+    rule: FLOW_CREDENTIAL_LITERAL,
+    stack: credentialStack({
+      id: 'push_invoice', type: 'connector_action',
+      connectorConfig: { connectorId: 'rest', actionId: 'request', input: { token: 'user-text-probe-3', path: '/p' } },
+    }),
+    params: { flow: 'sync_invoices', node: 'push_invoice', name: 'token', position: 'input' },
+  },
+];
+
+pinCatalog('flow node writes', FLOW_NODE_WRITES_USER_TEXT, [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR]);
+pinCases('flow node writes', validateFlowNodeWrites, FLOW_NODE_WRITE_CASES);
+pinCatalog('readonly flow writes', READONLY_FLOW_WRITES_USER_TEXT, [FLOW_UPDATE_READONLY_WHEN_FIELD]);
+pinCases('readonly flow writes', validateReadonlyFlowWrites, READONLY_FLOW_WRITE_CASES);
+pinCatalog('flow credential literals', FLOW_CREDENTIAL_LITERALS_USER_TEXT, [FLOW_CREDENTIAL_LITERAL]);
+pinCases('flow credential literals', lintFlowCredentialLiterals, FLOW_CREDENTIAL_CASES);
+
+describe('flow credential literals user text · never the value', () => {
+  it('no sentence in any locale carries the credential, the save door\'s copy included', () => {
+    for (const c of FLOW_CREDENTIAL_CASES) {
+      const [finding] = lintFlowCredentialLiterals(c.stack);
+      for (const tag of PLATFORM_LOCALE_TAGS) {
+        expect(findingUserMessage(finding!, [tag]), `${c.label} · ${tag}`).not.toMatch(/user-text-probe/);
+      }
+    }
+  });
+
+  it('the registry entry\'s re-map keeps the params, so the door can render the sentence', () => {
+    const result = runRuntimeAuthoringRules({ type: 'flow', item: (FLOW_CREDENTIAL_CASES[0]!.stack.flows as unknown[])[0] });
+    const advisory = result.advisories.find((f) => f.rule === FLOW_CREDENTIAL_LITERAL)!;
+    expect(result.rulesRun).toContain('lintFlowCredentialLiterals');
+    expect(findingUserMessage(advisory, ['ja-JP'])).toContain('ヘッダー「Authorization」');
   });
 });

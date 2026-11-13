@@ -145,3 +145,31 @@ describe('resolveArtifactCollections — its output handed back to strict define
         expect(() => defineStack(read as never)).not.toThrow();
     });
 });
+
+describe('resolveArtifactCollections — its output handed back to strict defineStack passes the namespace-prefix rule when the packages declare different namespaces (ADR-0028, ADR-0130 D4)', () => {
+    // The reader merges every body's objects onto the top level beside
+    // `packages[]`. Each of those objects is declared by a body, so the load
+    // path registers it under that body's own namespace, and strict
+    // `defineStack` judges it there too, not against the artifact's manifest.
+    const strictPackage = (id: string, type: 'app' | 'module', namespace: string, slug: string) =>
+        defineStack({
+            manifest: { id, name: slug, version: '1.0.0', type, namespace },
+            objects: [{ name: `${namespace}_${slug}`, label: slug, fields: { title: { type: 'text', label: 'Title' } } }],
+        } as never);
+
+    it('accepts the reader\'s output of a preserve composition of two namespaces', () => {
+        const preserved = composeStacks(
+            [strictPackage('com.example.crm', 'app', 'crm', 'account'), strictPackage('com.example.svc', 'module', 'svc', 'case')],
+            { manifest: 'preserve' },
+        );
+        const read = resolveArtifactCollections(preserved) as Raw & { manifest?: { namespace?: string } };
+
+        // Anti-vacuity: both bodies' objects at the top level, one of them not
+        // prefixed by the manifest's namespace.
+        expect(((read.objects as Array<{ name: string }>) ?? []).map((o) => o.name)).toEqual(['crm_account', 'svc_case']);
+        expect(read.manifest?.namespace).toBe('svc');
+        expect(Array.isArray(read.packages)).toBe(true);
+
+        expect(() => defineStack(read as never)).not.toThrow();
+    });
+});

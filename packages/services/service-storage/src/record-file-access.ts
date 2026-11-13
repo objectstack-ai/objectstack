@@ -41,11 +41,20 @@ import {
 // The upload doors' own storage-key layout, and the download doors' link.
 import { buildKey, mintDownloadUrl } from './storage-routes.js';
 import {
+  UPLOAD_LINK_KIND,
   UPLOAD_LINK_SEGMENT,
   UPLOAD_LINK_UNUSABLE_CODE,
   UPLOAD_LINK_UNUSABLE_MESSAGE,
   UPLOAD_LINK_UNUSABLE_STATUS,
 } from './upload-link-wire.js';
+// [#32686] A file uploaded before its record: the binding the upload writes,
+// and the field's own `accept` / `maxSize`, judged when the bytes arrive.
+import {
+  PRE_RECORD_CLAIM_WINDOW_SECONDS,
+  PRE_RECORD_UPLOAD_KIND,
+  preRecordBindingMetadata,
+} from './pre-record-upload.js';
+import { assertFileConstraints } from './file-reference-lifecycle.js';
 
 /**
  * [#30892] A record's files for a caller the host has already resolved: read
@@ -108,6 +117,37 @@ import {
  * other columns (the record, the field, the organization) rest on `sys_file`
  * edit being an administrative grant.
  *
+ * ## A link that names no record
+ *
+ * [#32686] Ruling A: a link can name an object and a file field and no
+ * record ({@link RecordFileAccess.createUploadLinkForNewRecordAs}), so an
+ * agent can file a record whose file field is required: the user uploads,
+ * then the agent creates the record naming the file id the link answered.
+ *
+ *  - **Minting** asks what the record's creation will need, of the caller:
+ *    the object's CREATE permission (`explain(…, 'create')`, the verdict
+ *    `assertMayAttach` asks of `sys_attachment`), the field's writability as
+ *    the security service answers it, and the field's own `readonly`
+ *    declaration. A conditional lock (`readonlyWhen`) and every other rule
+ *    are judged by the create itself. Only a file field: an attachment needs
+ *    its record.
+ *  - **The file id is the link row's id**, answered at once (`fileIds`), so
+ *    the flow is two calls and one upload. Until the upload, the uploader's
+ *    write naming it is refused as an upload that never completed, and every
+ *    other write, a system one included, as a file it cannot open.
+ *  - **Using it** stores the bytes and turns the link row into the user's
+ *    committed file, which no record holds, carrying the binding a write is
+ *    judged by (`pre-record-upload.ts`): only that user's write, into that
+ *    object and field, within {@link PRE_RECORD_CLAIM_WINDOW_SECONDS} of the
+ *    upload, and into one record. Once a record has let it go, it is that
+ *    record's released file like any other. The field's `accept` / `maxSize` are
+ *    judged when the bytes arrive, so a file the field cannot take is refused
+ *    then, and nothing is stored.
+ *  - **What reclaims it**: a link never used is a `pending` row, reaped by
+ *    the pending-upload retention. A file uploaded and never put in a record
+ *    is a committed file no record holds, as an upload the console's form
+ *    never saved is; `verify-file-references` reports it.
+ *
  * ## What counts the upload
  *
  * The bytes go through the doors' own size verdict (`max_upload_mb`, 413
@@ -121,9 +161,6 @@ export const UPLOAD_LINK_TTL_SECONDS = 10 * 60;
 
 /** The upload link's secret: 32 random bytes (256 bits), base64url in the link. */
 const UPLOAD_LINK_SECRET_BYTES = 32;
-
-/** The marker a link row's `metadata` carries, so no other pending row reads as a link. */
-const UPLOAD_LINK_KIND = 'upload_link';
 
 /**
  * A link row's `name` while the link is open, and once it is used. The state
@@ -144,6 +181,9 @@ export type RecordFileTarget = { field: string; fileId?: string } | { attachment
 
 /** Where an upload link lands: a file field, or the record's attachments list. */
 export type UploadLinkTarget = { field: string } | { attachments: true };
+
+/** [#32686] Where a link that names no record lands: a file field of the record to be created. */
+export type NewRecordUploadLinkTarget = { field: string };
 
 /** One file a record carries, as {@link RecordFileAccess.listRecordFilesAs} lists it. */
 export interface RecordFileEntry {
@@ -190,6 +230,28 @@ export interface UploadLinkGrant {
 export interface UploadLinkView {
   expiresAt: string;
   target: 'field' | 'attachments';
+  /** [#32686] The link names no record: the file waits for the record the agent creates. */
+  newRecord?: true;
+}
+
+/**
+ * [#32686] {@link RecordFileAccess.createUploadLinkForNewRecordAs}'s answer:
+ * the link, and the ids the upload is stored under, to write into the field
+ * when the record is created. One id: a link takes one file. An array so
+ * that a link taking several files answers more entries, not a second key.
+ */
+export interface NewRecordUploadLinkGrant {
+  /** The link's token: the pending row's id and the secret. Shown once, never stored. */
+  token: string;
+  /** The link's path on this server: the storage base path, the segment and the token. */
+  path: string;
+  /** When the link stops working (ISO 8601). */
+  expiresAt: string;
+  object: string;
+  /** The file field the upload is for. */
+  field: string;
+  /** The file id(s) the upload is stored under. */
+  fileIds: string[];
 }
 
 /** One upload arriving through a link. */
@@ -202,7 +264,8 @@ export interface UploadLinkUpload {
 /** Where an upload through a link landed. */
 export interface UploadLinkOutcome {
   object: string;
-  recordId: string;
+  /** The record it landed on; absent for a link that names no record ([#32686]). */
+  recordId?: string;
   fileId: string;
   size: number;
   /** The file field it now fills, for a field link. */
@@ -237,6 +300,15 @@ export interface ICallerRecordFileService {
     target: UploadLinkTarget,
     context: ExecutionContext,
   ): Promise<UploadLinkGrant>;
+  /**
+   * [#32686] A single-use upload link for a file field of a record not yet
+   * created, answering the file id the upload is stored under.
+   */
+  createUploadLinkForNewRecordAs(
+    object: string,
+    target: NewRecordUploadLinkTarget,
+    context: ExecutionContext,
+  ): Promise<NewRecordUploadLinkGrant>;
 }
 
 /**
@@ -296,7 +368,7 @@ export interface RecordFileAccessDeps {
   getBasePath(): string;
   getSharing?(): AttachmentSharingLike | null | undefined;
   getSecurity?():
-    | (AttachmentSecurityLike & Partial<Pick<ISecurityService, 'getWritableFields'>>)
+    | (AttachmentSecurityLike & Partial<Pick<ISecurityService, 'getWritableFields' | 'explain'>>)
     | null
     | undefined;
   /**
@@ -317,7 +389,8 @@ interface UploadLinkState {
   secret_sha256: string;
   expires_at: string;
   object: string;
-  record_id: string;
+  /** The record the upload lands on; absent for a field link that names no record ([#32686]). */
+  record_id?: string;
   target: 'field' | 'attachments';
   field?: string;
   user_id: string;
@@ -404,11 +477,14 @@ function openLinkStateOf(row: FileRecord | null): UploadLinkState | null {
   }
   const s = parsed as Partial<UploadLinkState> | null;
   if (!s || typeof s !== 'object' || s.kind !== UPLOAD_LINK_KIND) return null;
-  for (const key of ['secret_sha256', 'expires_at', 'object', 'record_id', 'user_id'] as const) {
+  for (const key of ['secret_sha256', 'expires_at', 'object', 'user_id'] as const) {
     if (!nonEmptyString(s[key])) return null;
   }
   if (s.target !== 'field' && s.target !== 'attachments') return null;
   if (s.target === 'field' && !nonEmptyString(s.field)) return null;
+  // [#32686] Only a field link may name no record: an attachment needs its record.
+  if (s.target === 'attachments' && !nonEmptyString(s.record_id)) return null;
+  if (s.record_id !== undefined && !nonEmptyString(s.record_id)) return null;
   return s as UploadLinkState;
 }
 
@@ -419,7 +495,7 @@ function linkMetadata(state: UploadLinkState): string {
     secret_sha256: state.secret_sha256,
     expires_at: state.expires_at,
     object: state.object,
-    record_id: state.record_id,
+    ...(state.record_id !== undefined ? { record_id: state.record_id } : {}),
     target: state.target,
     ...(state.field !== undefined ? { field: state.field } : {}),
     user_id: state.user_id,
@@ -714,6 +790,79 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       }
     }
 
+    const link = await this.mintLink(engine, caller, object, recordId, field);
+    return {
+      token: link.token,
+      path: link.path,
+      expiresAt: link.expiresAt,
+      object,
+      recordId,
+      ...(field !== undefined ? { field } : {}),
+    };
+  }
+
+  /**
+   * [#32686] Ruling A: a link for a file field of a record the caller is
+   * about to create. Asks what creating it will need of the caller (see the
+   * module comment), mints the same single-use link, and answers the link
+   * row's id as the file id the upload is stored under.
+   */
+  async createUploadLinkForNewRecordAs(
+    object: string,
+    target: NewRecordUploadLinkTarget,
+    context: ExecutionContext,
+  ): Promise<NewRecordUploadLinkGrant> {
+    const caller = requireUserContext(context);
+    const engine = this.engineOrRefuse();
+    const field = target && typeof target === 'object' ? (target as { field?: unknown }).field : undefined;
+    if (!nonEmptyString(field)) {
+      refuse(
+        'VALIDATION_ERROR',
+        400,
+        'A link for a record not yet created fills a file field: name the field. An attachment needs its record; create the record first.',
+      );
+    }
+    const fieldDef = requireFileField(engine, object, field);
+    // The object's create verdict, as the security service answers it for
+    // the caller with no write. A kernel with no security service enforces
+    // no object permission on the create either, so there is nothing to ask.
+    const security = this.deps.getSecurity?.();
+    if (security && typeof security.explain === 'function') {
+      const decision = await security.explain({ object, operation: 'create' }, caller);
+      if (!decision?.allowed) {
+        refuse('PERMISSION_DENIED', 403, `You cannot upload a file for a new ${object}: you cannot create ${object} records.`);
+      }
+    }
+    const writable = await security?.getWritableFields?.(object, caller);
+    if (Array.isArray(writable) && !writable.includes(field)) {
+      refuse('FIELD_NOT_ACCESSIBLE', 403, `You cannot upload a file for ${object}.${field}: you cannot edit that field.`);
+    }
+    if (fieldDef.readonly === true) {
+      refuse('FIELD_NOT_ACCESSIBLE', 403, `You cannot upload a file for ${object}.${field}: the field is read-only.`);
+    }
+    const link = await this.mintLink(engine, caller, object, undefined, field);
+    return {
+      token: link.token,
+      path: link.path,
+      expiresAt: link.expiresAt,
+      object,
+      field,
+      fileIds: [link.id],
+    };
+  }
+
+  /**
+   * Write the link's `pending` row, owned by the caller, holding the binding
+   * and the SHA-256 of the secret, and answer the token. `recordId` absent:
+   * a field link that names no record ([#32686]).
+   */
+  private async mintLink(
+    engine: RecordFileEngine,
+    caller: ExecutionContext,
+    object: string,
+    recordId: string | undefined,
+    field: string | undefined,
+  ): Promise<{ id: string; token: string; path: string; expiresAt: string }> {
     const organizationId = nonEmptyString(caller.tenantId) ? caller.tenantId : null;
     const id = randomUUID();
     const secret = randomBytes(UPLOAD_LINK_SECRET_BYTES).toString('base64url');
@@ -723,7 +872,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       secret_sha256: sha256Hex(secret),
       expires_at: expiresAt,
       object,
-      record_id: recordId,
+      ...(recordId !== undefined ? { record_id: recordId } : {}),
       target: field === undefined ? 'attachments' : 'field',
       ...(field !== undefined ? { field } : {}),
       user_id: caller.userId as string,
@@ -745,14 +894,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       { organizationId },
     );
     const token = `${id}.${secret}`;
-    return {
-      token,
-      path: `${this.deps.getBasePath()}/${UPLOAD_LINK_SEGMENT}/${token}`,
-      expiresAt,
-      object,
-      recordId,
-      ...(field !== undefined ? { field } : {}),
-    };
+    return { id, token, path: `${this.deps.getBasePath()}/${UPLOAD_LINK_SEGMENT}/${token}`, expiresAt };
   }
 
   /**
@@ -783,7 +925,11 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
 
   async inspectUploadLink(token: string, callerUserId: string): Promise<UploadLinkView> {
     const { state } = await this.openLink(new StorageMetadataStore(this.engineOrRefuse()), token, callerUserId);
-    return { expiresAt: state.expires_at, target: state.target };
+    return {
+      expiresAt: state.expires_at,
+      target: state.target,
+      ...(state.record_id === undefined ? { newRecord: true as const } : {}),
+    };
   }
 
   async consumeUploadLink(token: string, upload: UploadLinkUpload, callerUserId: string): Promise<UploadLinkOutcome> {
@@ -814,6 +960,18 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       );
     }
 
+    const mimeType = nonEmptyString(upload.mimeType) ? upload.mimeType : 'application/octet-stream';
+    // [#32686] A link that names no record writes no record now, so nothing
+    // judges the field's own `accept` / `maxSize` until the create does: they
+    // are judged here, before the link is spent, as the record's write would
+    // judge them, and a file the field cannot take is refused with nothing
+    // stored.
+    const newRecord = state.record_id === undefined;
+    if (newRecord) {
+      const def = requireFileField(engine, state.object, state.field as string);
+      assertFileConstraints(def, state.field as string, { name: upload.filename, mime_type: mimeType, size: upload.data.byteLength });
+    }
+
     // Spend the link: exactly one use turns it from open to used.
     const writeContext: StorageWriteContext = { organizationId };
     const spent = await updateFileIfUnchanged(
@@ -825,12 +983,17 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     );
     if (!spent) refuseUnusableLink();
 
+    // [#32686] The link row becomes the file: its id is the one the link answered.
+    const recordId = state.record_id;
+    if (recordId === undefined) {
+      return await this.fileForNewRecordThroughLink(storage, store, row, state, upload, mimeType, writeContext);
+    }
+
     try {
-      const mimeType = nonEmptyString(upload.mimeType) ? upload.mimeType : 'application/octet-stream';
       const outcome =
         state.target === 'attachments'
-          ? await this.attachThroughLink(state, user, upload, mimeType, organizationId)
-          : await this.fillFieldThroughLink(engine, storage, store, state, user, upload, mimeType, writeContext);
+          ? await this.attachThroughLink(state, recordId, user, upload, mimeType, organizationId)
+          : await this.fillFieldThroughLink(engine, storage, store, state, recordId, user, upload, mimeType, writeContext);
       return outcome;
     } finally {
       // The link row has done its work, used or refused: it holds no bytes,
@@ -847,8 +1010,58 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     }
   }
 
+  /**
+   * [#32686] Store the bytes and turn the link's row into the user's
+   * committed file, which no record holds yet, under the id the link
+   * answered. Its `metadata` becomes the binding a record write is judged by
+   * (`pre-record-upload.ts`); the link's own secret digest goes with the old
+   * metadata. A failed store discards the bytes and the row, so the id is
+   * refused as unknown rather than ever reading as a file.
+   */
+  private async fileForNewRecordThroughLink(
+    storage: IStorageService,
+    store: StorageMetadataStore,
+    row: FileRecord,
+    state: UploadLinkState,
+    upload: UploadLinkUpload,
+    mimeType: string,
+    writeContext: StorageWriteContext,
+  ): Promise<UploadLinkOutcome> {
+    const field = state.field as string;
+    const fileId = row.id;
+    const key = buildKey(FIELD_UPLOAD_SCOPE, fileId, upload.filename);
+    const size = upload.data.byteLength;
+    try {
+      await storage.upload(key, upload.data, { contentType: mimeType });
+      await store.updateFile(
+        fileId,
+        {
+          key,
+          name: upload.filename,
+          mime_type: mimeType,
+          size,
+          status: 'committed',
+          metadata: preRecordBindingMetadata({
+            kind: PRE_RECORD_UPLOAD_KIND,
+            object: state.object,
+            field,
+            user_id: state.user_id,
+            ...(state.organization_id !== undefined ? { organization_id: state.organization_id } : {}),
+            claim_until: new Date(this.now() + PRE_RECORD_CLAIM_WINDOW_SECONDS * 1000).toISOString(),
+          }),
+        },
+        writeContext,
+      );
+    } catch (err) {
+      await this.discard(storage, store, fileId, key, writeContext);
+      throw err;
+    }
+    return { object: state.object, fileId, size, field };
+  }
+
   private async attachThroughLink(
     state: UploadLinkState,
+    recordId: string,
     user: ExecutionContext,
     upload: UploadLinkUpload,
     mimeType: string,
@@ -857,7 +1070,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     const attached = await this.deps.attachments.attachFileAs(
       {
         parentObject: state.object,
-        parentId: state.record_id,
+        parentId: recordId,
         filename: upload.filename,
         mimeType,
         data: upload.data,
@@ -867,7 +1080,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     );
     return {
       object: state.object,
-      recordId: state.record_id,
+      recordId,
       fileId: attached.fileId,
       size: attached.size,
       attachmentId: attached.attachmentId,
@@ -887,6 +1100,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     storage: IStorageService,
     store: StorageMetadataStore,
     state: UploadLinkState,
+    recordId: string,
     user: ExecutionContext,
     upload: UploadLinkUpload,
     mimeType: string,
@@ -917,7 +1131,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       await store.updateFile(fileId, { status: 'committed' }, writeContext);
       let value: string | string[] = fileId;
       if (def.multiple === true) {
-        const current = await this.readRecordAs(engine, state.object, state.record_id, user);
+        const current = await this.readRecordAs(engine, state.object, recordId, user);
         value = [...fileIdsIn(current[field]), fileId];
       }
       // [#32734] Strict: a field the update would strip (`readonly`, or a
@@ -927,19 +1141,19 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       const updated = await engine.update(
         state.object,
         { [field]: value },
-        { where: { id: state.record_id }, context: user, strictReadonlyWrites: true },
+        { where: { id: recordId }, context: user, strictReadonlyWrites: true },
       );
       // A row the user's update no longer reaches (deleted, or out of their
       // scope since the link was minted) is refused, never answered as landed.
       if (updated == null || updated === 0) {
-        refuse('RECORD_NOT_FOUND', 404, `Record "${state.record_id}" not found in "${state.object}"`);
+        refuse('RECORD_NOT_FOUND', 404, `Record "${recordId}" not found in "${state.object}"`);
       }
     } catch (err) {
       await this.discard(storage, store, fileId, key, writeContext);
       readonlyRefusalOf(err, state.object, field);
       throw err;
     }
-    return { object: state.object, recordId: state.record_id, fileId, size, field };
+    return { object: state.object, recordId, fileId, size, field };
   }
 
   /** Undo a refused field upload: the bytes, then the row. Best-effort; the refusal is what is thrown. */
