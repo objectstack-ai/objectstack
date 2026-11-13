@@ -71,6 +71,8 @@ import {
   UPLOAD_LINK_FILE_COUNT_CODE,
   UPLOAD_LINK_FILE_COUNT_STATUS,
   UPLOAD_LINK_FORM_FILE_PREFIX,
+  UPLOAD_LINK_FORM_HEADER,
+  UPLOAD_LINK_FORM_HEADER_VALUE,
   UPLOAD_LINK_SEGMENT,
   UPLOAD_LINK_UNUSABLE_CODE,
   UPLOAD_LINK_UNUSABLE_MESSAGE,
@@ -1887,16 +1889,17 @@ export function registerStorageFamily(
       // The declared length first: this door refuses a body that declares more
       // than it takes before this door reads it. The service judges the bytes
       // read again, before the link is spent, so an oversized upload never uses
-      // it up. [#32747] Which submit a link takes is the link's: only a link
-      // that takes several files reads a form (`multipart/form-data`), which
-      // may declare up to as many files as that link takes, each within the
-      // limit, plus the form's framing. A link that takes one file takes its
-      // body as the file, whatever its content type, under the one-file limit,
-      // exactly as before links took several.
+      // it up. [#32747] A body is the page's several-file form only when it
+      // says so (`multipart/form-data` carrying the form header) AND the link
+      // takes several files; that form may declare up to as many files as the
+      // link takes, each within the limit, plus the form's framing. Any other
+      // body, on any link, is the file itself, whatever its content type,
+      // under the one-file limit, with the checks and order it had before
+      // links took several.
       const token = String(req.params.token ?? '');
       const { maxUploadBytes } = currentLimits();
       const declaredBody = declaredContentLength(req);
-      const linkFiles = isUploadLinkForm(req.headers?.['content-type'])
+      const linkFiles = isUploadLinkForm(req.headers?.['content-type'], req.headers?.[UPLOAD_LINK_FORM_HEADER])
         ? await severalFilesOf(door, token, caller.userId as string)
         : undefined;
       const formLimit =
@@ -2483,10 +2486,20 @@ async function severalFilesOf(
   return files.max > 1 ? files : undefined;
 }
 
-/** [#32747] Is the submit a several-file form (`multipart/form-data`)? */
-function isUploadLinkForm(raw: string | string[] | undefined): boolean {
-  const first = Array.isArray(raw) ? raw[0] : raw;
-  return typeof first === 'string' && first.split(';')[0].trim().toLowerCase() === 'multipart/form-data';
+/**
+ * [#32747] Is the submit the page's several-file form: `multipart/form-data`
+ * carrying {@link UPLOAD_LINK_FORM_HEADER}? A multipart body without it is a
+ * file, as it was before links took several.
+ */
+function isUploadLinkForm(contentType: string | string[] | undefined, marker: string | string[] | undefined): boolean {
+  const type = Array.isArray(contentType) ? contentType[0] : contentType;
+  const mark = Array.isArray(marker) ? marker[0] : marker;
+  return (
+    typeof type === 'string' &&
+    type.split(';')[0].trim().toLowerCase() === 'multipart/form-data' &&
+    typeof mark === 'string' &&
+    mark.trim().toLowerCase() === UPLOAD_LINK_FORM_HEADER_VALUE
+  );
 }
 
 /** [#32747] A form value that is a file: what a form parser hands for a file part. */

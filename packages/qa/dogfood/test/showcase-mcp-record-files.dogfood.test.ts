@@ -619,7 +619,8 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       picks.forEach((pick, i) => {
         form.append(`file${i}`, new Blob([new Uint8Array(pick.bytes)], { type: 'application/pdf' }), encodeURIComponent(pick.name));
       });
-      return stack.raw(path, { method: 'PUT', headers: authOf(token), body: form });
+      // The page's form says it is the form (`x-upload-link-form: several`); any other body is the file.
+      return stack.raw(path, { method: 'PUT', headers: { ...authOf(token), 'x-upload-link-form': 'several' }, body: form });
     };
     const threeInvoices = () => [
       { name: 'hotel-invoice.pdf', bytes: minimalPdf('Hotel invoice 268.00') },

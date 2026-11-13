@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import type { IHttpResponse } from '@objectstack/spec/contracts';
 import type { UploadLinkView } from './record-file-access.js';
 import { formatUploadLinkExpiry, type UploadLinkCopy } from './upload-link-copy.js';
+import { UPLOAD_LINK_FORM_HEADER, UPLOAD_LINK_FORM_HEADER_VALUE } from './upload-link-wire.js';
 
 /**
  * [#30892] The page an upload link opens: one file picker that sends the
@@ -89,7 +90,8 @@ function shell(copy: UploadLinkCopy, title: string, body: string, nonce: string,
  * The script: send the picked file to this page's own address, once. `text`
  * is the page's status lines in its language, and the number of files the
  * link takes (`min`, `max`), as a JSON literal. [#32747] More than one file
- * goes as one form: `file0` … `fileN-1`, each named URI-encoded, and `count`.
+ * goes as one form: `file0` … `fileN-1`, each named URI-encoded, and `count`,
+ * marked by {@link UPLOAD_LINK_FORM_HEADER}.
  */
 function uploadScript(text: string): string {
   return [
@@ -105,7 +107,7 @@ function uploadScript(text: string): string {
     'var request;',
     'if(T.max>1){var form=new FormData();form.append("count",String(n));',
     'for(var i=0;i<n;i++){form.append("file"+i,files[i],encodeURIComponent(files[i].name));}',
-    'request={method:"PUT",credentials:"same-origin",cache:"no-store",body:form};}',
+    `request={method:"PUT",credentials:"same-origin",cache:"no-store",headers:${JSON.stringify({ [UPLOAD_LINK_FORM_HEADER]: UPLOAD_LINK_FORM_HEADER_VALUE })},body:form};}`,
     'else{var file=files[0];request={method:"PUT",credentials:"same-origin",cache:"no-store",',
     'headers:{"content-type":file.type||"application/octet-stream","x-file-name":encodeURIComponent(file.name)},body:file};}',
     'fetch(location.pathname,request)',

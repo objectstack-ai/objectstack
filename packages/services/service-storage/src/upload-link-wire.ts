@@ -60,9 +60,20 @@ export function uploadLinkFileCountMessage(range: { min: number; max: number }, 
  * naming N. Indexed names, because a form parser that keeps one value per
  * name keeps only the last of a repeated one; `count` lets the door refuse a
  * body that lost a part rather than store fewer files than were sent. Only a
- * link that takes several files reads the form; a link that takes one takes
- * its body as the file, whatever its content type. Each part's file name is
+ * link that takes several files reads the form, and only when the submit
+ * carries {@link UPLOAD_LINK_FORM_HEADER}; any other body is the file itself,
+ * whatever its content type. Each part's file name is
  * URI-encoded, as the single-file submit's `x-file-name` header is.
  */
 export const UPLOAD_LINK_FORM_COUNT_FIELD = 'count';
 export const UPLOAD_LINK_FORM_FILE_PREFIX = 'file';
+
+/**
+ * [#32747] The header the page sends with its several-file form, and the one
+ * value it sends. The door reads a `multipart/form-data` body as that form
+ * only when it carries this header and the link takes several files; any
+ * other body, a multipart one included, is the file itself, as it was before
+ * links took several.
+ */
+export const UPLOAD_LINK_FORM_HEADER = 'x-upload-link-form';
+export const UPLOAD_LINK_FORM_HEADER_VALUE = 'several';

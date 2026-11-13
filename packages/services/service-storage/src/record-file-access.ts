@@ -166,9 +166,11 @@ import { assertFileConstraints } from './file-reference-lifecycle.js';
  *    as it was before this rule (to a record, the record's write judges the
  *    field's constraints), and takes its body as the file, whatever its
  *    content type, as it did before links took several.
- *  - **The several-file form** names `count`, at most the link's cap, and the
- *    door refuses a form whose `count` is over the link's cap or whose parts
- *    disagree with it before it reads any part's bytes.
+ *  - **The several-file form** is a `multipart/form-data` body marked by
+ *    the form header, read only on a link that takes several files; any other
+ *    body is the file itself. It names `count`, at most the link's cap, and
+ *    the door refuses a form whose `count` is over the link's cap or whose
+ *    parts disagree with it before it reads any part's bytes.
  *  - **All or nothing after the spend.** A link naming a record stores every
  *    file, then writes the field once, appending all of them. When any store
  *    or the write fails, every file of the submit is discarded, bytes and
@@ -569,6 +571,8 @@ function openLinkStateOf(row: FileRecord | null): UploadLinkState | null {
     if (s.target !== 'field' || s.record_id !== undefined || typeof s.reserved_ids !== 'string') return null;
     const ids = s.reserved_ids.split(',');
     if (ids.length < 1 || ids.length >= UPLOAD_LINK_MAX_FILES || !ids.every((id) => LINK_ID.test(id))) return null;
+    // Each id names one file of the submit: none twice, and none the link's own.
+    if (new Set(ids).size !== ids.length || ids.includes(row.id)) return null;
   }
   return s as UploadLinkState;
 }

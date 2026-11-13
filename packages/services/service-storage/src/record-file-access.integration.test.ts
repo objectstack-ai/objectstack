@@ -1204,7 +1204,7 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       });
       return call('PUT', `${BASE}/upload-links/:token`, {
         params: { token },
-        headers: { 'content-type': 'multipart/form-data; boundary=----os', ...sessionOf(user) },
+        headers: { 'content-type': 'multipart/form-data; boundary=----os', 'x-upload-link-form': 'several', ...sessionOf(user) },
         body,
         // A transport hands the body's bytes too; a link that reads no form takes them.
         rawBody: async () => Buffer.from('------os--\r\n'),
@@ -1215,7 +1215,7 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
     const putForm = (token: string, body: Record<string, unknown>, headers: Record<string, string> = {}) =>
       call('PUT', `${BASE}/upload-links/:token`, {
         params: { token },
-        headers: { 'content-type': 'multipart/form-data; boundary=----os', ...headers, ...sessionOf(OWNER.userId) },
+        headers: { 'content-type': 'multipart/form-data; boundary=----os', 'x-upload-link-form': 'several', ...headers, ...sessionOf(OWNER.userId) },
         body,
         rawBody: async () => Buffer.from('------os--\r\n'),
       });
@@ -1500,6 +1500,10 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
           const over = await useLink(token, raw, { 'content-type': multipart, 'content-length': String(MIB + 1) });
           expect(over._status, JSON.stringify(over._json)).toBe(413);
           expect(over._json.error.message).toBe(uploadSizeRefusal(MIB + 1, MIB, (n) => `The upload body is ${n} bytes`));
+          // So is the page's own form, header and all: such a link reads no form.
+          const marked = await putForm(token, { count: '1', ...countedParts(1).parts }, { 'content-length': String(MIB + 1) });
+          expect(marked._status, JSON.stringify(marked._json)).toBe(413);
+          expect(marked._json.error.message).toBe(over._json.error.message);
           // The body is the file: stored as sent, its size the body's length.
           const res = await useLink(token, raw, { 'content-type': multipart });
           expect(res._status, JSON.stringify(res._json)).toBe(200);
@@ -1509,6 +1513,63 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
         }
       } finally {
         storage.setLimitsSnapshot({} as never);
+      }
+    });
+
+    it('a multipart body without the form header is the file on every link, a multi-file field\'s and a count-1 link\'s included, under the one-file limit, as before', async () => {
+      const multipart = 'multipart/form-data; boundary=----os';
+      const raw = Buffer.from('------os\r\nContent-Disposition: form-data; name="file0"; filename="a.pdf"\r\n\r\n%PDF-1.4\r\n------os--\r\n');
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 1, authored: true } } as never);
+      try {
+        const record = await files.createUploadLinkAs('claim', await newClaim('raw-multipart'), { field: 'scans' }, OWNER as never);
+        const pre = await files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count: 1 }, OWNER as never);
+        for (const grant of [record, pre]) {
+          const token = tokenOf(grant.path);
+          const over = await useLink(token, raw, { 'content-type': multipart, 'content-length': String(MIB + 1) });
+          expect(over._status, JSON.stringify(over._json)).toBe(413);
+          expect(over._json.error.message).toBe(uploadSizeRefusal(MIB + 1, MIB, (n) => `The upload body is ${n} bytes`));
+          // Even a body shaped like the form (`count`, `file0`) is the file when it does not say it is the form.
+          const res = await call('PUT', `${BASE}/upload-links/:token`, {
+            params: { token },
+            headers: { 'content-type': multipart, 'x-file-name': encodeURIComponent('scan 1.pdf'), ...sessionOf(OWNER.userId) },
+            body: { count: '1', ...countedParts(1).parts },
+            rawBody: async () => raw,
+          });
+          expect(res._status, JSON.stringify(res._json)).toBe(200);
+          expect(res._json.data.size).toBe(raw.length);
+          expect(res._json.data.fileIds).toEqual([res._json.data.fileId]);
+        }
+      } finally {
+        storage.setLimitsSnapshot({} as never);
+      }
+    });
+
+    it('a form to a link that cannot be used takes the one-file path: over the one-file limit it is refused 413 with the one-file words, as before', async () => {
+      const grant = await files.createUploadLinkAs('claim', ids.claimB, { field: 'policy' }, OWNER as never);
+      expect((await useLink(tokenOf(grant.path), Buffer.from('%PDF-1.4 used')))._status).toBe(200);
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 1, authored: true } } as never);
+      try {
+        const over = await putForm(tokenOf(grant.path), { count: '1', ...countedParts(1).parts }, { 'content-length': String(MIB + 1) });
+        expect(over._status, JSON.stringify(over._json)).toBe(413);
+        expect(over._json.error.message).toBe(uploadSizeRefusal(MIB + 1, MIB, (n) => `The upload body is ${n} bytes`));
+      } finally {
+        storage.setLimitsSnapshot({} as never);
+      }
+      expect((await putForm(tokenOf(grant.path), { count: '1', ...countedParts(1).parts }))._status).toBe(404);
+    });
+
+    it('a link whose reserved ids name a file twice, or its own id, is the one unusable link', async () => {
+      for (const forge of ['twice', 'own'] as const) {
+        const grant = await files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count: 3 }, OWNER as never);
+        const [linkId, first] = grant.fileIds;
+        const row = await fileRow(linkId);
+        const state = JSON.parse(row.metadata);
+        state.reserved_ids = forge === 'twice' ? `${first},${first}` : `${linkId},${first}`;
+        await engine.update('sys_file', { metadata: JSON.stringify(state) }, { where: { id: linkId }, context: SYS } as never);
+        const res = await useLinkForm(tokenOf(grant.path), [pdf(`fg-${forge}-1.pdf`), pdf(`fg-${forge}-2.pdf`), pdf(`fg-${forge}-3.pdf`)]);
+        expect(res._status, `${forge}: ${JSON.stringify(res._json)}`).toBe(404);
+        expect(res._json.error.message).toBe(UPLOAD_LINK_UNUSABLE_MESSAGE);
+        expect(await rowsNamed([`fg-${forge}-1.pdf`, `fg-${forge}-2.pdf`, `fg-${forge}-3.pdf`])).toEqual([]);
       }
     });
 
@@ -1554,6 +1615,8 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect(several._status).toBe(200);
       expect(String(several._sent)).toContain('<input id="file" type="file" multiple>');
       expect(String(several._sent)).toContain(UPLOAD_LINK_COPY.en.wantedSeveral(UPLOAD_LINK_MAX_FILES));
+      // The page's form says it is the form; nothing else is read as one.
+      expect(String(several._sent)).toContain('headers:{"x-upload-link-form":"several"},body:form');
       const exact = await openLink(tokenOf((await files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count: 3 }, OWNER as never)).path));
       expect(String(exact._sent)).toContain(UPLOAD_LINK_COPY.en.wantedExactly(3));
       expect(String(exact._sent)).toContain('multiple');
