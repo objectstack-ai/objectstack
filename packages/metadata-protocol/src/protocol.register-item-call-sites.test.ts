@@ -136,6 +136,12 @@ const SITES: ReadonlyArray<Site & {
         viewOnlyBy: 'const bound = canonicalType === \'view\' ? boundPackageOf(options.packageId) : undefined;',
     },
     {
+        file: 'protocol-registry-hydration.ts', member: 'healSoleHolderEnvelopes', args: 'record.type, registered, \'name\'', disposition: 'no',
+        path: '[#32820] the registry\'s enable notice (onPackageEnabled), for an entry the read-side hydrator built under a sole holder\'s envelope that the slot still holds',
+        why: 'the same package-less row the hydrator registered, built again for the holders served now: its body binds to no '
+            + 'package (withRowBinding with none), and it wears the one served holder\'s envelope or, with two, none',
+    },
+    {
         // [#23198] Moved from hydrateExpandedViewItems into the one reconcile, which that hydration calls.
         // [#30147] The reconcile's body moved to its facet module by the codemod's members pass; the disposition is unchanged.
         file: 'protocol-registry-hydration.ts', member: 'reconcileViewExpansions', args: 'type, item, \'name\' as any',

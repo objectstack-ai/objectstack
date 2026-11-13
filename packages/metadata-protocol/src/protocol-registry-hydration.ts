@@ -188,9 +188,10 @@ interface SoleHolderEnvelope {
     readonly registered: unknown;
 }
 
+/** The engine's registry, as the hydrator reads it (its registration is the hydrator's own call, untyped there too). */
 type EnvelopeRegistry = {
+    readonly [member: string]: any;
     getItem?(type: string, name: string, currentPackageId?: string, member?: string): unknown;
-    registerItem(type: string, item: unknown, keyField: string): unknown;
     packageScopedHoldersOf?(type: string, name: string): readonly string[] | undefined;
     onPackageEnabled?(listener: (packageId: string) => void): () => void;
 };
