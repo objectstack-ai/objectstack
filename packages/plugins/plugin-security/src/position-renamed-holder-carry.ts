@@ -468,7 +468,7 @@ export function logPositionRenameCarry(report: PositionRenameCarryReport, logger
   const moved = report.carried.filter((c) => c.rows > 0);
   if (moved.length > 0) {
     logger.info?.(
-      '[security] position renames: holders moved to the renamed position, as the system (ADR-0150 D7 addendum, #32983) — '
+      '[security] position renames: holders moved to the renamed position, as the system (ADR-0150 D7 addendum) — '
         + moved.map((c) => `'${c.from}' → '${c.to}' (${c.rows} row(s) in ${Object.keys(c.byOrganization).length} organization(s))`).join(', ') + '.',
       { carried: moved },
     );

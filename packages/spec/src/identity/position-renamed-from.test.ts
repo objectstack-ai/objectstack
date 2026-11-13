@@ -3,7 +3,7 @@
 /**
  * [#32983, ruling A1 (record 6841971722), condition 3] A position's
  * `renamedFrom` follows the position-name grammar and the field `renamedFrom`
- * refusals (cloud#3652 D3, `object.zod.ts#refuseDishonestRenamedFrom`): never
+ * refusals (cloud#3652 D3, `refuseDishonestRenamedFrom` in `data/object.zod.ts`): never
  * the position's own name, each entry once, never a name another position of
  * the collection still declares (which rules out a cycle), never an old name
  * two positions claim. Each rule is pinned both ways: the refusal, and the
