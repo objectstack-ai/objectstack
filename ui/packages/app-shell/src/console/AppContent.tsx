@@ -1096,13 +1096,25 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     objects: allObjects,
   });
 
-  const handleEdit = (record: any) => {
+  const handleEdit = (record: any, objectName?: string) => {
+    // objectstack#33111 — a record drawer level edits a record of ITS object,
+    // which is not always the route's: the level names it, and the form is
+    // then that object's child task (`formObject`, the record-form URL
+    // contract above). Beside the record, never in it: the record doubles as
+    // a create's seed values (`recordFormCreateValues`).
+    const childObjectName =
+      typeof objectName === 'string' && objectName !== '' && objectName !== currentObjectDef?.name
+        ? objectName
+        : undefined;
+    const editObjectDef = childObjectName
+      ? allObjects.find((o: any) => o.name === childObjectName)
+      : currentObjectDef;
     // Page-mode opt-in: when the object metadata declares
     // `editMode: 'page'`, route to the full-screen create/edit page instead
     // of opening the global ModalForm. Default behavior (modal) is
     // preserved for any object without the flag.
     const target = resolveRecordFormTarget({
-      objectDef: currentObjectDef as any,
+      objectDef: editObjectDef as any,
       baseUrl: appSegment ? `/apps/${appSegment}` : '',
       record,
     });
@@ -1115,9 +1127,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     const rawId = record?.id ?? record?._id;
     const sp = new URLSearchParams(window.location.search);
     sp.set(RECORD_FORM_PARAM, rawId != null && rawId !== '' ? String(rawId) : 'new');
-    // Top-level task on the route's own object — drop any stale child-task
-    // overrides (see the record-form URL contract above).
-    sp.delete(RECORD_FORM_OBJECT_PARAM);
+    // A level's object names the form's; a top-level task on the route's own
+    // object drops any stale child-task overrides (see the record-form URL
+    // contract above).
+    if (childObjectName) sp.set(RECORD_FORM_OBJECT_PARAM, childObjectName);
+    else sp.delete(RECORD_FORM_OBJECT_PARAM);
     sp.delete(RECORD_FORM_LINK_PARAM);
     // objectui#12291 — a new record that arrives carrying values (the
     // calendar's empty-day hand-off sends the day clicked) opens the create
