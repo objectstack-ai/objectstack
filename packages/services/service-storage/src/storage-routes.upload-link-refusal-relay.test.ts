@@ -105,6 +105,16 @@ describe('upload-link refusal relay · the code is the closed vocabulary\'s', ()
     });
   }
 
+  it('a 503 relays only as spelled SERVICE_UNAVAILABLE: an unregistered spelling stays the route\'s 500, though its status derives that code', async () => {
+    expect(standardErrorCodeForHttpStatus(503)).toBe('SERVICE_UNAVAILABLE');
+    const unregistered = await doorsThrowing(refusal({ code: UNREGISTERED, status: 503, message: 'desk down' }))('PUT');
+    expect(unregistered.status).toBe(500);
+
+    const outage = await doorsThrowing(refusal({ code: 'SERVICE_UNAVAILABLE', status: 503, message: 'try later' }))('PUT');
+    expect(outage.status).toBe(503);
+    expect(outage.body.error.code).toBe('SERVICE_UNAVAILABLE');
+  });
+
   it('a registered spelling is answered verbatim, with no declaredCode', async () => {
     const answer = await doorsThrowing(refusal({ code: 'PERMISSION_DENIED', status: 403, message: 'You cannot edit that record.' }))('PUT');
 
