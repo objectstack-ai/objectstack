@@ -32,6 +32,7 @@
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import { storedRowDocument } from './item-lock.js';
 import { installedManifestsOf, isPairOf, isTenantAuthored, itemDiscriminator } from '@objectstack/metadata-core';
+import type { InstalledPackageSource } from '@objectstack/metadata-core';
 import { isPackageScopedType } from '@objectstack/core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
@@ -208,7 +209,7 @@ function judgesRowHolder(canonicalType: string): boolean {
  * before: one holder is the only package it can mean.
  */
 function namesNoHolderAmongMany(
-    registry: { packageScopedHoldersOf?(type: string, name: string, callerPackageId?: string | null, options?: { includeDisabledPackages?: boolean }): readonly string[] | undefined },
+    registry: InstalledPackageSource & { packageScopedHoldersOf?(type: string, name: string, callerPackageId?: string | null, options?: { includeDisabledPackages?: boolean }): readonly string[] | undefined },
     type: string,
     packageId: string | null | undefined,
     name: string,
@@ -247,7 +248,7 @@ const NOT_A_PAIR_ROW = Symbol('not-a-pair-row');
  * package holds, which keep their lookup.
  */
 function pairRowEnvelopeHolder(
-    registry: {
+    registry: InstalledPackageSource & {
         packageScopedHoldersOf?(type: string, name: string, callerPackageId?: string | null, options?: { includeDisabledPackages?: boolean }): readonly string[] | undefined;
         overlayRowBinding?(type: string, name: string, item: unknown, options?: { includeDisabledPackages?: boolean }): string | null | undefined;
     },

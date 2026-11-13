@@ -127,7 +127,7 @@ describe('a stored webhook row at boot: loadMetaFromDb registers it in its own h
             expect([got.holders, got.environment, got.stray]).toEqual([[A, B], undefined, undefined]);
             expect(got.slots).toEqual({ [A]: shipped(A), [B]: shipped(B) });
             // A webhook is sealed (ADR-0131 D6): the census names the row.
-            const lines = warn.mock.calls.map((call: unknown[]) => String(call[0]));
+            const lines: string[] = warn.mock.calls.map((call: unknown[]) => String(call[0]));
             expect(lines.some((line) => line.includes('metadata_sealed_overlay_unserved') && line.includes(T))).toBe(true);
         });
     }
@@ -330,7 +330,7 @@ describe('a stored row of a two-holder name at boot, beyond the webhook (#32692)
         const judged = ['action', 'hook', 'job', 'webhook', 'connector', 'sharing_rule', 'queue', 'assignment_rule',
             'analytics_cube', 'picklist', 'api', 'tool', 'skill', 'agent'];
         // The table the protocol's overlay allow-list is built from (`allowEnvironmentOverlay`).
-        const open = DEFAULT_METADATA_TYPE_REGISTRY.filter((entry) => entry.allowEnvironmentOverlay).map((entry) => entry.type);
+        const open: string[] = DEFAULT_METADATA_TYPE_REGISTRY.filter((entry) => entry.allowEnvironmentOverlay).map((entry) => entry.type);
         expect(judged.filter((type) => open.includes(type))).toEqual([]);
     });
 
