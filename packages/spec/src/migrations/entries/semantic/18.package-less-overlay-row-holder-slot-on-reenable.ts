@@ -20,7 +20,10 @@ export const entry: SemanticMigration = {
     + 'registry item, its scoped list (GET /api/v1/meta/TYPE?package=ID) and the registry list scoped to it, after '
     + 'the other holder is enabled again',
   replacement:
-    'Delete the package-less row (DELETE /api/v1/meta/TYPE/NAME, naming no package), then save the customization '
+    'First keep the package-less row\'s stored body and clear any row of the name bound to a package, as the entry '
+    + 'package-less-row-exact-address-by-type-class prescribes: the delete below hard-deletes the row, and with a '
+    + 'bound row present it addresses that row instead. Then delete the package-less row (DELETE '
+    + '/api/v1/meta/TYPE/NAME, naming no package; ?state=draft for a draft), then save the customization '
     + 'as the declared override of the holder it customizes: in the holder\'s paired .custom package '
     + '(PUT /api/v1/meta/TYPE/NAME?package=ID.custom with overrides: { package: ID, basedOn: VERSION }). Delete '
     + 'first: a package-less delete of the name removes the one bound row there is, so after the save it would '
