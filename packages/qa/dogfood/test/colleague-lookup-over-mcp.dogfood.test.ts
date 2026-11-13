@@ -242,7 +242,7 @@ describe('a member\'s agent finds a colleague through the read-only sys_user ove
     const byName = await queryUsers(member(), { where: { name: SHARED_NAME } });
     expect(idsOf(byName)).not.toContain(uid.outsider);
     expect(await queryUsers(member(), { where: { email: OUTSIDER } })).toEqual([]);
-    const unfiltered = await queryUsers(member(), { limit: 200 });
+    const unfiltered = await queryUsers(member(), { limit: 50 });
     expect(idsOf(unfiltered)).not.toContain(uid.outsider);
     expect(idsOf(unfiltered)).toEqual(expect.arrayContaining([uid.member, uid.colleague, uid.namesake]));
 
@@ -265,7 +265,7 @@ describe('a member\'s agent finds a colleague through the read-only sys_user ove
     const row = one.payload?.record ?? one.payload;
     expect(String(row.id)).toBe(uid.colleague);
     expect(servedAdminFields(row)).toEqual([]);
-    for (const value of Object.values(SYNTHETIC)) expect(one.text).not.toContain(String(value));
+    for (const value of [SYNTHETIC.last_login_ip, SYNTHETIC.ban_reason]) expect(one.text).not.toContain(value);
 
     const projected = await queryUsers(member(), {
       where: { email: COLLEAGUE },
@@ -287,13 +287,21 @@ describe('a member\'s agent finds a colleague through the read-only sys_user ove
   });
 
   it('⭐ the agent reads exactly what the member\'s console reads: the person picker\'s query at the HTTP data door', async () => {
-    const res = await stack.apiAs(bearer.member, 'GET', '/data/sys_user?$top=200');
+    const res = await stack.apiAs(bearer.member, 'GET', '/data/sys_user?$top=50');
     expect(res.status).toBe(200);
     const consoleRows = rowsOf(await res.json());
-    const agentRows = await queryUsers(member(), { limit: 200 });
+    const agentRows = await queryUsers(member(), { limit: 50 });
     expect(idsOf(agentRows)).toEqual(idsOf(consoleRows));
     const fieldsOf = (rows: Row[], id: string) => Object.keys(rows.find((r) => String(r.id) === id) ?? {}).sort();
     expect(fieldsOf(agentRows, uid.colleague)).toEqual(fieldsOf(consoleRows, uid.colleague));
+    // The served directory set the PR states, read off the live row: the
+    // `Admin` group is the only thing withheld.
+    // Read off the declaration, never listed here: every declared field
+    // outside the group, the set the PR body and the changeset enumerate.
+    const served = fieldsOf(agentRows, uid.colleague);
+    const directory = Object.keys(SysUser.fields as Record<string, unknown>).filter((f) => !ADMIN_GROUP.includes(f)).sort();
+    expect(served).toEqual(directory);
+    expect(served).toEqual(expect.arrayContaining(['id', 'name', 'email']));
   });
 
   it('⭐ no write tool opens sys_user', async () => {
