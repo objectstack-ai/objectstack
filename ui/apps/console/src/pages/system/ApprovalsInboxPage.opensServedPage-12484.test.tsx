@@ -364,3 +364,60 @@ describe('the approvals inbox opens a request on its served page (objectui#12484
     expect(approvalsApiStub.listRequests).toHaveBeenCalled();
   });
 });
+
+describe('a request opens in the app that owns its record, not the app it was asked from (objectstack#32667)', () => {
+  /** The app the reader is in (Home's host app, the notification's): it lists another object only. */
+  const CALLER = { name: APP, navigation: [{ type: 'object', objectName: 'leave_request' }] };
+  /** The app that lists the request's record, inside an area. */
+  const OWNER = {
+    name: 'finance',
+    _packageId: 'com.example.finance',
+    areas: [{ name: 'billing', navigation: [{ type: 'object', objectName: ROW.object_name }] }],
+  };
+  const SETUP = { name: 'setup', _packageId: 'com.objectstack.setup', navigation: [{ type: 'object', objectName: 'sys_user' }] };
+  const pageUnder = (segment: string) => `/apps/${segment}/${APPROVAL_REQUEST_OBJECT}/record/${REQ}`;
+  const setApps = (apps: unknown[]) => {
+    (metadata as { apps: unknown[] }).apps = apps;
+  };
+  afterEach(() => setApps([]));
+
+  it('the deep link Home and every notification follow lands under the owner app, in the deep link\'s place', async () => {
+    setApps([CALLER, OWNER, SETUP]);
+    renderAt([`/apps/${APP}/home`, `${INBOX}?request=${REQ}`]);
+
+    await servedPage();
+    expect(where()).toBe(pageUnder('com.example.finance'));
+    expect(approvalsApiStub.getRequest).toHaveBeenCalledWith(REQ);
+    expect(approvalsApiStub.listRequests).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'probe-back' }));
+    expect(where()).toBe(`/apps/${APP}/home`);
+  });
+
+  it('a row of the queue opens under the owner app, from the row it already holds', async () => {
+    setApps([CALLER, OWNER, SETUP]);
+    renderAt([INBOX]);
+    fireEvent.click(await inboxRow());
+
+    await servedPage();
+    expect(where()).toBe(pageUnder('com.example.finance'));
+    expect(approvalsApiStub.getRequest).not.toHaveBeenCalled();
+  });
+
+  it('no app lists the object: the request opens under Setup, never under the unrelated app', async () => {
+    setApps([CALLER, SETUP]);
+    renderAt([`/apps/${APP}/home`, `${INBOX}?request=${REQ}`]);
+
+    await servedPage();
+    expect(where()).toBe(pageUnder('com.objectstack.setup'));
+  });
+
+  it("CONTROL: a request about a record of the reader's own app still opens there", async () => {
+    const callerListingIt = { ...CALLER, navigation: [...CALLER.navigation, { type: 'object', objectName: ROW.object_name }] };
+    setApps([callerListingIt, OWNER, SETUP]);
+    renderAt([`/apps/${APP}/home`, `${INBOX}?request=${REQ}`]);
+
+    await servedPage();
+    expect(where()).toBe(REQUEST_PAGE);
+  });
+});
