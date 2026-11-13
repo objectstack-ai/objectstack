@@ -4,6 +4,10 @@ import { readFileSync } from 'node:fs';
 import { applyInjectedSystemColumns } from '@objectstack/metadata-core';
 import { describe, expect, it } from 'vitest';
 
+// The repo's one code/prose separator, so a call spelled in a comment or a
+// string is not read as a call the gate makes.
+import { maskCommentsAndLiterals } from '../../../scripts/js-comment-mask.mjs';
+
 import {
   AUTHORED_FORMULA_FIELD_NAME,
   AUTHORED_RULE_NAME,
@@ -29,18 +33,16 @@ import { validateStackExpressions } from './validate-expressions.js';
  */
 
 const GATE_SOURCE = readFileSync(new URL('./validate-expressions.ts', import.meta.url), 'utf8');
+/** The same source with comments and literal bodies blanked, at the same offsets. */
+const GATE_CODE = maskCommentsAndLiterals(GATE_SOURCE);
 
-/** The gate's source between two markers, comments and string bodies blanked. */
+/** The gate's code between two markers (found in the source), comments and literal bodies blanked. */
 function region(start: string, end: string): string {
   const from = GATE_SOURCE.indexOf(start);
   expect(from, `marker moved — update this pin: ${start}`).toBeGreaterThanOrEqual(0);
   const to = GATE_SOURCE.indexOf(end, from + start.length);
   expect(to, `marker moved — update this pin: ${end}`).toBeGreaterThan(from);
-  return GATE_SOURCE.slice(from + start.length, to)
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/[^\n]*/g, '')
-    .replace(/`(?:\\.|[^`\\])*`/g, '``')
-    .replace(/'(?:\\.|[^'\\])*'/g, "''");
+  return GATE_CODE.slice(from + start.length, to);
 }
 
 /** The functions a region calls by bare name (a spread call counts; a member call does not). */
