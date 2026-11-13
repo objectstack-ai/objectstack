@@ -80,7 +80,7 @@ function makeDataSource() {
 const headers = (): string[] =>
   Array.from(document.querySelectorAll('thead th')).map((th) => (th.textContent ?? '').trim());
 
-const zh = (resources: Record<string, unknown> = {}) =>
+const zh = (resources: Record<string, Record<string, unknown>> = {}) =>
   (node: React.ReactElement) => (
     <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false, resources }}>
       {node}
