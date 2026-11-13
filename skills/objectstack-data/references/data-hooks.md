@@ -316,13 +316,8 @@ executes — or as the deprecated inline **`handler`**.
 |:--|:--|:--|
 | Shape | `body: { language, source, capabilities }` (pure metadata) | `handler: async (ctx) => { … }` |
 | Runs in | An isolated **QuickJS VM** (edge-safe, capability-gated) | The host process (**full Node**) |
-| Ships as | Plain JSON inside the build artifact — travels everywhere | Lowered at build to a string ref + a sibling `.mjs` runtime module |
 | Status | **Preferred for new code** | **Deprecated** (`HookSchema`: *"prefer `body`"*) |
 | Both present? | Runtime uses **`body`** and ignores `handler` | — |
-
-Because a `body` is pure metadata, it is what AI-authored hooks, Studio-authored
-hooks, and any `objectstack build` artifact carry. The rest of this section is
-the contract for that sandbox.
 
 ### The `body` shape
 
@@ -362,6 +357,8 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.api` | object | Cross-object CRUD. Gated by `api.read` / `api.write` — see below. |
 | `ctx.log` | `{ debug, info, warn, error }` | Gated by `log`. Call **`ctx.log.info(msg, data?)`** — `ctx.log` is an **object, not** callable as `ctx.log(msg)`. Emission is **best-effort** (see Troubleshooting). |
 | `ctx.crypto` | `{ randomUUID }` | Gated by `crypto.uuid`. |
+| `ctx.email` | `{ send }` | Gated by `email.send`; not in a hook body. |
+| `ctx.activity` | `{ append }` | Gated by `activity.append`. |
 | `ctx.notice` | `(message) => void` | **Tell the saver what this save set in motion** — answered as the create/update `notice`, shown on the save toast. No capability; insert/update only; last call wins. [`rules/lifecycle.md` § Save Notice](../rules/lifecycle.md#save-notice). |
 | `ctx.title` | `(field?) => Promise<string \| null>` | **Name the record, not its id.** `ctx.title()` resolves this object's `nameField`, a **formula** included (no extra read); `ctx.title('account_id')` resolves a lookup's title (needs `api.read`). `null` when there is no title, never the id. **Per door:** `body` has it; a deprecated `handler` gets it at runtime, undeclared on `HookContext` (TS2339 when annotated) — use `body`; `ql.registerHook` and a bare `ObjectQL` `bindHooks` lack it. |
 
@@ -431,7 +428,7 @@ single-record form is `update({ id, ...fieldsToChange })` — e.g.
 A body may only touch a `ctx` API it declared in `capabilities`. Calling an
 undeclared one **throws inside the VM** — `capability '<token>' not granted to
 hook '<name>' …` — which surfaces as a hook error (see Troubleshooting). The full
-set of legal tokens (`HookBodyCapability`) is exactly five:
+set of legal tokens (`HookBodyCapability`) is exactly seven:
 
 | Token | Unlocks |
 |:--|:--|
@@ -440,6 +437,8 @@ set of legal tokens (`HookBodyCapability`) is exactly five:
 | `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one driver transaction** (commit on return, rollback on throw). Pair it with `api.write`. |
 | `crypto.uuid` | `ctx.crypto.randomUUID()` |
 | `log` | `ctx.log.debug` / `info` / `warn` / `error(msg, data?)` |
+| `email.send` | `ctx.email.send({ to, subject, text })` — mail via the mail service; sender, user and organization are stamped (`BodyMailSendInputSchema`). **Not in a hook body** (refused at parse and at bind): a message cannot be taken back if the hook's write rolls back. Mail on a record change goes through an action, a job or a flow. |
+| `activity.append` | `ctx.activity.append({ object, recordId, type, summary })` — one record-timeline entry; actor and origin are stamped (`BodyActivityAppendInputSchema`). Commits or rolls back with the write that runs the body. |
 
 There is **no `http.fetch` capability** by design — outbound calls go through
 [Connector recipes](../../objectstack-automation/references/integration-recipes.md)
@@ -559,8 +558,7 @@ Register it like any hook — add it to `defineStack({ hooks: [fillPositionOnHir
 > `handler`** context (full Node; `handler` is deprecated). A metadata-native **`body`** sees a
 > capability-gated *subset* of it inside an isolated VM — see
 > [Sandboxed Hook Bodies](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call)
-> for exactly what is and isn't available there, including the `where` query
-> shape and the `update({ id, … })` pattern.
+> for exactly what is and isn't available there.
 
 The engine's `HookContext` provides:
 
@@ -727,10 +725,7 @@ ctx.previous: {
 ### Cross-Object API
 
 Access other objects within the same transaction. `ctx.api.object(name)` is the
-same repository in both forms; the canonical query key is **`where`** (see
-[Sandboxed Hook Bodies](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call)
-for the full method + capability contract). In a sandboxed `body` these calls
-additionally require the `api.read` / `api.write` capabilities.
+same repository in both forms; the canonical query key is **`where`**.
 
 ---
 
