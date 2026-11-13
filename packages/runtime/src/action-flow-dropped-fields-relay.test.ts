@@ -23,6 +23,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { callData, invokeBusinessAction } from './action-execution.js';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
+
 const OBJECT = 'afr_report';
 const FLOW = 'afr_submit';
 const ACTION = 'submit_for_approval';
