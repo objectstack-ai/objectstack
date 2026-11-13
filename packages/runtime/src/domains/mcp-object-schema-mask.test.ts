@@ -1628,17 +1628,20 @@ describe('[#32530] describe_object serves readonly where a write never stands â€
         const id = String(created?.id ?? created?.record?.id);
         const row = await rowOf(id);
         expect(row.title, 'CONTROL: the writable field is stored').toBe('Pump');
-        expect(row.ticket_no).not.toBe('FORGED-1');
-        expect(row.total).not.toBe(999);
+        expect(row.ticket_no, 'the engine issues the number').toMatch(/^T-\d{4}$/);
+        expect(row.total, 'computed on read').toBe(6);
         expect(row.doubled).toBe(6);
     });
 
+    // Item 2 is answered by the description, not by `readonly`: the served object
+    // carries the caller's READ projection only, so an edit verdict would be a new
+    // security read on every describe (see `writeNeverSetsField`).
     it('a field the caller may read but not edit is served the SCHEMA\'s readonly (false), and the write naming it is refused', async () => {
         const { bridge } = await bridgeFor(kernelOver(services), MEMBER);
         const described: any = await bridge.describeObject(OBJ);
         expect(readonlyOf(described).locked_note).toBe(false);
         const refused = await rejectionOf(() => bridge.create(OBJ, { title: 'Valve', locked_note: 'x' }));
-        expect(refused, 'the field-level write gate refuses the field the member may not edit').toBeDefined();
-        expect(typeof refused.code).toBe('string');
+        // The field-level write gate refuses the field the member may not edit.
+        expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
     });
 });
