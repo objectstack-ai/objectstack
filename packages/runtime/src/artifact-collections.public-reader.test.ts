@@ -110,3 +110,38 @@ describe('resolveArtifactCollections — the public reader of a composed suite (
         expect(read.apps.map((a) => a.name).sort()).toEqual(['sales_app', 'service_app', 'suite_app']);
     });
 });
+
+describe('resolveArtifactCollections — its output handed back to strict defineStack passes the single-app rule (ADR-0019 D3 as amended)', () => {
+    // The reader's output is an additive artifact: every body's apps merged
+    // onto the top level beside `packages[]`. Each of those apps is declared by
+    // a body, so the load path registers it under that body's id, and strict
+    // `defineStack` counts it there too, not against the artifact's manifest.
+    // The packages share one namespace so that no other `defineStack` rule
+    // (the namespace prefix of the merged objects) is what answers.
+    const strictPackage = (id: string, type: 'app' | 'module', slug: string) =>
+        defineStack({
+            manifest: { id, name: slug, version: '1.0.0', type, namespace: 'crm' },
+            objects: [{ name: `crm_${slug}`, label: slug, fields: { title: { type: 'text', label: 'Title' } } }],
+            apps: [{
+                name: `crm_${slug}_app`,
+                label: `${slug} app`,
+                navigation: [{ id: `nav_${slug}`, type: 'object', label: slug, objectName: `crm_${slug}` }],
+            }],
+        } as never);
+
+    it('accepts the reader\'s output of a preserve suite with one app per package', () => {
+        const preserved = composeStacks(
+            [strictPackage('com.example.crm', 'app', 'sales'), strictPackage('com.example.crm.service', 'module', 'service')],
+            { manifest: 'preserve' },
+        );
+        const read = resolveArtifactCollections(preserved) as Raw & { manifest?: { type?: string } };
+
+        // Anti-vacuity: two apps at the top level, under a `module` manifest
+        // the single-app rule judges.
+        expect(((read.apps as Array<{ name: string }>) ?? []).map((a) => a.name)).toEqual(['crm_sales_app', 'crm_service_app']);
+        expect(read.manifest?.type).toBe('module');
+        expect(Array.isArray(read.packages)).toBe(true);
+
+        expect(() => defineStack(read as never)).not.toThrow();
+    });
+});
