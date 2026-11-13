@@ -167,14 +167,15 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > — the step succeeds, the drop is named in the step's
 > warnings; `os validate` / `os build` fail a `runAs:'user'`
 > `update_record` writing one (`readonlyWhen`: a warning).
-> A button or action does not let a user start an `autolaunched`,
-> `record_change` or `schedule` flow declared `runAs: 'system'`: it answers 403
-> `PERMISSION_DENIED`, so for a flow a user starts from a button the elevated
-> routes are a `screen` or `api` flow declared `runAs: 'system'`, or a user-run
-> flow whose `subflow` node calls the elevated flow.
+> A button, an action, an endpoint or the trigger route does not let a user
+> start an `autolaunched`, `record_change` or `schedule` flow declared
+> `runAs: 'system'` (403 `PERMISSION_DENIED`), so for a flow a user starts from a
+> button the elevated routes are a `screen` or `api` flow declared
+> `runAs: 'system'`, or a user-run flow whose `subflow` node calls the elevated flow.
 
 > **Elevate the write, not the flow.** Prefer the `subflow` route — raising a
-> whole `screen` flow silently elevates every other write in it.
+> whole `screen` flow silently elevates every other write in it, and an `api`
+> flow adds a webhook secret and an inbound door a button never uses.
 >
 > **Elevation stops at identity assignment.** A `runAs: 'system'` write (insert
 > through purge) of `sys_user_position`, `sys_user_permission_set`,
@@ -190,10 +191,9 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > re-declare it per object.
 
 > **Who may START a flow: `requiredPermissions: ['…']` on the flow** (ADR-0066
-> D4) — every door that starts it by name (trigger route, action of type `flow`,
-> declared endpoint) refuses a non-system caller missing any named capability
-> with `403 PERMISSION_DENIED`; an action starting it inherits the list, a
-> `subflow` node is not a door. Gate an elevated `screen` / `api` flow here, never
+> D4) — every door above that starts it by name refuses a non-system caller
+> missing any named capability with `403 PERMISSION_DENIED`; an action starting
+> it inherits the list, a `subflow` node is not a door. Gate an elevated `screen` / `api` flow here, never
 > on `current_user.positions` inside it.
 
 > **A hook elevates itself with `runAs`, never with `sudo`.** An object hook
@@ -384,9 +384,8 @@ token implies the other:
 
 ### Inbound webhook (`api`) triggers (ADR-0041 Tier 1)
 
-An `api` flow is bound to an inbound HTTP endpoint:
-`POST /api/v1/automation/hooks/:flowName/:hookId`. Configure it on the **start
-node `config`**:
+Endpoint: `POST /api/v1/automation/hooks/:flowName/:hookId`. Configure it on
+the **start node `config`**:
 
 | `config` key | Purpose |
 |:-------------|:--------|
