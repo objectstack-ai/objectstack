@@ -436,8 +436,10 @@ export async function resolveObjectMasker(
     const execCtx = (context as any)?.executionContext;
     // [decision 6840464379] Where an object's declared `schemaReadDelegate` is
     // found — this request's kernel, as `RestServer.resolveObjectMasker` finds
-    // it, so the two transports cannot disagree about the exception. Resolved
-    // only when an object the read check refused needs it.
+    // it, so the two transports give the same verdict. Resolved only when an
+    // object the read check refused needs it. One fault differs: a lookup that
+    // fails here reads as not registered (the object stays absent), where
+    // REST's environment leg answers 5xx; ADR-0106 allows both.
     const schemaReadDelegates = objectSchemaReadDelegateSource({
         engine: () => deps.resolveService(context, 'objectql'),
         service: (name) => deps.resolveService(context, name),
