@@ -44,6 +44,7 @@ import { strictObject } from '../shared/strict-object';
  * - 'Region East VP' (spaces and uppercase)
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { refuseSelfRenamedFrom } from './position-renamed-from';
 
 export const PositionSchema = lazySchema(() => strictObject(
   {
@@ -134,6 +135,46 @@ export const PositionSchema = lazySchema(() => strictObject(
   ),
 
   /**
+   * [#32983, ruling A1 (record 6841971722); ADR-0150 D7 addendum] The earlier
+   * names of THIS position, so the people who held it under an old name keep
+   * holding it under this one. ADR-0150 D7 makes a position one slot per name
+   * in the environment, so an app may have to rename a position after go-live
+   * (HotCRM renamed all twelve for 18.4.0); without this, every installed
+   * organization's `sys_user_position` rows keep naming a position that no
+   * longer exists and their holders silently lose its permission sets.
+   *
+   * The field `renamedFrom` (epic cloud#3652 ruling D3, `data/field.zod.ts`)
+   * is the precedent, and its rules carry over: each entry is a position name
+   * (this schema's `name` grammar); never this position's own name; each
+   * entry once; never a name another position of the same collection still
+   * declares (that name is still in use — which also rules out a cycle, since
+   * every name in a cycle is a current one); never an old name another
+   * position of the same collection also claims. The first two are judged
+   * here, the last two by the `positions` collection
+   * (`refuseDishonestPositionRenamedFrom` in `position-renamed-from.ts`,
+   * called from `stack.zod.ts`). Across packages — one environment — the
+   * boot carry judges the same rules again, and refuses an old name another
+   * package (enabled or disabled), or the environment, still holds or is
+   * recorded as owning.
+   *
+   * Read only by the boot carry (`plugin-security`
+   * `position-renamed-holder-carry.ts`, at `kernel:bootstrapped`): as the
+   * system, in every organization, it moves each holder row of an old name to
+   * this one, idempotently. It moves HOLDERS only; every other stored
+   * reference to the old name (sharing-rule, queue-member and record-share
+   * recipients, pending approvers, pending invitations, the activation
+   * ledger) is named in the boot log, never rewritten. An old name that was
+   * switched off in the activation ledger is not carried: its holders would
+   * come back active under this name.
+   */
+  renamedFrom: z.array(SnakeCaseIdentifierSchema).optional().describe(
+    'Earlier names of THIS position, in the position-name grammar (lowercase snake_case), e.g. `renamedFrom: [\'sales_rep\']` on a position now named `crm_sales_rep`. '
+    + 'At boot the platform moves every holder of an old name (`sys_user_position`) to this position, in every organization, as the system; a second boot moves nothing. '
+    + 'A position renamed twice lists both earlier names. Each entry once; never this position\'s own name; never a name another position still declares; never an old name another position also claims; never a name another package or the environment holds or is recorded as owning. '
+    + 'Holders only: sharing rules, queue members, record shares, pending approvals and invitations that name the old position are listed in the boot log for an administrator, not rewritten. An old name switched off in the activation ledger is not carried, so its holders do not come back active.',
+  ),
+
+  /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
    * authors declare lock policy here, in a code package's source;
    * the loader translates it into the private `_lock` envelope at
@@ -154,7 +195,7 @@ export const PositionSchema = lazySchema(() => strictObject(
   // runtime — the schema just could not represent them (the same ADR-0078 §3
   // inverse-drift class the permission schema had).
   ...MetadataProtectionFields,
-}));
+}).superRefine(refuseSelfRenamedFrom));
 
 /**
  * [ADR-0090 D5/D9] Built-in AUDIENCE ANCHOR positions. `everyone` is held

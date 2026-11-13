@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 309 |
-| Object name statically decidable | 215 |
+| Write call sites | 310 |
+| Object name statically decidable | 216 |
 | Object name chosen at run time | 94 |
-| Against a tenancy-enabled object | 208 |
+| Against a tenancy-enabled object | 209 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 238 |
+| Threading a tenant context | 239 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 59 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 173 |
+| Threading a decidably elevated context | 174 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 124 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-13 at `1bb3c359e`.
+Measured on 2026-11-13 at `cc6cce96c`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1144 |
-| engine-shaped types recognised | 134 |
+| tracked non-test sources scanned | 1149 |
+| engine-shaped types recognised | 135 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 292 |
+| same-named calls subtracted as non-engine | 293 |
 
 ## Every site
 
@@ -213,6 +213,7 @@ Measured on 2026-11-13 at `1bb3c359e`.
 | `packages/plugins/plugin-security/src/claim-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/cleanup-package-permissions.ts` | `delete` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/invitation-placement.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
+| `packages/plugins/plugin-security/src/position-renamed-holder-carry.ts` | `update` | `sys_user_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-security/src/stored-permission-set-package-backfill.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |

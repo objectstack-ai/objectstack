@@ -435,6 +435,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'renamedFrom',
     why: "planned, not yet read — the earlier keys of a field are validated at parse (each a field key, once, never the field's own key, a key another field still declares, or an old key another field also claims), but no package upgrade carries a column on them until the rename execution lands. It is a package author's declaration about the field's history, written in the package source beside the rename itself; a form control offered today would let an author declare a rename no upgrade performs",
   },
+  // #32983 (ruling A1) — a position's earlier names are the package author's
+  // declaration about the position's history, the field `renamedFrom` above's
+  // sibling, and like it are written in the package source, not in Setup.
+  {
+    kind: 'omit',
+    type: 'position',
+    path: ROOT_PATH,
+    key: 'renamedFrom',
+    why: "a package author's declaration, not a Setup setting — the earlier names of a position are validated at parse (each a position name, once, never the position's own name, a name another position still declares, or an old name another position also claims) and read by the boot holder carry, which moves every holder of an old name to this position in every organization. It belongs in the package source beside the rename itself; a form control would let an administrator point a position at another name's holders from Setup",
+  },
   // [ADR-0144 D5] A record-mode amount's home-currency projection lands
   // spec-first the same way: declared and judged at parse, written by nothing
   // until the engine's write-time projection lands in the same release (D9).

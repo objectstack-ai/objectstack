@@ -72,6 +72,7 @@ import { JobSchema } from './system/job.zod';
 
 // Security Protocol
 import { PositionSchema } from './identity/position.zod';
+import { refuseDishonestPositionRenamedFrom } from './identity/position-renamed-from';
 import { PermissionSetSchema, findHierarchyScopeGrants } from './security/permission.zod';
 import { judgePermissionSetOwnerBinding } from './security/permission-set-owner-binding';
 import { judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from './kernel/collection-item-owner-stamp';
@@ -953,7 +954,11 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   /**
    * ObjectGuard: Security Layer
    */
-  positions: z.array(PositionSchema).optional().describe('Positions — flat capability-distribution groups (ADR-0090 D3)'),
+  // [#32983] `renamedFrom` across the collection: no current name, no old name claimed twice.
+  positions: z.array(PositionSchema)
+    .superRefine(refuseDishonestPositionRenamedFrom)
+    .optional()
+    .describe('Positions — flat capability-distribution groups (ADR-0090 D3)'),
   /**
    * Permission Sets — the ADR-0090 app-category collection.
    *
