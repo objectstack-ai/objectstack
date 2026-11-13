@@ -905,5 +905,14 @@ export const SysApprovalRequest = ObjectSchema.create({
     // generic CRUD. Reads stay open, and serve each caller only the requests
     // the approvals door would (#22559, `request-read-gate.ts`).
     apiMethods: ['get', 'list'],
+    // [#32442, ruling A] An approver's agent reads the requests waiting on
+    // them with the MCP record tools (list, describe, query, get one,
+    // aggregate), as the console's My Pending list does. Read only: every gate
+    // above still decides the rows and their values (the caller's permissions,
+    // `request-read-gate.ts`, the payload redaction), and no MCP write tool
+    // opens this object; a decision goes through the decide actions, which
+    // declare their own `ai.exposed`. `sys_approval_action` declares nothing:
+    // an approver lists and decides without reading the decision trail.
+    aiReadable: true,
   },
 });

@@ -30,7 +30,12 @@
  *    action tools yield PER ACTION: a `sys_*` action whose author declared
  *    `ai.exposed: true` (the bridge attests it as `aiExposed`) is listed and
  *    run like any other exposed action (#27681, ADR-0011) — no other key and
- *    no deployment switch opens one.
+ *    no deployment switch opens one. The READ tools (list, describe, query,
+ *    get one, aggregate) yield PER OBJECT the same way: a `sys_*` object whose
+ *    author declared `enable.aiReadable: true` (the bridge attests it through
+ *    `isAiReadExposed`, {@link McpDataBridge.aiReadExposed}) is read like any
+ *    other object, under every later gate (#32442). No write tool ever opens a
+ *    `sys_*` object.
  *  - The bridge is bound to the caller's principal; tools cannot widen it.
  *  - Errors are returned as tool errors (text), never thrown across the wire,
  *    and never include secrets.
@@ -140,6 +145,24 @@ export interface McpDataBridge {
    */
   listObjectsDiagnosed?(): Promise<DiagnosedObjectListing<McpObjectSummary>>;
   describeObject(name: string): Promise<unknown | null>;
+  /**
+   * [#32442, ruling A] Has the system object `name` opted its records into the
+   * AI READ tools? The bridge answers with `isAiReadExposed`
+   * (`@objectstack/spec/data`), the ONE reading of `enable.aiReadable`, over
+   * the object's whole served definition: the stored-metadata family answers
+   * `false` before the key is read, and only the boolean `true` opens.
+   *
+   * The read tools (`list_objects`, `describe_object`, `query_records`,
+   * `get_record`, `aggregate_records`) ask it only for a `sys_*` name their
+   * fail-closed guard would otherwise refuse. An attested object is then read
+   * exactly like a business object: AS the caller, under the caller's
+   * permissions, row-level security, the object's own read gates and field
+   * masking. It never opens a write: every write tool keeps refusing `sys_*`.
+   *
+   * OPTIONAL and fail-closed: a bridge that omits it, or whose answer throws,
+   * keeps every system object refused, exactly as before.
+   */
+  aiReadExposed?(name: string): Promise<boolean>;
   /**
    * [#28715] The fields of `name` that declare options — the fields a
    * formula's `label(record.<field>)` can answer on — or `null` when no such
@@ -469,6 +492,12 @@ const DEFAULT_MAX_LIMIT = 50;
 /** A `sys_`-prefixed object is a system table — off-limits to external agents. */
 function isSystemObject(name: string): boolean {
   return /^sys_/i.test(name);
+}
+
+/** `items` kept where `keep` answers true, asked concurrently, in order. */
+async function filterAsync<T>(items: readonly T[], keep: (item: T) => Promise<boolean>): Promise<T[]> {
+  const verdicts = await Promise.all(items.map(keep));
+  return items.filter((_, i) => verdicts[i]);
 }
 
 /**
@@ -2187,6 +2216,30 @@ export function registerObjectTools(
     }
     return undefined;
   };
+  /**
+   * [#32442] Does the bridge attest this system object's read opt-in
+   * ({@link McpDataBridge.aiReadExposed})? Fail-closed: no member, or a throw,
+   * is `false`.
+   */
+  const attestsAiRead = async (objectName: string): Promise<boolean> => {
+    if (typeof bridge.aiReadExposed !== 'function') return false;
+    try {
+      return (await bridge.aiReadExposed(objectName)) === true;
+    } catch {
+      return false;
+    }
+  };
+  /**
+   * [#32442] The guard of the READ tools only (`describe_object`,
+   * `query_records`, `get_record`, `aggregate_records`): {@link guard}, except
+   * that a `sys_*` object the bridge attests as AI-readable is admitted. Every
+   * write tool keeps {@link guard}, so no declaration opens a system write.
+   */
+  const readGuard = async (objectName: string): Promise<string | undefined> => {
+    const bad = guard(objectName);
+    if (bad === undefined || !isSystemObject(objectName)) return bad;
+    return (await attestsAiRead(objectName)) ? undefined : bad;
+  };
 
   if (canRead) {
     server.registerTool(
@@ -2225,9 +2278,11 @@ export function registerObjectTools(
           const diagnosed = bridge.listObjectsDiagnosed
             ? await bridge.listObjectsDiagnosed()
             : { objects: await bridge.listObjects(), degraded: false, errors: [] };
+          // [#32442] A system object is listed only where the bridge attests
+          // its read opt-in, the same admission `readGuard` makes.
           const visible = allowSystem
             ? diagnosed.objects
-            : diagnosed.objects.filter((o) => !isSystemObject(o.name));
+            : await filterAsync(diagnosed.objects, async (o) => !isSystemObject(o.name) || await attestsAiRead(o.name));
           if (!diagnosed.degraded) {
             return textResult({ objects: visible, totalCount: visible.length });
           }
@@ -2261,7 +2316,7 @@ export function registerObjectTools(
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       async ({ objectName }) => {
-        const bad = guard(objectName);
+        const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
           const def = await bridge.describeObject(objectName);
@@ -2441,7 +2496,13 @@ export function registerObjectTools(
       {
         description:
           'Query records from an object with optional filter, field selection, sorting and pagination. ' +
-          'Runs under the caller\'s permissions and row-level security.',
+          'Runs under the caller\'s permissions and row-level security. ' +
+          'A filter value "{current_user_id}" stands for you. ' +
+          // [#32442] The console's My Pending list, filter for filter: the
+          // participant read alone also serves requests the caller submitted
+          // or already decided, so an agent must not guess "mine" from it.
+          'The approvals waiting on you (where the app has approvals): objectName "sys_approval_request", where ' +
+          '{"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}; decide one with run_action.',
         inputSchema: strictToolInput(
           {
             surface: 'this query_records call',
@@ -2487,7 +2548,7 @@ export function registerObjectTools(
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       async ({ objectName, where, fields, limit, offset, orderBy }) => {
-        const bad = guard(objectName);
+        const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
           const result = await bridge.query(objectName, {
@@ -2588,7 +2649,7 @@ export function registerObjectTools(
           annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
         },
         async ({ objectName, aggregations, groupBy, where, timezone }) => {
-          const bad = guard(objectName);
+          const bad = await readGuard(objectName);
           if (bad) return errorResult(bad);
           try {
             const rows = (await aggregateFn(objectName, {
@@ -2626,7 +2687,7 @@ export function registerObjectTools(
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       async ({ objectName, recordId }) => {
-        const bad = guard(objectName);
+        const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
           const record = await bridge.get(objectName, recordId);
