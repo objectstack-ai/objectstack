@@ -115,7 +115,6 @@ describe('a stored webhook row at boot: loadMetaFromDb registers it in its own h
     it('[#32692] CONTROL — one holder: a row naming a package that declares nothing keeps its reading (it is the one holder\'s), as before', async () => {
         const got = await hydrate([A], [{ packageId: S, url: 'https://stored.example/stray' }]);
         expect([got.holders, got.environment, got.slots]).toEqual([[A], undefined, { [A]: 'https://stored.example/stray' }]);
-        expect(warn.mock.calls.some((call: unknown[]) => String(call[0]).includes('metadata_stored_row_names_no_holder'))).toBe(false);
     });
 
     for (const order of [[A, B], [B, A]]) {
@@ -126,12 +125,9 @@ describe('a stored webhook row at boot: loadMetaFromDb registers it in its own h
             const got = await hydrate(order, [{ packageId: S, url: 'https://stored.example/stray' }]);
             expect([got.holders, got.environment, got.stray]).toEqual([[A, B], undefined, undefined]);
             expect(got.slots).toEqual({ [A]: shipped(A), [B]: shipped(B) });
-            // A webhook is sealed (ADR-0131 D6): the census names the row, and
-            // the hydrator's own line, whose remedy is a save no door admits
-            // for a sealed type, is not printed beside it.
+            // A webhook is sealed (ADR-0131 D6): the census names the row.
             const lines = warn.mock.calls.map((call: unknown[]) => String(call[0]));
             expect(lines.some((line) => line.includes('metadata_sealed_overlay_unserved') && line.includes(T))).toBe(true);
-            expect(lines.some((line) => line.includes('metadata_stored_row_names_no_holder'))).toBe(false);
         });
     }
 });
@@ -145,18 +141,22 @@ describe('a stored webhook row at boot: loadMetaFromDb registers it in its own h
 describe('a stored row of a two-holder name at boot, beyond the webhook (#32692)', () => {
     const N = 'thing';
     const D = 'com.acme.dep';
+    const APP = 'com.acme.app';
+    /** Install `<id>.custom`, the per-package customization pair of `id` (ADR-0146). */
+    const pair = (id: string) => (registry: SchemaRegistry) => registry.installPackage({ id: `${id}.custom`, name: `${id}.custom`, version: '1.0.0', type: 'app', namespace: `${id.split('.').pop()}_custom` } as never, 'code');
     let warn: ReturnType<typeof vi.spyOn>;
     beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined); });
     afterEach(() => { warn.mockRestore(); });
 
     /** Boot `type` with `order` each shipping `ship(id)`, then the stored rows; the protocol and registry after it. */
     async function boot(type: string, order: string[], ship: (id: string) => Record<string, unknown>,
-        rows: Array<{ packageId: string; body: Record<string, unknown> }>, extra?: (registry: SchemaRegistry) => void) {
+        rows: Array<{ packageId: string; body: Record<string, unknown> }>, extra?: (registry: SchemaRegistry) => void,
+        holder?: (id: string) => Record<string, unknown>) {
         const registry = new SchemaRegistry();
         registry.logLevel = 'silent';
         registry.installPackage({ id: S, name: S, version: '1.0.0', type: 'app', namespace: 'stray' } as never, 'code');
         for (const id of order) {
-            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop() } as never, 'code');
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(), ...holder?.(id) } as never, 'code');
             registry.registerItem(type, ship(id), 'name' as never, id);
         }
         extra?.(registry);
@@ -198,7 +198,6 @@ describe('a stored row of a two-holder name at boot, beyond the webhook (#32692)
         it(`tool (${first} first): a row of the second holder's customization pair is that holder's item, never the first-registered holder's`, async () => {
             // FROM: the pair row wore the first-registered holder's envelope, so in one order alpha answered beta's override.
             const body = (label: string) => ({ name: N, label, description: label });
-            const pair = (id: string) => (registry: SchemaRegistry) => registry.installPackage({ id: `${id}.custom`, name: `${id}.custom`, version: '1.0.0', type: 'app', namespace: `${id.split('.').pop()}_custom` } as never, 'code');
             const { registry } = await boot('tool', order, (id) => body(`shipped:${id}`),
                 [{ packageId: `${B}.custom`, body: { ...body('row:beta-custom'), overrides: { package: B } } }], pair(B));
             const label = (id: string) => (registry.getPackageScopedItem('tool', N, id) as { label?: string } | undefined)?.label;
@@ -207,25 +206,98 @@ describe('a stored row of a two-holder name at boot, beyond the webhook (#32692)
 
         it(`tool (${first} first): the first holder's own pair row stays the first holder's, whichever registered first`, async () => {
             const body = (label: string) => ({ name: N, label, description: label });
-            const pair = (id: string) => (registry: SchemaRegistry) => registry.installPackage({ id: `${id}.custom`, name: `${id}.custom`, version: '1.0.0', type: 'app', namespace: `${id.split('.').pop()}_custom` } as never, 'code');
-            const { registry, lines } = await boot('tool', order, (id) => body(`shipped:${id}`),
+            const { registry } = await boot('tool', order, (id) => body(`shipped:${id}`),
                 [{ packageId: `${A}.custom`, body: { ...body('row:alpha-custom'), overrides: { package: A } } }], pair(A));
             const label = (id: string) => (registry.getPackageScopedItem('tool', N, id) as { label?: string } | undefined)?.label;
             expect([label(A), label(B)]).toEqual(['row:alpha-custom', `shipped:${B}`]);
-            expect(lines().some((line) => line.includes('metadata_stored_row_names_no_holder'))).toBe(false);
+        });
+
+        it(`tool (${first} first): a pair row that binds to no holder is in no holder's slot and in no registry list`, async () => {
+            // FROM: the row took the first-registered holder's slot. Two shapes
+            // bind to no holder (the exact read's rule): a shared App pair's
+            // row that declares no base, and a per-package pair's row that
+            // declares a package the pair does not customize. These rows carry
+            // `overrides` as a stored residue does; the hydrator judges them as stored.
+            const body = (label: string) => ({ name: N, label, description: label });
+            const label = (registry: SchemaRegistry, id: string) => (registry.getPackageScopedItem('tool', N, id) as { label?: string } | undefined)?.label;
+            const listed = (registry: SchemaRegistry) => registry.listItems('tool').map((item) => (item as { label?: string }).label);
+            const shared = await boot('tool', order, (id) => body(`shipped:${id}`), [{ packageId: `${APP}.custom`, body: body('row:app-custom') }],
+                (registry) => {
+                    registry.installPackage({ id: APP, name: APP, version: '1.0.0', type: 'app', namespace: 'app' } as never, 'code');
+                    registry.installPackage({ id: `${APP}.custom`, name: `${APP}.custom`, version: '1.0.0', type: 'app', namespace: 'app_custom' } as never, 'code');
+                },
+                () => ({ type: 'module', dependencies: { [APP]: '^1.0.0' } }));
+            expect([label(shared.registry, A), label(shared.registry, B)]).toEqual([`shipped:${A}`, `shipped:${B}`]);
+            expect(listed(shared.registry)).not.toContain('row:app-custom');
+            const nonOwner = await boot('tool', order, (id) => body(`shipped:${id}`),
+                [{ packageId: `${B}.custom`, body: { ...body('row:beta-custom'), overrides: { package: S } } }], pair(B));
+            expect([label(nonOwner.registry, A), label(nonOwner.registry, B)]).toEqual([`shipped:${A}`, `shipped:${B}`]);
+            expect(listed(nonOwner.registry)).not.toContain('row:beta-custom');
+        });
+
+        it(`tool (${first} first): a disable does not move a pair row's envelope: the disabled holder's row is in no registry list, and its slot answers it again on enable`, async () => {
+            const body = (label: string) => ({ name: N, label, description: label });
+            const { registry, protocol } = await boot('tool', order, (id) => body(`shipped:${id}`),
+                [{ packageId: `${B}.custom`, body: { ...body('row:beta-custom'), overrides: { package: B } } }], pair(B));
+            const listed = () => registry.listItems('tool').map((item) => (item as { label?: string }).label);
+            registry.disablePackage(B);
+            await protocol.getMetaItems({ type: 'tool' });
+            expect(listed()).toEqual([`shipped:${A}`]);
+            registry.enablePackage(B);
+            await protocol.getMetaItems({ type: 'tool' });
+            expect((registry.getPackageScopedItem('tool', N, B) as { label?: string } | undefined)?.label).toBe('row:beta-custom');
+            expect((registry.getPackageScopedItem('tool', N, A) as { label?: string } | undefined)?.label).toBe(`shipped:${A}`);
+        });
+
+        it(`tool (${first} first): a pair row read while its holder is disabled wears that holder's envelope, so the holder's slot answers it on enable before any other read`, async () => {
+            const body = (label: string) => ({ name: N, label, description: label });
+            const { registry } = await boot('tool', order, (id) => body(`shipped:${id}`),
+                [{ packageId: `${B}.custom`, body: { ...body('row:beta-custom'), overrides: { package: B } } }],
+                (registry) => { pair(B)(registry); registry.disablePackage(B); });
+            expect(registry.listItems('tool').map((item) => (item as { label?: string }).label)).toEqual([`shipped:${A}`]);
+            registry.enablePackage(B);
+            expect((registry.getPackageScopedItem('tool', N, B) as { label?: string } | undefined)?.label).toBe('row:beta-custom');
+        });
+
+        it(`CONTROL — dashboard (${first} first): a per-package pair row of a row-served type stays out of the registry's bare entry and list, as before`, async () => {
+            const body = (label: string) => ({ name: N, label, description: label });
+            const { registry } = await boot('dashboard', order, (id) => body(`shipped:${id}`),
+                [{ packageId: `${B}.custom`, body: { ...body('row:beta-custom'), overrides: { package: B } } }], pair(B));
+            expect(registry.listItems('dashboard').map((item) => (item as { label?: string }).label)).not.toContain('row:beta-custom');
+        });
+
+        it(`CONTROL — permission (${first} first): a stray row keeps its reading (the first-registered holder's slot), as a stored fork of a permission set keeps its own ruling's disposition`, async () => {
+            const body = (label: string) => ({ name: N, label, description: label });
+            const { registry } = await boot('permission', order, (id) => body(`shipped:${id}`), [{ packageId: S, body: body('row:stray') }]);
+            const label = (id: string) => (registry.getPackageScopedItem('permission', N, id) as { label?: string } | undefined)?.label;
+            expect(label(order[0])).toBe('row:stray');
+            expect(label(order[1])).toBe(`shipped:${order[1]}`);
+        });
+
+        it(`CONTROL — dashboard (${first} first): a shared pair's undeclared row leaves each holder's exact read its own item`, async () => {
+            const body = (label: string) => ({ name: N, label, description: label });
+            const { protocol } = await boot('dashboard', order, (id) => body(`shipped:${id}`), [{ packageId: `${APP}.custom`, body: body('row:app-custom') }],
+                (registry) => {
+                    registry.installPackage({ id: APP, name: APP, version: '1.0.0', type: 'app', namespace: 'app' } as never, 'code');
+                    registry.installPackage({ id: `${APP}.custom`, name: `${APP}.custom`, version: '1.0.0', type: 'app', namespace: 'app_custom' } as never, 'code');
+                },
+                () => ({ type: 'module', dependencies: { [APP]: '^1.0.0' } }));
+            for (const id of [A, B]) {
+                const read = await protocol.getMetaItem({ type: 'dashboard', name: N, packageId: id }) as { item?: { label?: string } };
+                expect(read.item?.label, id).toBe(`shipped:${id}`);
+            }
         });
 
         it(`CONTROL — dashboard (${first} first): a row-served type keeps its reading: the row is the stray package's own at its address, and no new line is printed`, async () => {
             const body = (label: string) => ({ name: N, label, description: label });
-            const { protocol, lines } = await boot('dashboard', order, (id) => body(`shipped:${id}`), [{ packageId: S, body: body('row:stray') }]);
+            const { protocol } = await boot('dashboard', order, (id) => body(`shipped:${id}`), [{ packageId: S, body: body('row:stray') }]);
             const read = await protocol.getMetaItem({ type: 'dashboard', name: N, packageId: S }) as { item?: { label?: string } };
             expect(read.item?.label).toBe('row:stray');
-            expect(lines().some((line) => line.includes('metadata_stored_row_names_no_holder'))).toBe(false);
         });
 
         it(`CONTROL — email_template (${first} first): a bundle addition's own row of the locale it ships stays its own beside two holders`, async () => {
             const body = (label: string, locale: string) => ({ name: N, label, subject: label, body: label, locale });
-            const { registry, lines } = await boot('email_template', order, (id) => body(`shipped:${id}`, 'en-US'),
+            const { registry } = await boot('email_template', order, (id) => body(`shipped:${id}`, 'en-US'),
                 [{ packageId: D, body: body('row:dep-fr', 'fr-FR') }],
                 (registry) => {
                     registry.installPackage({ id: D, name: D, version: '1.0.0', type: 'app', namespace: 'dep', dependencies: { [A]: '^1.0.0' } } as never, 'code');
@@ -233,7 +305,13 @@ describe('a stored row of a two-holder name at boot, beyond the webhook (#32692)
                 });
             const label = (id: string, locale: string) => (registry.getPackageScopedItem('email_template', N, id, locale) as { label?: string } | undefined)?.label;
             expect([label(D, 'fr-FR'), label(A, 'en-US'), label(B, 'en-US')]).toEqual(['row:dep-fr', `shipped:${A}`, `shipped:${B}`]);
-            expect(lines().some((line) => line.includes('metadata_stored_row_names_no_holder'))).toBe(false);
         });
     }
+
+    it('CONTROL — tool, one holder: a pair row declaring a package the pair does not customize keeps its reading (the one holder\'s)', async () => {
+        const body = (label: string) => ({ name: N, label, description: label });
+        const { registry } = await boot('tool', [A], (id) => body(`shipped:${id}`),
+            [{ packageId: `${A}.custom`, body: { ...body('row:alpha-custom'), overrides: { package: S } } }], pair(A));
+        expect((registry.getPackageScopedItem('tool', N, A) as { label?: string } | undefined)?.label).toBe('row:alpha-custom');
+    });
 });

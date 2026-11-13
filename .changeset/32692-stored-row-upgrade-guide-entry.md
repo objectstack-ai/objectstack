@@ -2,7 +2,7 @@
 '@objectstack/spec': patch
 ---
 
-docs(spec): the protocol upgrade guide names what a holder's registry item answers when a stored row of its name is bound to a package that holds none of it, or to another holder's customization pair, while two packages hold the name: its own item (ADR-0150 D4)
+docs(spec): the protocol upgrade guide names what a holder's registry item answers when a stored row of its name is bound to a package that holds none of it, or to a customization pair, while two packages hold the name: its own item or its override (ADR-0150 D4)
 
 Clause-②: no
 Metadata-protocol: none
