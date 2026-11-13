@@ -375,7 +375,8 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                 const result = await p.historyMetaItem(historyRequest);
                 res.json(result);
             } catch (error: any) {
-                handleRouteError(res, error);
+                // [#32905] A two-holder refusal names its holders (`details.candidates`), as the by-name reads do.
+                handleRouteError(res, error, undefined, { packageScopedCandidates: true });
             }
         },
         metadata: {
@@ -876,7 +877,8 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                 });
                 res.json(result);
             } catch (error: any) {
-                handleRouteError(res, error);
+                // [#32905] A two-holder refusal names its holders (`details.candidates`), as the by-name reads do.
+                handleRouteError(res, error, undefined, { packageScopedCandidates: true });
             }
         },
         metadata: {

@@ -914,6 +914,7 @@
     "api/HistoryMetaItemRequest:limit",
     "api/HistoryMetaItemRequest:member",
     "api/HistoryMetaItemRequest:name",
+    "api/HistoryMetaItemRequest:packageId",
     "api/HistoryMetaItemRequest:sinceSeq",
     "api/HistoryMetaItemRequest:type",
     "api/HistoryMetaItemResponse:events",
