@@ -54,6 +54,12 @@
 
 import { platformLocaleTagOf, type PlatformLocaleTag } from '@objectstack/spec/system';
 import { SECURITY_POSTURE_USER_TEXT } from './validate-security-posture.user-text.js';
+import { APPROVAL_APPROVERS_USER_TEXT } from './validate-approval-approvers.user-text.js';
+import { FLOW_TRIGGER_READINESS_USER_TEXT } from './validate-flow-trigger-readiness.user-text.js';
+import { FLOW_TEMPLATE_PATHS_USER_TEXT } from './validate-flow-template-paths.user-text.js';
+import { FLOW_NODE_WRITES_USER_TEXT } from './validate-flow-node-writes.user-text.js';
+import { READONLY_FLOW_WRITES_USER_TEXT } from './validate-readonly-flow-writes.user-text.js';
+import { FLOW_CREDENTIAL_LITERALS_USER_TEXT } from './lint-flow-credential-literals.user-text.js';
 
 /**
  * The names a finding's user sentence interpolates — object, field and
@@ -153,7 +159,16 @@ export function mergeUserTextCatalogs(...catalogs: readonly UserTextCatalog[]): 
  * Every rule's user sentences, merged from the producers' own catalogs. A
  * producer that starts authoring user sentences adds its catalog here.
  */
-export const FINDING_USER_TEXT_CATALOG: UserTextCatalog = mergeUserTextCatalogs(SECURITY_POSTURE_USER_TEXT);
+export const FINDING_USER_TEXT_CATALOG: UserTextCatalog = mergeUserTextCatalogs(
+  SECURITY_POSTURE_USER_TEXT,
+  // The automation writes: approval, flow trigger and flow node advisories.
+  APPROVAL_APPROVERS_USER_TEXT,
+  FLOW_TRIGGER_READINESS_USER_TEXT,
+  FLOW_TEMPLATE_PATHS_USER_TEXT,
+  FLOW_NODE_WRITES_USER_TEXT,
+  READONLY_FLOW_WRITES_USER_TEXT,
+  FLOW_CREDENTIAL_LITERALS_USER_TEXT,
+);
 
 /**
  * A finding's user-facing sentence in the first of `locales` its rule has a
