@@ -22,6 +22,7 @@
  * produced no finding.
  */
 import { describe, it, expect } from 'vitest';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import { runAuthoringRules } from './authoring-rules.js';
 import { validateWidgetBindings, WIDGET_DATASET_UNKNOWN, WIDGET_MEASURE_UNKNOWN } from './validate-widget-bindings.js';
 
@@ -153,6 +154,33 @@ describe('widget-dataset-unknown — a sibling package’s dataset resolves thro
     expect(datasetUnknown(asPackageStack(appOnLibrary('book_metrics', ['book_count']), [libraryBody]))).toEqual([]);
   });
 
+  it('REPORTS, not refuses, when the reader declares a dependency the artifact does not carry (S1)', () => {
+    const app = appBody('product_metrics', ['product_count'], { dependencies: { 'com.example.elsewhere': '^1.0.0' } });
+    const findings = datasetUnknown(asPackageStack(app, [revenueBody]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].message).toContain('not judged: it may come from "com.example.elsewhere", a dependency this artifact does not carry');
+    // Nothing is said about what the installed read answers: the outside package may serve it.
+    expect(findings[0].message).not.toContain('409');
+    expect(findings[0].hint).toContain('If that package holds "product_metrics", nothing is wrong. Otherwise:');
+    expect(findings[0].hint).toContain('dependency cycle');
+    // The suppression a warning takes is open to the author once the outside package is confirmed.
+    const suppressed = appBody('product_metrics', ['product_count'], { dependencies: { 'com.example.elsewhere': '^1.0.0' } });
+    (suppressed.dashboards[0].widgets[0] as Record<string, unknown>).suppressWarnings = [WIDGET_DATASET_UNKNOWN];
+    expect(datasetUnknown(asPackageStack(suppressed, [revenueBody]))).toEqual([]);
+  });
+
+  it('an outside dependency never softens an ambiguity: two holders inside the closure stay refused (S1)', () => {
+    const second = { ...libraryBody, id: 'com.example.second', datasets: [{ ...libraryBody.datasets[0] }] };
+    const app = appBody('book_metrics', ['book_count'], {
+      dependencies: { 'com.example.library': '^1.0.0', 'com.example.second': '^1.0.0', 'com.example.elsewhere': '^1.0.0' },
+    });
+    const findings = datasetUnknown(asPackageStack(app, [libraryBody, second]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toContain('in the declared dependency closure');
+  });
+
   it('still REFUSES a dataset NO package of the artifact declares, as before', () => {
     const findings = datasetUnknown(asPackageStack(appBody('product_nowhere'), [revenueBody]));
     expect(findings).toHaveLength(1);
@@ -181,9 +209,44 @@ describe('widget-dataset-unknown — a sibling package’s dataset resolves thro
     expect(findings.filter((f) => f.path.startsWith('datasets['))).toEqual([]);
   });
 
-  it('a stack whose manifest is none of its bodies (the union run) reads every body, as before', () => {
-    const union = { ...appBody('product_metrics'), manifest: { id: 'com.example.suite' }, packages: [{ manifest: revenueBody }, { manifest: appBody('product_metrics') }] };
+  it('the union run of a `manifest: \'preserve\'` composition with a residual top-level dataset reads every body, as before (M2)', () => {
+    // The shape the doors hand the rule (review 6857932402 M2): the composition
+    // keeps the LAST input's manifest, whose id names the app's body, and a
+    // top-level `datasets` (the residual ADR-0130 D4 registers under that id)
+    // stops the union fold from folding the bodies' datasets. The module's
+    // dashboard on the module's OWN dataset, the module depending on the app,
+    // must stay accepted: the runtime serves it.
+    const module = defineStack({
+      manifest: { id: REVENUE, namespace: 'crm', name: 'revenue', version: '1.0.0', type: 'module', dependencies: { [APP]: '^1.0.0' } },
+      objects: revenueBody.objects,
+      datasets: revenueBody.datasets,
+      dashboards: appBody('product_metrics').dashboards,
+    } as never);
+    const app = defineStack({
+      manifest: { id: APP, namespace: 'crm', name: 'hotcrm', version: '1.0.0', type: 'app' },
+      objects: [{ name: 'crm_account', fields: { name: { type: 'text' } } }],
+    } as never);
+    const composed = composeStacks([module, app], { manifest: 'preserve' }) as unknown as Record<string, unknown> & {
+      manifest: { id: string };
+      packages: Array<{ manifest: Record<string, unknown> }>;
+    };
+    expect(composed.manifest.id).toBe(APP);
+    const residual = {
+      name: 'account_metrics', object: 'crm_account',
+      measures: [{ name: 'account_count', label: 'Accounts', aggregate: 'count' }],
+      dimensions: [{ name: 'name', field: 'name' }],
+    };
+    // `authoringRuleUnionStack` (cli): a top-level key already present is kept, an absent one is folded from the bodies.
+    const union = {
+      ...composed,
+      datasets: [residual],
+      dashboards: composed.packages.flatMap((p) => (p.manifest.dashboards as unknown[] | undefined) ?? []),
+    };
+    expect(union.dashboards).toHaveLength(1);
     expect(datasetUnknown(union)).toEqual([]);
+    // CONTROL: the same manifest handed as the app's body itself IS the per-package pass, and refuses nothing here either.
+    const appEntry = composed.packages.find((p) => p.manifest.id === APP)!.manifest;
+    expect(datasetUnknown({ ...appEntry, manifest: appEntry, packages: composed.packages })).toEqual([]);
   });
 
   it('reaches the rule table the per-package pass runs', () => {

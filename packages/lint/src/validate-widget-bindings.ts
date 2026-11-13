@@ -747,6 +747,15 @@ export interface ArtifactDatasetResolution {
   callerPackageId?: string;
   /** Does `holder`'s own declared closure reach the judged package, so declaring `holder` back is a cycle? */
   dependsOnCaller(holder: string): boolean;
+  /**
+   * [#32967 S1] The judged package's declared dependencies this artifact does
+   * not carry, in declaration order. Any one of them may hold a name the
+   * artifact holds only outside the closure, and the installed read then
+   * resolves there, so an `outside-closure` name is reported, not refused,
+   * while this is non-empty (the reading `picklist-references.ts` takes).
+   * Empty outside the per-package pass.
+   */
+  outsideDependencies: string[];
 }
 
 /**
@@ -769,15 +778,25 @@ export interface ArtifactDatasetResolution {
  * `?callerPackage=` by, read over the artifact's bodies as
  * `picklist-references.ts` reads them. The release artifact is the
  * co-ownership boundary, not a resolution scope. So on the per-package pass
- * (`stack.manifest.id` names one of the bodies) a name held only outside that
+ * (`stack.manifest` IS one of the bodies, as `packageBodyAsStack` hands it) a name held only outside that
  * closure, or by two packages inside it, is {@link ArtifactDatasetResolution.refused}
  * and resolves to nothing, where #25514 accepted every body and the installed
  * dashboard answered `409 RESOURCE_CONFLICT`.
  *
- * Any other stack (the union run, whose folded collections carry no package
- * provenance, or a stack whose manifest is none of its bodies) reads every
- * body, first declaration winning, as before: the per-package pass is the one
- * that knows the reader's package.
+ * Any other stack reads every body, first declaration winning, as before:
+ * the union run, whose folded collections carry no package provenance even
+ * when its manifest's id names a body (a `manifest: 'preserve'` composition
+ * keeps the last input's manifest beside that input's assembled body, a
+ * different object), and a stack without `packages[]`. The per-package pass
+ * is the one that knows the reader's package.
+ *
+ * [#32967 S1] A name held only outside the closure is refused only when the
+ * judged package declares no dependency the artifact does not carry. When it
+ * declares one, that package may hold the name once installed, and the read
+ * resolves there: {@link ArtifactDatasetResolution.outsideDependencies} names
+ * them, and the binding is reported, never refused. Two holders inside the
+ * closure stay refused whatever is installed: an outside package can add a
+ * holder, never remove one.
  */
 export function indexArtifactDatasetResolution(stack: AnyRec): ArtifactDatasetResolution {
   const resolvable = new Map<string, AnyRec>();
@@ -792,8 +811,13 @@ export function indexArtifactDatasetResolution(stack: AnyRec): ArtifactDatasetRe
     const id = (body as AnyRec).id;
     bodies.push({ id: typeof id === 'string' && id !== '' ? id : undefined, body: body as AnyRec });
   }
-  const ownId = (stack.manifest as AnyRec | undefined)?.id;
-  const callerPackageId = typeof ownId === 'string' && bodies.some((b) => b.id === ownId) ? ownId : undefined;
+  // [#32967 M2] The per-package pass hands the body ITSELF as `manifest`
+  // (`packageBodyAsStack`). An id match is not enough: the union run of a
+  // `composeStacks(…, { manifest: 'preserve' })` artifact carries the last
+  // input's manifest, whose id names a body, and its folded dashboards belong
+  // to every package, not to that one.
+  const own = bodies.find((b) => b.body === stack.manifest);
+  const callerPackageId = own?.id;
   const byId = new Map<string, { manifest: AnyRec }>();
   for (const b of bodies) if (b.id !== undefined && !byId.has(b.id)) byId.set(b.id, { manifest: b.body });
   const registry: PackageClosureRegistry = {
@@ -809,8 +833,12 @@ export function indexArtifactDatasetResolution(stack: AnyRec): ArtifactDatasetRe
         if (typeof ds.name === 'string' && !resolvable.has(ds.name)) resolvable.set(ds.name, ds);
       }
     }
-    return { resolvable, refused, dependsOnCaller };
+    return { resolvable, refused, dependsOnCaller, outsideDependencies: [] };
   }
+  const declared = own?.body.dependencies;
+  const outsideDependencies = declared && typeof declared === 'object' && !Array.isArray(declared)
+    ? Object.keys(declared).filter((id) => id !== callerPackageId && !byId.has(id))
+    : [];
 
   // Every other package's holdings, by name: who holds it inside the
   // caller's reach, who outside. The caller's own body is `stack.datasets`.
@@ -835,7 +863,7 @@ export function indexArtifactDatasetResolution(stack: AnyRec): ArtifactDatasetRe
     else if (inside.length > 1) refused.set(name, { reason: 'ambiguous-in-closure', holders: inside.map((h) => h.id) });
     else refused.set(name, { reason: 'outside-closure', holders: outside });
   }
-  return { resolvable, refused, callerPackageId, dependsOnCaller };
+  return { resolvable, refused, callerPackageId, dependsOnCaller, outsideDependencies };
 }
 
 /**
@@ -886,6 +914,33 @@ export function datasetRefusalWording(
         : `Declare a dependency on the one package whose dataset this ${reader} means (` +
           `${declarable.map((id) => `"${id}"`).join(', ')}); depending on more than one leaves the name ambiguous (ADR-0141)`) +
       `, or ${moveIn}.`,
+  };
+}
+
+/**
+ * [#32967 S1] The report for an `outside-closure` name when the judged
+ * package declares dependencies this artifact does not carry
+ * ({@link ArtifactDatasetResolution.outsideDependencies}): one of them may
+ * hold the name, so nothing here says what the installed read answers. The
+ * hint is the refusal's own fix, conditional on none of them holding it.
+ */
+export function datasetUnverifiedWording(
+  resolution: ArtifactDatasetResolution,
+  dsName: string,
+  reader: string,
+): { message: string; hint: string } {
+  const refusal = resolution.refused.get(dsName);
+  const holders = refusal?.holders ?? [];
+  const caller = resolution.callerPackageId ?? 'this package';
+  const outside = resolution.outsideDependencies.map((id) => `"${id}"`).join(', ');
+  const one = resolution.outsideDependencies.length === 1;
+  const fix = datasetRefusalWording(resolution, dsName, reader).hint;
+  return {
+    message:
+      `dataset "${dsName}" is held in this artifact only by ${holders.length === 1 ? 'package' : 'packages'} ` +
+      `${holders.map((id) => `"${id}"`).join(', ')}, outside the declared dependency closure of package "${caller}" — ` +
+      `not judged: it may come from ${outside}, ${one ? 'a dependency' : 'dependencies'} this artifact does not carry.`,
+    hint: `If ${one ? 'that package holds' : 'one of those packages holds'} "${dsName}", nothing is wrong. Otherwise: ${fix}`,
   };
 }
 
@@ -1212,7 +1267,13 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       // ── (a) dataset reference resolves ──
       const dsName = typeof w.dataset === 'string' ? w.dataset : undefined;
       const dataset = dsName ? datasets.get(dsName) : undefined;
-      if (dsName && !dataset && resolution.refused.has(dsName)) {
+      const refusal = dsName && !dataset ? resolution.refused.get(dsName) : undefined;
+      if (dsName && refusal?.reason === 'outside-closure' && resolution.outsideDependencies.length > 0) {
+        // [#32967 S1] A dependency this artifact does not carry may hold the
+        // name, and the installed read then resolves there: reported, never
+        // refused, as `picklist-references.ts` reports its twin.
+        push({ severity: 'warning', rule: WIDGET_DATASET_UNKNOWN, ...datasetUnverifiedWording(resolution, dsName, 'dashboard') });
+      } else if (dsName && refusal) {
         // [#32929] Declared in the artifact, but the runtime refuses this
         // package's read of it (ADR-0150 D3), so it is refused here.
         push({ severity: 'error', rule: WIDGET_DATASET_UNKNOWN, ...datasetRefusalWording(resolution, dsName, 'dashboard') });

@@ -18,6 +18,10 @@
 //      exits 0, and the module's reader is served 200.
 //   3. The dependency the old sentence asked for (the app declaring its own
 //      module) is a cycle the kernel refuses at boot.
+//
+// Plus two fences of review 6857932402: a residual top-level `datasets` beside
+// the composition leaves the union run as it was (M2), and an app declaring a
+// dependency the artifact does not carry is reported, not refused (S1).
 
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -36,12 +40,19 @@ const DATASET = 'sib_product_metrics';
 
 const widget = (id: string) => ({ id, type: 'bar', title: id, dataset: DATASET, dimensions: ['category'], values: ['list_price_sum'], layout: { x: 0, y: 0, w: 6, h: 4 } });
 
+/** A dependency no input of the artifact carries: an installed package may hold the dataset (#32967 S1). */
+const ELSEWHERE = 'com.qa.sib.elsewhere';
+
 /** The two input stacks, as plain configs: `appReads` puts the dashboard in the app package (HotCRM's shape). */
-function inputsFor(appDependsOnModule: boolean, appReads = true) {
+function inputsFor(appDependsOnModule: boolean, appReads = true, appDependsElsewhere = false) {
+  const dependencies = {
+    ...(appDependsOnModule ? { [REV]: '^1.0.0' } : {}),
+    ...(appDependsElsewhere ? { [ELSEWHERE]: '^1.0.0' } : {}),
+  };
   const app = {
     manifest: {
       id: APP, namespace: 'sib', name: 'qa_sib_app', version: '1.0.0', type: 'app',
-      ...(appDependsOnModule ? { dependencies: { [REV]: '^1.0.0' } } : {}),
+      ...(Object.keys(dependencies).length > 0 ? { dependencies } : {}),
     },
     objects: [{ name: 'sib_account', label: 'Account', sharingModel: 'public_read_write', fields: { name: { type: 'text', label: 'Name' } } }],
     ...(appReads ? { dashboards: [{ name: 'sib_overview', label: 'Overview', columns: 12, widgets: [widget('top_products')] }] } : {}),
@@ -69,15 +80,29 @@ function artifactFor(appDependsOnModule: boolean) {
 const CLI_BIN = join(dirname(createRequire(import.meta.url).resolve('@objectstack/cli/package.json')), 'bin', 'run.js');
 const SPEC_ROOT = dirname(createRequire(import.meta.url).resolve('@objectstack/spec/package.json'));
 
-/** `os validate` on the composed config an author writes (the `app-multi-package` shape), in a scratch directory. */
-function validate(appReads: boolean): { exitCode: number; output: string } {
+/** A top-level dataset no package body declares: the residual ADR-0130 D4 registers under the manifest's id. */
+const RESIDUAL = {
+  name: 'sib_account_metrics', label: 'Account metrics', object: 'sib_account',
+  dimensions: [{ name: 'name', label: 'Name', field: 'name', type: 'string' }],
+  measures: [{ name: 'account_count', label: 'Accounts', aggregate: 'count' }],
+};
+
+/**
+ * `os validate` on the composed config an author writes (the `app-multi-package` shape), in a scratch directory.
+ * `residual` adds a top-level `datasets` beside the composition's `packages[]` (#32967 M2); `elsewhere` has the
+ * app declare a dependency the artifact does not carry (#32967 S1).
+ */
+function validate(appReads: boolean, opts: { residual?: boolean; elsewhere?: boolean } = {}): { exitCode: number; output: string } {
   const dir = mkdtempSync(join(tmpdir(), 'dogfood-app-reads-module-validate-'));
   try {
-    const { module, app } = inputsFor(false, appReads);
+    const { module, app } = inputsFor(false, appReads, opts.elsewhere);
+    const composed = `composeStacks([defineStack(${JSON.stringify(module)}), defineStack(${JSON.stringify(app)})], { manifest: 'preserve' })`;
     writeFileSync(
       join(dir, 'objectstack.config.mjs'),
       "import { composeStacks, defineStack } from '@objectstack/spec';\n\n"
-        + `export default composeStacks([defineStack(${JSON.stringify(module)}), defineStack(${JSON.stringify(app)})], { manifest: 'preserve' });\n`,
+        + (opts.residual
+          ? `export default { ...${composed}, datasets: [${JSON.stringify(RESIDUAL)}] };\n`
+          : `export default ${composed};\n`),
     );
     mkdirSync(join(dir, 'node_modules', '@objectstack'), { recursive: true });
     symlinkSync(SPEC_ROOT, join(dir, 'node_modules', '@objectstack', 'spec'), 'dir');
@@ -103,6 +128,23 @@ describe('[#32967] os validate refuses what the runtime refuses: the app\'s dash
   it('cell 2: the dashboard moved into the module exits 0', () => {
     const run = validate(false);
     expect(run.exitCode, run.output).toBe(0);
+  }, 180_000);
+
+  it('M2: a residual top-level dataset leaves the union run unchanged: the module\'s dashboard on its own dataset exits 0', () => {
+    // The union run carries the app's manifest (the last input's) and, the top level
+    // holding `datasets`, folds only the bodies' dashboards: judged as the app's, the
+    // module's own dataset would be outside the app's closure.
+    const run = validate(false, { residual: true });
+    expect(run.exitCode, run.output).toBe(0);
+    expect(run.output).not.toContain('widget-dataset-unknown');
+  }, 180_000);
+
+  it('S1: HotCRM\'s shape with a dependency the artifact does not carry is reported, not refused (exit 0)', () => {
+    const run = validate(true, { elsewhere: true });
+    expect(run.exitCode, run.output).toBe(0);
+    expect(run.output).toContain('widget-dataset-unknown');
+    expect(run.output).toContain(`not judged: it may come from "${ELSEWHERE}"`);
+    expect(run.output).not.toContain('refused 409');
   }, 180_000);
 });
 
