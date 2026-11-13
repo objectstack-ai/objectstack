@@ -1246,8 +1246,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     async get(object, id) {
       const context = await resolvePrincipal();
       await enforceApiExposure(reads, object, GATED_ACTIONS.get, context);
-      // `null` rather than a throw: `get_record` owns the not-found wording on
-      // this path and already branches on a nullish record.
+      // `null` rather than a throw: `get_record` branches on a nullish record
+      // and refuses it with the shared `recordNotFoundError`, the value the
+      // HTTP bridge's `get` throws, so the two doors answer one coded 404.
       // [#21207] A stored metadata body is served as its type's projection,
       // and its stored content hash keyed (or not at all).
       return serveStoredMetadataHashes(
