@@ -560,6 +560,7 @@ import {
 import type { CelAstNode, CelBoundsOverrun, UnknownFunctionCall } from '@objectstack/formula';
 
 import { collectionEntries } from './collection-entries.js';
+import type { UserTextParams } from './finding-user-text.js';
 import { walkPageComponents } from './page-walk.js';
 import { COMPREHENSION_MACROS, bareRhsOnlyIdentifiers, schemaIdOf } from './predicate-rhs-position.js';
 import { formViewSites } from './view-walk.js';
@@ -646,6 +647,22 @@ export interface VisibilityFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's user-facing sentence interpolates, set at the
+   * `visibility-root-mislayered` push site only (the advisory the publish door
+   * returns); the sentence is `validate-visibility-predicates.user-text.ts`
+   * (`AuthoringFinding.userTextParams`).
+   */
+  userTextParams?: UserTextParams;
+}
+
+/**
+ * The element's owning surface, as the user sentence names it: the view or
+ * page, by the name the finding's `where` already shows.
+ */
+interface VisibilitySubject {
+  surface: 'view' | 'page';
+  name: string;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -1405,6 +1422,7 @@ function declaredPageVariables(page: AnyRec): Set<string> {
 function checkElement(
   el: AnyRec,
   where: string,
+  subject: VisibilitySubject,
   path: string,
   layer: VisibilityLayer,
   findings: VisibilityFinding[],
@@ -1427,6 +1445,9 @@ function checkElement(
       path,
       message: rule.message,
       hint: rule.hint,
+      // `root` selects the sentence: `data` on a runtime surface, `record` on
+      // a metadata-editing form.
+      userTextParams: { surface: subject.surface, name: subject.name, root: rule.forbiddenRoot },
     });
   }
 
@@ -1670,6 +1691,7 @@ export function validateVisibilityPredicates(
     const viewName = typeof view.name === 'string' ? view.name
       : typeof view.object === 'string' ? view.object
         : viewPath;
+    const viewSubject: VisibilitySubject = { surface: 'view', name: viewName };
 
     for (const site of formViewSites(view, viewPath)) {
       const where = site.surface ? `view "${viewName}" · ${site.surface}` : `view "${viewName}"`;
@@ -1700,13 +1722,13 @@ export function validateVisibilityPredicates(
           const sec = sections[s];
           if (!sec || typeof sec !== 'object') continue;
           const secPath = `${site.path}.${bucket}[${s}]`;
-          checkElement(sec as AnyRec, where, secPath, layer, findings, literalRhs);
+          checkElement(sec as AnyRec, where, viewSubject, secPath, layer, findings, literalRhs);
 
           const secFields = Array.isArray((sec as AnyRec).fields) ? ((sec as AnyRec).fields as unknown[]) : [];
           for (let f = 0; f < secFields.length; f++) {
             const entry = secFields[f];
             if (isFieldObject(entry)) {
-              checkElement(entry, where, `${secPath}.fields[${f}]`, layer, findings, literalRhs);
+              checkElement(entry, where, viewSubject, `${secPath}.fields[${f}]`, layer, findings, literalRhs);
             }
           }
         }
@@ -1734,13 +1756,14 @@ export function validateVisibilityPredicates(
   for (const { rec: page, path: pagePath } of collectionEntries(stack.pages, 'pages')) {
     const pageName = typeof page.name === 'string' ? page.name : undefined;
     const where = `page "${pageName ?? pagePath}"`;
+    const pageSubject: VisibilitySubject = { surface: 'page', name: pageName ?? pagePath };
     // #28725 — what `page.NAME` can resolve to on this page.
     const pageVariables = declaredPageVariables(page);
     for (const walked of walkPageComponents(page, pagePath)) {
       // No per-site derivation here: a page component declares no data source of
       // its own, so nothing in the metadata states a layer for it and
       // `opts.layer` is the only answer available (#7815).
-      checkElement(walked.component, where, walked.path, declaredLayer, findings, false, pageVariables);
+      checkElement(walked.component, where, pageSubject, walked.path, declaredLayer, findings, false, pageVariables);
     }
   }
 

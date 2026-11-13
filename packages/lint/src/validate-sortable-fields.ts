@@ -291,6 +291,7 @@ import {
   suggestName,
   type ObjectGraph,
 } from './object-graph.js';
+import type { UserTextParams } from './finding-user-text.js';
 import { walkPageComponents } from './page-walk.js';
 import { LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, columnSummaryRefusal } from './validate-list-view-field-refs.js';
 import { PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED } from './validate-page-field-bindings.js';
@@ -340,6 +341,13 @@ export interface SortableFieldFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's user-facing sentence interpolates, set at the
+   * page-sort `page-field-unprovisioned` push site (the advisory the page
+   * publish door returns); the sentence is the id owner's,
+   * `validate-page-field-bindings.user-text.ts` (`AuthoringFinding.userTextParams`).
+   */
+  userTextParams?: UserTextParams;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -694,6 +702,7 @@ function checkPageSortDeclaration(
   where: string,
   path: string,
   subject: string,
+  pageName: string,
 ): SortableFieldFinding[] {
   if (declared === undefined || declared === null || !objectName) return [];
   const projection = sortability.get(objectName);
@@ -716,6 +725,7 @@ function checkPageSortDeclaration(
             `${subject}: ${unprovisionedAnchorVerdict(objectName, name)}, so its ORDER BY is ` +
             'dropped and every fetch returns rows in an arbitrary order',
           hint: unprovisionedAnchorFix(objectName, name),
+          userTextParams: { page: pageName, object: objectName, field: name },
         });
       }
       // An author-DECLARED field of a system name is the author's own column,
@@ -772,10 +782,12 @@ function validatePageSorts(
   unprovisionedAnchors: ReadonlyMap<string, ReadonlySet<string>>,
 ): SortableFieldFinding[] {
   const findings: SortableFieldFinding[] = [];
-  const check = (declared: unknown, objectName: string | undefined, where: string, path: string, subject: string) => {
+  const check = (
+    declared: unknown, objectName: string | undefined, where: string, path: string, subject: string, pageName: string,
+  ) => {
     findings.push(
       ...checkPageSortDeclaration(
-        declared, objectName, fieldsByObject, sortability, unprovisionedAnchors, where, path, subject,
+        declared, objectName, fieldsByObject, sortability, unprovisionedAnchors, where, path, subject, pageName,
       ),
     );
   };
@@ -792,7 +804,7 @@ function validatePageSorts(
       const dataSource = isRec(component.dataSource) ? component.dataSource : undefined;
 
       if (dataSource) {
-        check(dataSource.sort, strName(dataSource.object), where, `${path}.dataSource.sort`, `${type} dataSource sort`);
+        check(dataSource.sort, strName(dataSource.object), where, `${path}.dataSource.sort`, `${type} dataSource sort`, pageName);
       }
       if (!props) continue;
       const objectProp = PAGE_BLOCK_SORT_OBJECT_PROP[type];
@@ -803,6 +815,7 @@ function validatePageSorts(
           where,
           `${path}.properties.sort`,
           `${type} sort`,
+          pageName,
         );
       }
       // The PARENT binding is declared on `record:related_list` alone.
@@ -815,6 +828,7 @@ function validatePageSorts(
           where,
           `${path}.properties.parentDataSource.sort`,
           `${type} parentDataSource sort`,
+          pageName,
         );
       }
     }
@@ -827,6 +841,7 @@ function validatePageSorts(
         `page "${pageName}" · interfaceConfig`,
         `pages[${pi}].interfaceConfig.sort`,
         'list-page sort',
+        pageName,
       );
     }
 
@@ -838,6 +853,7 @@ function validatePageSorts(
         `page "${pageName}" · record`,
         `pages[${pi}].record.sort`,
         'page record sort',
+        pageName,
       );
     }
   }

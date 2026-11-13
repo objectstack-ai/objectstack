@@ -56,6 +56,9 @@ import { platformLocaleTagOf, type PlatformLocaleTag } from '@objectstack/spec/s
 import { SECURITY_POSTURE_USER_TEXT } from './validate-security-posture.user-text.js';
 import { WIDGET_BINDINGS_USER_TEXT } from './validate-widget-bindings.user-text.js';
 import { CHART_BINDINGS_USER_TEXT } from './validate-chart-bindings.user-text.js';
+import { FORM_LAYOUT_USER_TEXT } from './validate-form-layout.user-text.js';
+import { VISIBILITY_PREDICATES_USER_TEXT } from './validate-visibility-predicates.user-text.js';
+import { PAGE_FIELD_BINDINGS_USER_TEXT } from './validate-page-field-bindings.user-text.js';
 
 /**
  * The names a finding's user sentence interpolates — object, field and
@@ -159,6 +162,9 @@ export const FINDING_USER_TEXT_CATALOG: UserTextCatalog = mergeUserTextCatalogs(
   SECURITY_POSTURE_USER_TEXT,
   WIDGET_BINDINGS_USER_TEXT,
   CHART_BINDINGS_USER_TEXT,
+  FORM_LAYOUT_USER_TEXT,
+  VISIBILITY_PREDICATES_USER_TEXT,
+  PAGE_FIELD_BINDINGS_USER_TEXT,
 );
 
 /**
