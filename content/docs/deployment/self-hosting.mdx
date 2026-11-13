@@ -70,9 +70,10 @@ its `ENV`.
 of the three on its own disk, it prints a warning block naming each file and the
 variable that moves it off that disk. Administrators also see it in the Console:
 a standing notice on the home page and at the top of Setup's System Overview,
-listing the same files with a button that copies the variables to set, plus two
-lower-severity lines when uploads are stored on the local disk or no email
-service is set up. Members never see it, and it is not on the public auth
+listing the same files with a button that copies the variables to set, plus a
+lower-severity line when uploads are stored on the local disk. Mail is optional
+and is not one of them: a deployment without an email service gets no line
+for it. Members never see it, and it is not on the public auth
 config (it is read from `GET /api/settings/deployment/notice`, which needs
 `manage_platform_settings`). An administrator can hide it: the hide is written
 to the audit log as a `config_change` (and refused where no audit log is

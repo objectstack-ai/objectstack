@@ -234,9 +234,11 @@ const booleanFlagRule = (unsetRequired: string) =>
  * skill's reference index (`gen:skill-refs`), for a describe string.
  *
  * The stored half states the inputs it may read: this record's own fields. A
- * stored expression reading another record is refused at authoring, and one
- * reading the clock or the acting user keeps the value it had at the write
- * (ruling 6816315099 on #32443), so neither appears here as an example.
+ * stored expression reading another record is warned at authoring
+ * (`stored-expression-cross-record-input`), and one reading the clock or the
+ * acting user keeps the value it had at the write and is warned at authoring
+ * too (`stored-expression-volatile-input`) (ruling 6816315099 on #32443), so
+ * neither appears here as an example.
  */
 const FORMULA_STORAGE_RULE =
   'A "formula" is computed on read and stored nowhere: it is shown everywhere, but a list cannot sort by it, search '
@@ -251,8 +253,8 @@ const STORED_EXPRESSION_RULE =
   + '销售额 = 销量 × 单价 is a "currency" field with "record.quantity * record.unit_price". Name the return type, not '
   + '"number" for every value: a date expression on a "number" field is refused at every write. A stored expression '
   + 'reads only this record\'s own fields: a value from a related record stays a "formula" (shown, not totalled) or '
-  + 'comes through a "summary" or a flow, and an input that changes over time (the current date, the acting user) '
-  + 'is frozen at the write.';
+  + 'is a snapshot field written by a flow on the related object when that value changes, and an input that changes '
+  + 'over time (the current date, the acting user) is frozen at the write.';
 
 /**
  * The refusal of a `defaultValue` that does not fit the field (ruling B on

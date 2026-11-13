@@ -36,14 +36,14 @@
 - 写序:认领一笔 `label-write --comment-file`,评论排首、标签随后;执行器首败即停,标签不先翻。
 - 评论存而标签未翻 ⇒ 非零退出;补标签用不带 `--comment-file` 的 `label-write`,⛔ 不重发评论。
 
-## 巡查常设项(每席巡查与总监席摘要)
+## 巡查常设项(每席巡查与总监席巡查)
 
-- 座位贴活性归总监席摘要:扫 `label:pm:seat` 挂 `🟢 <github-login>` 的贴,Routine 席读调度器。
+- 座位贴活性归总监席巡查:扫 `label:pm:seat` 挂 `🟢 <github-login>` 的贴,Routine 席读调度器。
 - 判据只认在任者自有产出(评论、认领、改正文)及其作者与时间戳,⛔ 收到的通知不算。
 - >24h 无自有产出 ⇒ 当场降级:改 `⏳ vacant` + 摘 assignee 同笔 + 证据评论(时间戳与链接)。
 - 跨账户复审:每席巡查跑 `node scripts/pm/check-owed-reviews.mjs`,TAKE 行剔除本账户署名的 PR。
 - 复核前落 `Contract-review-claim:` 行,形、失效、双认照 `contract-review.md`;有活认领 ⛔ 不双做。
-- 复核照 `contract-review.md`;PASS 同笔摘标记、FAIL 不摘;总监席摘要列等候逾 24h 的 PR。
+- 复核照 `contract-review.md`;PASS 同笔摘标记、FAIL 不摘;总监席巡查列等候逾 24h 的 PR。
 - 车道巡查同跑:hold/closed 解锁重验回队;本仓无卡 fork PR 按 `external-contributions.md` 立卡。
 
 ## 分诊席读数成本三则
@@ -127,7 +127,7 @@
 ## 卡线程(`mode:thread`)
 
 - 席位会话是项目线程(载 coordinator 通道工具)⇒ M 及以上、p1、`security` 卡一卡一线程。
-- S 级机械卡留席内 `mode:subagent`:开线程要重新克隆、重读技能与 `os-dev.md`,起步成本不值。
+- S 级机械卡留席内 `mode:subagent`:开线程要重新克隆、重读 `os-dev.md`,起步成本不值。
 - 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明;卡线程照计 `batch`。
 - 项目的 coordinator 跨席位统一调度卡线程;每席一个线程跑 PM 循环,卡线程即 dev。
 - 席位随时把候选卡交 coordinator,附优先级、派发令全文与建议 effort,⛔ 不等自己的槽位。
@@ -140,7 +140,7 @@
 - coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写卡 assignee。
 - 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领;线程核对最新认领指向本分支方开工。
 - 分支约定仍是 `claude/issue-<n>-<slug>`;线程只能推指定分支是实测平台例外,认领如实写。
-- worktree 照建;仓 `.claude/agents` 类型未加载(实测),线程照读 `os-dev.md`。
+- worktree 照建;线程读 `os-dev.md`、派发令、卡与全部评论,⛔ 不读 `SKILL.md`;references 按需读。
 - 交回:PR 与报告落地后给席位线程发一条消息(PR、head、报告要点);审核期线程不关,接 FAIL。
 
 ## 派发前置:前提核实,再把本地检出钉到 main
@@ -172,7 +172,7 @@
 - 衍生 sub-issue:认领席同笔写父卡域与优先级、附查重词后派发;父卡 checklist 评论记一行。
 - 无主阻塞项:只做 `Blocked-by:` 点名的那一张,做完即回,⛔ 不顺手接第二张。
 - 无主阻塞项的契约面(含 `packages/spec`)按 `contract-review.md` 欠达档复核记录。
-- 在飞阻塞项:等待者在阻塞卡留一行点名自卡;父卡 p0/p1 ⇒ 阻塞卡同笔升同级,沿链重复。
+- 在飞阻塞项:等待者在阻塞卡留行点名自卡;父卡 p0/p1 ⇒ 产品阻塞卡同笔升同级,沿链重复
 
 ## 停摆复位梯度
 
