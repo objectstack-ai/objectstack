@@ -57,6 +57,8 @@ const server = vi.hoisted(() => ({
   flows: {} as Record<string, Array<{ name: string; label: string }>>,
   clone: null as null | { status: number; body: unknown },
   canAuthor: true,
+  /** The engine's `_status` rows; `null` answers 404 (the pillar's documented fallback). */
+  status: null as null | Array<{ name: string; enabled: boolean; bound: boolean }>,
 }));
 
 const mockClient = vi.hoisted(() => ({
@@ -103,8 +105,12 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { AutomationsPillar } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
+import { registerMetadataPreview } from '../metadata-admin/preview-registry';
+import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 
 const dataSource = createEmptyDataSource();
+// The flow header's meta (its Status pill) draws only over a registered flow preview.
+registerMetadataPreview('flow', FlowPreview);
 
 // ── The `/automation` doors, doubled at `fetch` ───────────────────────────
 
@@ -116,12 +122,19 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
       headers: { 'content-type': 'application/json' },
     });
   }
-  // `/automation/_status`: "absent", the pillar's documented fallback.
+  if (url.split('?')[0].endsWith('/automation/_status') && server.status) {
+    return new Response(JSON.stringify({ success: true, data: { flows: server.status, total: server.status.length } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+  // `/automation/_status` unset: "absent", the pillar's documented fallback.
   return new Response('null', { status: 404, headers: { 'content-type': 'application/json' } });
 });
 vi.stubGlobal('fetch', fetchMock);
 
 const cloneCalls = () => fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/clone'));
+const statusReads = () => fetchMock.mock.calls.filter(([u]) => String(u).split('?')[0].endsWith('/automation/_status')).length;
 const cloneBody = (i = 0) => JSON.parse(String(cloneCalls()[i][1]?.body));
 
 /** The clone door's success answer (`CloneFlowResponseSchema`); `noticeCode` only when given. */
@@ -144,6 +157,7 @@ beforeEach(() => {
   server.flows = { [BASE]: [{ name: 'approval', label: 'Approval' }], [WRITABLE]: [{ name: 'approval', label: 'Approval' }], [PAIR]: [] };
   server.clone = null;
   server.canAuthor = true;
+  server.status = null;
   fetchMock.mockClear();
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
 });
@@ -360,5 +374,48 @@ describe('Automations — New similar: the copy notice in the reader\'s language
 
   it('CONTROL zh: an answer with no code shows the wire notice as sent', async () => {
     expect((await copyInZh(undefined)).textContent).toBe(NOTICE);
+  });
+});
+
+/**
+ * A copy that opens in this pillar reads its runtime state at once: the door
+ * stores the copy live and switched off, and the engine's `_status` already
+ * holds its row, so the pillar reads `_status` once more after the copy lands.
+ * CONTROL: a flow the engine holds no row for still reads as an unpublished
+ * draft after that same read. The other landing remounts the pillar keyed by
+ * package (the first `#28567` pin), and that mount reads `_status` itself.
+ */
+describe('Automations — New similar: the copy reads its runtime state without a reload', () => {
+  /** The header Status pill's value. */
+  const headerStatus = () => screen.getByText('Status:').nextElementSibling?.textContent ?? '';
+
+  it('the copy opened here reads "Switched off" from one more `_status` read; a flow with no row still reads unpublished', async () => {
+    server.flows[WRITABLE] = [...server.flows[WRITABLE], { name: 'intake', label: 'Intake' }];
+    server.status = [{ name: 'approval', enabled: true, bound: true }];
+    mount(WRITABLE);
+    await openMenu();
+    await waitFor(() => expect(headerStatus()).toBe(t('engine.studio.auto.on', 'en')), { timeout: 8000 });
+    fireEvent.click(screen.getByTestId('auto-item-new-similar'));
+    const dialog = await screen.findByTestId('auto-new-similar-dialog');
+    server.clone = landedIn(WRITABLE);
+    server.flows[WRITABLE] = [...server.flows[WRITABLE], { name: 'approval_copy', label: 'Approval (copy)' }];
+    // The door stored the copy live and switched off: the engine holds its row.
+    server.status = [...server.status, { name: 'approval_copy', enabled: false, bound: false }];
+    const readsBefore = statusReads();
+    fireEvent.click(within(dialog).getByTestId('auto-new-similar-submit'));
+
+    await screen.findByTestId('auto-new-similar-strip', undefined, { timeout: 8000 });
+    expect(screen.getByTestId('auto-canvas-caption')).toHaveTextContent('Approval (copy)');
+    await waitFor(() => expect(headerStatus()).toBe(t('engine.studio.auto.off', 'en')), { timeout: 8000 });
+    expect(headerStatus()).not.toBe(t('engine.studio.unpublishedDraft', 'en'));
+    // One read per copy, not one per render.
+    await new Promise((r) => setTimeout(r, 100));
+    expect(statusReads()).toBe(readsBefore + 1);
+
+    // CONTROL: a flow the engine has no row for reads as before.
+    fireEvent.click(await screen.findByRole('button', { name: /Intake/ }));
+    await waitFor(() => expect(screen.getByTestId('auto-canvas-caption')).toHaveTextContent('Intake'), { timeout: 8000 });
+    await waitFor(() => expect(headerStatus()).toBe(t('engine.studio.unpublishedDraft', 'en')), { timeout: 8000 });
+    expect(statusReads()).toBe(readsBefore + 1);
   });
 });
