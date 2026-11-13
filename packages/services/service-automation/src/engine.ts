@@ -7158,7 +7158,9 @@ export class AutomationEngine implements IAutomationService {
      * copy of anybody else's.
      *
      * A `runAs:'system'` run, a user-less run, a context carrying every fact,
-     * and an engine with no resolver wired resolve nothing.
+     * and an engine with no resolver wired resolve nothing. A `runAs:'system'`
+     * run therefore keeps the `principalKind` its launch door forwarded: no
+     * resolution here would re-seed it (ADR-0151 Non-goals).
      */
     private seedRunGrants(
         flowName: string,
