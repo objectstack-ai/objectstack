@@ -343,16 +343,16 @@ complementary by design.
   (said once, at warn); a delegate or a lookup that throws is the D6 tier-3
   fault (5xx), never a false absence.
 - Every schema-serving outlet resolves the exception inside the same posture
-  resolution, so list and item reads, and the two transports, give one
-  answer. An outlet that cannot reach the delegate applies no exception and
+  resolution, so list and item reads, the REST and dispatcher `/meta` doors,
+  and both MCP transports give one answer. An outlet that cannot reach the delegate applies no exception and
   fails closed.
 - First declaration: `sys_approval_request` and `sys_approval_action` name
   `approvals`. Their rows reach a member only through `/api/v1/approvals/*`,
   and the request page that door links to needs both definitions. The
-  service admits the callers its door serves at least one request to (the
-  rule its request read applies: a current approver, the submitter, a past
-  actor, or the override holder). A member party to no request keeps the
-  absent answer.
+  service admits the callers its door serves at least one request to in
+  their organization (the rule its request read applies: a current
+  approver, the submitter, a past actor, or the override holder). A member
+  party to no request in their organization keeps the absent answer.
 
 ---
 
