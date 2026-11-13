@@ -104,10 +104,11 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     'refused call did not run — no record was read and none was written. Two BOUNDS to ' +
     'read before you rely on it. (1) The enforced set is the doors that ask every action ' +
     'for the author\'s `ai.exposed` opt-in — today the action door reached from the MCP ' +
-    '`run_action` tool. REST `/actions` asks for `ai.exposed` in one case only, an AI ' +
+    '`run_action` tool. REST `/actions` reads `ai.exposed` in one case only (an AI ' +
     'service account starting a `type: \'flow\'` action whose flow declares ' +
-    '`runAs: \'system\'`, and asks no confirmation there; for a person\'s call it sits ' +
-    'OUTSIDE this gate, so a human in front of that route is still yours to ' +
+    '`runAs: \'system\'` needs the opt-in there), and that check asks for the opt-in ' +
+    'alone, not a confirmation; for a person\'s call REST `/actions` sits OUTSIDE this ' +
+    'gate, so a human in front of that route is still yours to ' +
     'arrange. An AI service account (an agent acting for itself, not on a person\'s ' +
     'behalf) does not confirm an action for itself: it is refused at every action door, ' +
     'REST `/actions` included, whatever its request carries, and a person runs the ' +
