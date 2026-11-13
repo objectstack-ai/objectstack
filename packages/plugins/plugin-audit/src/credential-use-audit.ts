@@ -55,8 +55,12 @@
  *    credential row (`sys_api_key.user_id`, `sys_oauth_consent.user_id`). The
  *    owner is the principal the credential admitted the request as;
  *  - `object_name` / `record_id`: the credential row, so the ledger's record
- *    read gate judges the row as it judges any row about that credential, and
- *    a reader can go from the row to the credential and back;
+ *    read gate judges the row as it judges any row about that credential: it
+ *    is served to a reader the gate narrows only when that reader can open the
+ *    credential row through the data door. A credential the data door serves
+ *    to no one (the OAuth consent, `sys_oauth_consent`) is a record no such
+ *    reader can open, so a row about it is read through the ledger's audit
+ *    capability (`view_all_audit_log`, `audit-log-read-visibility.ts`);
  *  - `tenant_id`: the organization the credential is bound to
  *    (`sys_api_key.active_organization_id`, `sys_oauth_consent.reference_id`),
  *    or none, which makes a deployment-level row;

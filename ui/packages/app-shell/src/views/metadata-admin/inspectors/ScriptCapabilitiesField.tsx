@@ -21,6 +21,11 @@
  *
  * The host draws this for a `js` body only: an expression body is strict and
  * refuses `capabilities` by name. Module-private: no barrel re-exports it.
+ *
+ * A token the host's body cannot be granted (`withheld`: a hook body's
+ * `email.send`, objectstack#32004, which the hook parse refuses) is not
+ * offered. A stored one stays on screen, flagged, like an unknown token, so it
+ * is never dropped unseen and unticking it removes it.
  */
 
 import { Label } from '@object-ui/components';
@@ -40,6 +45,8 @@ const CAPABILITY_CALLS: Partial<Record<HookBodyCapability, string>> = {
   'api.transaction': 'ctx.api.transaction(async () => { … })',
   'crypto.uuid': 'ctx.crypto.randomUUID()',
   log: 'ctx.log.debug / info / warn / error',
+  'email.send': 'ctx.email.send({ to, subject, text })',
+  'activity.append': 'ctx.activity.append({ object, recordId, type, summary })',
 };
 
 export interface ScriptCapabilitiesFieldProps {
@@ -53,6 +60,9 @@ export interface ScriptCapabilitiesFieldProps {
   locale: SupportedLocale;
   disabled?: boolean;
   testId?: string;
+  /** The tokens this host's body cannot be granted, and the catalogue key of
+   *  the flag a stored one carries. */
+  withheld?: { tokens: readonly string[]; flagKey: string };
 }
 
 export function ScriptCapabilitiesField({
@@ -62,11 +72,14 @@ export function ScriptCapabilitiesField({
   locale,
   disabled,
   testId,
+  withheld,
 }: ScriptCapabilitiesFieldProps) {
   const granted: string[] = Array.isArray(value)
     ? value.filter((c): c is string => typeof c === 'string')
     : [];
-  const options = [...CAPABILITY_TOKENS, ...granted.filter((c) => !CAPABILITY_TOKENS.includes(c))];
+  const isWithheld = (cap: string) => withheld?.tokens.includes(cap) === true;
+  const offered = CAPABILITY_TOKENS.filter((c) => !isWithheld(c));
+  const options = [...offered, ...granted.filter((c) => !offered.includes(c))];
   const toggle = (cap: string, on: boolean) => {
     const next = new Set(granted);
     if (on) next.add(cap);
@@ -82,9 +95,13 @@ export function ScriptCapabilitiesField({
           <div key={cap} className="space-y-0.5">
             <InspectorCheckboxField
               label={
-                CAPABILITY_TOKENS.includes(cap)
+                offered.includes(cap)
                   ? cap
-                  : flagUnknownValue(cap, t('engine.inspector.hook.capabilityUnknown', locale), locale)
+                  : flagUnknownValue(
+                      cap,
+                      t(isWithheld(cap) ? withheld!.flagKey : 'engine.inspector.hook.capabilityUnknown', locale),
+                      locale,
+                    )
               }
               value={granted.includes(cap)}
               onCommit={(on) => toggle(cap, on)}

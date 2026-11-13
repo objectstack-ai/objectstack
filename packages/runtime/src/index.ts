@@ -172,11 +172,14 @@ export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFun
 // [#21585] `collectHooksWithoutBody` names the hooks whose code is only a
 // function-name `handler`: install-local refuses them, and withholds them on a
 // rehydrate (`withholdHooksWithoutBody`).
+// [#32572] `collectJobNameCollisions` names the job names two enabled jobs share,
+// with the refusal the binder refuses each by at bind: install-local refuses them.
 export {
     bindAppArtifactHandlers,
     appArtifactHandlerOwner,
     scheduleAppArtifactJobs,
     collectJobsWithoutBody,
+    collectJobNameCollisions,
     collectHooksWithoutBody,
 } from './app-artifact-handlers.js';
 export type {
@@ -339,6 +342,13 @@ export {
 // Export Artifact Loader
 export { loadArtifactBundle, mergeRuntimeModule, isHttpUrl, readArtifactSource } from './load-artifact-bundle.js';
 export type { LoadArtifactBundleOptions } from './load-artifact-bundle.js';
+
+// The reader of every collection of a composed suite (#32827): a
+// `composeStacks(stacks, { manifest: 'preserve' })` artifact keeps each
+// collection in its package's body, and this is the one merge across the
+// flattened top level and every `packages[]` body (ADR-0130 D4) — the same one
+// the boot paths read. Exported so an app reads its suite without copying it.
+export { resolveArtifactCollections } from './artifact-collections.js';
 
 // Artifact-pinned boot (#8368) — `OS_ARTIFACT_URL`, the SRI-style `#sha256=`
 // fragment pin, and the verified local materialisation the boot reads.

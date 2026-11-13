@@ -25,7 +25,7 @@ import {
   type TenancyServiceResolver,
 } from '@objectstack/core';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
-import type { IHttpServer, IDataEngine, IHttpRequest, IAuthService, IEmailService } from '@objectstack/spec/contracts';
+import type { IHttpServer, IDataEngine, IHttpRequest, IAuthService } from '@objectstack/spec/contracts';
 import type { SettingsContext } from './settings-service.types.js';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
@@ -542,22 +542,6 @@ export class SettingsServicePlugin implements Plugin {
       const deploymentNotice = buildDeploymentNoticeDoor({
         sources: {
           env: () => process.env,
-          emailDeliveryLive: () => {
-            let email: IEmailService | undefined;
-            try {
-              email = ctx.getService<IEmailService>('email');
-            } catch {
-              return undefined;
-            }
-            // The deliverability member is optional: absent or throwing is
-            // not live, as the auth plugin's own reader rules.
-            if (!email || typeof email.isConfigured !== 'function') return email ? false : undefined;
-            try {
-              return email.isConfigured() === true;
-            } catch {
-              return false;
-            }
-          },
           storageAdapter: async () => {
             try {
               if (!ctx.getService('storage')) return undefined;

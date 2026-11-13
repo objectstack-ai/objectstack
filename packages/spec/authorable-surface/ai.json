@@ -62,6 +62,7 @@
     "ai/BlueprintNavItem:viewName",
     "ai/BlueprintObject:description",
     "ai/BlueprintObject:fields",
+    "ai/BlueprintObject:icon",
     "ai/BlueprintObject:label",
     "ai/BlueprintObject:name",
     "ai/BlueprintObject:nameField",

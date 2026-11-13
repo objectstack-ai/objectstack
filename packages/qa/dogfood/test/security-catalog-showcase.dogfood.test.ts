@@ -52,11 +52,31 @@ const stack = showcaseStack as unknown as {
   capabilities?: Named[];
 };
 
+/**
+ * The permission sets platform services contribute to the member baseline at
+ * boot (`ISecurityService.contributePlatformBaselineSet`, #32754). An admitted
+ * set is registered in the catalog under the contributing package, so the read
+ * lists it, the door lists it, and it resolves by name: it is the set the
+ * `everyone` definition and explain name, and a catalog that hid it would name
+ * a set it cannot resolve. The storage service contributes one,
+ * `storage_attachment_member` (read and create on `sys_attachment`), on every
+ * composition that runs it, since every gate it waits for is its own; the
+ * showcase runs it in every posture below. Named here as its producer names it
+ * (`attachment-member-grant.ts`, not exported), never read off a registry.
+ */
+const PLATFORM_CONTRIBUTED_PERMISSION_SETS = ['storage_attachment_member'];
+
 /** The declared catalog, read off the producers — never off a registry. */
 const DECLARED: Record<SecurityCatalogType, string[]> = {
   // [ADR-0131 D2] plus the six built-in positions `plugin-security` declares.
   position: [...new Set([...namesOf(stack.positions), ...BUILTIN_IDENTITY_NAMES, ...AUDIENCE_ANCHOR_POSITIONS])].sort(),
-  permission: [...new Set([...namesOf(stack.permissions), ...namesOf(securityDefaultPermissionSets)])].sort(),
+  permission: [
+    ...new Set([
+      ...namesOf(stack.permissions),
+      ...namesOf(securityDefaultPermissionSets),
+      ...PLATFORM_CONTRIBUTED_PERMISSION_SETS,
+    ]),
+  ].sort(),
   // [ADR-0131 D3] plus the curated platform capabilities `plugin-security` declares.
   capability: [...new Set([...namesOf(stack.capabilities), ...PLATFORM_CAPABILITY_NAMES])].sort(),
 };

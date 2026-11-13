@@ -262,6 +262,8 @@
     "PRINCIPAL_SESSION_MAX_TTL_SECONDS (const)",
     "PendingActionRow (interface)",
     "PendingActionStatus (type)",
+    "PlatformBaselineSetAdmission (interface)",
+    "PlatformBaselineSetContribution (interface)",
     "Plugin (interface)",
     "PluginStartupResult (type)",
     "PositionGrantSummary (interface)",

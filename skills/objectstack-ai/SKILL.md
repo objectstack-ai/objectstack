@@ -12,7 +12,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.3.0"
+  version: "18.4.0"
   domain: ai
   tags: agent, tool, skill, knowledge, llm, embedding, mcp
 ---
@@ -201,7 +201,7 @@ permissions and row-level security:
 | `validate_expression` | build-accurate CEL check before a formula is authored into metadata |
 | `create_record`, `update_record`, `delete_record` | writes; `delete_record` is refused with `ACTION_CONFIRMATION_REQUIRED` (428) unless it sends `confirm: true` — ask the human first, then retry |
 | `delete_records` | up to 200 records of one object per call (fewer under a smaller `OS_DATA_MAX_PAGE_SIZE` or `OS_DATA_QUERY_ROW_BUDGET`), by `where` or `recordIds`, not both; a call without `confirm: true` is the preview (match count, sample ids) and deletes nothing — show it to the human, and send `confirm: true` only once they approve; over OAuth it needs `data:read` and `data:write` |
-| `list_actions`, `run_action`, `resume_run` | your AI-exposed business Actions — the same `ai.exposed` opt-in as above; registered only when the bridge implements `listActions` and `runAction` (the stdio bridge does not, so it serves none), `resume_run` only when it also implements `resumeRun`. An action flagged `ai.requiresConfirmation` (`list_actions` reports it) is refused with the same 428 unless the call sends `confirm: true`, and nothing runs — ask the human first, then retry; `resume_run` submits a paused screen flow's form under the same gates |
+| `list_actions`, `run_action`, `resume_run` | your AI-exposed business Actions — the same `ai.exposed` opt-in as above; registered only when the bridge implements `listActions` and `runAction` (the stdio bridge does not, so it serves none), `resume_run` only when it also implements `resumeRun`. An action flagged `ai.requiresConfirmation` (`list_actions` reports it) is refused with the same 428 unless the call sends `confirm: true`, and nothing runs — ask the human first, then retry. Under an AI service account's own key (an agent acting for itself, for no person) the call is refused whatever it sends and nothing runs: hand the action to a person, or its author declares `ai.requiresConfirmation: false` when it is safe unattended. `resume_run` submits a paused screen flow's form under the same gates |
 
 ---
 
@@ -318,9 +318,8 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
    `enableActionApproval: true` (approval queue ☁️), `ai.requiresConfirmation` on
    the **action**, or `approval: 'always'` on an MCP tool binding. AI metadata
    edits are already gated: they land as drafts a human must publish (ADR-0033).
-   ⚠️ `requiresConfirmation` on the **tool** was REMOVED (ADR-0033 §2) — no
-   execution path read it, so it produced no pause; `ToolSchema` is strict, so
-   authoring it now fails the parse. There is no `requireApprovalFor` field.
+   ⚠️ `requiresConfirmation` on the **tool** was REMOVED (ADR-0033 §2; retired
+   above). There is no `requireApprovalFor` field.
 2. **Indexing everything.** A knowledge source without a `where` filter and
    curated `contentFields` fills the index with drafts and boilerplate that
    pollute retrieval. Source hygiene is the metadata's job; relevance tuning

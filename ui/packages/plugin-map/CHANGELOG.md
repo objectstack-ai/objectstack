@@ -1,5 +1,85 @@
 # @object-ui/plugin-map
 
+## 18.4.0
+
+### Patch Changes
+
+- Updated dependencies [96b5dab]
+- Updated dependencies [7da99b7]
+- Updated dependencies [85d9264]
+- Updated dependencies [3214615]
+- Updated dependencies [d0512c2]
+- Updated dependencies [4261169]
+- Updated dependencies [ffeda13]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [604a2b3]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [2e33533]
+- Updated dependencies [bb61872]
+- Updated dependencies [4211f50]
+- Updated dependencies [c2be734]
+- Updated dependencies [6e68d8f]
+- Updated dependencies [3461420]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [df4c06e]
+- Updated dependencies [f68b47c]
+- Updated dependencies [5f80129]
+- Updated dependencies [c1240a3]
+- Updated dependencies [5fa9375]
+- Updated dependencies [aa57c76]
+- Updated dependencies [ff3f83b]
+- Updated dependencies [ea5807e]
+- Updated dependencies [4128213]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [31260ca]
+- Updated dependencies [5174603]
+- Updated dependencies [fd749a4]
+- Updated dependencies [56cac5e]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [a91409c]
+- Updated dependencies [cd7f785]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [b631573]
+- Updated dependencies [1f37085]
+- Updated dependencies [534a287]
+- Updated dependencies [6be71ab]
+- Updated dependencies [3224545]
+- Updated dependencies [3684d18]
+- Updated dependencies [ac8fede]
+- Updated dependencies [52ffd5a]
+- Updated dependencies [36b216b]
+- Updated dependencies [0a81d2a]
+- Updated dependencies [4820ea2]
+- Updated dependencies [4d9ac62]
+- Updated dependencies [8a3eeef]
+- Updated dependencies [5fb79bc]
+- Updated dependencies [5b1fe45]
+- Updated dependencies [28af544]
+- Updated dependencies [8ce5827]
+- Updated dependencies [767f110]
+- Updated dependencies [6303e74]
+- Updated dependencies [8a0516c]
+- Updated dependencies [b463ec6]
+  - @object-ui/components@18.4.0
+  - @object-ui/core@18.4.0
+  - @object-ui/plugin-detail@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @object-ui/permissions@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

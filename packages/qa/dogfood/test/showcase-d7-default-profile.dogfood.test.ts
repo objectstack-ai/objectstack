@@ -110,9 +110,13 @@ describe('showcase: app-declared default profile, CLI-wired (ADR-0056 D7)', () =
     // no `sys_position` or junction row for it.
     const reader = createSecurityCatalogReader({ registry: ql.registry, metadata: stack.kernel.getService('metadata') });
     const everyone = await reader.resolve('position', 'everyone');
+    // The storage service's attachment set joins them, contributed beside the
+    // attachment gates, all of which are its own (`attachment-member-grant.ts`,
+    // service-storage).
     expect((everyone?.definition as any)?.permissionSets, 'everyone ← app baseline AND platform baseline').toEqual([
       'showcase_member_default',
       'member_default',
+      'storage_attachment_member',
     ]);
     if (ql.getObject?.('sys_position_permission_set')) {
       expect(await ql.find('sys_position_permission_set', { where: {}, context: SYS }), 'no junction row is written').toEqual([]);

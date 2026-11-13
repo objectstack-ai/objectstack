@@ -1,5 +1,423 @@
 # @object-ui/auth
 
+## 18.4.0
+
+### Patch Changes
+
+- ffeda13: refactor(auth)!: retire twelve zero-consumer exports (the Turnstile script URL, the two phone-identifier helpers, the authenticated-fetch options type, the org-role list, the invitation-status list and guard, and five form primitives)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/auth#TURNSTILE_SCRIPT_URL, @object-ui/auth#normalizePhoneIdentifier, @object-ui/auth#looksLikePhoneIdentifier, @object-ui/auth#AuthenticatedAdapterOptions, @object-ui/auth#ORG_ROLES, @object-ui/auth#AUTH_INVITATION_STATUSES, @object-ui/auth#isAuthInvitationStatus, @object-ui/auth#AUTH_FIELD_LABEL_CLASS, @object-ui/auth#AUTH_INPUT_CLASS, @object-ui/auth#AuthCheckIcon, @object-ui/auth#AuthDivider, @object-ui/auth#AuthMailIcon) the retired operands are a script URL constant, two sign-in identifier helpers, an options interface, two closed vocabulary lists with one narrowing guard, two class-name strings and three presentational components; nothing in the workspace or in hotcrm imports any of them from the package entry, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these twelve names from `@object-ui/auth`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected. Every module stays in the package: `TurnstileWidget` keeps loading its script, `LoginForm` keeps reading phone identifiers, `createAuthClient` keeps narrowing invitation statuses, `org-roles.ts` keeps building its pickers from the role list, and `LoginForm` / `RegisterForm` / `ForgotPasswordForm` keep drawing with the form primitives. Only the entry stops publishing them. `TurnstileWidget`, `createAuthenticatedFetch`, `ORG_ROLE_OWNER` / `ORG_ROLE_ADMIN` / `ORG_ROLE_DELEGATED_ADMIN` / `ORG_ROLE_MEMBER`, `ORG_ROLE_LABELS`, `orgRoleGrade`, `invitableOrgRoles`, `assignableOrgRoles`, the `OrgRole` and `AuthInvitationStatus` types, `AUTH_LINK_CLASS`, `AUTH_PRIMARY_BUTTON_CLASS`, `AuthAlertIcon`, `AuthErrorBanner`, `AuthFormHeader` and `AuthSpinner` stay exported unchanged.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `TURNSTILE_SCRIPT_URL` TO `TurnstileWidget`, which loads the Cloudflare Turnstile script itself.
+  - FROM `normalizePhoneIdentifier`, `looksLikePhoneIdentifier` TO `LoginForm`, which accepts a phone number as the identifier and normalizes it; keep a local copy if your own sign-in form needs them.
+  - FROM `AuthenticatedAdapterOptions` TO a local interface: no function in the package takes it (`createAuthenticatedFetch` has its own options).
+  - FROM `ORG_ROLES` TO `invitableOrgRoles` / `assignableOrgRoles` for the roles a picker offers, or the four `ORG_ROLE_*` constants.
+  - FROM `AUTH_INVITATION_STATUSES`, `isAuthInvitationStatus` TO the `AuthInvitationStatus` type; `AuthInvitation.status` already arrives narrowed from `createAuthClient`.
+  - FROM `AUTH_FIELD_LABEL_CLASS`, `AUTH_INPUT_CLASS`, `AuthCheckIcon`, `AuthDivider`, `AuthMailIcon` TO no replacement: the built-in forms apply them themselves; copy the class strings or icons if a custom form needs the same look.
+- a4c3e73: feat(console,mobile,auth): the Console registers the mobile shell's push token under its own session and unregisters it on sign-out and when the shell removes the connection
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`:** in the ObjectStack mobile shell, a signed-in person who has reached Home or an app is asked for push permission once per page load, after a short delay (never on a sign-in screen): the Console calls `getPushToken()` and registers the token with `POST /api/v1/notifications/devices`. A `null` answer (simulator, permission denied, no token) sends nothing. A token the shell rotates is registered again; an unchanged token for the same person is not sent twice. Another person signing in on the page registers the device for them, and the registry moves the token away from the previous person. An impersonation never registers, so the impersonated person's pushes never reach the administrator's device. The registration sends `deviceId` as the shell's `installId` when it has one, and `origin` only when the page was loaded over `http:` or `https:`. The device is unregistered (`DELETE /api/v1/notifications/devices/:deviceId`) before sign-out ends the session, and when the shell removes this connection; a shell that is neither iOS nor Android registers nothing. A browser is unchanged.
+  - **`@object-ui/mobile`:** `ObjectStackNative` gains the optional `installId` (`string | null`), and the package exports `NATIVE_PUSH_TOKEN_CHANGED_EVENT` (`objectstack-native:pushTokenChanged`, announced as `has('pushTokenChanged')`) with its event type `NativePushTokenChangedEvent`. Both are feature-detected: a shell that predates them carries neither.
+  - **`@object-ui/auth`:** `registerBeforeSignOut(step)` registers a step that `signOut()` awaits while the session still exists, and returns the function that removes it. The steps run together and can never hold sign-out back: a rejection is reported and dropped, and sign-out goes ahead after `BEFORE_SIGN_OUT_TIMEOUT_MS` (3 s) whether or not they have settled.
+- c322421: fix(console,auth): after an explicit sign-out, whoever signs in next lands on their own home, not on the page the previous person had open
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/auth`: `AuthContextValue.sessionEndedBySignOut`**, `true` from a `signOut()` until a session is established again in the tab, whoever it belongs to; `false` on load, while signed in, and after a session that ended any other way (expired, revoked, signed out in another tab). It is a new required member of the exported `AuthContextValue` type: code that builds its own value of that type (a test double, a custom provider) must add `sessionEndedBySignOut: false` (or its own reading) to type-check.
+  - **`@object-ui/console`: `LoginRedirect`** sends the visitor to `/login` with no `?redirect=` after an explicit sign-out. A new member signing in after the administrator signed out of a Setup page used to land on that page and read "you do not have access to this app". A session that expires or is revoked under the person still keeps the path (list state stripped as before), so that person signs back in where they were.
+- 10ecafd: fix(app-shell,auth,i18n): the organization form says requiring MFA needs two-factor on, an accepted save says who must enroll and when, and the enrollment screen names a two-factor-off deployment in the user's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Organization form, before saving.** While two-factor is off on the deployment (`features.twoFactor: false` in `/api/v1/auth/config`), the `sys_organization` edit form says, under its title, that Require Multi-Factor Auth needs two-factor, that a save with it ticked is refused, and how to turn two-factor on (Require multi-factor authentication in Setup → Authentication, or `OS_AUTH_TWO_FACTOR=true`). When the save is refused, the server's refusal shows on the field, as before.
+  - **Organization form, after an accepted save.** A save that turns `require_mfa` on for a row that stored it off adds a line to the saved toast: every member without an authenticator app must set one up, and is blocked from data once the MFA grace period ends (7 days unless changed in Setup → Authentication), counted from their first use after the change. A save of a row that already required it says nothing new.
+  - **Enrollment screen.** `enrollTotp` and `verifyTotp` of `@object-ui/auth` now reject with the HTTP `status` and the server's `code` on the error (the message is unchanged). The authenticator step reads a `404` (the `/two-factor/*` endpoints are not mounted while two-factor is off) as a translated sentence saying enrollment is not available and who can turn it on, instead of `Two-factor enable failed (404)`, and `INVALID_PASSWORD` as the password screen's sentence. Any other refusal keeps the server's message.
+  - **The widening.** `@object-ui/i18n` gains `auth.remediation.mfa.unavailable`, `console.organizationMfa.needsTwoFactor` and `console.organizationMfa.nowRequired` in all ten language packs. The two enrollment rejections gain the optional `status` and `code` properties.
+- fdd0641: fix(auth): the sign-in page reads the sign-in methods the server has now, not the ones it had when the tab was opened (#30299)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The auth client kept the first `/auth/config` answer for the life of the page. An administrator who turned email and password off on the Authentication settings page (with another way in configured) and then signed out was shown the email and password form on the sign-in page, from the copy read while signed in, although the server refuses that form. The client now forgets the cached config whenever the tab is left without a session: on sign-out, and when a session read finds none (an expired session reaches the sign-in page without a sign-out). Readers on one page still share one request, and nothing changes while a session lasts.
+- 7b10a30: fix(auth): the forgot-password page no longer says a reset link was sent on a deployment that sends no mail (#30366)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `GET /api/v1/auth/config` reports `features.emailDelivery`: `false` when no email service is wired or the stock `log` transport only writes mail to the server console. On such a deployment the forgot-password form used to answer every request with "Check your email — we've sent a password reset link", although no mail leaves. When the server reports `emailDelivery: false`, the success screen now says a reset link can't be emailed here and to ask an administrator, who can set a new password from Setup → Users.
+  
+  The text describes the deployment, never the address: it carries no address, and a known and an unknown address read the same, so the page adds no account-existence oracle. Only an explicit `false` changes it; a server that predates the flag (no `emailDelivery` key) or a failed config fetch keeps the "check your email" screen, since those deployments may well send mail.
+  
+  `ForgotPasswordFormLabels` gains `noDeliveryTitle` and `noDeliveryDescription`, and `AuthPublicConfig.features` gains `emailDelivery`. New strings `auth.forgotPassword.noDeliveryTitle` and `auth.forgotPassword.noDeliveryDescription` in all ten locales, passed by the Console's forgot-password page and `DefaultForgotPasswordPage`.
+- 8a83814: fix(auth): with email+password sign-in off, phone sign-in on and no single sign-on, the login card draws the phone way in on first paint instead of a single sign-on view
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `LoginForm` collapsed into the single sign-on view whenever the server turned email+password sign-in off (`emailPassword.enabled: false`), whether or not single sign-on existed. A deployment that signs in by phone only showed its users "Use a password instead" and, behind it, a "Back to single sign-on" button with no single sign-on anywhere. Now, with the password door shut, no single sign-on offered (`features.sso`) or enforced (`features.ssoEnforced`) and a phone way in advertised (`features.phoneNumber` or `features.phoneNumberOtp`), the form is drawn on first paint:
+  
+  - the identifier field reads "Phone number" (the existing `phoneLabel` / `phonePlaceholder` labels), since the server refuses an email address;
+  - with phone OTP the only way in, the form opens on the verification-code step and offers no switch to a password form the server refuses;
+  - no "Back to single sign-on" button, no sign-up link and no password-form description, all of which name a door the server refuses.
+  
+  A shut password door with single sign-on offered, declared enforcement, the no-method state and a failed config fetch (the password form, break-glass) are unchanged.
+- 8b3e68d: feat(auth,app-shell): the create-organization dialog draws the host's organization-create choices and sends the picked edition
+  
+  Clause-②: yes (widening): `@object-ui/auth` declares the optional `features.organizationEditions` and widens `createOrganization`'s `edition` from 'developer' to string; every value accepted before is still accepted
+  Metadata-protocol: none
+  
+  - **`@object-ui/auth`:** `AuthPublicConfig.features` declares `organizationEditions`, typed from `@objectstack/spec`'s `OrganizationEditionChoice` (`edition`, `label`, `hint`, `memberLimit`). `createOrganization`'s `edition` takes the `edition` value of any served choice (`string`), not only `developer`; it still rides the `edition` query parameter, and an absent value still sends none.
+  - **Console (`CreateWorkspaceDialog`):** where `/auth/config` serves `features.organizationEditions`, the dialog draws one choice per entry under the name, with the host's label and hint as given. Every choice starts unchecked and at most one is picked; the picked choice's `edition` goes with the create call and is kept when a taken slug is retried. With the list absent or empty, or nothing picked, the dialog and its create call are unchanged.
+- fe1249b: feat(auth): `createOrganization` can ask for a Developer Edition organization, and `AuthPublicConfig.features` declares `developerEditionCreate`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `createOrganization` takes an optional `edition?: 'developer'` and sends it as the `edition` query parameter of `POST /organization/create`, beside `timezone`. The body stays `{ name, slug, logo }`. With no edition, no parameter is sent and the request is unchanged. `AuthPublicConfig.features` declares the optional `developerEditionCreate` boolean that `@objectstack/spec`'s `AuthFeaturesConfigSchema` serves: `true` only where the host's create door accepts `?edition=developer`. No console surface offers the choice yet.
+- f75466c: fix(console): a clean self-hosted install reads as a first run — the sign-in page leads with creating the owner account, sign-up says every problem inline at once, Home says each item once, and a wrong password on a box with no mail points to the administrator
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  What a visitor and an administrator see on a fresh deployment (objectstack#32021):
+  
+  - **Sign-in on a box nobody has an account on.** The page asked the first visitor "Welcome back". When `GET /api/v1/auth/bootstrap-status` answers `hasOwner: false` (the probe that already switched the card's footer between "Sign up" and "Have an invitation?"), the card is now titled "Set up this deployment" and leads with a "Create the owner account" button, with the sign-in form below it. The probe now runs for every posture that offers a form to a visitor not invited, not only `invite_only`. A probe that fails, or a box that has an owner, keeps "Welcome back" exactly as before.
+  - **Sign-up.** `RegisterForm` is `noValidate` and checks every field on submit, so the browser's one-at-a-time bubble (in the browser's language) is gone, and a short password that also does not match shows both messages together, each under its own field with `aria-invalid` and `aria-describedby`. Three new labels, `nameRequiredError`, `emailRequiredError` and `emailInvalidError`, carry the empty-name, empty-email and malformed-email messages; the minimum stays 8, as the auth config serves none. The banner still carries what the server refuses.
+  - **Home.** "No email service is set up" and "Connect an AI assistant" are each said once: the deployment notice keeps its email line (what it says and who sees it are ruled, objectstack#30120), and the first-run checklist leaves its Email delivery row out while that line is drawn; the checklist's assistant row, while it is not done, stands in for Home's Connect an AI Assistant card, which members (who get no checklist) still see. The notice now uses the same 1120px width as the rest of Home, and the checklist sits closer under it, so "Your apps" is not pushed below the fold.
+  - **The checklist's assistant row** says it is about an external AI assistant over MCP, and that the built-in AI is set up separately.
+  - **A wrong password with no mail transport.** When `/api/v1/auth/config` reports `features.emailDelivery: false`, the refusal says to ask the administrator to reset the password, instead of pointing to a reset email that never arrives.
+  - **zh-CN wording.** The checklist names the current language and country in the reader's language; the managed-by note says 账号系统 instead of 「经身份服务写入」; and the AI settings page translates Embedder, Trace, Prompt and PII (向量化, 请求追踪, 提示词, 个人敏感信息).
+  
+  New `@object-ui/i18n` keys, in every pack: `auth.login.firstOwner.{title,description,createButton,signInDivider}`, `auth.login.errors.invalidCredentialsNoMail`, `auth.register.{nameRequiredError,emailRequiredError,emailInvalidError}` and `auth.register.firstOwner.{title,description}`. Nothing is removed or renamed.
+- cc8c4b0: fix(console): a refused single sign-on says why in words an end user can act on, "Sign in with SSO" with no email asks for one, and a checkbox no longer draws as a circle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The login page names each refusal.** A single sign-on refused with `SELF_REGISTRATION_CLOSED`, `account_not_linked`, `saml_error` / `invalid_saml_response` or `state_not_found` used to read "the sign-in link expired or was already used. Please try again." followed by the raw cause in parentheses. Each now has its own sentence ("Your account isn't set up for this system yet. Ask your administrator to invite you.", and so on). The code and the server's description, which are written for administrators, move behind a "Technical details" toggle under the banner. A code with no sentence of its own keeps the generic one.
+  - **`LoginForm` checks the email before it asks the server.** Pressing "Sign in with SSO" with an empty or whitespace-only email field used to send the request and show the server's `email, organizationSlug, domain or providerId is required`. It now shows "Enter your work email to sign in with SSO." and sends nothing. The same sentence replaces the untranslated one a phone number in that field got. The text is the new `LoginFormLabels.ssoEmailRequiredText` label (optional; English default as above), which both login pages pass from `auth.login.ssoEmailRequiredText`.
+  - **`@object-ui/i18n`** adds `auth.login.ssoEmailRequiredText` and `auth.login.errors.ssoAccountNotInvited`, `ssoAccountNotLinked`, `ssoResponseRejected`, `ssoStartFromLoginPage` and `ssoTechnicalDetails` to all 11 packs.
+  - **Console theme:** the 16px checkbox drew `rounded-sm` at 10px under the theme's larger corner radius, so every checkbox looked like a radio button, for example the two independent toggles of "Edit Sign-In Options". The console stylesheet now gives the checkbox a 4px corner; every other `rounded-sm` is unchanged.
+- 4c3abd6: fix(auth): signing in with a phone number and password on an account with two-factor sign-in on asks for the code, as the email path does, instead of saying "Invalid phone number or password."
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`AuthClient.signInWithPhonePassword`** now answers `SignInResult`, the same type `signIn` answers: a session, or `{ twoFactor: { methods } }` when the server accepted the password and holds a pending two-factor sign-in. Finish it with `verifySignInTwoFactor`. Code that reads `result.user` / `result.session` straight off the answer must check `result.twoFactor` first (the two members are optional on the union, as on `signIn`).
+  - **`AuthContextValue.signInWithPhonePassword`** resolves `{ twoFactorRequired: boolean }` instead of `void`; on `true`, `twoFactorChallenge` is set and `LoginForm` draws the code step.
+  - A custom `AuthClient` implementation (a test double, an alternative backend) keeps type-checking as long as it returns a session; it may now also return the challenge.
+- 530788c: fix(auth): a session that ended on the server now returns the Console to the sign-in page on the next in-app navigation, instead of reading every 401 as a missing page or a network fault
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When the session ended on the server (signed out elsewhere, expired, revoked), the Console kept the signed-in shell and answered each click with "Page Not Found" or "Couldn't load records … Check your connection", and only a full reload reached the sign-in page. Now a `401` answered to any API call made through `createAuthenticatedFetch` makes `AuthProvider` ask the server once whether a session is still held. When the server says there is none, the provider clears the session, and the route guard sends the visitor to `/login` with the current page as `?redirect=`, the same place a reload goes, so they sign back in where they were.
+  
+  Nothing else changes: a `403` or a `404` renders as before and asks nothing; a `401` while the server still holds the session (one endpoint refusing one request) leaves the page alone; a re-check the server does not answer (transport error) keeps the session; and with no session held, on the sign-in page included, a `401` is ignored, so there is no redirect loop. A burst of `401`s from one navigation makes one re-check.
+- c04aa29: fix(auth): a sign-in refused because the identity provider deactivated the account says so, instead of "You have been banned… contact support"
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The login page tells a deactivation from a ban.** plugin-auth refuses the password sign-in of an account its identity provider deactivated through SCIM with `403 BANNED_USER` and `details: { cause: 'scim_deactivated' }`. The Console login page and `DefaultLoginPage` showed better-auth's "You have been banned from this application. Please contact support if you believe this is an error." for it. They now show "Your account has been deactivated by your organization. Contact your administrator." in the session's language. An administrator's ban answers with no `details` and keeps the server's wording.
+  - **`@object-ui/auth`:** a refused call that goes through the auth client's error mapping now carries the response body's `details` object on the thrown error (`error.details`), beside `code`, `message`, `dependents` and `userMessage`. A `details` value that is not a plain object is not carried.
+  - **`LoginForm`'s `errorMessages`** is read under `CODE:cause` first (the refusal's `code` and `details.cause`, for example `BANNED_USER:scim_deactivated`), then under `CODE`, then the server's message is shown. A refusal with no cause, or with a cause the map has no entry for, answers exactly as before.
+  - **`@object-ui/i18n`** adds `auth.login.errors.accountDeactivated` to all 11 packs.
+- 6cde924: fix(console): a refused organization delete lists what the organization still holds, by object label, in the user's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `@object-ui/i18n` gains two keys in every shipped locale pack, so the published `en` export and `TranslationKeys` (`typeof en`) widen: `organization.settings.deleteRestricted` (the refusal's frame sentence) and `organization.settings.deleteRestrictedOther` (the "Other records" line). No key is removed or renamed; `organization.settings.deleteDescription` and `organization.settings.deleteConfirmDescription` keep their keys and change their text.
+  
+  The organization delete is refused with 409 `DELETE_RESTRICTED` while the organization still owns records, and the answer lists them as `dependents: [{ object, count }]`. The console showed that refusal as the server's English sentence, with internal table names such as `sys_billing_invoice_line`, in every language. Now the confirm dialog stays open and lists the remaining records itself: each object under its label from the loaded translation bundle, with its count, and every object no label resolves for counted on one "Other records" line. No API name and no server English is shown.
+  
+  The danger-zone and confirm copy no longer promise that all data is permanently deleted. In every shipped locale they say what the delete does: it removes the organization with its members and invitations, and it is refused, removing nothing, while the organization still holds records.
+  
+  `@object-ui/auth`: an auth-client rejection now carries the body's `dependents` (entries without an `object` dropped, a withheld count left out) and a producer-marked `userMessage`, beside `code` and `message`. Nothing else about the thrown error changes.
+- 7f5a237: fix(auth): the Console's phone-code sign-in and verify-email page continue to the two-factor prompt when the account has an enrolled second factor
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`AuthClient.signInWithPhoneOtp`** now answers `SignInResult`, the same type `signIn` and `signInWithPhonePassword` answer: a session, or `{ twoFactor: { methods } }` when the server accepted the code for an account with an enrolled second factor. Finish it with `verifySignInTwoFactor`. It used to reject with "No account is registered for this phone number." for that answer. Code that reads `result.user` / `result.session` straight off the answer must check `result.twoFactor` first.
+  - **`AuthContextValue.signInWithPhoneOtp`** resolves `{ twoFactorRequired: boolean }` instead of `void`; on `true`, `twoFactorChallenge` is set and `LoginForm` draws the same code step the password sign-in paths reach. A hand-built `AuthContextValue` (a test double passed to `AuthCtx.Provider`) whose `signInWithPhoneOtp` resolves nothing must now resolve `{ twoFactorRequired: false }`.
+  - **Console `/verify-email`**: when verifying the address would also sign in an account with an enrolled second factor, the page says the email is verified (it used to say verification failed) and sends the person to sign in, where the two-factor step follows.
+  - A custom `AuthClient` implementation (a test double, an alternative backend) keeps type-checking as long as it returns a session; it may now also return the challenge.
+- 633cce6: fix(auth): the forgot-password form sends one reset request at a time
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/auth`:** `ForgotPasswordForm` ignores a submit while its reset request is pending, so a fast double or triple click on "Send reset link" sends one `POST /request-password-reset`, not one per click. The button shows its submitting label and, like the email field, is disabled until the request answers; a request that fails (a 429 included) releases the form, so the next submit is sent. Before, the form's only guard was the provider's `isLoading`, which tracks the session read and was never raised for this call. The phone (SMS code) branch is unchanged.
+- f127b04: fix(plugin-auth)!: under invite_only, a self-serve sign-up is admitted only by the invitation it presents
+  
+  Clause-②: yes (narrowing) — under the `invite_only` audience posture an email-and-password sign-up for an invited address is admitted only when it presents that invitation's id as `invitationId`, and the address alone is refused `SELF_REGISTRATION_CLOSED`; a social OAuth creation is admitted by an invitation only when its identity provider verified the address. The sign-up request widens: `RegisterRequestSchema` and `RegisterRequest` gain `invitationId`, `SignUpData`, `RegisterForm` and the auth context's `signUp` gain it, and `os register` gains `--invitation`.
+  Metadata-protocol: added — RegisterRequest gains the optional invitationId key (packages/spec/authorable-surface/api.json)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key is removed, renamed or re-shaped and no stored row is rewritten: RegisterRequest gains an optional key, and a sign-up under invite_only that does not present its invitation is refused with the posture's existing code and message. -->
+  
+  **BREAKING** accept-set narrowing at the email-and-password sign-up door (`@objectstack/plugin-auth`), under the `invite_only` audience posture, the default.
+  
+  A sign-up under `invite_only` presents the invitation it is admitted by: the invitation's id, the last segment of the `/accept-invitation/` link the invitation mail carries, sent in the `/sign-up/email` body as `invitationId` beside `email`, `password` and `name`. The invitation must be pending, unexpired and addressed to that email. Anything else is refused `403 SELF_REGISTRATION_CLOSED` with the same message an uninvited sign-up gets, and nothing is written.
+  
+  **Upgrading.** A client that signs an invitee up sends `invitationId` beside the `email`, `password` and `name` it already sends. The one-line fix: send the id the invitation link carries as `invitationId`.
+  
+  **Who moves.** Nothing in this repository: the Console, the SDK, the CLI, the `@objectstack/verify` harness and the test fixtures all present the id; a client outside it that signs invitees up under `invite_only`, such as a custom front-end or a script, sends the accept link's last path segment as `invitationId`.
+  
+  **Operators.** Deploy the Console bundle together with the server; on a deployment with no mail transport, hand the invitee the link with the invitation's **Copy Invite Link** action; give an out-of-band recovery invitation row an `id` of your own, which the sign-up sends; and review accounts created before the upgrade that are unverified and hold or accepted an invitation.
+  
+  - **Unchanged:** the first account of a new deployment, and the operator's own provisioning (admin create, SCIM, the boot command's seed), need no invitation. The `open` and `email_domain` postures match an invitation by address as before. A magic-link or email-OTP creation, whose own flow answers from the mailbox, matches by address; an SSO provider's creation is unchanged.
+  - **Social OAuth under `invite_only`:** a creation through a social provider is admitted by an invitation only when the provider verified the address; otherwise it is refused with the same code as an uninvited sign-up.
+  - **No mail transport:** hand the invitee the link with the invitation's **Copy Invite Link** action; it carries the id.
+  - `@objectstack/spec`: `RegisterRequestSchema` declares the optional `invitationId`.
+  - `@objectstack/client`: `auth.register()` sends it through, typed by the widened `RegisterRequest`.
+  - `@objectstack/cli`: `os register --invitation ID`.
+  - `@objectstack/verify`: the harness's `signUp` presents the invitation it seeds.
+  - `@object-ui/auth`: `SignUpData.invitationId`, `RegisterForm`'s `invitationId` prop and the sixth argument of the context's `signUp` send it.
+  - `@object-ui/console`: `/register` opened from an invitation link sends that link's id with the sign-up; so does `@object-ui/app-shell`'s `DefaultRegisterPage`, whose package now also exports `invitationIdOf`.
+- c0abfb7: fix(auth,app-shell): every sign-out clears the browser storage the signed-out user's session wrote
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/auth`:** every sign-out path clears the `localStorage` and `sessionStorage` keys the session wrote: `signOut()`, and any session read the server answers with "no session" in a browser that has held a session (a session that expired, was revoked or was ended in another tab, at boot or in place). It is the same allowlist sweep a change of session user already runs. The sweep leaves the session token key (`auth-session-token`, which the auth client manages itself), the session-user pointer (`auth-session-user-id`), the theme (`vite-ui-theme`) and the sign-in page language (`objectui-locale`, `objectui-locale-seed`). A session read the server does not answer (a network failure, or an error status other than 401) is not a sign-out and clears nothing. Server-side user preferences are not changed. A host that keeps its own setting in browser storage under another key finds it cleared at sign-out, as it already was when a different user signed in.
+  - **`@object-ui/app-shell`:** a list's search write still waiting on its debounce is dropped before `signOut()` ends the session, and as soon as a session ends any other way, so none is written after sign-out.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [f56354c]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [1368536]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [de6d893]
+- Updated dependencies [326453e]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [e336a33]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/scenarios",
-  "version": "0.1.0",
+  "version": "18.4.0",
   "license": "Apache-2.0",
   "description": "Run the open ObjectStack scenario cards end to end from npm: `npx @objectstack/scenarios run` builds an app from each card's prompt with your local Claude Code login, scores it and writes one run record per card. Also the scenario-card schema and loader (computed truths over seed rows) and the deterministic scorer (`@objectstack/scenarios/score`, `./score/full`). Ships the open card library (docs/qa/scenarios) as package data, never a private overlay; refuses an API-billed login. A devx instrument, not a protocol: packages/spec carries no obligation for this format.",
   "type": "module",

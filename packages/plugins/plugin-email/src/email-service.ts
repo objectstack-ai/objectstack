@@ -28,6 +28,7 @@ import {
   type EncodedAttachments,
 } from './sys-email-payload.js';
 import { withRecoveredHeaders } from './internal-header-readback.js';
+import { SENDER_HEADER_NAMES } from '@objectstack/core';
 import {
   EMAIL_ATTACHMENT_RECLAIM_QUEUE,
   EMAIL_ATTACHMENT_RECLAIM_GRACE_MS,
@@ -113,6 +114,33 @@ export interface DeliverAttemptOptions {
    * accumulates across queue redeliveries instead of resetting to 1.
    */
   priorAttempts?: number;
+  /**
+   * Send the row from the configured sender ({@link EmailService.getDefaultFrom})
+   * with no sender header of its own (`SENDER_HEADER_NAMES`, `@objectstack/core`),
+   * whatever the row says. The outbox drain passes it for a row the service did
+   * not write. With no configured sender the row lands at `failed`.
+   */
+  asConfiguredSender?: boolean;
+}
+
+/**
+ * {@link DeliverAttemptOptions.asConfiguredSender}: the message sent from the
+ * configured sender, with every sender header taken off. Throws when no sender
+ * is configured, which lands the row at `failed`.
+ */
+function asConfiguredSender(message: NormalizedEmailMessage, configured: EmailAddress | undefined): NormalizedEmailMessage {
+  if (configured == null) {
+    throw new Error('no configured sender: a mail-log row the mail service did not write is sent only from the configured sender');
+  }
+  const out: NormalizedEmailMessage = { ...message, from: formatAddress(configured) };
+  if (message.headers) {
+    const kept = Object.fromEntries(
+      Object.entries(message.headers).filter(([name]) => !SENDER_HEADER_NAMES.has(name.trim().toLowerCase())),
+    );
+    if (Object.keys(kept).length > 0) out.headers = kept;
+    else delete out.headers;
+  }
+  return out;
 }
 
 /**
@@ -1084,6 +1112,16 @@ export class EmailService implements IEmailService {
         // is built to make impossible.
         await this.discardOrphanedAttachmentContent(storageKeys, 'the sys_email row could not be persisted');
       }
+      if (!rowPersisted && input.requireLogRow === true) {
+        // The caller sends only what the mail log records (`SendEmailInput.requireLogRow`):
+        // refused before any delivery, so nothing goes out unrecorded.
+        throw Object.assign(
+          new Error(
+            `SERVICE_UNAVAILABLE: the message was not sent, because the mail log (${object}) could not record it. Try again later.`,
+          ),
+          { code: 'SERVICE_UNAVAILABLE', status: 503, statusCode: 503 },
+        );
+      }
       if (queue) {
         // Queue mode delivers the ROW, so a row that never landed leaves the
         // job with nothing to reference. Deliver inline instead of publishing
@@ -1567,6 +1605,7 @@ export class EmailService implements IEmailService {
       // the reason, which is the whole point: an unfetchable attachment must
       // never become a message delivered without it.
       normalized = await rowToNormalizedAsync(source, { fetchContent: this.attachmentFetcher() });
+      if (opts?.asConfiguredSender) normalized = asConfiguredSender(normalized, this.getDefaultFrom());
     } catch (err: any) {
       const errMessage = String(err?.message ?? err ?? 'invalid row').slice(0, 1000);
       await this.updateRow(rowId, {

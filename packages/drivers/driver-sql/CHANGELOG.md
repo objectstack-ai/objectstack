@@ -1,5 +1,552 @@
 # @objectstack/driver-sql
 
+## 18.4.0
+
+### Minor Changes
+
+- 45916c9: feat(driver-sql): a field's declared `renamedFrom` carries the old column's values to the new key in the schema sync
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A field `b` declaring `renamedFrom: ['a']` is now carried from `a` when the table has a column for `a`, none for `b`, and the object no longer declares `a`: the schema sync renames the column (one transaction on PostgreSQL and SQLite, one atomic `ALTER TABLE` on MySQL), values, indexes and constraints with it, before any additive DDL. It runs wherever the sync runs (a boot on a new artifact, `os start` / `os dev`, `os migrate apply`, a package install), and a second sync finds `b` and no `a` and does nothing. The carry is logged by name; an index named for the old key is retired once the one named for the new key stands.
+  
+  A declaration the carry cannot honour throws `DeclaredRenameRefusal` before any DDL on that table, naming the field, the old key and the reason: a platform column (`id`, an audit timestamp, the tenant column, a hash shadow), a key the object still declares, a key two fields claim, both columns present, two old columns present, a destructive type change (the old column narrowed under the new type, or a target with no column — a formula), a MySQL hash-shadow unique that cannot follow, or a dialect that renames no column. `previewDeferredSchemaWork` lists a carry as `rename_columns` (with `renames`) and a refusal as `refuse_table`. New exports: `DeclaredRenameRefusal`, `planDeclaredRenames`, `renderDeclaredRenameRefusal` and their types.
+- 8c75f83: feat(spec, driver-sql, service-datasource): SQL Server as a federation-only dialect — an `external` datasource over Microsoft SQL Server reads live, and with the double opt-in writes live
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: generated only — `skills/objectstack-data/references/_index.md` gains the `driver/mssql.zod.ts` row (`gen:skill-refs`); no hand-written skill text enumerates a datasource driver-id roster or teaches per-dialect federation behaviour. `content/docs/data-modeling/external-datasources.mdx` gains the SQL Server section (§8, after Oracle's) (config shape, federation-only scope, schema-qualified tables, the 2017 floor), and `content/docs/references/data/driver-mssql.mdx` is generated.
+  
+  - **`@objectstack/spec`**: the driver vocabulary gains `mssql` (aliases `sqlserver`, `tedious`), a second `federationOnly` row after `oracle`, with `hasLocalDefault: false`: no boot host offers it, and a `managed` datasource declaring it is refused at parse, at `schemaMode`, by the same refusal as `oracle`. `FEDERATION_ONLY_DRIVER_IDS` and `isFederationOnlyDriver()` now answer both drivers, and `DatabaseSelectionDriverId` excludes both. The boot-host selection tables are now built without the federation-only rows, so the withdrawal holds by the column rather than by each row's empty `aliases`. `MssqlConfigSchema` is the closed config: `host`, `port` (1433), `instanceName`, `database`, `username`, `ssl`; an inline password, a connection URL and `autoMigrate` are refused with the reason. Its `ssl` docblock documents a self-signed server as the datasource-level `ssl: { enabled: true, rejectUnauthorized: false }`, because a block without `enabled: true` turns encryption off. `type-compat`'s `SqlDialect` gains `'mssql'`, and `DIALECT_ALIASES.mssql` maps SQL Server's types (`nvarchar`/`nchar`/`ntext`/`xml` → text, `bit` → boolean, `datetime2`/`datetimeoffset`/`smalldatetime` → datetime, `uniqueidentifier` → uuid, `money`/`decimal`/`numeric` → decimal, `timestamp`/`rowversion` → binary). Oracle's exact-to-lossy demotion and SQL Server's added lossy pairing are now one table, `DIALECT_LOSSY_RULES` (`demoteExact` / `addLossy`, only ever toward `'lossy'`): on `mssql`, a text column backs a `json`, `tags` or `multiselect` field as `'lossy'`, because SQL Server keeps JSON in `nvarchar(max)`; Oracle's answers are unchanged. ADR-0015 §4.6 lists the dialect, and §5.1's federation-only arm names both drivers.
+  - **`@objectstack/driver-sql`**: `dialectName` reads `'mssql'` for knex's `mssql` client, so nothing falls to `'unknown'`. Text predicates keep the #6518 contract on SQL Server's case-insensitive default collations (a `Latin1_General_100_BIN2` comparison, `TRANSLATE` for the ASCII fold, `[` escaped); a `bit` aggregand is cast for SUM/AVG/MIN/MAX; writes use `INSERT … OUTPUT inserted.*` through a temp table, so a table with triggers accepts them; a `uniqueidentifier` reads back in the canonical lower-case form (tedious `lowerCaseGuids`, unless the host sets it), so a GUID written as a string reads back as that string and filters by it in either case; an unsorted page of a federated table is ordered by its own single-column primary key, read from the catalog; `limit: 0` compiles to `TOP (0)`; JSON fields read back from `nvarchar`; introspection lists every user table as `schema.table` (`dbo.Orders`) with its primary key, foreign keys, unique columns and indexes. Managed DDL is refused as federation-only (`SQL_DIALECT_EMISSION_UNSUPPORTED`, through the same `'federation-only'` reason and message renderer as Oracle), and `$contains` / `$empty` on a multi-value field is refused rather than approximated.
+  - **`@objectstack/service-datasource`**: the datasource driver factory builds an `mssql` datasource on `SqlDriver` with the `tedious` connection (`server`, `port`, `database`, `user`, the bound secret as password, `encrypt` / `trustServerCertificate` / `instanceName` from the config and the datasource `ssl` block), and reports `@@VERSION`. The `ssl` block's resolution moves, unchanged, to its own leaf module (`datasource-ssl-option.ts`).
+  
+  Nothing existing changes for the other drivers.
+- 3aa0b42: feat(spec,driver-sql,service-datasource): Oracle Database as a federation dialect: read live, write behind both opt-ins, never managed
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`@objectstack/spec`**: a datasource may name `driver: 'oracle'` (alias `oracledb`), with `OracleConfigSchema` as its `config` contract: `connectString`, or `host` / `port` (default 1521) / `serviceName`, and `username`. `password` (the credential is the bound secret), `url`, and the TLS keys are refused by name with the spelling that works. The row is federation-only (`FEDERATION_ONLY_DRIVER_IDS`, `isFederationOnlyDriver`) with no local default. It is never a boot selection, and a `managed` oracle datasource, including the default mode, is refused at `defineStack` with the scope and the fix named. A datasource `ssl` block that asks for TLS is refused on oracle too, because Thin mode takes TLS from a `tcps://` connect string and would drop the block. A private certificate authority is reached through a PEM wallet the connect string names (`?wallet_location=DIR`, or `MY_WALLET_DIRECTORY` in a descriptor). Two published types narrow with no runtime change: `resolveDatabaseDriverId()` now returns `DatabaseSelectionDriverId | undefined` and `DATABASE_DRIVER_SELECTION_IDS` is `readonly DatabaseSelectionDriverId[]` (new types `DatabaseSelectionDriverId` and `FederationOnlyDriverId`), because no selection spelling resolves to a federation-only id. A consumer that asks `DATABASE_DRIVER_SELECTION_IDS.includes(id)` with a wider `BuiltinDriverId` widens the list first: `(DATABASE_DRIVER_SELECTION_IDS as readonly string[]).includes(id)`. The type-compatibility matrix gains `'oracle'` (`DIALECT_ALIASES.oracle`, `NUMBER(p,s)` / `RAW(16)` parameterised), and ADR-0015 §4.6 lists it. On oracle, `isCompatible` answers `'lossy'` for every field over a `RAW(16)` uuid column, `lookup` included, because the driver cannot yet filter or write it by its UUID string.
+  - **`@objectstack/driver-sql`**: `client: 'oracledb'` speaks Oracle over node-oracledb in Thin mode, with no Oracle Client libraries. `oracledb` is an optional peer. Minimum Oracle 12c Release 1. Paging uses `OFFSET … ROWS FETCH NEXT … ROWS ONLY`. Identifiers are quoted as the catalog folds them (UPPER). `LIKE` gets a bound `ESCAPE`, and the `$icontains` fold is ASCII-only. A NUMBER(1) flag reads as a boolean. Datetime and date comparands and writes bind as instants on a UTC session, and DATE / TIMESTAMP reads are repaired from Thin's local-clock decode. RAW(16) reads as a UUID string. `$empty` on a text column is its NULL row. Catalog introspection covers the current schema: ALL_TABLES, ALL_TAB_COLUMNS, and PK/unique/FK from ALL_CONSTRAINTS. Refusals: every DDL operation (`UnsupportedDialectEmissionError`, reason `federation-only`); a `''` equality or range comparand (`INVALID_FILTER`, because Oracle stores `''` as NULL and would answer IS NULL); JSON-array membership (`INVALID_FILTER`); and upsert (`NOT_IMPLEMENTED`, 501, because no MERGE is emitted).
+  - **`@objectstack/service-datasource`**: the shared driver factory builds the oracle arm. It composes `host:port/serviceName` or passes `connectString` verbatim, and the password is the bound secret. A missing `oracledb` package is answered with that package's install.
+  
+  Held to the shared conformance case-sets over a live Oracle 23ai (`OS_TEST_ORACLE_URL`, declared skip without it, `OS_EXPECT_LIVE_ORACLE=1` to require it). The Oracle section of the external-datasources guide states the minimum version, the config shape, and each refusal.
+
+### Patch Changes
+
+- 8d7f906: fix(driver-sql): schema sync never drops an existing table that holds rows; a `_id`-keyed table with rows is refused, naming the table and the column
+  
+  Clause-②: yes (narrowing) — `SqlDriver.initObjects` / `syncSchema` refuse one more case that used to succeed: an existing table that has a `_id` column, no `id` column and at least one row. It used to be dropped and recreated empty; it is now refused with an `ExistingTableAdoptionRefusal` naming the table, the column and the row count, and nothing is changed.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored metadata changes: what moves is what schema sync does to a database table it finds, and the refused table is left exactly as it was, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing in schema sync (`@objectstack/driver-sql`): a table the sync would have rebuilt is refused while it holds rows.
+  
+  - **Before.** Schema sync adopts an existing table by adding the columns the object declares and the table lacks, rows kept. A table keyed by `_id` with no `id` column (the storage key of the ObjectQL driver this one was ported from) was instead dropped and recreated as the object declares, whatever it held. Storing an object on a managed datasource over an existing database reached it: an object named after such a table deleted its rows, and the save answered success.
+  - **Now.** That rebuild runs only on an empty table, as before. A table that holds rows is refused before anything is written: no column is added, no index is built, no row is touched. The refusal is thrown from `initObjects` and reaches the caller of the sync. The metadata save, the boot sync and a datasource connect report a refused sync in the server log at `error`, followed by this message, as they do for any refused sync.
+  - **Who moves.** Only a deployment storing an object on a managed SQL datasource whose table of the same name is keyed by `_id` and holds rows. No platform table has that shape.
+  
+  **The remedy.** To keep the rows and use the table, rename its `_id` column to `id`, then save the object again (or restart). To read the table as it is, bind the object through a datasource whose `schemaMode` is `external`. If the rows are not needed, empty the table and save again; the sync then rebuilds it.
+- 6990b0d: fix(driver-sql,cli): `os migrate plan` previews a `_id`-keyed table as apply treats it, and one refused table no longer stops `os migrate apply`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An existing table keyed by `_id` with no `id` column is the one shape schema sync does not adopt by adding columns: it rebuilds it while it is empty and, since #30562, refuses it while it holds rows. `os migrate plan` listed it as a harmless `add_columns` step. The plan now lists it as `apply` treats it: a `rebuild_table` entry (in place) when the table is empty, and a `refuse_table` entry when it holds rows, naming the table, the `_id` column and the row count, with the refusal's own text (`refusal`, rendered by the same renderer the sync throws through). `isRefusedSchemaWork` is exported beside `isInPlaceSchemaWork`. For a driver-sql consumer this widens the published `PendingSchemaWorkKind` / `PendingSchemaWork`: a caller of `flushDeferredSchemaDdl()` must now treat a returned `refuse_table` entry (`isRefusedSchemaWork`) as a table that was refused and left as it is, not as performed work — where that call used to throw.
+  
+  `os migrate apply` used to hand every held-back object to one sync call, so one refused table stopped the batch: the tables after it got no DDL and the list of performed work was lost with the error. The refused table is now left out of that call and reported on its own: every other table gets its DDL, the run names the refused table with the refusal text, and ends PARTIAL with exit 1 (`--json`: `refused` beside `created`, `message: "partial"`).
+- f108e6d: feat(spec): a field declares the key or keys it was renamed from — `renamedFrom` on `FieldSchema`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #30885 — `skills/**` does not teach the key yet: it is declared ahead of the upgrade step that carries the data (rename execution, #30885), and that step owns the skills line; this diff documents it in `content/docs/data-modeling/fields.mdx` and the generated references
+  
+  A package author can now say that a field was renamed, so that an upgrade knows a rename from a drop-and-add. On the new field, write the old key: `account_name: Field.text({ label: 'Account Name', renamedFrom: ['company'] })`. A field renamed twice lists both earlier keys. This is the manifest half of the rename mapping ruled on epic objectstack-ai/cloud#3652 (Q3 「默认拒绝，需显式映射（推荐）」, and on where the mapping lives, 「写进清单 renamedFrom」), and it supersedes item 5 of objectstack#24443's ruling A ("No rename spelling is added to the spec").
+  
+  - **`@objectstack/spec`: `FieldSchema.renamedFrom: string[]`, optional.** Each entry is an earlier key of this same field, in the field-key grammar (lowercase snake_case). The parse refuses, in one located issue naming the object, the field and the old key: an entry that is not a field key (judged by `FieldSchema`), and, in `ObjectSchema`'s refinement beside the stage-field check, an entry that is the field's own key, an entry repeated within one list, an entry that another field of the same object still declares (the old name is still in use), and an old key that two fields of the same object both claim. Type compatibility between the old column and the new field is not judged at parse: it depends on the installed version, so the upgrade plan judges it. An object that does not write the key parses exactly as before; nothing materializes.
+  - **Declared ahead of its readers.** Nothing in this release reads the key at upgrade or anywhere else. The upgrade plan (#30884) and the rename execution (#30885) read it; until the execution ships, no upgrade carries a column on this declaration. The liveness ledger records the row as `planned`, naming #30885 as the reader that flips it to `live`.
+  - **Publish-time consequence.** `FieldSchema` is strict, so an artifact that carries `renamedFrom` is refused, as an unrecognized key, by every runtime older than this release. A package that adds the key needs an installing runtime at this release or later; a package that does not write it is unaffected.
+  - **`@objectstack/driver-sql` and `@objectstack/metadata-core`: the key is classified in the two maps pinned exhaustive over `FieldSchema`.** The SQL driver's builtin-column classification files it as `storage` (on `id`, `created_at` or `updated_at` the platform's own column takes no data from an old one, so the builtin-column diagnostic reports it as discarded there). The field-level security scrub keeps it: the parse refuses any entry that names a live field, so no entry can name a field a caller is denied.
+- e2e6ec7: fix(driver-sql): `aggregate()` and `distinct()` honour `external.columnMap` on every dialect
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A federated object whose `external.columnMap` names a remote column different from the field could not be aggregated or listed for distinct values. `find()`, `count()` and every WHERE already read through the map, but `aggregate()` named the field verbatim in its GROUP BY, its date-bucket expression and its aggregand, and `distinct()` named it in `SELECT DISTINCT`. The remote table was asked for a column it does not have. On SQLite, PostgreSQL and MySQL that surfaced as the driver's unresolvable-column refusal.
+  
+  Both doors now spell every identifier as the remote column and keep the field everywhere the caller reads: as the output key, in the presentation (`min`/`max` over a mapped date, a mapped boolean's distinct values) and in the per-field registries. An object without a `columnMap` compiles exactly the statement it compiled before.
+- e2e6ec7: fix(driver-sql): `update()`, `delete()` and `bulkDelete()` find their row through `external.columnMap` on every dialect
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A federated object whose `external.columnMap` maps its key to a remote column (`CUST_NO: 'id'`) could be created and read, but not updated or deleted by id. The payload was already mapped, but the by-id doors wrote `WHERE "id" = ?` whatever the map said. The same held on SQLite, PostgreSQL and MySQL. On a remote table without an `id` column the statement failed. On a remote table that also has its own `id` column, which is not the mapped key, it matched rows by that other column: an update answered `null` or a delete removed a row nobody named.
+  
+  The three doors now match the key's mapped column, the column the insert read-back already used. An object without a `columnMap`, and every rotation shard, compiles the statement it compiled before.
+- 77a675d: fix(driver-sql): paged reads of a federated object keyed through `external.columnMap` are a partition, ordered by that key, on every dialect
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A paged `find()` gets a unique tie-breaker so its pages partition the result set (objectui#3106, #4363). That tie-breaker was imposed only on tables this driver created. A federated object got none, even when its `external.columnMap` names the remote key column (`T_NO: 'id'`), which is the column the by-id doors already address. Ties within the caller's sort were not ordered at all, and an unsorted paged read had no order. SQLite mostly hid this, because a plain table scan returns rowid order. PostgreSQL and MySQL promise no order among ties, so a page walk there can repeat some rows and never serve others.
+  
+  A paged read of such an object is now ordered by the mapped key after the caller's own keys, the same rule a managed table follows. A federated object with no mapped key keeps the old behaviour exactly: no column is guessed, and the existing warning still names the gap.
+- 77a675d: fix(driver-sql): `upsert()` resolves its conflict target and its read-back through `external.columnMap` on every dialect
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A federated object whose `external.columnMap` maps its key to a remote column (`CUST_NO: 'id'`) could not be upserted correctly. The payload was mapped, but the conflict target stayed the field names: the default target compiled `ON CONFLICT ("id")`, and an explicit `conflictKeys` naming the key did the same. On SQLite, PostgreSQL and MySQL alike, on a remote table without an `id` column every upsert failed. On a remote table that also has its own `id` column, which is not the mapped key, the conflict target was that other column: an upsert of an existing key raised a primary-key violation instead of merging, and the read-back of an inserted row matched that other column and answered a different row.
+  
+  The conflict target, the MySQL pre-flight and identity probes, and the read-back now name the mapped columns. Refusals still name the fields the caller passed. An object without a `columnMap` compiles the statement it compiled before.
+- 836d408: fix(driver-sql): an Oracle `RAW(16)` uuid column (a `SYS_GUID()` key, or a lookup over one) is now filtered and written by the uuid text it reads back as
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The driver already read a `RAW(16)` column as a lowercase hyphenated uuid, but it bound that same text back as a string, which Oracle refuses against `RAW`. So a lookup keyed by a `SYS_GUID()` column displayed correctly and could not be filtered, written, updated or deleted by its value.
+  
+  The driver now reads, once per federated object, which of its remote columns are `RAW(16)` (`ALL_TAB_COLUMNS`), and binds a comparand, a written value or a by-id key for those columns as `HEXTORAW(?)` over the uuid's 32 hex digits. The column type decides, never the value: a `VARCHAR2` column holding uuids is bound as text, as before. Uuid text is accepted dashed (the read form) or as the 32 digits undashed, in either case. Anything else is refused before the statement is sent: a filter comparand with `INVALID_FILTER` / 400, a written value with `VALIDATION_ERROR` / 400. A failed catalog read changes nothing: values are bound as before and the next read asks again. Other dialects are unchanged.
+- 90457e7: fix(service-analytics): a dashboard's text filter on a SQL Server object matches the rows the list view matches; the text-match construct table moves to `@objectstack/core`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-analytics`:** the native-SQL `where`, the read scope and the ObjectQL echo now compile `$contains` / `$notContains` / `$startsWith` / `$endsWith` / `$icontains` on SQL Server the way `@objectstack/driver-sql` does: the four case-exact operators compare under a binary collation, `$icontains` folds the 26 ASCII letters and nothing else, and a `[` in the comparand is matched literally. Before, a SQL Server object's text filter compiled to a plain `LIKE` under the database's case-insensitive default collation, so `$contains: 'acme'` also matched `ACME Corp`, `$icontains` also folded accented letters, and `$contains: '[1]'` matched any value holding a `1`. `AnalyticsServiceConfig.sqlDialect` now accepts `'mssql'` beside `'sqlite'`, `'postgres'` and `'mysql'`, and the plugin's bridge hands a SQL Server driver's dialect on instead of reading it as "no answer". Every other per-dialect behaviour of the package (duration measures, the multi-value empty test, JSON membership, the window clause, NULL placement, the aggregand policies) treats `'mssql'` exactly as it treated the unknown dialect before. Oracle is unchanged: it already matched the driver's rows.
+  - **`@objectstack/core`:** exports `dialectTextMatchSql` (with `TextMatchDialect`, `TextMatchShape`, `TextMatchEmitters`, `TextMatchRequest`), the per-dialect text-match constructs `driver-sql` and the analytics compilers now both emit through, plus `textMatchLikePattern`, `ASCII_UPPER_LETTERS` / `ASCII_LOWER_LETTERS`, `mssqlCaseExactSql`, `mssqlAsciiLowerSql` and `mysqlAsciiLowerBinarySql`. The column and each value are emitted through caller-supplied emitters, so each face keeps its own placeholders. The unknown dialect answers `null`; each face keeps its own fallback there.
+  - **`@objectstack/driver-sql`:** no behaviour change. Its `$contains` family and `$icontains` emit through the shared table; the SQL and bindings are identical to before.
+- 06060c6: fix(driver-sql): on SQL Server, the text operators match a `uniqueidentifier` column as the lower-case text a read answers
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A federated SQL Server table's `uniqueidentifier` columns read back lower-case, but `$contains`, `$startsWith`, `$endsWith`, `$notContains`, `$icontains`, `$like` and `$ilike` compared SQL Server's own upper-case text of the GUID, so a lower-case fragment copied from a read matched nothing. The driver now reads which columns are `uniqueidentifier` from the remote catalog (`INFORMATION_SCHEMA.COLUMNS`) once per object, the first time a read uses a text operator on it, and matches such a column as `LOWER(CONVERT(nvarchar(36), col))`.
+  
+  The case-exact operators follow the read form: `$startsWith: '3f2504e0'` now matches, and `$startsWith: '3F2504E0'`, which matched SQL Server's upper-case rendering before, now does not; use `$icontains` / `$ilike` to match either case. Equality and `$in` are unchanged (SQL Server compares GUIDs by value). `nvarchar` columns, and every other dialect, compile exactly as before.
+- 82a3ed2: fix(driver-sql): concurrent first writes to a new autonumber object on MySQL no longer issue duplicate numbers
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On MySQL 8, the first records written concurrently to an object whose autonumber counter did not exist yet could share a number (measured: 16 cold writers gave up to 10 duplicates, with some creates failing `ER_LOCK_DEADLOCK`). The cold seed locked a missing counter row before inserting it; on InnoDB that takes a gap lock every writer shares, so the inserts deadlocked, the server rolled the losers' whole transactions back, and the driver went on in autocommit, where its locked read no longer locked anything.
+  
+  The counter row is now seeded first, by an idempotent insert (`ON CONFLICT DO NOTHING` on Postgres and SQLite, a no-op `ON DUPLICATE KEY UPDATE` on MySQL), and locked only once it exists, so a cold counter takes the same path as a warm one. Measured on MySQL 8.0 after the fix: 16 cold writers on one driver, on two drivers, and in 16 caller transactions issue 1..16 once each, with no deadlock.
+  
+  When the server does roll the whole transaction back (`ER_LOCK_DEADLOCK`): an issue in a transaction the driver owns is retried from the start, up to five attempts; an issue inside the caller's transaction is not retried and the caller gets the server's `ER_LOCK_DEADLOCK`, since that transaction, and the caller's earlier writes in it, are already gone. Before, the issue went on and its writes autocommitted outside the caller's transaction.
+  
+  Postgres and SQLite issue the same numbers as before; every issue now reads the counter row once without a lock before locking it.
+- 5e85952: fix(service-analytics): the `/analytics/sql` echo for a federated SQL Server object prints SQL Server's own row window, and the JSON membership and `$empty` refusals name the `mssql` dialect
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dashboard over a federated SQL Server object runs the engine aggregate, so its rows were already paged by driver-sql. The SQL this package prints for the same query (`/analytics/sql`, and the statement attached to a query answer) spelled the window `LIMIT n OFFSET m`, which SQL Server does not parse. It now prints the window driver-sql's find path runs: `TOP (n)` for a limit alone, and `OFFSET m ROWS FETCH NEXT n ROWS ONLY` after an `ORDER BY`, ordered by `(SELECT NULL)` when the query states no order. `limit: 0` prints `TOP (0)`.
+  
+  The rules for that window (an `OFFSET` needs an `ORDER BY`; `FETCH NEXT 0 ROWS` is an error, so `limit: 0` is `TOP (0)`) moved out of driver-sql's find path into `@objectstack/core` as `mssqlWindow` / `mssqlWindowSql`, which driver-sql and the analytics echo both use. driver-sql's statements are byte-identical.
+  
+  A `$contains` / `$notContains` on a JSON-stored field, or `$empty` on a multi-value field, on SQL Server is still refused (no JSON construct is stated for that dialect). The refusal now names the dialect, `"mssql"`, where it used to say the dialect is not known. The refusal for a dialect the host cannot name keeps its words. SQLite, PostgreSQL and MySQL statements are unchanged.
+- 5b7269f: feat(core): the activation ledger is keyed by `(metadata_type, package_id, name)`, and rows that name no package take their one holder
+  
+  Clause-②: yes (widening) — `@objectstack/core` exports `backfillActivationLedgerPackages` and the `ActivationLedgerHolder`, `ActivationLedgerUnboundRow`, `ActivationLedgerBackfillReport` and `ActivationLedgerBackfillOptions` types from its root, and `@objectstack/metadata-protocol` exports `ensureActivationLedgerPackagelessIndex`, `buildActivationLedgerPackagelessIndexSql`, `buildActivationLedgerPackagelessDuplicateProbeSql`, `ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME` and the `EnsureActivationLedgerPackagelessIndexResult` / `EnsureActivationLedgerPackagelessIndexStatus` types; nothing is removed or renamed, and every door and name-keyed reader answers as before.
+  Metadata-protocol: none
+  
+  `sys_metadata_activation` (the switch an administrator throws to turn a packaged flow, action, permission set, sharing rule, webhook, queue or assignment rule off) is now unique on `(metadata_type, package_id, name)` instead of `(metadata_type, name)` (ADR-0150 D4, D8 row R4). Two packages may each hold a row for an item of the same name; one package may not hold two.
+  
+  At every boot, once the package holders are sealed, a ledger row that names no package is given the package that holds its item, as the package-scoped resolver answers it. Who sees it: an operator whose deployment carries such rows reads one `info` line naming each row bound. A row whose name two packages hold is left as it is and reported in one `warn` line naming every holder; nothing is picked. A row for an item the environment authored, or for a position, keeps naming no package. The backfill writes only `package_id`, never the switch itself, so the next boot finds nothing to change.
+  
+  Nothing reads the package yet: every flow, action and catalog switch still applies by type and name exactly as before, and the activation doors answer as before.
+  
+  Rows for an item the environment authored name no package, and SQL `UNIQUE` (like the memory and MongoDB drivers) exempts a row whose key part is NULL, so the new key does not constrain them. They keep one row per `(metadata_type, name)` through an index of their own, `uniq_sys_metadata_activation_packageless`: built at boot by `metadata-protocol` (SQLite and PostgreSQL: a partial index `WHERE package_id IS NULL`; MySQL 8.0.13+: a functional key part) and by `driver-mongodb` at collection sync (a `{ package_id: null }` partial filter). Who sees it: a second activation row naming no package for one item is refused `409 DUPLICATE_RECORD`, as it was before. A database that already holds such duplicates keeps them and gets one `error` line with the query that lists them, also reported by `os migrate duplicates`; nothing is deleted. MariaDB can build neither form and says so at `error`. The memory driver enforces declared indexes only.
+  
+  On an existing SQL database the boot's schema sync creates the new key's index beside the old one, and once the package-less index stands, `os migrate plan` reports the old `(metadata_type, name)` index as superseded: one `replace_unique_index`, category safe, applied by `os migrate apply` with no `--allow-destructive`. The SQL driver reads a generated plain UNIQUE whose columns are an in-order proper subsequence of a declared global UNIQUE on the same table this way, because widening a unique key only admits rows the old key refused; when a column the key gained is nullable, it does so only beside a partial UNIQUE on the old columns, and until then keeps the old index without offering to drop it (MariaDB stays there). A UNIQUE on other columns still reads as an orphan, as before. Until the replace is applied the old index keeps refusing a second package's row of the same name, which nothing writes yet.
+- f647430: fix(objectql): a server boot's schema sync takes the same schema-migration lock as `os migrate apply`, so replicas starting together create each table once
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Several servers booting against one Postgres or MySQL database at the same time (replicas of one deployment, or several `OS_MIGRATE_AND_EXIT=1` jobs) each read the same missing tables and each created them. Postgres then refused one of the duplicate `CREATE TABLE` statements with a `pg_type` unique-key collision, and the boot that lost logged `Schema sync FAILED` for that object while still exiting 0. The boot's schema sync now takes the schema-migration lock that `os migrate apply` takes (one name, `objectstack:schema-migrate`, and one Postgres key), on the default datasource's database, and releases it as soon as the sync is done. It is never held while the server runs. A boot that finds another migration running prints one line saying it waits, then finds the tables already there.
+  
+  On a single node nothing changes: the lock is uncontended and prints nothing, and SQLite (with Turso and WASM SQLite) takes no lock at all: the lock reads the dialect from the driver's `dialectName` and never asks a SQLite-dialect driver for its Knex, so a remote Turso transport, which refuses to hand its Knex out, boots as before. A boot with `skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1` takes none either, since it runs no DDL. A waiting boot gives up after half of the engine plugin's start budget (60 s by default), changes nothing and fails the boot with a message naming the lock; start it again once the other migration has finished.
+  
+  The lock now lives in `@objectstack/objectql` (`acquireSchemaMigrationLock`, `SCHEMA_MIGRATION_LOCK_NAME`), so the engine's boot can take it; `@objectstack/cli` keeps importing it from there. `SqlDriver` gains a read-only `schemaDdlDeferred` getter, which tells the engine's boot that `os migrate plan` / `apply` is holding the driver's DDL back and will take the lock itself.
+- 31ae944: fix(drivers): an upgraded MongoDB or MariaDB database retires the activation ledger's old `(metadata_type, name)` unique safely
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The activation ledger `sys_metadata_activation` became unique on `(metadata_type, package_id, name)` (ADR-0150 D4), with a separate index, `uniq_sys_metadata_activation_packageless`, keeping rows that name no package to one per `(metadata_type, name)`. On two kinds of upgraded database the old two-part unique stayed beside them and would refuse the first second-package row of a name. This release replaces it safely there. Fresh databases are unaffected.
+  
+  - **MongoDB.** Who sees it: a deployment whose `sys_metadata_activation` collection was synced by an earlier release. Schema sync now drops `idx_metadata_type_name_unique` once the wider key and the package-less guard are confirmed present, and prints one `warn` line naming the collection, the old key and the new key. The rule is general but narrow: it drops only a unique this driver built itself (its own name and options), whose fields are an in-order part of an unnamed declared global unique, that no current declaration still asks for, and, when a gained field is not `required`, only beside a partial unique on the old fields over the rows where that field is null. The plain read index over the old fields stays: it refuses nothing and still serves lookups.
+  - **MariaDB.** MariaDB has no partial index and no functional key part, so until now the package-less guard was not built there and the old index had to stay. The guard is now a UNIQUE key over an INVISIBLE generated column, `uniq_sys_metadata_activation_packageless__hash`, holding a digest of `(metadata_type, name)` that is NULL for a packaged row (MariaDB 10.3 or later). INVISIBLE keeps the column out of every read. Who sees it: on the next boot of such a database, `os migrate plan` reports the old index as one `replace_unique_index`, category safe, and `os migrate apply` replaces it with no `--allow-destructive`. A second row naming no package is still refused, and two packages may each hold a row of one name. The SQL driver's drift check reads this guard as a partial unique, never as an orphan index or column to drop. A MariaDB database that already holds two package-less rows of one name keeps them and gets one `error` line with the query that lists them, as on the other dialects.
+- 2b880f1: fix(driver-sql): index each authored single-valued reference column without a declaration
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The SQL driver now gives every authored single-valued `master_detail`, `lookup` and `user` column a non-unique `(column)` index named `idx_TABLE_COLUMN`. Before, it built only the indexes metadata declared, so a read of the detail rows of one parent (a `controlled_by_parent` read, a related list, the referential-integrity read on a parent delete) walked the whole organization through the tenant index or scanned the table. Measured on PostgreSQL 16 at 1M rows: 73 ms before, 1.4 ms after; on SQLite at 200k rows: 21 ms before, 0.2 ms after. Read and write results are unchanged; only the plan is.
+  
+  What is skipped:
+  
+  - Multi-valued references (`multiple: true`), which are JSON columns.
+  - The platform's own system columns (`created_by`, `updated_by`, `owner_id`, `owning_business_unit_id`) and the tenant column, which has its own index already.
+  - A column that a declared index already has as its leading column. An author who later declares `{ fields: ['COLUMN'] }` gets the same name, so the two converge on one index.
+  
+  Write cost, measured on a 20,000-row `bulkCreate` into a table already holding 20,000 rows, with one `master_detail`, one `lookup` and one `user` column (three new indexes): about 12% slower on PostgreSQL 16 and about 39% slower on SQLite. A table with only a `master_detail` column pays about 3% (PostgreSQL) and 6% (SQLite).
+  
+  Existing deployments: the indexes are created on the next boot by the same additive schema sync that creates declared indexes, and `os migrate plan` lists each missing one as a safe `create_index` beforehand. On PostgreSQL an existing table builds them with `CREATE INDEX CONCURRENTLY`, so writes to the table are not blocked while they build; see this release's entry on concurrent index backfills for the lock-wait bound and the INVALID-index cleanup. A second sync creates nothing.
+- c72ec19: fix(driver-sql): build PostgreSQL index backfills on existing tables concurrently
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On PostgreSQL, an index the schema sync adds to a table that already exists is now built with `CREATE INDEX CONCURRENTLY`, so writes to the table are no longer blocked while it builds. This covers the boot sync, `os migrate apply`, and rotation shards that already exist; non-unique and unique indexes alike. Before, the sync sent a plain `CREATE INDEX` (or `ADD CONSTRAINT … UNIQUE`), which blocks every INSERT, UPDATE and DELETE on the table for the whole build. Measured on PostgreSQL 16 at 1,000,000 rows: an INSERT sent during the build waited 537 to 777 ms before and about 1.2 ms after. The index that results is the same; a plain unique index still ends as the same unique constraint. A table the sync creates is empty and keeps the plain statement, and SQLite, MySQL and the other dialects send exactly what they sent before. `os migrate plan` output is unchanged.
+  
+  What operators should know:
+  
+  - **A concurrent build waits for older transactions anywhere in the database.** `CREATE INDEX CONCURRENTLY` waits for every transaction that started before it, on any table, not only the one being indexed. A long report query or an open, uncommitted session elsewhere holds it.
+  - **The wait is bounded, and a timeout is deferred to the next sync.** The build arms PostgreSQL's `lock_timeout` at the driver's existing DDL lock-wait bound, 120 seconds. On a timeout, boot logs an error naming the index and carries on. For the next 120 seconds every other concurrent build in that process is deferred to the next sync, each with its own error line and without waiting, so a process waits at most once per 120 seconds, not 120 seconds per missing index. After those 120 seconds the next sync in the same process (a package install, say) builds again, without a restart. `os migrate apply` waits for its own build rather than inheriting an earlier deferral, and on a timeout it instead fails with `DATABASE_ERROR` (500), naming the table, the bound, and how to find the holder in `pg_stat_activity`. Re-running it once the holder has ended is safe.
+  - **INVALID indexes are cleaned up automatically.** A concurrent build that does not finish (a lock timeout, or a duplicate row written during a unique build) leaves an INVALID index behind. The next sync reads `pg_index.indisvalid`, drops an INVALID index under a name this driver manages (`DROP INDEX CONCURRENTLY`, with a warn line), and builds it again. An INVALID index under another name is reported and left alone.
+  - **A unique index is probed for duplicates before its DDL.** Over duplicate rows no DDL is sent: the same error line as before names the conflicting groups, and no INVALID index is left behind.
+- 48d6b47: fix(driver-sql): the differ's widening arm keeps, or safely retires, a narrower unique an 18.0 database built in the NULL-safe form, and keeps one a hash shadow carries or whose gained column is not yet physical, instead of offering any of them as an orphan drop (#32164)
+  
+  Clause-②: no
+  - The widening arm (the rule that retires a narrower unique key superseded by a declared global key that gained columns), on a narrower an 18.0 database built with its organization key part in the NULL-safe form (`COALESCE(organization_id, '__global__')`, under the same generated name): FROM an orphan, `drop_index` categorized `destructive` TO the widening arm's answer. On a certified table (ADR-0131 D1: the tenant column holds no NULL), the narrower is kept until a partial guard on its columns stands, then offered as the one `replace_unique_index`, categorized `safe`. On a table that is not certified, it is kept and nothing is offered, because the COALESCE form also keeps NULL-organization rows to one, which neither the wider key nor the guard does.
+  - A plan read before the sync that adds a gained column (`os migrate plan` over an upgraded database): FROM the narrower an orphan, `drop_index` categorized `destructive` TO kept, nothing offered.
+  - A narrower carried by a #11627 hash shadow (MySQL, MariaDB: a key over a long TEXT column), whose resolved key is exactly the superseded columns, plain or with the organization part NULL-safe: FROM an orphan, `drop_index` categorized `destructive` TO kept, nothing offered, certified or not and with or without the guard. `replace_unique_index` drops the legacy name and retires no shadow, so this arm never offers it.
+  - A hash-shadow carrier under the superseded key's generated name whose key could not be read (its generation expression did not resolve): FROM an orphan, `drop_index` categorized `destructive` TO kept, nothing offered, certified or not and with or without the guard; read before the sync that adds a gained column, it is kept and nothing is offered: the wider key over a column not yet physical is not expected yet. What it hashes is unknown, so it is never dropped on a guess.
+  
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. The change is in the SQL driver's schema-drift plan: which physical index it keeps or offers to replace. No stored metadata row is rewritten, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  Part of #32164 (ADR-0150 D8 R1). It lands ahead of the grant key's widening, where the restored 18.0 store's `uniq_sys_user_permission_set_ac248331` is the first narrower in this form. The grant key itself is still `unique: 'organization'`, which the widening arm does not take, so this change alone leaves the grant table's plan as it is. On `main`, 17 first-party declarations are unnamed `unique: true` / `'global'` keys of 2 to 8 fields, the ones this arm reads; it acts on one only where a physical unique stands under the generated name of a narrower subsequence of its fields, which is the activation ledger's `(metadata_type, name)` on an upgraded database (respelled to `(metadata_type, package_id, name)` by ADR-0150). Any other declared global key that gained columns reaches the new answers only in the four shapes above. In each, a destructive offer becomes a kept index, or a safe replace once a guard stands. No answer is added that a sync would apply to drop a key that is still needed.
+  
+  Unchanged: a plain narrower is matched as before. A narrower whose key parts (read through a hash shadow's resolved key where one carries it) are not the superseded columns is still the orphan arm's. Pinned at the differ with pure functions: no live MySQL or MariaDB has run this arm, and the live suites run on `main` only.
+- 76684a7: fix(driver-sql): the differ's orphan arm keeps a hash-shadow carrier whose key it could not read, instead of offering it as a destructive drop (#32399)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On MySQL (and anywhere a #11627 hash shadow carries a unique key over a long TEXT column), `os migrate plan` / `apply` no longer offer a `drop_index`, categorized `destructive`, for a shadow-carried unique under an ObjectStack generated name when the shadow's generation expression could not be read. What that index enforces is unknown, so it is kept and nothing is offered: the answer the widening arm and the redefinition arm already give such a carrier. An orphaned carrier whose key was read is still offered as the orphan drop, described by the key it enforced. Measured on a live MySQL 8.0: before this change the unreadable carrier was offered as `drop_index` and `os migrate apply --allow-destructive` removed it; after it, the carrier stays and the resolved one beside it is still dropped.
+- a2cb3aa: fix(driver-sql,objectql,metadata-protocol): publishing a field change on a live object brings the table to the declaration — `date` → `datetime` keeps the time, and `storage: { notNull: false }` drops the NOT NULL
+  
+  Clause-②: yes (widening) — new public `SqlDriver.applyPublishedColumnChanges` and `ObjectQL.applyPublishedColumnChanges`, a new `widen_date_to_datetime` drift op, an optional `MetadataHostEngine.applyPublishedColumnChanges` member and the new `object-column-changes-not-applied` advisory rule
+  Metadata-protocol: none
+  
+  Publishing a changed object used to update the metadata and leave its table as it was. Two changes the field-type table says pass cleanly did not:
+  
+  - **`date` → `datetime` on a table with rows.** Every time of day written after the publish was lost. Postgres and MySQL kept the `date` column, and the SQLite driver kept the field registered as a date, so the read cut the value to its day. The publish now widens the column in place (Postgres `timestamptz`, MySQL `DATETIME(3)`; each stored day becomes midnight UTC; on Postgres the widening waits at most 5 seconds for its table lock, and behind a lock held longer it is reported as not applied), and the driver re-registers the field's type on every sync, so a value written afterwards reads back with its time on all three dialects.
+  - **`required: true` → `false` with `storage: { notNull: false }`.** The column kept its NOT NULL, so every create that omitted the field was refused by the database although the declaration said it was optional. The publish now relaxes the column.
+  
+  How it works:
+  
+  - **`@objectstack/driver-sql`.** A new `SqlDriver.applyPublishedColumnChanges(object)` applies the `safe` column drift (now including the new `widen_date_to_datetime` op, Postgres and MySQL only) plus one `needs_confirm` entry: a NOT NULL column whose field explicitly declares `storage: { notNull: false }`. That entry is now reported whatever `required` says, and its message names the declaration. It stays `needs_confirm`, so dev `autoMigrate: 'safe'` still never applies it at boot (ADR-0113 D5). A NOT NULL with no `storage.notNull` declared either way is left as it was. Index work is not touched. `syncSchema` and `initObjects` stay additive.
+  - **`@objectstack/objectql`.** A new `ObjectQL.applyPublishedColumnChanges(objectName)` calls that driver door. It skips a federated object or a driver without the door, and reports what was applied and what was not. `syncObjectSchema` is unchanged.
+  - **`@objectstack/metadata-protocol`.** Every door that publishes an object (`saveMetaItem` in publish mode, `publishMetaItem`, `publishPackageDrafts` and the others that run `ensureObjectStorage`) calls it after the storage sync. A change the datasource cannot apply, such as a table rebuild over the Turso remote transport, or a failure while applying the changes, is logged at `error` and returned as an `object-column-changes-not-applied` warning on the answer's `advisories`. The publish still succeeds.
+  - **`@objectstack/driver-turso`.** The remote face inherits the door, so it diffs the remote catalog and returns any entry needing a table rebuild as not applied.
+  
+  A change the table says needs a migration (for example `number` → `text`) is still refused at the save with `409 DESTRUCTIVE_CHANGE`, as before.
+- 6d10967: fix(driver-sql): a `date` field still on a Postgres `timestamptz` column reads, writes, filters and buckets the same day
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Publishing a field changed from `datetime` to `date` keeps its `timestamptz` column on Postgres. The driver then wrote a bare day into that column, and Postgres stored it as midnight in the server's time zone; the read folds the stored instant by its UTC day, so with the server ahead of UTC (`Asia/Shanghai`) a date written as `2026-11-12` read back `2026-11-11`. A filter by the day and the date bucket also read the column in the server's zone, so the four doors gave three answers. SQLite and MySQL were not affected.
+  
+  Every door now uses UTC, the zone the read already used: the write binds the day's UTC midnight, and a filter and a date bucket read the column as its UTC calendar day. The schema sync records which `date` fields sit on a `timestamptz` column from the column catalog it already reads. Nothing a `datetime` field reads changes, the column type is not changed, and no stored value is rewritten. A day written before this fix on such a server keeps the earlier day it was stored as.
+- dcb5fb3: fix(driver-turso): the remote face joins a large `$and` / `$or` as balanced halves, so comment and attachment reads fit a hosted libSQL server's depth limit
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a remote Turso / libSQL database (`TursoDriver` with a `libsql://`, `https://` or `wss://` url and no `syncUrl`, as every hosted environment runs), every read of `sys_comment` and `sys_attachment` answered `500 DATABASE_ERROR` once the deployment registered roughly a hundred objects, as an installed app does. The driver's log named the cause: `Expression tree is too large (maximum depth 100)`. The comment and attachment read gates OR one `ReadableIds` branch per registered parent object, and the remote face's compiler joined a group's members into one flat chain, one expression level per member, while the hosted server refuses a tree deeper than 100.
+  
+  The local face (`SqlDriver`) has emitted such groups as balanced halves since #29888. The remote face compiles its SQL text itself, so that change never reached it. It now regroups by the same rule, shared from `@objectstack/driver-sql` as `joinBalancedGroup` (with `FLAT_GROUP_MAX_MEMBERS`): a group of at most 8 members compiles byte-identical to before, and a larger one as two parenthesised halves, recursively, so the depth it adds grows with the logarithm of its size. Measured on the gate's own shape with 134 branches and a three-level master chain: 162 levels before, 38 after.
+  
+  The regrouped expression selects exactly the rows the flat one did, on every dialect: `AND` and `OR` are associative over SQL's three-valued logic, the members keep their order, and so do their bind values. No gate, scope or tenant wall changes.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [f6a429b]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [e735425]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [f4b4c8a]
+- Updated dependencies [db50231]
+- Updated dependencies [0e1311d]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [b6e6545]
+- Updated dependencies [90457e7]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [59630d9]
+- Updated dependencies [5e85952]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [3487ccc]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [5b7269f]
+- Updated dependencies [6dd196d]
+- Updated dependencies [d834a36]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [b96b875]
+- Updated dependencies [c62e72a]
+- Updated dependencies [450bfb6]
+- Updated dependencies [5defbfe]
+- Updated dependencies [f56354c]
+- Updated dependencies [e55347d]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [36a8700]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [5a8dbc7]
+- Updated dependencies [fb94249]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [8fca8f7]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [d9f626b]
+- Updated dependencies [1a66fcf]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [f00fb1b]
+- Updated dependencies [c655af8]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [aad7d2f]
+- Updated dependencies [4f6fb53]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [9bff554]
+- Updated dependencies [1368536]
+- Updated dependencies [7aab601]
+- Updated dependencies [c419609]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [1e474e3]
+- Updated dependencies [7575116]
+- Updated dependencies [0763bf6]
+- Updated dependencies [de6d893]
+- Updated dependencies [5192297]
+- Updated dependencies [326453e]
+- Updated dependencies [6d6f86b]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [3c18783]
+- Updated dependencies [e336a33]
+- Updated dependencies [3452dec]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [070e879]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [28a1527]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [d4b14a8]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [e542831]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/types@18.4.0
+  - @objectstack/observability@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

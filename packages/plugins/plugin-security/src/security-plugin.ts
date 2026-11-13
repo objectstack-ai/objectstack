@@ -276,6 +276,7 @@ import {
   owdOpenWritesCoversOperation,
 } from './platform-ownership-policies.js';
 import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
+import { PlatformBaselineSets } from './platform-baseline-sets.js';
 import {
   refuseUndeclaredExternalObjectScope,
   registeredObjectsOf,
@@ -1601,6 +1602,15 @@ export class SecurityPlugin implements Plugin {
    */
   private readonly ownershipFloorAlternates = new OwnershipFloorAlternates();
 
+  /**
+   * The permission sets always-on platform services contributed to the member
+   * baseline at boot, beside the row gates they install — joined into
+   * {@link baselinePermissionSets} in place, so every reader of the baseline
+   * reads them, and closed to contributions at `kernel:bootstrapped`. The
+   * seam and its rules: `platform-baseline-sets.ts`.
+   */
+  private readonly platformBaselineSets = new PlatformBaselineSets();
+
   constructor(options: SecurityPluginOptions = {}) {
     this.bootstrapPermissionSets =
       options.defaultPermissionSets ?? securityDefaultPermissionSets;
@@ -1891,7 +1901,18 @@ export class SecurityPlugin implements Plugin {
     // which is a database read. Derived again on every accept, revoke,
     // uninstall and package publish (`declareEveryone`).
     if (typeof (ctx as any).hook === 'function') {
-      (ctx as any).hook('kernel:ready', () => this.declareEveryone(ctx.logger));
+      (ctx as any).hook('kernel:ready', () => {
+        this.platformBaselineSets.noteAnchorDerived();
+        return this.declareEveryone(ctx.logger);
+      });
+      // The platform baseline seam's boot window closes once every plugin's
+      // `kernel:ready` handler — where a platform service installs its gates
+      // and contributes its set — has run. A set that joined the baseline
+      // after the derivation above began is not yet named by the anchor's
+      // definition, so the anchor is derived again before anything serves.
+      (ctx as any).hook('kernel:bootstrapped', async () => {
+        if (this.platformBaselineSets.close()) await this.declareEveryone(ctx.logger);
+      });
     }
 
     // [ADR-0131 D3/D4] Bind the security catalog read to this engine: every
@@ -2230,8 +2251,11 @@ export class SecurityPlugin implements Plugin {
       const readPermissionEvaluator = () => this.permissionEvaluator;
       const readQl = () => this.ql;
       const readTenancyPosture = () => this.tenancyPosture;
-      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      const readEpoch = () => this.epoch;
+      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'epoch' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'platformBaselineSets' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
         acceptedDefaultPermissionSets: this.acceptedDefaultPermissionSets,
+        baselinePermissionSets: this.baselinePermissionSets,
+        bootstrapPermissionSets: this.bootstrapPermissionSets,
         canExport: (...a) => this.canExport(...a),
         canReadObject: (...a) => this.canReadObject(...a),
         checkAuthoredRowWrite: (...a) => this.checkAuthoredRowWrite(...a),
@@ -2240,6 +2264,7 @@ export class SecurityPlugin implements Plugin {
         get delegatedAdminGate() { return readDelegatedAdminGate(); },
         describeEffectiveAccess: (...a) => this.describeEffectiveAccess(...a),
         describePositionGrants: (...a) => this.describePositionGrants(...a),
+        get epoch() { return readEpoch(); },
         explainAccessForCaller: (...a) => this.explainAccessForCaller(...a),
         getEffectiveObjectPermissions: (...a) => this.getEffectiveObjectPermissions(...a),
         getMetadataReadableFields: (...a) => this.getMetadataReadableFields(...a),
@@ -2252,6 +2277,7 @@ export class SecurityPlugin implements Plugin {
         get logger() { return readLogger(); },
         ownershipFloorAlternates: this.ownershipFloorAlternates,
         get permissionEvaluator() { return readPermissionEvaluator(); },
+        platformBaselineSets: this.platformBaselineSets,
         get ql() { return readQl(); },
         resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
         get tenancyPosture() { return readTenancyPosture(); },
@@ -2376,7 +2402,7 @@ export class SecurityPlugin implements Plugin {
     onWithheld?: (set: string, offending: string) => void,
   ): string[] {
     return this.baselinePermissionSets.filter((name) => {
-      const boot = this.bootstrapPermissionSets.find((p) => p.name === name);
+      const boot = this.bootstrapPermissionSets.find((p) => p.name === name) ?? this.platformBaselineSets.body(name);
       const offending = boot ? describeHighPrivilegeBits(boot, context) : null;
       if (offending) onWithheld?.(name, offending);
       return !offending;

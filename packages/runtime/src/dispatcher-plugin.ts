@@ -2259,6 +2259,21 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         errorResponse(err, res);
                     }
                 });
+                // [ADR-0150 D5, #31699] One namespace's declared webhook.
+                server!.post(`${base}/security/_activation/webhook/:ns/:name`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch(
+                            'POST',
+                            `/security/_activation/webhook/${req.params.ns}/${req.params.name}`,
+                            deferRequestBody(req),
+                            req.query,
+                            { request: req },
+                        );
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
                 server!.post(`${base}/security/permission-sets/:name/clone`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch(

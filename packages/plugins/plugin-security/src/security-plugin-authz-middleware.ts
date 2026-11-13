@@ -106,6 +106,7 @@ import { isGuestEnvelope, readUnlessRefused, requiredCapsForOperation } from './
 import {
   assertAppAutomationAppendOnlyWriteAllowed,
   assertFlowSystemIdentityWriteAllowed,
+  warnAppAutomationAppendOnlyInsert,
 } from './flow-system-identity-write-refusal.js';
 import { delegatedUnitReadScope, isUnreadableAddressedRowRefusal } from './delegated-admin-gate.js';
 import { isRowWriteProbe, logGateRefusal, type AuthzMiddlewareFn } from './record-row-write-probe.js';
@@ -541,6 +542,13 @@ export function registerAuthzMiddleware(
     // names. See `flow-system-identity-write-refusal.ts`.
     assertAppAutomationAppendOnlyWriteAllowed(opCtx, (object) =>
       typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined,
+    );
+    // The same elevation's insert into an append-only object is told, once,
+    // that it is deprecated, naming the two doors that replace it.
+    warnAppAutomationAppendOnlyInsert(
+      opCtx,
+      (object) => (typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined),
+      (line) => ctx.logger.warn(line),
     );
 
     // System operations bypass security

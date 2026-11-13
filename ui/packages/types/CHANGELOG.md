@@ -1,5 +1,462 @@
 # @object-ui/types
 
+## 18.4.0
+
+### Minor Changes
+
+- ac8fede: feat(app-shell): a `row-table` page block lists the rows a page `api` binding answers, as a table
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`@object-ui/app-shell`: the `row-table` block**, the sixth product-page block beside `hero`, `stat`, `usage-bar`, `checklist` and `tile-grid`, registered under the `app-shell` namespace with the bare `row-table` as its authorable key. `rows` is a list, or one whole `${…}` hole naming a list in the bound `data` (`rows: '${data.actors}'`); every row is drawn, with no cap. `columns` declares, in order, `{ path, label, format?, enum? }`: `path` is a dotted path into one row, `label` a string or an inline locale map, and `format` is `text` (the default, drawn as written), `datetime` (an instant in the viewer's display locale and time zone, through the `datetime` field cell's `formatDateTime`) or `enum` (the label `enum: { value: label }` names; a value the map does not name is drawn as written). A field the row lacks, `null` or empty draws `—`. An empty list draws `emptyLabel`, else the bundle's "No rows to display". A `rows` hole that resolves to anything but a list, or a column the block cannot draw, draws the binding's error panel, never the empty state.
+  - **`@object-ui/types`: its arm**, `RowTableBlockSchema` with `RowTableColumnSchema` (and the TS twins `RowTableBlockSchema`, `RowTableBlockProps`, `RowTableColumn`), a member of `ProductBlockComponentSchema`, so `objectui validate` claims the type. The arm is strict: an unknown `format`, an `enum` column with no label map, a label map on a column that is not `enum`, a `path` that is not a dotted path, an undeclared key and an empty `columns` are refused. The `dataSource` is the spec's `ElementApiDataSourceSchema`, by reference.
+  - **`@object-ui/cli`:** `known-schema-types.ts` regenerated with `row-table` and `app-shell:row-table`.
+  
+  No `@objectstack/spec` change: the type parses through `PageComponentSchema.type`'s open string arm, and `component-type-unknown` claims only colon namespaces. The SDUI manifest does not move (`@object-ui/app-shell` is not one of its registry modules).
+- 36b216b: feat(spec)!: one-way sync-in, the spec half: a datasource source, paging and delete policy keys, the refusals a pull needs, and the `managedBy: 'synced'` bucket with every guard that enforces it (ADR-0153)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered sourced-mapping-upserts-into-synced-object, sync-field-prefix-reserved -->
+  
+  **BREAKING** accept-set narrowing on `data.Mapping` and `data.Object`, beside four new mapping keys the pull engine reads in a later release.
+  
+  - **New keys, declared ahead of the engine that reads them.** `datasourceSource: { object, watermark: { field, start }, full?, deletePolicy?, deletedField? }`, a sibling of `connectorSource` that names a federated object of the stack to copy from; and on `connectorSource`, `paging: { style: 'page' | 'cursor' | 'offset' | 'none', param?, nextPath? }`, `deletePolicy: 'mark' | 'ignore'` and `deletedField`. `deletePolicy` has no schema default: its absence reads as `mark`. Each is a `planned` row of the liveness ledger that warns its author until the pull reads it. `job.pull` accepts a mapping with either source.
+  - **A sourced mapping is refused unless it can be pulled honestly.** At parse: one source at most; `mode: 'upsert'` with a non-empty `upsertKey`; `paging` states the parameter its style needs (and `none` states none). At `defineStack`: the `targetObject` is declared `managedBy: 'synced'`; a `datasourceSource.object` is an object of the stack with an `external` binding; its `external.columnMap` maps a remote column onto `id` (`source_key_missing`); that key is a string or an integer of at most 15 digits of precision (`source_key_not_exact`); `watermark.field` is a `datetime`, `date` or integer field (`watermark_not_exact` when an integer one is not exact); and a `fieldMapping` entry copies it unchanged onto a target field of its type (`watermark_field_unmapped`).
+  - **`managedBy: 'synced'`.** The bucket of a pulled copy: the `engine-owned` affordance row (reads and CSV export only), and `userActions` cannot open a write verb on it, a named exception to ADR-0103 D1, refused at parse and closed by `resolveCrudAffordances`. The engine write guard refuses a member's generic write (403), the `apiMethods` reconciliation strips every write method, the `/me/permissions` clamp answers the closed row, both platform-internal bucket mirrors take it, and the UI bucket union names it. `ObjectQL.outlivesOrganization` does not take it: an organization that still owns synced rows is refused deletion as before.
+  - **`_sync_` is reserved.** A field key starting with `_sync_` is refused on any object and in an object extension; `fieldPatches` is unchanged.
+  - **Lint.** `security-owd-unset` on a synced object recommends `sharingModel: 'public_read'` (a pulled row has no person owner), or `'private'` with a sharing rule that grants read.
+  - **Guidance.** A connector-side `deleteMode` is pointed at `deletePolicy`.
+  
+  ## Before and after
+  
+  ```ts
+  // before: parsed green; now refused at mode, upsertKey and (at defineStack) targetObject
+  mappings: [{ name: 'orders_pull', targetObject: 'order',
+    fieldMapping: [{ source: 'id', target: 'external_id' }],
+    connectorSource: { connector: 'orders_api', action: 'request' } }],
+  objects: [{ name: 'order', label: 'Order', fields: { external_id: { type: 'text' } } }],
+  
+  // after
+  mappings: [{ name: 'orders_pull', targetObject: 'order', mode: 'upsert', upsertKey: ['external_id'],
+    fieldMapping: [{ source: 'id', target: 'external_id' }],
+    connectorSource: { connector: 'orders_api', action: 'request' } }],
+  objects: [{ name: 'order', label: 'Order', managedBy: 'synced', sharingModel: 'public_read',
+    fields: { external_id: { type: 'text' } } }],
+  ```
+  
+  A field named `_sync_…` is renamed outside the prefix (`synced_at`, `source_id`), its stored column with it; a `userActions` entry opening a write on a synced object is removed. There is no automatic rewrite: the key column and the field names are the author's choice. The upgrade guide entries are `sourced-mapping-upserts-into-synced-object` and `sync-field-prefix-reserved`.
+- 8a3eeef: fix(types, app-shell): a record page that places no component is refused by objectui's page-kind node and explains itself in the record view instead of opening a blank panel, and Studio creates a full record page it cannot copy as slotted, so the first save is accepted
+  
+  Clause-②: yes (narrowing) — widening: the three empty.recordPagePlacesNoComponent* keys; narrowing: the PageKindNodeSchema attach
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (already-registered page-record-no-component-refused) the entry already prescribes this exact narrowing: a kind full record page that places no component, refused through the spec's own checkPageRecordPlacesComponent, with the same three rewrites; this change runs that same check on objectui's page-kind node, so the accept set it narrows is the one the entry already records, and no key, value, export or stored shape moves -->
+  
+  - **`@object-ui/types` (narrowing):** `PageKindNodeSchema`, the node for a stored spec page whose `type` is its page kind, now runs the spec's `checkPageRecordPlacesComponent` (`@objectstack/spec/ui`), as it already runs the spec's `isDefault` and `record` binding placement checks. So `safeValidateSchema`, and `objectui validate` with it, refuses a `kind: 'full'` `type: 'record'` page that places no component in its `regions` at `regions`, with the spec's own sentence, where it used to accept it. The spec already refuses that page at every door: save, `os validate`, `os build`, `defineStack` and artifact registration. The check is attached as-is, so `children` is not read: a `{ type: 'record', children: [ … ] }` kind node with no placed region is refused too, and the spec refuses that document anyway, because its page declares no `children`. The `page` node (`type: 'page'`, the kind on `pageType`) does not run the check, because its `type` is the component discriminator.
+    Migration, FROM → TO: a `record` kind node whose regions place nothing → add a region with components (`regions: [{ name: 'main', components: [{ type: 'record:details' }] }]`), or make it `kind: 'slotted'` to draw the object's default record page with only the slots you name replaced, or delete the page so the default record page draws. The refusal names the same three fixes.
+  - **`@object-ui/app-shell`, the record view:** the spec refuses a `kind: 'full'` record page that places no component in its `regions` when it is saved, validated or built. A page stored before that refusal, or one a package registers flat, still reached the record view, which drew it as written for every record of its object: the breadcrumb and an empty panel, or, where the row also carried `children` (off-spec: the spec's page declares no `children`), those `children`. The record view now asks the spec's own check and, where it refuses the page, draws a panel in place of the page body. A row that carries `children` and places no component in its `regions` now shows that panel too, where it used to draw its `children`. The panel names the page (a row with no `name` gets a sentence that names none) and says how to fix it in Studio: add components to a region, make the page `slotted` to show the default record page, or delete the page so the default record page shows. The default record page is not drawn in the page's place, because a page shows what its author composed. The record drawer shows the same panel. A record that is missing, or that the reader may not open, still shows that state first. Pages that place a component, `slotted` pages, and `html` or `react` pages draw as before.
+  - **`@object-ui/app-shell`, Studio's New page form:** a record page created with `kind: 'full'` starts as a copy of the object's default record page regions. Four paths had nothing to copy: no object chosen, an object read that came back empty, a synthesized page that placed no component, and a read that failed. On those paths the page saved with empty `regions`, which the spec now refuses with `422`. Each of them now starts the page as `kind: 'slotted'`, which is the object's default record page on the day it is created, so the first save is accepted. The designer's "Convert to full page" still turns it into a `full` page once the object can be read. Whether a copy places a component is judged by the same spec check.
+  - **`@object-ui/i18n`:** `empty.recordPagePlacesNoComponent`, `empty.recordPagePlacesNoComponentDescription` and `empty.recordPagePlacesNoComponentDescriptionUnnamed` are added to all eleven locale packs, with zh-Hant regenerated from zh-Hans.
+
+### Patch Changes
+
+- b5fd350: refactor(types)!: delete `ActionExecutor` and the Batch Operations pair nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/types#ActionExecutor, @object-ui/types#BatchOperationConfig, @object-ui/types#BatchOperationSummary) the retired operands are TypeScript-only shapes declared in `ui-action.ts`: a function type for an action executor and a batch-operation config and summary pair that no renderer, adapter or host reads; nothing in the workspace or in hotcrm imports any of them from the package entry, they have no zod twin, they are not arms of `AnySchema`, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these three types from `@object-ui/types`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected.
+  
+  They are **gone from the package, not only from the entry**: `src/ui-action.ts` no longer declares them. They were types only, so the built JavaScript is unchanged. The "Transaction Support" block beside them stays (`TransactionIsolationLevel`, `TransactionConfig`, `TransactionResult`; `@object-ui/core`'s `TransactionManager` reads them).
+  
+  What leaves, and what to write instead:
+  
+  - FROM `ActionExecutor` TO no replacement in this package. Actions run through `@object-ui/core`'s `ActionRunner`, which registers `ActionRunnerHandler` functions; a host that typed its own executor declares that signature locally.
+  - FROM `BatchOperationConfig` TO no replacement. No renderer or runner read a batch-operation config; a host that kept one declares it locally.
+  - FROM `BatchOperationSummary` TO no replacement. Nothing produced this summary; a host that kept one declares it locally.
+- ac5d0ce: refactor(types)!: delete the api-types module and its eight names nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/types#HTTPMethod, @object-ui/types#APIRequest, @object-ui/types#APIConfig, @object-ui/types#DataFetchConfig, @object-ui/types#DataFetchableSchema, @object-ui/types#ExpressionContext, @object-ui/types#ExpressionNodeSchema, @object-ui/types#APISchema) the retired operands are TypeScript-only interfaces and unions for a data-fetching and expression-node dialect that no renderer, adapter or host reads; nothing in the workspace or in hotcrm imports any of them from the package entry, they have no zod twin, they are not arms of `AnySchema`, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these eight types from `@object-ui/types`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected.
+  
+  They are **gone from the package, not only from the entry**: the whole `api-types.ts` module (the entry's "API and Events" block) is deleted. The objectui#6497 tombstone for `UIEventHandler` and `EventableSchema` it carried now stands in the entry where the block was; those two stay retired.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `HTTPMethod`, `APIRequest`, `APIConfig`, `DataFetchConfig`, `DataFetchableSchema`, `APISchema` TO no replacement in this package. A component reads data through this package's `DataSource` interface; a host that kept its own request shape declares it locally.
+  - FROM `ExpressionContext`, `ExpressionNodeSchema` TO no replacement in this package. Expressions are `${…}` strings evaluated by `@object-ui/core`'s `ExpressionEvaluator` against its own `ExpressionContext` class.
+- 2cf269f: refactor(types)!: delete the fifteen driver and datasource interfaces nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/types#SqlDriverInterface, @object-ui/types#ConnectionConfig, @object-ui/types#DriverQueryResult, @object-ui/types#BatchOperation, @object-ui/types#BatchResult, @object-ui/types#TransactionContext, @object-ui/types#CacheManager, @object-ui/types#ConnectionPool, @object-ui/types#DatasourceRegistration, @object-ui/types#DatasourceType, @object-ui/types#DatasourceMetric, @object-ui/types#DatasourceAlert, @object-ui/types#DatasourceManager, @object-ui/types#HealthCheckResult, @object-ui/types#DatasourceMetrics) the retired operands are TypeScript-only interfaces and unions for a server-side SQL driver and a datasource manager that no renderer, adapter or host implements; nothing in the workspace or in hotcrm imports any of them from the package entry, they have no zod twin, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these fifteen types from `@object-ui/types`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected.
+  
+  They are **gone from the package, not only from the entry**: the "Phase 3.6" driver interfaces and the "Phase 3.7" datasource interfaces at the end of `data-protocol.ts` were read only by each other. Nothing implemented the driver interface and nothing constructed the datasource manager; the client talks to data through the `DataSource` interface instead. Every other name of `data-protocol.ts` stays exported unchanged, among them `DriverQueryConfig`, `SqlQueryAST`, the query-AST node types, `AdvancedFilterSchema` and `ObjectValidationRule` with its variants.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `SqlDriverInterface`, `ConnectionConfig`, `DriverQueryResult`, `BatchOperation`, `BatchResult`, `TransactionContext`, `CacheManager`, `ConnectionPool` TO no replacement in this package. A client reads and writes data through `DataSource` (`BatchTransactionOperation` with `DataSource.batchTransaction` for a transactional batch); the platform's runtime driver contract is `DriverInterface` from `@objectstack/spec/data`.
+  - FROM `DatasourceRegistration`, `DatasourceType`, `DatasourceMetric`, `DatasourceAlert`, `DatasourceManager`, `HealthCheckResult`, `DatasourceMetrics` TO no replacement in this package. An authored datasource is `DatasourceSchema` from `@objectstack/spec/data`; a host that kept its own registry declares these shapes locally.
+- 604a2b3: refactor(types)!: delete the two `field-types` orphans nothing reads, `VisibilityCondition` and `GeolocationFieldMetadata`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/types#VisibilityCondition, @object-ui/types#GeolocationFieldMetadata) the retired operands are TypeScript-only shapes declared in `field-types.ts`: a condition object that typed the field key objectui#12242 retired, and the interface of a field type that is not a spec `FieldType` and already left the `FieldMetadata` union; nothing in the workspace or in hotcrm imports either from the package entry, they have no zod twin, they are not arms of `AnySchema`, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports either of these two types from `@object-ui/types`. Neither had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected. Both were already marked `@deprecated`.
+  
+  They are **gone from the package, not only from the entry**: `src/field-types.ts` no longer declares them. They were types only, so the built JavaScript is unchanged. Every other field metadata type stays, including every member of `FieldMetadata`.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `VisibilityCondition` TO no replacement in this package. It typed the retired `visible_on` key; a field's visibility is `visibleWhen`, a CEL predicate on the field.
+  - FROM `GeolocationFieldMetadata` TO no replacement. `geolocation` is not a spec field type, so no published object can declare it; the spec's map-point field type is `location`, typed by `LocationFieldMetadata`. The `field:geolocation` widget in `@object-ui/fields` stays registered.
+- e396095: refactor(types)!: delete nine Spec Report Bridge names nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/types#SpecReportChart, @object-ui/types#SpecReportChartInput, @object-ui/types#SpecReportChartSchema, @object-ui/types#SpecReportTypeEnum, @object-ui/types#SpecReportAggregate, @object-ui/types#QLAggregationFunction, @object-ui/types#mapAggregateToQL, @object-ui/types#JoinedSpecReport, @object-ui/types#isJoinedSpecReport) the retired operands are package re-exports of `@objectstack/spec/ui` symbols, two string unions, a helper function and a type guard that no renderer, adapter or host reads; nothing in the workspace or in hotcrm imports any of them from the package entry, they are not arms of `AnySchema`, and the spec schemas they re-exported stay where they are in `@objectstack/spec/ui`, so no stored shape, registered node type or conversion surface changes and there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these nine names from `@object-ui/types`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected.
+  
+  They are **gone from the package, not only from the entry**: `src/spec-report.ts` no longer declares them. Two of them, `mapAggregateToQL` and `isJoinedSpecReport`, are runtime values, so the built `dist` loses them too. The rest of the Spec Report Bridge stays: `SpecReport`, `SpecReportInput`, `SpecReportTypeName`, `SpecReportDateGranularity`, `SpecReportSchema`, `LegacyReportPresentationLike`, `specReportToPresentation`, `isSpecReport` and `JoinedReportBlock`.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `SpecReportChart` TO `ReportChartParsed` from `@objectstack/spec/ui`.
+  - FROM `SpecReportChartInput` TO `ReportChart` from `@objectstack/spec/ui`.
+  - FROM `SpecReportChartSchema` TO `ReportChartSchema` from `@objectstack/spec/ui`.
+  - FROM `SpecReportTypeEnum` TO `ReportType` from `@objectstack/spec/ui`.
+  - FROM `SpecReportAggregate`, `QLAggregationFunction`, `mapAggregateToQL` TO no replacement. A spec report is dataset-bound: its `values` name measures whose aggregation the dataset declares, so there is no per-column aggregate left to translate.
+  - FROM `JoinedSpecReport`, `isJoinedSpecReport` TO no replacement in this package. Test `isSpecReport(value) && value.type === 'joined'` and read `value.blocks`, each a `JoinedReportBlock`.
+- f810c34: refactor(types)!: delete `SubqueryNode` and the filter builder configuration pair nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/types#SubqueryNode, @object-ui/types#FilterBuilderConfig, @object-ui/types#FilterFieldConfig) the retired operands are TypeScript-only interfaces declared in `data-protocol.ts`: a query-AST subquery node and a filter builder configuration pair that no query builder, renderer, adapter or host constructs or reads; nothing in the workspace or in hotcrm imports any of them from the package entry, they have no zod twin, they are not arms of `AnySchema`, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these three types from `@object-ui/types`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected.
+  
+  They are **gone from the package, not only from the entry**: `src/data-protocol.ts` no longer declares them. They were types only, so the built JavaScript is unchanged. The other query-AST node types (`SelectNode`, `OffsetNode`, `AggregateNode`, …), `DateRangeFilter` and `FilterBuilderDateRangePreset` stay exported unchanged.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `SubqueryNode` TO no replacement in this package. Nothing built or read a subquery node; a host that kept one declares it locally on top of `QueryASTNode` and `SqlQueryAST`, which stay.
+  - FROM `FilterBuilderConfig` TO no replacement. No filter builder read this configuration; a host that kept one declares it locally.
+  - FROM `FilterFieldConfig` TO no replacement. It was only the `fields` item of `FilterBuilderConfig`; a host that kept one declares it locally (`AdvancedFilterOperator`, which typed its `operators`, stays).
+- 7a5f73e: feat(types): `@object-ui/types` publishes the upload adapter contract, `UploadAdapter`, `UploadOptions` and `UploadResult`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The three interfaces the file, image and avatar widgets upload through, unchanged in shape from the `@object-ui/providers` package they leave. They live here, as `DataSource` does, because `@object-ui/fields` (whose `UploadProvider` reads an adapter) and `@object-ui/data-objectstack` (whose `createObjectStackUploadAdapter` builds one) do not depend on each other. A host that writes its own adapter types it from here. Nothing existing changes.
+- a52761f: fix(console): an action another package places on `sys_user` at `record_header` / `record_more` draws again on the user's record page, in the drawer and on the full page (#29951)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The header reads `placedActions: true`.** `page:header`'s `placedActions` (#30018) is now drawn by the console's header renderer (`PageHeaderActions` in `@object-ui/components`): `true` draws every action of the page's object whose `locations` include `record_header` or `record_more`, in declaration order, read from the object's metadata at render time, so an action an installed package adds to the object is drawn without editing the page. Omitted or `false`, an authored `actions` list is still the whole set (#11592). A `true` beside an authored list, which the spec refuses, draws none of the object's actions and is reported once in the console.
+  - **One placed-header reader.** `placedHeaderActions` (`@object-ui/types`) is the rule both headers read: the synthesized default record page's header in `RecordDetailView` and a `placedActions: true` header. The `page:header` registration publishes the `placedActions` input.
+  - **The platform record pages opt in.** `sys_user_detail` and `sys_organization_detail` (`@objectstack/platform-objects`) and `sys_approval_request_detail` (`@objectstack/plugin-approvals`) set `placedActions: true` in place of the id lists #27219 froze, which dropped every header action another package places on those objects. The tab strips are unchanged, and every action the lists named is placed at `record_header` / `record_more`, so each still draws.
+  - `@objectstack/spec`: the `placedActions` describe no longer opens with `[PLANNED — not yet rendered]`, and the `page` liveness record names the reader.
+- 56cac5e: feat(ui): undo a business-record delete from its toast, through the recycle bin
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A delete of one business record (an object without the `sys_`, `cloud_` or `ai_` prefix) enters the recycle bin (ADR-0148). When the server answers with its `recycleBinEntryId` and the caller holds `allowRestoreOwnDeleted` on the object (read through `objectPermissionGrants`, so `manageRecycleBin` and `modifyAllRecords` grant it too), the "deleted" toast on the console list, the plugin list and the record page now carries an Undo action. Undo restores that entry under its original ids (`POST {data}/:object/recycle-bin/:entryId/restore`), never re-creates the record, refreshes the view and toasts "{label} "{name}" restored". On the record page, Undo also returns to the record.
+  
+  A refused restore toasts one sentence per reason, in the session language: another record now holds the same unique value, the parent record was purged, the package was uninstalled, the parent is itself in the recycle bin, the entry is gone, no permission, or no recycle bin on this deployment. An unknown code keeps the server's message. Without the grant, without an entry id, or for a batch delete, the toast is unchanged.
+  
+  The delete confirmation for a business record (one record and a selection, on the console list, the plugin list, the record page and the plugin detail view) is now the question alone ("Are you sure you want to delete this record?", "Delete N selected records?"). It no longer says "This cannot be undone." Platform objects keep today's copy.
+  
+  `@object-ui/types`: `DataSource.delete` options gain `onRecycleBinEntry?`, and `DataSource` gains an optional `restoreRecycleBinEntry?`. `delete` still returns a boolean. `@object-ui/data-objectstack` implements both. `@object-ui/core` exports `recycleBinRestoreRefusalText`, `RECYCLE_BIN_RESTORE_REFUSAL_KEYS` and the `RecycleBinRefusalLabels` type, and `recordDelete` gains `successToast`, `undo` and `entersRecycleBin`. `@object-ui/i18n` adds `objectActions.deleteConfirmQuestion`, `restoredNamed`, `restoreSuccess` and `restoreFailed`, `detail.deleteConfirmQuestion`, the `console.objectView.bulkDeleteQuestion` family and the seven `recycleBin.refusal.*` sentences to every pack.
+- 5268f50: fix(types): the form face's currency `scale` refusal names the currency's CLDR fraction digits, the spec's wording
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `CURRENCY_FIELD_SCALE_REFUSAL` is held equal to `@objectstack/spec`'s currency `scale` refusal, which now says "the currency's CLDR fraction digits (2 for USD, 0 for JPY, 3 for KWD) decide how the amount displays" instead of naming the ISO 4217 minor unit. Words only: the same entries are refused at the same path.
+- b631573: feat(console): revoke an authorized AI assistant from Connect an Agent, and an administrator widget for a person's assistants
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: each row in Connect an Agent's "Authorized AI assistants" list now has a Revoke. It asks first, naming the assistant, then withdraws the grant through `oauth.authorizedClients.withdraw(id)`: the assistant's token is refused on its next call and it has to be authorized again to reconnect. The list is read again after every withdraw, so a grant already withdrawn elsewhere leaves it too, and the refusal is named. The line saying withdrawing was not available yet is gone. New SDUI widget `mcp:authorized-assistants` for a `sys_user` record page: it reads the person from the bound record (no props), lists their authorized assistants through `oauth.authorizedClients.listForUser(userId)` with the same rows and confirm-first Revoke, which calls `withdrawForUser(userId, id)`. Those doors are for platform administrators; anyone else sees the server's refusal as a failed read. Off a `sys_user` record it renders nothing, and it is drawn only where a page names it.
+  - **`@object-ui/i18n`**: `connectAgent.access.withdrawTitle`, `withdrawBody`, `managedBody`, `managedEmpty` and `managedTruncated` added in all eleven packs; `connectAgent.access.withdrawLater` removed (net +4 keys per pack).
+  - **`@object-ui/types`**: `McpAuthorizedAssistantsSchema` (zod arm) and its TypeScript twin, so a page placing `{ type: 'mcp:authorized-assistants' }` validates. The widget reads only `className`: `properties` may only be `{}`, and `body` / `children` are refused by name.
+  - **`@object-ui/cli`**: `objectui check` knows the `mcp:authorized-assistants` type (the generated known-types list).
+- 1f37085: feat(console): the user page's Permission Sets tab shows the person's effective permission sets and where each comes from
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: new SDUI widget `security:effective-access` for a `sys_user` record page. It reads the person from the bound record (no props) and lists every permission set in force for them in the caller's organization through `security.describeEffectiveAccess(userId)` of `@objectstack/client`. Each set appears once, by its catalog label with its name beside it, with every origin the server reports: a direct grant, a position by name, the default binding, or a derived standing (the configured platform administrator, AI access). A `403` (a person the viewer may not manage) and a `501` (a server that does not report effective access) each show one quiet line and no list; any other failure is named. The widget reads again when a grant or a position is written on the page. Off a `sys_user` record it renders nothing.
+  - **`@objectstack/platform-objects`**: the `sys_user` record page's Permission Sets tab opens with the `security:effective-access` widget, above the list of stored grants. A person who holds access only through the default binding or a position no longer reads as having no permission sets; direct grants keep their remove action in the list below.
+  - **`@object-ui/i18n`**: `effectiveAccess.*` (the widget's title, body, refused, unserved, failed and empty lines, and one label per origin kind) added in all eleven packs.
+  - **`@object-ui/types`**: `SecurityEffectiveAccessSchema` (zod arm) and its TypeScript twin, so a page placing `{ type: 'security:effective-access' }` validates. The widget reads only `className`: `properties` may only be `{}`, and `body` / `children` are refused by name.
+  - **`@object-ui/cli`**: `objectui check` knows the `security:effective-access` type (the generated known-types list).
+- 3224545: feat(app-shell): an action's `preflight` read draws a panel in the param dialog and seeds the params it names
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`: the param dialog reads `ActionSchema.preflight`.** When an action declares `preflight`, the dialog re-judges the block with the spec's `ActionSchema`, fills `preflight.read.url` from the dialog's current values and the record, checks the filled URL is a same-origin API path, and sends the read once every hole has a value (again whenever a param a hole reads changes). The answer is drawn as a panel above the form (`preflight.fields`, through the result dialog's field cells), and each `preflight.seed` entry fills its param from the answer, drawn read-only. Seeds are cleared on every URL change and applied only from the current URL's answer, so a late answer to an earlier URL never overwrites the current one. A read that fails, a seed path the answer lacks, a hole with no value and a refused block each draw the panel's error state, and the seeded param's `required` mark keeps Confirm disabled. An action with no `preflight` draws exactly as before (the `ban_user` work panel included).
+  - **`@object-ui/core`: `ActionDef.preflight`** and a fifth `ParamCollectionHandler` argument, `interpolateRead`, which fills a read URL: `${param.NAME}` from the dialog's current values, `${ctx.record.FIELD}` / `${ctx.recordId}` from the dispatched row or, on a record page's header, the record the page shows; each value is percent-encoded, and a hole with no value answers `null` so nothing is sent. `ACTION_DEF_KEYS` lists `preflight`.
+  - **`@object-ui/types`:** `ActionSchema.preflight` mirrors the spec's block.
+  - **`@object-ui/components`:** the action button, icon, group and menu renderers forward `preflight` to the runner.
+  - **`@object-ui/i18n`:** the `actionDialog.preflight` strings in every locale pack.
+  - **`@objectstack/spec`:** the `preflight` liveness rows move from `planned` to `live`. `preflight.fields[].label` still draws as authored: no bundle walker or overlay translates it yet (objectstack#31885).
+- 8ce5827: fix(fields, plugin-form): the permission-set picker lists one option per package that provides a set's name, and a grant's New form saves the package picked
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A permission set is identified by its package and its name, and the registry serves one item per package that provides a name. The `permission-ref` picker listed them by name alone, so two packages' sets of one name were two identical options, and a grant could not say which one it meant.
+  
+  - **Now.** Where more than one package provides a permission set's name, the picker lists one option per provider, each naming it: "Sales User (sales_user) · package com.acme.crm", or "… · defined in this environment" for the environment's own set. On a permission-set grant's New form, picking a package's set saves its package in the grant's package column beside the name. Picking the environment's set, or a name only one package provides, saves the name alone, as before.
+  - **Where a form cannot name the package** (editing a grant, whose package the server re-stamps by its own rule, and an action input that takes a set's name only), a package's option is listed but cannot be picked, and a note under the picker says why. The environment's own set can still be picked. The picker never chooses between packages by their order.
+  - **Shown values.** A stored name more than one package provides is shown as the set its grant's package column names. Without one it is shown as the environment's own set, or, where two packages provide it and none is named, as naming none.
+  - **Unchanged.** A name one provider serves is listed, saved and shown exactly as before, with no note, on every form. The relationship pickers keep their autofill on every form, and every other widget gets no new prop. Every other read-only column, every other object's, and every edit are still stripped from the save. The server still judges the package: an insert naming a package that does not provide the set is refused.
+  - **The widening.** `DataSource.listMetadataItems` (`@object-ui/types`) may answer an optional `packageId` on each item: the package it was served under, verbatim. `ObjectStackAdapter` (`@object-ui/data-objectstack`) answers it from the item's `_packageId`, and an item served without one reads as before. `@object-ui/fields` exports `PERMISSION_SET_GRANT_COLUMNS`, the grant's name and package columns, and `@object-ui/plugin-form` exports nothing new. `@object-ui/i18n` adds four `fields.registryRef.*` strings in every locale.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [f56354c]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [1368536]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [de6d893]
+- Updated dependencies [326453e]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [e336a33]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

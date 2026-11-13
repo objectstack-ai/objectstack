@@ -41,10 +41,22 @@ function install(opts: {
   logger?: ReturnType<typeof silentLogger>;
   /** The security service's object-level read admission the gate resolves per read; absent: none composed. */
   admission?: ParentObjectReadAdmissionSource;
+  /**
+   * The registry view: by default one holding every parent object `readable`
+   * names, with no `enable` block (the data door serves each); `null`: none.
+   * Either way the engine answers no classifying question, so every read is
+   * the whole-read probe.
+   */
+  registry?: unknown;
 }) {
   let mw!: Mw;
   const calls = { scans: [] as any[], probes: [] as Array<{ object: string; ids: string[] }> };
-  const engine: CommentAccessEngine = {
+  const registry =
+    opts.registry === undefined
+      ? { getAllObjects: () => Object.keys(opts.readable ?? {}).map((name) => ({ name })) }
+      : opts.registry;
+  const engine: CommentAccessEngine & { registry?: unknown } = {
+    ...(registry === null ? {} : { registry }),
     registerHook: () => {},
     registerMiddleware: (fn) => {
       mw = fn as Mw;
@@ -63,7 +75,7 @@ function install(opts: {
     },
     findOne: async () => null,
   };
-  installAuditLogReadVisibility(engine, opts.logger ?? silentLogger(), opts.admission ?? (() => undefined));
+  installAuditLogReadVisibility(engine as ParentRecordGateEngine, opts.logger ?? silentLogger(), opts.admission ?? (() => undefined));
   return { mw, calls };
 }
 
@@ -321,14 +333,16 @@ function baseEngine(onMiddleware: (fn: Mw) => void, onFind: (object: string, opt
   };
 }
 
-function installClassifying(objects: string[]) {
+function installClassifying(objects: string[], enable: Record<string, unknown> = {}) {
   let mw!: Mw;
   const calls = { scans: [] as any[] };
   // The classifying questions, over the comment-gate double.
   const engine: ParentRecordGateEngine = Object.assign(
     baseEngine((fn) => (mw = fn), (object, options) => calls.scans.push({ object, options })),
     {
-      registry: { getAllObjects: () => objects.map((name) => ({ name })) } as any,
+      registry: {
+        getAllObjects: () => objects.map((name) => (enable[name] ? { name, enable: enable[name] } : { name })),
+      } as any,
       hasObjectMiddleware: () => false,
       resolveEffectiveDatasource: () => undefined,
     },
@@ -515,5 +529,49 @@ describe('[#26750, ruling A] the deployment-level rows: the platform administrat
       expect(where).toBeUndefined();
       expect(organizationBound).toBe(false);
     }
+  });
+});
+
+describe('a parent the data door does not serve: a reader the ledger gate narrows is not served a row about it', () => {
+  const leafOf = (branch: any): string | null => {
+    const comparand = branch?.record_id?.$in;
+    return isReadableIds(comparand) ? comparand.object : null;
+  };
+  /** The connector credential and the OAuth resource: the door serves neither. */
+  const enable = {
+    sys_connector_credential: { apiEnabled: false, apiMethods: [] },
+    sys_oauth_resource: { apiEnabled: false, apiMethods: [] },
+  };
+
+  it('the leaf path writes no branch for it; the outside class stays beside the rest', async () => {
+    const { mw } = installClassifying(['crm_case', 'sys_connector_credential', 'sys_oauth_resource'], enable);
+    const where = (await read(mw)).where as any;
+    expect(where.$or.map(leafOf)).toEqual(['crm_case', null]);
+    expect(where.$or[1]).toEqual(OUTSIDE);
+  });
+
+  it('the whole-read probe keeps no row naming it', async () => {
+    const { mw, calls } = install({
+      scan: () => [
+        { action: 'update', object_name: 'crm_case', record_id: 'c1' },
+        { action: 'create', object_name: 'sys_connector_credential', record_id: 'k1' },
+      ],
+      readable: { crm_case: ['c1'], sys_connector_credential: ['k1'] },
+      registry: {
+        getAllObjects: () => [{ name: 'crm_case' }, { name: 'sys_connector_credential', enable: enable.sys_connector_credential }],
+      },
+    });
+    expect((await read(mw)).where).toEqual({ $or: [{ object_name: 'crm_case', record_id: { $in: ['c1'] } }, OUTSIDE] });
+    expect(calls.probes.map((p) => p.object)).toEqual(['crm_case']);
+  });
+
+  it('CONTROL: a holder of the audit capability is decided first, and is not narrowed by it', async () => {
+    const { mw } = installClassifying(['crm_case', 'sys_connector_credential'], enable);
+    const existing = { object_name: 'sys_connector_credential' };
+    const { where } = await read(mw, {
+      context: { userId: 'u1', systemPermissions: [LEDGER_AUDIT_CAPABILITY] },
+      ast: { object: 'sys_audit_log', where: existing },
+    });
+    expect(where).toBe(existing);
   });
 });

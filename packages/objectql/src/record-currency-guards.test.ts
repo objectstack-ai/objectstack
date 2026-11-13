@@ -1057,7 +1057,7 @@ describe('a single-object save is refused when the currency it follows is not th
     expect(() => save(engine, invoiceWithout('currency_code'), 'pkg_owner')).not.toThrow();
   });
 
-  it('`registerObject` never asks the follow door: a caller without the option (hydration, install, a batch writer) registers the pair as before', async () => {
+  it('`registerObject` never asks the follow door: a registration outside a run and without the option (the stored-row hydration, a batch writer\'s row) registers the pair as before', async () => {
     const { engine } = await bootSealed();
     engine.registry.registerObject(PP_INVOICE as any);
     engine.registry.registerObject(lineFollowing('invoice.title') as any);
@@ -1068,7 +1068,7 @@ describe('a single-object save is refused when the currency it follows is not th
     expect(engine.registry.objectRegistrationRefusal(lineFollowing('invoice.currency') as any)).toBeNull();
   });
 
-  it('CONTROL: a post-seal `registerApp` whose own `objectExtensions` supplies the parent\'s code field installs, as before', async () => {
+  it('a post-seal `registerApp` whose own `objectExtensions` supplies the parent\'s code field installs: its run is asked once, at its end, with the extension registered', async () => {
     const { engine } = await bootSealed();
     engine.registry.registerObject(invoiceWithout('currency_code') as any, 'pkg_owner');
     // The package's object registers (step 2) before its extension (step 2b).
@@ -1079,6 +1079,28 @@ describe('a single-object save is refused when the currency it follows is not th
     } as any);
     expect(engine.registry.getObject('pp_line')).toBeDefined();
     expect((engine.registry.getObject('pp_invoice')?.fields as any)?.currency_code?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('a post-seal `registerApp` with a bad pair is refused 422 at the end of its run, in defineStack\'s words, and leaves nothing of the package', async () => {
+    const { engine } = await bootSealed();
+    engine.registry.registerObject(PP_INVOICE as any, 'pkg_owner');
+    const child = lineFollowing('invoice.currency');
+    const err = await refusalOf(() => engine.registerApp({ id: 'com.test.follow_pkg', name: 'follow-pkg', objects: [child] } as any));
+    expect(envelopeOf(err)).toEqual(INVALID_METADATA);
+    expect(err?.name).toBe(FOLLOW_REFUSED);
+    expect(err?.objectName).toBe('pp_line');
+    expect(err?.fieldName).toBe('amount');
+    expect(err?.message).toBe(stackFinding([PP_INVOICE, child]));
+    expect(engine.registry.getObject('pp_line')).toBeUndefined();
+    expect(engine.registry.getPackage('com.test.follow_pkg')).toBeUndefined();
+    expect(engine.registry.getObjectOwner('pp_invoice')?.packageId).toBe('pkg_owner');
+  });
+
+  it('before the seal the same `registerApp` registers the pair: a cold boot is not asked', async () => {
+    const { engine } = await bootEngine();
+    engine.registry.registerObject(PP_INVOICE as any, 'pkg_owner');
+    engine.registerApp({ id: 'com.test.follow_pkg', name: 'follow-pkg', objects: [lineFollowing('invoice.currency')] } as any);
+    expect(engine.registry.getObjectOwner('pp_line')?.packageId).toBe('com.test.follow_pkg');
   });
 
   it('during the cold boot nothing is judged, even a single save naming the option: the boot registers what it registered before the seal', async () => {
