@@ -64,6 +64,7 @@ import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
+import type { TranslateFn } from '@object-ui/i18n';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import { findDeclaredApiAction, isSameOriginApiTarget, readApiActionDoorSuccess, sendApiActionThroughDoor } from '../utils/apiActionDoor.js';
 import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/NavigationContext.js';
@@ -2050,6 +2051,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         triggerParams: flowParams,
         objects,
         language,
+        // The run's `droppedFields` warning (objectstack#33009): labels read
+        // through this page's data source, the console's adapter.
+        droppedFields: { t: t as TranslateFn, fieldLabel, dataSource },
       });
       const judged = launch.judged;
       // Paused at a `screen` node: FlowRunner renders the form + resumes, and
@@ -2075,7 +2079,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [authFetch, pureRecordId, objectName, objects, language]);
+  }, [authFetch, pureRecordId, objectName, objects, language, t, fieldLabel, dataSource]);
 
   // Server-side action handler — POST /api/v1/actions/{object}/{action},
   // built from @object-ui/core's `createServerActionHandler` via the shared
