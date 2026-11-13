@@ -87,8 +87,9 @@ import {
   type ExprFaultOutcome,
   type FieldRole,
 } from '@objectstack/formula';
-// [#32872] The publish gate's own passes at a validation rule and a formula
-// field, run over the served definitions (see `VALIDATE_SITE_MAP.gatePasses`).
+// [#32872] The publish gate's own passes at a validation rule, a formula
+// field and (#33147) a flow condition, run over the served definitions (see
+// `VALIDATE_SITE_MAP.gatePasses`).
 // [#32872] Types only: the entry itself is loaded lazily, in `gatePassFindings`.
 import type { AuthoredExpressionSite } from '@objectstack/lint';
 // [#16913] The unknown-key error map every `strictToolInput` shape below is
@@ -1720,10 +1721,16 @@ function jsonText(value: unknown): string {
  * `@objectstack/lint`'s walk. There the tool asks the gate itself
  * (`judgeAuthoredSiteExpression`) over the served definitions
  * (`McpDataBridge.servedObjectDefinitionOf`) and adds its findings to the
- * validator's. A flow condition and a template are not judged by this: the
- * gate's own passes there (the unprovisioned-anchor warning on an
- * object-bound flow predicate, the null-guard gate on a record-triggered
- * flow's conditions) are not run by the tool.
+ * validator's. A template is not judged by this.
+ *
+ * [#33147] A flow condition is judged too, as the runtime publish gate judges
+ * a flow write (the door an MCP or Studio write of the flow meets): the
+ * null-guard gate on a record-triggered flow's `record.` / `previous.` reads
+ * and the unprovisioned-anchor warning. A bare name's null guard, a root the
+ * run does not bind and a read a flow variable shadows are `os validate`'s
+ * whole-flow judgments, over the flow's variables, node ids and entrances,
+ * which the tool is not handed; that door does not give them, and neither
+ * does the tool.
  */
 const VALIDATE_SITE_MAP: Record<
   string,
@@ -1774,6 +1781,7 @@ const VALIDATE_SITE_MAP: Record<
   // gate's `type-mismatch-run-may-fail` warning.
   flow_condition: {
     role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema,
+    gatePasses: 'flow_condition',
     faultOutcome: ({ triggerKind, sweepsTypedObject }) =>
       (triggerKind === 'record_change' || (triggerKind === 'time_relative' && sweepsTypedObject) ? 'run-fails' : undefined),
   },
@@ -1789,12 +1797,33 @@ interface GatePassFinding {
 const NO_GATE_PASS_FINDINGS: { errors: GatePassFinding[]; warnings: GatePassFinding[] } = { errors: [], warnings: [] };
 
 /**
- * [#32872] The publish gate's findings at a `validation` / `formula` site
- * beyond the shared validator's, judged by `@objectstack/lint`'s
- * `judgeAuthoredSiteExpression` over the definitions the caller is served:
- * the subject's, and each object the expression reads through. A bridge
- * without `servedObjectDefinitionOf`, or an object it does not serve, adds
- * none; a target it does not serve is not judged, as at the gate.
+ * [#33147] What the caller says about where the expression sits, beyond the
+ * site: the field being authored (formula), and how the flow is started and
+ * what its start condition proves (flow condition). Each is handed to the
+ * gate as given; the handler refuses one on a site it does not describe.
+ */
+interface GatePassContext {
+  severity?: ValidationSeverity;
+  field?: string;
+  triggerKind?: FlowTriggerOrNone;
+  sweepObject?: string;
+  startCondition?: string;
+}
+
+/**
+ * [#32872] The publish gate's findings at a `validation` / `formula` /
+ * (#33147) `flow_condition` site beyond the shared validator's, judged by
+ * `@objectstack/lint`'s `judgeAuthoredSiteExpression` over the definitions
+ * the caller is served: the subject's, and at a rule or formula each object
+ * the expression reads through (nothing hydrates a hop at a flow condition,
+ * so no target is read there). A bridge without `servedObjectDefinitionOf`,
+ * or an object it does not serve, adds none; a target it does not serve is
+ * not judged, as at the gate.
+ *
+ * [#33147] The field being authored resolves through the same served
+ * definition, and nothing else: a field the caller is not served reads as
+ * one the object does not declare, so the answer never says whether it
+ * exists.
  *
  * A hop target follows the same system-object fence as `describe_object`:
  * `exposed` is the tool's object-name guard, and a target it refuses is
@@ -1811,23 +1840,29 @@ async function gatePassFindings(
   site: AuthoredExpressionSite,
   objectName: string,
   expression: string,
-  severity: ValidationSeverity | undefined,
+  context: GatePassContext,
 ): Promise<{ errors: GatePassFinding[]; warnings: GatePassFinding[] }> {
   if (!bridge.servedObjectDefinitionOf) return NO_GATE_PASS_FINDINGS;
   const subject = await bridge.servedObjectDefinitionOf(objectName);
   if (!subject) return NO_GATE_PASS_FINDINGS;
   const { authoredExpressionHopTargets, judgeAuthoredSiteExpression } = await import('@objectstack/lint');
   const targets: Array<Record<string, unknown>> = [];
-  for (const target of authoredExpressionHopTargets(subject, expression)) {
+  const hops = site === 'flow_condition' ? [] : authoredExpressionHopTargets(subject, expression);
+  for (const target of hops) {
     if (target === objectName || !exposed(target)) continue;
     const def = await bridge.servedObjectDefinitionOf(target);
     if (def) targets.push(def);
   }
+  const { severity, field, triggerKind, sweepObject, startCondition } = context;
   const findings = judgeAuthoredSiteExpression({
     site,
     objectName,
     expression,
     ...(severity ? { severity } : {}),
+    ...(field !== undefined ? { field } : {}),
+    ...(triggerKind ? { triggerKind } : {}),
+    ...(sweepObject !== undefined ? { sweepObject } : {}),
+    ...(startCondition !== undefined ? { startCondition } : {}),
     objects: [subject, ...targets],
   });
   const errors: GatePassFinding[] = [];
@@ -2382,18 +2417,25 @@ export function registerObjectTools(
           'build-time errors (bare field refs, unknown fields, unknown functions; at a `formula` or `validation` site, every ' +
           'other refusal the publish gate gives there: a reference field read both through the relationship and as a plain ' +
           'value, more than one hop, a hop to a field the target does not declare or into a stored-metadata table, and at a ' +
-          '`validation` site an unguarded nullable field or a read of `parent`) and advisory warnings ' +
+          '`validation` site an unguarded nullable field or a read of `parent`; at a `flow_condition` of a record-triggered ' +
+          'flow, an unguarded nullable `record.`/`previous.` read) and advisory warnings ' +
           '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
           '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
-          'a warning on any other flow; date-equality pitfalls; at a `formula` or `validation` site, a read of an ' +
-          'external object\'s unprovisioned system column), plus the fields and stdlib ' +
+          'a warning on any other flow; date-equality pitfalls; at a `formula`, `validation` or `flow_condition` site, a read ' +
+          'of an external object\'s unprovisioned system column; at a `formula` site naming a stored (non-formula) `field`, ' +
+          'a read of another record, the clock, the user or a permission), plus the fields and stdlib ' +
           'functions in scope so you can self-correct. A hop target follows the same system-object fence as ' +
           '`describe_object`. `site` says where the expression will live: a `formula` ' +
           'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions). ' +
           'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition), so the verdict is ' +
           'the one the publish gate gives that rule or flow. A time-relative flow\'s conditions read a row of the object ' +
           'its sweep scans (`timeRelative.object`): pass that object as objectName. A start whose objectName names ' +
-          'another object is refused at publish (`flow-time-relative-object-mismatch`).',
+          'another object is refused at publish (`flow-time-relative-object-mismatch`). At a `flow_condition` the verdict ' +
+          'is the runtime publish gate\'s, which a flow saved through MCP or Studio meets: `os validate` also judges a ' +
+          'bare name\'s null guard and unbound roots over the whole flow, which this tool is not handed, so write ' +
+          '`record.<field>` to be judged here. Pass `field` (formula) to be judged as that field: its type, and the ' +
+          'formula cycle it would close; a field not yet declared is judged as a new formula, so a new stored field gets ' +
+          'its stored-expression warnings only once it is declared.',
         inputSchema: strictToolInput(
           {
             surface: 'this validate_expression call',
@@ -2440,11 +2482,30 @@ export function registerObjectTools(
                 '(`flow-time-relative-object-mismatch`); passed with another objectName, the verdict is the gate\'s ' +
                 'advisory one for such a flow, a type mismatch warning. Default: objectName.',
               ),
+            // [#33147] The two facts the gate reads off the item the expression
+            // sits on that `site` does not carry.
+            startCondition: z
+              .string()
+              .optional()
+              .describe(
+                'site flow_condition only: the flow\'s start condition, when the expression is an edge or `decision` ' +
+                'branch condition after it. What it proves non-null holds downstream, as at publish. Omit it when ' +
+                'the expression is the start condition itself.',
+              ),
+            field: z
+              .string()
+              .regex(/^[a-z_][a-z0-9_]*$/, 'a field name is snake_case, e.g. "due_in_days"')
+              .optional()
+              .describe(
+                'site formula only: the name of the field the expression is authored on. A declared field is judged ' +
+                'as it is declared: a stored (non-formula) field gets the stored-expression warnings, and a formula ' +
+                'the cycle it would close. Any other name is judged as a new formula field.',
+              ),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, expression, site, severity, triggerKind, sweepObject }) => {
+      async ({ objectName, expression, site, severity, triggerKind, sweepObject, startCondition, field }) => {
         const bad = guard(objectName);
         if (bad) return errorResult(bad);
         // [#29959] Each input describes one site; on another it would be
@@ -2461,6 +2522,13 @@ export function registerObjectTools(
             `\`sweepObject\` describes a time-relative sweep; it applies only with site "flow_condition" and triggerKind ` +
               `"time_relative", not site "${site ?? 'formula'}" with triggerKind "${triggerKind ?? 'record_change'}".`,
           );
+        }
+        // [#33147] The flow's start condition describes a flow; the field, a formula's.
+        if (startCondition !== undefined && site !== 'flow_condition') {
+          return errorResult(`\`startCondition\` describes a flow; it applies only with site "flow_condition", not "${site ?? 'formula'}".`);
+        }
+        if (field !== undefined && (site ?? 'formula') !== 'formula') {
+          return errorResult(`\`field\` names the field a formula is authored on; it applies only with site "formula", not "${site}".`);
         }
         try {
           const def = (await bridge.describeObject(objectName)) as { fields?: unknown } | null;
@@ -2515,10 +2583,17 @@ export function registerObjectTools(
                 })),
                 warnings: [],
               };
-          // [#32872] …and, at a validation rule or a formula field, every other
-          // pass the gate runs there, in the gate's own words.
+          // [#32872] …and, at a validation rule, a formula field or (#33147) a
+          // flow condition, every other pass the gate runs there, in the
+          // gate's own words.
           const gate = slotParse.success && gatePasses
-            ? await gatePassFindings(bridge, (name) => guard(name) === undefined, gatePasses, objectName, expression, severity)
+            ? await gatePassFindings(bridge, (name) => guard(name) === undefined, gatePasses, objectName, expression, {
+                severity,
+                field,
+                triggerKind,
+                sweepObject,
+                startCondition,
+              })
             : NO_GATE_PASS_FINDINGS;
           const inScope = introspectScope(role, hint);
           const inferredType =
