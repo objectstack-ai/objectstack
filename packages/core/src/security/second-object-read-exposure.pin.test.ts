@@ -220,6 +220,11 @@ const CALLERS: Record<string, Classification> = {
     kind: 'not-a-served-read',
     reason: 'authoring-time static analysis of metadata; reads no record',
   },
+  // [#32529] A stored expression's hop judged as a warning: names the target in the message only.
+  'packages/lint/src/stored-expression-inputs.ts': {
+    kind: 'not-a-served-read',
+    reason: 'authoring-time static analysis of metadata; reads no record',
+  },
   'packages/metadata-protocol/src/seed-loader.ts': {
     kind: 'not-a-served-read',
     reason: "resolves a seed's references at install, under the system identity; serves nothing to a caller",
