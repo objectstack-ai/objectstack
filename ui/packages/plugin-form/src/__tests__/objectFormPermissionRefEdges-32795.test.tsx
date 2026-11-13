@@ -415,3 +415,82 @@ describe("objectstack#32833 item 2 — a create's values and its baseline come f
     expect(ds.create.mock.calls[0][1]).not.toHaveProperty('permission_set_package');
   });
 });
+
+describe('objectstack#32833 M1 — a package pick does not survive a re-seed of the open create form to another name', () => {
+  // `sales_user` is held by the environment and one package; `shared_set` by
+  // two packages, so a name sent alone there is the server's to refuse.
+  const RESEED_ITEMS = [
+    ...PERMISSION_ITEMS,
+    { name: 'shared_set', label: 'Shared Set', packageId: 'com.acme.crm' },
+    { name: 'shared_set', label: 'Shared Set', packageId: 'com.acme.hr' },
+  ];
+  const SECTIONS = [{ name: 'main', label: 'Main', fields: ['permission_set', 'note'] }];
+  const FORMS: Array<[string, React.ComponentType<any>, Record<string, unknown>]> = [
+    ['ModalForm', ModalForm as any, { formType: 'modal', open: true, sections: SECTIONS }],
+    ['DrawerForm', DrawerForm as any, { formType: 'drawer', open: true, sections: SECTIONS }],
+    ['ObjectForm (full page)', ObjectForm as any, {}],
+    ['TabbedForm', TabbedForm as any, { formType: 'tabbed', sections: SECTIONS }],
+  ];
+  function mountSeeded(Container: React.ComponentType<any>, extra: Record<string, unknown>) {
+    const ds = { ...dataSourceFor(GRANT_SCHEMA), listMetadataItems: vi.fn(async (_type: string) => RESEED_ITEMS) };
+    const tree = (seed: Record<string, unknown>, more: Record<string, unknown> = {}) => (
+      <SchemaRendererProvider dataSource={ds as any}>
+        <Container
+          schema={{ type: 'object-form', objectName: GRANT_SCHEMA.name, mode: 'create', ...extra, initialData: seed, ...more } as any}
+          dataSource={ds as any}
+        />
+      </SchemaRendererProvider>
+    );
+    const view = render(tree({ permission_set: 'sales_user', note: 'n' }));
+    return { ds, rerender: (seed: Record<string, unknown>, more?: Record<string, unknown>) => view.rerender(tree(seed, more)) };
+  }
+  async function pickCrm() {
+    const trigger = await openPicker();
+    await act(async () => {
+      fireEvent.click(await optionOf(CRM));
+    });
+    await waitFor(() => expect(trigger).toHaveTextContent(CRM));
+  }
+  const submitDoc = async () => {
+    await act(async () => {
+      fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    });
+  };
+
+  describe.each(FORMS)('%s', (_name, Container, extra) => {
+    it('after a package pick, a re-seed to another name sends the name alone and shows no stale holder', async () => {
+      const { ds, rerender } = mountSeeded(Container, extra);
+      await pickCrm();
+      rerender({ permission_set: 'shared_set', note: 'n' });
+      const trigger = await screen.findByRole('combobox');
+      await waitFor(() => expect(trigger).not.toHaveTextContent('Sales User'));
+      await waitFor(() => expect(trigger).not.toHaveTextContent('package com.acme'));
+      await submitDoc();
+      await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+      expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'shared_set' });
+      expect(ds.create.mock.calls[0][1]).not.toHaveProperty('permission_set_package');
+    });
+  });
+
+  it('CONTROL — the wizard ignores a re-seed of the open form: the pick and its package stay together', async () => {
+    const { ds, rerender } = mountSeeded(WizardForm as any, { formType: 'wizard', sections: SECTIONS });
+    await pickCrm();
+    rerender({ permission_set: 'shared_set', note: 'n' });
+    await submitDoc();
+    await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+    expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'sales_user', permission_set_package: 'com.acme.crm' });
+  });
+
+  it('CONTROL — closing the modal and reopening it on another name carries no pick over', async () => {
+    const { ds, rerender } = mountSeeded(ModalForm as any, { formType: 'modal', open: true, sections: SECTIONS });
+    await pickCrm();
+    rerender({ permission_set: 'sales_user', note: 'n' }, { open: false });
+    await waitFor(() => expect(document.querySelector('form')).toBeNull());
+    rerender({ permission_set: 'shared_set', note: 'n' }, { open: true });
+    await screen.findByRole('combobox');
+    await submitDoc();
+    await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+    expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'shared_set' });
+    expect(ds.create.mock.calls[0][1]).not.toHaveProperty('permission_set_package');
+  });
+});

@@ -248,3 +248,38 @@ describe('objectstack#32833 item 3 — where the form does not stamp its object'
     expect(holderPackageFieldOf('sys_user_permission_set', 'permission_set')).toBe('permission_set_package');
   });
 });
+
+describe('objectstack#32833 M1 — a stored package belongs to the name it was picked for', () => {
+  const GRANT = withFormObject({ ...GRANT_DEF }, 'sys_user_permission_set');
+  const field = (value: string, pkg: string | null, onAutofill: (p: Record<string, unknown>) => void) => (
+    <PermissionRefField
+      name="permission_set"
+      value={value}
+      onChange={vi.fn()}
+      field={GRANT as any}
+      dataSource={SHARED}
+      dependentValues={{ permission_set_package: pkg }}
+      onAutofill={onAutofill}
+    />
+  );
+  const SHARED = lister([...TWO_PACKAGES, { name: 'other_set', label: 'Other Set', packageId: 'com.acme.crm' }, { name: 'other_set', label: 'Other Set', packageId: 'com.acme.hr' }]);
+
+  it('the name changed by another path than a pick: the package it kept is cleared', async () => {
+    const onAutofill = vi.fn();
+    const view = render(field('sales_user', 'com.acme.crm', onAutofill));
+    await screen.findByRole('combobox');
+    expect(onAutofill).not.toHaveBeenCalled();
+    view.rerender(field('other_set', 'com.acme.crm', onAutofill));
+    await waitFor(() => expect(onAutofill).toHaveBeenCalledWith({ permission_set_package: null }));
+  });
+
+  it('CONTROL — the same name with its package, or a name with no package, writes nothing', async () => {
+    const onAutofill = vi.fn();
+    const view = render(field('sales_user', 'com.acme.crm', onAutofill));
+    await screen.findByRole('combobox');
+    view.rerender(field('sales_user', 'com.acme.crm', onAutofill));
+    view.rerender(field('other_set', null, onAutofill));
+    view.rerender(field('sales_user', null, onAutofill));
+    expect(onAutofill).not.toHaveBeenCalled();
+  });
+});
