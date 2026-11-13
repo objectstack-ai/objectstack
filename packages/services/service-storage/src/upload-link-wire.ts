@@ -66,8 +66,7 @@ export const UPLOAD_LINK_ONE_FILE_FORM_MESSAGE =
  * [#32747] The multipart form a several-file submit is sent as: one part per
  * file named `file0` … `fileN-1`, in the order picked, and a `count` field
  * naming N. Indexed names, because a form parser that keeps one value per
- * name (Hono's `parseBody`, both transports) keeps only the last of a
- * repeated one; `count` lets the door refuse a body that lost a part rather
+ * name keeps only the last of a repeated one; `count` lets the door refuse a body that lost a part rather
  * than store fewer files than were sent. Each part's file name is
  * URI-encoded, as the single-file submit's `x-file-name` header is.
  */

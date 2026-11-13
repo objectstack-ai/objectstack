@@ -303,9 +303,9 @@ record means no file**, refused with the same `RECORD_NOT_FOUND`.
   file, and it lands on exactly that record and field, or as an attachment of
   that record. On a phone, they sign in there first. A link for a
   `multiple: true` file field takes several files in its one use: the user
-  picks up to 10 and sends them together, every file is checked (the maximum
-  upload size, and the field's own `accept` and `maxSize`) before the link is
-  spent, and the field gains all of them in one write, or none: one file the
+  picks up to 10 and sends them together, every file of the send, however
+  many, is checked (the maximum upload size, and the field's own `accept` and
+  `maxSize`) before the link is spent, and the field gains all of them in one write, or none: one file the
   field cannot take, or more than 10 (`400` `VALIDATION_ERROR`), refuses the
   whole send with the link still usable, and a failure after that leaves the
   record as it was. A single-file field link and an attachments link take one

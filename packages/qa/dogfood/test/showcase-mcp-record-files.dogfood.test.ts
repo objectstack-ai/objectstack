@@ -39,7 +39,7 @@
 //
 // [#32747] And one link, three PDFs: a link for the claim's multi-file
 // `invoices` takes the three invoices in one send, as the page's form sends
-// them through the real transport (`multipart/form-data`, `file0` … `file2`
+// them through the served stack (`multipart/form-data`, `file0` … `file2`
 // and `count`), and lands all three in one write; a link for a claim not yet
 // created takes `count: 3` and answers the three ids `create_record` names.
 //
