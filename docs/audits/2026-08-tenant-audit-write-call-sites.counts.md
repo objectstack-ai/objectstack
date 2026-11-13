@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 308 |
+| Write call sites | 309 |
 | Object name statically decidable | 214 |
-| Object name chosen at run time | 94 |
+| Object name chosen at run time | 95 |
 | Against a tenancy-enabled object | 207 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 238 |
+| Threading a tenant context | 239 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 58 |
 | …and decidably tenancy-enabled | 31 |
 | Threading a decidably elevated context | 173 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 123 |
+| Threading a context of undecidable elevation | 124 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-12 at `0e97e095f`.
+Measured on 2026-11-13 at `4c59f2d43`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1139 |
-| engine-shaped types recognised | 134 |
+| tracked non-test sources scanned | 1146 |
+| engine-shaped types recognised | 135 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 291 |
+| same-named calls subtracted as non-engine | 292 |
 
 ## Every site
 
@@ -186,6 +186,7 @@ Measured on 2026-11-12 at `0e97e095f`.
 | `packages/plugins/plugin-auth/src/scim-connection-admin.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `update` | `sys_scim_connection_credential` | enabled | elevated | 2 |
+| `packages/plugins/plugin-auth/src/scim-deactivation-key-revocation.ts` | `update` | `SystemObjectName.API_KEY` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `delete` | `sys_user_permission_set` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/scim-identity-source.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
