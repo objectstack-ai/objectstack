@@ -383,7 +383,7 @@ describe('RecordSnapshotSummary: attachments are drawn and open (objectstack#328
     ]);
   });
 
-  it.each([['video', 'clip'], ['audio', 'memo']])('a %s field draws its file as a link that opens it', async (_kind, key) => {
+  it.each([['video', 'clip'], ['audio', 'memo']])('the %s field draws its file as a link that opens it', async (_kind, key) => {
     const summary = await draw({ title: 'Trip', [key]: [ID_A] });
     expect(linksOf(summary.querySelector(`[data-summary-attachment="${key}"]`))).toEqual([
       { href: `/api/v1/storage/files/${ID_A}`, target: '_blank', name: 'File' },
