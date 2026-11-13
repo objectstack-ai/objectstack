@@ -17,9 +17,12 @@ import {
   judgeSsoOnlyLocalPassword,
   resolveResetDoorUserId,
   ssoOnlyPasswordRefusal,
+  SSO_ONLY_REFUSAL_CODE,
   SSO_ONLY_REFUSAL_MESSAGES,
+  SSO_ONLY_REFUSAL_STATUS,
   type ResetDoorContext,
 } from './sso-only-local-password';
+import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_STATUS } from './cloud-managed';
 
 const engineWith = (source: string | null) => ({
   find: async () => [{ id: 'u1', source }],
@@ -63,6 +66,11 @@ describe('judgeSsoOnlyLocalPassword', () => {
 });
 
 describe('ssoOnlyPasswordRefusal', () => {
+  it('carries the cloud-managed refusals\' code and status', () => {
+    expect(SSO_ONLY_REFUSAL_CODE).toBe(CLOUD_MANAGED_REFUSAL_CODE);
+    expect(SSO_ONLY_REFUSAL_STATUS).toBe(CLOUD_MANAGED_REFUSAL_STATUS);
+  });
+
   it('answers the registered RESOURCE_CONFLICT with status 409 and the door sentence', () => {
     for (const door of Object.keys(SSO_ONLY_REFUSAL_MESSAGES) as Array<keyof typeof SSO_ONLY_REFUSAL_MESSAGES>) {
       expect(ssoOnlyPasswordRefusal(door)).toEqual({

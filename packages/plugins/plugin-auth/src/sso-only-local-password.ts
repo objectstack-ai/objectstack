@@ -58,14 +58,18 @@
  */
 
 import type { StandardErrorCode } from '@objectstack/spec/api';
-import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_STATUS } from './cloud-managed.js';
 import { DIRECTORY_MANAGED_SOURCE } from './scim-identity-source.js';
 
-/** The ADR-0112 code every SSO-only refusal carries (the cloud-managed refusals' code). */
-export const SSO_ONLY_REFUSAL_CODE: StandardErrorCode = CLOUD_MANAGED_REFUSAL_CODE;
+/**
+ * The ADR-0112 code every SSO-only refusal carries: the cloud-managed
+ * refusals' code (`CLOUD_MANAGED_REFUSAL_CODE`), spelled as its literal so the
+ * error-vocabulary gate reads it; `sso-only-local-password.test.ts` pins the
+ * two equal.
+ */
+export const SSO_ONLY_REFUSAL_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
 
-/** The status every SSO-only refusal answers. */
-export const SSO_ONLY_REFUSAL_STATUS = CLOUD_MANAGED_REFUSAL_STATUS;
+/** The status every SSO-only refusal answers (the cloud-managed refusals' status). */
+export const SSO_ONLY_REFUSAL_STATUS = 409;
 
 /** One message per door, keyed by the door. */
 export const SSO_ONLY_REFUSAL_MESSAGES = {
