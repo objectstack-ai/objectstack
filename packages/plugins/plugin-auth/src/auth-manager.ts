@@ -255,6 +255,11 @@ import {
   revokeDirectoryDeactivatedApiKeys,
   scimDeactivationKeyRevocationIncompleteMessage,
 } from './scim-deactivation-key-revocation.js';
+import {
+  directoryDeactivatedOwnerSuspensionIncompleteMessage,
+  isOwnedAccountSuspensionComplete,
+  suspendAccountsOfDirectoryDeactivatedOwner,
+} from './service-account-owner-leaves.js';
 // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
 // token: the answer `handleRequest` gives after the provider's, through
 // `answerOAuthTokenRevocation` below.
@@ -4634,6 +4639,17 @@ export class AuthManager {
    * already landed); it is reported once at `error`. The `active: true` branch
    * and an administrator's ban leave keys alone.
    *
+   * An inactive state also suspends every AI service account the user is
+   * accountable for, with the reason that the directory deactivated its owner
+   * (`service-account-owner-leaves.ts`, the owner-left writer with its own
+   * reason; the maintainer's choice that this card covers those accounts). A
+   * re-activation lifts the user's ban only, so the accounts stay suspended
+   * until an administrator resumes them, and resume refuses while the owner is
+   * still deactivated. It runs on every inactive call after the key
+   * revocation, an account already suspended keeps its own reason, and a
+   * suspension that does not finish never fails the deprovision; it is
+   * reported once at `error`. An administrator's ban leaves the accounts alone.
+   *
    * [ADR-0135 D4] This callback also writes the directory-managed mark
    * (`sys_user.source = 'idp_provisioned'`, `scim-identity-source.ts`) on every
    * call — fail-closed and first on an active state, best-effort and after the
@@ -4712,6 +4728,10 @@ export class AuthManager {
       // a revocation that cannot land never leaves the account enabled.
       const revocation = await revokeDirectoryDeactivatedApiKeys(engine as never, state.userId);
       if (!revocation.complete) this.logScimKeyRevocationIncomplete(state.userId, revocation);
+      // ...and suspends the AI service accounts the user is accountable for; a
+      // re-activation resumes none of them.
+      const suspension = await suspendAccountsOfDirectoryDeactivatedOwner(engine as never, state.userId);
+      if (!isOwnedAccountSuspensionComplete(suspension)) this.logScimAccountSuspensionIncomplete(state.userId, suspension);
       try {
         await markDirectoryProvisionedUsers(engine as never, [state.userId]);
       } catch (e) {
@@ -4738,6 +4758,28 @@ export class AuthManager {
   ): void {
     const message = scimDeactivationKeyRevocationIncompleteMessage(userId, outcome);
     const meta = { object: 'sys_api_key', revoked: outcome.apiKeys, failed: outcome.failed };
+    const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
+    if (typeof sink?.error === 'function') sink.error(message, meta);
+    else console.error(message, meta);
+  }
+
+  /**
+   * The one notice for a SCIM deprovision whose suspension of the user's AI
+   * service accounts did not finish (`service-account-owner-leaves.ts`).
+   * Logged at `error`: the user is disabled, so nothing looks wrong, but an
+   * account left unsuspended keeps running with nobody accountable for it.
+   */
+  private logScimAccountSuspensionIncomplete(
+    userId: string,
+    outcome: Parameters<typeof directoryDeactivatedOwnerSuspensionIncompleteMessage>[1],
+  ): void {
+    const message = directoryDeactivatedOwnerSuspensionIncompleteMessage(userId, outcome);
+    const meta = {
+      object: 'sys_user',
+      suspended: outcome.suspended.length,
+      failed: outcome.failed.map((f) => f.accountId),
+      ...(outcome.readError !== undefined ? { error: outcome.readError } : {}),
+    };
     const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
     if (typeof sink?.error === 'function') sink.error(message, meta);
     else console.error(message, meta);

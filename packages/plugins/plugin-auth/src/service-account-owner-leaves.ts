@@ -30,6 +30,23 @@
  * the removal already happened. Each failure is logged with what it costs (the
  * account keeps running with an owner who has left), so the operator can stop
  * it by hand.
+ *
+ * ## The directory deactivates the owner
+ *
+ * A SCIM deactivation (`active: false`) or delete of a person suspends every
+ * AI service account that person is accountable for, in every organization,
+ * with {@link SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON}
+ * (`suspendAccountsOfDirectoryDeactivatedOwner`, called from the directory's
+ * lifecycle callback, `AuthManager#reconcileScimUserLifecycle`). A deactivation
+ * keeps the person's memberships, so the owner-left trigger above never fires
+ * for it. It is the same writer with its own reason, so a reader tells it apart
+ * from the owner leaving. A re-activation lifts the person's ban only, so the
+ * accounts stay suspended: an administrator names a new owner, or keeps the
+ * re-activated one, and resumes it; resume refuses while the owner is still
+ * deactivated (`service-account-lifecycle.ts`). An account already suspended
+ * keeps its own reason, and nothing is revoked. A suspension that cannot be
+ * written never fails the deprovision: the outcome says so and the caller
+ * logs it once, and the next inactive write for the person retries it.
  */
 
 import { authSystemWriteContext } from './auth-actor-attribution.js';
@@ -41,6 +58,9 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 /** The ban reason the owner's leaving records. */
 export const SERVICE_ACCOUNT_OWNER_LEFT_REASON = 'Accountable owner left the organization';
+
+/** The ban reason a directory (SCIM) deactivation or delete of the owner records. */
+export const SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON = 'Accountable owner deactivated by the directory';
 
 type LoggerLike = {
   info?(msg: string, meta?: unknown): void;
@@ -70,6 +90,67 @@ function rowsOf(found: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
 }
 
+/** What one suspension pass over an owner's AI service accounts did. */
+export interface OwnedAccountSuspensionOutcome {
+  /** The accounts this pass suspended. */
+  suspended: string[];
+  /** The accounts whose suspension write was refused, with the error it raised. */
+  failed: { accountId: string; error: string }[];
+  /** The owner's accounts could not be read, so none is known to be suspended. */
+  readError?: string;
+}
+
+/**
+ * The one suspension writer: every AI service account whose accountable owner
+ * is `ownerId` and that is not already suspended gets `reason` as its ban
+ * (`banned`, `ban_reason`, no expiry). With `organizationId`, only the
+ * accounts that are members of that organization. Never throws.
+ */
+async function suspendOwnedAccounts(
+  engine: ServiceAccountOwnerLeavesEngine,
+  ownerId: string,
+  scope: { reason: string; organizationId?: string },
+): Promise<OwnedAccountSuspensionOutcome> {
+  const outcome: OwnedAccountSuspensionOutcome = { suspended: [], failed: [] };
+  try {
+    const owned = rowsOf(await engine.find(USER_OBJECT, {
+      where: { accountable_user_id: ownerId },
+      fields: ['id', 'principal_kind', 'accountable_user_id', 'banned'],
+      context: SYSTEM_CTX,
+    })).filter(isAgentAccountRow);
+    if (owned.length === 0) return outcome;
+
+    const context = await authSystemWriteContext();
+    for (const account of owned) {
+      const accountId = idOf(account.id);
+      // An account already suspended keeps its own reason.
+      if (!accountId || account.banned === true) continue;
+      if (scope.organizationId !== undefined) {
+        const inOrganization = rowsOf(await engine.find(MEMBER_OBJECT, {
+          where: { user_id: accountId, organization_id: scope.organizationId },
+          fields: ['id'],
+          limit: 1,
+          context: SYSTEM_CTX,
+        }));
+        if (inOrganization.length === 0) continue;
+      }
+      try {
+        await engine.update(
+          USER_OBJECT,
+          { id: accountId, banned: true, ban_reason: scope.reason, ban_expires: null },
+          { context },
+        );
+        outcome.suspended.push(accountId);
+      } catch (e) {
+        outcome.failed.push({ accountId, error: (e as Error)?.message ?? String(e) });
+      }
+    }
+  } catch (e) {
+    outcome.readError = (e as Error)?.message ?? String(e);
+  }
+  return outcome;
+}
+
 /**
  * `userId` has left `organizationId`: suspend every AI service account that
  * person owns in that organization. Returns the ids it suspended.
@@ -80,7 +161,7 @@ export async function suspendAccountsOfDepartedOwner(
   opts: { logger?: LoggerLike } = {},
 ): Promise<string[]> {
   const { userId, organizationId } = ended;
-  const suspended: string[] = [];
+  let outcome: OwnedAccountSuspensionOutcome;
   try {
     // Still a member there (a second row): nothing ended for the accounts.
     const remaining = rowsOf(await engine.find(MEMBER_OBJECT, {
@@ -89,55 +170,66 @@ export async function suspendAccountsOfDepartedOwner(
       limit: 1,
       context: SYSTEM_CTX,
     }));
-    if (remaining.length > 0) return suspended;
-
-    const owned = rowsOf(await engine.find(USER_OBJECT, {
-      where: { accountable_user_id: userId },
-      fields: ['id', 'principal_kind', 'accountable_user_id', 'banned'],
-      context: SYSTEM_CTX,
-    })).filter(isAgentAccountRow);
-    if (owned.length === 0) return suspended;
-
-    const context = await authSystemWriteContext();
-    for (const account of owned) {
-      const accountId = idOf(account.id);
-      if (!accountId || account.banned === true) continue;
-      const inOrganization = rowsOf(await engine.find(MEMBER_OBJECT, {
-        where: { user_id: accountId, organization_id: organizationId },
-        fields: ['id'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      }));
-      if (inOrganization.length === 0) continue;
-      try {
-        await engine.update(
-          USER_OBJECT,
-          { id: accountId, banned: true, ban_reason: SERVICE_ACCOUNT_OWNER_LEFT_REASON, ban_expires: null },
-          { context },
-        );
-        suspended.push(accountId);
-      } catch (e) {
-        opts.logger?.warn(
-          '[ServiceAccountOwnerLeaves] could not suspend an AI service account whose owner left its organization: '
-            + 'it keeps running with nobody accountable. Suspend it by hand.',
-          { accountId, ownerId: userId, organizationId, error: (e as Error)?.message },
-        );
-      }
-    }
+    if (remaining.length > 0) return [];
+    outcome = await suspendOwnedAccounts(engine, userId, { reason: SERVICE_ACCOUNT_OWNER_LEFT_REASON, organizationId });
   } catch (e) {
+    outcome = { suspended: [], failed: [], readError: (e as Error)?.message };
+  }
+  for (const { accountId, error } of outcome.failed) {
+    opts.logger?.warn(
+      '[ServiceAccountOwnerLeaves] could not suspend an AI service account whose owner left its organization: '
+        + 'it keeps running with nobody accountable. Suspend it by hand.',
+      { accountId, ownerId: userId, organizationId, error },
+    );
+  }
+  if (outcome.readError !== undefined) {
     opts.logger?.warn(
       '[ServiceAccountOwnerLeaves] could not read the AI service accounts of an owner who left an organization: '
         + 'any such account keeps running with nobody accountable. Check read access on sys_user / sys_member.',
-      { ownerId: userId, organizationId, error: (e as Error)?.message },
+      { ownerId: userId, organizationId, error: outcome.readError },
     );
   }
-  if (suspended.length > 0) {
+  if (outcome.suspended.length > 0) {
     opts.logger?.info?.(
-      `[ServiceAccountOwnerLeaves] suspended ${suspended.length} AI service account(s) whose owner left the organization`,
-      { ownerId: userId, organizationId, accountIds: suspended },
+      `[ServiceAccountOwnerLeaves] suspended ${outcome.suspended.length} AI service account(s) whose owner left the organization`,
+      { ownerId: userId, organizationId, accountIds: outcome.suspended },
     );
   }
-  return suspended;
+  return outcome.suspended;
+}
+
+/**
+ * The directory (SCIM) deactivated or deleted `ownerId`: suspend every AI
+ * service account that person is accountable for, in every organization, with
+ * {@link SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON}. Never throws; the caller
+ * logs an outcome that is not complete
+ * ({@link directoryDeactivatedOwnerSuspensionIncompleteMessage}).
+ */
+export function suspendAccountsOfDirectoryDeactivatedOwner(
+  engine: ServiceAccountOwnerLeavesEngine,
+  ownerId: string,
+): Promise<OwnedAccountSuspensionOutcome> {
+  return suspendOwnedAccounts(engine, ownerId, { reason: SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON });
+}
+
+/** Did the pass suspend every account it found unsuspended? */
+export function isOwnedAccountSuspensionComplete(outcome: OwnedAccountSuspensionOutcome): boolean {
+  return outcome.readError === undefined && outcome.failed.length === 0;
+}
+
+/** The one `error` line for a directory deactivation whose account suspension did not finish. */
+export function directoryDeactivatedOwnerSuspensionIncompleteMessage(
+  ownerId: string,
+  outcome: OwnedAccountSuspensionOutcome,
+): string {
+  const what = outcome.readError !== undefined
+    ? 'the AI service accounts they are accountable for could not be read'
+    : `${outcome.failed.length} AI service account(s) they are accountable for could not be suspended `
+      + `(${outcome.suspended.length} were)`;
+  return `[auth] AI service account suspension INCOMPLETE — the directory deactivated user '${ownerId}', but ${what}. `
+    + 'The deprovision succeeded and the user is disabled, but such an account keeps running with nobody '
+    + 'accountable for it. Remedy: suspend each AI service account whose accountable_user_id is this user '
+    + '(POST /api/v1/auth/service-account/suspend); the next SCIM write that leaves the user inactive retries it.';
 }
 
 /**
