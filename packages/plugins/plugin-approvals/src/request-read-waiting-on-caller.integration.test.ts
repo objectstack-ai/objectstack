@@ -40,6 +40,7 @@ import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 import { splitWaitingOnCaller } from './request-read-gate.js';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 const REQUEST = 'sys_approval_request';
 const OBJECT = 'exam_sheet';
@@ -86,7 +87,7 @@ async function boot() {
   await engine.syncSchemas();
   await installDefaultOrganization(engine);
   for (const id of ['sheet_a', 'sheet_b']) {
-    await engine.insert(OBJECT, { id, title: id }, { context: SYSTEM } as any);
+    await engine.insert(OBJECT, { id, title: id }, { context: SYSTEM } satisfies EngineQueryOptions);
   }
 
   const services: Record<string, unknown> = { objectql: engine };
@@ -114,9 +115,9 @@ async function boot() {
   // `position:<p>` literal, on the request and in the pending-approver index,
   // as the open path writes it (`approver-address.ts`).
   const literal = `position:${LEAD_POSITION}`;
-  await engine.update(REQUEST, { id: byPosition, pending_approvers: literal }, { context: SYSTEM } as any);
-  const [indexRow] = await engine.find('sys_approval_approver', { where: { request_id: byPosition }, context: SYSTEM } as any) as any[];
-  await engine.update('sys_approval_approver', { id: indexRow.id, approver: literal }, { context: SYSTEM } as any);
+  await engine.update(REQUEST, { id: byPosition, pending_approvers: literal }, { context: SYSTEM } satisfies EngineQueryOptions);
+  const [indexRow] = await engine.find('sys_approval_approver', { where: { request_id: byPosition }, context: SYSTEM } satisfies EngineQueryOptions) as any[];
+  await engine.update('sys_approval_approver', { id: indexRow.id, approver: literal }, { context: SYSTEM } satisfies EngineQueryOptions);
 
   return { engine, svc, ids: { byUserId, byPosition } };
 }
@@ -126,7 +127,7 @@ const idsOf = (rows: unknown) => (rows as any[]).map((r) => String(r.id)).sort()
 describe('[#32442] the request read gate answers "waiting on me" with the approvals fold', () => {
   it('an approver whose slot is their user id gets exactly that request', async () => {
     const rig = await boot();
-    const rows = await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: asUser(APPROVER) } as any);
+    const rows = await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: asUser(APPROVER) } satisfies EngineQueryOptions);
     expect(idsOf(rows)).toEqual([rig.ids.byUserId]);
   });
 
@@ -134,24 +135,24 @@ describe('[#32442] the request read gate answers "waiting on me" with the approv
     const rig = await boot();
     const lead = asUser(LEAD, [LEAD_POSITION]);
     // The literal reading matches nothing: the column holds `position:exam_lead`, not the id.
-    const stored = await rig.engine.find(REQUEST, { where: { id: rig.ids.byPosition }, context: SYSTEM } as any) as any[];
+    const stored = await rig.engine.find(REQUEST, { where: { id: rig.ids.byPosition }, context: SYSTEM } satisfies EngineQueryOptions) as any[];
     expect(stored[0].pending_approvers).toBe(`position:${LEAD_POSITION}`);
 
-    expect(idsOf(await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: lead } as any))).toEqual([rig.ids.byPosition]);
-    expect(await rig.engine.count(REQUEST, { where: WAITING_ON_ME, context: lead } as any)).toBe(1);
+    expect(idsOf(await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: lead } satisfies EngineQueryOptions))).toEqual([rig.ids.byPosition]);
+    expect(await rig.engine.count(REQUEST, { where: WAITING_ON_ME, context: lead } satisfies EngineQueryOptions)).toBe(1);
     const groups = await rig.engine.aggregate(REQUEST, {
       where: WAITING_ON_ME, groupBy: ['status'], aggregations: [{ function: 'count', alias: 'n' }], context: lead,
-    } as any) as any[];
+    } satisfies EngineQueryOptions) as any[];
     expect(groups.map((g) => [g.status, Number(g.n)])).toEqual([['pending', 1]]);
   });
 
   it('a member on no request gets nothing, and the submitter gets nothing waiting on them', async () => {
     const rig = await boot();
-    expect(await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: asUser(OUTSIDER) } as any)).toEqual([]);
-    expect(await rig.engine.count(REQUEST, { where: WAITING_ON_ME, context: asUser(OUTSIDER) } as any)).toBe(0);
-    expect(await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: asUser(SUBMITTER) } as any)).toEqual([]);
+    expect(await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: asUser(OUTSIDER) } satisfies EngineQueryOptions)).toEqual([]);
+    expect(await rig.engine.count(REQUEST, { where: WAITING_ON_ME, context: asUser(OUTSIDER) } satisfies EngineQueryOptions)).toBe(0);
+    expect(await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: asUser(SUBMITTER) } satisfies EngineQueryOptions)).toEqual([]);
     // Control: the submitter's untargeted read serves both requests they filed.
-    expect(idsOf(await rig.engine.find(REQUEST, { context: asUser(SUBMITTER) } as any)))
+    expect(idsOf(await rig.engine.find(REQUEST, { context: asUser(SUBMITTER) } satisfies EngineQueryOptions)))
       .toEqual([rig.ids.byUserId, rig.ids.byPosition].sort());
   });
 
@@ -161,18 +162,18 @@ describe('[#32442] the request read gate answers "waiting on me" with the approv
     // submitter's participant set: the one request whose column holds that id.
     const rows = await rig.engine.find(REQUEST, {
       where: { status: 'pending', pending_approvers: { $contains: APPROVER } }, context: asUser(SUBMITTER),
-    } as any);
+    } satisfies EngineQueryOptions);
     expect(idsOf(rows)).toEqual([rig.ids.byUserId]);
     // An outsider asking the same reads nothing: the participant narrowing still applies.
     expect(await rig.engine.find(REQUEST, {
       where: { pending_approvers: { $contains: APPROVER } }, context: asUser(OUTSIDER),
-    } as any)).toEqual([]);
+    } satisfies EngineQueryOptions)).toEqual([]);
   });
 
   it('a decided request leaves the answer', async () => {
     const rig = await boot();
     await rig.svc.decideNode(rig.ids.byUserId, { decision: 'approve' } as any, asUser(APPROVER));
-    expect(await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: asUser(APPROVER) } as any)).toEqual([]);
+    expect(await rig.engine.find(REQUEST, { where: WAITING_ON_ME, context: asUser(APPROVER) } satisfies EngineQueryOptions)).toEqual([]);
   });
 });
 
