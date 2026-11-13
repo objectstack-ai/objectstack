@@ -11,6 +11,20 @@
  */
 const ko = {
   marketplace: {
+    objectExtensions: {
+      title: "기존 개체를 변경합니다",
+      intro: "설치하면 이 환경에 이미 있는 다음 개체가 변경됩니다:",
+      platformBadge: "플랫폼 개체",
+      platformWarning: "플랫폼 개체는 이 환경의 모든 앱이 공유합니다. 이를 변경하면 로그인, 사용자 프로필 및 다른 앱에 영향을 줄 수 있습니다.",
+      fields: "필드 추가 또는 교체",
+      fieldPatches: "필드 표시 방식 변경",
+      validations: "유효성 검사 규칙 추가 또는 교체",
+      indexes: "추가되는 인덱스: {{count}}",
+      relabels: "레이블 또는 설명 변경",
+      reading: "이 패키지가 변경하는 기존 개체를 읽는 중…",
+      unknown: "이 패키지가 변경하는 기존 개체를 읽을 수 없습니다. 플랫폼 개체를 포함해 일부를 변경할 수 있습니다.",
+      acknowledge: "이 패키지가 플랫폼 개체를 변경한다는 점을 이해합니다.",
+    },
     suggestedBindings: {
       promptEveryone: "이 앱은 로그인한 모든 사용자(Everyone 위치)에게 \"{{set}}\"을(를) 부여할 것을 제안합니다.",
       promptGuest: "이 앱은 인증되지 않은 방문자(Guest 위치)에게 \"{{set}}\"을(를) 부여할 것을 제안합니다.",

@@ -11,6 +11,20 @@
  */
 const pt = {
   marketplace: {
+    objectExtensions: {
+      title: "Altera objetos existentes",
+      intro: "A instalação altera estes objetos que já existem neste ambiente:",
+      platformBadge: "Objeto da plataforma",
+      platformWarning: "Os objetos da plataforma são compartilhados por todos os apps deste ambiente. Alterá-los pode afetar o login, os perfis de usuário e outros apps.",
+      fields: "Adiciona ou substitui campos",
+      fieldPatches: "Altera como os campos são exibidos",
+      validations: "Adiciona ou substitui regras de validação",
+      indexes: "Índices adicionados: {{count}}",
+      relabels: "Altera seu rótulo ou descrição",
+      reading: "Lendo quais objetos existentes este pacote altera…",
+      unknown: "Não foi possível ler quais objetos existentes este pacote altera. Ele pode alterar alguns, inclusive objetos da plataforma.",
+      acknowledge: "Entendo que este pacote altera objetos da plataforma.",
+    },
     suggestedBindings: {
       promptEveryone: "Este app sugere conceder \"{{set}}\" a todos os usuários autenticados (a posição Everyone).",
       promptGuest: "Este app sugere conceder \"{{set}}\" a visitantes não autenticados (a posição Guest).",

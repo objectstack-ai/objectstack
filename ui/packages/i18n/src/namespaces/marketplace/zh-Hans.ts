@@ -197,6 +197,20 @@ const zh = {
       },
       // ADR-0090 D5/D9 — 安装时建议：包声明 isDefault 的权限集建议绑定到
       // everyone/guest 岗位，由管理员在此确认，服务端绝不自动绑定。
+      objectExtensions: {
+        title: "会修改已有对象",
+        intro: "安装会修改本环境中以下已有的对象：",
+        platformBadge: "平台对象",
+        platformWarning: "平台对象由本环境中的所有应用共用。修改它们可能影响登录、用户资料以及其他应用。",
+        fields: "新增或替换字段",
+        fieldPatches: "修改字段的显示方式",
+        validations: "新增或替换校验规则",
+        indexes: "新增索引：{{count}}",
+        relabels: "修改其标签或描述",
+        reading: "正在读取此软件包会修改哪些已有对象…",
+        unknown: "无法读取此软件包会修改哪些已有对象。它可能会修改一些对象，包括平台对象。",
+        acknowledge: "我了解此软件包会修改平台对象。",
+      },
       suggestedBindings: {
         promptEveryone: '此应用建议将「{{set}}」授予所有已登录用户（Everyone 岗位）。',
         promptGuest: '此应用建议将「{{set}}」授予未登录访客（Guest 岗位）。',

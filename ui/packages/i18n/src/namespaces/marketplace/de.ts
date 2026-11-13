@@ -11,6 +11,20 @@
  */
 const de = {
   marketplace: {
+    objectExtensions: {
+      title: "Ändert vorhandene Objekte",
+      intro: "Die Installation ändert diese Objekte, die in dieser Umgebung bereits vorhanden sind:",
+      platformBadge: "Plattformobjekt",
+      platformWarning: "Plattformobjekte werden von allen Apps in dieser Umgebung gemeinsam genutzt. Änderungen daran können die Anmeldung, Benutzerprofile und andere Apps beeinträchtigen.",
+      fields: "Fügt Felder hinzu oder ersetzt sie",
+      fieldPatches: "Ändert die Anzeige von Feldern",
+      validations: "Fügt Validierungsregeln hinzu oder ersetzt sie",
+      indexes: "Hinzugefügte Indizes: {{count}}",
+      relabels: "Ändert Bezeichnung oder Beschreibung",
+      reading: "Es wird gelesen, welche vorhandenen Objekte dieses Paket ändert…",
+      unknown: "Welche vorhandenen Objekte dieses Paket ändert, konnte nicht gelesen werden. Es kann einige ändern, auch Plattformobjekte.",
+      acknowledge: "Ich habe verstanden, dass dieses Paket Plattformobjekte ändert.",
+    },
     suggestedBindings: {
       promptEveryone: "Diese App empfiehlt, „{{set}}“ allen angemeldeten Benutzern zu gewähren (Position „Everyone“).",
       promptGuest: "Diese App empfiehlt, „{{set}}“ nicht authentifizierten Besuchern zu gewähren (Position „Guest“).",
