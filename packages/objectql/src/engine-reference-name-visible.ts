@@ -78,7 +78,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { withoutOperationPrivateKeys } from '@objectstack/core';
 import type { ObjectQL } from './engine.js';
 import { isReadRefusal } from './engine-file-reference-hydration.js';
-import { formulaPlanEntry } from './engine-top-level.js';
+import { planFormulaProjection } from './engine-top-level.js';
 
 /**
  * The `ObjectQL` members {@link serveReferenceNames} reads, every one of them
@@ -273,8 +273,10 @@ async function servableNameField(
  */
 export const formulaReadsReference: ReferenceNameVisibleHost['formulaReadsReference'] = (name, def, fields) => {
   try {
-    const entry = formulaPlanEntry(name, def, fields);
-    return entry.hops !== undefined || entry.hopConflict !== undefined;
+    // [#33100] A gate that admits a formula to a read judges the whole plan
+    // that read will run, the formulas it reads included.
+    const { plan } = planFormulaProjection({ fields: { ...(fields as object), [name]: def } }, [name]);
+    return plan.some((entry) => entry.hops !== undefined || entry.hopConflict !== undefined);
   } catch {
     // An expression the planner cannot compile is not served by name.
     return true;

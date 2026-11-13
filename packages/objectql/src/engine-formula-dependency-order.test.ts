@@ -247,4 +247,47 @@ describe('#33100 — a cycle of formulas reads null, names the cycle, and does n
 
     expect(await engine.find('x_cycle', { fields: ['f_reads_cycle'] } as never)).toEqual([{ f_reads_cycle: -1 }]);
   });
+
+  it('a formula of a component holding more than one loop is named in either declaration order', async () => {
+    const tangled = (order: 'n-first' | 'x-first') => {
+      const f_n = formula('f_n', 'record.f_p + record.f_x');
+      const f_p = formula('f_p', 'record.f_n + 1');
+      const f_x = formula('f_x', 'record.f_p + 1');
+      return {
+        name: `x_tangle_${order.replace('-', '_')}`,
+        label: 'Tangle',
+        fields: {
+          id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+          ...(order === 'n-first' ? { f_n, f_p, f_x } : { f_x, f_p, f_n }),
+        },
+      };
+    };
+    for (const order of ['n-first', 'x-first'] as const) {
+      const obj = tangled(order);
+      const { engine, faults } = await makeRig([obj]);
+      const created = await engine.insert(obj.name, {}) as Rec;
+      expect([created.f_n, created.f_p, created.f_x], order).toEqual([null, null, null]);
+      expect(faults(obj.name, 'f_x').map((w) => String(w.meta?.error))[0], order)
+        .toContain(formulaCycleMessage('f_x', ['f_x', 'f_p', 'f_n']));
+      // A projection naming one member alone answers the same.
+      expect(await engine.find(obj.name, { fields: ['f_x'] } as never), order).toEqual([{ f_x: null }]);
+    }
+  });
+
+  it('a member whose read of the cycle is guarded reads null with the cycle fault too', async () => {
+    const guarded = {
+      name: 'x_guarded',
+      label: 'Guarded',
+      fields: {
+        id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+        f_g: formula('f_g', 'has(record.f_g) ? record.f_g : 1'),
+      },
+    };
+    const { engine, faults } = await makeRig([guarded]);
+
+    const created = await engine.insert('x_guarded', {}) as Rec;
+
+    expect(created.f_g).toBeNull();
+    expect(String(faults('x_guarded', 'f_g')[0]?.meta?.error)).toContain(formulaCycleMessage('f_g', ['f_g']));
+  });
 });

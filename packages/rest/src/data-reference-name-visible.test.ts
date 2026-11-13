@@ -54,6 +54,7 @@ const MEMBER_SET = PermissionSetSchema.parse({
     rnv_ledger: { allowRead: false },
     rnv_badge: { allowRead: false },
     rnv_branch: { allowRead: false },
+    rnv_outpost: { allowRead: false },
   },
   // Field-level security keeps the ledger's name field from the reader.
   fields: { 'rnv_ledger.label': { readable: false, editable: false } },
@@ -124,6 +125,22 @@ const OBJECTS = [
     },
   },
   {
+    // [#33100] A formula title over the record's own columns and another formula.
+    name: 'rnv_outpost', label: 'Outpost', sharingModel: 'public_read_write', nameField: 'heading',
+    fields: {
+      city: { name: 'city', type: 'text' },
+      account: { name: 'account', type: 'lookup', reference: 'rnv_account' },
+      via: {
+        name: 'via', type: 'formula', returnType: 'text',
+        expression: { dialect: 'cel', source: 'record.account.secret' },
+      },
+      heading: {
+        name: 'heading', type: 'formula', returnType: 'text',
+        expression: { dialect: 'cel', source: 'record.via + " / " + record.city' },
+      },
+    },
+  },
+  {
     name: 'rnv_case', label: 'Case', sharingModel: 'public_read_write',
     fields: {
       subject: { name: 'subject', type: 'text' },
@@ -137,6 +154,7 @@ const OBJECTS = [
       ledger: { name: 'ledger', type: 'lookup', reference: 'rnv_ledger', referenceNameVisible: true },
       badge: { name: 'badge', type: 'lookup', reference: 'rnv_badge', referenceNameVisible: true },
       branch: { name: 'branch', type: 'lookup', reference: 'rnv_branch', referenceNameVisible: true },
+      outpost: { name: 'outpost', type: 'lookup', reference: 'rnv_outpost', referenceNameVisible: true },
       assignee: { name: 'assignee', type: 'user', referenceNameVisible: true },
       assignee_plain: { name: 'assignee_plain', type: 'user' },
       approver: { name: 'approver', type: 'lookup', reference: 'sys_user', referenceNameVisible: true },
@@ -144,7 +162,7 @@ const OBJECTS = [
   },
 ];
 
-const ALL_REFERENCES = 'account,account_plain,accounts,vault,vault_plain,contact,ledger,badge,branch,assignee,assignee_plain,approver';
+const ALL_REFERENCES = 'account,account_plain,accounts,vault,vault_plain,contact,ledger,badge,branch,outpost,assignee,assignee_plain,approver';
 
 /** The value a refused target is served as. */
 const refused = (id: string, name: string) => ({ id, name, readRefused: true });
@@ -228,10 +246,11 @@ async function boot(opts: { posture?: string } = {}): Promise<{ engine: ObjectQL
   await engine.insert('rnv_ledger', [{ id: 'l1', label: 'Payroll', secret: 'ledger-secret' }], { context: SYS_CTX } as never);
   await engine.insert('rnv_badge', [{ id: 'b1', holder: 'Grace Hopper' }], { context: SYS_CTX } as never);
   await engine.insert('rnv_branch', [{ id: 'br1', city: 'Oslo', account: 'a2' }], { context: SYS_CTX } as never);
+  await engine.insert('rnv_outpost', [{ id: 'o1', city: 'Bergen', account: 'a2' }], { context: SYS_CTX } as never);
   await engine.insert('rnv_case', [
     {
       id: 'c1', subject: 'readable targets', account: 'a1', account_plain: 'a1', accounts: ['a1', 'a2', 'a_none'],
-      vault: 'v1', vault_plain: 'v1', contact: 'k1', ledger: 'l1', badge: 'b1', branch: 'br1',
+      vault: 'v1', vault_plain: 'v1', contact: 'k1', ledger: 'l1', badge: 'b1', branch: 'br1', outpost: 'o1',
       assignee: 'usr_peer', assignee_plain: 'usr_peer', approver: 'usr_stranger',
     },
     {
@@ -378,6 +397,12 @@ describe('[#29460] referenceNameVisible — a refused target is served by name a
     it('the name field is a formula that reads through another reference', () => {
       expect(c1.branch).toEqual(refused('br1', 'Record #br1'));
       expect(JSON.stringify(c1)).not.toContain('Oslo');
+    });
+
+    it('[#33100] the name field is judged with every formula computing it reads', () => {
+      expect(c1.outpost).toEqual(refused('o1', 'Record #o1'));
+      expect(JSON.stringify(c1)).not.toContain('Bergen');
+      expect(JSON.stringify(c1)).not.toContain('hidden-secret');
     });
   });
 

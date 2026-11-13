@@ -36,4 +36,19 @@ describe('#33100 — formulaReadOrder', () => {
     // Every formula is still listed once: the caller decides what a cycle member does.
     expect([...order].sort()).toEqual(['f_reads', 'f_self', 'f_x', 'f_y', 'f_z']);
   });
+
+  it('names every formula of a component holding more than one loop, whatever order the formulas come in', () => {
+    // f_n reads f_p and f_x, f_p reads f_n, f_x reads f_p: all three read their own value.
+    const graph = { f_n: ['f_p', 'f_x'], f_p: ['f_n'], f_x: ['f_p'] };
+    for (const keys of [['f_n', 'f_p', 'f_x'], ['f_x', 'f_p', 'f_n'], ['f_p', 'f_x', 'f_n']]) {
+      const { cycles } = formulaReadOrder(new Map(keys.map((k) => [k, graph[k as keyof typeof graph]])));
+      expect([...cycles.keys()].sort(), keys.join(',')).toEqual(['f_n', 'f_p', 'f_x']);
+      expect(cycles.get('f_x')).toBe(formulaCycleMessage('f_x', ['f_x', 'f_p', 'f_n']));
+    }
+  });
+
+  it('a formula reading a cycle without being read back is not on it', () => {
+    const { cycles } = formulaReadOrder(reads({ f_reader: ['f_a'], f_a: ['f_b'], f_b: ['f_a'] }));
+    expect([...cycles.keys()].sort()).toEqual(['f_a', 'f_b']);
+  });
 });

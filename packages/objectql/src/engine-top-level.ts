@@ -1630,9 +1630,10 @@ function planFormulaProjection(
  * projection naming it without the formula it reads, while the publish gate,
  * `validate_expression` and the Studio editor all accept the expression.
  *
- * Two steps, over the `record.<field>` names each formula reads (the member
- * reader {@link storedExpressionReads} the stored-expression plan already uses,
- * so the lint and this plan agree on which spellings name a field):
+ * Two steps, over the fields each formula reads as {@link storedExpressionReads}
+ * names them (the stored-expression plan's reader: the fields read as values
+ * and the fields read through), the read set the authoring lint's cycle
+ * refusal takes too:
  *
  *  1. Closure: a formula field a planned formula reads joins the plan,
  *     transitively. Those are returned as `added`; a projection cuts them back
@@ -3305,8 +3306,10 @@ function replacedStoredExpressionFields(
  * {@link hydrateWriteFormulas} use — plans EVERY formula field on the schema
  * and `ExpressionEngine.compile`s each one at planning stage. Asking for one
  * title would then throw on an unrelated malformed formula elsewhere on the
- * object. Passing `[field]` plans exactly the requested field, so the blast
- * radius of a title lookup is the title's own declaration.
+ * object. Passing `[field]` plans the requested field and [#33100] the
+ * formulas it reads, transitively (a formula over a formula reads the other's
+ * value), so the blast radius of a title lookup is the title's own
+ * declaration and the declarations of the formulas it reads.
  *
  * ## Read-path parity, including how it fails
  *

@@ -15,8 +15,10 @@
  *
  * Reads are the platform's one member reader's (`analyzeRelationshipTraversals`
  * over `record`: `record.x`, `record.?x`, `record['x']`, inside `has()` too),
- * the reader the engine's plan uses. A source the reader cannot parse names no
- * reads here; the expression pass refuses it on its own.
+ * taken as the engine's plan takes them: the fields read as values
+ * (`bareFields`) and the fields read through (`traversals`). A source the
+ * reader cannot parse names no reads here; the expression pass refuses it on
+ * its own.
  */
 import { analyzeRelationshipTraversals, formulaReadOrder } from '@objectstack/formula';
 
@@ -66,7 +68,10 @@ export function formulaCycleIssues(
   const reads = new Map<string, string[]>();
   for (const [name, source] of sources) {
     const analysis = analyzeRelationshipTraversals(source);
-    reads.set(name, analysis ? [...analysis.bareFields].filter((read) => sources.has(read)) : []);
+    // The engine's read set (`storedExpressionReads` in `@objectstack/objectql`):
+    // the fields read as values and the fields read through.
+    const named = analysis ? [...analysis.bareFields, ...analysis.traversals.keys()] : [];
+    reads.set(name, named.filter((read) => sources.has(read)));
   }
   const { cycles } = formulaReadOrder(reads);
   const issues: FormulaCycleIssue[] = [];

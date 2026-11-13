@@ -20,8 +20,10 @@
  *
  * The caller names the reads: for each formula, the formula fields of the same
  * object its expression reads, as the platform's member reader
- * ({@link analyzeRelationshipTraversals}' `bareFields`) names them. A read of
- * a name that is not a key of `reads` is ignored.
+ * ({@link analyzeRelationshipTraversals}) names them — the fields read as
+ * values (`bareFields`) and the fields read through (`traversals`); both
+ * callers pass that same set. A read of a name that is not a key of `reads`
+ * is ignored.
  */
 
 /** {@link formulaReadOrder}'s answer. */
@@ -42,31 +44,91 @@ export function formulaCycleMessage(field: string, loop: readonly string[]): str
     + 'not read it back. Break the cycle, for instance by reading the stored fields the other formula reads.';
 }
 
-/** See the module docblock. */
+/**
+ * See the module docblock. A formula is on a cycle when its strongly
+ * connected component of the read graph holds more than one formula, or it
+ * reads itself: exactly the formulas that read their own value, whatever
+ * order the formulas are given in. Each is named with one shortest loop
+ * through it.
+ */
 export function formulaReadOrder(reads: ReadonlyMap<string, readonly string[]>): FormulaReadOrder {
-  const state = new Map<string, 'visiting' | 'done'>();
-  const path: string[] = [];
+  const edges = (name: string): string[] => (reads.get(name) ?? []).filter((read) => reads.has(read));
+  // The evaluation order: each formula after the formulas it reads (post-order).
+  const done = new Set<string>();
+  const entered = new Set<string>();
   const order: string[] = [];
-  const cycles = new Map<string, string>();
-  const visit = (name: string): void => {
-    const seen = state.get(name);
-    if (seen === 'done') return;
-    if (seen === 'visiting') {
-      const loop = path.slice(path.indexOf(name));
-      for (const member of loop) {
-        if (!cycles.has(member)) cycles.set(member, formulaCycleMessage(member, loop));
-      }
-      return;
-    }
-    state.set(name, 'visiting');
-    path.push(name);
-    for (const read of reads.get(name) ?? []) {
-      if (reads.has(read)) visit(read);
-    }
-    path.pop();
-    state.set(name, 'done');
+  const place = (name: string): void => {
+    if (done.has(name) || entered.has(name)) return;
+    entered.add(name);
+    for (const read of edges(name)) place(read);
+    done.add(name);
     order.push(name);
   };
-  for (const name of reads.keys()) visit(name);
+  for (const name of reads.keys()) place(name);
+  // The strongly connected components (Tarjan).
+  let counter = 0;
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const component = new Map<string, number>();
+  const components: string[][] = [];
+  const connect = (name: string): void => {
+    index.set(name, counter);
+    low.set(name, counter);
+    counter += 1;
+    stack.push(name);
+    onStack.add(name);
+    for (const read of edges(name)) {
+      if (!index.has(read)) {
+        connect(read);
+        low.set(name, Math.min(low.get(name)!, low.get(read)!));
+      } else if (onStack.has(read)) {
+        low.set(name, Math.min(low.get(name)!, index.get(read)!));
+      }
+    }
+    if (low.get(name) !== index.get(name)) return;
+    const members: string[] = [];
+    for (let member = stack.pop()!; ; member = stack.pop()!) {
+      onStack.delete(member);
+      component.set(member, components.length);
+      members.push(member);
+      if (member === name) break;
+    }
+    components.push(members);
+  };
+  for (const name of reads.keys()) if (!index.has(name)) connect(name);
+  const cycles = new Map<string, string>();
+  for (const name of reads.keys()) {
+    const own = component.get(name)!;
+    if (components[own]!.length === 1 && !edges(name).includes(name)) continue;
+    cycles.set(name, formulaCycleMessage(name, shortestLoop(name, own, edges, component)));
+  }
   return { order, cycles };
+}
+
+/** One shortest loop from `start` back to itself inside its component, `start` first. */
+function shortestLoop(
+  start: string,
+  own: number,
+  edges: (name: string) => string[],
+  component: ReadonlyMap<string, number>,
+): string[] {
+  const previous = new Map<string, string>();
+  const queue = [start];
+  for (let head = 0; head < queue.length; head += 1) {
+    const at = queue[head]!;
+    for (const read of edges(at)) {
+      if (component.get(read) !== own) continue;
+      if (read === start) {
+        const loop = [at];
+        while (loop[0] !== start) loop.unshift(previous.get(loop[0]!)!);
+        return loop;
+      }
+      if (previous.has(read)) continue;
+      previous.set(read, at);
+      queue.push(read);
+    }
+  }
+  return [start];
 }
