@@ -78,11 +78,11 @@ import { boundPackageOf, withRowBinding } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
 import { type ServedOverrideRow, isServedOverrideRowOf } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { isAnotherHoldersCopy, servedAddressOf } from './protocol-meta-item-face.js';
+import { isAnotherHoldersCopy, servedAddressJudgment } from './protocol-meta-item-face.js';
 import { packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#packagelessLayeredReadRefusal`; the method's docblock there is its contract. */
-export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'engine' | 'packagelessAddress' | 'shippedArtifactsOf'>, request: {
+export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'declinesStoredRow' | 'engine' | 'packagelessAddress' | 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf'>, request: {
         type: string;
         name: string;
         /** The bundle member the layered read addresses ({@link resolveBundleMemberSelector}); omitted, the canonical one. */
@@ -94,10 +94,13 @@ export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'en
     // package and the stored rows of other packages (the disabled holder's
     // among them) leave it no ambiguity to refuse.
     // [#32354] …and so does a name a disabled package holds through a stored
-    // row ({@link servedAddressOf}), whose served holders the rows name; two
-    // or more of them are refused naming only those, never the disabled one.
+    // row ({@link servedAddressJudgment}), whose served holders the rows name;
+    // two or more of them are this door's refusal, naming only those, never
+    // the disabled one. Answered, not thrown (contract review S1).
     const member = resolveBundleMemberSelector(type, request.member);
-    if (await servedAddressOf(host, PLURAL_TO_SINGULAR[type] ?? type, name, member) !== undefined) return undefined;
+    const judged = await servedAddressJudgment(host, PLURAL_TO_SINGULAR[type] ?? type, name, member);
+    if (judged?.kind === 'refused') return judged.error;
+    if (judged !== undefined) return undefined;
     const address = await host.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
     return address.candidates.length > 1
         ? packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates)
@@ -168,10 +171,16 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // ({@link servedHolderAddressOf}): its code layer, its overlay rows and its
     // lock. The code layer is otherwise the first composite in registration
     // order, which can be the disabled holder's.
-    // [#32354] …judged over the stored rows too ({@link servedAddressOf}).
-    const servedAddress = request.packageId
+    // [#32354] …judged over the stored rows too ({@link servedAddressJudgment}).
+    // [contract review S1] ⛔ Never the refusal here: two or more served row
+    // holders leave this read as it was, so its in-process resolution readers
+    // (the security catalog echo, the packaged-permission-set lock gate) keep
+    // the answer they had; the door refuses through
+    // {@link packagelessLayeredReadRefusal}, its step 1c.
+    const judged = request.packageId
         ? undefined
-        : await servedAddressOf(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member));
+        : await servedAddressJudgment(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member));
+    const servedAddress = judged?.kind === 'served' ? judged.packageId : undefined;
     if (servedAddress !== undefined) request = { ...request, packageId: servedAddress };
     // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the
     // option-A ruling on #26649: ONE member of a bundled type, the

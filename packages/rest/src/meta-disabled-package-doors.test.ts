@@ -572,7 +572,40 @@ describe('[#32354] RestServer: stored rows judged over the served set', () => {
         const layers = await host.layers('dashboard', 'three_rows_dash');
         expect(layers.status, JSON.stringify(layers.body)).toBe(409);
         for (const pkg of [OTHER_PKG, THIRD_PKG]) expect(JSON.stringify(layers.body)).toContain(pkg);
-        noDisabledTrace([read, layers]);
+        // [contract review S3] Bare /published asks the plain read first and answers its refusal.
+        const published = await host.published('dashboard', 'three_rows_dash');
+        expect([published.status, published.body?.code ?? published.body?.error?.code], JSON.stringify(published.body))
+            .toEqual([409, 'RESOURCE_CONFLICT']);
+        for (const pkg of [OTHER_PKG, THIRD_PKG]) expect(JSON.stringify(published.body)).toContain(pkg);
+        noDisabledTrace([read, layers, published]);
+        // [contract review S1] In-process, the layered read never throws the refusal: its resolution
+        // readers (the security catalog echo, the packaged-permission-set lock gate) keep the answer
+        // they had. The door's step 1c is the one that refuses, naming only the served holders.
+        await expect(host.protocol.getMetaItemLayered({ type: 'dashboard', name: 'three_rows_dash' })).resolves.toBeDefined();
+        const refusal: any = await host.protocol.packagelessLayeredReadRefusal({ type: 'dashboard', name: 'three_rows_dash' });
+        expect([refusal?.code, refusal?.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+        expect(String(refusal?.message)).not.toContain(PKG);
+        for (const pkg of [OTHER_PKG, THIRD_PKG]) expect(String(refusal?.message)).toContain(pkg);
+    }, 60_000);
+
+    it.each(ORDERS)('%s, contract review S4: a shipped flow name whose shipper is disabled, with rows of two other packages the reads decline, is not refused naming them', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of packages) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+        host.registry.registerItem('flow', { name: 'shipped_flow', label: 'disabled code', type: 'autolaunched', nodes: [], edges: [] } as any, 'name', PKG);
+        const engine: any = (host.protocol as any).engine;
+        for (const pkg of [OTHER_PKG, THIRD_PKG]) {
+            await engine.insert('sys_metadata', {
+                type: 'flow', name: 'shipped_flow', package_id: pkg, state: 'active', scope: 'platform', strategy: 'merge', version: 1,
+                metadata: JSON.stringify({ name: 'shipped_flow', label: `${tag(pkg)} row`, type: 'autolaunched', nodes: [], edges: [] }),
+            });
+        }
+        host.registry.disablePackage(PKG);
+        // Neither row is served (an undeclared row of a shipped flow name is declined), so neither
+        // package holds the name: the read is the missing name's, as before, never a 409 naming them.
+        for (const answer of [await host.plain('flow', 'shipped_flow'), await host.layers('flow', 'shipped_flow'), await host.published('flow', 'shipped_flow')]) {
+            expect(answer.status, JSON.stringify(answer.body)).toBe(404);
+            expect(JSON.stringify(answer.body ?? null)).not.toMatch(/healthy row|third row|disabled code/);
+        }
     }, 60_000);
 
     it.each(ORDERS)('%s, case 3: ?package=DISABLED, where the enabled package ships the name and the disabled one holds it only as a stored row, is the withheld 404', async (_order, packages) => {
@@ -589,6 +622,74 @@ describe('[#32354] RestServer: stored rows judged over the served set', () => {
         const bare = await host.plain('dashboard', 'shipped_dash');
         expect([bare.status, bare.body?.item?.label], JSON.stringify(bare.body)).toEqual([200, 'healthy code']);
         noDisabledTrace([exact, bare]);
+    }, 60_000);
+});
+
+/**
+ * [#32354 contract review S2, N2] A customization pair is a package of its
+ * own. S2: `?package=PAIR` of a disabled pair whose base is enabled is the
+ * pair's withheld 404 with its declared override row; with no row the pair
+ * holds nothing and the strict envelope refuses the address naming the base
+ * (#32501), enabled or not. N2: a disabled base's declared override row,
+ * bound to its enabled pair, is the base's item (ADR-0146 D9): the bare doors
+ * never serve it.
+ *
+ * Measured on `main` (2c98485d, this change's four source files put back):
+ * every answer here is the same, so neither case moves. With this change's
+ * row holders counting the pair's override row for the enabled pair (fix
+ * round 2, before the N2 exclusion), N2's three doors answered 200 with the
+ * pair override.
+ */
+describe('[#32354] RestServer: a disabled customization pair and a disabled base\'s pair row', () => {
+    // A base whose id derives a pair (`MANIFEST_ID_PATTERN`: no underscore), and that pair.
+    const BASE = 'com.qa.pair-base';
+    const PAIR = `${BASE}.custom`;
+    const install = (host: ReturnType<typeof setup>) => {
+        host.registry.installPackage({ id: BASE, name: BASE, version: '1.0.0' } as any, 'code');
+        host.registry.installPackage({ id: PAIR, name: PAIR, version: '1.0.0', dependencies: { [BASE]: '^1' } } as any, 'authored');
+        host.registry.registerItem('dashboard', { name: 'pair_dash', label: 'base code', widgets: [] } as any, 'name', BASE);
+    };
+    const overrideRow = (host: ReturnType<typeof setup>) => (host.protocol as any).engine.insert('sys_metadata', {
+        type: 'dashboard', name: 'pair_dash', package_id: PAIR, state: 'active', scope: 'platform', strategy: 'merge', version: 1,
+        metadata: JSON.stringify({ name: 'pair_dash', label: 'pair override', widgets: [], overrides: { package: BASE, basedOn: '1.0.0' } }),
+    });
+
+    it.each([['without an override row', false], ['with its declared override row', true]] as const)('S2, %s: ?package=PAIR of a disabled pair is the withheld 404 while its base is enabled', async (_label, withRow) => {
+        const host = setup();
+        install(host);
+        if (withRow) await overrideRow(host);
+        // CONTROL: the pair enabled, its address serves its override row, or with none the base's item.
+        const own = await host.plainWith('dashboard', 'pair_dash', { package: PAIR });
+        expect([own.status, own.body?.item?.label], JSON.stringify(own.body)).toEqual([200, withRow ? 'pair override' : 'base code']);
+        host.registry.disablePackage(PAIR);
+        const exact = await host.plainWith('dashboard', 'pair_dash', { package: PAIR });
+        expect([exact.status, exact.body?.error?.code], JSON.stringify(exact.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+        expect(JSON.stringify(exact.body ?? null)).not.toMatch(/pair override|base code/);
+        // The base's own address is untouched.
+        const base = await host.plainWith('dashboard', 'pair_dash', { package: BASE });
+        expect(base.status, JSON.stringify(base.body)).toBe(200);
+    }, 60_000);
+
+    it.each([['alone', false], ['beside an enabled package\'s row', true]] as const)('N2, %s: a disabled base\'s declared override row at its enabled pair is never served by the bare read, and holds nothing', async (_label, withOther) => {
+        const host = setup();
+        install(host);
+        await overrideRow(host);
+        if (withOther) {
+            host.registry.installPackage({ id: 'com.qa.other', name: 'other', version: '1.0.0' } as any, 'code');
+            await (host.protocol as any).engine.insert('sys_metadata', {
+                type: 'dashboard', name: 'pair_dash', package_id: 'com.qa.other', state: 'active', scope: 'platform', strategy: 'merge', version: 1,
+                metadata: JSON.stringify({ name: 'pair_dash', label: 'other row', widgets: [] }),
+            });
+        }
+        host.registry.disablePackage(BASE);
+        const read = await host.plain('dashboard', 'pair_dash');
+        const layers = await host.layers('dashboard', 'pair_dash');
+        const published = await host.published('dashboard', 'pair_dash');
+        // Alone: the missing name. Beside an enabled package's row: that row, the one served holder.
+        expect([read.status, read.body?.item?.label], JSON.stringify(read.body)).toEqual(withOther ? [200, 'other row'] : [404, undefined]);
+        expect([layers.status, layers.body?.effective?.label], JSON.stringify(layers.body)).toEqual(withOther ? [200, 'other row'] : [404, undefined]);
+        expect([published.status, published.body?.label], JSON.stringify(published.body)).toEqual(withOther ? [200, 'other row'] : [404, undefined]);
+        for (const answer of [read, layers, published]) expect(JSON.stringify(answer.body ?? null)).not.toMatch(/pair override|base code/);
     }, 60_000);
 });
 
