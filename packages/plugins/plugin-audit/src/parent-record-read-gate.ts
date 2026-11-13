@@ -45,11 +45,29 @@
  *
  * Rows the leaf excludes, exactly as the probe below does: a row naming no
  * parent or a non-machine name, an object this gate does not enumerate, the
- * gated object itself, or a parent that no longer exists (the subquery finds
- * no such id). A parent object the caller may not read is answered `$in: []`
- * by the engine's own `canReadObject` admission, before anything of that
- * object is read: no caller-scoped read of it happens, so its middleware
- * logs no denial for it.
+ * gated object itself, a parent the data door does not serve (see "A parent
+ * the data door does not serve" below), or a parent that no longer exists
+ * (the subquery finds no such id). A parent object the caller may not read is
+ * answered `$in: []` by the engine's own `canReadObject` admission, before
+ * anything of that object is read: no caller-scoped read of it happens, so
+ * its middleware logs no denial for it.
+ *
+ * ## A parent the data door does not serve
+ *
+ * A row about a record is served only when the reader can open that record
+ * through the data door. So a parent object whose `enable` block the data
+ * door refuses `get` for — `canServeApiOperation(enable, 'get')`, the one
+ * decision the door itself reads (`@objectstack/spec/data`) — is never a
+ * parent of any gate here: it is not enumerated, so no leaf is written for
+ * it, and the whole-read probe keeps no row naming it. That decision is a
+ * pure function of the object's declaration, so it is the same for every
+ * reader, administrators included; only a gate's declared exemption is
+ * decided before it. An object with no `enable` block declares nothing to
+ * refuse, so it keeps its branch. ⛔ It is applied here and nowhere below:
+ * `canReadObject`, the engine's leaf and every internal read keep their own
+ * answers, so a system read, a hook and `current_user.can()` still read the
+ * object. An engine with no registry view cannot say what the door serves, so
+ * the whole-read probe then keeps no row (fail closed), and says so once.
  *
  * ## A delegated caller reads through the leaf (ADR-0139 D5.1, as amended)
  *
@@ -94,8 +112,8 @@
  *    literal id lists mean the same thing under every context. With no
  *    security service, a leaf would select nothing for any caller.
  *
- * The probe, for the parents it is given (or for every row, for a whole-read
- * probe): pre-scan the parent pairs the query would touch under SYSTEM
+ * The probe, for the parents it is given (or, for a whole-read probe, for
+ * every row naming a parent the data door serves): pre-scan the parent pairs the query would touch under SYSTEM
  * context (bounded at {@link PARENT_GATE_SCAN_LIMIT}, in the caller's own
  * order), ask which of those parent OBJECTS the caller may read at all (the
  * security service's object-level read admission — see "A skipped object is
@@ -180,7 +198,7 @@ import type {
   ISecurityService,
   SecurityContext,
 } from '@objectstack/spec/contracts';
-import { ReadableIds } from '@objectstack/spec/data';
+import { ReadableIds, canServeApiOperation, type EnableLike } from '@objectstack/spec/data';
 import { AUDIT_EXCLUDED_OBJECTS } from './audit-writers.js';
 import {
   type CommentAccessEngine,
@@ -263,6 +281,37 @@ const OBJECT_NAME_RE = /^[a-z_][a-z0-9_]*$/;
 
 /** The columns the probe pre-scans: the parent pair. */
 const PARENT_COLUMNS = ['object_name', 'record_id'] as const;
+
+/** The data door's operation a reader opens one record by. */
+const PARENT_DOOR_OPERATION = 'get';
+
+/**
+ * Whether the data door opens a record of this registered object: its
+ * `enable` block, judged by the door's own decision (module header, "A parent
+ * the data door does not serve"). No `enable` block refuses nothing.
+ */
+function doorServesParent(schema: unknown): boolean {
+  const enable = (schema as { enable?: EnableLike | null } | null | undefined)?.enable;
+  return canServeApiOperation(enable, PARENT_DOOR_OPERATION);
+}
+
+/**
+ * The registered objects whose records the data door opens — `null` when the
+ * engine exposes no registry view, so nothing can be confirmed served and
+ * every caller fails closed. Read on every call: an object registered or
+ * redeclared after boot is judged by its current declaration.
+ */
+export function doorServedParentObjects(engine: ParentRecordGateEngine): Set<string> | null {
+  const getAllObjects = engine.registry?.getAllObjects;
+  if (typeof getAllObjects !== 'function') return null;
+  const served = new Set<string>();
+  for (const schema of getAllObjects.call(engine.registry) ?? []) {
+    const name = (schema as { name?: unknown } | null | undefined)?.name;
+    if (typeof name !== 'string' || !OBJECT_NAME_RE.test(name)) continue;
+    if (doorServesParent(schema)) served.add(name);
+  }
+  return served;
+}
 
 /** The record a row is about. */
 export interface ParentRecord {
@@ -402,8 +451,10 @@ export function namedParentObjects(where: unknown): ReadonlySet<string> | null {
 /**
  * The parent objects one gate enumerates, in name order: every registered
  * object outside `AUDIT_EXCLUDED_OBJECTS` and outside the gated object, plus
- * the gate's {@link ParentRecordGate.namedParents} — `null` when the engine
- * exposes no registry view to enumerate.
+ * the gate's {@link ParentRecordGate.namedParents} — and of those, only the
+ * ones the data door opens a record of (module header, "A parent the data
+ * door does not serve") — `null` when the engine exposes no registry view to
+ * enumerate.
  *
  * Given one read's own `where` (before any gate ANDs into it), only those the
  * read names ({@link namedParentObjects}), when it names any: a parent it does
@@ -427,6 +478,7 @@ export function enumerateParentObjects(
     if (typeof name !== 'string' || !OBJECT_NAME_RE.test(name)) continue;
     if (name === gate.object || excluded.has(name)) continue;
     if (readNames !== null && !readNames.has(name)) continue;
+    if (!doorServesParent(schema)) continue;
     names.add(name);
   }
   return [...names].sort();
@@ -499,6 +551,34 @@ function reportWholeReadProbeOnce(
   );
 }
 
+/** The seams that have said their engine has no registry view to read the door from, per engine. */
+const noDoorViewReported = new WeakMap<object, Set<string>>();
+
+/**
+ * {@link doorServedParentObjects} for a probe that reads every row: with no
+ * registry view nothing is confirmed served, so the answer is the empty set —
+ * every row is excluded (fail closed) — and that is said once per engine and
+ * seam.
+ */
+export function doorServedParentObjectsOrNone(
+  engine: ParentRecordGateEngine,
+  logger: CommentAccessLogger,
+  seam: string,
+): Set<string> {
+  const served = doorServedParentObjects(engine);
+  if (served !== null) return served;
+  let reported = noDoorViewReported.get(engine);
+  if (!reported) noDoorViewReported.set(engine, (reported = new Set()));
+  if (!reported.has(seam)) {
+    reported.add(seam);
+    logger.warn(
+      `[audit] ${seam}: the engine exposes no registry view, so it cannot say which parent objects the data door ` +
+        'serves: every row the bounded probe reads is excluded (fail-closed). Reported once for this engine.',
+    );
+  }
+  return new Set();
+}
+
 /** Whether the security service `getAdmission` resolves answers `canReadObject`. */
 function hasObjectAdmission(getAdmission: ParentObjectReadAdmissionSource): boolean {
   try {
@@ -555,10 +635,11 @@ async function admittedParentObjects(
 /**
  * [ADR-0139 D5] The bounded probe's branches for one read: one `$in` of the
  * readable ids per parent object, for the rows naming one of `restrictTo` — or
- * for every row when `restrictTo` is `null` (a whole-read probe).
+ * for every row naming a parent the data door serves when `restrictTo` is
+ * `null` (a whole-read probe).
  */
 async function probeBranches(
-  engine: CommentAccessEngine,
+  engine: ParentRecordGateEngine,
   ctx: CommentReadMiddlewareCtx,
   logger: CommentAccessLogger,
   gate: ParentRecordGate,
@@ -597,10 +678,13 @@ async function probeBranches(
    * value is what the emitted filter carries, so it can only match rows the
    * pre-scan actually saw spelled that way. */
   const byObject = new Map<string, Map<string, unknown>>();
-  const allowed = restrictTo ? new Set(restrictTo.parents) : null;
+  // A restricted probe's parents are enumerated, so the data door serves each.
+  // A whole-read probe keeps only the parents it serves (module header, "A
+  // parent the data door does not serve"); with no registry view it keeps none.
+  const allowed = restrictTo ? new Set(restrictTo.parents) : doorServedParentObjectsOrNone(engine, logger, gate.seam);
   for (const row of candidates) {
     const parent = parseParentRecord(row, gate.object);
-    if (!parent || (allowed && !allowed.has(parent.object))) continue;
+    if (!parent || !allowed.has(parent.object)) continue;
     let ids = byObject.get(parent.object);
     if (!ids) byObject.set(parent.object, (ids = new Map()));
     if (!ids.has(parent.recordId)) ids.set(parent.recordId, row.record_id);
