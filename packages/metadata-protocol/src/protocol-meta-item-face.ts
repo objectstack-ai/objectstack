@@ -43,7 +43,7 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { shippingPackageIds } from './protocol-environment-rows.js';
 import { resolveBundleMemberSelector } from './protocol-bundle-members.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { isServedOverrideRowOf } from './served-override.js';
+import { pairsOf } from '@objectstack/metadata-core';
 import { disabledExactAddressHolder } from './protocol-exact-qualifier.js';
 import {
     isActionWithheldByDisabledPackage,
@@ -156,11 +156,13 @@ export function servedHolderAddressOf(registry: any, type: string, name: string)
  * disabled package holds the name, and an unbound one still leaves the read
  * as it was.
  *
- * [#32354 contract review N2] Nor does a disabled holder's declared override
- * row ({@link isServedOverrideRowOf}): bound to the holder's customization
- * pair, it is that holder's item (ADR-0146 D9), withheld with it. Counted for
- * the enabled pair, it served a disabled base's customization at the bare
- * address, where the read answered the missing name.
+ * [#32354 contract review N2, #32408] Nor does a row bound to a holder's
+ * customization pair (`pairsOf`): a pair row is bound over every holder it
+ * is a pair of, never a holder of its own, so a disable never moves it (a
+ * disabled holder's declared override row is that holder's item, ADR-0146
+ * D9, withheld with it). Counted for the enabled pair, it served a disabled
+ * holder's customization at the bare address, where the read answered the
+ * missing name.
  *
  * Every holder is judged by save order no more: the disabled package's row
  * read first answered the missing name, the enabled one's served it.
@@ -199,10 +201,10 @@ export async function servedRowHolderOf(
     const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
     if (![...every, ...rows.candidates].some(disabled)) return undefined;
     const installed = installedManifestsOfEngine(host.engine);
-    const disabledHolders = every.filter(disabled);
+    const pairRow = (row: { package_id?: unknown }): boolean =>
+        typeof row.package_id === 'string' && every.some((holder) => pairsOf(holder, installed).includes(row.package_id as string));
     const servingRows = await host.packagelessAddress(type, name, member, 'active', activeRows.filter((row) =>
-        !host.declinesStoredRow(type, name, row)
-        && !disabledHolders.some((holder) => isServedOverrideRowOf(row, holder, installed))));
+        !host.declinesStoredRow(type, name, row) && !pairRow(row)));
     const served = [...new Set([...(registry.packageScopedHoldersOf(type, name, null) ?? []), ...servingRows.candidates])]
         .filter((id) => !disabled(id));
     if (served.length === 1) return { kind: 'served', packageId: served[0] };
