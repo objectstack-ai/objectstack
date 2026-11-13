@@ -1443,9 +1443,11 @@ export interface ISecurityService {
    *
    * The implementation registers the set under `contributor`'s package and,
    * when the deployment declares a member baseline, joins its name to that
-   * baseline. An external member and an agent principal resolve no member
-   * baseline, so neither gains anything from it. Synchronous; open during boot
-   * only.
+   * baseline. An external member and an agent principal's own leg resolve no
+   * member baseline, so neither gains anything from it in its own right; an
+   * agent acting for a member is bounded by that member and by its own scope
+   * (ADR-0090 D10), so it reaches what the member reaches, within that scope.
+   * Synchronous; open during boot only.
    *
    * **Refuses by throwing a plain `Error`**, with no registered `code`: this is
    * a boot-time refusal, never a wire answer. A refused call changes nothing.

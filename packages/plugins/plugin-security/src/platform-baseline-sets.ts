@@ -53,9 +53,12 @@
  * deployment that declares none (`fallbackPermissionSet: null`) hands out no
  * baseline, so the set is registered and reaches no member through it. An
  * external member resolves its own baseline in place of this one, and an agent
- * principal resolves no human baseline (`external-baseline.ts`, ADR-0090 D10),
- * so neither gains anything here. Every admitted contribution, and every
- * refusal, is logged by the seam that calls {@link PlatformBaselineSets.contribute}.
+ * principal's own leg resolves no human baseline (`external-baseline.ts`,
+ * ADR-0090 D10), so neither gains anything here in its own right. An agent
+ * acting for a member is bounded by that member and by its own scope, so it
+ * reaches what the member reaches, within that scope. Every admitted
+ * contribution, and every refusal, is logged by the seam that calls
+ * {@link PlatformBaselineSets.contribute}.
  *
  * This seam is for always-on platform services. A tenant-installed package
  * suggests a default set and a `manage_metadata` holder accepts it

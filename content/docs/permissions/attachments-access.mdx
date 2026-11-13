@@ -33,22 +33,22 @@ half with no grant from the app: the storage service
 (`@objectstack/service-storage`) contributes a set of its own,
 `storage_attachment_member`, to the member baseline that every signed-in member
 holds through the `everyone` anchor. It contributes the set beside the gates,
-and only once all three are installed: the write rule, the read-visibility gate
-and the download door's parent-record check. So a member attaches a file to a
-record they can edit, and sees the files of a record they can read, and
-`security/explain` names `storage_attachment_member` as the baseline that grants
-it.
+and only once all four are present: the write rule, the read-visibility gate,
+the download door's parent-record check and the per-object opt-in gate
+(`enable.files`, below). So a member attaches a file to a record they can edit,
+and sees the files of a record they can read, and `security/explain` names
+`storage_attachment_member` as the baseline that grants it.
 
 The set reaches no one else:
 
 - an external member (`org_external`) resolves its own baseline instead, and an
   agent principal resolves no member baseline; an agent acting for a member
-  gets no more than that member;
+  gets no more than that member, within its own scope;
 - a deployment that declares no member baseline (`fallbackPermissionSet: null`)
   hands it to no one;
-- a host that registers `sys_attachment` without the storage service, or runs
-  it on an engine that cannot install one of the three gates, gets no set, and
-  a member's attach is refused `PERMISSION_DENIED` (403); on such an engine the
+- a host that registers `sys_attachment` without the storage service, or whose
+  composition lacks any of the four gates, gets no set, and a member's attach
+  is refused `PERMISSION_DENIED` (403); where the storage service runs, the
   boot log names the missing gate.
 
 The set carries **no edit and no delete** (ADR-0090 D5: a set every member holds
@@ -289,8 +289,8 @@ can be shared across records). Reclamation is handled by the platform LifecycleS
 
 Every operation also needs its object grant on `sys_attachment`, refused
 `PERMISSION_DENIED` (403) without it. Read and create come with the member
-baseline (`storage_attachment_member`, where the storage service installs its
-gates); edit and delete need an explicit grant.
+baseline (`storage_attachment_member`, where every attachment gate is
+present); edit and delete need an explicit grant.
 
 | Operation | Requirement | Deny code |
 | --- | --- | --- |

@@ -19,7 +19,7 @@ import {
 } from './attachment-member-grant.js';
 
 const logger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
-const ALL_GATES: AttachmentRowGates = { writeRule: true, readVisibility: true, downloadCheck: true };
+const ALL_GATES: AttachmentRowGates = { writeRule: true, readVisibility: true, downloadCheck: true, filesOptIn: true };
 
 describe("the members' attachment grant service-storage contributes", () => {
   it('is read and create on sys_attachment, and nothing else', () => {
@@ -47,6 +47,7 @@ describe("the members' attachment grant service-storage contributes", () => {
     ['writeRule', 'the attachment write rule'],
     ['readVisibility', 'the attachment read-visibility gate'],
     ['downloadCheck', "the download door's parent-record check"],
+    ['filesOptIn', 'the per-object attachment opt-in gate'],
   ] as const)('a kernel without %s contributes nothing, and says which gate is missing at warn', (gate, named) => {
     const contribute = vi.fn();
     const log = logger();

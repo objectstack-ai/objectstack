@@ -604,19 +604,24 @@ export class StorageServicePlugin implements Plugin {
         }
         // Every member's object grant on sys_attachment (read and create),
         // handed to the member baseline HERE, after the last of the row gates
-        // it relies on, and only when all three are in place: the write rule
-        // above, the read-visibility gate just installed, and the download
-        // door's parent-record check, which binds wherever an auth service and
-        // a queryable engine exist (`buildFileReadAuthorizer`, the same
-        // binding `composeStorageRoutes` makes). On a kernel lacking any of
-        // them the object grant would judge the rows alone, so nothing is
-        // contributed and members stay refused (maintainer ruling; the
-        // reasoning is in `attachment-member-grant.ts`).
+        // it relies on, and only when all four are in place: the write rule
+        // above, the read-visibility gate just installed, the download door's
+        // parent-record check, which binds wherever an auth service and a
+        // queryable engine exist (`buildFileReadAuthorizer`, the same binding
+        // `composeStorageRoutes` makes), and the per-object opt-in gate
+        // (`enable.files`), which the audit service installs on this engine —
+        // its service is registered at init, before any `kernel:ready`
+        // handler runs, so its presence is known here whichever order the two
+        // plugins' handlers run in. On a kernel lacking any of them the object
+        // grant would judge the rows alone, so nothing is contributed and
+        // members stay refused (maintainer ruling; the reasoning is in
+        // `attachment-member-grant.ts`).
         contributeAttachmentMemberGrant(
           {
             writeRule: true,
             readVisibility: readVisibilityInstalled,
             downloadCheck: buildFileReadAuthorizer(toGateRegistry(ctx), engine) !== undefined,
+            filesOptIn: hasService(ctx, 'audit'),
           },
           () => ctx.getService<unknown>('security'),
           ctx.logger,
@@ -717,7 +722,12 @@ export class StorageServicePlugin implements Plugin {
         // An engine the attachment gates cannot be installed on: members get
         // no attachment grant, and the warning says which gates are missing.
         contributeAttachmentMemberGrant(
-          { writeRule: false, readVisibility: false, downloadCheck: buildFileReadAuthorizer(toGateRegistry(ctx), engine) !== undefined },
+          {
+            writeRule: false,
+            readVisibility: false,
+            downloadCheck: buildFileReadAuthorizer(toGateRegistry(ctx), engine) !== undefined,
+            filesOptIn: hasService(ctx, 'audit'),
+          },
           () => ctx.getService<unknown>('security'),
           ctx.logger,
         );
@@ -1083,6 +1093,15 @@ interface StorageSettingsSlot {
  * → noop). Local helper to avoid making `service-storage` depend on
  * `@objectstack/runtime`.
  */
+/** Whether `name` is a registered service on this kernel; a lookup that throws reads as absent. */
+function hasService(ctx: PluginContext, name: string): boolean {
+  try {
+    return ctx.getService<unknown>(name) != null;
+  } catch {
+    return false;
+  }
+}
+
 function resolveMetrics(
   ctx: PluginContext,
   override: MetricsRegistry | undefined,

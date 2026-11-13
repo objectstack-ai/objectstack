@@ -5,22 +5,24 @@ import type { AttachmentLifecycleLogger } from './attachment-lifecycle.js';
 /**
  * Every member's object-level grant on `sys_attachment`: read, and create.
  *
- * The rows of `sys_attachment` are decided by the gates this plugin installs,
- * never by the object grant: an insert needs edit on the parent record
+ * The rows of `sys_attachment` are decided by gates, never by the object
+ * grant: an insert needs edit on the parent record
  * (`installAttachmentAccessHooks`), a list, count or aggregate returns only
  * the rows whose parent record the caller can read
- * (`installAttachmentReadVisibility`), and the download door serves an
+ * (`installAttachmentReadVisibility`), the download door serves an
  * attachments-scope file only to its uploader or a reader of a record it is
- * attached to. The object grant only opens the door to those gates. Since the
+ * attached to, and an insert or re-point onto an object that has not opted in
+ * to attachments (`enable.files`) is refused by the opt-in gate, which the
+ * audit service installs. The object grant only opens the door to those gates. Since the
  * platform baseline (`member_default`) carries no line for this object, a
  * member who could edit a record still could not attach a file to it, nor see
  * the files already attached to it, without an app granting the object
  * explicitly.
  *
  * So this plugin grants it, as a set of its own handed to the member baseline,
- * and only where every one of those gates is installed: the set is contributed
- * from the place the gates are installed, after the last of them, and on a
- * kernel that lacks any of them nothing is contributed and members stay
+ * and only where every one of those gates is present: the set is contributed
+ * from the place this plugin installs its gates, after the last of them, and on
+ * a kernel that lacks any of the four nothing is contributed and members stay
  * refused, loudly. A static line in a shipped set would stay in force in a
  * composition that registers the object without these gates, where the object
  * grant would decide every row; and ADR-0090 D9 rules out other packages
@@ -32,12 +34,16 @@ import type { AttachmentLifecycleLogger } from './attachment-lifecycle.js';
  *    bit (ADR-0090 D5). Managing attachments (detaching, re-pointing) stays an
  *    explicit grant.
  *  - It reaches the members of a deployment that declares a member baseline,
- *    and no one else: an external member resolves its own baseline instead,
- *    an agent principal resolves none, and a deployment that declares none
- *    (`fallbackPermissionSet: null`) hands this set to no one.
- *  - An object with `enable.files` off still refuses every attachment
- *    (plugin-audit's capability gate), and a parent record the caller cannot
- *    edit still refuses the attach (`ATTACHMENT_PARENT_ACCESS`).
+ *    and no one else: an external member resolves its own baseline instead, an
+ *    agent principal's own leg resolves none, and a deployment that declares
+ *    none (`fallbackPermissionSet: null`) hands this set to no one. An agent
+ *    acting for a member is bounded by that member and by its own scope
+ *    (ADR-0090 D10), so it reaches what the member reaches here, within that
+ *    scope.
+ *  - Where the set is contributed, an object that has not opted in to
+ *    attachments (`enable.files`) still refuses every attachment, and a parent
+ *    record the caller cannot edit still refuses the attach
+ *    (`ATTACHMENT_PARENT_ACCESS`).
  *
  * The seam is `contributePlatformBaselineSet` on the `security` service,
  * feature-detected because this package does not depend on plugin-security.
@@ -57,8 +63,8 @@ export const ATTACHMENT_MEMBER_PERMISSION_SET = Object.freeze({
 export const ATTACHMENT_MEMBER_GRANT_CONTRIBUTOR = 'com.objectstack.service.storage';
 
 /**
- * Which of the attachment row gates this kernel has installed, as the plugin
- * installed them. All three must be `true` for the grant to be contributed.
+ * Which of the attachment gates this kernel has. All four must be `true` for
+ * the grant to be contributed.
  */
 export interface AttachmentRowGates {
   /** The write rule: the insert, update and delete gates on `sys_attachment` rows. */
@@ -67,6 +73,8 @@ export interface AttachmentRowGates {
   readonly readVisibility: boolean;
   /** The download door's parent-record check, which needs an auth service and a queryable engine. */
   readonly downloadCheck: boolean;
+  /** The per-object opt-in gate (`enable.files`) on the insert and re-point, which the audit service installs. */
+  readonly filesOptIn: boolean;
 }
 
 /** The slice of plugin-security's `security` service this contribution uses. */
@@ -99,12 +107,13 @@ function missingGates(gates: AttachmentRowGates): string[] {
   if (!gates.downloadCheck) {
     missing.push("the download door's parent-record check (no auth service, or an engine that cannot be queried)");
   }
+  if (!gates.filesOptIn) missing.push('the per-object attachment opt-in gate, enable.files (no audit service)');
   return missing;
 }
 
 /**
  * Contribute {@link ATTACHMENT_MEMBER_PERMISSION_SET} to the member baseline,
- * when every attachment row gate is installed. ⛔ Call it only after the last
+ * when every attachment gate is present. ⛔ Call it only after the last
  * of them is installed, from the place they are installed: that pairing is the
  * maintainer's ruling, and the caller is the only place it can be kept.
  *
@@ -123,7 +132,7 @@ export function contributeAttachmentMemberGrant(
     logger.warn(
       '[storage] members are NOT granted attachments (read and create on sys_attachment): this kernel lacks ' +
         `${missing.join('; ')}, so the rows would be judged by the object grant alone. A member's attach is refused ` +
-        'until every gate is installed; an app can still grant sys_attachment explicitly.',
+        'until every gate is installed.',
     );
     return 'gates-incomplete';
   }

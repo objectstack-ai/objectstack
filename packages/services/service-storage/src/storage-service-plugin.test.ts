@@ -578,17 +578,18 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
   });
 
   // Every member's attachment grant (read and create on sys_attachment) is
-  // contributed only once ALL THREE attachment row gates are in place — the
-  // write rule, the read-visibility middleware and the download door's
-  // parent-record check — after the last of them, and never on a kernel that
-  // lacks one (maintainer ruling; `attachment-member-grant.ts`).
-  describe("the members' attachment grant, contributed beside the three row gates", () => {
+  // contributed only once ALL FOUR attachment gates are in place — the write
+  // rule, the read-visibility middleware, the download door's parent-record
+  // check and the per-object opt-in gate — after the last of this plugin's,
+  // and never on a kernel that lacks one (maintainer ruling;
+  // `attachment-member-grant.ts`).
+  describe("the members' attachment grant, contributed beside the attachment gates", () => {
     const MEMBER_SET = {
       name: 'storage_attachment_member',
       objects: { sys_attachment: { allowRead: true, allowCreate: true } },
     };
 
-    async function bootWith(engine: Record<string, unknown>, opts: { auth?: boolean } = {}) {
+    async function bootWith(engine: Record<string, unknown>, opts: { auth?: boolean; audit?: boolean } = {}) {
       const dir = await fs.mkdtemp(join(tmpdir(), 'oss-member-grant-'));
       const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir: dir }, registerRoutes: false });
       const ctx = makeCtx();
@@ -602,6 +603,7 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
         ...engine,
       });
       if (opts.auth !== false) ctx.registerService('auth', { api: {} });
+      if (opts.audit !== false) ctx.registerService('audit', {});
       ctx.registerService('security', {
         contributeOwnershipFloorAlternates: () => {},
         contributePlatformBaselineSet: (...args: unknown[]) => {
@@ -648,6 +650,14 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
       const warned = booted.ctx._logs.warn.filter((w: string) => w.includes('NOT granted attachments'));
       expect(warned).toHaveLength(1);
       expect(warned[0]).toContain("download door's parent-record check");
+    });
+
+    it('a kernel without the per-object attachment opt-in gate: no grant — said at warn', async () => {
+      const booted = await bootWith({ registerHook: () => {}, registerMiddleware: () => {} }, { audit: false });
+      expect(booted.contributions).toEqual([]);
+      const warned = booted.ctx._logs.warn.filter((w: string) => w.includes('NOT granted attachments'));
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toContain('per-object attachment opt-in gate');
     });
 
     it('an engine without the hook seam: no write rule, so no grant — said at warn', async () => {

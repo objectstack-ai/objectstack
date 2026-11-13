@@ -20,11 +20,14 @@
 //
 // Both attach doors a member reaches are driven: the upload-complete door with
 // `attachTo` (the record page's Attachments panel) and the single-use link the
-// MCP `create_upload_link` tool mints with `attachments: true`. The explainer
+// MCP `create_upload_link` tool mints with `attachments: true` — minted on the
+// member's session and by an agent acting for the member on an OAuth token,
+// which reaches what the member and its own scope both allow. The explainer
 // names the storage set as the baseline that grants the object. And a host
-// that composes `sys_attachment` WITHOUT the storage service — so without its
-// gates — hands a member no grant: the same member is refused 403.
+// that composes `sys_attachment` WITHOUT the storage service, or without one of
+// the attachment gates, hands a member no grant: the same member is refused 403.
 
+import { createHash, randomBytes } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, promises as fs } from 'node:fs';
 import { join } from 'node:path';
@@ -41,6 +44,10 @@ import { attachmentsFixtureStack } from './fixtures/attachments-fixture.js';
 const SYS = { isSystem: true } as const;
 const MEMBER_EMAIL = 'att-baseline-member@verify.test';
 const STORAGE_SET = 'storage_attachment_member';
+const MEMBER_PASSWORD = 'Member-Pass-123';
+const REDIRECT_URI = 'http://127.0.0.1:33419/callback';
+const WRITE_SCOPE = 'openid profile email offline_access data:read data:write';
+const READ_SCOPE = 'openid profile email offline_access data:read';
 
 /** The app's every-member set: its own objects, and nothing of `sys_attachment` or `sys_file`. */
 const appMemberSet = PermissionSetSchema.parse({
@@ -86,6 +93,59 @@ describe('a member attaches to the records they edit and sees the files of the r
   let adminAttachmentId: string;
   let adminCaseId: string;
   let adminCaseAttachmentId: string;
+  let agentWriteTok: string;
+  let agentReadTok: string;
+  let priorOidc: string | undefined;
+
+  /**
+   * An access token for an MCP client the member connects (authorization code
+   * with PKCE, on the member's own sign-in): the agent acts for the member,
+   * within `scope`.
+   */
+  async function mintAgentToken(email: string, password: string, scope: string): Promise<string> {
+    const authSvc: any = await stack.kernel.getServiceAsync('auth');
+    const resource = authSvc.getMcpResourceUrl();
+    const reg = await stack.api('/auth/oauth2/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ client_name: 'attachment agent', redirect_uris: [REDIRECT_URI], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none', application_type: 'native', scope }),
+    });
+    const regBody: any = await reg.json();
+    expect(reg.status, JSON.stringify(regBody)).toBe(201);
+    const signin = await stack.api('/auth/sign-in/email', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
+    const cookie = ((signin.headers as any).getSetCookie() as string[]).map((c) => c.split(';')[0]).join('; ');
+    const verifier = randomBytes(32).toString('base64url');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+    const qs = new URLSearchParams({ client_id: regBody.client_id, redirect_uri: REDIRECT_URI, response_type: 'code', scope, state: 'st', code_challenge: challenge, code_challenge_method: 'S256', resource });
+    const az = await stack.api(`/auth/oauth2/authorize?${qs}`, { headers: { cookie }, redirect: 'manual' });
+    const loc = az.headers.get('location') ?? '';
+    let code = new URL(loc, 'http://localhost:3000').searchParams.get('code');
+    if (!code) {
+      const consent = await stack.api('/auth/oauth2/consent', { method: 'POST', headers: { 'content-type': 'application/json', cookie, origin: 'http://localhost:3000' }, body: JSON.stringify({ accept: true, oauth_query: loc.slice(loc.indexOf('?')) }) });
+      const cb: any = await consent.json().catch(() => null);
+      code = new URL(cb?.redirect_uri ?? cb?.url).searchParams.get('code');
+    }
+    const tok = await stack.api('/auth/oauth2/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'authorization_code', code: code!, redirect_uri: REDIRECT_URI, client_id: regBody.client_id, code_verifier: verifier, resource }).toString(),
+    });
+    const tj: any = await tok.json();
+    expect(tok.status, JSON.stringify(tj)).toBe(200);
+    return String(tj.access_token);
+  }
+
+  /** The tool names an MCP caller is offered. */
+  async function mcpToolNames(token: string): Promise<string[]> {
+    const res = await stack.api('/mcp', {
+      method: 'POST',
+      headers: { ...json, Accept: 'application/json, text/event-stream', ...bearer(token) },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+    });
+    expect(res.status, 'tools/list').toBe(200);
+    const rpc: any = await res.json();
+    return ((rpc.result?.tools ?? []) as Array<{ name: string }>).map((t) => t.name);
+  }
 
   /** Presign in the attachments scope and PUT the bytes: the panel's first two steps. */
   async function presignAndPut(token: string, name = 'notes.txt'): Promise<string> {
@@ -136,6 +196,8 @@ describe('a member attaches to the records they edit and sees the files of the r
   };
 
   beforeAll(async () => {
+    priorOidc = process.env.OS_OIDC_PROVIDER_ENABLED;
+    process.env.OS_OIDC_PROVIDER_ENABLED = 'true';
     rootDir = mkdtempSync(join(tmpdir(), 'att-member-baseline-'));
     stack = await bootStack(attachmentsFixtureStack as never, {
       security: appSecurity(),
@@ -147,7 +209,7 @@ describe('a member attaches to the records they edit and sees the files of the r
     });
     ql = await stack.kernel.getServiceAsync('objectql');
     adminTok = await stack.signIn();
-    memberTok = await stack.signUp(MEMBER_EMAIL);
+    memberTok = await stack.signUp(MEMBER_EMAIL, MEMBER_PASSWORD);
     memberId = String((await ql.findOne('sys_user', { where: { email: MEMBER_EMAIL }, context: SYS }))?.id);
     adminId = String((await ql.findOne('sys_user', { where: { email: 'admin@objectos.ai' }, context: SYS }))?.id);
 
@@ -166,17 +228,22 @@ describe('a member attaches to the records they edit and sees the files of the r
     const adminAttach = await completeOnto(adminTok, 'att_secret', adminSecretId);
     expect(adminAttach.status, JSON.stringify(adminAttach.body)).toBe(200);
     adminAttachmentId = String(adminAttach.body.data.attachmentId);
-    // And one to their own case, which every member reads: an attachment stored
-    // before the member held any attachment grant.
+    // And one to their own case, which every member reads: another user's
+    // attachment on a record the member can read.
     adminCaseId = String((await ql.insert('att_case', { name: 'admin case', owner_id: adminId }, { context: SYS })).id);
     const adminCaseAttach = await completeOnto(adminTok, 'att_case', adminCaseId);
     expect(adminCaseAttach.status, JSON.stringify(adminCaseAttach.body)).toBe(200);
     adminCaseAttachmentId = String(adminCaseAttach.body.data.attachmentId);
-  }, 180_000);
+
+    agentWriteTok = await mintAgentToken(MEMBER_EMAIL, MEMBER_PASSWORD, WRITE_SCOPE);
+    agentReadTok = await mintAgentToken(MEMBER_EMAIL, MEMBER_PASSWORD, READ_SCOPE);
+  }, 240_000);
 
   afterAll(async () => {
     await stack?.stop();
     if (rootDir) await fs.rm(rootDir, { recursive: true, force: true });
+    if (priorOidc === undefined) delete process.env.OS_OIDC_PROVIDER_ENABLED;
+    else process.env.OS_OIDC_PROVIDER_ENABLED = priorOidc;
   });
 
   it('precondition: the member holds no app grant on sys_attachment — the storage set is what grants it, and explain says so', async () => {
@@ -217,6 +284,30 @@ describe('a member attaches to the records they edit and sees the files of the r
     const body: any = await put.json();
     expect(put.status, JSON.stringify(body)).toBe(200);
     expect((await linksOn(ownSecretId)).map((r) => String(r.id))).toContain(String(body.data.attachmentId));
+  });
+
+  it('an agent acting for the member on an OAuth token attaches where the member and its scope both allow, and nowhere else', async () => {
+    // Both allow: the member edits the case, and the token carries data:write.
+    const minted = await mcpCall(agentWriteTok, 'create_upload_link', { objectName: 'att_case', recordId: caseId, attachments: true });
+    expect(minted.isError, JSON.stringify(minted.json)).toBe(false);
+    const put = await stack.raw(String(minted.json.url).replace(/^https?:\/\/[^/]+/, ''), {
+      method: 'PUT',
+      headers: { 'content-type': 'text/plain', 'x-file-name': 'via-agent.txt', ...bearer(memberTok) },
+      body: 'hello',
+    });
+    const body: any = await put.json();
+    expect(put.status, JSON.stringify(body)).toBe(200);
+    const row = (await linksOn(caseId)).find((r) => String(r.id) === String(body.data.attachmentId));
+    expect(row?.uploaded_by, 'stored as the member').toBe(memberId);
+
+    // The member does not allow it: a record they read but may not edit.
+    const onReadonly = await mcpCall(agentWriteTok, 'create_upload_link', { objectName: 'att_readonly', recordId: readonlyId, attachments: true });
+    expect(onReadonly.isError).toBe(true);
+    expect(onReadonly.json.error?.code).toBe('ATTACHMENT_PARENT_ACCESS');
+
+    // The scope does not allow it: a read-only token is not offered the tool.
+    expect(await mcpToolNames(agentWriteTok)).toContain('create_upload_link');
+    expect(await mcpToolNames(agentReadTok)).not.toContain('create_upload_link');
   });
 
   it('a record they can read but not edit refuses the attach with ATTACHMENT_PARENT_ACCESS, and keeps nothing', async () => {
@@ -316,6 +407,64 @@ describe('a host composing sys_attachment without the storage service hands memb
     });
     expect(res.status).toBe(403);
     expect(((await res.json()) as any).code).toBe('PERMISSION_DENIED');
+    const explain = (await (await stack.apiAs(tok, 'GET', '/security/explain?object=sys_attachment&operation=create')).json()) as any;
+    expect(explain.allowed).toBe(false);
+    expect(explain.principal.permissionSets).not.toContain(STORAGE_SET);
+  });
+});
+
+// A host that runs the storage service and the security plugin but whose
+// composition lacks the per-object attachment opt-in gate: one of the four
+// gates is missing, so no grant is handed out, and the same member is refused
+// before any attachment row is judged.
+describe('a host lacking one of the attachment gates hands members no attachment grant', () => {
+  let stack: VerifyStack;
+  let rootDir: string;
+
+  beforeAll(async () => {
+    rootDir = mkdtempSync(join(tmpdir(), 'att-member-baseline-nogate-'));
+    stack = await bootStack(attachmentsFixtureStack as never, {
+      security: appSecurity(),
+      extraPlugins: [new StorageServicePlugin({ adapter: 'local', local: { rootDir }, bindToSettings: false })],
+    });
+  }, 120_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+    if (rootDir) await fs.rm(rootDir, { recursive: true, force: true });
+  });
+
+  it('the member is refused the attach (403 PERMISSION_DENIED), and explain names no storage set', async () => {
+    // Control: the storage service runs here, so this is the missing gate and not a missing service.
+    expect(stack.kernel.getService('storage')).toBeTruthy();
+    expect(() => stack.kernel.getService('audit')).toThrow();
+    await stack.signIn();
+    const tok = await stack.signUp('att-baseline-nogate@verify.test');
+    const caseRes = await stack.apiAs(tok, 'POST', '/data/att_case', { name: 'missing gate here' });
+    expect(caseRes.status).toBeLessThan(300);
+    const caseId = await createdId(caseRes);
+
+    const presign = await stack.api('/storage/upload/presigned', {
+      method: 'POST',
+      headers: { ...json, ...bearer(tok) },
+      body: JSON.stringify({ filename: 'notes.txt', mimeType: 'text/plain', size: 5, scope: 'attachments' }),
+    });
+    expect(presign.status, 'presign').toBe(200);
+    const { data } = (await presign.json()) as any;
+    const put = await stack.raw(String(data.uploadUrl).replace(/^https?:\/\/[^/]+/, ''), {
+      method: 'PUT',
+      headers: data.headers ?? { 'content-type': 'text/plain' },
+      body: 'hello',
+    });
+    expect(put.status, 'raw PUT').toBeLessThan(300);
+    const complete = await stack.api('/storage/upload/complete', {
+      method: 'POST',
+      headers: { ...json, ...bearer(tok) },
+      body: JSON.stringify({ fileId: data.fileId, attachTo: { parentObject: 'att_case', parentId: caseId } }),
+    });
+    const body = (await complete.json()) as any;
+    expect([complete.status, body.error?.code ?? body.code]).toEqual([403, 'PERMISSION_DENIED']);
+
     const explain = (await (await stack.apiAs(tok, 'GET', '/security/explain?object=sys_attachment&operation=create')).json()) as any;
     expect(explain.allowed).toBe(false);
     expect(explain.principal.permissionSets).not.toContain(STORAGE_SET);

@@ -24,7 +24,7 @@
  * Each refusal rule on its own: `platform-baseline-sets.test.ts`.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectKernel, resolveAuthzContext, assembleExecutionContext, type Plugin, type PluginContext } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -62,6 +62,8 @@ const APP_SET = PermissionSetSchema.parse({
 
 type Ctx = Record<string, unknown>;
 type Outcome = { joined: boolean } | { refused: string };
+/** What the kernel's logger was handed during boot, by level: `[message, meta]` per call. */
+type BootLogs = { info: unknown[][]; warn: unknown[][] };
 
 function sqliteDriverPlugin(): Plugin {
   return {
@@ -135,8 +137,15 @@ function servicePlugin(outcomes: Record<string, Outcome>): Plugin {
   };
 }
 
-async function boot(fallbackPermissionSet: string | null, outcomes: Record<string, Outcome>): Promise<ObjectKernel> {
+async function boot(fallbackPermissionSet: string | null, outcomes: Record<string, Outcome>, logs?: BootLogs): Promise<ObjectKernel> {
   const kernel = new ObjectKernel({ logger: { level: 'silent' } });
+  // Every plugin context logs through the kernel's one logger: the calls are
+  // the record, whatever level the logger then prints at.
+  const logger = (kernel as unknown as { logger: { info: (...a: unknown[]) => void; warn: (...a: unknown[]) => void } }).logger;
+  if (logs) {
+    vi.spyOn(logger, 'info').mockImplementation((...a: unknown[]) => void logs.info.push(a));
+    vi.spyOn(logger, 'warn').mockImplementation((...a: unknown[]) => void logs.warn.push(a));
+  }
   await kernel.use(sqliteDriverPlugin());
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(appPlugin());
@@ -186,10 +195,11 @@ describe('a platform service’s baseline set reaches every member, and no one e
   let ql: ObjectQL;
   let security: SecurityService;
   const outcomes: Record<string, Outcome> = {};
+  const logs: BootLogs = { info: [], warn: [] };
   const as: Record<string, Ctx> = {};
 
   beforeAll(async () => {
-    kernel = await boot(APP_SET.name, outcomes);
+    kernel = await boot(APP_SET.name, outcomes, logs);
     ql = kernel.getService<ObjectQL>('objectql');
     security = kernel.getService<SecurityService>('security');
     await seedPeople(ql);
@@ -259,6 +269,24 @@ describe('a platform service’s baseline set reaches every member, and no one e
     expect((ql as any).registry.getItem('permission', 'pbs_ledger_member')).toBeUndefined();
   });
 
+  it('every admission is logged: the set, its contributor, what it grants and that it joined the baseline', () => {
+    const admitted = logs.info.filter(([m]) => String(m).startsWith(`[security] platform baseline set '${SERVICE_SET.name}'`));
+    expect(admitted).toEqual([
+      [
+        `[security] platform baseline set '${SERVICE_SET.name}' from '${SERVICE}': ${NOTE} (read, create) — ` +
+          'joined the member baseline every signed-in member holds through the everyone anchor.',
+        { contributor: SERVICE, set: SERVICE_SET.name, joined: true },
+      ],
+    ]);
+  });
+
+  it('every refusal is logged at warn, naming the contributor and the reason', () => {
+    const refused = logs.warn.filter(([m]) => String(m).includes(`platform baseline set from '${SERVICE}' refused`));
+    expect(refused).toHaveLength(1);
+    expect(refused[0][0]).toContain(`'${LEDGER}' is registered by 'test.pbs.app', not by '${SERVICE}'`);
+    expect(refused[0][1]).toEqual({ contributor: SERVICE });
+  });
+
   it('the boot window is closed once the kernel has bootstrapped', () => {
     expect(() => security.contributePlatformBaselineSet(SERVICE, SERVICE_SET)).toThrow(/boot window is closed/);
   });
@@ -268,9 +296,10 @@ describe('a deployment that declares no member baseline (fallbackPermissionSet: 
   let kernel: ObjectKernel;
   let ql: ObjectQL;
   const outcomes: Record<string, Outcome> = {};
+  const logs: BootLogs = { info: [], warn: [] };
 
   beforeAll(async () => {
-    kernel = await boot(null, outcomes);
+    kernel = await boot(null, outcomes, logs);
     ql = kernel.getService<ObjectQL>('objectql');
     await seedPeople(ql);
   }, 120_000);
@@ -284,5 +313,12 @@ describe('a deployment that declares no member baseline (fallbackPermissionSet: 
     const alice = await contextOf(ql, ALICE);
     expect(await refusal(() => ql.find(NOTE, { context: alice } as never), NOTE)).toMatchObject({ status: 403 });
     expect(kernel.getService<string[]>('security.baselinePermissionSets')).toEqual([]);
+  });
+
+  it('and the admission is logged as reaching no one', () => {
+    const admitted = logs.info.filter(([m]) => String(m).startsWith(`[security] platform baseline set '${SERVICE_SET.name}'`));
+    expect(admitted).toHaveLength(1);
+    expect(admitted[0][0]).toContain('registered, and handed to no one: this deployment declares no member baseline');
+    expect(admitted[0][1]).toEqual({ contributor: SERVICE, set: SERVICE_SET.name, joined: false });
   });
 });
