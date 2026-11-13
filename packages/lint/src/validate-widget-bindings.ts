@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { packageResolutionClosure, type PackageClosureRegistry } from '@objectstack/metadata-core';
 import { isIncoherentAggregate } from '@objectstack/spec/data';
 import { ChartTypeSchema } from '@objectstack/spec/ui';
 
@@ -706,35 +707,138 @@ function effectiveFilterField(
 
 /**
  * [#29900] The datasets a presentation's `dataset` binding resolves against:
- * `stack.datasets`, then every `packages[]` body's datasets as resolution
- * context. One index for every presentation that binds a dataset by name (a
- * dashboard widget, a report and its joined blocks), so the two cannot disagree
- * about which dataset a name reaches.
+ * `stack.datasets`, then the datasets of the `packages[]` bodies this stack's
+ * package may reach, as resolution context. One index for every presentation
+ * that binds a dataset by name (a dashboard widget, a report and its joined
+ * blocks), so the two cannot disagree about which dataset a name reaches.
+ * {@link indexArtifactDatasetResolution} carries the rule.
  */
 export function indexResolvableDatasets(stack: AnyRec): Map<string, AnyRec> {
-  const datasets = new Map<string, AnyRec>();
+  return indexArtifactDatasetResolution(stack).resolvable;
+}
+
+/**
+ * [#32929, ADR-0150 D3] Which datasets a stack's presentations resolve, and
+ * which names a package of the artifact holds where this stack's package may
+ * not reach them.
+ */
+export interface ArtifactDatasetResolution {
+  /** Name → dataset, for every name this stack's presentations resolve. */
+  resolvable: Map<string, AnyRec>;
+  /**
+   * Name → the artifact packages holding it, for a name only packages OUTSIDE
+   * the judged package's declared dependency closure hold. Empty outside the
+   * per-package pass.
+   */
+  outsideClosure: Map<string, string[]>;
+  /** The judged package (the per-package pass), or `undefined` for any other stack. */
+  callerPackageId?: string;
+  /** Does `holder`'s own declared closure reach the judged package — it depends on it, so the reverse edge is a cycle? */
+  dependsOnCaller(holder: string): boolean;
+}
+
+/**
+ * [#25514, #32929] The resolution {@link indexResolvableDatasets} answers.
+ *
+ * `stack.datasets` resolves first: on the per-package pass that body IS this
+ * package, and the stack's own declaration wins a name it shares with a body.
+ * The datasets every `packages[]` body declares then join as RESOLUTION
+ * CONTEXT, the way `validate-object-references.ts` widens rung ① with the
+ * artifact's objects. ⛔ It changes what a binding can RESOLVE, never what is
+ * JUDGED: the dataset-level checks of `validateWidgetBindings` still walk
+ * `stack.datasets` alone, and a name no package declares still resolves
+ * nowhere.
+ *
+ * [#32929] Which bodies join is the runtime's rule (ADR-0150 D3 (c), ruling
+ * N1 6729820123; maintainer ruling on #32929, option two): a package's reader
+ * resolves a bare dataset name in its own package, then in its DECLARED
+ * dependency closure (ADR-0141) — `packageResolutionClosure`, the one walk the
+ * dataset doors resolve `?callerPackage=` by, read over the artifact as
+ * `picklist-references.ts` reads it. The release artifact is the
+ * co-ownership boundary, not a resolution scope, so on the per-package pass
+ * (`stack.manifest.id` names one of the bodies) a body outside that closure
+ * is no context: its datasets are recorded in
+ * {@link ArtifactDatasetResolution.outsideClosure}, so the widget is refused
+ * with the fix, where #25514 accepted every body and the dashboard answered
+ * `409 RESOURCE_CONFLICT` once installed. Any other stack (the union run, a
+ * stack whose manifest is none of its bodies) reads every body, as before.
+ */
+export function indexArtifactDatasetResolution(stack: AnyRec): ArtifactDatasetResolution {
+  const resolvable = new Map<string, AnyRec>();
+  const outsideClosure = new Map<string, string[]>();
   for (const ds of recordsOf(stack.datasets)) {
-    if (typeof ds.name === 'string') datasets.set(ds.name, ds);
+    if (typeof ds.name === 'string') resolvable.set(ds.name, ds);
   }
-  // [#25514] A widget's `dataset` resolves against the ARTIFACT: the datasets
-  // every `packages[]` body declares join the map as RESOLUTION CONTEXT, the way
-  // `validate-object-references.ts` widens rung ① with the artifact's objects.
-  // A cross-domain dashboard in the app package reads a module's dataset (the
-  // ADR-0130 plan rule "multi-module dashboards move to the app package"), and
-  // the runtime serves every package's datasets from one analytics service.
-  // ⛔ It changes what a widget can RESOLVE, never what is JUDGED: the
-  // dataset-level checks of `validateWidgetBindings` still walk `stack.datasets`
-  // alone, and a name no package declares still resolves nowhere. The stack's
-  // own declaration wins a name it shares with a body — on the per-package
-  // pass that body IS this one.
+  const bodies: Array<{ id: string | undefined; body: AnyRec }> = [];
   for (const entry of packagesOf(stack)) {
     const body = entry.manifest;
     if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
-    for (const ds of recordsOf((body as AnyRec).datasets)) {
-      if (typeof ds.name === 'string' && !datasets.has(ds.name)) datasets.set(ds.name, ds);
+    const id = (body as AnyRec).id;
+    bodies.push({ id: typeof id === 'string' && id !== '' ? id : undefined, body: body as AnyRec });
+  }
+  const ownId = (stack.manifest as AnyRec | undefined)?.id;
+  const callerPackageId = typeof ownId === 'string' && bodies.some((b) => b.id === ownId) ? ownId : undefined;
+  const byId = new Map<string, { manifest: AnyRec }>();
+  for (const b of bodies) if (b.id !== undefined && !byId.has(b.id)) byId.set(b.id, { manifest: b.body });
+  const registry: PackageClosureRegistry = {
+    getPackage: (id) => byId.get(id),
+    getAllPackages: () => [...byId.values()],
+  };
+  const reach = callerPackageId === undefined ? undefined : packageResolutionClosure(registry, callerPackageId);
+  for (const { id, body } of bodies) {
+    const inReach = reach === undefined || id === callerPackageId || (id !== undefined && reach.has(id));
+    for (const ds of recordsOf(body.datasets)) {
+      if (typeof ds.name !== 'string') continue;
+      if (inReach) {
+        if (!resolvable.has(ds.name)) resolvable.set(ds.name, ds);
+        continue;
+      }
+      const holders = outsideClosure.get(ds.name) ?? [];
+      if (id !== undefined && !holders.includes(id)) holders.push(id);
+      outsideClosure.set(ds.name, holders);
     }
   }
-  return datasets;
+  for (const name of resolvable.keys()) outsideClosure.delete(name);
+  return {
+    resolvable,
+    outsideClosure,
+    ...(callerPackageId !== undefined ? { callerPackageId } : {}),
+    dependsOnCaller: (holder) => callerPackageId !== undefined && packageResolutionClosure(registry, holder).has(callerPackageId),
+  };
+}
+
+/**
+ * [#32929] The finding's two sentences for a widget whose dataset only a
+ * package outside the judged package's declared closure holds. When every
+ * holder already depends on the judged package, declaring it back is a
+ * dependency cycle the kernel refuses at boot, so the fix is the move.
+ */
+export function outsideClosureDatasetWording(
+  resolution: ArtifactDatasetResolution,
+  dsName: string,
+  reader: string,
+): { message: string; hint: string } {
+  const holders = resolution.outsideClosure.get(dsName) ?? [];
+  const caller = resolution.callerPackageId ?? 'this package';
+  const named = holders.map((id) => `"${id}"`).join(', ');
+  const message =
+    `dataset "${dsName}" is held by package ${named}, outside the declared dependency closure of package ` +
+    `"${caller}", so the installed ${reader} is refused 409 (ADR-0150 D3).`;
+  if (holders.length > 0 && holders.every((id) => resolution.dependsOnCaller(id))) {
+    return {
+      message,
+      hint:
+        `${holders.length === 1 ? `Package ${named} already depends` : `Packages ${named} already depend`} on ` +
+        `"${caller}", so "${caller}" cannot declare ${holders.length === 1 ? 'it' : 'them'} back (a dependency cycle). ` +
+        `Move this ${reader} into the package that holds the dataset (ADR-0019 D3).`,
+    };
+  }
+  return {
+    message,
+    hint:
+      `Declare the dependency: add the package that holds "${dsName}" to the \`dependencies\` of package "${caller}" ` +
+      `(ADR-0141), or move this ${reader} into that package.`,
+  };
 }
 
 /** One filter key of a dataset-bound filter that the dataset query cannot satisfy. */
@@ -889,7 +993,8 @@ function measureColumn(measure: AnyRec): string | undefined {
 export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   const findings: WidgetBindingFinding[] = [];
 
-  const datasets = indexResolvableDatasets(stack);
+  const resolution = indexArtifactDatasetResolution(stack);
+  const datasets = resolution.resolvable;
 
   // ── (0) dataset measures aggregate their field coherently ──
   // A measure that SUMs a percentage/rate field produces a meaningless total
@@ -1059,7 +1164,11 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       // ── (a) dataset reference resolves ──
       const dsName = typeof w.dataset === 'string' ? w.dataset : undefined;
       const dataset = dsName ? datasets.get(dsName) : undefined;
-      if (dsName && !dataset) {
+      if (dsName && !dataset && resolution.outsideClosure.has(dsName)) {
+        // [#32929] Declared in the artifact, but by a package this one does
+        // not reach: the runtime refuses it (ADR-0150 D3), so it is refused here.
+        push({ severity: 'error', rule: WIDGET_DATASET_UNKNOWN, ...outsideClosureDatasetWording(resolution, dsName, 'dashboard') });
+      } else if (dsName && !dataset) {
         push({
           severity: 'error',
           rule: WIDGET_DATASET_UNKNOWN,
