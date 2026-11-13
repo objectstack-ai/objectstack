@@ -113,7 +113,7 @@ import {
 } from './package-slotted-store.js';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
-import { peelStoredEnvelope, STORED_ENVELOPE_KEYS } from './stored-envelope.js';
+import { peelStoredEnvelope, STORED_BODY_KEY, STORED_ENVELOPE_KEYS } from './stored-envelope.js';
 // [#13913] Registry-free expansion of an aggregated view container reached
 // through THIS manager's own store — see `getViewsByObject`.
 import { expandRuntimeViewContainer } from './view-container-expansion.js';
@@ -183,6 +183,26 @@ export interface MetadataUnregisterOptions extends MetadataWriteOptions {
 function isPackageMember(item: unknown, packageId: string): boolean {
   const meta = item as { packageId?: unknown; package?: unknown; _packageId?: unknown } | null | undefined;
   return meta?.packageId === packageId || meta?.package === packageId || meta?._packageId === packageId;
+}
+
+/**
+ * [#33003] The body {@link MetadataManager.register} stores for an environment
+ * row the boot pass stamped with `stamp`: `data` without that stamp, at the top
+ * and in the publish envelope's `metadata` body (`revertPackage` restores the
+ * stamped snapshot there, and the store's package read peels to it). The
+ * registry keeps `data` as it is, stamp included. A copy: `data` is never
+ * changed.
+ */
+function withoutEnvironmentRowStamp(data: Record<string, unknown>, stamp: string): Record<string, unknown> {
+  const stored: Record<string, unknown> = { ...data };
+  delete stored._packageId;
+  const body = stored[STORED_BODY_KEY];
+  if (body !== null && typeof body === 'object' && !Array.isArray(body) && (body as { _packageId?: unknown })._packageId === stamp) {
+    const unstamped: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+    delete unstamped._packageId;
+    stored[STORED_BODY_KEY] = unstamped;
+  }
+  return stored;
 }
 
 /**
@@ -654,9 +674,17 @@ export class MetadataManager implements IMetadataService {
    * the host's declared package (`_packageId`), and the stamp stays — ObjectQL
    * registers such an `object` as the host package's contribution — but the
    * row is not the package's item, so {@link unregisterPackage} leaves it
-   * ({@link isStampedEnvironmentRow}).
+   * ({@link isStampedEnvironmentRow}). [#33003] A copy that replaces one
+   * joins the set ({@link carryEnvironmentRowMark}), and {@link register}
+   * stores a member without the stamp.
    */
   private readonly storedEnvironmentRows = new WeakSet<object>();
+  /**
+   * [#33003] The host stamp each {@link storedEnvironmentRows} member carried
+   * on, so an unstamped replacement passes it on to the copy after it
+   * ({@link carryEnvironmentRowMark}).
+   */
+  private readonly environmentRowHosts = new WeakMap<object, string>();
   // Protected so subclasses can access serializers if needed
   protected serializers: Map<MetadataFormat, MetadataSerializer>;
   protected logger: Logger;
@@ -1167,6 +1195,13 @@ export class MetadataManager implements IMetadataService {
     const existed = this.writeRegistryEntry(type, name, data);
     this.invalidateListCache(type);
 
+    // [#33003] An environment row the boot pass stamped is stored as the
+    // environment's own row: without the host stamp, so the next boot reads it
+    // naming no package again, whichever writer rewrote it
+    // ({@link withoutEnvironmentRowStamp}).
+    const stamp = this.environmentRowStamp(data);
+    const stored = stamp === undefined ? data : withoutEnvironmentRowStamp(data as Record<string, unknown>, stamp);
+
     // Persist only to database-backed loaders that declare write capability.
     // FilesystemLoader is read-only at runtime — writing to it can crash in
     // read-only environments (e.g. serverless, containerized deployments).
@@ -1188,7 +1223,7 @@ export class MetadataManager implements IMetadataService {
         await loader.bindReadRowPackage?.(type, name, data);
         continue;
       }
-      await loader.save(type, name, data);
+      await loader.save(type, name, stored);
     }
 
     // Publish metadata.{type}.created / .updated event to realtime service.
@@ -1294,6 +1329,8 @@ export class MetadataManager implements IMetadataService {
     const { key, replaces } = slot === undefined ? storeWriteKey(typeStore, type, name, data) : { key: slot, replaces: [] };
     if (!typeStore) this.registry.set(type, (typeStore = new Map()));
     const existed = typeStore.has(key) || replaces.length > 0;
+    // [#33003] A copy of an environment row the boot pass stamped, carrying its stamp or none, is that row.
+    this.carryEnvironmentRowMark(typeStore.get(key), data);
     for (const replaced of replaces) typeStore.delete(replaced);
     typeStore.set(key, data);
     recordStoreWrite(typeStore, key);
@@ -2665,6 +2702,48 @@ export class MetadataManager implements IMetadataService {
     if (data === null || typeof data !== 'object' || !this.storedEnvironmentRows.has(data)) return false;
     const meta = data as { packageId?: unknown; package?: unknown; _packageId?: unknown };
     return meta._packageId === packageId && meta.packageId !== packageId && meta.package !== packageId;
+  }
+
+  /**
+   * [#33003] The host stamp of `data` when it is one of the
+   * {@link storedEnvironmentRows} naming its package by that stamp alone
+   * ({@link isStampedEnvironmentRow}); `undefined` for every other item.
+   */
+  private environmentRowStamp(data: unknown): string | undefined {
+    const stamp = (data as { _packageId?: unknown } | null | undefined)?._packageId;
+    return typeof stamp === 'string' && this.isStampedEnvironmentRow(data, stamp) ? stamp : undefined;
+  }
+
+  /**
+   * [#33003] Writing `data` over `before`, where `before` is one of the
+   * {@link storedEnvironmentRows}: `data` is that row rewritten, and keeps its
+   * mark, when no loader handed it out and it carries the row's host stamp or
+   * none. A copy that also names the package by its own key stays the
+   * package's item ({@link isStampedEnvironmentRow} reads every key at each
+   * use); a copy stamped with another package is that package's. The host
+   * stamp is remembered ({@link environmentRowHosts}), so a copy stamped with
+   * the host after an unstamped replacement (an `importMetadata` without
+   * `merge`, a `bulkRegister`, a `rollback` to an authored version, then
+   * ObjectQL's object-copy follow) is still the row.
+   *
+   * Every writer that registers such a copy reaches this — ObjectQL's
+   * late-manifest bridge (the `ownPreviousCopy` re-register and
+   * `restoreExtendedObjectCopies`) and its object-copy follow
+   * (`registerInMemory`), `publishPackage` / `revertPackage` over
+   * {@link collectPackageMembers}, `importMetadata`, `bulkRegister` and
+   * {@link rollback} — so the copy keeps the row's mark instead of the mark
+   * riding the replaced object. An item a loader handed out (a file's, a
+   * stored row's) is that loader's item, never a copy: a stored row is marked
+   * by {@link loadMany} itself.
+   */
+  private carryEnvironmentRowMark(before: unknown, data: unknown): void {
+    if (data === null || typeof data !== 'object' || data === before || this.loadedFrom.has(data)) return;
+    if (before === null || typeof before !== 'object' || !this.storedEnvironmentRows.has(before)) return;
+    const host = this.environmentRowHosts.get(before) ?? this.environmentRowStamp(before);
+    const stamp = (data as { _packageId?: unknown })._packageId;
+    if (stamp !== undefined && stamp !== host) return;
+    this.storedEnvironmentRows.add(data);
+    if (host !== undefined) this.environmentRowHosts.set(data, host);
   }
 
   /**
@@ -4546,10 +4625,16 @@ export class MetadataManager implements IMetadataService {
     // Restore the metadata using the dedicated rollback path so that a single
     // 'revert' history entry is written (instead of a conflicting 'update' entry)
     const restoredMetadata = targetVersion.metadata;
+    // [#33003] A version restored over an environment row the boot pass
+    // stamped is that row (a version a rewrite stored before #33003 carries the
+    // host stamp): stored without the stamp, as {@link register} stores it.
+    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
+    if (!slotted) this.carryEnvironmentRowMark(this.registry.get(type)?.get(name), restoredMetadata);
+    const stamp = this.environmentRowStamp(restoredMetadata);
     await dbLoader.registerRollback(
       type,
       name,
-      restoredMetadata,
+      stamp === undefined ? restoredMetadata : withoutEnvironmentRowStamp(restoredMetadata as Record<string, unknown>, stamp),
       version,
       options?.changeNote,
       options?.recordedBy,
@@ -4562,7 +4647,6 @@ export class MetadataManager implements IMetadataService {
     // as the row it was written to is. [S4] One restored by the environment
     // address is filed under the bare slot, as its row is, even when one
     // package holds the name (the write rule would file it under that package's).
-    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
     if (slotted && isPackageCaller(address?.packageId)) {
       this.writeRegistryEntry(type, name, withEntryPackage({ name, data: restoredMetadata, packageId: address.packageId }));
     } else if (slotted && address !== undefined) {
