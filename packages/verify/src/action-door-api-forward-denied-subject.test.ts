@@ -8,14 +8,21 @@
  *
  * The request page's decision actions are same-origin `type: 'api'` actions
  * (`approval_approve` → `POST /api/v1/approvals/requests/{id}/approve`). The
- * action door loads the subject row in the CALLER's data scope first, and a
- * member has no data-door read on `sys_approval_request` by design: the
+ * action door loads the subject row in the CALLER's data scope first; the
  * decision routes authorize a pending approver themselves (ADR-0066 D4). The
- * door used to answer that denied load with its own `404 RECORD_NOT_FOUND`
- * ahead of the forward, so no non-admin decision from the page ever reached
- * the routes that would have admitted it. A denied load now forwards an api
- * action whose request needs nothing from the row, and the door answers what
- * the target answers.
+ * door used to answer a denied load with its own `404 RECORD_NOT_FOUND` ahead
+ * of the forward, so no decision from a caller the data door refused ever
+ * reached the routes that would have admitted it. A denied load now forwards
+ * an api action whose request needs nothing from the row, and the door answers
+ * what the target answers.
+ *
+ * Since #32442 (maintainer ruling 6849636735, 1B) the shipped member baseline
+ * `member_default` names `sys_approval_request` read-only, so out of the box a
+ * pending approver's load is no longer denied. The forward must still
+ * authorize on its own wherever the data door refuses the row (a deployment
+ * whose baseline does not name the request table), so this suite boots with
+ * that one line withdrawn from `member_default` — and only that line — to keep
+ * the denied-load forward under test.
  *
  * What is pinned, each against what only the real stack produces:
  *  - the control: the approver cannot read the request row through the data
@@ -38,6 +45,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { defineStack, defineFlow } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
+
+// Paid at collection: the harness's boot loads these lazily (check:test-source-alias).
+import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
 
 import { bootStack, type VerifyStack } from './harness.js';
 import { warmUpBoot } from './boot-warm-up.testkit.js';
@@ -112,6 +125,21 @@ const fixtureStack = defineStack({
   flows: [flow],
 });
 
+/**
+ * The shipped default sets with `member_default`'s read on the request table
+ * withdrawn (see the header): every other grant is the platform's own.
+ */
+const withoutMemberRequestRead = securityDefaultPermissionSets.map((set) => {
+  if (set.name !== 'member_default') return set;
+  const { sys_approval_request: withdrawn, ...objects } = set.objects ?? {};
+  // Guard the premise: if the baseline stops naming the table, this
+  // withdrawal is a no-op and the header's reason has moved again.
+  if ((withdrawn as { allowRead?: boolean } | undefined)?.allowRead !== true) {
+    throw new Error('member_default no longer names sys_approval_request read-only (#32442, 1B): re-read this suite\'s premise');
+  }
+  return { ...set, objects };
+});
+
 type Answer = { status: number; text: string; json: any };
 
 let stack: VerifyStack;
@@ -148,7 +176,10 @@ const approveRows = async (id: string): Promise<any[]> =>
 const pendingOf = (row: any): string[] => String(row?.pending_approvers ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 
 beforeAll(async () => {
-  stack = await bootStack(fixtureStack as never, { automation: true });
+  stack = await bootStack(fixtureStack as never, {
+    automation: true,
+    security: new SecurityPlugin({ defaultPermissionSets: withoutMemberRequestRead }),
+  });
   ql = await stack.kernel.getServiceAsync('objectql');
   admin = await stack.signIn();
   // The first user is the seeded dev admin, so these sign-ups are plain members.
@@ -168,8 +199,9 @@ describe('a pending approver decides through the action door — the forward aut
     const requestId = await openRequest('INV-control');
     // The slate holds the addresses the flow named.
     expect(pendingOf(await requestRow(requestId))).toEqual([FIRST, SECOND]);
-    // A member holds no object grant on the request table, so the data door
-    // refuses the read outright.
+    // With the baseline's read withdrawn (see the header), a member holds no
+    // object grant on the request table, so the data door refuses the read
+    // outright: the load the action door makes below is a denied one.
     const read = await call(first, 'GET', `/data/sys_approval_request/${requestId}`);
     expect(read.status, read.text).toBe(403);
     expect(read.json?.code).toBe('PERMISSION_DENIED');

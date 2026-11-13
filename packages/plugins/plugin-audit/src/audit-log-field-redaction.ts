@@ -88,6 +88,7 @@
  * the activity stream's open predicate question, not this one's.
  */
 
+import { omitSideCopyFromCopy, sideCopyColumnsOf } from './side-copy-columns.js';
 import {
   dropUnservedKeys,
   ensureJudgedColumnsProjected,
@@ -188,6 +189,24 @@ export async function redactAuditLogRows(
     if (typeof object !== 'string' || !OBJECT_NAME_RE.test(object)) {
       stripSnapshots(row);
       continue;
+    }
+    // [#32442] Ahead of the served-fields answer, for every reader: the listed
+    // columns of a copy (`side-copy-columns.ts`).
+    if (sideCopyColumnsOf(object).length > 0) {
+      for (const col of SNAPSHOT_COLUMNS) {
+        const raw = row[col];
+        if (raw === undefined || raw === null) continue;
+        const inPlace = isRecord(raw);
+        let snapshot: unknown = raw;
+        if (!inPlace) {
+          try {
+            snapshot = typeof raw === 'string' ? JSON.parse(raw) : undefined;
+          } catch {
+            snapshot = undefined;
+          }
+        }
+        if (isRecord(snapshot) && omitSideCopyFromCopy(object, snapshot) && !inPlace) row[col] = JSON.stringify(snapshot);
+      }
     }
     const answer = await servedFor(object);
     if (answer === undefined) continue;
