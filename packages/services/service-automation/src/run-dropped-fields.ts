@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { DroppedFieldsEvent } from '@objectstack/spec/data';
+import { DroppedFieldsEventSchema, type DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { StepLogEntry } from './engine.js';
 
 /**
@@ -17,22 +17,45 @@ import type { StepLogEntry } from './engine.js';
  * The fold is over the FLAT step log, like `summarizeRun`: a structured
  * region's body steps are already spliced into it, and a run resumed from a
  * pause carries the steps it ran before the pause — so a drop before a
- * `screen` node still reaches the answer the run finally gives.
+ * `screen` node still reaches the answer the run finally gives. A delegated
+ * write reaches it the same way `summary` credits one: the `subflow` / `map`
+ * step carries its child runs' answers ({@link foldDropEvents}).
+ */
+export function dropEventsOf(steps: readonly StepLogEntry[]): DroppedFieldsEvent[] | undefined {
+    return foldDropEvents(steps.map((step) => step.droppedFields));
+}
+
+/**
+ * The ONE fold (#32861, #33019): every list of drop events a run answers for —
+ * its steps' (`dropEventsOf`), a `map` entry's synchronously completed items',
+ * a paused child's credited to the step that awaited it (`creditChildRun`) —
+ * goes through here, so all of them coalesce under one rule.
  *
  * Coalesced, not concatenated: one event per `(object, reason)`, its `fields`
  * the union in first-seen order. A loop that writes thirty rows and drops
  * `status` on each is one fact for the caller ("status did not take effect"),
  * not thirty, and the answer stays bounded by the schema rather than by the
  * run's length. The element is the engine's own event, unchanged in shape —
- * no new vocabulary.
+ * no new vocabulary. The fields are copied, so no input array is mutated.
+ *
+ * Total, never throwing: a list or an event that is not well-typed against
+ * `DroppedFieldsEventSchema` is skipped. Both in-tree producers are
+ * well-typed, but a host-registered executor's `droppedFields` reaches the
+ * step unchecked, and the callers run this inside the `try` whose `catch`
+ * reads any throw as a node or run failure — a report about values that did
+ * not land must never turn a completed run into a failed or retried one.
  *
  * Returns `undefined` — never `[]` — when nothing was dropped, so the member
  * is omitted on every run that dropped nothing.
  */
-export function dropEventsOf(steps: readonly StepLogEntry[]): DroppedFieldsEvent[] | undefined {
+export function foldDropEvents(lists: Iterable<unknown>): DroppedFieldsEvent[] | undefined {
     const byKey = new Map<string, DroppedFieldsEvent>();
-    for (const step of steps) {
-        for (const e of step.droppedFields ?? []) {
+    for (const list of lists) {
+        if (!Array.isArray(list)) continue;
+        for (const raw of list) {
+            const parsed = DroppedFieldsEventSchema.safeParse(raw);
+            if (!parsed.success) continue;
+            const e = parsed.data;
             const key = `${e.reason}\u0000${e.object}`;
             const held = byKey.get(key);
             if (!held) {
