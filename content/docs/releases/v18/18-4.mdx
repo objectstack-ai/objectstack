@@ -19,7 +19,8 @@ under that commit carries the before, the after and the fix. The 595 other
 fixes are counted by area and left to the CHANGELOGs. The areas are placed
 mechanically, from the words of each summary and the packages the entry
 touches, for finding your way: an entry that spans two areas is listed once,
-in the first one its words match. Each package's Release also carries an
+in the first one its words match. Three lines say "membership tier" or "the
+reserved-word rule" for better-auth's word, as ADR-0090 D3 asks. Each package's Release also carries an
 `Updated dependencies` bullet under 其他修复, which this page does not count.
 The [upgrade checklist](#upgrade-checklist) is compiled from the changesets;
 its steps were run once, on one small app, by the
@@ -209,7 +210,7 @@ to meet.
 - The marketplace pages' strings leave the eager language packs for a lazy `marketplace` namespace (`d996c38`, #30640)
 - The marketplace filters by business function, industry and solution type, and badges a beta package (`065bba7`, #31187)
 - A record page that places no component is refused by objectui's page-kind node and explains itself in the record view instead of opening a blank panel, and Studio creates a full record page it cannot copy as slotted, so the first save is accepted (`8a3eeef`, #32693)
-- Retire twelve zero-consumer exports (the Turnstile script URL, the two phone-identifier helpers, the authenticated-fetch options type, the org-role list, the invitation-status list and guard, and five form primitives) (`ffeda13`, #30629)
+- Retire twelve zero-consumer exports (the Turnstile script URL, the two phone-identifier helpers, the authenticated-fetch options type, the organization membership-tier list, the invitation-status list and guard, and five form primitives) (`ffeda13`, #30629)
 - Retire two zero-consumer type exports from the package entries (`CollaborationTranslate`, `MobileDialogContentProps`) (`96b5dab`, #31387)
 - Retire forty-four more zero-consumer exports — menubar, navigation-menu, input-otp and carousel parts, filter and notification helpers — and delete the item parts, `NativeSelect`, `ResizableHandleProps` and `useRelatedCount` nothing reads (`7da99b7`, #30791)
 - Retire ten zero-consumer shadcn sub-part exports (dialog, dropdown-menu, sheet and sidebar parts) (`85d9264`, #31318)
@@ -372,7 +373,7 @@ to meet.
 - A stored page sort naming a field its object lacks is refused by `os validate` and at the page publish door (`page-field-unknown`, error), on every page sort slot (#30093) (`c045c34`, #30270)
 - The field-name indexes judge an object as the registry serves it, so a read, write or sort naming a field an `objectExtensions` entry adds is no longer refused as unknown, and the readonly, sortability and translation rules judge that field by its served definition (#30471) (`482e089`, #30533)
 - A roll-up summary whose `summaryOperations.filter` names a key its child object lacks is refused at build and publish (`object-field-ref-unknown`), because every child write then fails its recompute (`38fc529`, #31337)
-- `security-role-word` judges what an `objectExtensions` entry writes onto an object (its fields, its `label`, its `fieldPatches` relabels), in `os validate` / `os build` / `os verify` and at the `object_extension` publish door (#31998) (`dee2e92`, #32034)
+- The reserved-word rule of ADR-0090 D3 judges what an `objectExtensions` entry writes onto an object (its fields, its `label`, its `fieldPatches` relabels), in `os validate` / `os build` / `os verify` and at the `object_extension` publish door (#31998) (`dee2e92`, #32034)
 - MCP describe_object answers the same field-masked object schema the /meta door answers (ADR-0106) (`e1dac19`, #31042)
 - A save that re-points a stored record-mode amount's `currencyField` answers 409 `destructive_change` with the finding `currency_field_repointed` (`33ab84f`, #31969)
 - A single-object save or publish is refused when a record-mode amount follows no code field on its parent, or a `record` roll-up reads an amount that follows nothing (`26f4e6d`, #32368)
@@ -748,7 +749,7 @@ are graded `minor`, because they add to the metadata protocol.
 - `run_action` takes the face `list_actions` lists, so an action bound to several objects can be run by its listed row (`79aa1b4`, #32514)
 - Purge and empty the recycle bin, and delete a record for good (ADR-0148): `ObjectQL.purge(entryId)`, `ObjectQL.empty(object)` and `delete(object, { where: { id }, permanent: true })`, all authorized as the `purge` operation; hooks and app-authored bodies cannot pass `permanent` (`9d939c5`, #30990)
 - A job with no `organization` pulls as the organization its writes are stamped with, so its upsert match uses the organization index (`a15b544`, #31886)
-- The `org:members` audience reaches every member of the emitting organization, and `role:` / `team:` read every member instead of the first 10,000 (`ada6a42`, #32782)
+- The `org:members` audience reaches every member of the emitting organization, and the membership-tier and `team:` audiences read every member instead of the first 10,000 (`ada6a42`, #32782)
 - Every data export writes one run-level `sys_audit_log` row, and the `export` action comes back with its writer (`022b4e7`, #31000)
 - Package jobs honour the host's per-kernel `scheduledWorkPolicy` (`b6e6545`, #31423)
 - A flow run's answer names the fields its write steps did not store, so a record button whose flow writes a read-only field no longer answers a plain success (`fc45328`, #33007)
