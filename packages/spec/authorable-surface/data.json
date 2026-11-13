@@ -686,6 +686,7 @@
     "data/Object:validations",
     "data/ObjectAccessConfig:default",
     "data/ObjectCapabilities:activities",
+    "data/ObjectCapabilities:aiReadable",
     "data/ObjectCapabilities:apiEnabled",
     "data/ObjectCapabilities:apiMethods",
     "data/ObjectCapabilities:approvalsVisibleToReaders",

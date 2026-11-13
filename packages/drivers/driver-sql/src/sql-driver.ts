@@ -229,6 +229,7 @@ import { findMisplacedReadableIds, refuseReadableIdsOnce } from '@objectstack/co
 import { isComposedReadableIds, type ComposedReadableIds } from '@objectstack/spec/data';
 // [#29520 codemod] The top-level declarations that moved whole to `sql-driver-top-level.ts`, as this file still reads them.
 import { AUTONUMBER_COLLISION_RETRIES, SEQUENCES_TABLE } from './sql-driver-top-level.js';
+import type { DateFieldsOnInstantColumn } from './date-on-instant-column.js';
 import type {
   AutoNumberReservation, ConflictTargetVerdict, IntrospectedColumn, IntrospectedForeignKey, IntrospectedSchema,
   NowAnchor, ReadPresentationKind, RowWidthContribution, SqlAggregateLowering, SqlDriverConfig,
@@ -533,6 +534,15 @@ export class SqlDriver implements IDataDriver {
    */
   protected fractionalNumericFields: Record<string, string[]> = {};
   protected dateFields: Record<string, Set<string>> = {};
+  /**
+   * [#32851] The {@link dateFields} whose Postgres column is still a
+   * `timestamptz` — a field published `datetime` → `date` keeps the column its
+   * `datetime` declaration built. Recorded by the schema sync from the column
+   * catalog it already reads; the write, the filter and the date bucket of
+   * such a field read it in UTC, the zone the read door folds in. See
+   * `date-on-instant-column.ts`.
+   */
+  protected dateFieldsOnInstantColumn: DateFieldsOnInstantColumn = {};
   protected datetimeFields: Record<string, Set<string>> = {};
   /**
    * [#21259] The builtin audit timestamps ({@link AUDIT_TIMESTAMP_COLUMNS}) a
@@ -1210,12 +1220,16 @@ export class SqlDriver implements IDataDriver {
     column?: string,
   ): { sql: string; bindings: any[] } | null {
     // [#25521 cut 20] The body moved to `sql-driver-date-bucket.ts` (see `DateBucketHost`).
+    const readDateFields = () => this.dateFields;
+    const readDateFieldsOnInstantColumn = () => this.dateFieldsOnInstantColumn;
     const readDateGranularityCapabilities = () => this.dateGranularityCapabilities;
     const readIsMysql = () => this.isMysql;
     const readIsOracle = () => this.isOracle;
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const host: ThisParameterType<typeof buildDateBucketExpr> = {
+      get dateFields() { return readDateFields(); },
+      get dateFieldsOnInstantColumn() { return readDateFieldsOnInstantColumn(); },
       get dateGranularityCapabilities() { return readDateGranularityCapabilities(); },
       get isMysql() { return readIsMysql(); },
       get isOracle() { return readIsOracle(); },
@@ -9544,6 +9558,7 @@ export class SqlDriver implements IDataDriver {
       coercionKey: (...a) => driver.coercionKey(...a),
       compileFilters: (...a) => driver.compileFilters(...a),
       get dateFields() { return driver.dateFields; },
+      get dateFieldsOnInstantColumn() { return driver.dateFieldsOnInstantColumn; },
       get datetimeFields() { return driver.datetimeFields; },
       filterColumnExpr: (...a) => driver.filterColumnExpr(...a),
       isJsonColumn: (...a) => driver.isJsonColumn(...a),
@@ -9653,6 +9668,7 @@ export class SqlDriver implements IDataDriver {
       createAuditTimestampColumn: (...a) => driver.createAuditTimestampColumn(...a),
       createColumn: (...a) => driver.createColumn(...a),
       get dateFields() { return driver.dateFields; },
+      get dateFieldsOnInstantColumn() { return driver.dateFieldsOnInstantColumn; },
       get datetimeFields() { return driver.datetimeFields; },
       get deferredDdl() { return driver.deferredDdl; },
       get deferredSchemaObjects() { return driver.deferredSchemaObjects; },
@@ -9771,6 +9787,7 @@ export class SqlDriver implements IDataDriver {
       get booleanFields() { return driver.booleanFields; },
       get columnFieldByObject() { return driver.columnFieldByObject; },
       get dateFields() { return driver.dateFields; },
+      get dateFieldsOnInstantColumn() { return driver.dateFieldsOnInstantColumn; },
       get datetimeFields() { return driver.datetimeFields; },
       get fileColumnsMoved() { return driver.fileColumnsMoved; },
       get isMssql() { return driver.isMssql; },

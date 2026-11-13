@@ -43,6 +43,7 @@ import {
   isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
+import { isPostgresInstantColumnType } from './date-on-instant-column.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link RotationFacet} read — every one of
@@ -64,6 +65,7 @@ export interface RotationHost {
   createAuditTimestampColumn: SqlDriver['createAuditTimestampColumn'];
   createColumn: SqlDriver['createColumn'];
   readonly dateFields: SqlDriver['dateFields'];
+  readonly dateFieldsOnInstantColumn: SqlDriver['dateFieldsOnInstantColumn'];
   readonly datetimeFields: SqlDriver['datetimeFields'];
   readonly deferredDdl: SqlDriver['deferredDdl'];
   readonly deferredSchemaObjects: SqlDriver['deferredSchemaObjects'];
@@ -397,7 +399,7 @@ export class RotationFacet {
   }
 
   /** The body of `SqlDriver#initObjects`; the method's docblock there is its contract. */
-  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'carryDeclaredRenames' | 'createAuditTimestampColumn' | 'createColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'retireIndexesNamedForOldKeys' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
+  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'carryDeclaredRenames' | 'createAuditTimestampColumn' | 'createColumn' | 'dateFields' | 'dateFieldsOnInstantColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'dialectName' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'retireIndexesNamedForOldKeys' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
     // The ADR-0104 media arm, resolved BEFORE registration because
     // `registerObjectMetadata` below freezes `isJsonField`'s answer into
     // `jsonFields` for every media column it sees. Memoized, and every failure
@@ -497,6 +499,11 @@ export class RotationFacet {
         }
       }
 
+      // [#32851] Which declared `Field.date` columns are still `timestamptz`
+      // (a field published `datetime` → `date`): unknown until the existing
+      // table's catalog is read below, and none for a table created here.
+      this.dateFieldsOnInstantColumn[tableName] = new Set();
+
       // Columns created unconditionally by initObjects — skip them when
       // iterating obj.fields to avoid duplicate-column errors (e.g. SQLite
       // rejects CREATE TABLE with two columns of the same name).
@@ -553,6 +560,16 @@ export class RotationFacet {
 
         const columnInfo = await this.knex(tableName).columnInfo();
         const existingColumns = Object.keys(columnInfo);
+
+        // [#32851] Read from the catalog just fetched, before any column below
+        // is added: an added `date` column is built `date`, never an instant.
+        if (this.dialectName === 'postgres') {
+          for (const field of this.dateFields[tableName] ?? []) {
+            if (isPostgresInstantColumnType((columnInfo as Record<string, { type?: unknown }>)[field]?.type)) {
+              this.dateFieldsOnInstantColumn[tableName].add(field);
+            }
+          }
+        }
 
         if (existingColumns.includes('updated_at')) {
           this.tablesWithTimestamps.add(tableName);
