@@ -111,6 +111,15 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
   key — the account's own included — can neither register an account nor mint
   one's key. An account is never counted as one of the administrators that
   keep an organization manageable, and never receives administrator mail.
+  A flow that runs as the system (`runAs: 'system'`) writes past the
+  account's grants, so an account starts one only through an action whose
+  author opted it into AI (`ai: { exposed: true }`), run over
+  `POST /api/v1/actions/...` or the MCP `run_action` tool. The flow's trigger
+  route and a declared `type: 'flow'` endpoint refuse it **403**
+  `PERMISSION_DENIED`, and the refusal names the declaration to add (see
+  [Run a flow via API](/docs/automation/flows#run-a-flow-via-api)). A flow
+  that runs as the user, the default, it starts at every door under its own
+  grants.
   Its lifecycle has doors of its own, each taking a signed-in session only
   (`POST /api/v1/auth/service-account/<door>`):
   - **`suspend`** (its owner or an administrator) stops every key on its

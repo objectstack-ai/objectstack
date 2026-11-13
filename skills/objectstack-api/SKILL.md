@@ -157,7 +157,6 @@ export const leadFeed: ApiEndpoint = {
   summary: 'Lead feed',
   type: 'object_operation',
   objectParams: { object: 'acme_lead', operation: 'find' },
-  // `authRequired` omitted → defaults to `true`. Omission is SAFE.
   cacheTtlSeconds: 30,                   // GET-only; rides success answers only
 };
 ```
@@ -191,7 +190,7 @@ rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 100 },
 ```
 
 The gate's predicate is `rateLimit.enabled === true`, **not** the key's presence:
-`RateLimitConfigSchema.enabled` itself defaults to `false`, so writing only
+`RateLimitConfigSchema.enabled` (`@objectstack/spec/shared`) itself defaults to `false`, so writing only
 `windowMs` / `maxRequests` declares a budget that meters nothing. Endpoint
 budgets are metered independently of the server-level `server.security.rateLimit`.
 
@@ -225,11 +224,8 @@ for `authRequired: false`.
 
 | Pattern | Use Case | Example |
 |:--------|:---------|:--------|
-| `/api/v1/data/{object}` | Auto-generated collection | `/api/v1/data/accounts` |
-| `/api/v1/data/{object}/:id` | Auto-generated record | `/api/v1/data/accounts/abc123` |
 | `/api/v1/{object}/:id/{action}` | Custom action on record | `/api/v1/cases/:id/close` |
 | `/api/v1/{domain}/{action}` | Domain-level action | `/api/v1/ai/chat` |
-| `/api/v1/apps/{namespace}/{subpath}` | Declarative `apis:` endpoint — the carve-out, not a free choice | `/api/v1/apps/acme/leads` |
 
 **Rules:**
 
@@ -303,8 +299,6 @@ The **HttpDispatcher** is the central request router; it answers:
 
 ## Realtime Subscriptions
 
-Realtime contracts live in the spec source:
-
 - `node_modules/@objectstack/spec/src/api/realtime.zod.ts` — `TransportProtocol`
   (`websocket` | `sse` | `polling`), `SubscriptionSchema` (`id`, `events[]`,
   `transport`, optional `channel`), `RealtimeEventSchema`, and
@@ -317,27 +311,12 @@ Realtime contracts live in the spec source:
 
 ## Authentication & Authorization
 
-RBAC and RLS are objectstack-data's surface; this section is the endpoint's
-own auth keys.
-
 ### Auth Configuration
 
 There is no nested `auth` block on an endpoint, and no `name` / `request` /
 `response` field: auth is the flat `public` + `permissions` pair on
 `RestApiEndpointSchema`, and declarative `ApiEndpointSchema` endpoints (and the
-dispatcher) use `authRequired: boolean` (default `true`; `false` owes an armed
-`rateLimit`, D6 above). Rate-limit policies are shaped by `RateLimitConfigSchema`:
-
-<!-- os:check -->
-```typescript
-import { RateLimitConfigSchema, type RateLimitConfig } from '@objectstack/spec/shared';
-
-const limit: RateLimitConfig = RateLimitConfigSchema.parse({
-  enabled: true,
-  windowMs: 60_000,     // time window in milliseconds
-  maxRequests: 100,     // max requests per window
-});
-```
+dispatcher) use `authRequired: boolean` (D6 above).
 
 ### Auth Providers
 
@@ -362,6 +341,18 @@ ledger and composes the two checks itself — `envelopeViolations(body)` for the
 SHAPE, `makeApiErrorSchema(yourCodes)` for the VOCABULARY (both in
 `api/contract.zod.ts`). What no repo may do is emit a code in no ledger at all.
 
+`userMessage` is producer-marked user-facing text in the REQUEST's locale; render it as
+received and keep no per-code translation table. Platform-composed text follows one ladder
+over the platform locale table (`PLATFORM_LOCALES`, `@objectstack/spec/system`): the locale
+the request names (its `Accept-Language`, or `?locale` on the REST door), else the workspace
+default, else `en`, each code read whole and then one subtag shorter at a time (`fr-FR` →
+`fr`, `zh-Hant-US` → `zh-Hant`). App-authored text, such as a hook's catalogued refusal, is
+not on this ladder: it is served in the caller's locale from the app's own translations,
+otherwise as declared, with no `en` floor. The save / publish doors' `advisories[]` and the
+422 `issues[]` share one element, `RuntimeAuthoringIssueSchema` (`api/protocol.zod.ts`): it
+carries an optional `userMessage` beside the stable `rule`, while `message` / `hint` stay
+developer-facing English; absent, render `message`.
+
 A flow door — `POST /api/v1/automation/{name}/trigger`, resume, `/actions`, a
 declared `type: 'flow'` endpoint — answers a failed run with `400 FLOW_FAILED`;
 its `error.details` is `FlowFailureDetailsSchema` (`api/automation-api.zod.ts`):
@@ -384,8 +375,7 @@ keys mean the run produced none — never invent an empty.
    string and `code`/`message` are required. General API errors use
    `ErrorResponseSchema` (`errors.zod.ts`). Be aware the shipped data routes
    return flat `{ error, code }` bodies instead (e.g. `CONCURRENT_UPDATE` →
-   409, `VALIDATION_FAILED` → 400) — do not assume every error arrives in the
-   `success: false` envelope.
+   409, `VALIDATION_FAILED` → 400).
 3. **Design idempotent writes deliberately.** No upsert route is generated, so
    an external integration queries by its unique external ID and branches to
    create or update — group those writes through
