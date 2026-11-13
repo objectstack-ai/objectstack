@@ -193,10 +193,60 @@ function namesNoHolderAmongMany(
 ): boolean {
     const bound = boundPackageOf(packageId);
     if (bound === undefined || typeof registry.packageScopedHoldersOf !== 'function') return false;
-    const holders = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
-    if (holders.length < 2 || holders.includes(bound)) return false;
+    // The row's own package asks as the caller, so its own holding stays in
+    // the set even when it is a bundle addition (a dependent's locale its base
+    // does not ship): that package holds the name, and the row is its own.
+    if ((registry.packageScopedHoldersOf(type, name, bound, { includeDisabledPackages: true }) ?? []).includes(bound)) return false;
+    const holders = holdersOfEvery(registry, type, name);
+    if (holders.length < 2) return false;
     const installed = installedManifestsOf(registry);
     return !holders.some((holder) => isPairOf(bound, holder, installed));
+}
+
+/** Every package holding `(type, name)`, a disabled one included (ADR-0150 D3: a binding never moves with a disable). */
+function holdersOfEvery(
+    registry: { packageScopedHoldersOf?(type: string, name: string, callerPackageId?: string | null, options?: { includeDisabledPackages?: boolean }): readonly string[] | undefined },
+    type: string,
+    name: string,
+): readonly string[] {
+    return registry.packageScopedHoldersOf?.(type, name, null, { includeDisabledPackages: true }) ?? [];
+}
+
+/** Per registry, the `(type, name, package)` rows {@link reportRowNamingNoHolder} has reported. */
+const reportedRowsNamingNoHolder = new WeakMap<object, Set<string>>();
+
+/**
+ * [#32692] Say once per registry, at `warn`, that the stored row of `type`
+ * `name` bound to `bound` is served by no holder, naming each holder. The
+ * hydrator runs for every list read and every write-through, so the line is
+ * keyed by the row's address and printed the first time only. A sealed type's
+ * row is already reported by the boot census (`metadata_sealed_overlay_unserved`),
+ * which no save door can act on either, so it is not reported twice.
+ */
+function reportRowNamingNoHolder(
+    host: Pick<ProtocolHost, 'isUnservedSealedOverlay'>,
+    registry: object,
+    type: string,
+    name: string,
+    bound: string,
+): void {
+    if (host.isUnservedSealedOverlay(type, name)) return;
+    let reported = reportedRowsNamingNoHolder.get(registry);
+    if (reported === undefined) {
+        reported = new Set();
+        reportedRowsNamingNoHolder.set(registry, reported);
+    }
+    const key = `${type}\u0000${name}\u0000${bound}`;
+    if (reported.has(key)) return;
+    reported.add(key);
+    const holders = holdersOfEvery(registry as Parameters<typeof holdersOfEvery>[0], type, name);
+    console.warn(
+        `[Protocol] [metadata_stored_row_names_no_holder] the stored ${type} row '${name}' is bound to package `
+        + `'${bound}', which holds no ${type} of that name, while ${holders.map((h) => `'${h}'`).join(' and ')} each hold one. `
+        + `No registry reader serves it: a stored row is never laid into a holder's slot picked for it. To keep it, `
+        + `save it again under the holder it customizes (?package=<holder>); otherwise remove it with `
+        + `DELETE /api/v1/meta/${type}/${name}?package=${bound}.`,
+    );
 }
 
 /**
@@ -663,7 +713,7 @@ export class ProtocolRegistryHydrationFacet {
      * anything the static map does not carry, so a runtime kind the platform
      * has never heard of can never trip this gate.
      */
-    static async hydrateOverlayIntoRegistry(host: Pick<ProtocolHost, 'anotherPackageShips' | 'declinesStoredRow' | 'engine' | 'hydrateExpandedViewItems' | 'lookupArtifactItem' | 'packagedArtifactOwner' | 'registerStoredObjectExtension' | 'restoreArtifactRegistryView' | 'shippedArtifactsOf'>, type: string,
+    static async hydrateOverlayIntoRegistry(host: Pick<ProtocolHost, 'anotherPackageShips' | 'declinesStoredRow' | 'engine' | 'hydrateExpandedViewItems' | 'isUnservedSealedOverlay' | 'lookupArtifactItem' | 'packagedArtifactOwner' | 'registerStoredObjectExtension' | 'restoreArtifactRegistryView' | 'shippedArtifactsOf'>, type: string,
             data: unknown,
             options: HydrationOptions,): Promise<boolean> {
         // [#9111] See the header: the mint door asserts, the caller folds.
@@ -741,21 +791,6 @@ export class ProtocolRegistryHydrationFacet {
         // one holder's, and with two or more holders none, registering as the
         // environment's tenant row that each holder's exact read judges
         // (ADR-0150 D4). ⛔ Never a pick between two.
-        // [#32692, ADR-0150 D4] …and a row naming a package that holds no
-        // item of the name, while two or more other packages hold it, borrows
-        // no holder's envelope either: it is declined and reported, as the
-        // package-less row is ({@link namesNoHolderAmongMany}). ⛔ Not a flow
-        // (above).
-        if (scoped && canonicalType !== 'flow' && namesNoHolderAmongMany(registry, canonicalType, options.packageId, rowName)) {
-            console.warn(
-                `[Protocol] [metadata_stored_row_names_no_holder] the stored ${canonicalType} row '${rowName}' is bound to `
-                + `package '${boundPackageOf(options.packageId)}', which holds no ${canonicalType} of that name, while `
-                + `${registry.packageScopedHoldersOf(canonicalType, rowName, null, { includeDisabledPackages: true }).map((h: string) => `'${h}'`).join(' and ')} `
-                + `each hold one. It is not registered and no holder serves it: a stored row is never grafted onto a holder `
-                + `picked for it. Delete the row, or re-save it under the package whose item it customizes.`,
-            );
-            return false;
-        }
         const envelopePackage = options.packageId ?? (scoped ? soleHolderOf(registry, canonicalType, rowName) : undefined);
         const artifact = envelopePackage === null ? undefined : host.lookupArtifactItem(
             type, (data as any).name, envelopePackage ?? undefined, bundleMemberOf(type, data),
@@ -766,6 +801,16 @@ export class ProtocolRegistryHydrationFacet {
         // it would wear that other package's envelope. Its reads answer it from
         // its row. ⛔ Those three types, and [#29613] page, app, dataset, doc, book and [#30062] mapping.
         if (declinesBorrowedEnvelope(canonicalType, options.packageId, artifact)) return true;
+        // [#32692, ADR-0150 D4] …and for every other package-scoped type, a
+        // row naming a package that holds no item of the name, while two or
+        // more other packages hold it, wears no holder's envelope either: it
+        // is declined, as the package-less row is ({@link namesNoHolderAmongMany}).
+        // After the borrowed-envelope rule, whose types serve such a row from
+        // the row itself. ⛔ Not a flow (above).
+        if (scoped && canonicalType !== 'flow' && namesNoHolderAmongMany(registry, canonicalType, options.packageId, rowName)) {
+            reportRowNamingNoHolder(host, registry, canonicalType, rowName, boundPackageOf(options.packageId)!);
+            return false;
+        }
         // [#16702] Say what this row IS before the artifact envelope is grafted
         // on top of it. Every body reaching this hydrator came out of a
         // `sys_metadata` write and is therefore tenant-authored by definition
