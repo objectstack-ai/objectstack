@@ -14,7 +14,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
-import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, isBundledStoreType, pluralEntryKeys, storedItemPackageId } from './package-slotted-store.js';
+import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, isBundledStoreType, storedItemPackageId } from './package-slotted-store.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -1672,7 +1672,6 @@ export class MetadataPlugin implements Plugin {
                     // the earlier loader's item keeps the entry — the file over its
                     // own stale seed. One loader's own items never shadow each other.
                     const primedBy = new Map<string, string | undefined>();
-                    const contested = contestedNames(entry.type, items);
                     for (const item of primingOrder(entry.type, items)) {
                         const meta = item as any;
                         if (meta?.name) {
@@ -1682,14 +1681,13 @@ export class MetadataPlugin implements Plugin {
                             // uses, so both load paths produce identical
                             // _packageId/_provenance state. No-op when the
                             // option is unset or the item is already stamped.
-                            // [#32521] Not a package-less stored row of a name
-                            // two packages hold: it stays the environment's own
-                            // item (`contestedNames`). The host's own file item
-                            // of such a name is stamped as before.
+                            // [#32521, #32812] Never a package-less stored row
+                            // of a type stored per `(package, name)`: it stays
+                            // the environment's own item, which the store files
+                            // by its write rule (`unstampedStoredRow`). The
+                            // host's own file item is stamped as before.
                             applyProtection(meta, {
-                                packageId: storedItemPackageId(meta) === undefined
-                                    && contested.has(meta.name)
-                                    && this.manager.sourceLoaderOf(meta) === STORED_ROW_LOADER
+                                packageId: unstampedStoredRow(entry.type, meta, this.manager.sourceLoaderOf(meta))
                                     ? undefined
                                     : this.options.packageId,
                             });
@@ -1729,36 +1727,23 @@ export class MetadataPlugin implements Plugin {
 const STORED_ROW_LOADER = 'database';
 
 /**
- * [#32521; epic #31527 red lines 2 and 3, contract reviews F1 and D1] The
- * names two or more packages hold among a type's items, for an unbundled type
- * stored per `(package, name)`. The boot priming pass does not stamp a
- * package-less STORED ROW of such a name (an item `DatabaseLoader` handed on)
- * with the host's declared package: ADR-0150 D4 makes a package-less row a
- * holder's customization only under a name ONE package holds, so under a name
- * two hold it is the environment's own item, and that is what a read without
- * the pass answers. Stamped, the store would file it into the host's slot —
- * over that holder's own item when the host is one of the holders (a read
- * naming it would answer the package-less body and `list` would drop its
- * item), or as a third holder when it is not. The host's own file item of such
- * a name is the host package's item and keeps the stamp, so its edit still
- * reaches the host's slot and row over a row an earlier boot seeded from it. A
- * name one package holds is not here, so its package-less row is stamped as
- * before. Every other type: none.
+ * [#32521, #32812; epic #31527 red line 2, ADR-0150 D4] Whether the boot
+ * priming pass keeps the host's declared package off `item`: a package-less
+ * STORED ROW (an item `DatabaseLoader` handed on, no package on its column or
+ * body) of a type stored per `(package, name)`. Such a row is the
+ * environment's own item, or the customization of the one package that holds
+ * its name (D4), and the store files it where it files any write that carries
+ * no package. Stamped with the host's package, the registry filed it into the
+ * host's slot while the loaders still stored it package-less: the host was
+ * counted as a holder it is not (a third holder beside two packages, #32521;
+ * a second beside one, which after a package-less write named the host in
+ * the bare read's refusal, #32812), and a read naming the host served the
+ * environment's row. Unstamped, every read answers what it answers on a host
+ * that declares no package. The host's own file items, and every other
+ * type's items, are stamped as before.
  */
-function contestedNames(type: string, items: unknown[]): ReadonlySet<string> {
-    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || isBundledStoreType(type)) return new Set();
-    // `pluralEntryKeys` keys a name no package or one package holds once (a
-    // package-less item beside one holder takes that holder's key, D4), and a
-    // name two or more packages hold once per holder: a name of two or more
-    // keys is a name two or more packages hold.
-    const keysOf = new Map<string, Set<string>>();
-    const names = items.map((item) => (item as { name?: unknown } | null)?.name);
-    pluralEntryKeys(type, items.map((item, at) => ({ name: names[at], data: item }))).forEach((key, at) => {
-        const name = names[at];
-        if (key === undefined || typeof name !== 'string') return;
-        keysOf.set(name, (keysOf.get(name) ?? new Set()).add(key));
-    });
-    return new Set([...keysOf].filter(([, keys]) => keys.size > 1).map(([name]) => name));
+function unstampedStoredRow(type: string, item: unknown, loader: string | undefined): boolean {
+    return PACKAGE_SLOTTED_STORE_TYPES.has(type) && storedItemPackageId(item) === undefined && loader === STORED_ROW_LOADER;
 }
 
 /**
@@ -1774,7 +1759,7 @@ function contestedNames(type: string, items: unknown[]): ReadonlySet<string> {
  * customization and answer a read naming that package; registered before
  * them, the first one's item would take its bare slot over and `list` would
  * drop it. With the host's package stamp kept off such an item
- * (`contestedNames`), the registry holds what a read without the pass
+ * (`unstampedStoredRow`), the registry holds what a read without the pass
  * answers, whatever order the loaders handed the items in and whatever
  * package the host declares. A name one package holds
  * hands on one item, whose order does not move. Every other type: as handed.
