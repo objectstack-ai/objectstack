@@ -1264,7 +1264,8 @@ export class DelegatedAdminGate {
         // keeps a package the writer names when it holds the name and refuses
         // one that does not, at any holder count; it never re-stamps it from
         // the name (#32164). A column that names no holder of the name reads
-        // as no package, so the set judged is the one the reader resolves,
+        // as no package inside that package's namespace, so the set judged is
+        // the one the reader resolves (a holder outside it is refused, #31698),
         // and a grant naming none is judged by its name — two holders refused,
         // naming both.
         const column = grantPackageOf(row);

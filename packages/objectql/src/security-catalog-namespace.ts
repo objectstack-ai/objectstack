@@ -27,6 +27,20 @@
  * PACKAGE holder by its sibling `bare-name-one-holder.ts` (ruling C on #30798;
  * there the environment catalog is never a holder).
  *
+ * ## The narrowing: a permission set is one name per namespace
+ *
+ * [ADR-0150 D2/D9, #31698] A permission set is now identified by `(package,
+ * name)`: a grant carries its set's package (D8), and every reader resolves a
+ * bare name by D3 or refuses it naming each holder. So two PACKAGES of two
+ * namespaces may each hold a set of one name, and the package door and the item
+ * seam refuse a second package holder only when the two meet under
+ * `permissionSetHoldersMeet` (`@objectstack/core`) — the ONE predicate the
+ * metadata save door asks too. It is stricter than the sibling types'
+ * `namespacedHoldersMeet`: a holder in a shareable platform namespace (`base`,
+ * `system`, `sys`) and a name the platform requests by spelling
+ * (`guest_portal`) keep one holder. Positions and capabilities, the environment
+ * catalog and the built-ins are unchanged: one name, one holder.
+ *
  * ## The holders
  *
  *  - **a package** — a name another installed package declares (its claim,

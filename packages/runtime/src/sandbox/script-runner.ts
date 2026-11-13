@@ -462,6 +462,19 @@ export interface ScriptContext {
   crypto?: {
     randomUUID?: () => string;
   };
+  /**
+   * The mail door (`body-doors.ts`): `ctx.email.send(input)`, behind the
+   * `email.send` capability. Built by the host with the caller it resolved, so
+   * the sending user and organization are the host's, never the body's copy of
+   * `ctx.user`. Absent when the runner was built without kernel services; the
+   * VM's `ctx.email.send` then refuses a call as unavailable.
+   */
+  email?: { send: (input: unknown) => Promise<unknown> };
+  /**
+   * The activity door (`body-doors.ts`): `ctx.activity.append(input)`, behind
+   * the `activity.append` capability. Same provenance as {@link email}.
+   */
+  activity?: { append: (input: unknown) => Promise<unknown> };
 }
 
 /**

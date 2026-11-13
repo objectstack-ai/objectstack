@@ -56,6 +56,7 @@ import { registerAgentCeilingGrantRefusal, registerPositionAgentCeilingGate } fr
 import { registerAgentAccountGrantRefusal } from './agent-account-grant-refusal.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
 import { backfillStoredPermissionSetPackagesAtBoot } from './stored-permission-set-package-backfill.js';
+import { carryRenamedPositionHoldersAtBoot } from './position-renamed-holder-carry.js';
 import {
   reportAccessUpgrade,
   SHARING_RULES_SERVICE,
@@ -383,6 +384,21 @@ export function registerStartHooks(
         await backfillStoredPermissionSetPackagesAtBoot(ql as any, (ql as any)?.registry, ctx.logger);
       } catch (e) {
         ctx.logger.warn('[security] the permission-set package backfill did not run — it is tried again at the next boot', {
+          error: (e as Error)?.message,
+        });
+      }
+      // [#32983, ruling A1; ADR-0150 D7 addendum] A declared position rename
+      // (`PositionSchema.renamedFrom`) carries its HOLDERS, as the system, in
+      // every organization, before the report below judges them — so a moved
+      // holder is not reported as naming no position. Holders only: every other
+      // reference to an old name is named, never written. Never fails the boot.
+      // See `position-renamed-holder-carry.ts`.
+      try {
+        await carryRenamedPositionHoldersAtBoot(ql as any, {
+          catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
+        }, ctx.logger);
+      } catch (e) {
+        ctx.logger.warn('[security] position renames: the holder carry did not run — it is tried again at the next boot', {
           error: (e as Error)?.message,
         });
       }

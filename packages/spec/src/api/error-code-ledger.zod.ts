@@ -337,8 +337,10 @@ export const ERROR_CODE_LEDGER = {
     // whose AUTHOR declared `ai.requiresConfirmation: true` when the request
     // does not carry the confirmation member as `true` — 428, the standard
     // catalog's "request is missing a required precondition" status, because
-    // the request is VALID and merely incomplete: the identical call with the
-    // member set succeeds, and nothing about server state changed. Never
+    // the request is VALID and merely incomplete: for a caller acting for a
+    // person the identical call with the member set succeeds, and nothing about
+    // server state changed. An AI service account is refused the same way
+    // whatever it sends (ADR-0151 D3 rule 3): no retry of its own succeeds. Never
     // carries `status: 'failed'`: nothing dispatched, no action body ran, no
     // record was read or written.
     // Contract, including which request member and what `error.details` carries:
@@ -587,6 +589,14 @@ export const ERROR_CODE_LEDGER = {
     'AUTH_REQUIRED',
     'ERR_FILE_CONSTRAINT',
     'ERR_FILE_REFERENCE_COPY',
+    // [#32754] 403 from the storage service's own per-object attachment opt-in
+    // gate (`attachment-files-opt-in.ts`): a `sys_attachment` insert, or an
+    // update that re-points one, onto an object that does not declare
+    // `enable.files: true`, thrown from its engine hook and answered by every
+    // attach door as it was thrown. Second EMITTER of the code
+    // `@objectstack/plugin-audit` registers for its own gate on the same
+    // declaration. Provenance, not identity (see above).
+    'FILES_DISABLED',
     'FILE_DOWNLOAD_DENIED',
     'FILE_FIELD_BULK_WRITE_REFUSED', // a multi/predicate update wrote a file id into a file-class field (#7102)
     'FILE_NOT_FOUND',
@@ -1846,7 +1856,12 @@ export const ERROR_CODE_LEDGER = {
     // `os validate` / `os build` for an unmarked default export — see its row.
     'STACK_PROVENANCE_MISSING',                  // the value was not built by `defineStack` / `composeStacks` (`hasStackProvenance` is false)
     'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
-    'STACK_SINGLE_APP_VIOLATION',                // an `app` package declares more than one app (ADR-0019 D3)
+    // [ADR-0019 D3 as amended · #32810] Two raise sites, one rule: `defineStack`
+    // (the stack's own package and each `packages[]` body) and `composeStacks`
+    // (a flat composition's one selected manifest, each `packages[]` body, and
+    // the artifact's manifest id with the top-level apps no body declares).
+    // `door: 'none'` on the same reading as the rows around it.
+    'STACK_SINGLE_APP_VIOLATION',                // an `app` or `module` package declares more than one app (ADR-0019 D3 as amended)
     'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers` or `automation` (the pair installs its trigger)
     // [ADR-0131 D6] The eighth `defineStack` refusal, same family and same
     // reading (`door: 'none'`, `status: 422`): the package permits the

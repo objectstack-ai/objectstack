@@ -2444,7 +2444,7 @@ export type DroppedFieldsNotice = DroppedFieldsEvent | UnrecognizedDropReasonEve
  * {@link WriteWarningEvent} — is unchanged: a subscriber's `fields: string[]`
  * stays `string[]` and is now TRUE rather than asserted.
  */
-type WireDroppedFieldsEntry = { object?: unknown; fields: unknown[]; reason?: unknown };
+export type WireDroppedFieldsEntry = { object?: unknown; fields: unknown[]; reason?: unknown };
 
 /** Whether the wire's `reason` is an arm the installed spec pin declares. */
 function isRecognizedDropReason(reason: unknown): reason is DroppedFieldsEvent['reason'] {
@@ -2466,8 +2466,15 @@ function isRecognizedDropReason(reason: unknown): reason is DroppedFieldsEvent['
  * them: both are parsed afterwards, so a missing `object` or an unnameable
  * `reason` still reaches the user as the warning it is (objectui#3484's
  * silence is the worse failure).
+ *
+ * Exported with {@link asDroppedFieldsNotice} (objectstack#33009): a flow
+ * run's answer carries the same `droppedFields` wire (`AutomationResult`,
+ * objectstack#32861) but reaches the console outside this adapter, so its
+ * reader (`app-shell`'s `announceFlowDroppedFields` in `utils/flowLaunch`)
+ * parses it with these two — one parser for every `droppedFields` the
+ * console reads, never a second copy.
  */
-function isWireDroppedFieldsEntry(e: unknown): e is WireDroppedFieldsEntry {
+export function isWireDroppedFieldsEntry(e: unknown): e is WireDroppedFieldsEntry {
   return (
     !!e &&
     typeof e === 'object' &&
@@ -2506,7 +2513,7 @@ function isWireDroppedFieldsEntry(e: unknown): e is WireDroppedFieldsEntry {
  * Extra server-sent keys still ride along: the spread preserves them, and only
  * the three parsed keys are rewritten.
  */
-function asDroppedFieldsNotice(
+export function asDroppedFieldsNotice(
   entry: WireDroppedFieldsEntry,
   fallbackObject: string,
 ): DroppedFieldsNotice {
@@ -6154,19 +6161,30 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * An item without a string `name` is not listed (the widget stores the
    * name, so there is nothing to store); a `label` that is not a string is
    * left off rather than coerced.
+   *
+   * objectstack#32770 — the package the registry served an item under (its
+   * `_packageId`) rides along, verbatim, as `packageId`, so the
+   * `permission-ref` widget can tell two holders of one name apart (ADR-0150
+   * D4). A `_packageId` that is not a non-empty string is left off, and an
+   * item served without one reads exactly as before.
    */
-  async listMetadataItems(type: string): Promise<Array<{ name: string; label?: string }>> {
+  async listMetadataItems(type: string): Promise<Array<{ name: string; label?: string; packageId?: string }>> {
     await this.connect();
     const result: { items?: unknown } | null | undefined = await this.client.meta.getItems(type);
     if (!Array.isArray(result?.items)) {
       throw new Error(`GET /meta/${type} answered without an items list`);
     }
-    const out: Array<{ name: string; label?: string }> = [];
+    const out: Array<{ name: string; label?: string; packageId?: string }> = [];
     for (const it of result.items as unknown[]) {
       const name = (it as { name?: unknown } | null)?.name;
       if (typeof name !== 'string' || !name) continue;
       const label = (it as { label?: unknown }).label;
-      out.push(typeof label === 'string' && label ? { name, label } : { name });
+      const packageId = (it as { _packageId?: unknown })._packageId;
+      out.push({
+        name,
+        ...(typeof label === 'string' && label ? { label } : {}),
+        ...(typeof packageId === 'string' && packageId ? { packageId } : {}),
+      });
     }
     return out;
   }

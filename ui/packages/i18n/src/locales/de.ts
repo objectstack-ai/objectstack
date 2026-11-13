@@ -335,6 +335,10 @@ const de = {
     registryRef: {
       loadFailed: "Die Liste konnte nicht geladen werden. Sie können den Namen weiterhin eingeben.",
       notFound: "{{name}} (nicht gefunden)",
+      holderPackage: "{{item}} · Paket {{package}}",
+      holderEnvironment: "{{item}} · in dieser Umgebung definiert",
+      holderUnresolved: "{{name}} (von mehreren Paketen bereitgestellt; kein Paket angegeben)",
+      holderNeedsPackage: "Dieses Formular gibt einen Berechtigungssatz nur über seinen Namen an. Stellen mehrere Pakete einen Satz mit demselben Namen bereit, kann hier nur der in dieser Umgebung definierte ausgewählt werden.",
     },
     preferenceOption: {
       allTopics: "Alle Themen ({{value}})",
@@ -1360,6 +1364,7 @@ const de = {
     saving: "Speichern…",
     lockedByApproval: "Zur Genehmigung gesperrt",
     lockedTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage; die Bearbeitung ist gesperrt",
+    lockedByState: "Im aktuellen Status nicht bearbeitbar",
     writeStrippedTitle: "Gespeichert — einige Felder wurden jedoch nicht übernommen",
     writeWarningsTitle: "Gespeichert — mit Warnungen",
     writeStrippedReadonly: "Schreibgeschützt und daher nicht übernommen: {{fields}}",
@@ -2293,6 +2298,7 @@ const de = {
       dismiss: "Checkliste ausblenden",
       showDone: "Erledigte anzeigen ({{done}})",
       hideDone: "Erledigte ausblenden",
+      optional: "Optional",
       set: "Festlegen",
       change: "Ändern",
       view: "Anzeigen",
@@ -2723,6 +2729,7 @@ const de = {
         invalidCredentials: "Ungültige E-Mail oder Passwort. Nach mehreren fehlgeschlagenen Versuchen wird die Anmeldung für eine Weile pausiert. Passwort vergessen? Setzen Sie es zurück, um sich sofort anzumelden.",
         invalidCredentialsNoMail: 'Ungültige E-Mail oder Passwort. Nach mehreren fehlgeschlagenen Versuchen wird die Anmeldung für eine Weile pausiert. Passwort vergessen? Bitten Sie Ihre Administration, es zurückzusetzen.',
         emailNotVerified: "Bitte bestätigen Sie Ihre E-Mail-Adresse, bevor Sie sich anmelden.",
+        accountDeactivated: "Ihr Konto wurde von Ihrer Organisation deaktiviert. Wenden Sie sich an Ihren Administrator.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -3994,6 +4001,7 @@ const de = {
       get_authoring_rules: "Die Erstellungsregeln nachlesen",
       get_metadata_schema: "Das Metadatenformat nachlesen",
       get_package: "Das Paket ansehen",
+      get_record_history: "Den Verlauf des Datensatzes lesen",
       list_metadata: "Vorhandene Metadaten auflisten",
       list_objects: "Vorhandene Objekte auflisten",
       list_packages: "Vorhandene Pakete auflisten",

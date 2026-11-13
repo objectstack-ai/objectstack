@@ -324,6 +324,62 @@ describe('EmailService', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('persist failed'), expect.any(Object));
   });
 
+  it('sends nothing when the caller requires the log row and it cannot be written', async () => {
+    const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
+    const failing: EmailPersistence = {
+      insert: vi.fn(async () => { throw new Error('db down'); }),
+      update: vi.fn(async () => {}),
+    };
+    const svc = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence: failing, logger: { info: vi.fn(), warn: vi.fn() } });
+    await expect(svc.send({ to: 'a@b.com', subject: 'Hi', text: 'x', requireLogRow: true })).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      statusCode: 503,
+    });
+    const none = new EmailService({ transport, defaultFrom: 'no@reply.com' });
+    await expect(none.send({ to: 'a@b.com', subject: 'Hi', text: 'x', requireLogRow: true })).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+    });
+    expect(transport.send).not.toHaveBeenCalled();
+
+    const { p, rows } = makePersistence();
+    const logged = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence: p });
+    const res = await logged.send({ to: 'a@b.com', subject: 'Hi', text: 'x', requireLogRow: true });
+    expect(res.status).toBe('sent');
+    expect(rows.get(res.id)).toMatchObject({ status: 'sent' });
+  });
+
+  it('delivers a row the service did not write from the configured sender, with no sender header of its own', async () => {
+    const sent: any[] = [];
+    const transport = { send: vi.fn(async (m: any) => { sent.push(m); return { messageId: '<m@x>' }; }) };
+    const { p, rows } = makePersistence();
+    rows.set('r1', { id: 'r1', status: 'queued' });
+    const svc = new EmailService({ transport, defaultFrom: { name: 'Acme', address: 'noreply@acme.test' }, persistence: p });
+    const res = await svc.deliverPersistedRow(
+      {
+        id: 'r1',
+        status: 'queued',
+        from_address: 'ceo@acme.test',
+        to_addresses: 'pat@example.test',
+        subject: 'Hi',
+        body_text: 'x',
+        headers_json: JSON.stringify({ Sender: 'ceo@acme.test', 'X-Campaign': 'q4' }),
+      },
+      { asConfiguredSender: true },
+    );
+    expect(res.status).toBe('sent');
+    expect(sent[0].from).toBe('Acme <noreply@acme.test>');
+    expect(sent[0].headers).toEqual({ 'X-Campaign': 'q4' });
+
+    const unconfigured = new EmailService({ transport, persistence: p });
+    rows.set('r2', { id: 'r2', status: 'queued' });
+    const failed = await unconfigured.deliverPersistedRow(
+      { id: 'r2', status: 'queued', from_address: 'ceo@acme.test', to_addresses: 'pat@example.test', subject: 'Hi', body_text: 'x' },
+      { asConfiguredSender: true },
+    );
+    expect(failed.status).toBe('failed');
+    expect(transport.send).toHaveBeenCalledTimes(1);
+  });
+
   // ── Outbox-drain support (sys_email afterInsert) ───────────────────
   it('marks its own row managed during send() so the drain hook skips it', async () => {
     // The persistence.insert callback fires at exactly the moment the

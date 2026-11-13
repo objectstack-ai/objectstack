@@ -73,7 +73,7 @@ import {
 } from '../flow-dispatch-status.js';
 // Who may START a flow by name — the one rule the trigger door, the action door
 // and the declared endpoint share (the maintainer's ruling, letters B and A).
-import { flowStartRefusal } from '../flow-start-admission.js';
+import { flowStartRefusal, isAiServiceAccount } from '../flow-start-admission.js';
 // ADR-0143 D5 · ruling A (record 6548764795) — which credential admitted the
 // caller, read the way the api-action forward table reads it.
 //
@@ -255,7 +255,7 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     // evaluated as a person's (the member baseline, no agent ceiling). Only the
     // account (`agent` with no `onBehalfOf`); an OAuth-delegated agent is
     // forwarded as before. Read by `runPrincipalKind` (`@objectstack/service-automation`).
-    if (ec?.principalKind === 'agent' && !ec?.onBehalfOf) automationContext.principalKind = 'agent';
+    if (isAiServiceAccount(ec)) automationContext.principalKind = 'agent';
     // [#22450] The caller's language, already resolved (the request's
     // `Accept-Language` first, then the `localization` settings) — forwarded,
     // never re-derived, so a refused run's message renders in the language of
@@ -3116,8 +3116,16 @@ async function respondToFlowTrigger(
     // node, no side effect. The ONE rule every door that starts a flow by name
     // asks (`../flow-start-admission.ts`): the action door and the declared
     // endpoint answer the same refusal for the same declaration — the elevated
-    // self-triggered rule, then the flow's own `requiredPermissions`.
-    const startRefusal = await flowStartRefusal(automationService, flowName, context?.executionContext);
+    // self-triggered rule, the AI service account rule, then the flow's own
+    // `requiredPermissions`.
+    //
+    // [ADR-0151 Non-goals; ruling record 6812617393, letter C] This route
+    // starts a flow by NAME: no action is in hand, and a flow declares no AI
+    // opt-in, so nothing here carries one and the door says so. An AI service
+    // account is therefore refused an elevated (`runAs: 'system'`) flow at
+    // this route, and told where the opt-in stands: an `ai.exposed` action
+    // that targets the flow, run through `/actions` or MCP `run_action`.
+    const startRefusal = await flowStartRefusal(automationService, flowName, context?.executionContext, { aiExposed: false });
     if (startRefusal) {
         return {
             handled: true,

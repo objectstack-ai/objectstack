@@ -762,7 +762,7 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // Identity and posture — no field names.
     name: keep, label: keep, pluralLabel: keep, description: keep, icon: keep, isSystem: keep,
     managedBy: keep, ownership: keep, systemFields: keep, datasource: keep, access: keep,
-    requiredPermissions: keep, fileAccessDelegate: keep, editMode: keep, enable: keep,
+    requiredPermissions: keep, fileAccessDelegate: keep, schemaReadDelegate: keep, editMode: keep, enable: keep,
     sharingModel: keep, externalSharingModel: keep, protection: keep,
     // [#25760] The per-object sharing opt-ins (`sharing.controlledByParent.ownerMayEdit`,
     // ADR-0055 §3 amendment): a block of booleans that names no field.

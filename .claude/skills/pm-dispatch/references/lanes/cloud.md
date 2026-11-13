@@ -25,4 +25,4 @@
 - 卡阻于 objectstack 卡 ⇒ 挂 `pm:blocked` 或认领它的本车道席敲阻塞卡车道席 `Request: assist`。
 - 阻塞卡未认领或停车改敲 `triage#1`;每张阻塞卡一次,轮记列明敲了谁;不限级(维护者令)。
 - 兜底:分诊日对账见 cloud 卡无状态逾 4 h ⇒ 写信本车道各席;分诊 ⛔ 不代打标签。
-- `target:<major>` 发版板在 cloud 仓的生产者是本车道(`seat-post-protocol.md` 发版板节)。
+- 发版板(窗内升 `priority:p0`)在 cloud 仓的生产者是本车道(`seat-post-protocol.md` 发版板节)。

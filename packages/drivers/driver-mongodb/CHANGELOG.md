@@ -1,5 +1,345 @@
 # @objectstack/driver-mongodb
 
+## 18.4.0
+
+### Patch Changes
+
+- 5b7269f: feat(core): the activation ledger is keyed by `(metadata_type, package_id, name)`, and rows that name no package take their one holder
+  
+  Clause-②: yes (widening) — `@objectstack/core` exports `backfillActivationLedgerPackages` and the `ActivationLedgerHolder`, `ActivationLedgerUnboundRow`, `ActivationLedgerBackfillReport` and `ActivationLedgerBackfillOptions` types from its root, and `@objectstack/metadata-protocol` exports `ensureActivationLedgerPackagelessIndex`, `buildActivationLedgerPackagelessIndexSql`, `buildActivationLedgerPackagelessDuplicateProbeSql`, `ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME` and the `EnsureActivationLedgerPackagelessIndexResult` / `EnsureActivationLedgerPackagelessIndexStatus` types; nothing is removed or renamed, and every door and name-keyed reader answers as before.
+  Metadata-protocol: none
+  
+  `sys_metadata_activation` (the switch an administrator throws to turn a packaged flow, action, permission set, sharing rule, webhook, queue or assignment rule off) is now unique on `(metadata_type, package_id, name)` instead of `(metadata_type, name)` (ADR-0150 D4, D8 row R4). Two packages may each hold a row for an item of the same name; one package may not hold two.
+  
+  At every boot, once the package holders are sealed, a ledger row that names no package is given the package that holds its item, as the package-scoped resolver answers it. Who sees it: an operator whose deployment carries such rows reads one `info` line naming each row bound. A row whose name two packages hold is left as it is and reported in one `warn` line naming every holder; nothing is picked. A row for an item the environment authored, or for a position, keeps naming no package. The backfill writes only `package_id`, never the switch itself, so the next boot finds nothing to change.
+  
+  Nothing reads the package yet: every flow, action and catalog switch still applies by type and name exactly as before, and the activation doors answer as before.
+  
+  Rows for an item the environment authored name no package, and SQL `UNIQUE` (like the memory and MongoDB drivers) exempts a row whose key part is NULL, so the new key does not constrain them. They keep one row per `(metadata_type, name)` through an index of their own, `uniq_sys_metadata_activation_packageless`: built at boot by `metadata-protocol` (SQLite and PostgreSQL: a partial index `WHERE package_id IS NULL`; MySQL 8.0.13+: a functional key part) and by `driver-mongodb` at collection sync (a `{ package_id: null }` partial filter). Who sees it: a second activation row naming no package for one item is refused `409 DUPLICATE_RECORD`, as it was before. A database that already holds such duplicates keeps them and gets one `error` line with the query that lists them, also reported by `os migrate duplicates`; nothing is deleted. MariaDB can build neither form and says so at `error`. The memory driver enforces declared indexes only.
+  
+  On an existing SQL database the boot's schema sync creates the new key's index beside the old one, and once the package-less index stands, `os migrate plan` reports the old `(metadata_type, name)` index as superseded: one `replace_unique_index`, category safe, applied by `os migrate apply` with no `--allow-destructive`. The SQL driver reads a generated plain UNIQUE whose columns are an in-order proper subsequence of a declared global UNIQUE on the same table this way, because widening a unique key only admits rows the old key refused; when a column the key gained is nullable, it does so only beside a partial UNIQUE on the old columns, and until then keeps the old index without offering to drop it (MariaDB stays there). A UNIQUE on other columns still reads as an orphan, as before. Until the replace is applied the old index keeps refusing a second package's row of the same name, which nothing writes yet.
+- 31ae944: fix(drivers): an upgraded MongoDB or MariaDB database retires the activation ledger's old `(metadata_type, name)` unique safely
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The activation ledger `sys_metadata_activation` became unique on `(metadata_type, package_id, name)` (ADR-0150 D4), with a separate index, `uniq_sys_metadata_activation_packageless`, keeping rows that name no package to one per `(metadata_type, name)`. On two kinds of upgraded database the old two-part unique stayed beside them and would refuse the first second-package row of a name. This release replaces it safely there. Fresh databases are unaffected.
+  
+  - **MongoDB.** Who sees it: a deployment whose `sys_metadata_activation` collection was synced by an earlier release. Schema sync now drops `idx_metadata_type_name_unique` once the wider key and the package-less guard are confirmed present, and prints one `warn` line naming the collection, the old key and the new key. The rule is general but narrow: it drops only a unique this driver built itself (its own name and options), whose fields are an in-order part of an unnamed declared global unique, that no current declaration still asks for, and, when a gained field is not `required`, only beside a partial unique on the old fields over the rows where that field is null. The plain read index over the old fields stays: it refuses nothing and still serves lookups.
+  - **MariaDB.** MariaDB has no partial index and no functional key part, so until now the package-less guard was not built there and the old index had to stay. The guard is now a UNIQUE key over an INVISIBLE generated column, `uniq_sys_metadata_activation_packageless__hash`, holding a digest of `(metadata_type, name)` that is NULL for a packaged row (MariaDB 10.3 or later). INVISIBLE keeps the column out of every read. Who sees it: on the next boot of such a database, `os migrate plan` reports the old index as one `replace_unique_index`, category safe, and `os migrate apply` replaces it with no `--allow-destructive`. A second row naming no package is still refused, and two packages may each hold a row of one name. The SQL driver's drift check reads this guard as a partial unique, never as an orphan index or column to drop. A MariaDB database that already holds two package-less rows of one name keeps them and gets one `error` line with the query that lists them, as on the other dialects.
+- 4d398be: Clause-②: no
+  Metadata-protocol: none
+  
+  MongoDB schema sync now builds a plain index on every single-valued `master_detail` field, named `idx_FIELD`. A detail object is read by its parent (a `controlled_by_parent` permission filter reads every detail that way), and without an index on the field that read scanned the whole collection. `lookup` and `user` fields were already indexed and are unchanged.
+  
+  A multi-valued field gets no index. A field that a declared `indexes[]` entry already leads with, or that is field-level `unique`, gets no extra index, because those declarations already build a read index on it. The name matches what a declared `{ fields: [FIELD] }` produces, so an author who declares that index later ends up with the same single index.
+  
+  Existing deployments gain the index on their next schema sync, which runs at every boot unless `OS_SKIP_SCHEMA_SYNC=1` (or the `skipSchemaSync` option) turns it off. The sync builds the index over the documents already stored and changes no data; a later sync finds it present and does nothing. Each index adds some cost to writes on the detail collection; that cost was not measured on MongoDB.
+- e765a09: feat(metadata-protocol, objectql, driver-mongodb, cli): the permission-set grant table gets its package-less guard at schema sync on every kernel that runs its DDL, and a runtime-owned Mongo unique the server refuses is reported at `error` (#32164)
+  
+  Clause-②: no
+  - A runtime-owned unique on MongoDB (`RUNTIME_OWNED_UNIQUES`: the activation ledger's `uniq_sys_metadata_activation_packageless`, and now the grant's) that the server refuses at collection sync: on a duplicate (`E11000`), FROM the collection's whole sync failing (reported by the engine as "Schema sync FAILED", the declared indexes after it and the widening arm not run) TO one `error` line naming the index, its key, the consequence and the aggregation that lists the duplicates, with the sync going on; on an options or key-spec conflict (85, 86), FROM skipped without a word TO one `error` line naming the index and what to inspect, and saying the key is enforced only as far as the index in its way enforces it (an older unique on the same fields does). Either way the index is not built, and the widening arm keeps any older unique it stands in for, as it did. A declared index the server refuses is unchanged.
+  
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. The change adds a runtime-managed physical index beside a platform table's declared key, a kernel-bus event, and an error line. No stored metadata row is rewritten, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  Part of #32164 (ADR-0150 D4). It lands ahead of the change that widens `sys_user_permission_set`'s key to `(user_id, permission_set, permission_set_package, organization_id)`. That key is NULL-distinct, and a grant names no package whenever the environment authored its set, the platform registered it, or two packages hold it with no binding yet, so for exactly those grants the wider key constrains nothing. The guard keeps them to one per `(user_id, permission_set, organization_id)`.
+  
+  **The guard: `uniq_sys_user_permission_set_packageless`.**
+  
+  - On SQL, `metadata-protocol` builds it: a partial unique index `(user_id, permission_set, organization_id) WHERE permission_set_package IS NULL` on SQLite and PostgreSQL, a functional key part over the driver's hash-shadow digest on MySQL 8.0.13+, and a UNIQUE key over an INVISIBLE generated column `uniq_sys_user_permission_set_packageless__hash` on MariaDB 10.3+ (the SQL driver's drift check reads that column as the guard's carrier, never as an orphan). On MongoDB, `driver-mongodb` builds it at collection sync with the object's own indexes (`RUNTIME_OWNED_UNIQUES`, `permission_set_package: null`, which matches a missing field and an explicit null).
+  - When: at schema sync, not `kernel:ready` (epic ruling on #32164). `ObjectQLPlugin` now triggers `objectql:schema-synced` (exported as `OBJECTQL_SCHEMA_SYNCED_HOOK`) when each schema-sync pass's DDL is done, with the engine as its argument, and `metadata-protocol` builds the guard from it. The boot's first pass runs inside its schema-migration lock, so the guard stands before any later plugin's `start()` writes a grant, and on a `bootPhaseHooks: false` host too: the plugin triggers that event, the kernel does not, so the option does not withhold it. Every later pass checks it again, because a SQLite table rebuild drops every index it does not declare, and the check reads the catalog first: DDL only when the guard is missing, so a `metadata:reloaded` re-sync over a standing guard sends none. On PostgreSQL a `CREATE UNIQUE INDEX IF NOT EXISTS` over a standing index waits for the table's SHARE lock behind every open write, and holds every new write behind it, before it finds the name taken (measured on PostgreSQL 16); the MySQL family refuses that statement outright. A refusal is reported once per boot. Pinned through a booted kernel: two grants naming no package, written from a plugin's `start()` before `kernel:ready`, are refused at the second, with and without `bootPhaseHooks: false`; with the build moved back to `kernel:ready`, both pins go red. A guard dropped after the boot is back after the next pass; with `created` latched, that pin goes red. A second pass over a standing guard sends no DDL, on SQLite and, with a write open on the table, on PostgreSQL 16; with the catalog read removed, both pins go red.
+  - Where: on every kernel whose schema sync runs the table's DDL, not behind the `runPlatformMigrations` gate that arms the boot repairs (MF6's review, must-fix 1). That gate is off on a kernel that passes an `environmentId` without declaring it (a per-project kernel) and on every one-shot CLI boot, and both create this table at their own schema sync, so both build the guard. Pinned on both: a kernel with an `environmentId` and nothing declared, and one that declares `runPlatformMigrations: false` (with `bootPhaseHooks: false`); with the subscription back inside the gate, both go red.
+  - A boot that runs no DDL builds nothing. `os migrate plan` and every dry-run mode boot with their drivers holding DDL back, and `metadata-protocol` reads that (`schemaDdlDeferred`) and leaves the database as it was. `os migrate apply` holds its DDL back until the operator confirms; its flush then performs it and triggers `objectql:schema-synced` again (`DeferSchemaDdlPlugin.announceSchemaSynced`), which builds the guard. A write mode that boots without deferring (`--apply` of the data commands) builds it at its sync. Pinned in `packages/cli` over a SQLite file: the write boot builds it, the read-only boot leaves a table without it untouched, and `apply` on a fresh database has neither before the confirmation and both after the flush.
+  - A `skipSchemaSync` boot (`OS_SKIP_SCHEMA_SYNC`) runs no DDL and triggers no pass. Its tables come from the boot that runs their DDL (a serving boot, an `OS_MIGRATE_AND_EXIT=1` job, or `os migrate apply`), and that boot builds the guard with them. Where the boot-repair gate is on, its `kernel:ready` repair also builds it, for a database whose DDL came from somewhere that did not. The skip-sync face of `os migrate plan` / `apply` (a Turso remote primary) builds nothing on the primary, which its serving boot provisions.
+  - A server with no form for it (MySQL before 8.0.13, MariaDB before 10.3) keeps the old three-column key instead: an upgraded database keeps the one it has, and a database without one gets it under the name the SQL driver generates for it, `uniq_sys_user_permission_set_ac248331`, so the driver's widening arm reads it as the superseded key and keeps it until the guard can be built. It refuses every second grant naming no package, and also one user's grant of a second package's set of the same name in one organization: a declared limit of those servers. One `error` line says so each boot.
+  - Refuse, never keep-one: a database that already holds two grants naming no package of one `(user_id, permission_set, organization_id)` keeps them. The build fails and logs, at `error`, the duplicated keys, the consequence and the query that lists them (on MongoDB, the aggregation), and the next boot tries again. `os migrate duplicates` lists this index too, six in all.
+  - Admits nothing new, refuses nothing new, while the grant's declared key is still `(user_id, permission_set, organization_id)`: that key already refuses every second grant the guard would, and the guard exempts a NULL organization as that key does.
+  - Measured on SQLite (`node:sqlite`, and a booted kernel over `better-sqlite3`) and PostgreSQL 16. The MySQL and MariaDB forms and the real-mongod pins are pinned in suites that run on `main` only, so they first run after this lands.
+  
+  **In-process APIs.** `@objectstack/objectql` exports `OBJECTQL_SCHEMA_SYNCED_HOOK`. `@objectstack/cli`'s internal `DeferSchemaDdlPlugin` gains `announceSchemaSynced`. `@objectstack/metadata-protocol` exports `ensureUserPermissionSetPackagelessIndex`, `createUserPermissionSetGuardAtSchemaSync`, `buildUserPermissionSetPackagelessIndexSql`, `buildUserPermissionSetPackagelessDuplicateProbeSql`, `buildUserPermissionSetOldKeySql`, `resolveUserPermissionSetIndexSeam`, `USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME`, `USER_PERMISSION_SET_PACKAGELESS_INDEX_COLUMNS`, `USER_PERMISSION_SET_OLD_KEY_INDEX_NAME` and the result, status and pass-outcome types. `driver-mongodb`'s `SchemaSyncLogger` gains an optional `error`; a logger without it gets that line at `warn`. All additive.
+  
+  Unchanged: `driver-memory` builds no guard (no raw-SQL seam, the activation ledger's exemption). A pin measures that its unique check treats a NULL package as distinct; the change that widens the key declares what that admits.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [f6a429b]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [e735425]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [f4b4c8a]
+- Updated dependencies [db50231]
+- Updated dependencies [0e1311d]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [b6e6545]
+- Updated dependencies [90457e7]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [59630d9]
+- Updated dependencies [5e85952]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [3487ccc]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [5b7269f]
+- Updated dependencies [6dd196d]
+- Updated dependencies [d834a36]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [b96b875]
+- Updated dependencies [c62e72a]
+- Updated dependencies [450bfb6]
+- Updated dependencies [5defbfe]
+- Updated dependencies [f56354c]
+- Updated dependencies [e55347d]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [36a8700]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [5a8dbc7]
+- Updated dependencies [fb94249]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [8fca8f7]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [d9f626b]
+- Updated dependencies [1a66fcf]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [f00fb1b]
+- Updated dependencies [c655af8]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [aad7d2f]
+- Updated dependencies [4f6fb53]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [9bff554]
+- Updated dependencies [1368536]
+- Updated dependencies [7aab601]
+- Updated dependencies [c419609]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [1e474e3]
+- Updated dependencies [7575116]
+- Updated dependencies [0763bf6]
+- Updated dependencies [de6d893]
+- Updated dependencies [5192297]
+- Updated dependencies [326453e]
+- Updated dependencies [6d6f86b]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [3c18783]
+- Updated dependencies [e336a33]
+- Updated dependencies [3452dec]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [070e879]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [28a1527]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [d4b14a8]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [e542831]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

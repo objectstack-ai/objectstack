@@ -15,7 +15,7 @@ import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHea
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale, useLocalization, pickLocalized } from '@object-ui/i18n';
-import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, answeredLoadFailure, extractWriteErrorMessage, isExternalWriteRefusal } from '@object-ui/react';
+import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, usePredicateScope, classifyLoadError, answeredLoadFailure, extractWriteErrorMessage, isExternalWriteRefusal } from '@object-ui/react';
 import type { AnsweredLoadFailure } from '@object-ui/react';
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
@@ -59,10 +59,12 @@ import { createConsoleServerActionHandler } from '../utils/consoleServerAction.j
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 import { actionContextOrg } from '../utils/actionContextOrg.js';
+import { editFormLockedByState } from '../utils/editFormLockedByState.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
+import type { TranslateFn } from '@object-ui/i18n';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import { findDeclaredApiAction, isSameOriginApiTarget, readApiActionDoorSuccess, sendApiActionThroughDoor } from '../utils/apiActionDoor.js';
 import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/NavigationContext.js';
@@ -2049,6 +2051,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         triggerParams: flowParams,
         objects,
         language,
+        // The run's `droppedFields` warning (objectstack#33009): labels read
+        // through this page's data source, the console's adapter.
+        droppedFields: { t: t as TranslateFn, fieldLabel, dataSource },
       });
       const judged = launch.judged;
       // Paused at a `screen` node: FlowRunner renders the form + resumes, and
@@ -2074,7 +2079,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [authFetch, pureRecordId, objectName, objects, language]);
+  }, [authFetch, pureRecordId, objectName, objects, language, t, fieldLabel, dataSource]);
 
   // Server-side action handler — POST /api/v1/actions/{object}/{action},
   // built from @object-ui/core's `createServerActionHandler` via the shared
@@ -2714,6 +2719,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   });
   const editDisabledByPredicate = editPredicates?.disabledWhen != null && editDisabledPred;
   const deleteDisabledByPredicate = deletePredicates?.disabledWhen != null && deleteDisabledPred;
+  // objectstack#32756 — the record's state leaves the edit form nothing to
+  // edit: every field it shows resolves read-only, at least one by its
+  // `readonlyWhen`. Judged by the form's own field-rule evaluator over the
+  // same predicate scope the form binds (`editFormLockedByState`), so Edit
+  // goes off exactly when the form would open with no control.
+  const predicateScope = usePredicateScope();
+  const editLockedByState = useMemo(
+    () => editFormLockedByState(objectDef as any, pageRecord as Record<string, unknown> | null | undefined, predicateScope),
+    [objectDef, pageRecord, predicateScope],
+  );
 
   // ── Audit history fetch ────────────────────────────────────────────
   // Loads recent sys_audit_log entries for this record so the record page can
@@ -4657,7 +4672,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // are independent reasons, and neither may cancel the other. With no
         // predicate declared `editDisabledByPredicate` is `false`, so this is
         // byte-identical to the pre-#4213 `disabled: approvalLocked`.
-        disabled: approvalLocked || editDisabledByPredicate,
+        //
+        // objectstack#32756 — a record whose state locks every field of the
+        // edit form is a third reason for the same off, explained beside the
+        // header by the `editLockedByState` badge, as the lock band explains
+        // the approval lock.
+        disabled: approvalLocked || editDisabledByPredicate || editLockedByState,
         onClick: () => onEdit({ id: pureRecordId }),
       } as any);
     }
@@ -5110,8 +5130,26 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // lives in `ManagedByBadge`, so an end user sees none here. Inside
   // Setup it is not drawn at all: its note rides the header's
   // object-label chip (`objectLabelNote` below, objectui#13385).
+  //
+  // The state lock (objectstack#32756) rides here too: the header's Edit is
+  // the host's own action, so its reason is the host's to draw (the
+  // `page:header` renderer draws a disabled reason for authored actions
+  // only), as the DetailView lock band draws the approval lock's. Not while
+  // an approval lock already explains a disabled Edit.
+  const stateLockLabel = t('detail.lockedByState', { defaultValue: 'Not editable in its current state' });
   const sharedChrome = (
     <>
+      {editLockedByState && !approvalLocked && (
+        <span
+          role="status"
+          data-testid="record-state-lock"
+          title={stateLockLabel}
+          className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
+        >
+          <Lock className="h-3 w-3" aria-hidden="true" />
+          <span>{stateLockLabel}</span>
+        </span>
+      )}
       {recordPresence.length > 0 && (
         <PresenceAvatars users={recordPresence} size="sm" maxVisible={3} showStatus />
       )}
@@ -5178,7 +5216,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             the header-vs-row asymmetry #4213 is about: Edit gone from the
             header while double-click still opened a draft the object says this
             record may not have. `disabledWhen` suppresses the pencils for the
-            same reason `approvalLocked` does — a draft Save would reject. */}
+            same reason `approvalLocked` does — a draft Save would reject.
+            `editLockedByState` (objectstack#32756) joins for the same
+            mirror: a record whose state locks every field has no pencil. */}
         <InlineEditProvider
           canEdit={
             resolveRecordHeaderActionGates(objectDef, perms).edit
@@ -5186,6 +5226,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             && !approvalLocked
             && editVisible
             && !editDisabledByPredicate
+            && !editLockedByState
           }
           locked={approvalLocked}
           approvalPending={approvalPending}

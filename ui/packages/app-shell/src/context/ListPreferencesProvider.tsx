@@ -393,6 +393,27 @@ const SAVE_DEBOUNCE_MS = 500;
 
 type ListFamily = UserPreferenceFamily<ObjectListPreference>;
 
+/**
+ * One spelling per VALUE of an object's state: object keys sorted at every
+ * depth, so two states that differ only in the order their parts were set
+ * compare equal. Arrays keep their order: a tab order or a sort is ordered.
+ */
+export function listPreferenceFingerprint(state: ObjectListPreference): string {
+  const canonical = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(canonical);
+    if (!isRecord(v)) return v;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(v).sort()) {
+      if (v[key] !== undefined) out[key] = canonical(v[key]);
+    }
+    return out;
+  };
+  return JSON.stringify(canonical(state));
+}
+
+/** The fingerprint of an object the user has stored nothing for. */
+const NO_ROW_FINGERPRINT = listPreferenceFingerprint({});
+
 export function ListPreferencesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -403,6 +424,10 @@ export function ListPreferencesProvider({ children }: { children: ReactNode }) {
   statesRef.current = states;
   // The family whose first load has settled (or whose wait ran out).
   const [settledFor, setSettledFor] = useState<ListFamily | null>(null);
+  // What the attached family's store holds, per object, as a fingerprint: the
+  // rows its load answered, then every save it accepted. `null` until that
+  // load answers: what is stored is unknown then, so every change is written.
+  const persistedRef = useRef<{ family: ListFamily; byObject: Map<string, string> } | null>(null);
 
   // Hydrate when a family attaches (a sign-in, a user switch): the remote rows
   // are the user's state on every device, written through to this browser's
@@ -410,6 +435,7 @@ export function ListPreferencesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     statesRef.current = {};
     setStates({});
+    persistedRef.current = null;
     if (!family) return;
     let cancelled = false;
     const wait = setTimeout(() => {
@@ -418,13 +444,16 @@ export function ListPreferencesProvider({ children }: { children: ReactNode }) {
     void family.load().then((rows) => {
       if (cancelled) return;
       const remote: Record<string, ObjectListPreference> = {};
+      const byObject = new Map<string, string>();
       for (const [key, value] of Object.entries(rows)) {
         if (!key.startsWith(LIST_PREFERENCE_PREFIX)) continue;
         const objectName = key.slice(LIST_PREFERENCE_PREFIX.length);
         const clean = sanitizeObjectListPreference(value);
         remote[objectName] = clean;
+        byObject.set(objectName, listPreferenceFingerprint(clean));
         writeLocalListState(userId, objectName, clean);
       }
+      persistedRef.current = { family, byObject };
       statesRef.current = { ...statesRef.current, ...remote };
       setStates((prev) => ({ ...prev, ...remote }));
       setSettledFor(family);
@@ -451,6 +480,9 @@ export function ListPreferencesProvider({ children }: { children: ReactNode }) {
   );
   // Saves sent and not yet answered, so a sign-out can wait for them.
   const inFlightRef = useRef(new Set<Promise<void>>());
+  // Saves on the wire per object: while one is, what the store holds is about
+  // to change, so no change is judged against it.
+  const sendingRef = useRef(new Map<string, number>());
   const flushOne = useCallback((objectName: string) => {
     const pending = pendingRef.current.get(objectName);
     if (!pending) return;
@@ -459,10 +491,21 @@ export function ListPreferencesProvider({ children }: { children: ReactNode }) {
     const inFlight = inFlightRef.current;
     const sent = pending.family.save(listPreferenceKey(objectName), pending.value);
     inFlight.add(sent);
+    const sending = sendingRef.current;
+    sending.set(objectName, (sending.get(objectName) ?? 0) + 1);
     const settle = () => {
       inFlight.delete(sent);
+      const left = (sending.get(objectName) ?? 1) - 1;
+      if (left > 0) sending.set(objectName, left);
+      else sending.delete(objectName);
     };
-    sent.then(settle, settle);
+    const fingerprint = listPreferenceFingerprint(pending.value);
+    sent.then(() => {
+      // Accepted: this is what the store now holds for the object.
+      settle();
+      const persisted = persistedRef.current;
+      if (persisted?.family === pending.family) persisted.byObject.set(objectName, fingerprint);
+    }, settle);
   }, []);
 
   // Before `signOut()` ends the session (objectstack#32298): a list change
@@ -493,12 +536,28 @@ export function ListPreferencesProvider({ children }: { children: ReactNode }) {
       const prev = statesRef.current[objectName] ?? readLocalListState(userId, objectName);
       const next = fn(prev);
       if (next === prev) return;
+      // A patch that re-states what the user already has (a re-emitted sort,
+      // a "Clear all" over no filters) changes no preference: nothing to hold
+      // and nothing to write.
+      const fingerprint = listPreferenceFingerprint(next);
+      if (fingerprint === listPreferenceFingerprint(prev)) return;
       statesRef.current = { ...statesRef.current, [objectName]: next };
       setStates((s) => ({ ...s, [objectName]: next }));
       writeLocalListState(userId, objectName, next);
       if (!family) return;
       const existing = pendingRef.current.get(objectName);
       if (existing) clearTimeout(existing.timer);
+      // Back to what the store already holds (a change undone inside the
+      // debounce): the write still waiting is dropped and none is sent.
+      const persisted = persistedRef.current;
+      if (
+        persisted?.family === family &&
+        !sendingRef.current.has(objectName) &&
+        fingerprint === (persisted.byObject.get(objectName) ?? NO_ROW_FINGERPRINT)
+      ) {
+        pendingRef.current.delete(objectName);
+        return;
+      }
       pendingRef.current.set(objectName, {
         value: next,
         family,

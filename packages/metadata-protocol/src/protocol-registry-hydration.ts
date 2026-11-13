@@ -31,7 +31,8 @@
 
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import { storedRowDocument } from './item-lock.js';
-import { installedManifestsOf, itemDiscriminator } from '@objectstack/metadata-core';
+import { installedManifestsOf, isTenantAuthored, itemDiscriminator } from '@objectstack/metadata-core';
+import { isPackageScopedType } from '@objectstack/core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { bindStoredRow } from './stored-row-binding.js';
@@ -154,6 +155,18 @@ async function readHealBaseline(
         if (bases.length !== 1) throw error;
         return host.readItemFromMetadataService(type, name, bases[0]);
     }
+}
+
+/**
+ * [#32568] The one package holding `(type, name)` in the registry, `undefined`
+ * when none does (the lookup naming no package then finds no artifact either),
+ * and `null` when two or more do: a package-less row of the name wears no
+ * holder's envelope.
+ */
+function soleHolderOf(registry: { packageScopedHoldersOf?(type: string, name: string): readonly string[] | undefined }, type: string, name: string): string | null | undefined {
+    const holders = typeof registry.packageScopedHoldersOf === 'function' ? registry.packageScopedHoldersOf(type, name) ?? [] : [];
+    if (holders.length > 1) return null;
+    return holders[0];
 }
 
 export class ProtocolRegistryHydrationFacet {
@@ -524,7 +537,7 @@ export class ProtocolRegistryHydrationFacet {
      * anything the static map does not carry, so a runtime kind the platform
      * has never heard of can never trip this gate.
      */
-    static async hydrateOverlayIntoRegistry(host: Pick<ProtocolHost, 'anotherPackageShips' | 'engine' | 'hydrateExpandedViewItems' | 'lookupArtifactItem' | 'packagedArtifactOwner' | 'registerStoredObjectExtension'>, type: string,
+    static async hydrateOverlayIntoRegistry(host: Pick<ProtocolHost, 'anotherPackageShips' | 'declinesStoredRow' | 'engine' | 'hydrateExpandedViewItems' | 'lookupArtifactItem' | 'packagedArtifactOwner' | 'registerStoredObjectExtension' | 'restoreArtifactRegistryView'>, type: string,
             data: unknown,
             options: HydrationOptions,): Promise<boolean> {
         // [#9111] See the header: the mint door asserts, the caller folds.
@@ -569,14 +582,42 @@ export class ProtocolRegistryHydrationFacet {
             await host.hydrateExpandedViewItems(type, data, options);
             return true;
         }
+        // [#32568, ADR-0126 Regime C, epic ruling 6817768147] A package-less
+        // row the reads decline, of a type ADR-0150 addresses by `(package,
+        // name)` (a sealed managed item's stored row), is not registered.
+        // Registered, it took the first holder's slot under that holder's
+        // envelope, so one stored row was served as that holder's own item
+        // after a hydration and declined before it. ⛔ Not a flow: its tenant
+        // row registers as it is, without the envelope (below), so the boot
+        // pull reports it (#20913).
+        const rowName = String((data as any).name);
+        const scoped = isPackageScopedType(canonicalType);
+        // A copy of it registered before the package arrived (the write-through
+        // of a save the seal did not refuse yet) is healed by the one heal walk
+        // (#23198), so the registry answers the package's item whichever came
+        // first. The walk re-hydrates the stored rows, and this row then meets
+        // the package's item, not a tenant-authored one, so it stops there.
+        if (scoped && canonicalType !== 'flow' && !options.packageId && host.declinesStoredRow(type, rowName, { type, package_id: null, metadata: data })) {
+            if (isTenantAuthored(registry.getItem?.(type, rowName))) {
+                await host.restoreArtifactRegistryView(type, rowName, null, null, bundleMemberOf(type, data));
+            }
+            return false;
+        }
         // [#23074] The artifact of the row's OWN bundle member: an overlay of
         // a member the package does not ship has none, so it registers as the
         // tenant row it is ({@link mergeArtifactProtection}). It used to take
         // the bundle's artifact canonical-first, and a `zh-CN` overlay beside
         // a shipped `en-US` was registered wearing that envelope, which every
         // registry reader then took for the package's own `zh-CN` artifact.
-        const artifact = host.lookupArtifactItem(
-            type, (data as any).name, options.packageId ?? undefined, bundleMemberOf(type, data),
+        // [#32568, epic ruling 6817768147] A package-less row of such a type
+        // borrows no envelope through a lookup naming no package, which
+        // answered the FIRST package that registered the name: it wears its
+        // one holder's, and with two or more holders none, registering as the
+        // environment's tenant row that each holder's exact read judges
+        // (ADR-0150 D4). ⛔ Never a pick between two.
+        const envelopePackage = options.packageId ?? (scoped ? soleHolderOf(registry, canonicalType, rowName) : undefined);
+        const artifact = envelopePackage === null ? undefined : host.lookupArtifactItem(
+            type, (data as any).name, envelopePackage ?? undefined, bundleMemberOf(type, data),
         );
         // [#29600] See the header: a dashboard, report or email-template row
         // bound to a package that ships no artifact of its name, under a name
@@ -1743,6 +1784,17 @@ export class ProtocolRegistryHydrationFacet {
      * `published[]` element, [#30693] `publishPackageDrafts`). A sync that ran, or
      * a type with no storage, returns `undefined`, so a clean answer is
      * unchanged.
+     *
+     * [#32590] After the sync, the engine's `applyPublishedColumnChanges` brings
+     * an EXISTING table's columns to the published declaration, for the
+     * changes the driver can make without losing data
+     * (`SqlDriver.applyPublishedColumnChanges` names them). Without it a field
+     * published `date` → `datetime` kept a `date` column that dropped every time
+     * of day, and `storage: { notNull: false }` kept a NOT NULL that refused
+     * every write omitting the field. A change the datasource could not apply,
+     * or a failure applying them, returns the
+     * {@link publishedColumnChangesNotAppliedNotice} warning instead, on the
+     * same doors.
      */
     static async ensureObjectStorage(host: Pick<ProtocolHost, 'engine' | 'ensureObjectStorage'>, type: string, name: string): Promise<RuntimeAuthoringIssue | undefined> {
         // [#8862] The `&& type !== 'objects'` limb is GONE. Both call sites
@@ -1762,7 +1814,6 @@ export class ProtocolRegistryHydrationFacet {
         if (type !== 'object') return;
         try {
             await host.engine.syncObjectSchema(name);
-            return undefined;
         } catch (err: any) {
             // [#22985] `error`, not `warn`, by the one question AGENTS.md
             // "Degradation log levels" turns this on: the publish still
@@ -1782,6 +1833,41 @@ export class ProtocolRegistryHydrationFacet {
             );
             return objectStorageSyncRefusedNotice(name, err);
         }
+        // [#32590] The publish asks for the column half too, once the additive
+        // sync above has run: an existing table's columns follow the published
+        // declaration for every change the driver can make without losing data
+        // (a `date` → `datetime` widening, a NOT NULL the declaration dropped),
+        // so the change table's "passes cleanly" holds for the table, not only
+        // the save. An engine without the door (a test double, a metadata-only
+        // store) keeps the additive sync it always had.
+        if (typeof host.engine.applyPublishedColumnChanges !== 'function') return undefined;
+        let columns: PublishedColumnChanges | undefined;
+        try {
+            columns = await host.engine.applyPublishedColumnChanges(name);
+        } catch (err: any) {
+            // `error` by the same question as the refused sync above: the
+            // publish answers success and the object is served while its table
+            // may keep the old column contract. Its OWN catch, so a failure
+            // here is never reported as a sync that did not run.
+            console.error(
+                `[Protocol] object '${name}' was published and its storage synced, but bringing its existing columns `
+                + 'to the declaration FAILED — the publish answered success, so the object looks usable while those '
+                + "columns may keep the previous contract. Fix: resolve the driver's error (logged after this line), "
+                + "then publish the object again; 'os migrate plan' lists each change.",
+                err?.message ?? err,
+            );
+            return publishedColumnChangesNotAppliedNotice(name, [], err);
+        }
+        const notApplied = columns?.skipped ?? [];
+        if (notApplied.length === 0) return undefined;
+        console.error(
+            `[Protocol] object '${name}' was published but its table did NOT follow the declaration for `
+            + `${notApplied.length} column change(s) — the publish answered success, so the object looks usable `
+            + 'while those columns keep the previous contract. Fix: resolve the reason the datasource gave '
+            + "(after this line), then publish the object again; 'os migrate plan' lists each change.",
+            notApplied.map((d) => d.message).join(' | '),
+        );
+        return publishedColumnChangesNotAppliedNotice(name, notApplied);
     }
 
     /**
@@ -1988,6 +2074,56 @@ export class ProtocolRegistryHydrationFacet {
  * groups or suppresses the notice by.
  */
 export const OBJECT_STORAGE_SYNC_REFUSED = 'object-storage-sync-refused';
+
+/**
+ * [#32590] The column changes a publish asked the engine to apply (its
+ * `applyPublishedColumnChanges`), read structurally: the driver's drift
+ * entries, applied and not.
+ */
+export interface PublishedColumnChanges {
+    applied: ReadonlyArray<{ table: string; column?: string; op: { type: string } }>;
+    skipped: ReadonlyArray<{ table: string; column?: string; op: { type: string }; message: string }>;
+}
+
+/**
+ * [#32590] The rule id of the advisory a save or publish answers with when the
+ * object's table did not follow its declaration for a column change the
+ * publish asked the driver to apply. Stable across releases, like {@link OBJECT_STORAGE_SYNC_REFUSED}.
+ */
+export const OBJECT_COLUMN_CHANGES_NOT_APPLIED = 'object-column-changes-not-applied';
+
+/**
+ * [#32590] The caller's half of a column change the publish could not apply —
+ * the datasource cannot perform it (the Turso REMOTE transport runs no table
+ * rebuild) or its DDL failed — or of a failure applying them at all (`err`):
+ * one `warning` on the answer's `advisories`, beside the `error` line the
+ * operator reads, on the same doors and in the same shape as
+ * {@link objectStorageSyncRefusedNotice}. Names each column and the change; the
+ * datasource's reason stays in the server log, and a thrown failure's text is
+ * quoted only under the rule {@link objectStorageSyncRefusedNotice} follows.
+ */
+export function publishedColumnChangesNotAppliedNotice(
+    name: string,
+    notApplied: PublishedColumnChanges['skipped'],
+    err?: unknown,
+): RuntimeAuthoringIssue {
+    const changes = notApplied.map((d) => `'${d.column ?? d.table}' (${d.op.type})`).join(', ');
+    const what = err === undefined
+        ? `its table did not follow the declaration for ${changes}`
+        : `bringing its table's columns to the declaration failed (${clientFacingFailureText(err, 'the reason is in the server log')})`;
+    return {
+        rule: OBJECT_COLUMN_CHANGES_NOT_APPLIED,
+        severity: 'warning',
+        where: `object "${name}"`,
+        path: '',
+        message:
+            `object '${name}' was saved and is served, but ${what}: a column whose type or constraint was changed `
+            + 'keeps the previous one, so writes to it are refused or stored the old way until the change is applied.',
+        hint:
+            "The server log names the datasource's reason. Run 'os migrate plan', which lists each change with what "
+            + 'can apply it, or publish the object again once the reason is resolved.',
+    };
+}
 
 /**
  * [#30635] The caller's half of a refused object-storage sync: one `warning`

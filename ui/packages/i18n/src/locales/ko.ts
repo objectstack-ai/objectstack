@@ -335,6 +335,10 @@ const ko = {
     registryRef: {
       loadFailed: "목록을 불러오지 못했습니다. 이름을 직접 입력할 수 있습니다.",
       notFound: "{{name}} (찾을 수 없음)",
+      holderPackage: "{{item}} · 패키지 {{package}}",
+      holderEnvironment: "{{item}} · 이 환경에서 정의됨",
+      holderUnresolved: "{{name}} (여러 패키지가 제공하며 패키지가 지정되지 않음)",
+      holderNeedsPackage: "이 양식은 권한 세트를 이름으로만 지정합니다. 여러 패키지가 같은 이름의 권한 세트를 제공하는 경우 여기서는 이 환경에서 정의된 것만 선택할 수 있습니다.",
     },
     preferenceOption: {
       allTopics: "모든 주제 ({{value}})",
@@ -1360,6 +1364,7 @@ const ko = {
     saving: "저장 중…",
     lockedByApproval: "승인을 위해 잠김",
     lockedTooltip: "이 레코드에 대기 중인 승인 요청이 있습니다. 편집이 잠겨 있습니다",
+    lockedByState: "현재 상태에서는 편집할 수 없습니다",
     writeStrippedTitle: "저장되었지만 일부 필드는 적용되지 않았습니다",
     writeWarningsTitle: "저장되었지만 경고가 있습니다",
     writeStrippedReadonly: "다음 필드는 읽기 전용이므로 적용되지 않았습니다: {{fields}}",
@@ -2293,6 +2298,7 @@ const ko = {
       dismiss: "체크리스트 숨기기",
       showDone: "완료된 항목 보기({{done}})",
       hideDone: "완료된 항목 접기",
+      optional: "선택 사항",
       set: "설정",
       change: "변경",
       view: "보기",
@@ -2723,6 +2729,7 @@ const ko = {
         invalidCredentials: "잘못된 이메일 또는 비밀번호입니다. 여러 번 실패하면 잠시 동안 로그인이 일시 중지됩니다. 비밀번호를 잊으셨나요? 재설정하면 바로 로그인할 수 있습니다.",
         invalidCredentialsNoMail: '잘못된 이메일 또는 비밀번호입니다. 여러 번 실패하면 잠시 동안 로그인이 일시 중지됩니다. 비밀번호를 잊으셨나요? 관리자에게 재설정을 요청하세요.',
         emailNotVerified: "로그인하기 전에 이메일을 확인하세요.",
+        accountDeactivated: "소속 조직에서 계정을 비활성화했습니다. 관리자에게 문의하세요.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -3993,6 +4000,7 @@ const ko = {
       get_authoring_rules: "작성 규칙 읽기",
       get_metadata_schema: "메타데이터 형식 살펴보기",
       get_package: "패키지 정보 확인하기",
+      get_record_history: "이 레코드의 변경 기록 읽기",
       list_metadata: "기존 메타데이터 나열하기",
       list_objects: "기존 오브젝트 나열하기",
       list_packages: "기존 패키지 나열하기",

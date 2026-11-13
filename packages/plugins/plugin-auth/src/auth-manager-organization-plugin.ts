@@ -102,6 +102,7 @@ export interface OrganizationPluginHost {
   readonly config: AuthManager['config'];
   emailLocaleArg: AuthManager['emailLocaleArg'];
   getAppName: AuthManager['getAppName'];
+  getAudience: AuthManager['getAudience'];
   getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
   getEmailService: AuthManager['getEmailService'];
@@ -534,7 +535,9 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
       },
       // [#24948] The teams, their members and the organization-admin
       // grants are the organization's own auth structure, and better-auth's
-      // delete leaves them behind. They go here, inside the request's
+      // delete leaves them behind; so is the self-registration grant
+      // [#32787], by the set the deployment declares now, the one the
+      // `hooks.before` refusal left out of its count. They go here, inside the request's
       // transaction (`handleRequest`), after the `hooks.before` refusal has
       // found no records left. The Default Organization is the
       // last-administrator guard's to answer, so its structure is not
@@ -545,7 +548,9 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
         const organizationId = organization?.id;
         if (!engine || typeof organizationId !== 'string' || !organizationId) return;
         if (await isDefaultOrganizationTarget(engine, organization, postureEnforcesWall(resolveTenancyPosture()))) return;
-        await removeOrganizationAuthStructure(engine, organizationId);
+        await removeOrganizationAuthStructure(engine, organizationId, {
+          selfRegistrationSet: this.getAudience().selfRegistrationPermissionSet,
+        });
       },
     },
     // No mailer is wired in framework yet — log the accept URL so

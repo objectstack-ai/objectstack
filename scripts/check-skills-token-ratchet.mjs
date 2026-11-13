@@ -168,6 +168,15 @@
  *     a small feature) stands. The script cannot read diffs or rulings: the
  *     deletion and the quote are checked by the seat's contract-review
  *     record, never here.
+ *   - One standing case of that last clause, so it is not re-asked per PR:
+ *     a PR that adds an authorable top-level key or a liveness Leg 2 bound
+ *     member carries the matching enumeration row in the published skill
+ *     (ruling A on #32584, record 6819475461), and may raise that file's row
+ *     by the row's own measured delta and by no more. Nothing else in the
+ *     file is cut to make room and no wider raise rides along; the body quotes
+ *     ruling A and the ruling that made this standing (#32673, letter A,
+ *     maintainer 「32843 32673 同意」, record 6840575378). A rename whose
+ *     replacement is such a key or member is the same case.
  *
  * ## Enumeration, never a hand list
  *

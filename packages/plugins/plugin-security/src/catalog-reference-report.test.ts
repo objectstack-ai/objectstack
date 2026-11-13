@@ -625,8 +625,11 @@ describe('[ADR-0131 D3/D4] SecurityPlugin runs the report at kernel:bootstrapped
     ]);
 
     const handlers = b.hooks.get('kernel:bootstrapped') ?? [];
-    // This report alone: the grant-name backfill that ran ahead of it is retired (ADR-0131 D10).
-    expect(handlers).toHaveLength(1);
+    // The platform baseline seam's window close (it re-derives the everyone
+    // anchor only when a set joined after the derivation began — none here),
+    // then this report, last. The grant-name backfill that ran ahead of it is
+    // retired (ADR-0131 D10).
+    expect(handlers).toHaveLength(2);
     for (const handler of handlers.slice(0, -1)) await handler();
     const writes = [
       vi.spyOn(b.engine, 'insert'), vi.spyOn(b.engine, 'update'), vi.spyOn(b.engine, 'delete'),
@@ -639,5 +642,183 @@ describe('[ADR-0131 D3/D4] SecurityPlugin runs the report at kernel:bootstrapped
     expect(lines.map((meta: any) => meta?.organizations?.items?.map((o: any) => ({
       organizationId: o.organizationId, positions: o.positions, assignments: o.assignments,
     })))).toEqual([[{ organizationId: ORG, positions: { ghost_lead: 1 }, assignments: { items: ['up_ghost'] } }]]);
+  });
+});
+
+/**
+ * [ADR-0150 D8] A grant whose package no longer serves its set, read onto a
+ * holder another grant of the same user, set and organization is bound to,
+ * confers nothing (`staleGrantBesideBoundGrant`, the rule the authorization
+ * resolver applies). The report lists exactly those rows, per organization.
+ * Every package here shares one namespace, the only place a stale column is
+ * read onto another holder (#31698).
+ */
+describe('[ADR-0150 D8] the report lists each stale-column grant beside a grant bound to the holder it reads', () => {
+  const Q = 'com.acme.q';
+  const GONE = 'com.acme.gone';
+  /** `solo` held by Q alone. */
+  const solo = { name: 'solo', _packageId: Q, systemPermissions: ['cap_solo'] };
+  const catalog = createSecurityCatalogReader({
+    registry: {
+      getItem: (type: string, name: string) => (type === 'permission' && name === 'solo' ? solo : undefined),
+      listItems: (type: string) => (type === 'permission' ? [solo] : []),
+      isPackageDisabled: () => false,
+      packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' && name === 'solo' ? [Q] : []),
+      getPackageScopedItem: (type: string, name: string, packageId: string) =>
+        type === 'permission' && name === 'solo' && packageId === Q ? solo : undefined,
+      getEnvironmentScopedItem: () => undefined,
+      getArtifactItem: () => undefined,
+      getPackage: (id: string) => ({ manifest: { id, namespace: 'acme' } }),
+      getAllPackages: () => [],
+    } as any,
+    metadata: { get: () => undefined, list: () => [] },
+  });
+  const grant = (id: string, user: string, column: string, organization = ORG) =>
+    ({ id, user_id: user, permission_set: 'solo', permission_set_package: column, organization_id: organization });
+  const rows = [
+    grant('g_bound', 'usr_a', Q),
+    grant('g_stale', 'usr_a', GONE),
+    // CONTROL: the same stale column with no bound grant beside it reads the one holder, as before.
+    grant('g_alone', 'usr_b', GONE),
+    // CONTROL: bound in another organization only.
+    grant('g_bound_elsewhere', 'usr_c', Q, OTHER_ORG),
+    grant('g_stale_here', 'usr_c', GONE),
+  ];
+  const engine: CatalogReferenceReportEngine = {
+    getObject: () => ({}),
+    find: async (object, options: any) =>
+      object === 'sys_user_permission_set' ? rows.slice(options.offset ?? 0, (options.offset ?? 0) + options.limit) : [],
+  };
+
+  it('lists the stale grant under its organization, with its package and the bound holder, and nothing else', async () => {
+    const report = await collectCatalogReferences(engine, { catalog });
+    expect(report.organizations.map((o) => ({ organizationId: o.organizationId, withheld: o.staleGrantsBesideBound })))
+      .toEqual([{
+        organizationId: ORG,
+        withheld: [{ id: 'g_stale', userId: 'usr_a', name: 'solo', packageId: GONE, holder: Q }],
+      }]);
+    expect(report.organizations.flatMap((o) => o.permissionSetGrants)).toEqual([]);
+  });
+
+  it('logs one error line for the category, with every listed grant in its meta', async () => {
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    await reportCatalogReferences(engine, { catalog, logger });
+    const lines = logger.error.mock.calls.filter(([line]: any[]) => String(line).includes('no longer serves their permission set'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0][2]).toEqual({
+      count: 1,
+      organizations: {
+        items: [{
+          organizationId: ORG,
+          count: 1,
+          grants: { items: [{ id: 'g_stale', userId: 'usr_a', permissionSet: 'solo', packageId: GONE, holder: Q }] },
+        }],
+      },
+    });
+  });
+});
+
+/**
+ * [ADR-0150 D2/D8, #31698] A grant whose package no longer serves its set,
+ * where the holder the name now reads is outside that package's namespace,
+ * confers nothing: the catalog never reads the column onto that holder. The
+ * report lists exactly those rows, per organization, with the holder — apart
+ * from the grants naming a set nothing holds.
+ */
+describe('[ADR-0150 D2/D8, #31698] the report lists each stale-column grant whose holder is outside its package\'s namespace', () => {
+  const Q = 'com.acme.q';
+  /** Of Q's namespace, holding no set. */
+  const SAME = 'com.acme.q-old';
+  /** Of another namespace, holding no set. */
+  const OTHER = 'com.acme.other';
+  const NAMESPACES: Record<string, string> = { [Q]: 'q', [SAME]: 'q', [OTHER]: 'other' };
+  /** `solo` held by Q alone; `env_only` by the environment alone. */
+  const solo = { name: 'solo', _packageId: Q, systemPermissions: ['cap_solo'] };
+  const envOnly = { name: 'env_only', systemPermissions: ['cap_env'] };
+  const catalog = createSecurityCatalogReader({
+    registry: {
+      getItem: (type: string, name: string) => (type !== 'permission' ? undefined : name === 'solo' ? solo : name === 'env_only' ? envOnly : undefined),
+      listItems: (type: string) => (type === 'permission' ? [solo, envOnly] : []),
+      isPackageDisabled: () => false,
+      packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' && name === 'solo' ? [Q] : []),
+      getPackageScopedItem: (type: string, name: string, packageId: string) =>
+        type === 'permission' && name === 'solo' && packageId === Q ? solo : undefined,
+      getEnvironmentScopedItem: (type: string, name: string) => (type === 'permission' && name === 'env_only' ? envOnly : undefined),
+      getArtifactItem: () => undefined,
+      getPackage: (id: string) => (NAMESPACES[id] ? { manifest: { id, namespace: NAMESPACES[id] } } : undefined),
+      getAllPackages: () => [],
+    } as any,
+    metadata: { get: () => undefined, list: () => [] },
+  });
+  const grant = (id: string, user: string, set: string, column: string, organization = ORG) =>
+    ({ id, user_id: user, permission_set: set, permission_set_package: column, organization_id: organization });
+  const rows = [
+    grant('g_other', 'usr_a', 'solo', OTHER),
+    grant('g_env', 'usr_b', 'env_only', SAME, OTHER_ORG),
+    // CONTROL: a stale column of the holder's namespace reads the holder, as before.
+    grant('g_same', 'usr_c', 'solo', SAME),
+    // CONTROL: a column of a package the registry does not know has no
+    // namespace to bound the read, and reads the holder, as before.
+    grant('g_unknown', 'usr_c', 'solo', 'com.acme.gone'),
+    // CONTROL: a set nothing holds is the other line.
+    grant('g_ghost', 'usr_c', 'ghost', OTHER),
+  ];
+  const engine: CatalogReferenceReportEngine = {
+    getObject: () => ({}),
+    find: async (object, options: any) =>
+      object === 'sys_user_permission_set' ? rows.slice(options.offset ?? 0, (options.offset ?? 0) + options.limit) : [],
+  };
+
+  it('lists each such grant under its organization, with its package and the holder, and nothing else', async () => {
+    const report = await collectCatalogReferences(engine, { catalog });
+    expect(report.organizations.map((o) => ({
+      organizationId: o.organizationId,
+      outside: o.staleGrantsOutsideNamespace,
+      unresolved: o.permissionSetGrants.map((g) => g.id),
+      withheld: o.staleGrantsBesideBound,
+    }))).toEqual([
+      {
+        organizationId: ORG,
+        outside: [
+          { id: 'g_other', userId: 'usr_a', name: 'solo', packageId: OTHER, holder: Q },
+        ],
+        unresolved: ['g_ghost'],
+        withheld: [],
+      },
+      {
+        organizationId: OTHER_ORG,
+        outside: [{ id: 'g_env', userId: 'usr_b', name: 'env_only', packageId: SAME, holder: null }],
+        unresolved: [],
+        withheld: [],
+      },
+    ]);
+  });
+
+  it('logs one error line for the category, with every listed grant in its meta and the fix', async () => {
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    await reportCatalogReferences(engine, { catalog, logger });
+    const lines = logger.error.mock.calls.filter(([line]: any[]) => String(line).includes("outside that package's namespace"));
+    expect(lines).toHaveLength(1);
+    expect(String(lines[0][0])).toContain('so each confers nothing');
+    expect(String(lines[0][0])).toContain('grant it again naming its package; then remove each listed grant');
+    expect(lines[0][2]).toEqual({
+      count: 2,
+      organizations: {
+        items: [
+          {
+            organizationId: ORG,
+            count: 1,
+            grants: { items: [
+              { id: 'g_other', userId: 'usr_a', permissionSet: 'solo', packageId: OTHER, holder: Q },
+            ] },
+          },
+          {
+            organizationId: OTHER_ORG,
+            count: 1,
+            grants: { items: [{ id: 'g_env', userId: 'usr_b', permissionSet: 'env_only', packageId: SAME, holder: null }] },
+          },
+        ],
+      },
+    });
   });
 });

@@ -31,6 +31,7 @@ import {
   isBundledStoreType,
   isPackageCaller,
   namedRowColumnOf,
+  pluralEntryKeys,
   refuseSeveralSlots,
   refuseSlotNotHeld,
   slotPackageOf,
@@ -1317,23 +1318,38 @@ export class DatabaseLoader implements MetadataLoader {
 
   /**
    * [#32246] {@link readTypeRows} as the unscoped reads answer it: for a
-   * by-package type, one row per name — the one saved last (its highest
-   * version), in the order names first appear — as when the loader kept one
-   * row per name. Every other type: every row.
+   * by-package type, one row per store slot — the one saved last of the slot
+   * (its highest version), in the order slots first appear — where, for an
+   * unbundled type, a name no package or one package holds is one slot (as
+   * when the loader kept one row per name); the paragraphs below give the
+   * other keys, a bundled type's included. Every other type: every row.
    *
    * [#31699 R3-B] A bundled by-package type keeps one row per
    * `(package, name, member)` ({@link unscopedRowKey}): one per name would
    * drop every other member of a bundle, and every other package's bundle.
+   *
+   * [#32521; epic #31527 red lines 2 and 3] An unbundled by-package type
+   * keeps one row per `(package, name)` ({@link pluralEntryKeys}, the key the
+   * metadata service's own plural reads keep one entry per), FROM one per
+   * name: one per name dropped every package's row of a name two packages
+   * hold but the one saved last, so the boot priming pass registered that
+   * package alone and a bare read of the name answered its body instead of
+   * refusing (`409 ambiguous-in-environment`). A name no package or one
+   * package holds keeps one row, as before: a package-less row beside one
+   * package's is that holder's customization (D4), and the row saved last of
+   * the two is the one answered; one package's action bound to several
+   * objects is one `(package, name)`, as before.
    */
   private async unscopedTypeRows(type: string): Promise<StoredTypeRow[]> {
     const rows = await this.readTypeRows(type);
     if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return rows;
     const bundled = isBundledStoreType(type);
+    const keys = bundled ? undefined : pluralEntryKeys(type, rows);
     const latest = new Map<string, StoredTypeRow>();
     const unnamed: StoredTypeRow[] = [];
-    for (const row of rows) {
+    for (const [at, row] of rows.entries()) {
       if (row.name === null) { unnamed.push(row); continue; }
-      const key = bundled ? unscopedRowKey(row.name, row.packageId, row.member ?? null) : row.name;
+      const key = keys ? keys[at]! : unscopedRowKey(row.name, row.packageId, row.member ?? null);
       const held = latest.get(key);
       if (!held || (row.version ?? 0) >= (held.version ?? 0)) latest.set(key, row);
     }

@@ -225,8 +225,12 @@ describe('control — array keys still concatenate', () => {
       views: [{ name: 'v1' }],
       requires: ['ai'],
     });
+    // The selected (last) manifest is a `plugin` package because the
+    // single-app rule (ADR-0019 D3 as amended) refuses two apps under one `app`
+    // or `module` package id and does not judge `plugin`; this test's subject
+    // is the concat pass. If a ruling holds `plugin` to one app too, retype it.
     const b = raw({
-      manifest: manifestB,
+      manifest: { ...manifestB, type: 'plugin' },
       apps: [{ name: 'a2' }],
       views: [{ name: 'v2' }],
       requires: ['automation'],

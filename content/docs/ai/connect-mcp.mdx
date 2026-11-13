@@ -306,7 +306,15 @@ record means no file**, refused with the same `RECORD_NOT_FOUND`.
   `401`, and a second use, an expired link, an unknown link and another user's
   link all get the same `404`. The upload is stored as that user, with their
   access checked again when the file arrives, and it meets the storage
-  service's maximum upload size before the link is spent. Sending a file's
+  service's maximum upload size before the link is spent. A field that cannot
+  take the upload now gets no link: a `readonly` field, or one whose
+  `readonlyWhen` holds on this record as it stands (refused `403`
+  `FIELD_NOT_ACCESSIBLE`, naming the lock in the words the engine update's
+  strict refusal (`strictReadonlyWrites`) uses for it; `update_record` reports
+  the same lock under `droppedFields` with reason `readonly_when`), and a
+  record a pending approval locks (`409`
+  `RECORD_LOCKED`). A field that becomes read-only after the link was made
+  refuses the upload when it arrives, attaching nothing. Sending a file's
   bytes through the MCP protocol itself is not supported yet.
 
 Reading a PDF or Word document's text runs on a pool of worker threads, so the
@@ -365,6 +373,25 @@ can reach is the **default exposure policy (v1)**:
   identity routes that accept a signed-in session only, so an agent connected
   over OAuth sees them listed, but a call that reaches the identity route is
   refused there (`401`) and changes nothing.
+- **An approver's decisions are exposed to the approver's agent.** The four
+  decisions on an approval request (`sys_approval_request`): approve, reject,
+  reassign and send back, are exposed with `ai.requiresConfirmation: true`, so
+  `run_action` decides only once the call carries `confirm: true`. Each forwards
+  to its approvals route as the caller, and the approval service admits the
+  same people the console's buttons admit: a current approver of the request,
+  and, for approve, reject and reassign, the administrator who may override it.
+  Anyone else, the submitter
+  included, is refused and the request stays pending.
+- **A submitter's recall and resubmit are exposed to the submitter's agent.**
+  Recall (withdraw a pending request, or abandon one sent back for revision) and
+  resubmit (send a request that was sent back for revision into review again)
+  are exposed the same way, with `ai.requiresConfirmation: true`, and forward to
+  their approvals routes as the caller. The approval service admits the
+  submitter, and for recalling a pending request the administrator who may
+  override it; anyone else is refused (`FORBIDDEN`) and the request does not
+  move. A recalled request is closed: to send the record for approval again,
+  the agent uses the app's own submit action. Remind, request-info and comments
+  are not exposed.
 
 <Callout type="info">
 This is the default policy, not a ceiling. A finer, **metadata-declared** exposure
@@ -478,6 +505,10 @@ drive this MCP server. Same word, different layer.
   an action as a code-review-worthy act — that's the real security boundary.
 - An action can also declare `ai.requiresConfirmation`; destructive-looking
   actions (`confirmText`, danger variants) default to requiring it.
+- **An AI service account does not confirm an action for itself.** An action
+  declaring `ai.requiresConfirmation: true` refuses an AI service account's key
+  (`428` `ACTION_CONFIRMATION_REQUIRED`) at `run_action`, `resume_run` and REST
+  `/actions`, whatever the call carries; a person runs that action.
 - **`delete_record` needs `confirm: true` on every call.** A record delete over
   MCP is permanent, so the tool refuses a call without it with `run_action`'s
   refusal (`428` `ACTION_CONFIRMATION_REQUIRED`, its `details.actionName`
