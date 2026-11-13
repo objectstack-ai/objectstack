@@ -818,9 +818,14 @@ describe('[#32365] the bare action read weighs the package-less holder and serve
          */
         describe('[#32751] the bare route on an object neither holder binds serves the environment\'s own item there', () => {
             const engineReadsStore = () => {
-                (engine as any).find = async (object: string, query: any) => (object !== 'sys_metadata' ? [] : storedRows.filter(
-                    (row) => Object.entries(query?.where ?? {}).every(([field, want]) => row[field] === want),
-                ));
+                (engine as any).find = async (object: string, query: any) => {
+                    if (object !== 'sys_metadata') return [];
+                    const where: Record<string, any> = query?.where ?? {};
+                    return storedRows.filter((row) => Object.keys(where).every((field) => {
+                        if (field.startsWith('$')) throw new Error(`engine store double: combinator ${field} is not implemented`);
+                        return row[field] === where[field];
+                    }));
+                };
             };
             const twoHoldersAndEnvironment = (envFirst: boolean, envObject: string | undefined = 'lead') => {
                 engine = new ObjectQL();
