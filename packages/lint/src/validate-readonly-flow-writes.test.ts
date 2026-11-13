@@ -703,6 +703,64 @@ describe('validateReadonlyFlowWrites', () => {
   });
 });
 
+// [#32666] `runAs:'system'` is the remedy for a flow automation runs, but a
+// button or action cannot start an elevated autolaunched flow for a user: the
+// start-admission rule answers 403 (`packages/runtime/src/flow-start-admission.ts`).
+// So on an autolaunched flow, the type a record action button names, the fix
+// line names the elevated flow a button can start. Only that clause is pinned;
+// the wording around it is the fix line's own. Declared before the #22161
+// one-line pins below, which read what these cases fire.
+describe('[#32666] the fix line names what a button can start elevated', () => {
+  const BUTTON_ENTRY_CLAUSE = "a 'screen' or 'api' flow";
+  const findingFor = (flowType: string, nodeType: 'update_record' | 'create_record') => {
+    const findings = validateReadonlyFlowWrites({
+      objects: [opportunityObject],
+      flows: [{
+        name: 'submit_for_approval',
+        type: flowType,
+        nodes: [
+          { id: 'start', type: 'start', config: {} },
+          { id: 'w', type: nodeType, label: 'Write', config: { objectName: 'crm_opportunity', fields: { approval_status: 'pending' } } },
+        ],
+        edges: [],
+      }],
+    });
+    expect(findings.map((f) => f.rule)).toEqual([FLOW_UPDATE_READONLY_FIELD]);
+    return findings[0];
+  };
+
+  it.each(['update_record', 'create_record'] as const)('an autolaunched %s names a screen or api flow and the subflow route beside runAs:\'system\'', (nodeType) => {
+    const { hint } = findingFor('autolaunched', nodeType);
+    expect(hint).toContain(BUTTON_ENTRY_CLAUSE);
+    expect(hint).toContain('subflow node');
+    expect(hint).toContain("runAs:'system'");
+    expect(hint).toContain(nodeType);
+  });
+
+  it('an autolaunched create_record leads with the beforeInsert stamp, which a button-started run keeps', () => {
+    expect(findingFor('autolaunched', 'create_record').hint).toMatch(/^Stamp 'approval_status' in a beforeInsert hook/);
+  });
+
+  it.each(['record_change', 'schedule', 'screen', 'api'])('a %s flow keeps the plain runAs:\'system\' remedy', (flowType) => {
+    // A record_change / schedule flow starts on its own trigger, where
+    // elevation is admitted; a screen / api flow is itself an entry a button
+    // can start elevated. Neither needs the clause.
+    for (const nodeType of ['update_record', 'create_record'] as const) {
+      const { hint } = findingFor(flowType, nodeType);
+      expect(hint, `${flowType} ${nodeType}`).toMatch(/^Declare the flow runAs:'system'/);
+      expect(hint, `${flowType} ${nodeType}`).not.toContain(BUTTON_ENTRY_CLAUSE);
+      expect(hint, `${flowType} ${nodeType}`).not.toContain('subflow node');
+    }
+  });
+
+  it('`os explain flow-update-readonly-field` states the limit and both elevated routes a button can reach', () => {
+    const text = explanationOf(FLOW_UPDATE_READONLY_FIELD);
+    expect(text).toContain('PERMISSION_DENIED');
+    expect(text).toContain('a `screen` or `api` flow');
+    expect(text).toContain('`subflow` node calls the elevated flow');
+  });
+});
+
 describe('[#22161] one-line verdicts — the rule ids this file shortened', () => {
   it('every verdict the cases above fired for those ids is one line of at most 200 characters', () => {
     // The coverage control first: each shortened id fired at least once, so

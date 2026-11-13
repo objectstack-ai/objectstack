@@ -65,7 +65,10 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
    * (cloud#3565; they replaced `draft_record`), and the package removal
    * (`delete_package`), which only stages the removal of a package built in
    * the environment — a person confirms before anything is deleted
-   * (cloud#3656).
+   * (cloud#3656), and the `ask` agent's read-only `get_record_history`, which
+   * reads one record's change history the user may see so a chat can undo the
+   * last edit — the restore itself still goes through a confirm card
+   * (cloud#4347).
    */
   'service-ai-studio': [
     'add_field',
@@ -84,6 +87,7 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
     'get_authoring_rules',
     'get_metadata_schema',
     'get_package',
+    'get_record_history',
     'list_metadata',
     'list_objects',
     'list_packages',

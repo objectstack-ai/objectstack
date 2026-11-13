@@ -137,11 +137,12 @@ each child row.
 Build an App with `App.create({...})` from
 `@objectstack/spec/ui` and register under `defineStack({ apps: [...] })`.
 
-⛔ **At most one App per package** (ADR-0019 (app-as-consumer-unit) D3):
-`defineStack` refuses a second in a `type: 'app'` package. A suite (an app
-package plus its modules) may surface more apps: a `type: 'module'` package may
-carry its own app, served under the module's package id and gone when the
-module is disabled. Audiences sharing one product and its objects stay
+⛔ **At most one App per package** (ADR-0019 (app-as-consumer-unit) D3 as
+amended): `defineStack` refuses a second app in a `type: 'app'` and a
+`type: 'module'` package alike. A suite (an app package plus its modules) may
+surface more apps: each further app goes in a module of its own with the
+objects it shows, served under that module's package id and gone when it is
+disabled. Audiences sharing one product and its objects stay
 `requiredPermissions`-gated groups **inside** one app.
 
 Who sees an app (`tabPermissions`) and who may open it (app
@@ -264,8 +265,7 @@ it; the option `value`, never its label. A multi-step operation is
    The grid-placement field is `layout: { x, y, w, h }` — `position` is not a
    widget key and the closed schema REJECTS it by name.
    `layout` is optional: omit it and the widget
-   auto-flows; set it only when you want
-   an explicit grid position.
+   auto-flows.
 
 ---
 

@@ -313,10 +313,25 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     } else {
       textValue = String(value);
     }
-    navigator.clipboard.writeText(textValue).then(() => {
-      setCopiedField(fieldName);
-      setTimeout(() => setCopiedField(null), 2000);
-    });
+    // The browser may offer no clipboard (an insecure origin) or refuse the
+    // write (permission, an unfocused document): the copy then does nothing,
+    // and nothing is thrown or left rejected out of the row's click
+    // (objectstack#32667). The copied mark is drawn only for a write that landed.
+    const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+    if (typeof clipboard?.writeText !== 'function') return;
+    let write: Promise<void>;
+    try {
+      write = clipboard.writeText(textValue);
+    } catch {
+      return;
+    }
+    Promise.resolve(write).then(
+      () => {
+        setCopiedField(fieldName);
+        setTimeout(() => setCopiedField(null), 2000);
+      },
+      () => {},
+    );
   }, []);
 
   // Identify empty fields once for both filtering and the toggle counter —
@@ -442,7 +457,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // Apply auto-layout: infer columns and auto-span wide fields
   const { fields: layoutFields, columns: rawColumns } = applyDetailAutoLayout(
     visibleFields,
-    section.columns
+    section.columns,
+    undefined,
+    objectSchema?.fields,
   );
   // Never render more columns than there are visible fields — the object-wide
   // column count (objectui#2578) can exceed a section's visible count when

@@ -713,6 +713,36 @@ describe('[#32292] POST /analytics/dataset/query — a refused name is judged ov
     };
   };
 
+  /**
+   * Each holder's own exact-qualifier read (`packageId` one of `holders`)
+   * refuses `ambiguous-in-closure` naming both holders. [#32568] A
+   * package-less row of the name beside the holders no longer rigs this for a
+   * dataset: a sealed type declines that row at every exact address (epic
+   * ruling 6817768147), which serves the holder's own. So the refusal that row
+   * gave is thrown here, in the shape that read threw it.
+   */
+  const exactReadsRefuse = (...holders: string[]) => {
+    const target = protocol;
+    protocol = new Proxy(target, {
+      get(t, prop) {
+        if (prop === 'getMetaItem') {
+          return async (req: any) => {
+            if (holders.includes(req?.packageId)) {
+              const base = {
+                status: 'refused' as const, reason: 'ambiguous-in-closure' as const, type: 'dataset', name: req.name,
+                callerPackageId: null, candidates: holders.map((packageId) => ({ kind: 'package' as const, packageId })),
+              };
+              throw new PackageScopedNameRefusedError({ ...base, message: 'refused' } as never);
+            }
+            return t.getMetaItem(req);
+          };
+        }
+        const value = Reflect.get(t, prop, t);
+        return typeof value === 'function' ? value.bind(t) : value;
+      },
+    });
+  };
+
   beforeEach(() => {
     registry = new SchemaRegistry({ multiTenant: false });
     for (const id of [A, B, C]) registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop()! } as never, 'code');
@@ -907,12 +937,7 @@ describe('[#32292] POST /analytics/dataset/query — a refused name is judged ov
   it('a holder whose own exact-qualifier read refuses is undetermined: 503 on every arm, for every caller, naming no holder and running nothing', async () => {
     ship('sales', A);
     ship('sales', B);
-    // A row of the name in the bare slot, beside both package holders.
-    registry.registerItem('dataset', {
-      name: 'sales', label: 'bare sales', object: 'bare_item',
-      dimensions: [{ name: 'region', field: 'region', type: 'string' }],
-      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
-    }, 'name' as never);
+    exactReadsRefuse(A, B);
     for (const admitted of [[], ['alpha_item'], ['alpha_item', 'beta_item']]) {
       for (const query of [{}, { callerPackage: P }, { package: C }]) {
         const svc = service({ admitted });
@@ -986,11 +1011,7 @@ describe('[#32292] POST /analytics/dataset/query — a refused name is judged ov
   it('?package= naming a holder whose own address refuses: 503 for every caller, naming no holder and running nothing', async () => {
     ship('sales', A);
     ship('sales', B);
-    registry.registerItem('dataset', {
-      name: 'sales', label: 'bare sales', object: 'bare_item',
-      dimensions: [{ name: 'region', field: 'region', type: 'string' }],
-      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
-    }, 'name' as never);
+    exactReadsRefuse(A, B);
     for (const admitted of [[], ['alpha_item'], ['alpha_item', 'beta_item']]) {
       for (const holder of [A, B]) {
         const svc = service({ admitted });
@@ -1001,6 +1022,24 @@ describe('[#32292] POST /analytics/dataset/query — a refused name is judged ov
         expect(answer.text, where).not.toContain(B);
         expect(svc.queryDataset, where).not.toHaveBeenCalled();
       }
+    }
+  });
+
+  it('[#32568] a package-less row of the name beside both holders is declined at each holder\'s exact address: ?package= runs that holder\'s own', async () => {
+    ship('sales', A);
+    ship('sales', B);
+    registry.registerItem('dataset', {
+      name: 'sales', label: 'bare sales', object: 'bare_item',
+      dimensions: [{ name: 'region', field: 'region', type: 'string' }],
+      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+    }, 'name' as never);
+    for (const [holder, own] of [[A, 'alpha_item'], [B, 'beta_item']]) {
+      const svc = service({ admitted: ['alpha_item', 'beta_item'] });
+      const answer = await send(svc, { package: holder });
+      expect(answer.status, answer.text).toBe(200);
+      expect(answer.body.object, answer.text).toBe(own);
+      expect(svc.queryDataset).toHaveBeenCalledTimes(1);
+      expect(svc.queryDataset.mock.calls[0][0].object).toBe(own);
     }
   });
 
