@@ -187,15 +187,6 @@ function isPackageMember(item: unknown, packageId: string): boolean {
 }
 
 /**
- * [#32986, #33003] Whether `item` names `packageId` by the `_packageId` stamp
- * alone: neither its own `packageId` nor the legacy `package` key names it.
- */
-function namesPackageByStampAlone(item: object, packageId: string): boolean {
-  const meta = item as { packageId?: unknown; package?: unknown; _packageId?: unknown };
-  return meta._packageId === packageId && meta.packageId !== packageId && meta.package !== packageId;
-}
-
-/**
  * [#33003] The body {@link MetadataManager.register} stores for an environment
  * row the boot pass stamped with `stamp`: `data` without that stamp, at the top
  * and in the publish envelope's `metadata` body (`revertPackage` restores the
@@ -691,7 +682,9 @@ export class MetadataManager implements IMetadataService {
    * the host's declared package (`_packageId`), and the stamp stays — ObjectQL
    * registers such an `object` as the host package's contribution — but the
    * row is not the package's item, so {@link unregisterPackage} leaves it
-   * ({@link isStampedEnvironmentRow}).
+   * ({@link isStampedEnvironmentRow}). [#33003] A copy that replaces one
+   * joins the set ({@link rewritesEnvironmentRow}), and {@link register}
+   * stores a member without the stamp.
    */
   private readonly storedEnvironmentRows = new WeakSet<object>();
   /**
@@ -1352,7 +1345,7 @@ export class MetadataManager implements IMetadataService {
         this.storedRowsOverOwnItems.add(data);
       }
     }
-    // [#33003] A copy of an environment row the boot pass stamped, still stamped alone, is that row.
+    // [#33003] A copy of an environment row the boot pass stamped, still carrying the stamp, is that row.
     if (this.rewritesEnvironmentRow(typeStore.get(key), data)) this.storedEnvironmentRows.add(data as object);
     for (const replaced of replaces) typeStore.delete(replaced);
     typeStore.set(key, data);
@@ -2771,7 +2764,8 @@ export class MetadataManager implements IMetadataService {
    */
   private isStampedEnvironmentRow(data: unknown, packageId: string): boolean {
     if (data === null || typeof data !== 'object' || !this.storedEnvironmentRows.has(data)) return false;
-    return namesPackageByStampAlone(data, packageId);
+    const meta = data as { packageId?: unknown; package?: unknown; _packageId?: unknown };
+    return meta._packageId === packageId && meta.packageId !== packageId && meta.package !== packageId;
   }
 
   /**
@@ -2787,20 +2781,22 @@ export class MetadataManager implements IMetadataService {
   /**
    * [#33003] Whether writing `data` over `before` rewrites an environment row
    * the boot pass stamped: `before` is such a row ({@link environmentRowStamp}),
-   * and `data` is a copy no loader handed out that still names that package by
-   * the stamp alone. Every writer that registers such a copy reaches this —
-   * ObjectQL's late-manifest bridge (the `ownPreviousCopy` re-register and
-   * `restoreExtendedObjectCopies`) and its object-copy follow
-   * (`registerInMemory`), `publishPackage` / `revertPackage` over
-   * {@link collectPackageMembers}, and `importMetadata`'s merge — so the copy
-   * keeps the row's mark instead of the mark riding the replaced object. An
-   * item a loader handed out (a file's, a stored row's) is that loader's
-   * item, never a copy: a stored row is marked by {@link loadMany} itself.
+   * and `data` is a copy no loader handed out that still carries that stamp (a
+   * copy that also names the package by its own key stays the package's item:
+   * {@link isStampedEnvironmentRow} reads every key at each use). Every writer
+   * that registers such a copy reaches this — ObjectQL's late-manifest bridge
+   * (the `ownPreviousCopy` re-register and `restoreExtendedObjectCopies`) and
+   * its object-copy follow (`registerInMemory`), `publishPackage` /
+   * `revertPackage` over {@link collectPackageMembers}, and `importMetadata`'s
+   * merge — so the copy keeps the row's mark instead of the mark riding the
+   * replaced object. An item a loader handed out (a file's, a stored row's) is
+   * that loader's item, never a copy: a stored row is marked by
+   * {@link loadMany} itself.
    */
   private rewritesEnvironmentRow(before: unknown, data: unknown): boolean {
     if (data === null || typeof data !== 'object' || data === before || this.loadedFrom.has(data)) return false;
     const stamp = this.environmentRowStamp(before);
-    return stamp !== undefined && namesPackageByStampAlone(data, stamp);
+    return stamp !== undefined && (data as { _packageId?: unknown })._packageId === stamp;
   }
 
   /**

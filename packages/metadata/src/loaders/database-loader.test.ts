@@ -3219,6 +3219,14 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
     expect(await state(m)).toEqual(ITEMS.map(([type, name]) => name === 'env_account' ? [type, name, null, false, 0] : [type, name, HOST, true, 1]));
   });
 
+  it('CONTROL a copy stamped with another package is that package\'s item: unregisterPackage of that package removes it', async () => {
+    for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
+    const m = await bootPass();
+    await m.register('object', 'env_account', { name: 'env_account', label: 'env', _packageId: EXT }, { notify: false });
+    await m.unregisterPackage(EXT);
+    expect(await state(m)).toEqual(ITEMS.map(([type, name]) => name === 'env_account' ? [type, name, null, false, 0] : [type, name, HOST, true, 1]));
+  });
+
   it('CONTROL unregisterPackage of the extender leaves the environment\'s object the bridge rewrote, and of another package nothing moves', async () => {
     for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
     const m = await bootPass();
