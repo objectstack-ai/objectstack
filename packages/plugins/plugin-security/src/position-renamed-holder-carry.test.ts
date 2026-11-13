@@ -7,15 +7,17 @@
  * single-column write and the activation-ledger read are the driver's own
  * answers, not a double's.
  *
- * The positions come from a stand-in catalog (`list('position')`), which is
+ * Most positions come from a stand-in catalog (`list('position')`), which is
  * what lets one test hold a position of another package, of the environment,
  * or two claimants of one old name: a real registry refuses the clashes at
- * registration. Each of the ruling's conditions is pinned both ways — the old
+ * registration. The disabled-package and environment-sentinel cases run
+ * through the REAL reader (`createSecurityCatalogReader`) over the engine's
+ * own `SchemaRegistry`, since the gaps they pin live in the real shapes. Each of the ruling's conditions is pinned both ways — the old
  * name refused, and the honest declaration beside it carried:
  *
  *  1. a switched-off old position does not come back active under the new name;
- *  2. a package never claims an old name another package (or the environment)
- *     holds or is recorded as owning;
+ *  2. a package never claims an old name another package (enabled or
+ *     disabled) or the environment holds, or is recorded as owning;
  *  3. no current name, no cycle, no old name claimed twice.
  */
 
@@ -24,7 +26,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { SysMetadataActivation } from '@objectstack/platform-objects/system';
-import type { SecurityCatalogEntry } from '@objectstack/core';
+import { createSecurityCatalogReader, type SecurityCatalogEntry } from '@objectstack/core';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import {
   carryRenamedPositionHolders,
@@ -164,7 +166,7 @@ describe('the holders of an old name move to the new one, in every organization'
     const engine = await boot();
     const find = vi.spyOn(engine, 'find');
     const report = await carryRenamedPositionHolders(engine as any, { catalog: catalogOf(entry('crm_sales_rep', CRM)) });
-    expect(report).toEqual({ carried: [], refused: [], leftBehind: [], notRead: [] });
+    expect(report).toEqual({ carried: [], refused: [], failed: [], leftBehind: [], notRead: [] });
     expect(find).not.toHaveBeenCalled();
   });
 });
@@ -277,6 +279,127 @@ describe('holders only: every other reference to an old name is named, never wri
     const warn = vi.fn();
     logPositionRenameCarry(report, { warn, info: vi.fn() });
     expect(warn.mock.calls.map(([m]) => String(m)).join('\n')).toMatch(/sys_sharing_rule[\s\S]*'sales_rep' \(1 row\(s\) in 1 organization\(s\)\)/);
+  });
+});
+
+/** The engine's own registry, and a real catalog reader over it (no stored metadata unless given). */
+function realCatalog(engine: ObjectQL, stored: Array<Record<string, unknown>> = []) {
+  const registry = (engine as any).registry;
+  const metadata = {
+    get: async (type: string, name: string) => (type === 'position' ? stored.find((d) => d.name === name) : undefined),
+    list: async (type: string) => (type === 'position' ? stored : []),
+  };
+  return { registry, catalog: createSecurityCatalogReader({ registry, metadata }) };
+}
+
+/** Install `packageId` on the real registry with `positions`. */
+function installWithPositions(registry: any, packageId: string, positions: Array<Record<string, unknown>>): void {
+  registry.installPackage({ id: packageId, name: packageId, version: '1.0.0', type: 'app', namespace: packageId.split('.').pop() } as never, 'code');
+  for (const p of positions) registry.registerItem('position', { label: String(p.name), ...p }, 'name', packageId);
+}
+
+describe('condition 2 over every installed package: a disabled package still holds its names', () => {
+  it('a position of a DISABLED package is refused as held; once that package is uninstalled, the same claim carries', async () => {
+    const engine = await boot();
+    await seed(engine, 'sys_user_position', [holder('h1', 'u1', 'sales_rep', 'org_a')]);
+    const { registry, catalog } = realCatalog(engine);
+    installWithPositions(registry, HR, [{ name: 'sales_rep' }]);
+    installWithPositions(registry, CRM, [{ name: 'crm_sales_rep', renamedFrom: ['sales_rep'] }]);
+    registry.disablePackage(HR);
+    // The served catalog no longer lists HR's position: the gap this pins.
+    expect((await catalog.list('position')).map((e) => e.name)).not.toContain('sales_rep');
+
+    const whileDisabled = await carryRenamedPositionHolders(engine as any, { catalog });
+    expect((await positionsById(engine)).h1).toBe('sales_rep');
+    expect(whileDisabled.refused).toEqual([
+      expect.objectContaining({ from: 'sales_rep', to: 'crm_sales_rep', packageId: CRM, reason: 'held-by-other', detail: `'sales_rep' is a position package "${HR}" (disabled) declares` }),
+    ]);
+
+    registry.uninstallPackage(HR);
+    const afterUninstall = await carryRenamedPositionHolders(engine as any, { catalog });
+    expect((await positionsById(engine)).h1).toBe('crm_sales_rep');
+    expect(afterUninstall.carried).toEqual([expect.objectContaining({ from: 'sales_rep', rows: 1 })]);
+  });
+
+  it('a disabled package claiming an old name: alone it is not carried; beside another claimant, both are claimed-twice', async () => {
+    const engine = await boot();
+    await seed(engine, 'sys_user_position', [holder('h1', 'u1', 'sales_rep', 'org_a')]);
+    const { registry, catalog } = realCatalog(engine);
+    installWithPositions(registry, HR, [{ name: 'hr_sales_rep', renamedFrom: ['sales_rep'] }]);
+    registry.disablePackage(HR);
+
+    const alone = await carryRenamedPositionHolders(engine as any, { catalog });
+    expect(alone.refused).toEqual([expect.objectContaining({ to: 'hr_sales_rep', reason: 'claimant-disabled', disabled: true })]);
+
+    installWithPositions(registry, CRM, [{ name: 'crm_sales_rep', renamedFrom: ['sales_rep'] }]);
+    const both = await carryRenamedPositionHolders(engine as any, { catalog });
+    expect(both.refused.map((r) => [r.to, r.reason]).sort()).toEqual([['crm_sales_rep', 'claimed-twice'], ['hr_sales_rep', 'claimed-twice']]);
+    expect((await positionsById(engine)).h1).toBe('sales_rep');
+  });
+
+  it('the real reader: an environment position (stamped `sys_metadata`) is "the environment", never a package', async () => {
+    const engine = await boot();
+    await seed(engine, 'sys_user_position', [holder('h1', 'u1', 'sales_rep', 'org_a'), holder('h2', 'u2', 'old_rep', 'org_a')]);
+    const { registry, catalog } = realCatalog(engine, [
+      { name: 'sales_rep', label: 'Sales rep', _packageId: 'sys_metadata' },
+      { name: 'env_rep', label: 'Env rep', _packageId: 'sys_metadata', renamedFrom: ['old_rep'] },
+    ]);
+    installWithPositions(registry, CRM, [{ name: 'crm_sales_rep', renamedFrom: ['sales_rep'] }]);
+
+    const report = await carryRenamedPositionHolders(engine as any, { catalog });
+    expect(report.refused).toEqual([
+      expect.objectContaining({ from: 'sales_rep', reason: 'held-by-other', detail: "'sales_rep' is a position the environment declares" }),
+    ]);
+    expect(report.carried).toEqual([expect.objectContaining({ from: 'old_rep', to: 'env_rep', packageId: null, rows: 1 })]);
+  });
+});
+
+describe('a failure is one claim\'s: the others still run, and what moved before it is said', () => {
+  it('a write refused part-way: the rows moved before it are reported, the next claim is carried', async () => {
+    const engine = await boot();
+    await seed(engine, 'sys_user_position', [
+      holder('h1', 'u1', 'sales_rep', 'org_a'),
+      holder('h2', 'u2', 'sales_rep', 'org_b'),
+      holder('h3', 'u3', 'field_rep', 'org_a'),
+    ]);
+    const realUpdate = engine.update.bind(engine);
+    vi.spyOn(engine, 'update').mockImplementation(async (object: any, data: any, options: any) => {
+      if (data?.id === 'h2') throw new Error('refused by a write gate');
+      return realUpdate(object, data, options);
+    });
+
+    const report = await carryRenamedPositionHolders(engine as any, {
+      catalog: catalogOf(entry('crm_sales_rep', CRM, ['sales_rep']), entry('crm_field_rep', CRM, ['field_rep'])),
+    });
+
+    expect(await positionsById(engine)).toEqual({ h1: 'crm_sales_rep', h2: 'sales_rep', h3: 'crm_field_rep' });
+    expect(report.failed).toEqual([expect.objectContaining({ from: 'sales_rep', rows: 1, byOrganization: { org_a: 1 }, error: 'refused by a write gate' })]);
+    expect(report.carried).toEqual([expect.objectContaining({ from: 'field_rep', rows: 1 })]);
+    const warn = vi.fn();
+    logPositionRenameCarry(report, { warn, info: vi.fn() });
+    expect(warn.mock.calls.map(([m]) => String(m)).join('\n')).toMatch(/'sales_rep' → 'crm_sales_rep' .* did not finish: 1 holder row\(s\) were moved before it failed \(org_a: 1\)/);
+  });
+
+  it('a row another replica moved after this one read it is neither moved again nor named as a twin', async () => {
+    const engine = await boot();
+    // Already on the new name: the other replica's write.
+    await seed(engine, 'sys_user_position', [holder('h1', 'u1', 'crm_sales_rep', 'org_a')]);
+    const realFind = engine.find.bind(engine);
+    let served = false;
+    vi.spyOn(engine, 'find').mockImplementation(async (object: any, options: any) => {
+      // This replica's read of the old name, taken before the other replica's write.
+      if (object === 'sys_user_position' && !served && JSON.stringify(options?.where ?? {}).includes('"sales_rep"')) {
+        served = true;
+        return [holder('h1', 'u1', 'sales_rep', 'org_a')] as any;
+      }
+      return realFind(object, options);
+    });
+    const update = vi.spyOn(engine, 'update');
+
+    const report = await carryRenamedPositionHolders(engine as any, { catalog: catalogOf(entry('crm_sales_rep', CRM, ['sales_rep'])) });
+
+    expect(report.carried).toEqual([expect.objectContaining({ rows: 0, alreadyHolds: [] })]);
+    expect(update).not.toHaveBeenCalled();
   });
 });
 

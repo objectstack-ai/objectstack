@@ -9,9 +9,10 @@
  */
 
 import type { z } from 'zod';
+import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 
-/** The position-name grammar (`SnakeCaseIdentifierSchema`), as the `renamedFrom` checks read it. */
-const POSITION_NAME_GRAMMAR = /^[a-z][a-z0-9_]*$/;
+/** Is `entry` a position name (`SnakeCaseIdentifierSchema`, the grammar of `PositionSchema.name`)? */
+const isPositionName = (entry: unknown): entry is string => SnakeCaseIdentifierSchema.safeParse(entry).success;
 
 /** The rule every `renamedFrom` refusal ends with (field `renamedFrom` precedent, cloud#3652 D3). */
 const POSITION_RENAMED_FROM_PRESCRIPTION =
@@ -31,7 +32,7 @@ export function refuseSelfRenamedFrom(position: { name?: unknown; renamedFrom?: 
   const own = typeof position.name === 'string' ? position.name : '<unnamed>';
   const seen = new Set<string>();
   list.forEach((entry: unknown, i: number) => {
-    if (typeof entry !== 'string' || !POSITION_NAME_GRAMMAR.test(entry)) return;
+    if (!isPositionName(entry)) return;
     const refuse = (reason: string): void => {
       ctx.addIssue({
         code: 'custom',
@@ -74,7 +75,7 @@ export function refuseDishonestPositionRenamedFrom(
     const own = typeof position?.name === 'string' ? position.name : '<unnamed>';
     const mine = new Set<string>();
     list.forEach((entry: unknown, i: number) => {
-      if (typeof entry !== 'string' || !POSITION_NAME_GRAMMAR.test(entry) || entry === own || mine.has(entry)) return;
+      if (!isPositionName(entry) || entry === own || mine.has(entry)) return;
       mine.add(entry);
       const refuse = (reason: string): void => {
         ctx.addIssue({

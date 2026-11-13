@@ -151,10 +151,11 @@ export const PositionSchema = lazySchema(() => strictObject(
    * every name in a cycle is a current one); never an old name another
    * position of the same collection also claims. The first two are judged
    * here, the last two by the `positions` collection
-   * (`refuseDishonestPositionRenamedFrom`, `stack.zod.ts`). Across packages —
-   * one environment, one catalog — the boot carry judges the same rules
-   * again, and refuses an old name another package, or the environment,
-   * still holds or is recorded as owning.
+   * (`refuseDishonestPositionRenamedFrom` in `position-renamed-from.ts`,
+   * called from `stack.zod.ts`). Across packages — one environment — the
+   * boot carry judges the same rules again, and refuses an old name another
+   * package (enabled or disabled), or the environment, still holds or is
+   * recorded as owning.
    *
    * Read only by the boot carry (`plugin-security`
    * `position-renamed-holder-carry.ts`, at `kernel:bootstrapped`): as the
@@ -166,11 +167,7 @@ export const PositionSchema = lazySchema(() => strictObject(
    * switched off in the activation ledger is not carried: its holders would
    * come back active under this name.
    */
-  renamedFrom: z.array(
-    z.string().min(2).regex(/^[a-z][a-z0-9_]*$/, {
-      message: 'Each `renamedFrom` entry is an earlier name of this position, so it must be a position name: lowercase snake_case starting with a letter (e.g. "sales_rep").',
-    }),
-  ).optional().describe(
+  renamedFrom: z.array(SnakeCaseIdentifierSchema).optional().describe(
     'Earlier names of THIS position, in the position-name grammar (lowercase snake_case), e.g. `renamedFrom: [\'sales_rep\']` on a position now named `crm_sales_rep`. '
     + 'At boot the platform moves every holder of an old name (`sys_user_position`) to this position, in every organization, as the system; a second boot moves nothing. '
     + 'A position renamed twice lists both earlier names. Each entry once; never this position\'s own name; never a name another position still declares; never an old name another position also claims; never a name another package or the environment holds or is recorded as owning. '

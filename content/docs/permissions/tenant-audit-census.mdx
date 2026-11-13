@@ -199,7 +199,7 @@ reproduce them. Where it disagrees, it disagrees on the page:
 | :--- | :--- | ---: |
 | 175 write call sites | quoted in the merged changeset | **309** |
 | 24 carrying no tenant context | quoted in the merged changeset | **3** provable and tenancy-enabled; **31** more whose options argument is unreadable |
-| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **214 of 309** decidable, **95** undecidable |
+| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **215 of 309** decidable, **94** undecidable |
 | 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: 174 decidably elevated, 0 decidably not, 123 undecidable |
 | 141 and 132, two independent re-derivations | the card that filed this work | — |
 
@@ -234,9 +234,9 @@ cannot read, and they are neither in nor out.
 | what | count |
 | :--- | ---: |
 | write call sites on the application surface | **309** |
-| …whose object name is statically decidable | 214 |
-| …whose object name is chosen at run time | 95 |
-| …against an object with tenancy ENABLED | 207 |
+| …whose object name is statically decidable | 215 |
+| …whose object name is chosen at run time | 94 |
+| …against an object with tenancy ENABLED | 208 |
 | …against an object that declares tenancy off | 7 |
 | threading a tenant context | 239 |
 | PROVABLY carrying none (options read, no context key) | **12** |
@@ -254,10 +254,10 @@ cannot read, and they are neither in nor out.
 | receiver erased, placed by an `object: string` PARAMETER | 5 |
 | receiver erased, placed by an `UNTYPED_RECEIVERS` row | 5 |
 
-| object name spelled inline | 129 |
+| object name spelled inline | 130 |
 | object name spelled through a `const` | 85 |
 | object name is an `object: string` parameter | 10 |
-| object name is some other run-time expression | 85 |
+| object name is some other run-time expression | 84 |
 
 ### Subtractions the census could NOT defend — enforced
 
@@ -307,7 +307,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-13 at `2b41c1350`.
+Measured on 2026-11-13 at `7a1bbb3f2`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |

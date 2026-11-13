@@ -35,23 +35,34 @@
  *
  * ## What it refuses to carry (each named at `warn`, holders left as they are)
  *
- * The ruling's conditions, judged over the ONE catalog the environment
- * serves, since `PositionSchema` and the `positions` collection can only see
- * one package body:
+ * The ruling's conditions, judged over every position the environment holds
+ * — the catalog it serves AND every position of an installed package that is
+ * disabled, since a disabled package is still installed and still holds its
+ * names (the registry's one-holder rule) although the catalog hides it — as
+ * `PositionSchema` and the `positions` collection can only see one package
+ * body:
  *
  *  - `claimed-twice` — two positions claim one old name: whose holders they
  *    are is not decidable, so neither carries (condition 3);
+ *  - `claimant-disabled` — the one position claiming the old name belongs to a
+ *    disabled package: nothing is carried onto a position that is switched
+ *    off with its package; the next boot after the package is enabled
+ *    carries;
  *  - `still-declared` — the old name is still a position of the same holder:
  *    the name is in use, so nothing was renamed away from it (condition 3;
  *    a cycle is this case, since every name in a cycle is a current one);
- *  - `held-by-other` — the old name is a position another package, or the
- *    environment, holds: a package never claims another holder's people
- *    (condition 2);
+ *  - `held-by-other` — the old name is a position another package (enabled
+ *    or disabled), or the environment, holds: a package never claims another
+ *    holder's people (condition 2);
  *  - `owned-by-other` — the old name is no position now, but the activation
  *    ledger records it under ANOTHER package (or, for a position the
  *    environment authored, under any package): the only stored record of an
  *    old name's owner says it was not this one's (condition 2). A ledger row
- *    naming no package is no evidence either way;
+ *    naming no package (or the environment's sentinel) is no evidence either
+ *    way. With no current holder and no such record, the old name is carried
+ *    for its one claimant, whichever package that is: the platform keeps no
+ *    other record of who owned a name that is no position now, and a package
+ *    may already declare such a name outright (D7, one slot per name);
  *  - `switched-off` — the old name is switched off in the activation ledger
  *    (`readDisabledCatalogNames`, the resolver's own read): its holders hold
  *    nothing today, and the new name is active by default, so moving them
@@ -74,10 +85,22 @@
  *
  * Not a downgrade path: a version that drops the rename does not carry the
  * holders back. Not a metadata rewrite: Setup-authored bodies that name an
- * old position are not read. It never fails the boot.
+ * old position are not read. Not run on a hot install: a package installed or
+ * upgraded into a running kernel is carried at the next boot. It never fails
+ * the boot, and a claim that fails is said with the rows it moved before
+ * failing; the other claims still run.
+ *
+ * ## Its one limit
+ *
+ * It judges the positions this boot LOADED. An installed package that did not
+ * load at all this boot (a marketplace entry whose rehydrate the engine
+ * refused, or whose protocol range this runtime does not meet) holds no name
+ * the registry or the ledger can show, so a standing claim on one of its
+ * position names is carried. A package that loaded and then failed a later
+ * step is loaded, and is judged.
  */
 
-import { readDisabledCatalogNames, type SecurityCatalogEntry, type SecurityCatalogReader } from '@objectstack/core';
+import { catalogEntryAddress, readDisabledCatalogNames, type SecurityCatalogEntry, type SecurityCatalogReader } from '@objectstack/core';
 import { isUniqueViolationError, keysetWalk } from '@objectstack/types';
 import { POSITION_ASSIGNMENT_OBJECT } from './catalog-reference-report.js';
 
@@ -89,8 +112,8 @@ const ORGANIZATION_COLUMN = 'organization_id';
 /** The activation ledger (ADR-0126 §4), read for an old name's recorded owner. */
 const ACTIVATION_LEDGER_OBJECT = 'sys_metadata_activation';
 
-/** The position-name grammar (`PositionSchema.name`). */
-const POSITION_NAME_GRAMMAR = /^[a-z][a-z0-9_]*$/;
+/** The position-name grammar (`PositionSchema.name`, `SnakeCaseIdentifierSchema`): two characters or more. */
+const POSITION_NAME_GRAMMAR = /^[a-z][a-z0-9_]+$/;
 
 /** Infrastructure rows, written and read the way the platform's own boot passes do. */
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -102,7 +125,7 @@ const PAGE_SIZE = 500;
 const LOGGED_LIMIT = 20;
 
 /** Why an old name is not carried (module doc). */
-export type PositionRenameRefusal = 'claimed-twice' | 'still-declared' | 'held-by-other' | 'owned-by-other' | 'switched-off';
+export type PositionRenameRefusal = 'claimed-twice' | 'claimant-disabled' | 'still-declared' | 'held-by-other' | 'owned-by-other' | 'switched-off';
 
 /** One position's claim on one old name. */
 export interface PositionRenameClaim {
@@ -110,6 +133,8 @@ export interface PositionRenameClaim {
   readonly to: string;
   /** The package that declares the renamed position; `null` for a position the environment authored. */
   readonly packageId: string | null;
+  /** The declaring package is installed and disabled. */
+  readonly disabled?: boolean;
 }
 
 /** An old name moved to its new one. */
@@ -138,9 +163,18 @@ export interface LeftBehindReferences {
   readonly byName: Readonly<Record<string, { readonly rows: number; readonly organizations: readonly string[] }>>;
 }
 
+/** A claim whose carry failed part-way: what it moved before the failure stays moved. */
+export interface FailedPositionRename extends PositionRenameClaim {
+  readonly error: string;
+  readonly rows: number;
+  readonly byOrganization: Readonly<Record<string, number>>;
+}
+
 export interface PositionRenameCarryReport {
   readonly carried: readonly CarriedPositionRename[];
   readonly refused: readonly RefusedPositionRename[];
+  /** Claims whose carry failed; the next boot reads what is left on the old name. */
+  readonly failed: readonly FailedPositionRename[];
   readonly leftBehind: readonly LeftBehindReferences[];
   /** Tables that exist here and could not be read: no answer, never "none". */
   readonly notRead: ReadonlyArray<{ readonly object: string; readonly error: string }>;
@@ -150,8 +184,16 @@ export interface PositionRenameCarryReport {
 export interface PositionRenameCarryEngine {
   find(object: string, options?: unknown): Promise<unknown>;
   update(object: string, data: unknown, options?: unknown): Promise<unknown>;
-  /** The registry, asked which objects this composition registers. */
-  readonly registry?: { getObject?(name: string): unknown };
+  /**
+   * The registry, asked which objects this composition registers, and which
+   * positions a disabled package holds (`listItems` with
+   * `includeDisabledPackages`; ObjectQL's `SchemaRegistry` answers both).
+   */
+  readonly registry?: {
+    getObject?(name: string): unknown;
+    listItems?(type: string, packageId?: string, options?: { includeDisabledPackages?: boolean }): readonly unknown[];
+    isPackageDisabled?(packageId?: string): boolean;
+  };
 }
 
 export interface PositionRenameCarryDeps {
@@ -193,17 +235,43 @@ function declares(engine: PositionRenameCarryEngine, object: string, field: stri
   }
 }
 
-/** Every row of `object` matching `where`, by keyset page, as the system. */
-async function readAll(engine: PositionRenameCarryEngine, object: string, where: Row, fields: string[]): Promise<Row[]> {
-  const out: Row[] = [];
-  const walk = keysetWalk<Row>(
+/** The rows of `object` matching `where`, one keyset page at a time, as the system. */
+function pagesOf(engine: PositionRenameCarryEngine, object: string, where: Row, fields: string[]): AsyncIterable<Row[]> {
+  return keysetWalk<Row>(
     async (query) => {
       const page = await engine.find(object, { ...query, fields, context: SYSTEM_CTX });
       return Array.isArray(page) ? (page as Row[]) : [];
     },
     { where, pageSize: PAGE_SIZE },
-  );
-  for await (const page of walk.pages()) out.push(...page);
+  ).pages();
+}
+
+/** Every row of `object` matching `where`, as the system. */
+async function readAll(engine: PositionRenameCarryEngine, object: string, where: Row, fields: string[]): Promise<Row[]> {
+  const out: Row[] = [];
+  for await (const page of pagesOf(engine, object, where, fields)) out.push(...page);
+  return out;
+}
+
+/** The package an entry is held by, the environment's sentinel read as no package (`catalogEntryAddress`). */
+const holderOf = (e: { name: string; packageId?: string }): string | null => catalogEntryAddress(e).packageId;
+
+/**
+ * Every position a DISABLED package holds. The catalog hides them (a disabled
+ * package serves nothing), but the package is still installed and still holds
+ * its names, so a rename may neither take those names nor count without them.
+ */
+function disabledPackagePositions(engine: PositionRenameCarryEngine): SecurityCatalogEntry[] {
+  const registry = engine.registry;
+  if (typeof registry?.listItems !== 'function' || typeof registry.isPackageDisabled !== 'function') return [];
+  const out: SecurityCatalogEntry[] = [];
+  for (const item of registry.listItems('position', undefined, { includeDisabledPackages: true }) ?? []) {
+    if (typeof item !== 'object' || item === null) continue;
+    const def = item as Record<string, unknown>;
+    const owner = typeof def._packageId === 'string' && def._packageId !== '' ? def._packageId : undefined;
+    if (owner === undefined || typeof def.name !== 'string' || !registry.isPackageDisabled(owner)) continue;
+    out.push({ type: 'position', name: def.name, definition: def, source: 'registry', packageId: owner } as SecurityCatalogEntry);
+  }
   return out;
 }
 
@@ -219,14 +287,18 @@ function claimedNamesOf(entry: SecurityCatalogEntry): string[] {
   return out;
 }
 
-const holderLabel = (packageId: string | null | undefined): string =>
-  packageId ? `package "${packageId}"` : 'the environment';
+const holderLabel = (packageId: string | null | undefined, disabled?: boolean): string =>
+  packageId ? `package "${packageId}"${disabled ? ' (disabled)' : ''}` : 'the environment';
 
-/** Move every holder row of `claim.from` to `claim.to` (module doc). */
-async function carryHolders(engine: PositionRenameCarryEngine, claim: PositionRenameClaim): Promise<CarriedPositionRename> {
-  const byOrganization: Record<string, number> = {};
-  const alreadyHolds: Array<{ id: string; organization: string }> = [];
-  let rows = 0;
+/** What one claim's carry has done so far — kept by the caller, so a failure part-way still says it. */
+interface CarryProgress {
+  readonly byOrganization: Record<string, number>;
+  readonly alreadyHolds: Array<{ id: string; organization: string }>;
+  rows: number;
+}
+
+/** Move every holder row of `claim.from` to `claim.to` (module doc), recording each move in `progress`. */
+async function carryHolders(engine: PositionRenameCarryEngine, claim: PositionRenameClaim, progress: CarryProgress): Promise<void> {
   const fields = ['id', POSITION_COLUMN, HOLDER_COLUMN, ORGANIZATION_COLUMN];
   // Read the whole set first: each write takes its row out of the filter.
   const holders = await readAll(engine, POSITION_ASSIGNMENT_OBJECT, { [POSITION_COLUMN]: claim.from }, fields);
@@ -243,24 +315,28 @@ async function carryHolders(engine: PositionRenameCarryEngine, claim: PositionRe
         limit: 1,
         context: SYSTEM_CTX,
       });
-      if (Array.isArray(twin) && twin.length > 0) {
-        alreadyHolds.push({ id, organization });
+      const twinId = Array.isArray(twin) && twin.length > 0 ? text((twin[0] as Row).id) : null;
+      // The row itself, already on the new name: a replica booting beside this
+      // one moved it after the read above. Nothing to move, nothing to name.
+      if (twinId === id) continue;
+      if (twinId !== null) {
+        progress.alreadyHolds.push({ id, organization });
         continue;
       }
     }
     try {
-      await engine.update(POSITION_ASSIGNMENT_OBJECT, { id, [POSITION_COLUMN]: claim.to }, { context: SYSTEM_CTX });
+      // Spelled as a literal (`POSITION_ASSIGNMENT_OBJECT`), so the tenant-audit census reads the object this writes.
+      await engine.update('sys_user_position', { id, [POSITION_COLUMN]: claim.to }, { context: SYSTEM_CTX });
     } catch (e: unknown) {
       // The unique key (user, position, organization) answered for a twin the
       // read above did not see: the same case, reported the same way.
       if (!isUniqueViolationError(e)) throw e;
-      alreadyHolds.push({ id, organization });
+      progress.alreadyHolds.push({ id, organization });
       continue;
     }
-    byOrganization[organization] = (byOrganization[organization] ?? 0) + 1;
-    rows += 1;
+    progress.byOrganization[organization] = (progress.byOrganization[organization] ?? 0) + 1;
+    progress.rows += 1;
   }
-  return { ...claim, byOrganization, rows, alreadyHolds };
 }
 
 /** One table of stored references this pass names (module doc). */
@@ -345,21 +421,23 @@ async function readLeftBehind(
   const out: LeftBehindReferences[] = [];
   for (const source of REFERENCE_SOURCES) {
     if (!registers(engine, source.object)) continue;
-    let rows: Row[];
+    // Counted a page at a time: a table read in full (pending requests and
+    // invitations are filtered by status only) is never held in memory.
+    const byName: Record<string, { rows: number; organizations: string[] }> = {};
     try {
-      rows = await readAll(engine, source.object, source.where([...olds]), fieldsOf(engine, source));
+      for await (const page of pagesOf(engine, source.object, source.where([...olds]), fieldsOf(engine, source))) {
+        for (const row of page) {
+          for (const name of source.names(row, olds)) {
+            const at = (byName[name] ??= { rows: 0, organizations: [] });
+            at.rows += 1;
+            const org = text(row[ORGANIZATION_COLUMN]);
+            if (org !== null && !at.organizations.includes(org)) at.organizations.push(org);
+          }
+        }
+      }
     } catch (e: unknown) {
       notRead.push({ object: source.object, error: e instanceof Error ? e.message : String(e) });
       continue;
-    }
-    const byName: Record<string, { rows: number; organizations: string[] }> = {};
-    for (const row of rows) {
-      for (const name of source.names(row, olds)) {
-        const at = (byName[name] ??= { rows: 0, organizations: [] });
-        at.rows += 1;
-        const org = text(row[ORGANIZATION_COLUMN]);
-        if (org !== null && !at.organizations.includes(org)) at.organizations.push(org);
-      }
     }
     if (Object.keys(byName).length > 0) out.push({ object: source.object, column: source.column, byName });
   }
@@ -375,21 +453,26 @@ export async function carryRenamedPositionHolders(
   engine: PositionRenameCarryEngine,
   deps: PositionRenameCarryDeps,
 ): Promise<PositionRenameCarryReport> {
-  const entries = await deps.catalog.list('position');
-  const current = new Map<string, SecurityCatalogEntry>();
-  for (const e of entries) current.set(e.name, e);
+  const served = await deps.catalog.list('position');
+  // [condition 2] A disabled package still holds its names: judge them too.
+  const servedNames = new Set(served.map((e) => e.name));
+  const disabled = disabledPackagePositions(engine).filter((e) => !servedNames.has(e.name));
+  const current = new Map<string, { entry: SecurityCatalogEntry; disabled: boolean }>();
+  for (const e of served) current.set(e.name, { entry: e, disabled: false });
+  for (const e of disabled) current.set(e.name, { entry: e, disabled: true });
   const claimsByOld = new Map<string, PositionRenameClaim[]>();
-  for (const e of entries) {
+  for (const { entry: e, disabled: off } of current.values()) {
     for (const from of claimedNamesOf(e)) {
       const list = claimsByOld.get(from) ?? [];
-      list.push({ from, to: e.name, packageId: e.packageId ?? null });
+      list.push({ from, to: e.name, packageId: holderOf(e), ...(off ? { disabled: true } : {}) });
       claimsByOld.set(from, list);
     }
   }
   const carried: CarriedPositionRename[] = [];
   const refused: RefusedPositionRename[] = [];
+  const failed: FailedPositionRename[] = [];
   const notRead: Array<{ object: string; error: string }> = [];
-  if (claimsByOld.size === 0) return { carried, refused, leftBehind: [], notRead };
+  if (claimsByOld.size === 0) return { carried, refused, failed, leftBehind: [], notRead };
 
   const olds = [...claimsByOld.keys()];
   const switchedOff = deps.switchedOff
@@ -402,7 +485,7 @@ export async function carryRenamedPositionHolders(
     const rows = await readAll(engine, ACTIVATION_LEDGER_OBJECT, { metadata_type: 'position', name: { $in: olds } }, ['id', 'name', 'package_id']);
     for (const row of rows) {
       const name = text(row.name);
-      const pkg = text(row.package_id);
+      const pkg = name === null ? null : holderOf({ name, packageId: text(row.package_id) ?? undefined });
       if (name === null || pkg === null) continue; // a row naming no package is no evidence
       const at = recordedOwners.get(name) ?? new Set<string>();
       at.add(pkg);
@@ -410,46 +493,56 @@ export async function carryRenamedPositionHolders(
     }
   }
 
-  const leftOlds = new Set<string>();
+  // The old names a carry ran for: the only ones whose other references are left behind by it.
+  const carriedOlds = new Set<string>();
   for (const [from, claims] of claimsByOld) {
     if (claims.length > 1) {
       for (const c of claims) {
         refused.push({
           ...c,
           reason: 'claimed-twice',
-          detail: `claimed by ${claims.map((o) => `'${o.to}' (${holderLabel(o.packageId)})`).join(' and ')}`,
+          detail: `claimed by ${claims.map((o) => `'${o.to}' (${holderLabel(o.packageId, o.disabled)})`).join(' and ')}`,
         });
       }
-      leftOlds.add(from);
       continue;
     }
     const [claim] = claims;
     const holder = current.get(from);
     if (holder) {
-      const same = (holder.packageId ?? null) === claim.packageId;
+      const holderPackage = holderOf(holder.entry);
       refused.push({
         ...claim,
-        reason: same ? 'still-declared' : 'held-by-other',
-        detail: `'${from}' is a position ${holderLabel(holder.packageId)} declares`,
+        reason: holderPackage === claim.packageId ? 'still-declared' : 'held-by-other',
+        detail: `'${from}' is a position ${holderLabel(holderPackage, holder.disabled)} declares`,
       });
-      continue; // the name is live: its references are not left behind
+      continue;
+    }
+    if (claim.disabled) {
+      refused.push({ ...claim, reason: 'claimant-disabled', detail: `${holderLabel(claim.packageId)} is disabled` });
+      continue;
     }
     const others = [...(recordedOwners.get(from) ?? [])].filter((pkg) => pkg !== claim.packageId);
     if (others.length > 0) {
       refused.push({ ...claim, reason: 'owned-by-other', detail: `the activation ledger records '${from}' under ${others.map((p) => `package "${p}"`).join(', ')}` });
-      leftOlds.add(from);
       continue;
     }
     if (switchedOff.has(from)) {
       refused.push({ ...claim, reason: 'switched-off', detail: `'${from}' is switched off in the activation ledger` });
-      leftOlds.add(from);
       continue;
     }
-    if (registers(engine, POSITION_ASSIGNMENT_OBJECT)) carried.push(await carryHolders(engine, claim));
-    leftOlds.add(from);
+    if (!registers(engine, POSITION_ASSIGNMENT_OBJECT)) continue;
+    carriedOlds.add(from);
+    const progress: CarryProgress = { byOrganization: {}, alreadyHolds: [], rows: 0 };
+    try {
+      await carryHolders(engine, claim, progress);
+      carried.push({ ...claim, byOrganization: progress.byOrganization, rows: progress.rows, alreadyHolds: progress.alreadyHolds });
+    } catch (e: unknown) {
+      // One claim's failure is that claim's: the others still run.
+      failed.push({ ...claim, error: e instanceof Error ? e.message : String(e), rows: progress.rows, byOrganization: progress.byOrganization });
+    }
   }
-  const leftBehind = leftOlds.size > 0 ? await readLeftBehind(engine, leftOlds, notRead) : [];
-  return { carried, refused, leftBehind, notRead };
+  const leftBehind = carriedOlds.size > 0 ? await readLeftBehind(engine, carriedOlds, notRead) : [];
+  return { carried, refused, failed, leftBehind, notRead };
 }
 
 const listIds = (ids: readonly string[]): string =>
@@ -457,6 +550,7 @@ const listIds = (ids: readonly string[]): string =>
 
 const REFUSAL_SENTENCE: Record<PositionRenameRefusal, string> = {
   'claimed-twice': 'two positions claim it, so whose holders they are is not decidable',
+  'claimant-disabled': 'the renamed position\'s package is disabled; the first boot after it is enabled carries them',
   'still-declared': 'it is still a position of the same holder, so nothing was renamed away from it',
   'held-by-other': 'it is a position another holder declares, and a package never claims another holder\'s people',
   'owned-by-other': 'it was another package\'s position, and a package never claims another holder\'s people',
@@ -477,8 +571,16 @@ export function logPositionRenameCarry(report: PositionRenameCarryReport, logger
     if (c.alreadyHolds.length === 0) continue;
     logger.warn(
       `[security] position rename '${c.from}' → '${c.to}': ${c.alreadyHolds.length} holder row(s) were left on '${c.from}' because the same `
-        + `user already holds '${c.to}' in that organization; each grants nothing now. Review and remove them in Setup: ${listIds(c.alreadyHolds.map((r) => r.id))}.`,
+        + `user already holds '${c.to}' in that organization; each grants nothing now. Review them in Setup before removing either row: `
+        + `when the row on '${c.to}' is a time-boxed delegation, the old row is the lasting assignment and is the one to re-point: ${listIds(c.alreadyHolds.map((r) => r.id))}.`,
       { alreadyHolds: c.alreadyHolds },
+    );
+  }
+  for (const f of report.failed) {
+    logger.warn(
+      `[security] position rename '${f.from}' → '${f.to}' (${holderLabel(f.packageId)}) did not finish: ${f.rows} holder row(s) were moved before it failed `
+        + `(${Object.entries(f.byOrganization).map(([org, n]) => `${org || '(no organization)'}: ${n}`).join(', ') || 'none'}); the rest stay on '${f.from}' until the next boot tries again.`,
+      { failed: f },
     );
   }
   for (const r of report.refused) {
