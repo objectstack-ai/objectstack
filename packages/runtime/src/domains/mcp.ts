@@ -750,6 +750,9 @@ export function buildMcpBridge(
      * judges against: from the listing {@link readMergedObjects} reads, or the
      * metadata service's by-name read on a host with none.
      */
+    /** {@link readMergedObjects}, read once per bridge for the `aiReadExposed` asks. */
+    let mergedForAiRead: Promise<any[] | undefined> | undefined;
+
     const readServedObject = async (name: string): Promise<any> => {
         const merged = await readMergedObjects();
         return merged !== undefined
@@ -937,7 +940,16 @@ export function buildMcpBridge(
          * ran (permissions, RLS, the object's own read middleware, field
          * masking), so this admits the object and nothing else.
          */
-        aiReadExposed: async (name: string): Promise<boolean> => isAiReadExposed(await readServedObject(name)),
+        aiReadExposed: async (name: string): Promise<boolean> => {
+            // `list_objects` asks once per listed `sys_*` object: one merged
+            // read serves every ask this bridge (one request) makes.
+            mergedForAiRead ??= readMergedObjects();
+            const merged = await mergedForAiRead;
+            const def = merged !== undefined
+                ? merged.find((o: any) => o?.name === name)
+                : await ((await getMeta()) as any)?.getObject?.(name);
+            return isAiReadExposed(def);
+        },
         describeObject: async (name: string) => {
             const def: any = await readObjectForCaller(name);
             if (!def) return null;

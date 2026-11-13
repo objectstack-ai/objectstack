@@ -32,7 +32,7 @@
 //   ⭐ the same query as the submitter returns nothing;
 //   ⭐ a member on no request reads nothing: by query, by id, by aggregate;
 //   ⭐ the snapshot field the approver may not read is not served to them,
-//      on the request row or in the activity rows its writes left;
+//      on the request row or in its activity rows;
 //   ⭐ the object is listed and described; no write tool opens it, and
 //      `sys_approval_action` stays refused;
 //   ⭐ the query tool's text names the "pending for me" filter shape;
@@ -349,16 +349,15 @@ describe('an approver\'s agent lists the approvals waiting on them over MCP (#32
     expect(own.text).toContain(STORED);
   });
 
-  it('⭐ the activity rows the request\'s writes left do not serve the approver the snapshot either', async () => {
-    // Control: the mirror stored the snapshot, masked field and all, in the
-    // request's activity rows.
+  it('⭐ the request\'s activity rows serve the approver no value they may not read', async () => {
+    // Control: the value is at rest.
     const stored = rowsOf(await ql.find('sys_activity', {
       where: { object_name: REQUEST, record_id: first.requestId }, context: SYS.context,
     }));
     expect(stored.length, 'the request\'s insert left an activity row').toBeGreaterThan(0);
     expect(JSON.stringify(stored)).toContain(STORED);
     // The approver reads those rows on the data door (their participant read
-    // of the parent admits them) and is not served the snapshot.
+    // of the parent admits them).
     const res = await stack.api('/data/sys_activity', { headers: { Authorization: `Bearer ${approver}` } });
     const text = await res.text();
     expect(res.status, text).toBe(200);

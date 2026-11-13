@@ -2501,7 +2501,7 @@ export function registerObjectTools(
           // [#32442] The console's My Pending list, filter for filter: the
           // participant read alone also serves requests the caller submitted
           // or already decided, so an agent must not guess "mine" from it.
-          'The approvals waiting on you (where the app has approvals): objectName "sys_approval_request", where ' +
+          'For example, where the app runs approvals, the ones waiting on you: objectName "sys_approval_request", where ' +
           '{"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}; decide one with run_action.',
         inputSchema: strictToolInput(
           {

@@ -32,7 +32,7 @@ import { HttpDispatcher } from './http-dispatcher.js';
 
 const [FAMILY] = [...STORED_METADATA_BODY_OBJECTS];
 
-function bridgeOver(objects: any[]) {
+function bridgeOver(objects: any[], protocol: any = null) {
     const byName = (n: string) => objects.find((o) => o.name === n);
     const metadata: any = {
         load: vi.fn(async () => null),
@@ -43,7 +43,8 @@ function bridgeOver(objects: any[]) {
     const ql: any = { getSchema: byName, registry: { getObject: byName, getItem: () => undefined } };
     const kernel: any = {
         context: {
-            getService: (n: string) => (n === 'objectql' || n === 'data' ? ql : n === 'metadata' ? metadata : null),
+            getService: (n: string) =>
+                (n === 'objectql' || n === 'data' ? ql : n === 'metadata' ? metadata : n === 'protocol' ? protocol : null),
         },
     };
     const ctx: any = {
@@ -82,5 +83,22 @@ describe('[#32442] the HTTP MCP bridge attests enable.aiReadable with isAiReadEx
     it('answers false for a business object and for a name nothing serves', async () => {
         expect(await bridge.aiReadExposed('probe_task')).toBe(false);
         expect(await bridge.aiReadExposed('sys_probe_missing')).toBe(false);
+    });
+});
+
+describe('[#32442] the bridge reads the merged listing once for every aiReadExposed ask it answers', () => {
+    it('answers several names from one merged read', async () => {
+        const getMetaItems = vi.fn(async () => ({
+            type: 'object',
+            items: [
+                { name: 'sys_probe_request', fields: {}, enable: { aiReadable: true } },
+                { name: 'sys_probe_silent', fields: {} },
+            ],
+        }));
+        const bridge = bridgeOver([], { getMetaItems });
+        expect(await bridge.aiReadExposed('sys_probe_request')).toBe(true);
+        expect(await bridge.aiReadExposed('sys_probe_silent')).toBe(false);
+        expect(await bridge.aiReadExposed('sys_probe_missing')).toBe(false);
+        expect(getMetaItems).toHaveBeenCalledTimes(1);
     });
 });

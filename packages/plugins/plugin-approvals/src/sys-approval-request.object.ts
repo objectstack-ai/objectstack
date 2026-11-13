@@ -45,14 +45,16 @@ export const SysApprovalRequest = ObjectSchema.create({
   isSystem: true,
   managedBy: 'engine-owned',
   description: 'Live approval instance tracked per submission',
-  // [decision 6840464379] The rows reach a member only through the approvals
-  // door (`/api/v1/approvals/*`); the data side is closed to ordinary members on
-  // purpose. The metadata API answers an object the caller may not read as
-  // absent (ADR-0106, ruling record 6787890900), yet the request page that door
-  // links to needs this definition to render, so the approvals service answers
-  // who else is served it: the callers its door serves a request to
-  // (`ApprovalService.authorizeSchemaRead`). Field security still projects it,
-  // and the rows stay closed.
+  // [decision 6840464379, as amended by ruling 6849636735 (1B, #32442)] The
+  // member baseline (`member_default`) grants every member a read on this
+  // object, and the request read gate (`request-read-gate.ts`) narrows the rows
+  // to the requests the approvals door would serve that member. The metadata
+  // API answers an object the caller may not read as absent (ADR-0106, ruling
+  // record 6787890900); with the baseline read, every member is served this
+  // definition, projected by their field security. The delegate stays: it
+  // answers a caller whose permission sets do not carry that read (a deployment
+  // that withdraws it) with the callers its door serves a request to
+  // (`ApprovalService.authorizeSchemaRead`).
   schemaReadDelegate: 'approvals',
   // [ADR-0079, ADR-0085] The record title is the flow's label, `process_label`:
   // a STORED column, so every door that serves the row serves its title. The
@@ -914,5 +916,11 @@ export const SysApprovalRequest = ObjectSchema.create({
     // declare their own `ai.exposed`. `sys_approval_action` declares nothing:
     // an approver lists and decides without reading the decision trail.
     aiReadable: true,
+    // [#32442] No generic discussion thread: a request's thread is its
+    // timeline, and its reply is the `approval_comment` action (stored as a
+    // `sys_approval_action` row), as the request page declares. With the
+    // member read (1B), `feeds` left on would let every party read and post
+    // `sys_comment` rows on a request beside that trail.
+    feeds: false,
   },
 });
