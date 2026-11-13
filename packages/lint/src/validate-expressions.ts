@@ -159,6 +159,7 @@ import { injectedColumnDefsFor, injectedColumnsFor, unprovisionedInjectedColumns
 import { findUnguardedNullableOperands, nullGuardMessage, provenNonNullKeys } from './validate-null-guards.js';
 import type { NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
 import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
+import { storedExpressionInputIssues } from './stored-expression-inputs.js';
 export interface ExprIssue {
   where: string;
   message: string;
@@ -182,6 +183,14 @@ export interface ExprIssue {
    * located by `where` alone.
    */
   path?: string;
+  /**
+   * The rule id the finding is reported under, when it is not the pass's
+   * own `expression-invalid`: set only by the stored-expression input member
+   * (`stored-expression-inputs.ts`), whose two findings each carry an id of
+   * their own so `os explain` can name them. Absent, the finding is
+   * `expression-invalid`.
+   */
+  rule?: string;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -3381,7 +3390,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   }
 
   // ── Object validation-rule + formula predicates ────────────────────
+  // [#32529] The object's position in `objects`, which is its position in
+  // `typedObjects` too (the served body the stored-expression member reads).
+  let objectPosition = -1;
   for (const obj of objects) {
+    objectPosition += 1;
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
     // [#27643] The object's index in the authored list, for a validation-rule
     // finding's key path (`recordsOf` hands an array's own members back). A
@@ -3565,6 +3578,23 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       ? [...optionHolders, { root: 'parent', types: masterTypes, owner: master }]
       : optionHolders;
 
+    // The served body is `typedObjects[objectPosition]`: `objectsAsServed`
+    // answers its objects positionally with `recordsOf(stack.objects)`, and
+    // `objectsWithoutTiedFields` keeps the positions. Read through
+    // `fieldEntries`, so the #5017 key scan sees no new read.
+    const servedSelf = typedObjects[objectPosition];
+    /**
+     * [#32529] This object's fields by name AS THE REGISTRY SERVES THEM — what a
+     * stored expression's hop is judged through, since the engine plans the hop
+     * over the registered schema: the served body first (the declared fields
+     * with every `objectExtensions` field folded in, a tie between two
+     * packages left out), then a declared field the fold left out, then the
+     * columns the registry injects (`owner_id`, `created_by`, `updated_by` are
+     * `lookup`s to `sys_user`), which never shadow a declared one.
+     */
+    const fieldDefs = new Map<string, AnyRec>(servedSelf ? fieldEntries(servedSelf) : []);
+    for (const [n, def] of fieldList) if (!fieldDefs.has(n)) fieldDefs.set(n, def);
+    for (const [n, def] of injectedColumnDefsFor(obj)) if (!fieldDefs.has(n)) fieldDefs.set(n, def as AnyRec);
     /**
      * The field-formula pass — one computed field's `expression`. A closure
      * since #22019, whose object door ran this pass and no other slot of the
@@ -3639,6 +3669,14 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // [#8116] Formulas read the same record binding the predicates do, so
         // a `record.<anchor>` read inside one degrades identically.
         warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
+        // [#32529, #32554] A STORED field's `expression` (any field but a
+        // `formula`) is computed at the write and kept: a read of another
+        // record, of the clock, of the acting user or of a permission is
+        // warned. A `formula` answers nothing here.
+        const storedSource = celSourceOf(f.expression);
+        for (const finding of storedExpressionInputIssues(fname, f, storedSource, (name) => fieldDefs.get(name), objectName)) {
+          issues.push({ where: fieldWhere, message: finding.message, source: storedSource ?? '', severity: finding.severity, rule: finding.rule });
+        }
       }
     };
 

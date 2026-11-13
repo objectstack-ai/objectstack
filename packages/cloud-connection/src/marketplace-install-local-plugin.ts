@@ -1057,6 +1057,11 @@ function flattenPackageBody(body: Record<string, any>): Record<string, any> {
 /** What this door cannot run in a package, as the runtime binder judges it. */
 interface UnrunnableCode {
     jobs: ReadonlyArray<{ name: string; handler?: string; bodyRefusal?: string; pullRefusal?: string }>;
+    /**
+     * [#32572, ADR-0150 D3] Each job name two or more enabled jobs share, with the binder's own refusal of it
+     * (`collectJobNameCollisions`): the sentence naming every job of the name and its holders.
+     */
+    sharedJobNames: ReadonlyArray<{ name: string; message: string }>;
     hooks: ReadonlyArray<{ name: string; handler?: string }>;
 }
 
@@ -1069,17 +1074,32 @@ const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1
 
 /**
  * The refusal sentence: everything the door cannot run, why, and the remedies,
- * one clause per kind — a job with no `body`, a job whose `body` the
- * declaration refuses, a job whose `pull` does not bind, a hook with no `body`
- * — in one answer, so the author fixes them all in one pass. Each names the
- * item and the function its `handler` declares (or the refusal of its `body` or
- * its `pull`).
+ * one clause per kind — a job name two enabled jobs share, a job with no
+ * `body`, a job whose `body` the declaration refuses, a job whose `pull` does
+ * not bind, a hook with no `body` — in one answer, so the author fixes them all
+ * in one pass. Each names the item and the function its `handler` declares (or
+ * the refusal of its `body` or its `pull`); a shared name is named by the
+ * binder's own refusal of it, quoted whole, so its jobs and their holders are
+ * the words the bind would have logged.
  */
 function describeUnrunnable(manifestId: string, what: UnrunnableCode): string {
     const clauses: string[] = [];
     const jobsWithBadPull = what.jobs.filter((j) => j.pullRefusal !== undefined);
     const jobsWithoutBody = what.jobs.filter((j) => j.pullRefusal === undefined && j.bodyRefusal === undefined);
     const jobsWithBadBody = what.jobs.filter((j) => j.pullRefusal === undefined && j.bodyRefusal !== undefined);
+    if (what.sharedJobNames.length > 0) {
+        // [#32572] First, as the binder judges it first: a shared name is refused before any job of it is
+        // judged by its run form, so no other clause makes its jobs schedulable.
+        const one = what.sharedJobNames.length === 1;
+        const names = what.sharedJobNames.map((s) => `'${s.name}'`).join(', ');
+        clauses.push(
+            `${one ? `two or more of its enabled jobs share the name ${names}` : `its enabled jobs share ${what.sharedJobNames.length} names, ${names}`}, `
+            + `so this install door cannot run any job of ${one ? 'that name' : 'those names'}: `
+            + `${what.sharedJobNames.map((s) => s.message).join(' ')} `
+            + `Installed, the package would have none of ${one ? 'them' : 'those jobs'} scheduled, and a job of ${one ? 'that name' : 'one of those names'} `
+            + 'that an earlier version of the package scheduled would be cancelled.',
+        );
+    }
     if (jobsWithoutBody.length > 0) {
         const one = jobsWithoutBody.length === 1;
         clauses.push(
@@ -2657,6 +2677,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //         not declare, one with no `connectorSource`): judged by the
         //         binder's own `judgeJobPull` — it used to install and never be
         //         scheduled.
+        //     [#32572, ADR-0150 D3] …and a job name two or more ENABLED jobs
+        //     share: the binder refuses the name at bind (the job service keys
+        //     a job by its name and would keep only the later), schedules none
+        //     of its jobs and cancels the one an earlier version ran — while
+        //     this door answered 200. Judged by the binder's own
+        //     `collectJobNameCollisions` for the id the binder schedules under
+        //     (`manifestId`), and named by its refusal: every job of the name
+        //     and its holders, the residual included. A disabled twin collides
+        //     with nothing, as at bind.
         //     The judgements are the runtime binder's own, so the door and the
         //     binder cannot disagree about what this door can run.
         //
@@ -2672,7 +2701,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     its hook with no `body` is warned and NOT bound
         //     ({@link bindArtifactHandlers}).
         const unrunnable = await this.unrunnableCode(ctx, manifest, manifestId);
-        if (unrunnable.jobs.length > 0 || unrunnable.hooks.length > 0) {
+        if (unrunnable.jobs.length > 0 || unrunnable.sharedJobNames.length > 0 || unrunnable.hooks.length > 0) {
             return c.json({
                 success: false,
                 error: {
@@ -6626,10 +6655,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *     (`collectJobsWithoutBody`, which reads the jobs the binder schedules,
      *     judges a body by the parse the binder binds by and a pull by the
      *     binder's own `judgeJobPull`);
+     *   - [#32572] the job names two or more enabled jobs share
+     *     (`collectJobNameCollisions`, the binder's own refusal at bind, judged
+     *     for `manifestId` — the id {@link bindArtifactHandlers} schedules the
+     *     package's jobs under), each with that refusal's sentence;
      *   - the hooks with no `body` (`collectHooksWithoutBody`, the judgement the
      *     binder withholds by on this door's rehydrate).
      *
-     * Both judgements are the runtime binder's own, so the door and the binder
+     * Every judgement is the runtime binder's own, so the door and the binder
      * cannot disagree about what this door can run. A runtime that predates a
      * judgement judges nothing for it and says so: the install proceeds as it
      * did before that gate existed.
@@ -6640,10 +6673,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         manifestId: string,
     ): Promise<UnrunnableCode> => {
         let collectJobs: typeof import('@objectstack/runtime')['collectJobsWithoutBody'] | undefined;
+        let collectShared: typeof import('@objectstack/runtime')['collectJobNameCollisions'] | undefined;
         let collectHooks: typeof import('@objectstack/runtime')['collectHooksWithoutBody'] | undefined;
         try {
             const mod: any = await import('@objectstack/runtime');
             if (typeof mod?.collectJobsWithoutBody === 'function') collectJobs = mod.collectJobsWithoutBody;
+            if (typeof mod?.collectJobNameCollisions === 'function') collectShared = mod.collectJobNameCollisions;
             if (typeof mod?.collectHooksWithoutBody === 'function') collectHooks = mod.collectHooksWithoutBody;
         } catch { /* reported below */ }
         if (!collectJobs) {
@@ -6652,13 +6687,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 + 'so a job with no runnable `body` or `pull` installs and is never run. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
             );
         }
+        if (!collectShared) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] this runtime has no collectJobNameCollisions — the job names of ${manifestId} are not judged, `
+                + 'so a package with two enabled jobs of one name installs, and the binder schedules none of them. '
+                + 'Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
+            );
+        }
         if (!collectHooks) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] this runtime has no collectHooksWithoutBody — the hooks of ${manifestId} are not judged, `
                 + 'so a hook with no `body` installs. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
             );
         }
-        return { jobs: collectJobs ? collectJobs(manifest) : [], hooks: collectHooks ? collectHooks(manifest) : [] };
+        return {
+            jobs: collectJobs ? collectJobs(manifest) : [],
+            sharedJobNames: collectShared
+                ? collectShared(manifest, manifestId).map(({ name, message }) => ({ name, message }))
+                : [],
+            hooks: collectHooks ? collectHooks(manifest) : [],
+        };
     };
 
     /**

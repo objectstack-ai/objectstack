@@ -1230,6 +1230,7 @@ const zhHant = {
     editInlineHint: '雙擊編輯',
     lockedByApproval: '審批中已鎖定',
     lockedTooltip: '該記錄有待審批的請求，編輯已被鎖定',
+    lockedByState: '當前狀態下不可編輯',
     writeStrippedTitle: '已儲存，但部分欄位未生效',
     writeWarningsTitle: '已儲存，但有警告',
     writeStrippedReadonly: '以下欄位為只讀，未生效：{{fields}}',

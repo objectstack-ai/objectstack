@@ -172,11 +172,14 @@ export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFun
 // [#21585] `collectHooksWithoutBody` names the hooks whose code is only a
 // function-name `handler`: install-local refuses them, and withholds them on a
 // rehydrate (`withholdHooksWithoutBody`).
+// [#32572] `collectJobNameCollisions` names the job names two enabled jobs share,
+// with the refusal the binder refuses each by at bind: install-local refuses them.
 export {
     bindAppArtifactHandlers,
     appArtifactHandlerOwner,
     scheduleAppArtifactJobs,
     collectJobsWithoutBody,
+    collectJobNameCollisions,
     collectHooksWithoutBody,
 } from './app-artifact-handlers.js';
 export type {
