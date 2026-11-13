@@ -5522,7 +5522,7 @@ describe('ApprovalService — authorizeSchemaRead delegate (ADR-0106, decision 6
     const svc = await seed(); // t1: submitter u1, pending approver u9
     // u9 also decides a request in t2.
     const inT2 = { userId: 'u3', tenantId: 't2', positions: [], permissions: [] } as any;
-    const req = await svc.openNodeRequest(openInput(['u9'], { recordId: 'opp_t2', record: { id: 'opp_t2' } }), inT2);
+    const req = (await svc.openNodeRequest(openInput(['u9'], { recordId: 'opp_t2', record: { id: 'opp_t2' } }), inT2)) as { id: string };
     await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
     const u9In = (tenantId: string) => ({ userId: 'u9', tenantId, positions: [], permissions: [] }) as any;
     expect(await svc.authorizeSchemaRead('sys_approval_request', u9In('t1')), 'pending approver in t1').toBe(true);
