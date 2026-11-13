@@ -152,6 +152,9 @@ export function servedHolderAddressOf(registry: any, type: string, name: string)
  * `options.refuseWithoutDisabled` asks (the item face, {@link
  * readMetaItemFace}), two or more are refused the same way, naming each: the
  * plain read served the row saved first while `/layers` refused naming both.
+ * That arm also requires that no enabled package ships the name at any member
+ * (`shippedArtifactsOf` without a member, as `packagelessContentPackage`
+ * reads it): a shipped name never fell to save order.
  * Otherwise, and for one holder, `undefined` (the read already reads there).
  * The layered reads keep their own refusal for that case, the one the
  * package-less writes give (#28337).
@@ -212,6 +215,13 @@ export async function servedRowHolderOf(
     const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
     const anyDisabled = [...every, ...rows.candidates].some(disabled);
     if (!anyDisabled && options.refuseWithoutDisabled !== true) return undefined;
+    // [#32607] With no disabled holder, only a name no package ships moves. A
+    // name an enabled package ships, at any member (a bundled type's base
+    // shipping one locale beside another package's row of another), keeps the
+    // read's own content judgment, which counts that shipper as it always has
+    // (`packagelessContentPackage` over the name's shipped artifacts): there is
+    // no save order to guess there.
+    if (!anyDisabled && [...shippingPackageIds(host.shippedArtifactsOf(type, name))].some((id) => !disabled(id))) return undefined;
     const installed = installedManifestsOfEngine(host.engine);
     const pairRow = (row: { package_id?: unknown }): boolean =>
         typeof row.package_id === 'string' && every.some((holder) => pairsOf(holder, installed).includes(row.package_id as string));
