@@ -26,7 +26,7 @@ export const entry: SemanticMigration = {
     'Since 18.4.0 a package\'s dashboard resolves a dataset name in its own package, then in the one holder of its '
     + 'declared dependency closure, and the dataset doors refuse any other read 409 RESOURCE_CONFLICT (ADR-0150 D3 '
     + '(c): the release artifact is the co-ownership boundary, not a resolution scope). The per-package authoring '
-    + 'pass of os validate, os build and os lint resolved the name against every package of the artifact (#25514), '
+    + 'pass of os validate, os build and os lint resolved the name against every package of the artifact (since 18.2.0), '
     + 'so it passed a dashboard the installed runtime refuses to serve. It now asks the runtime\'s question and '
     + 'refuses with widget-dataset-unknown (error). Not convertible: which package a dashboard or a dataset belongs '
     + 'to is a fact only the author holds.',
