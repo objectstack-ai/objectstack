@@ -486,15 +486,13 @@ describe('[#32613] two packages ship one name, each with its declared override: 
         });
 
         // Mixed (review n1): two holders, only one with a declared override.
-        // Flow: the overridden holder's override and the other holder's
-        // shipped body, each once, in its own slot, whichever holder is
-        // overridden. Action: the overridden holder's override is listed in
-        // its own slot and served at its own address. The other holder's list
-        // slot is NOT pinned here: when the second holder to register is the
-        // overridden one, the first holder's slot lists that override too, on
-        // `main` as on this change (the registry face: the hydrator registers
-        // the override row under the bare name wearing the first shipper's
-        // envelope), carried to #33131.
+        // The overridden holder's override and the other holder's shipped
+        // body, each once, in its own slot, whichever holder is overridden.
+        // [#33131] The action's other slot too: before, when the second
+        // holder to register was the overridden one, the first holder's slot
+        // listed that override as well (the hydrator registered the override
+        // row under the bare name wearing the first shipper's envelope). The
+        // registry face is pinned in this file's [#33131] describe.
         it(`flow and action, ${first} registered first, one holder overridden: its override in its own slot`, async () => {
             for (const [overridden, other] of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
                 const protocol = await bootHolders(order);
@@ -505,17 +503,10 @@ describe('[#32613] two packages ship one name, each with its declared override: 
                     await overrideEach(protocol, type, [overridden]);
                     const name = type === 'flow' ? FLOW : SHARED_ACTION;
                     for (const face of ['served', 'execution'] as const) {
-                        const listed = await entries(protocol, type, face);
-                        if (type === 'flow') {
-                            expect(listed, `${type} ${face}, ${overridden} overridden`).toEqual([`${overridden}:${label}`, `${other}:${shipped}`].sort());
-                        } else {
-                            expect(listed.filter((e) => e.startsWith(`${overridden}:`)), `${type} ${face}, ${overridden} overridden`).toEqual([`${overridden}:${label}`]);
-                        }
+                        expect(await entries(protocol, type, face), `${type} ${face}, ${overridden} overridden`).toEqual([`${overridden}:${label}`, `${other}:${shipped}`].sort());
                     }
                     expect((await p.getMetaItem({ type, name, packageId: overridden })).item.label, `${type} at ${overridden}`).toBe(label);
-                    if (type === 'flow') {
-                        expect((await p.getMetaItem({ type, name, packageId: other })).item.label, `${type} at ${other}`).toBe(shipped);
-                    }
+                    expect((await p.getMetaItem({ type, name, packageId: other })).item.label, `${type} at ${other}`).toBe(shipped);
                 }
             }
         });
@@ -783,7 +774,7 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
     const sharedAction = (label: string, extra: Record<string, unknown> = {}) => ({
         name: SHARED, label, type: 'script', body: { language: 'js', source: `return { ran: '${label}' };` }, ...extra,
     });
-    /** An import mapping of one name, a sealed type that keeps the first-registered holder's judgment until #33131. */
+    /** An import mapping of one name, a sealed type judged against every shipper too (#33131). */
     const MAPPING = 'shared_feed';
     const sharedMapping = (ns: string, label: string, extra: Record<string, unknown> = {}) => ({
         name: MAPPING, label, sourceFormat: 'csv', targetObject: `${ns}_task`,
@@ -913,12 +904,14 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
             expect(named[0]).toContain(`flow×1 (${FLOW})`);
         });
 
-        // [#32552 review s1] The census judges a row as the reads serve it. The
-        // reads serve a second holder's declared override per shipper for a flow
-        // and an action only (#32613); the six sealed types keep the name's
-        // first-registered shipper until #33131, so the second holder's mapping
-        // override is unserved and the census still names it.
-        it(`CONTROL, ${nsOf(first)} registered first: a sealed type's census keeps the first-registered holder's judgment (a mapping)`, async () => {
+        // [#32552 review s1] The census judges a row as the reads serve it.
+        // [#33131] The reads serve a second holder's declared override per
+        // shipper for the six sealed types too, so the census names neither
+        // holder's mapping override. FROM: the second holder's was named for
+        // deletion (judged against the first-registered holder alone). The
+        // stranger's row it still names is pinned in
+        // `protocol-custom-override-bare-slot-envelope.test.ts`'s [#33131] describe.
+        it(`${nsOf(first)} registered first: a sealed type's census names neither holder's declared override (a mapping)`, async () => {
             const { engine, protocol } = await bootHolders(first === ALPHA ? [ALPHA, BETA] : [BETA, ALPHA], { mapping: true });
             for (const base of [ALPHA, BETA]) {
                 await engine.insert('sys_metadata', {
@@ -935,8 +928,7 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
             } finally {
                 warn.mockRestore();
             }
-            expect(named).toHaveLength(1);
-            expect(named[0]).toContain(`mapping×1 (${MAPPING})`);
+            expect(named).toEqual([]);
         });
 
 
