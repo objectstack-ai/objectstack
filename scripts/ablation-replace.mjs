@@ -102,6 +102,30 @@
 // where the handler happens to fire. The foreground ten-minute cap in this
 // environment sends SIGTERM, and it can land mid-mutation.
 //
+// ### A handler only runs on a free event loop: WRAP spawns ASYNC
+//
+// Node delivers `process.on('SIGTERM')` through the event loop. The wrapped
+// command used to run under `spawnSync`, which blocks that loop for the
+// child's whole life, so a SIGTERM landing while the child waited (on the
+// shared verify lock, on a build) ran no handler at all. Measured on the tree
+// that shipped it: SIGTERM to the tool mid-wait printed nothing, the target
+// stayed at the MUTATED blob, and the cap's follow-up kill left the child
+// orphaned under init, still queued; when the child happened to finish first,
+// the pending signal was dropped by the `process.exit` that followed, and the
+// run exited with the CHILD's status -- 0, a green that described an
+// interrupted run. So the child runs under an async `spawn`, and a signal
+// while it lives does three things, in this order:
+//
+//   1. forward the same signal to the child, so it stops reading the tree;
+//   2. restore, at once and synchronously -- the signal may be the only
+//      warning before a SIGKILL nothing can trap, and the restore is the one
+//      thing that must win that race;
+//   3. await the child, escalating to SIGKILL after WRAP_KILL_GRACE_MS, so no
+//      orphan is left behind (in a lock queue, say); then exit 130.
+//
+// The child stays in this process's group (no `detached`): a kill aimed at
+// the whole group -- SIGKILL included -- still takes the child with it.
+//
 // That promise has a boundary, and the boundary decides the modes:
 //
 //   WRAP (`-- <cmd...>`)  the default and the recommended form. The tool
@@ -134,7 +158,7 @@
 
 import { readFileSync, writeFileSync, existsSync, statSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { resolve, relative, isAbsolute, join } from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
@@ -156,6 +180,12 @@ const TOOL = 'ablation-replace';
 //      this tool's failure -- so the tool's own failure needs a code no child
 //      can accidentally mint.
 export const EXIT = Object.freeze({ OK: 0, EVIDENCE: 1, USAGE: 2, ANCHOR: 3, RESTORE: 4 });
+
+// How long a signalled WRAP run waits for its child to leave after forwarding
+// the signal, before it sends SIGKILL. The restore has already run by then;
+// this bounds only the wait for the child, so that a child which ignores the
+// signal can neither hang the tool nor outlive it.
+export const WRAP_KILL_GRACE_MS = 3000;
 
 // Control bytes, minus TAB (0x09) and LF (0x0a), which are ordinary source
 // text. CR (0x0d) is included: it is not ordinary in this repo's sources and a
@@ -488,12 +518,35 @@ function run(argv) {
     armed = false;
     return restoreLeg(repoRoot, absPath, { quiet: false });
   };
+  // The WRAP child once it is spawned, and whether a signal has interrupted
+  // the run. See "A handler only runs on a free event loop" in the header.
+  let wrapped = null;
+  let interrupted = false;
+  const wrappedAlive = () => wrapped !== null && wrapped.pid !== undefined && wrapped.exitCode === null && wrapped.signalCode === null;
   process.on('exit', restoreNow);
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
     process.on(sig, () => {
       console.error(`x ${TOOL}: ${sig} received mid-ablation — restoring ${absPath}`);
+      if (interrupted) {
+        // A second signal while the child is still leaving: pass it on, and
+        // leave the restore and the bounded wait to the first.
+        if (wrappedAlive()) wrapped.kill(sig);
+        return;
+      }
+      interrupted = true;
+      if (!wrappedAlive()) {
+        restoreNow();
+        process.exit(130);
+      }
+      console.error(`x ${TOOL}: forwarding ${sig} to the wrapped command (pid ${wrapped.pid}); SIGKILL after ${WRAP_KILL_GRACE_MS} ms if it has not exited`);
+      wrapped.kill(sig);
       restoreNow();
-      process.exit(130);
+      setTimeout(() => {
+        if (!wrappedAlive()) return;
+        console.error(`x ${TOOL}: the wrapped command (pid ${wrapped.pid}) outlived ${WRAP_KILL_GRACE_MS} ms after ${sig} — sending SIGKILL`);
+        wrapped.kill('SIGKILL');
+      }, WRAP_KILL_GRACE_MS);
+      // The child's own 'exit' listener (below) ends the run with 130.
     });
   }
   process.on('uncaughtException', (e) => {
@@ -540,20 +593,39 @@ function run(argv) {
   }
 
   say(`running: ${a.command.join(' ')}`);
-  const child = spawnSync(a.command[0], a.command.slice(1), { cwd: process.cwd(), stdio: 'inherit' });
-  const childStatus = child.status === null ? 1 : child.status;
-  say(`command exited ${childStatus}${child.signal ? ` (signal ${child.signal})` : ''}`);
-  const rv = restoreNow();
-  // The child's colour is the ablation's READING, not this tool's verdict: a
-  // RED child is the expected direction for most ablations. So the child's
-  // status passes through unchanged, and the one thing that is this tool's own
-  // failure -- a restore that did not restore -- gets its own code, which no
-  // child can accidentally mint.
-  if (rv && !rv.ok) {
-    console.error(`x ${TOOL}: the command ran, but the RESTORE could not be proven. The tree is not the tree you think you are measuring.`);
-    process.exit(EXIT.RESTORE);
-  }
-  process.exit(childStatus);
+  // ASYNC, never `spawnSync`: a synchronous spawn holds the event loop for the
+  // child's whole life, and the signal handlers above cannot run on a held
+  // loop. See "A handler only runs on a free event loop" in the header.
+  let done = false;
+  const childDone = (code, signal) => {
+    if (done) return;
+    done = true;
+    if (interrupted) {
+      // The signal handler has already restored and printed its proof.
+      restoreNow();
+      process.exit(130);
+    }
+    // `code === null` is a signal death or a spawn that never started (no
+    // such command): both read 1, as `spawnSync`'s null status did.
+    const childStatus = code === null ? 1 : code;
+    say(`command exited ${childStatus}${signal ? ` (signal ${signal})` : ''}`);
+    const rv = restoreNow();
+    // The child's colour is the ablation's READING, not this tool's verdict: a
+    // RED child is the expected direction for most ablations. So the child's
+    // status passes through unchanged, and the one thing that is this tool's own
+    // failure -- a restore that did not restore -- gets its own code, which no
+    // child can accidentally mint.
+    if (rv && !rv.ok) {
+      console.error(`x ${TOOL}: the command ran, but the RESTORE could not be proven. The tree is not the tree you think you are measuring.`);
+      process.exit(EXIT.RESTORE);
+    }
+    process.exit(childStatus);
+  };
+  wrapped = spawn(a.command[0], a.command.slice(1), { cwd: process.cwd(), stdio: 'inherit' });
+  wrapped.on('exit', childDone);
+  // A spawn that never started (ENOENT, EACCES) emits 'error' with no pid and
+  // no 'exit'. Any later 'error' (a failed kill) must not end the run.
+  wrapped.on('error', () => { if (wrapped.pid === undefined) childDone(null, null); });
 }
 
 // --- self-test ------------------------------------------------------------
@@ -576,9 +648,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'direction A — anchor missing refuses': 5,
   'direction B — anchor present lands on disk': 8,
   'restore is proven, never assumed': 4,
-  'WRAP mode holds the trap and restores after the child': 7,
+  'WRAP mode holds the trap and restores after the child': 10,
+  'WRAP mode answers a signal while the child is alive': 11,
 });
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 function selfTest() {
@@ -717,6 +790,86 @@ function selfTest() {
     ok(/CHILD_SAW_MUTATION/.test(w2.stdout), 'a `--self-test` AFTER the -- does not hijack the dispatcher — the parent still performs the ablation');
     ok(!/self-test: all/.test(w2.stdout), 'and the parent does not print a self-test verdict for an ablation it was asked to run');
     ok(blobHash(target, tmp) === headBlob, 'and that wrapped run still restores the file');
+    // The async spawn keeps `spawnSync`'s reading of a child that never ran
+    // or died by a signal: status 1, the signal named, the file restored.
+    const w3 = invoke(['--file', target, '--anchor', 'GUARD = true', '--replacement', 'GUARD = false', '--', 'no-such-command-ablation-replace-zz9']);
+    ok(w3.status === 1, `a wrapped command that cannot be spawned exits 1 (got ${w3.status})`);
+    ok(blobHash(target, tmp) === headBlob, 'and the unspawnable run still restores the file');
+    const w4 = invoke(['--file', target, '--anchor', 'GUARD = true', '--replacement', 'GUARD = false', '--', process.execPath, '-e', "process.kill(process.pid, 'SIGKILL')"]);
+    ok(w4.status === 1 && /command exited 1 \(signal SIGKILL\)/.test(w4.stdout), `a child killed by a signal exits 1 and names the signal (got ${w4.status})`);
+
+    battery('WRAP mode answers a signal while the child is alive');
+    // The defect: under `spawnSync` the handler could not run while the child
+    // lived, so a SIGTERM mid-wait left the target MUTATED and the child
+    // orphaned. This battery sends that SIGTERM mid-wait. The self-test is
+    // synchronous, so the signal is sent by a small driver that spawns this
+    // tool asynchronously, waits for the child to report in, signals the
+    // TOOL's pid (not the group), and reports what it saw as JSON.
+    //
+    // The child reports its pid and whether it saw the mutation, then closes
+    // its stdout/stderr so that an orphan cannot hold the driver's pipes open.
+    const sleeper = join(tmp, 'sleeper.mjs');
+    writeFileSync(
+      sleeper,
+      "import { readFileSync, writeFileSync, renameSync, closeSync } from 'node:fs';\n"
+        + 'const [pidFile, file, mode] = process.argv.slice(2);\n'
+        + "if (mode === 'ignore') process.on('SIGTERM', () => {});\n"
+        + "const saw = readFileSync(file, 'utf8').includes('GUARD = false') ? 'MUTATED' : 'PRISTINE';\n"
+        + 'closeSync(1); closeSync(2);\n'
+        + "writeFileSync(pidFile + '.tmp', `${process.pid} ${saw}`); renameSync(pidFile + '.tmp', pidFile);\n"
+        + 'setTimeout(() => process.exit(0), 30000);\n',
+      'utf8',
+    );
+    const driver = join(tmp, 'driver.mjs');
+    writeFileSync(
+      driver,
+      "import { spawn } from 'node:child_process';\n"
+        + "import { existsSync, readFileSync } from 'node:fs';\n"
+        + 'const [tool, cwd, file, sleeperPath, pidFile, mode, graceMs] = process.argv.slice(2);\n'
+        + "const t = spawn(process.execPath, [tool, '--file', file, '--anchor', 'GUARD = true', '--replacement', 'GUARD = false', '--', process.execPath, sleeperPath, pidFile, file, mode], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });\n"
+        + "let out = ''; let err = '';\n"
+        + "t.stdout.on('data', (d) => { out += d; }); t.stderr.on('data', (d) => { err += d; });\n"
+        + 'const started = Date.now(); let sentAt = null; let childPid = null; let saw = null; let timedOut = false;\n'
+        + 'const poll = setInterval(() => {\n'
+        + '  if (sentAt === null && existsSync(pidFile)) {\n'
+        + "    [childPid, saw] = readFileSync(pidFile, 'utf8').trim().split(' ');\n"
+        + "    childPid = Number(childPid); sentAt = Date.now(); t.kill('SIGTERM');\n"
+        + '  }\n'
+        + '  const late = sentAt === null ? Date.now() - started > 10000 : Date.now() - sentAt > Number(graceMs) + 4000;\n'
+        + "  if (late && !timedOut) { timedOut = true; t.kill('SIGKILL'); }\n"
+        + '}, 25);\n'
+        + "t.on('close', (status, signal) => {\n"
+        + '  clearInterval(poll);\n'
+        + '  let childAlive = false;\n'
+        + "  if (childPid) { try { process.kill(childPid, 0); childAlive = true; process.kill(childPid, 'SIGKILL'); } catch { /* gone */ } }\n"
+        + '  process.stdout.write(JSON.stringify({ status, signal, out, err, saw, childAlive, timedOut, waitedMs: sentAt === null ? null : Date.now() - sentAt }));\n'
+        + '});\n',
+      'utf8',
+    );
+    const signalled = (mode) => {
+      const pidFile = join(tmp, `child-${mode}.pid`);
+      rmSync(pidFile, { force: true });
+      const d = spawnSync(process.execPath, [driver, self, tmp, target, sleeper, pidFile, mode, String(WRAP_KILL_GRACE_MS)], { encoding: 'utf8' });
+      try {
+        return JSON.parse(d.stdout);
+      } catch {
+        return { status: null, out: '', err: `driver gave no JSON (status ${d.status}): ${d.stderr}`, saw: null, childAlive: true, timedOut: true };
+      }
+    };
+    const s1 = signalled('cooperative');
+    ok(s1.saw === 'MUTATED', `the SIGTERM landed MID-WAIT, while the child had the mutation live (child saw ${s1.saw})`);
+    ok(!s1.timedOut, `the tool answered the SIGTERM while its child was alive, instead of blocking until the child finished (${s1.err})`);
+    ok(/SIGTERM received mid-ablation/.test(s1.err), 'the tool says it received SIGTERM');
+    ok(s1.status === 130, `a signalled run exits 130 (got ${s1.status})`);
+    ok(blobHash(target, tmp) === headBlob, 'after the SIGTERM the target blob equals HEAD');
+    ok(/git diff HEAD\s+empty/.test(s1.out), 'and the signalled restore prints its proof');
+    ok(!s1.childAlive, 'the wrapped child is gone — no orphan left behind (in a lock queue, say)');
+    g(['checkout', 'HEAD', '--', target]); // isolate the next case from a red one
+    const s2 = signalled('ignore');
+    ok(/sending SIGKILL/.test(s2.err) && !s2.timedOut, `a child that ignores SIGTERM is SIGKILLed after the grace, and the tool exits (${s2.err})`);
+    ok(s2.status === 130, `the escalated run still exits 130 (got ${s2.status})`);
+    ok(blobHash(target, tmp) === headBlob, 'the target equals HEAD even while that child ignored the signal');
+    ok(!s2.childAlive, 'and the child that ignored SIGTERM is gone too');
   } finally {
     cleanup();
   }
