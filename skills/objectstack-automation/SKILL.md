@@ -175,7 +175,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 
 > **Elevate the write, not the flow.** Prefer the `subflow` route — raising a
 > whole `screen` flow silently elevates every other write in it, and an `api`
-> flow adds a webhook secret and an inbound door a button never uses.
+> flow adds a webhook secret and an inbound endpoint a button never uses.
 >
 > **Elevation stops at identity assignment.** A `runAs: 'system'` write (insert
 > through purge) of `sys_user_position`, `sys_user_permission_set`,
@@ -191,10 +191,10 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > re-declare it per object.
 
 > **Who may START a flow: `requiredPermissions: ['…']` on the flow** (ADR-0066
-> D4) — every door above that starts it by name refuses a non-system caller
-> missing any named capability with `403 PERMISSION_DENIED`; an action starting
-> it inherits the list, a `subflow` node is not a door. Gate an elevated
-> `screen` / `api` flow here, never on `current_user.positions` inside it.
+> D4) — the four entrances above refuse a non-system caller missing any named
+> capability with `403 PERMISSION_DENIED`; an action starting it inherits the
+> list, a `subflow` node is not an entrance. Gate an elevated `screen` / `api`
+> flow here, never on `current_user.positions` inside it.
 
 > **A hook elevates itself with `runAs`, never with `sudo`.** An object hook
 > (objectstack-data) declares its own `runAs: 'system' | 'user' | 'inherit'` —
