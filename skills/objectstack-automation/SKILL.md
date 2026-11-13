@@ -193,8 +193,8 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > **Who may START a flow: `requiredPermissions: ['…']` on the flow** (ADR-0066
 > D4) — every door above that starts it by name refuses a non-system caller
 > missing any named capability with `403 PERMISSION_DENIED`; an action starting
-> it inherits the list, a `subflow` node is not a door. Gate an elevated `screen` / `api` flow here, never
-> on `current_user.positions` inside it.
+> it inherits the list, a `subflow` node is not a door. Gate an elevated
+> `screen` / `api` flow here, never on `current_user.positions` inside it.
 
 > **A hook elevates itself with `runAs`, never with `sudo`.** An object hook
 > (objectstack-data) declares its own `runAs: 'system' | 'user' | 'inherit'` —
