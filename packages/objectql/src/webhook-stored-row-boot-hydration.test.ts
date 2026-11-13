@@ -19,6 +19,12 @@
  * shipped declaration is sealed (ADR-0131 D6), so such a row is residue an
  * older release stored, and the boot census names it with its remedy.
  *
+ * [#32741, merged from main] A package-less row at a holder's address is
+ * declined for a sealed type in every hydration state, so it no longer lands
+ * in the one holder's slot: the slot keeps the holder's declaration. Measured
+ * the same on the merged tree with `webhook` out of the three type sets
+ * (dists rebuilt), so that move is #32741's, not this PR's.
+ *
  * The harness is the one `protocol.hydrate-overlay-canonical-type.test.ts`
  * uses: an engine double answering `find` over the stored rows, with the real
  * `SchemaRegistry` and the real `ObjectStackProtocolImplementation`.
@@ -81,11 +87,11 @@ describe('a stored webhook row at boot: loadMetaFromDb registers it in its own h
     beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined); });
     afterEach(() => { warn.mockRestore(); });
 
-    it('CONTROL — one holder: a row naming it, or naming no package (D8), is its slot; no environment holder appears', async () => {
-        for (const packageId of [A, null]) {
+    it('CONTROL — one holder: a row naming it is its slot; a row naming no package is declined, as main since #32741, so the slot keeps the declaration; no environment holder appears', async () => {
+        for (const [packageId, url] of [[A, 'https://stored.example/row'], [null, shipped(A)]] as const) {
             const got = await hydrate([A], [{ packageId, url: 'https://stored.example/row' }]);
             expect(got.load).toMatchObject({ loaded: 1, errors: 0 });
-            expect([got.holders, got.environment, got.slots], String(packageId)).toEqual([[A], undefined, { [A]: 'https://stored.example/row' }]);
+            expect([got.holders, got.environment, got.slots], String(packageId)).toEqual([[A], undefined, { [A]: url }]);
         }
         // The boot census names the sealed residue row (ADR-0131 D6).
         expect(warn.mock.calls.some((call: unknown[]) => String(call[0]).includes('metadata_sealed_overlay_unserved'))).toBe(true);

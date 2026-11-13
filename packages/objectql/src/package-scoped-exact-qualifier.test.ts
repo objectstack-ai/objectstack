@@ -1425,9 +1425,18 @@ describe('[#32407] a package-less item of a two-holder name of a narrowed type o
  * BASE (measured on this branch's round-3 head 2200b8c9, before main's #32566
  * was merged, same fixture): `?layers=true&package=X` of a package-less stored
  * webhook row of a two-holder name reported that row as the overlay of both
- * holders; every other read below answered as it does now. On `origin/main`
- * the two-holder state is not reachable: a second namespace's webhook of the
- * name was refused `422`.
+ * holders. On `origin/main` the two-holder state is not reachable: a second
+ * namespace's webhook of the name was refused `422`.
+ *
+ * [#31699 PR 2 × #32741] After the merge of main's #32741 (a package-less row
+ * at a holder's exact address is declined for a sealed type, on every read and
+ * in every hydration state), each package-less item below is declined at each
+ * holder's exact and layered reads, so each holder answers its own declaration
+ * and nothing is picked between them. BASE for the two-holder cases: this
+ * branch before that merge (7f68e294b), `409 ambiguous-in-closure` naming both.
+ * The one-holder CONTROLs answer as `main` does since #32741, measured on the
+ * merged tree with `webhook` out of the three type sets (dists rebuilt): the
+ * same declines, so they are #32741's answers, not this change's.
  */
 describe('[#31699 PR 2] a package-less webhook of a name two packages hold is no holder\'s own, plain and layered (#32566)', () => {
   const hookBody = (label: string) => ({ name: 'hook', label, object: 'task', url: 'https://hooks.example/x' });
@@ -1446,29 +1455,27 @@ describe('[#31699 PR 2] a package-less webhook of a name two packages hold is no
     protocol.getMetaItemLayered({ type: 'webhook', name: 'hook', packageId } as never) as Promise<{ overlay?: { label?: string } | null; code?: { label?: string } | null }>;
   const listed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'webhook', packageId } as never)) as { items?: Array<{ name?: string; label?: string }> })
     .items?.filter((i) => i.name === 'hook').map((i) => i.label).sort();
-  const BOTH = [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }];
 
   it('the premise: `webhook` is narrowed to the namespace and its readers consult `(package, name)`', () => {
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('webhook');
     expect(registry.readsByPackage('webhook')).toBe(true);
   });
 
-  it('[FROM each holder\'s overlay TO 409] two holders: `?layers=true&package=X` of a package-less stored row refuses naming both, at both holders', async () => {
+  it('[FROM each holder\'s overlay, then 409, TO declined] two holders: `?layers=true&package=X` of a package-less stored row reports no overlay at either holder, each code layer the holder\'s own (#32741)', async () => {
     shipHook(A);
     shipHook(B);
     storeHook(null, 'stored webhook');
-    for (const at of [A, B]) {
-      const err = await refusalOf(() => layered(at));
-      expect([err.code, err.status, err.refusal.reason, err.refusal.candidates], at)
-        .toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-closure', BOTH]);
+    for (const [at, own] of [[A, 'alpha webhook'], [B, 'beta webhook']] as const) {
+      const answer = await layered(at);
+      expect([answer.code?.label, answer.overlay ?? null], at).toEqual([own, null]);
     }
   });
 
-  it('CONTROL — one holder: the layered read reports the package-less row as the overlay, over the holder\'s code layer', async () => {
+  it('CONTROL — one holder, as main since #32741: the layered read declines the package-less row (no overlay) over the holder\'s code layer', async () => {
     shipHook(A);
     storeHook(null, 'stored webhook');
     const answer = await layered(A);
-    expect([answer.code?.label, answer.overlay?.label]).toEqual(['alpha webhook', 'stored webhook']);
+    expect([answer.code?.label, answer.overlay ?? null]).toEqual(['alpha webhook', null]);
   });
 
   it('CONTROL — a row bound to alpha: alpha\'s layered read reports it, beta\'s reports none; each code layer is the holder\'s own', async () => {
@@ -1481,23 +1488,22 @@ describe('[#31699 PR 2] a package-less webhook of a name two packages hold is no
   });
 
   for (const stamp of [undefined, '', 'sys_metadata']) {
-    it(`two holders: both plain exact reads of the environment's item (stamp ${JSON.stringify(stamp)}) refuse 409 naming both; each list serves the holder's own`, async () => {
+    it(`[FROM 409 TO declined] two holders: both plain exact reads of the environment's item (stamp ${JSON.stringify(stamp)}) answer each holder's own declaration, the item declined (#32741); each list serves the holder's own`, async () => {
       envHook(stamp);
       shipHook(A);
       shipHook(B);
       for (const [at, own] of [[A, 'alpha webhook'], [B, 'beta webhook']] as const) {
-        const err = await refusalOf(() => read(at));
-        expect([err.code, err.status, err.refusal.reason, err.refusal.candidates], at)
-          .toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-closure', BOTH]);
+        expect(labelOf(await read(at)), at).toBe(own);
         expect(await listed(at), at).toEqual([own]);
       }
     });
   }
 
-  it('CONTROL — one holder: the environment\'s item is that holder\'s customization, served on its exact address; after a bind to alpha, beta serves its own', async () => {
+  it('CONTROL — one holder, as main since #32741: the environment\'s item is declined at the holder\'s exact address, which serves its declaration; bound to alpha, it is alpha\'s own, and beta serves its own', async () => {
     envHook();
     shipHook(A);
-    expect(labelOf(await read(A))).toBe('env webhook');
+    expect(labelOf(await read(A))).toBe('alpha webhook');
+    expect(await listed(A)).toEqual(['alpha webhook']);
     shipHook(B);
     registry.registerItem('webhook', { ...hookBody('env webhook'), _provenance: 'org', _packageId: A }, 'name' as never);
     expect(labelOf(await read(A))).toBe('env webhook');
