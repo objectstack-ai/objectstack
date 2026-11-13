@@ -33,6 +33,7 @@ import {
   AUDIT_TIMESTAMP_COLUMNS, canonicalTimeOfDay, normalizeSqliteDatetimeOutput, presentAuditTimestampOutput,
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
+import { isDateOnInstantColumn, utcMidnightOfDay } from './date-on-instant-column.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link SqliteSerialisationFacet} read — every one of
@@ -45,6 +46,7 @@ export interface SqliteSerialisationHost {
   readonly booleanFields: SqlDriver['booleanFields'];
   readonly columnFieldByObject: SqlDriver['columnFieldByObject'];
   readonly dateFields: SqlDriver['dateFields'];
+  readonly dateFieldsOnInstantColumn: SqlDriver['dateFieldsOnInstantColumn'];
   readonly datetimeFields: SqlDriver['datetimeFields'];
   readonly fileColumnsMoved: SqlDriver['fileColumnsMoved'];
   readonly isMssql: SqlDriver['isMssql'];
@@ -67,7 +69,7 @@ export interface SqliteSerialisationHost {
 /** The bodies of the "SQLite serialisation" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class SqliteSerialisationFacet {
   /** The body of `SqlDriver#formatInput`; the method's docblock there is its contract. */
-  static formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'datetimeFields' | 'fileColumnsMoved' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
+  static formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'dateFieldsOnInstantColumn' | 'datetimeFields' | 'fileColumnsMoved' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
     let copy: any = data;
     let copied = false;
 
@@ -152,7 +154,11 @@ export class SqliteSerialisationFacet {
         if (v == null) continue;
         const day = this.toDateOnly(v);
         // Oracle binds the day as its UTC-midnight instant — `oracleDayBinding`.
-        const normalized = this.isOracle ? oracleDayBinding(day) : day;
+        // [#32851] So does a Postgres `timestamptz` column a `datetime` → `date`
+        // publish left: a bare day would be read in the SESSION's zone.
+        const normalized = this.isOracle
+          ? oracleDayBinding(day)
+          : isDateOnInstantColumn(this, object, field) ? utcMidnightOfDay(day) : day;
         if (normalized !== v) {
           if (!copied) { copy = { ...copy }; copied = true; }
           copy[field] = normalized;
