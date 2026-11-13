@@ -30,6 +30,13 @@
 // nothing and keeps no file — never "attached" for a change the engine
 // ignored.
 //
+// [#32686] And a record that cannot be created without its file: an extra
+// object, `dogfood_expense_line`, whose `invoice` file field is required. The
+// agent asks for a link naming the object and the field (no record), the
+// member uploads through it, and the agent's `create_record` names the file id
+// the link answered: two agent calls and one upload, over the real
+// `/api/v1/mcp` and the real upload-link route.
+//
 // Not eligible for the shared showcase project: it boots its own plugins.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -69,12 +76,15 @@ const memberSet = PermissionSetSchema.parse({
     showcase_invoice_line: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     sys_attachment: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     dogfood_upload_claim: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+    dogfood_expense_line: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
   },
   rowLevelSecurity: [RLS.ownerPolicy('showcase_invoice', 'created_by')],
 });
 
 /** [#32734] An expense claim whose invoices lock once it is approved. */
 const UPLOAD_CLAIM = 'dogfood_upload_claim';
+/** [#32686] An expense line whose e-invoice is required. */
+const EXPENSE_LINE = 'dogfood_expense_line';
 const uploadClaimApp = {
   name: 'com.dogfood.upload-claim',
   type: 'standard' as const,
@@ -94,6 +104,15 @@ const uploadClaimApp = {
           name: { type: 'text', label: 'Name' },
           status: { type: 'text', label: 'Status' },
           invoices: { type: 'file', label: 'Invoices', multiple: true, readonlyWhen: "record.status == 'approved'" },
+        },
+      }, {
+        // [#32686] An expense line that cannot be saved without its e-invoice.
+        name: EXPENSE_LINE,
+        label: 'Expense Line',
+        fields: {
+          invoice_no: { type: 'text', label: 'Invoice No.' },
+          amount: { type: 'number', label: 'Amount' },
+          invoice: { type: 'file', label: 'E-invoice', required: true },
         },
       }],
     });
@@ -494,6 +513,85 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       expect(json.droppedFields, JSON.stringify(json)).toEqual(
         expect.arrayContaining([expect.objectContaining({ reason: 'readonly_when', fields: ['invoices'] })]),
       );
+    });
+  });
+
+  // [#32686] Ruling A: an agent creates a record whose file field is
+  // required. The link names the object and the field, no record; the member
+  // uploads; the create names the file id the link answered.
+  describe('[#32686] a required file field, filled when the record is created (`dogfood_expense_line.invoice`)', () => {
+    const lineOf = (id: string) => ql.findOne(EXPENSE_LINE, { where: { id }, ...SYS });
+    const invoiceOf = async (id: string): Promise<string | null> => {
+      const value = (await lineOf(id))?.invoice;
+      return value == null ? null : String(typeof value === 'object' ? value.id : value);
+    };
+
+    it('two agent calls and one upload: create_upload_link with no record, the upload, create_record naming fileIds[0]', async () => {
+      // Without the file the line cannot be created: the precondition the card measures.
+      const missing = await refused(memberToken, 'create_record', { objectName: EXPENSE_LINE, data: { invoice_no: 'FP-0001', amount: 88 } });
+      expect(JSON.stringify(missing), 'the required e-invoice refuses the create').toContain('invoice');
+
+      // Agent call 1: a link for the field of a record not yet created.
+      const { path, answer } = await mint({ objectName: EXPENSE_LINE, field: 'invoice' });
+      expect(answer).toMatchObject({ singleUse: true, objectName: EXPENSE_LINE, field: 'invoice' });
+      expect(answer).not.toHaveProperty('recordId');
+      expect(answer.fileIds).toHaveLength(1);
+      const [fileId] = answer.fileIds as string[];
+
+      // The browser: the page the member opens says what is wanted and that
+      // the file will be received (no record holds it yet), and names nothing.
+      const page = await open(path);
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain('The file was received');
+      expect(html).not.toContain(EXPENSE_LINE);
+      expect(html).not.toContain(MEMBER_EMAIL);
+
+      // The upload, as the page's script sends it.
+      const pdf = minimalPdf('E-invoice FP-0001');
+      const res = await put(path, pdf, { 'x-file-name': 'fp-0001.pdf' });
+      const body: any = await res.json();
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      expect(body.data).toEqual({ fileId, size: pdf.length, field: 'invoice' });
+      expect(await fileRow(fileId)).toMatchObject({ status: 'committed', size: pdf.length, ref_id: null, name: 'fp-0001.pdf' });
+
+      // Agent call 2: the create names the file id; the record holds the file.
+      const { json } = await ok(memberToken, 'create_record', {
+        objectName: EXPENSE_LINE,
+        data: { invoice_no: 'FP-0001', amount: 88, invoice: fileId },
+      });
+      const lineId = String(json.id ?? json.record?.id);
+      expect(await invoiceOf(lineId)).toBe(fileId);
+      expect(await fileRow(fileId)).toMatchObject({ ref_object: EXPENSE_LINE, ref_id: lineId, ref_field: 'invoice' });
+
+      // read_file reads it back through the record, as for any record's file.
+      const read = await ok(memberToken, 'read_file', { objectName: EXPENSE_LINE, recordId: lineId, field: 'invoice' });
+      expect(read.content.map((c: any) => c.text ?? '').join('\n')).toContain('E-invoice FP-0001');
+    });
+
+    it('another user\'s create naming the member\'s upload is refused as a file they cannot open, and the file stays unclaimed', async () => {
+      const { path, answer } = await mint({ objectName: EXPENSE_LINE, field: 'invoice' });
+      const [fileId] = answer.fileIds as string[];
+      expect((await put(path, minimalPdf('E-invoice FP-0002'), { 'x-file-name': 'fp-0002.pdf' })).status).toBe(200);
+
+      const error = await refused(adminToken, 'create_record', { objectName: EXPENSE_LINE, data: { invoice_no: 'FP-0002', invoice: fileId } });
+      expect(JSON.stringify(error)).toContain('it is not a file you can open');
+      expect(await fileRow(fileId)).toMatchObject({ status: 'committed', ref_id: null });
+      // Nor can that user download it while no record holds it.
+      expect((await stack.apiAs(adminToken, 'GET', `/storage/files/${fileId}/url`)).status).not.toBe(200);
+
+      // The member's own create still takes it.
+      const { json } = await ok(memberToken, 'create_record', { objectName: EXPENSE_LINE, data: { invoice_no: 'FP-0002', invoice: fileId } });
+      expect(await invoiceOf(String(json.id ?? json.record?.id))).toBe(fileId);
+    });
+
+    it('a member who cannot create the object gets no link: the create verdict refuses it before anything is reserved', async () => {
+      const linksBefore = (await ql.find('sys_file', { where: { name: 'upload-link', status: 'pending' }, ...SYS })).length;
+      // `showcase_task` is not in the member's set; its `cover` is an image field.
+      const error = await refused(memberToken, 'create_upload_link', { objectName: 'showcase_task', field: 'cover' });
+      expect(error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      expect(error.message).toBe('You cannot upload a file for a new showcase_task: you cannot create showcase_task records.');
+      expect((await ql.find('sys_file', { where: { name: 'upload-link', status: 'pending' }, ...SYS })).length).toBe(linksBefore);
     });
   });
 });
