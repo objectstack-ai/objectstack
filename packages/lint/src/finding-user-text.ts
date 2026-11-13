@@ -66,6 +66,9 @@ import { AUTONUMBER_FORMATS_USER_TEXT } from './lint-autonumber-formats.user-tex
 import { SORTABLE_FIELDS_USER_TEXT } from './validate-sortable-fields.user-text.js';
 import { SEARCHABLE_FIELDS_USER_TEXT } from './validate-searchable-fields.user-text.js';
 import { OBJECT_REFERENCES_USER_TEXT } from './validate-object-references.user-text.js';
+import { FORM_LAYOUT_USER_TEXT } from './validate-form-layout.user-text.js';
+import { VISIBILITY_PREDICATES_USER_TEXT } from './validate-visibility-predicates.user-text.js';
+import { PAGE_FIELD_BINDINGS_USER_TEXT } from './validate-page-field-bindings.user-text.js';
 import { CONNECTOR_CREDENTIAL_LITERALS_USER_TEXT } from './lint-connector-credential-literals.user-text.js';
 import { RETIRED_PERMISSION_RESIDUE_USER_TEXT } from './validate-retired-permission-residue.user-text.js';
 import { PREDICATE_PATH_REFS_USER_TEXT } from './validate-predicate-path-refs.user-text.js';
@@ -184,6 +187,9 @@ export const FINDING_USER_TEXT_CATALOG: UserTextCatalog = mergeUserTextCatalogs(
   SORTABLE_FIELDS_USER_TEXT,
   SEARCHABLE_FIELDS_USER_TEXT,
   OBJECT_REFERENCES_USER_TEXT,
+  FORM_LAYOUT_USER_TEXT,
+  VISIBILITY_PREDICATES_USER_TEXT,
+  PAGE_FIELD_BINDINGS_USER_TEXT,
   // The connector, permission and form-view writes: the connector credential,
   // retired permission key and form predicate advisories.
   CONNECTOR_CREDENTIAL_LITERALS_USER_TEXT,

@@ -3379,11 +3379,14 @@ export function registerFileTools(
         description:
           'Create a link through which the user uploads one file onto a record: into a file field (field) or ' +
           'as an attachment (attachments: true). Give the link to the user to open in a browser where they are ' +
-          'signed in to this deployment as themselves; it works only for them, once, for this record and field ' +
-          'only, and expires (see expiresAt). The upload is stored as the user, so they must be able to edit the ' +
-          'record (and the field): a record a pending approval locks, a read-only field, or a field read-only on ' +
-          'this record in its current state (readonlyWhen), gets no link, and an ' +
-          'upload the field cannot take when it arrives is refused with the reason, attaching nothing.' +
+          'signed in to this deployment as themselves; it works only for them, once, for this record and this ' +
+          'field (or its attachments) only, and expires (see expiresAt). The upload is stored as the user, so they ' +
+          'must be able to edit the record. A field link also needs a field they may write, and gets no link for ' +
+          'a field declared read-only (readonly), a field read-only on this record in its current state ' +
+          '(readonlyWhen), or a record a pending approval locks. An attachments link asks only what attaching ' +
+          'asks, so a record a pending approval locks still takes attachments. An upload refused when it arrives ' +
+          '(for a field link: the field became read-only, or the record was locked, after the link was made) ' +
+          'answers the reason and attaches nothing.' +
           (newRecordLinkFn
             ? ' For a record you have not created yet (a required file field), omit recordId and name the field: ' +
               'the user must be able to create such records, and the answer carries fileIds, the id(s) the upload ' +
