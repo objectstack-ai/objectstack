@@ -6,4 +6,14 @@ export * from './adapter';
 export * from './pattern-matcher';
 export * from './cors-admission';
 export * from './route-pattern';
-
+export {
+    DEFAULT_MAX_REQUEST_BODY_BYTES,
+    MAX_REQUEST_BODY_BYTES_ENV,
+    RequestBodyTooLarge,
+    installRequestBodyLimit,
+    requestBodyGuardOf,
+    requestBodyTooLargeAnswer,
+    requestBodyTooLargeEnvelope,
+    resolveMaxRequestBodyBytes,
+    type RequestBodyGuard,
+} from './body-limit';
