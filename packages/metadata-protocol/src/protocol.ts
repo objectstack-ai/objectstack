@@ -380,7 +380,7 @@ import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-
 // [#25467 cut 35] The environment's own `sys_metadata` rows: the family read, the one-row read, the served row and the package-less address.
 import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage } from './protocol-environment-rows.js';
 // [#25467 cut 35] The stored rows of a collection, folded over the registered ones.
-import { foldStoredCollection } from './protocol-stored-collection-fold.js';
+import { foldStoredCollection, type StoredCollectionTargetFold } from './protocol-stored-collection-fold.js';
 // [#25467 cut 35] The environment-wide package uninstall verb.
 import { deletePackage, recordPackageUninstall, runUninstallGuards } from './protocol-package-uninstall.js';
 // ADR-0146 D3 — the ensure door of a base's paired `.custom` package, and the
@@ -2028,6 +2028,7 @@ export class ObjectStackProtocolImplementation implements
         registered: unknown[],
         singularType: string,
         pluralType: string,
+        targetFold?: StoredCollectionTargetFold,
     ): Promise<unknown[]> {
         // [#25467 cut 35] The body moved to `protocol-stored-collection-fold.ts` (see `StoredCollectionFoldHost`).
         const readEngine = () => this.engine;
@@ -2037,7 +2038,7 @@ export class ObjectStackProtocolImplementation implements
             findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
             foldObjectExtendersFromRegistry: (...a) => this.foldObjectExtendersFromRegistry(...a),
         };
-        return foldStoredCollection.call(host, registered, singularType, pluralType);
+        return foldStoredCollection.call(host, registered, singularType, pluralType, targetFold);
     }
 
     /**
@@ -2779,13 +2780,13 @@ export class ObjectStackProtocolImplementation implements
      * (see {@link SchemaRegistry.foldObjectExtendersOnto}), so applying it twice
      * would duplicate both.
      */
-    private foldObjectExtendersFromRegistry(type: string, name: unknown, body: unknown, onlyExtensionsOf?: string): unknown {
+    private foldObjectExtendersFromRegistry(type: string, name: unknown, body: unknown, onlyExtensionsOf?: string, withoutExtensionsOf?: string): unknown {
         // [#25467 cut 30] The body moved to `protocol-object-extender-fold.ts` (see `ObjectExtenderFoldHost`).
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof foldObjectExtendersFromRegistry> = {
             get engine() { return readEngine(); },
         };
-        return foldObjectExtendersFromRegistry.call(host, type, name, body, onlyExtensionsOf);
+        return foldObjectExtendersFromRegistry.call(host, type, name, body, onlyExtensionsOf, withoutExtensionsOf);
     }
 
     /**

@@ -207,6 +207,50 @@ export async function runAuthoringGate(
 }
 
 /**
+ * [#33072] What an `object_extension` write's object universe leaves out: the
+ * WRITTEN package's own extensions of the extended target (`options`, the
+ * registry's existing `withoutExtensionsOf` fold option), on that target only
+ * (`target`, the body's `extend`, else the row's name, which the item gate
+ * holds equal to it). A package holds one extension per target, so the written
+ * entry replaces the stored one; the gate folds the written entry in itself
+ * (`objectsAsServed` in `@objectstack/lint`), so the candidate is the target as
+ * it will be served after the write. The package's extensions of OTHER objects
+ * are not being written and stay served. `undefined` (the ordinary fold) for
+ * every other write type, and for a write naming no package or no target.
+ */
+export function objectExtensionWriteFold(
+    singularType: string,
+    name: string,
+    body: unknown,
+    packageId: string | null | undefined,
+): { options: { withoutExtensionsOf: string }; target: string } | undefined {
+    if (singularType !== 'object_extension') return undefined;
+    if (typeof packageId !== 'string' || packageId === '') return undefined;
+    const extend = body !== null && typeof body === 'object' ? (body as { extend?: unknown }).extend : undefined;
+    const target = typeof extend === 'string' && extend !== '' ? extend : name;
+    if (typeof target !== 'string' || target === '') return undefined;
+    return { options: { withoutExtensionsOf: packageId }, target };
+}
+
+/**
+ * [#33072] `served` with the entry named `target` taken from `withoutWritten`
+ * (the same registry list, folded without the written package's extensions):
+ * two answers of the registry's own fold, composed by name, no fold of its
+ * own. Positions are kept, so every other entry is the served one, unchanged.
+ * A target absent from `withoutWritten` keeps its served entry.
+ */
+export function withTargetFoldedWithout(
+    served: readonly unknown[],
+    withoutWritten: readonly unknown[],
+    target: string,
+): unknown[] {
+    const nameOf = (o: unknown): unknown => (o !== null && typeof o === 'object' ? (o as { name?: unknown }).name : undefined);
+    const replacement = withoutWritten.find((o) => nameOf(o) === target);
+    if (replacement === undefined) return [...served];
+    return served.map((o) => (nameOf(o) === target ? replacement : o));
+}
+
+/**
  * The members {@link judgeRuntimeAuthoringRules} reads: the host facts and
  * collections every judgement of the shared rules is made against.
  */
@@ -375,11 +419,31 @@ export async function judgeRuntimeAuthoringRules(
     // prevent). It is still bounded by the number of TENANT-AUTHORED rows
     // of one type — code-package metadata lives in the registry and never
     // reaches this read — and it never runs on a draft.
+    //
+    // [#33072] On an `object_extension` write the extended TARGET is listed
+    // without the written package's own extensions (the registry's
+    // `withoutExtensionsOf` fold option, which the disable door reads too):
+    // the written entry REPLACES that package's stored extension of its
+    // target, so the stored one must not stay folded beneath it. Left in, a
+    // republish was judged against the target as served BEFORE the write: a
+    // field the write drops still resolved, and a reference the write
+    // re-targets still resolved to its old target. Every other object, and
+    // every other package's extensions of the target, stay as served.
+    const extensionWrite = objectExtensionWriteFold(singular, evt.name, evt.body, evt.packageId);
     const listRegisteredCollection = (singularType: string, pluralType: string): unknown[] => {
         try {
             if (typeof this.engine.registry?.listItems !== 'function') return [];
-            const items = [...this.engine.registry.listItems(singularType)];
-            return items.length > 0 ? items : [...this.engine.registry.listItems(pluralType)];
+            const list = (type: string): unknown[] => {
+                const items = [...this.engine.registry.listItems(type)];
+                if (extensionWrite === undefined || (type !== 'object' && type !== 'objects')) return items;
+                return withTargetFoldedWithout(
+                    items,
+                    [...this.engine.registry.listItems(type, undefined, extensionWrite.options)],
+                    extensionWrite.target,
+                );
+            };
+            const items = list(singularType);
+            return items.length > 0 ? items : list(pluralType);
         } catch {
             return [];
         }
@@ -394,6 +458,12 @@ export async function judgeRuntimeAuthoringRules(
             listRegisteredCollection(singularType, pluralType),
             singularType,
             pluralType,
+            // [#33072] The stored half of the same narrowing: a target that
+            // has its own stored `object` row is folded without the written
+            // package's extension too. Objects only; undefined otherwise.
+            extensionWrite !== undefined && singularType === 'object'
+                ? { target: extensionWrite.target, withoutExtensionsOf: extensionWrite.options.withoutExtensionsOf }
+                : undefined,
         );
     // Resolved together rather than in sequence: each is one indexed
     // `sys_metadata` read and they do not depend on one another, so the
