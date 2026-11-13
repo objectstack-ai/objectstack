@@ -820,27 +820,28 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
             expect(gammaBinds(ql, 'qa_beta_old'), 'no holder is left to refuse it').toBeUndefined();
         });
 
-        it('a re-bind that moves a function also releases a name an earlier bind gave the old owner, which the removal took and nothing registers again: a co-owner binds it (base 8564eaac: refused naming the old owner)', () => {
-            const betaHooks = [hookOn('beta', 'qa_beta_moving', 'qa_moving')];
-            const first = movingArtifact(
-                [...betaHooks, hookOn('beta', 'qa_beta_old_hook', 'qa_beta_old')],
-                [],
-                { qa_moving: stamp('moving'), qa_beta_old: stamp('beta_old') },
-            );
+        it('a re-bind that moves a function also releases a name an earlier bind gave the old owner, which the removal took and nothing registers again: a co-owner binds it; what the old owner keeps keeps its claim (base 8564eaac: refused naming the old owner)', () => {
+            // Beta keeps a hook of its own, so it stays an owner of the bind and the move goes through `releaseMovedFunctions`.
+            const betaHooks = [hookOn('beta', 'qa_beta_moving', 'qa_moving'), hookOn('beta', 'qa_beta_kept', 'qa_kept')];
+            const fns = { qa_moving: stamp('moving'), qa_kept: stamp('kept') };
+            const first = movingArtifact([...betaHooks, hookOn('beta', 'qa_beta_old_hook', 'qa_beta_old')], [], { ...fns, qa_beta_old: stamp('beta_old') });
             const { errors, logger } = recordingErrors();
             const ql = engineFor(first, logger);
             installGamma(ql);
             bind(ql, first, logger);
             expect(ql.registry.sealBareNameHolders()).toEqual([]);
-            bind(ql, movingArtifact(betaHooks, [], { qa_moving: stamp('moving') }), logger);
+            bind(ql, movingArtifact(betaHooks, [], fns), logger);
             expect(ql.functionHoldersOf('qa_beta_old').packageHolders, 'precondition: the name the last bind dropped stays registered').toEqual([BETA]);
 
-            bind(ql, movingArtifact(betaHooks, [hookOn('alpha', 'qa_res_moving', 'qa_moving')], { qa_moving: stamp('moving') }), logger);
+            bind(ql, movingArtifact(betaHooks, [hookOn('alpha', 'qa_res_moving', 'qa_moving')], fns), logger);
 
             expect(errors.map((e) => e.message), 'every group bound').toEqual([]);
             expect(ql.functionHoldersOf('qa_moving').packageHolders).toEqual([ALPHA]);
             expect(ql.functionHoldersOf('qa_beta_old').packageHolders, 'the removal took it').toEqual([]);
             expect(gammaBinds(ql, 'qa_beta_old'), 'no holder is left to refuse it').toBeUndefined();
+            const kept = gammaBinds(ql, 'qa_kept');
+            expect(kept?.code, 'CONTROL: beta still holds what it keeps').toBe('NAMESPACE_CONFLICT');
+            expect(holdersNamed(kept)).toEqual([BETA]);
         });
     });
 
