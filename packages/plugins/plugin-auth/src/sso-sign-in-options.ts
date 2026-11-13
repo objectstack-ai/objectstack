@@ -2,7 +2,8 @@
 
 /**
  * Per-provider Enterprise SSO sign-in options: IdP-initiated sign-in (SAML and
- * OIDC) and just-in-time provisioning under `invite_only`.
+ * OIDC), just-in-time provisioning under `invite_only`, and "sign out of the
+ * company sign-in too" (ruling record 6866334319, `sso-sign-out-of-idp.ts`).
  *
  * Maintainer ruling A on the Enterprise SSO operator knobs (record 6718355623):
  * each option is a toggle on the SSO provider, OFF by default, and every change
@@ -11,9 +12,10 @@
  *
  * ## Where the toggles live
  *
- * Two `ssoProvider` additional fields, declared to the vendor through
+ * `ssoProvider` additional fields, declared to the vendor through
  * `sso({ schema: { ssoProvider: { additionalFields } } })`
- * ({@link SSO_PROVIDER_SIGN_IN_FIELDS}): `allowIdpInitiated` and `allowJit`.
+ * ({@link SSO_PROVIDER_SIGN_IN_FIELDS}): `allowIdpInitiated`, `allowJit` and
+ * `signOutOfIdp` (`sys_sso_provider.sign_out_of_idp`).
  * The vendor's own `/sso/register` and `/sso/update-provider` accept them
  * (typed: a non-boolean answers 400), so the writers are exactly the ones that
  * write a provider today — the platform-admin registration gate and the
@@ -43,6 +45,14 @@
  *   {@link runWithSamlIdpInitiated} put in scope for this ACS request — the
  *   provider row's column, read before the vendor runs. No scope (a server-side
  *   call, any other path) answers false.
+ * - **SAML single logout.** The vendor reads ONE plugin-wide
+ *   `saml.enableSingleLogout` at request time too: it records the SAML
+ *   session at the ACS, advertises SingleLogoutService in the SP metadata,
+ *   and opens its IdP logout endpoint. {@link ssoSamlOptions} answers it from
+ *   the scope {@link runWithSamlProviderScope} put in place, the provider's
+ *   `sign_out_of_idp` column, so with the switch off that endpoint stays
+ *   closed. `wantLogoutRequestSigned` and `wantLogoutResponseSigned` are
+ *   always true: an incoming logout message is accepted only when signed.
  * - **JIT under `invite_only`.** Not a vendor option: the audience gate
  *   (`audience-posture.ts`) reads `allowJit` for a creation whose source is an
  *   SSO provider ({@link isSsoProviderSource}).
