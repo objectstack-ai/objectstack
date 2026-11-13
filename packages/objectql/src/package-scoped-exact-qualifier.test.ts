@@ -2157,6 +2157,40 @@ describe('[#32820] re-enabling a holder: the package-less overlay row the hydrat
     registry.enablePackage(B);
     expect(registry.getItem('email_template', 'welcome', undefined, 'en-US')).toBe(written);
   });
+
+  it('the holder set moves from A alone to B alone, then to both: the entry is built again under B\'s envelope, then under none (review s2)', async () => {
+    holderOwn('email_template', A);
+    holderOwn('email_template', B);
+    storeEnvRow('email_template');
+    registry.disablePackage(B);
+    await protocol.getMetaItems({ type: 'email_template' } as never);
+    const slotAt = (at: string) => {
+      const slot = registry.getPackageScopedItem('email_template', 'welcome', at) as { label?: string; _packageId?: string } | undefined;
+      return [slot?.label, slot?._packageId];
+    };
+    expect(slotAt(A), 'B disabled, hydrated: A alone served').toEqual(['env row', A]);
+    registry.disablePackage(A);
+    registry.enablePackage(B);
+    // B is now the one served holder: the row is its customization, recorded again under its envelope.
+    expect(slotAt(B), 'A disabled, B enabled: B alone served').toEqual(['env row', B]);
+    registry.enablePackage(A);
+    // Both served: the second heal builds it under no holder's envelope.
+    expect(await readers('email_template', A), 'both enabled').toEqual(own(A));
+    expect(await readers('email_template', B), 'both enabled').toEqual(own(B));
+  });
+
+  it('a package-less permission row is not recorded: an enable leaves the hydrated slot as the hydrator laid it (review s1; the heal moves only the three declared overlay types)', async () => {
+    admitSecondPermissionHolder();
+    holderOwn('permission', A);
+    holderOwn('permission', B);
+    storeEnvRow('permission');
+    registry.disablePackage(B);
+    await protocol.getMetaItems({ type: 'permission' } as never);
+    const hydrated = registry.getItem('permission', 'welcome') as { label?: string } | undefined;
+    expect(hydrated?.label, 'B disabled, hydrated: the row in A\'s slot').toBe('env row');
+    registry.enablePackage(B);
+    expect(registry.getItem('permission', 'welcome')).toBe(hydrated);
+  });
 });
 
 /**

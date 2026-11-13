@@ -197,6 +197,16 @@ type EnvelopeRegistry = {
     onPackageEnabled?(listener: (packageId: string) => void): () => void;
 };
 
+/**
+ * [#32820] The overlay types whose package-less row the heal rebuilds: the
+ * three the narrowing declares (its changeset and ADR-0087 entry
+ * `package-less-overlay-row-holder-slot-on-reenable`). A package-less
+ * `permission` row also wears its sole holder's envelope, but two holders of a
+ * permission set are refused by the registry today; when that rule opens, the
+ * heal widens to it only in a change that declares it (contract review s1).
+ */
+const HEALED_OVERLAY_TYPES: ReadonlySet<string> = new Set(['email_template', 'dashboard', 'report']);
+
 /** Per registry, the {@link SoleHolderEnvelope} of each bare-slot key (`type`, `name`, member). */
 const soleHolderEnvelopes = new WeakMap<object, Map<string, SoleHolderEnvelope>>();
 
@@ -768,7 +778,7 @@ export class ProtocolRegistryHydrationFacet {
         // of the key forgets it.
         const member = bundleMemberOf(type, data);
         recordSoleHolderEnvelope(registry, envelopeKey(type, rowName, member),
-            !options.packageId && typeof envelopePackage === 'string' && envelope
+            !options.packageId && typeof envelopePackage === 'string' && envelope && HEALED_OVERLAY_TYPES.has(canonicalType)
                 ? { host, type, canonicalType, name: rowName, member, data, holder: envelopePackage, registered }
                 : undefined);
         await host.hydrateExpandedViewItems(type, data, options);
