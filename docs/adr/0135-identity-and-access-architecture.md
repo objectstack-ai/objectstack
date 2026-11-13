@@ -276,9 +276,11 @@ register-then-login flow. The surface is
 > Cloud ADR-0024 clause ② decides that domain verification exists and is opt-in. The account rule
 > in the paragraph above (exact comparison, failing closed, relaxed by no audience posture,
 > invitation or JIT toggle) is not a clause of cloud ADR-0024: it is a rule made in this
-> repository, and it is the one clause this file records that the cloud record did not decide. The
-> maintainer's ruling on it is pending as this note is written; that ruling, not this file, is its
-> authority. Cloud ADR-0024's own text is not amended here.
+> repository, like the repository-side facts the D4 notes record. It was approved by the
+> maintainer on 2026-11-13, on the security lane's decision card, with no carve-out, and with a
+> provider's domain entry counting only when it is written as a bare host name (an entry written
+> as a URL or with a port proves nothing). That ruling, not this file, is its authority; #32669
+> implements it. Cloud ADR-0024's own text is not amended here.
 
 ⚠️ **The SCIM half of "SSO + SCIM per production environment" is not restated here.** Its
 mechanism record is `cloud ADR-0071`, mirrored into this repository by its own card; this file
