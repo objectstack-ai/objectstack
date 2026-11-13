@@ -160,7 +160,7 @@ import { findUnguardedNullableOperands, nullGuardMessage, provenNonNullKeys } fr
 import type { NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
 import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
-import { formulaCycleFindings } from './formula-cycles.js';
+import { formulaCycleIssues } from './formula-cycle-issues.js';
 export interface ExprIssue {
   where: string;
   message: string;
@@ -3928,16 +3928,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // formulas it reads, has no order the engine can compute it in: it reads
     // null on every row. Refused on each declared member of the cycle, located
     // on its `expression` as the field-formula pass locates its findings.
-    if (objectName) {
-      for (const cycle of formulaCycleFindings(fieldDefs, declaredNames)) {
-        issues.push({
-          where: `object '${objectName}' · field '${cycle.field}' expression`,
-          message: cycle.message,
-          source: cycle.source,
-          severity: 'error',
-        });
-      }
-    }
+    if (objectName) issues.push(...formulaCycleIssues(objectName, fieldDefs, declaredNames));
 
     // [#26646] A field group's section predicate — `fieldGroups[].visibleWhen`
     // (ADR-0085 §5). The form renderer evaluates it with the same engine,

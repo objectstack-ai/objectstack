@@ -22,11 +22,12 @@ import { analyzeRelationshipTraversals, formulaReadOrder } from '@objectstack/fo
 
 type AnyRec = Record<string, unknown>;
 
-/** One formula on a cycle: the field, its CEL source, and the sentence naming the cycle. */
-export interface FormulaCycleFinding {
-  field: string;
-  source: string;
+/** One formula on a cycle, as a finding of the expression rule (an `ExprIssue`). */
+export interface FormulaCycleIssue {
+  where: string;
   message: string;
+  source: string;
+  severity: 'error';
 }
 
 /** The CEL source of a formula's `expression` (string shorthand or a `cel` envelope); `undefined` otherwise. */
@@ -42,16 +43,19 @@ function formulaSourceOf(def: AnyRec): string | undefined {
 }
 
 /**
- * Every formula field of one object that sits on a cycle of formulas, in the
- * order `fields` lists them. `fields` are the object's fields by name, as
- * served (an `objectExtensions` field included, so a cycle through one is
- * seen); only the names in `report` get a finding, so the caller locates each
- * on a field its own walk names.
+ * Every formula field of object `objectName` that sits on a cycle of
+ * formulas, in the order `fields` lists them, located on its `expression` as
+ * the field-formula pass locates its findings
+ * (`object 'x_job' · field 'f_total' expression`). `fields` are the object's
+ * fields by name, as served (an `objectExtensions` field included, so a cycle
+ * through one is seen); only the names in `report` get a finding, so each is
+ * located on a field the caller's walk names.
  */
-export function formulaCycleFindings(
+export function formulaCycleIssues(
+  objectName: string,
   fields: ReadonlyMap<string, AnyRec>,
   report: ReadonlySet<string>,
-): FormulaCycleFinding[] {
+): FormulaCycleIssue[] {
   const sources = new Map<string, string>();
   for (const [name, def] of fields) {
     if (def.type !== 'formula') continue;
@@ -65,10 +69,11 @@ export function formulaCycleFindings(
     reads.set(name, analysis ? [...analysis.bareFields].filter((read) => sources.has(read)) : []);
   }
   const { cycles } = formulaReadOrder(reads);
-  const findings: FormulaCycleFinding[] = [];
+  const issues: FormulaCycleIssue[] = [];
   for (const [field, source] of sources) {
     const message = cycles.get(field);
-    if (message !== undefined && report.has(field)) findings.push({ field, source, message });
+    if (message === undefined || !report.has(field)) continue;
+    issues.push({ where: `object '${objectName}' · field '${field}' expression`, message, source, severity: 'error' });
   }
-  return findings;
+  return issues;
 }
