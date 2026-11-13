@@ -112,6 +112,7 @@ import {
 } from './system-fields.js';
 import { walkFlowNodes, type WalkedFlowNode } from './flow-walk.js';
 import { objectsAsServed, recordsOf } from './object-graph.js';
+import type { UserTextParams } from './finding-user-text.js';
 
 export type FlowTemplatePathSeverity = 'error' | 'warning';
 
@@ -124,6 +125,11 @@ export interface FlowTemplatePathFinding {
   path: string;
   message: string;
   hint: string;
+  /**
+   * The names this finding's user sentence interpolates, on the advisory push
+   * sites only (``validate-flow-template-paths.user-text.ts`` sibling catalog); see `AuthoringFinding.userTextParams`.
+   */
+  userTextParams?: UserTextParams;
 }
 
 // Rule ids (registry entries).
@@ -652,6 +658,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
                 // [#22161] The shared one-line anchor fix; how to vouch for or
                 // opt out of the anchor is `os explain flow-template-field-unprovisioned`.
                 hint: unprovisionedAnchorFix(objectName, head),
+                userTextParams: { flow: flowName, reference: token, field: head, object: objectName },
               });
             }
           }
@@ -673,6 +680,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
                 : `Check the field name against object '${objectName}'s field definitions — '${rootName}' is ` +
                   `bound to a '${objectName}' record by this flow. System columns like id/created_at/owner ` +
                   `are also addressable.`,
+              userTextParams: { flow: flowName, reference: token, field: head, object: objectName },
             });
             continue;
           }
@@ -702,6 +710,10 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
                     `(the id) or a formula field on '${objectName}' instead.`
                   : `Write '{{ ${rootName}.${head} }}' (the id) or a formula field on '${objectName}', or ` +
                     `read the related record with a get_record node.`,
+                userTextParams: {
+                  flow: flowName, reference: token, field: head, object: objectName,
+                  root: root.isTrigger ? 'trigger' : 'variable',
+                },
               });
             }
             // STRUCTURED_TYPES + any other scalar `.sub` access is left alone:

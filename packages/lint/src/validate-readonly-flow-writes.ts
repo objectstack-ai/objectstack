@@ -65,6 +65,7 @@
 
 import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
 import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
+import type { UserTextParams } from './finding-user-text.js';
 
 export type ReadonlyFlowWriteSeverity = 'error' | 'warning';
 
@@ -77,6 +78,11 @@ export interface ReadonlyFlowWriteFinding {
   path: string;
   message: string;
   hint: string;
+  /**
+   * The names this finding's user sentence interpolates, on the advisory push
+   * sites only (`validate-readonly-flow-writes.user-text.ts` sibling catalog); see `AuthoringFinding.userTextParams`.
+   */
+  userTextParams?: UserTextParams;
 }
 
 // Rule ids (registry entries). One id per SHAPE, not per verb: since #15394
@@ -412,6 +418,7 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
             hint:
               `Derive '${fieldName}' in a beforeUpdate hook on '${objectName}', or target only records whose ` +
               `readonlyWhen predicate is FALSE; the lock is NOT waived by a system context`,
+            userTextParams: { flow: flowName, node: nodeName, field: fieldName, object: objectName },
           });
         }
       }

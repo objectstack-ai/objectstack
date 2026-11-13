@@ -215,6 +215,7 @@ import {
 } from '@objectstack/spec/automation';
 import { walkFlowNodes } from './flow-walk.js';
 import { closureDependencyRemedy, recordsOf, suggestName } from './object-graph.js';
+import type { UserTextParams } from './finding-user-text.js';
 
 export type FlowTriggerReadinessSeverity = 'error' | 'warning';
 
@@ -227,6 +228,11 @@ export interface FlowTriggerReadinessFinding {
   path: string;
   message: string;
   hint: string;
+  /**
+   * The names this finding's user sentence interpolates, on the advisory push
+   * sites only (``validate-flow-trigger-readiness.user-text.ts`` sibling catalog); see `AuthoringFinding.userTextParams`.
+   */
+  userTextParams?: UserTextParams;
 }
 
 // Rule ids (registry entries).
@@ -605,7 +611,7 @@ export function validateFlowTriggerReadiness(
     path: string,
     objectName: string,
     at: { verb: string; key: string },
-    advisory: { message: string; hint: string },
+    advisory: { message: string; hint: string; userTextParams: UserTextParams },
     // [#29442] The start-input declaration shares this verdict under its own
     // id and position; the trigger's two halves take the defaults.
     position: { rule: string; where: string } = { rule: FLOW_TRIGGER_UNKNOWN_OBJECT, where: 'start node' },
@@ -678,6 +684,7 @@ export function validateFlowTriggerReadiness(
               hint:
                 `Set config.objectName to the object's exact registered name (e.g. 'app_candidate', not ` +
                 `'candidate'), or ignore this if another installed package declares it`,
+              userTextParams: { flow: flowName, object: objectName, trigger: 'record' },
             },
           ),
         );
@@ -731,6 +738,7 @@ export function validateFlowTriggerReadiness(
               hint:
                 `Set config.timeRelative.object to the object's exact registered name, or ignore this if ` +
                 `another installed package declares it`,
+              userTextParams: { flow: flowName, object: objectName, trigger: 'schedule' },
             },
           ),
         );
@@ -1123,6 +1131,7 @@ export function validateFlowTriggerReadiness(
             hint:
               `Set the input's objectName to the object's exact registered name, or ignore this if another ` +
               `installed package declares it`,
+            userTextParams: { flow: flowName, input: variableName, object: objectName },
           },
           { rule: FLOW_INPUT_UNKNOWN_OBJECT, where: `input "${variableName}"` },
         ),
@@ -1163,6 +1172,7 @@ export function validateFlowTriggerReadiness(
           hint:
             `Set the input's objectName to the object whose record id the input carries, or remove ` +
             `objectName if the input is not a record id`,
+          userTextParams: { flow: flowName, input: shown },
         });
       }
       if (variable.isInput === true && variableName && !declaredInputs.has(variableName)) {
@@ -1202,6 +1212,9 @@ export function validateFlowTriggerReadiness(
           hint:
             `Remove the input's objectName if it carries a list of ids, or read it as one id with filter.id ` +
             `or filter.id.$eq`,
+          userTextParams: {
+            flow: flowName, input: listed, object: declaredObject ?? '', node: nodeLabel, listObject: readObject,
+          },
         });
       }
     }
@@ -1218,6 +1231,7 @@ export function validateFlowTriggerReadiness(
           `has status 'draft' (the default when none is authored). Draft flows DO still fire their ` +
           `triggers (only 'obsolete'/'invalid' disable), so the intent is ambiguous.`,
         hint: `Declare status: 'active' to arm it deliberately, or status: 'obsolete' to disable it.`,
+        userTextParams: { flow: flowName },
       });
     }
   });
