@@ -1,12 +1,12 @@
 ---
-'@objectstack/service-storage': minor
-'@objectstack/mcp': minor
-'@objectstack/runtime': minor
+'@objectstack/service-storage': patch
+'@objectstack/mcp': patch
+'@objectstack/runtime': patch
 ---
 
 feat(storage,mcp): an upload link for a file field of a record not yet created, so an agent can create a record whose file field is required
 
-Clause-②: yes
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 `create_upload_link` takes no `recordId` when it names a `field`: the link names the object and the file field only, and its answer carries `fileIds`, the id the upload is stored under. The user opens the link signed in and uploads; the agent then calls `create_record` with the field set to `fileIds[0]`. An expense line with a required e-invoice is created in two agent calls and one upload, and the field's `required` rule is unchanged.
