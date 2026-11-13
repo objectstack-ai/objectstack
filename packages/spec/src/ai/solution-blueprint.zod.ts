@@ -6,6 +6,8 @@ import { FieldType, SelectOptionSchema } from '../data/field.zod';
 import { checkLiteralDefaultValue } from '../data/default-value-shape';
 import { isRuntimeDefaultToken } from '../data/default-value-tokens';
 import { FilterConditionSchema } from '../data/filter.zod';
+import { OBJECT_ICON_SCHEMA } from '../data/object-icon';
+import { refuseStageFieldWithoutKinds } from '../data/stage-field-kinds';
 import { SortDirectionEnum, SortItemSchema } from '../shared/enums.zod';
 import { VIEW_FILTER_OPERATORS, ViewFilterRuleSchema } from '../ui/view.zod';
 
@@ -43,9 +45,11 @@ const optionKindEnum = () => SelectOptionSchema.shape.kind.unwrap();
 
 /**
  * What the object schema refuses about the field a blueprint object's
- * `stageField` names (`refuseStageFieldWithoutKinds`, `data/object.zod.ts`):
- * one sentence both object shapes and both option shapes state, so the two
- * halves of the rule (the pointer and the kinds) read the same on every side.
+ * `stageField` names (`refuseStageFieldWithoutKinds`, `data/stage-field-kinds.ts`),
+ * and what the lenient blueprint object now refuses too (it runs that same
+ * function): one sentence both object shapes and both option shapes state, so
+ * the two halves of the rule (the pointer and the kinds) read the same on
+ * every side.
  */
 const STAGE_FIELD_RULE =
   'The object schema refuses the object unless the field `stageField` names is a single-value `select` or `radio` '
@@ -234,9 +238,11 @@ const booleanFlagRule = (unsetRequired: string) =>
  * skill's reference index (`gen:skill-refs`), for a describe string.
  *
  * The stored half states the inputs it may read: this record's own fields. A
- * stored expression reading another record is refused at authoring, and one
- * reading the clock or the acting user keeps the value it had at the write
- * (ruling 6816315099 on #32443), so neither appears here as an example.
+ * stored expression reading another record is warned at authoring
+ * (`stored-expression-cross-record-input`), and one reading the clock or the
+ * acting user keeps the value it had at the write and is warned at authoring
+ * too (`stored-expression-volatile-input`) (ruling 6816315099 on #32443), so
+ * neither appears here as an example.
  */
 const FORMULA_STORAGE_RULE =
   'A "formula" is computed on read and stored nowhere: it is shown everywhere, but a list cannot sort by it, search '
@@ -251,8 +257,8 @@ const STORED_EXPRESSION_RULE =
   + '销售额 = 销量 × 单价 is a "currency" field with "record.quantity * record.unit_price". Name the return type, not '
   + '"number" for every value: a date expression on a "number" field is refused at every write. A stored expression '
   + 'reads only this record\'s own fields: a value from a related record stays a "formula" (shown, not totalled) or '
-  + 'comes through a "summary" or a flow, and an input that changes over time (the current date, the acting user) '
-  + 'is frozen at the write.';
+  + 'is a snapshot field written by a flow on the related object when that value changes, and an input that changes '
+  + 'over time (the current date, the acting user) is frozen at the write.';
 
 /**
  * The refusal of a `defaultValue` that does not fit the field (ruling B on
@@ -344,11 +350,55 @@ export const BlueprintFieldSchema = lazySchema(() => z.object({
 }).superRefine(refuseUnfitDefaultValue, { when: () => true }));
 export type BlueprintField = z.input<typeof BlueprintFieldSchema>;
 
+/**
+ * [#32764] The object schema's stage-field option-kind rule, run on the
+ * blueprint object: the SAME function `ObjectSchema` runs
+ * (`refuseStageFieldWithoutKinds`), handed the blueprint's field ARRAY as the
+ * field map that function reads. Before it, a blueprint whose `stageField`
+ * named a select with a kind-less option parsed here, `apply_blueprint` staged
+ * the object's views and nav entry, and the object write alone refused, so the
+ * build answered `drafted` with dependents pointing at an object that was never
+ * written. Refusing at parse stages nothing.
+ *
+ * Each issue lands where the blueprint carries the value: an option's own
+ * `kind` at `['fields', <index>, 'options', <i>, 'kind']`, the pointer at
+ * `['stageField']`. EVERY entry that carries the stage field's name is judged,
+ * each at its own index: which of two same-named entries an applier keeps is
+ * the applier's choice, so a kind-less duplicate is refused wherever it sits.
+ * The strict mirror cannot state this cross-key rule (per-leaf only); its
+ * describes teach it, and this parse, the one `apply_blueprint` runs, refuses it.
+ */
+function refuseBlueprintStageFieldWithoutKinds(object: unknown, ctx: z.RefinementCtx): void {
+  if (typeof object !== 'object' || object === null) return;
+  const { name, stageField, fields } = object as Record<string, unknown>;
+  if (typeof stageField !== 'string' || !Array.isArray(fields)) return;
+  fields.forEach((field: unknown, index: number) => {
+    if ((field as { name?: unknown } | null)?.name !== stageField) return;
+    // The function reads only the entry `stageField` names, so a one-entry map
+    // per carrier is the whole input it judges. `Object.fromEntries` defines an
+    // own data property, so a field named `__proto__` (legal snake_case) is a
+    // key here, never the map's prototype.
+    refuseStageFieldWithoutKinds(name, stageField, Object.fromEntries([[stageField, field]]), ctx, {
+      fieldKey: () => index,
+      noLifecycle: 'Or omit `stageField` if this object has no linear lifecycle.',
+    });
+  });
+}
+
+/**
+ * What a blueprint object's `icon` is, read on both sides (#32763): the
+ * object's own icon, carried onto the built object as `ObjectSchema.icon`.
+ */
+const OBJECT_ICON_RULE = 'The built object\'s icon, carried into the object as its `icon`: a Lucide icon name for what the records are (e.g. "users" for contacts, "receipt" for invoices, "ticket" for support tickets). SET it on every object: an object without one is drawn with a generic glyph.';
+
 /** A proposed business object (table) with its fields. */
 export const BlueprintObjectSchema = lazySchema(() => z.object({
   name: z.string().regex(SNAKE_CASE).describe('Object machine name (snake_case)'),
   label: z.string().optional().describe('Human-readable singular label'),
   description: z.string().optional().describe('What this object represents'),
+  // [#32763] `ObjectSchema.icon`'s own leaf, re-described for the blueprint,
+  // so the blueprint accepts exactly the icon the object accepts.
+  icon: OBJECT_ICON_SCHEMA.describe(OBJECT_ICON_RULE),
   fields: z.array(BlueprintFieldSchema).describe('Fields to create on the object'),
   sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).optional()
     .describe('Org-Wide Default record visibility (OWD) for INTERNAL users — the deliberate sharing choice for this object (ADR-0090). Canonical four only: private (owner-only) | public_read (everyone reads, owner writes) | public_read_write (everyone reads+writes) | controlled_by_parent (derived from the master record — ONLY for an object whose fields include a master_detail reference). SET it when the user\'s description implies a visibility intent — personal/private data (HR, 绩效, salary, 个人隐私) → "private"; shared reference data everyone edits → "public_read_write". Omit to accept the platform\'s deterministic default (business object → public_read_write; master-detail child → controlled_by_parent) — omitting on privacy-sensitive data silently over-shares it.'),
@@ -360,7 +410,7 @@ export const BlueprintObjectSchema = lazySchema(() => z.object({
   // schema's `false` ("no linear lifecycle") has no blueprint spelling.
   stageField: z.string().regex(SNAKE_CASE).optional()
     .describe(`The lifecycle stage field (ADR-0085) — which \`select\` (or \`radio\`) field of THIS object holds the ordered steps a record moves through (a deal's stage, a ticket's status), drawn as the record path. snake_case, naming one of this object's own fields. ${STAGE_FIELD_RULE} SET it whenever the object has such a status/stage field, and give every one of that field's options its \`kind\`. Omitting it leaves stage detection to a guess from field names (status / stage / state / phase).`),
-}));
+}).superRefine(refuseBlueprintStageFieldWithoutKinds));
 export type BlueprintObject = z.input<typeof BlueprintObjectSchema>;
 
 /**
@@ -401,6 +451,49 @@ const WIDGET_MEASURE_RULE = 'Name the FIELD, not "total_amount" or "avg_score": 
 const VIEW_START_DATE_FIELD_RULE = 'For type:"calendar" only: the date or datetime field of THIS view\'s object that places each record on the calendar (e.g. "interview_date", "due_date"), carried into the built view as `calendar.startDateField`. snake_case, naming one of the object\'s own fields. SET it on every calendar view; without it the builder binds a date field of its own choosing, which may not be the one meant. Ignored on the other view types (a gantt view takes its dates from `columns`, start before end).';
 
 /**
+ * [#32762] A blueprint view's `name`: the bare snake_case key, or that key
+ * qualified with an object as `OBJECT.KEY` — one optional qualifier segment in
+ * the blueprint's own `SNAKE_CASE` grammar. The qualified spelling is the one a
+ * stored view record carries (`ViewItemNameSchema`, `ui/view.zod.ts`, requires
+ * it) and the one the lint view resolver and objectui's view-id matcher
+ * treat as the bare key's equal when the qualifier is the view's own object
+ * (`resolvesViewId`, `packages/lint/src/lint-view-refs.ts`, kept in lock-step with
+ * objectui's `resolveViewId`).
+ * Which object the qualifier may name is a cross-key rule, judged by
+ * {@link refuseForeignViewQualifier}.
+ */
+const BLUEPRINT_VIEW_NAME = /^(?:[a-z_][a-z0-9_]*\.)?[a-z_][a-z0-9_]*$/;
+
+/** The view `name` rule, one sentence for the describe and the refusal. */
+const VIEW_NAME_RULE = 'View machine name: the bare snake_case key (e.g. "ticket_status_board"), or that key qualified with THIS view\'s `object` as `OBJECT.KEY` (e.g. "ticket.ticket_status_board" on a view whose object is "ticket"), the spelling a stored view record carries. Both spellings name the same view. A qualifier naming any other object is refused.';
+
+/**
+ * [#32762] A qualified view name's qualifier is the view's own `object`. A view
+ * over `ticket` named `case.open_list` would be stored under another object's
+ * name space, where the view resolvers look for a view of `case`, so it is
+ * refused at `['name']`, naming both spellings that are accepted.
+ */
+function refuseForeignViewQualifier(view: unknown, ctx: z.RefinementCtx): void {
+  if (typeof view !== 'object' || view === null) return;
+  const { object, name } = view as Record<string, unknown>;
+  // A name outside the pattern is the pattern's issue alone: judging its
+  // qualifier too would answer one wrong name twice.
+  if (typeof object !== 'string' || typeof name !== 'string' || !BLUEPRINT_VIEW_NAME.test(name)) return;
+  const dot = name.indexOf('.');
+  if (dot < 0) return;
+  const qualifier = name.slice(0, dot);
+  if (qualifier === object) return;
+  const key = name.slice(dot + 1);
+  ctx.addIssue({
+    code: 'custom',
+    path: ['name'],
+    message:
+      `View name '${name}' is qualified with object '${qualifier}', but this view displays object '${object}'. `
+      + `Write the bare key '${key}', or qualify it with this view's own object: '${object}.${key}'.`,
+  });
+}
+
+/**
  * A proposed list/form/kanban/calendar/gallery/gantt view over an object.
  *
  * `filters` and `sort` are what let a view keep the promise its name makes
@@ -417,7 +510,7 @@ const VIEW_START_DATE_FIELD_RULE = 'For type:"calendar" only: the date or dateti
  */
 export const BlueprintViewSchema = lazySchema(() => z.object({
   object: z.string().regex(SNAKE_CASE).describe('Object this view displays (snake_case)'),
-  name: z.string().regex(SNAKE_CASE).describe('View machine name (snake_case)'),
+  name: z.string().regex(BLUEPRINT_VIEW_NAME).describe(VIEW_NAME_RULE),
   label: z.string().optional().describe('Human-readable view label'),
   type: z.enum(['list', 'form', 'kanban', 'calendar', 'gallery', 'gantt']).default('list')
     .describe('View kind. Pick the surface that fits the data: "gallery" for a visual card/cover browse when the user asks for a 画廊/相册/卡片墙/封面/海报/图集 (a gallery / card wall / cover / poster grid) or the object has an image/avatar/file field worth showing as a card cover; "gantt" for a 甘特图/时间线/排期 (timeline / schedule) when the object has BOTH a start and an end date field; "kanban" for a board grouped by a status/select field; "calendar" for a single-date schedule; "form" for a record editor; else "list".'),
@@ -437,7 +530,7 @@ export const BlueprintViewSchema = lazySchema(() => z.object({
     .describe('Default record order: [{ field, order }] with order "asc" or "desc"; the first entry sorts first (e.g. an overdue list → [{ field: "due_date", order: "asc" }]). Omit for the platform default order.'),
   startDateField: z.string().regex(SNAKE_CASE).optional()
     .describe(VIEW_START_DATE_FIELD_RULE),
-}));
+}).superRefine(refuseForeignViewQualifier));
 export type BlueprintView = z.input<typeof BlueprintViewSchema>;
 /** Post-parse shape of {@link BlueprintView} — defaults applied, transforms run (ADR-0122). */
 export type BlueprintViewParsed = z.infer<typeof BlueprintViewSchema>;
@@ -494,9 +587,10 @@ export type BlueprintDashboard = z.input<typeof BlueprintDashboardSchema>;
  * the model's behaviour was reasonable and the schema was the defect.
  *
  * Deliberately NOT `.regex(SNAKE_CASE)`, unlike `target`. A view is identified
- * downstream in two interchangeable spellings — the bare key a blueprint's
- * `views[].name` carries (`ticket_status_board`) and the qualified
- * `<object>.<key>` a staged view record's `name` carries — and the applier
+ * downstream in two interchangeable spellings — the bare key
+ * (`ticket_status_board`) and the qualified `<object>.<key>` a staged view
+ * record's `name` carries, both of which a blueprint's `views[].name` may
+ * carry — and the applier
  * normalizes between them. Constraining this leaf to snake_case would make the
  * qualified spelling legal to GENERATE (a strict mirror is per-leaf) and
  * illegal to APPLY, which is the cloud#1967 failure mode: a blueprint the user
@@ -672,6 +766,11 @@ const StrictObject = z.object({
   name: strictIdent('Object machine name (snake_case)'),
   label: z.string().nullable().describe('Human-readable singular label, or null'),
   description: z.string().nullable().describe('What this object represents, or null'),
+  // ⛔ Must stay in lockstep with the lenient `BlueprintObjectSchema.icon`
+  // (#32763): a key present only there is one no proposal can ever contain.
+  // The same `ObjectSchema.icon` leaf, in this mirror's spelling of "optional";
+  // the object key-parity pin fails if either side drops it.
+  icon: OBJECT_ICON_SCHEMA.unwrap().nullable().describe(`${OBJECT_ICON_RULE} Null only when no icon fits.`),
   fields: z.array(StrictField).describe('Fields to create on the object'),
   sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).nullable()
     .describe('Org-Wide Default record visibility (OWD) for INTERNAL users (ADR-0090), or null to accept the platform default (business object → public_read_write; master-detail child → controlled_by_parent). SET it when the user\'s description implies a visibility intent: personal/private data (HR, 绩效, salary, 个人隐私) → "private" (owner-only); "public_read" = everyone reads, owner writes; "public_read_write" = everyone reads+writes; "controlled_by_parent" ONLY for an object with a master_detail reference field. Null on privacy-sensitive data silently over-shares it.'),
@@ -714,7 +813,13 @@ const StrictSortItem = z.object({
 
 const StrictView = z.object({
   object: strictIdent('Object this view displays (snake_case)'),
-  name: strictIdent('View machine name (snake_case)'),
+  // [#32762] The bare key only. The lenient side also admits `OBJECT.KEY`
+  // qualified with the view's own object, a cross-key rule this per-leaf mirror
+  // cannot state: admitting a dot here would let the model generate a qualifier
+  // naming another object, legal to propose and refused at apply (the
+  // cloud#1967 failure mode). Narrower here, never wider: every name the mirror
+  // admits, the lenient side admits. The VALUE-parity pin names this one path.
+  name: strictIdent('View machine name: the bare snake_case key (e.g. "ticket_status_board").'),
   label: z.string().nullable().describe('Human-readable view label, or null'),
   type: z.enum(['list', 'form', 'kanban', 'calendar', 'gallery', 'gantt']).nullable().describe('View kind, or null for list. "gallery" = visual card/cover browse (画廊/相册/卡片墙/封面/海报, or an object with an image/avatar/file field); "gantt" = timeline/schedule (甘特图/时间线/排期, object with BOTH a start and an end date field); "kanban" = board grouped by a status/select field; "calendar" = single-date schedule; "form" = record editor.'),
   columns: z.array(z.string().regex(SNAKE_CASE)).nullable().describe('Field names shown as columns, or null. For a gallery, INCLUDE the image/avatar/file field (becomes the card cover); for a gantt, INCLUDE the start date column before the end date column.'),

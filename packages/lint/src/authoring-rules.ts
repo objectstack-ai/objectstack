@@ -355,6 +355,14 @@ export interface AuthoringRuleContext {
    */
   runtimeWriteType?: string;
   /**
+   * [#32666] Set by the runtime gate on its SUBJECT pass only, which judges
+   * the subject collections it withholds from every other pass
+   * (`RuntimeStackContext.flows` on an object write). Read by the
+   * reference-integrity suite, the one entry whose members declare a subject;
+   * the gate runs no other entry on that pass.
+   */
+  subjectPass?: boolean;
+  /**
    * [#16546] `hooks[*].handler` ref strings whose metadata `body` was minted
    * by `lowerCallables` from the author's inline `handler` function, rather
    * than authored directly. Set by the CLI commands that lower before they
@@ -818,7 +826,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     run: (stack, ctx) =>
       runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
         severity: i.severity ?? 'error',
-        rule: EXPRESSION_INVALID,
+        // [#32529, #32554] The stored-expression input member names its own
+        // two ids; every other finding of the pass is `expression-invalid`.
+        rule: i.rule ?? EXPRESSION_INVALID,
         where: i.where,
         // [#26858] The slot's key path where the pass spells one (a flow edge's
         // `condition`, #27828 a flow node's config value), so a draft's
