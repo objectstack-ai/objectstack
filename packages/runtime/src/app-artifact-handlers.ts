@@ -1342,6 +1342,22 @@ function jobNameCollisions(bundle: unknown, appId: string, jobs: readonly unknow
 }
 
 /**
+ * [#32572, ADR-0150 D3] The job names two or more ENABLED jobs of an artifact share, each with the refusal
+ * the binder ({@link scheduleAppArtifactJobs}) refuses it by at bind: {@link jobNameCollisions} itself, over
+ * the jobs the binder reads ({@link collectBundleJobs}), for the artifact scheduled as `appId`. One refusal
+ * per shared name, in the order the binder logs them, each naming every job of the name and its holders —
+ * every declaring package body and, when the artifact holds more jobs of the name than its bodies declare,
+ * its residual (`{ kind: 'residual', ownerId: appId }`).
+ *
+ * The install-local install route refuses a package by it (beside {@link collectJobsWithoutBody}), so the
+ * door and the binder cannot disagree about a shared name: before it, the door answered such a package 200
+ * and the binder then scheduled none of the name's jobs and cancelled the one an earlier version ran.
+ */
+export function collectJobNameCollisions(bundle: unknown, appId: string): PackageScopedRefusal[] {
+    return [...jobNameCollisions(bundle, appId, collectBundleJobs(bundle)).values()];
+}
+
+/**
  * [#32071] The refusal of a job name several package bodies declare: nothing picks one of them.
  * [#32355] With `residual`, the name the residual carries beside the bodies: it is named too.
  * [#32412] As a candidate of its own kind, after every declaring body: `{ kind: 'residual',
@@ -1636,7 +1652,11 @@ export interface AppArtifactJobScheduling {
  *     scheduled, nor is any job of that name: the job service keys a job by
  *     its name and would keep only the later one. Refused once per name at
  *     `error`, naming every job ({@link jobNameCollisions}); a job of that
- *     name this app scheduled before is cancelled with the rest;
+ *     name this app scheduled before is cancelled with the rest.
+ *     [#32572] Install-local refuses that shape up front
+ *     ({@link collectJobNameCollisions}, this same judgement), so on that
+ *     door this fires only on the rehydrate of an entry an earlier build
+ *     installed;
  *   - (#20281 stage ③) no `organization` on a deployment whose scheduled-work
  *     policy requires one (`isolated`, switch on) → NOT scheduled, at `error`
  *     ({@link describeMissingJobOrganization}), whatever its run form;

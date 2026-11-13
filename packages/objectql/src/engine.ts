@@ -96,7 +96,7 @@ import {
 import { enforceTransactionOrigin, execute, warnTransactionUnsupported } from './engine-execute-transactions.js';
 // [#25522 cut 8] The compatibility-API bodies; the methods of the same names
 // below hand each body the members it reads (`CompatibilityApiHost`).
-import { getConfigs, introspectDatasource, registerObject, removePackage, syncObjectSchema, syncSchemas } from './engine-compatibility-api.js';
+import { applyPublishedColumnChanges, getConfigs, introspectDatasource, registerObject, removePackage, syncObjectSchema, syncSchemas, type PublishedColumnChangeReport } from './engine-compatibility-api.js';
 // [#25522 cut 9] The hook-context caller-envelope builders; the methods of the
 // same names below call them, and none of the bodies reads a member.
 import { buildEvalUser, buildProvenance, buildSession, buildUser } from './engine-execution-plumbing.js';
@@ -5497,6 +5497,31 @@ export class ObjectQL implements IObjectQLEngine {
       get _registry() { return readRegistry(); },
     };
     return syncObjectSchema.call(host, objectName);
+  }
+
+  /**
+   * [#32590] Bring an existing object's table to its PUBLISHED declaration for
+   * the column changes the driver can make without losing data or failing on
+   * existing rows — a `date` column under a field now declared `datetime`, a
+   * NOT NULL column under `storage: { notNull: false }` — and answer what it
+   * applied and what it could not (`SqlDriver.applyPublishedColumnChanges`
+   * names the set). The metadata publish calls it right after
+   * {@link syncObjectSchema}, which stays additive for every caller, the
+   * boot's sync among them.
+   *
+   * `undefined` when there is nothing to ask: no such object, no driver for
+   * it, a federated (external) object whose remote owns its schema, or a
+   * driver without the door (memory, Mongo — no column type or constraint to
+   * bring to a declaration).
+   */
+  async applyPublishedColumnChanges(objectName: string): Promise<PublishedColumnChangeReport | undefined> {
+    // [#32590] The body is in `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof applyPublishedColumnChanges> = {
+      getDriverForObject: (...a) => this.getDriverForObject(...a),
+      get _registry() { return readRegistry(); },
+    };
+    return applyPublishedColumnChanges.call(host, objectName);
   }
 
   /**

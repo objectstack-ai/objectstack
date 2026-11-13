@@ -4133,9 +4133,10 @@ describe('HttpDispatcher', () => {
             }
         });
 
-        it('caches positive results so repeat calls skip the DB lookup', async () => {
-            const { dispatcher: d, memberQL } = buildDispatcher({
-                memberRows: [{ id: 'm1', role: 'admin' }],
+        it('[#32230] a member removed between two calls is refused on the second', async () => {
+            const memberRows = [{ id: 'm1', role: 'admin' }];
+            const { dispatcher: d } = buildDispatcher({
+                memberRows,
                 userId: 'user-1',
                 orgId: 'org-tenant',
             });
@@ -4146,14 +4147,15 @@ describe('HttpDispatcher', () => {
                 '/api/v1/environments/proj-a/data/task',
             );
             expect(r1).toBeNull();
-            expect(memberQL.find).toHaveBeenCalledTimes(1);
+
+            memberRows.length = 0;
 
             const r2 = await (d as any).enforceProjectMembership(
                 ctx,
                 '/api/v1/environments/proj-a/data/task',
             );
-            expect(r2).toBeNull();
-            expect(memberQL.find).toHaveBeenCalledTimes(1);
+            expect(r2?.status).toBe(403);
+            expect(r2?.body?.error?.code).toBe('PROJECT_MEMBERSHIP_REQUIRED');
         });
 
         it('is a no-op when enforcement is disabled', async () => {
