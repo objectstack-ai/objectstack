@@ -1121,6 +1121,18 @@ describe('SaveMetaItemResponseSchema.advisories (advisory findings ride the 2xx 
     expect(parsed.advisories).toEqual([advisory]);
   });
 
+  it('keeps an advisory\'s localized `userMessage` (ruling record 6819749037) — with and without it', () => {
+    const localized = {
+      ...advisory,
+      rule: 'security-private-no-readscope',
+      severity: 'info' as const,
+      userMessage: '权限集“crm_rep”的持有者只能看到自己拥有或被共享给他们的“crm_deal”记录。',
+    };
+    const parsed = SaveMetaItemResponseSchema.parse({ ...realResponse, advisories: [localized, advisory] });
+    expect(parsed.advisories).toEqual([localized, advisory]);
+    expect(parsed.advisories![0]!.rule).toBe('security-private-no-readscope');
+  });
+
   it('is OPTIONAL — absence means "nothing to report", never "the gate did not run"', () => {
     expect(SaveMetaItemResponseSchema.safeParse(realResponse).success).toBe(true);
     expect(SaveMetaItemResponseSchema.parse(realResponse).advisories).toBeUndefined();
@@ -1245,6 +1257,27 @@ describe('RuntimeAuthoringIssueSchema (the ONE finding shape)', () => {
     }
     expect(RuntimeAuthoringIssueSchema.safeParse({ ...issue, severity: 'advisory' }).success).toBe(false);
     expect(RuntimeAuthoringIssueSchema.safeParse({ ...issue, severity: 'fatal' }).success).toBe(false);
+  });
+
+  // [ruling record 6819749037] The producer-composed, user-facing sentence in
+  // the request's locale — optional, so every finding above stays a finding,
+  // and declared, so a client that parses the response keeps it (an
+  // undeclared key is stripped by the parse).
+  it('carries an optional `userMessage` beside the stable rule id', () => {
+    const userMessage = '权限集“crm_rep”的持有者只能看到自己拥有或被共享给他们的“crm_deal”记录。';
+    const parsed = RuntimeAuthoringIssueSchema.parse({ ...issue, userMessage });
+    expect(parsed).toEqual({ ...issue, userMessage });
+    expect(parsed.rule).toBe(issue.rule);
+    expect(RuntimeAuthoringIssueSchema.parse(issue)).not.toHaveProperty('userMessage');
+  });
+
+  it('refuses a `userMessage` that is not text', () => {
+    for (const userMessage of [42, null, { en: 'x' }, ['x']]) {
+      expect(
+        RuntimeAuthoringIssueSchema.safeParse({ ...issue, userMessage }).success,
+        `userMessage ${JSON.stringify(userMessage)} must fail parse`,
+      ).toBe(false);
+    }
   });
 });
 

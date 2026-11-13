@@ -69,7 +69,7 @@ Built-in (plugins register more):
 | `end` | Exit point — can have multiple (early exit, error exit) |
 | `decision` | Conditional branching — routed by **edge `condition` predicates**, not node config |
 | `loop` | Iterate a **nested `config.body` region** once per item of `config.collection` — a CEL value envelope or an inline list, never a string; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
-| `parallel` | Fan out into `config.branches[]` (≥ 2 regions) run concurrently, **joined implicitly** at block end — no split/join pair to mis-wire |
+| `parallel` | Fan out into `config.branches[]` (≥ 2 regions) run concurrently, **joined implicitly** at block end |
 | `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first. **No `finally`** — the container's ordinary out-edges are the continuation |
 | `map` | Sequential multi-instance — invoke the `config.flowName` flow (named as `subflow`'s) per item of `config.collection` (shaped as `loop`'s); each may pause (batch approvals); a refused name fails it at the first item |
 | `wait` | Pause execution until a timer elapses or a named signal arrives |
@@ -93,7 +93,7 @@ Built-in (plugins register more):
 |:-----|:--------|
 | `http` | Call an external HTTP API — always set `timeoutMs` (unset = no timeout). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there: a credential means a declared connector called via `connector_action` |
 | `notify` | Send a notification (below) |
-| `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`. Once evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `properties`, `items`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable), nothing sent; `os validate` does not judge the `inputSchema` fit yet |
+| `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`. Once evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `properties`, `items`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable); `os validate` does not judge the `inputSchema` fit yet |
 | `script` | Call a **registered** function (*Valid-but-silently-wrong* #3) |
 | `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress` (`nextScreen: 'none' | 'possible' | 'certain'`; `step` / `stepCount` only when every path agrees), which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen answers `possible` — "Next", no count. `progress` in a node `config` is refused |
 
@@ -164,7 +164,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > **Writing a `readonly` field? Set `runAs: 'system'`** (approval stamps, SLA
 > markers, rollups). Under the default
 > `runAs: 'user'` the engine **strips** it from `create_record` / `update_record`
-> — the step succeeds, the value never lands, the drop is named in the step's
+> — the step succeeds, the drop is named in the step's
 > warnings; `os validate` / `os build` fail a `runAs:'user'`
 > `update_record` writing one (`readonlyWhen`: a warning).
 
@@ -204,7 +204,8 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 
 ### Filter operands (`config.filter`)
 
-- **Each operand is a value slot**, evaluated before the query.
+- **Each operand is a value slot**, evaluated
+  before the query.
   A whole-string **query placeholder** (`{current_user_id}`, `{today}`,
   `{current_year_start}`) passes through verbatim for the query engine; a flow
   variable never shadows it, and only `filter` gets this hand-off.
@@ -252,7 +253,7 @@ Legal metadata authors get wrong; most are caught by `objectstack build`:
    'current_user.id' } }`), then write `{{ v }}`.
 
 2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
-   ❌ `fields: { ref: { dialect: 'cel', source: 'newRec' } }` → writes the whole record object
+   ❌ `fields: { ref: { dialect: 'cel', source: 'newRec' } }`
    ✅ `source: 'newRec.id'`
 
 3. **`script` nodes call a registered function — nothing else.** `config.function`
@@ -297,7 +298,7 @@ Legal metadata authors get wrong; most are caught by `objectstack build`:
    ```ts
    defineStack({ functions: {
      'helpdesk.aiTriageStub': (ctx) => ({ ai_category: 'other' }),  // pure — the default
-     'billing.sync': { handler: syncBilling, effect: 'writes' },    // declared writer
+     'billing.sync': { handler: syncBilling, effect: 'writes' },
    } });
    ```
 
@@ -393,6 +394,7 @@ node `config`**:
 - **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
 - **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer.
 - The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
+- **A flow name two packages hold:** the bare hook above answers `401 INVALID_SIGNATURE` whatever the signature (cause: server log only). Each package's flow is reached only at `POST /api/v1/automation/hooks/:namespace/:flowName/:hookId`, by its `manifest.namespace` (`_env` there: a flow no package ships).
 
 ### Trigger Types (start-node `config.triggerType`)
 
@@ -436,7 +438,7 @@ A flow around it also owns `label`, `type`, `nodes` and the `edges`
 
 ## Integrations are declared, not coded
 
-A vendor system reachable over HTTP (OpenAPI, remote MCP, plain REST) is a
+A vendor system reachable over HTTP is a
 `connectors:` entry inside the app — `provider: 'openapi' | 'mcp' | 'rest'`, a
 packaged spec, `auth.credentialRef` (the customer's administrator supplies the
 value) — dispatched by `connector_action`; an inbound vendor callback is an

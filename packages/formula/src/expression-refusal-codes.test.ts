@@ -454,6 +454,107 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
+  // [#32595] A call handed a date field's text that no overload accepts.
+  'date-text-call': [
+    {
+      produce: () =>
+        onlyError('value', 'isoDate(record.start_at)', { scope: 'record', fieldTypes: { start_at: 'datetime' } }),
+      params: { call: 'isoDate(record.start_at)', reference: 'record.start_at', rewrite: 'isoDate(date(record.start_at))' },
+      message:
+        '`isoDate(record.start_at)` — `record.start_at` is a date field, and the runtime holds a date field as its text ' +
+        '(`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which this call does not accept: ' +
+        'this faults at runtime, so the field silently evaluates to null. ' +
+        'Parse the text into a timestamp first: `isoDate(date(record.start_at))`.',
+    },
+    {
+      produce: () =>
+        onlyError('value', 'record.start_date.getFullYear()', { scope: 'record', fieldTypes: { start_date: 'date' } }),
+      params: {
+        call: 'record.start_date.getFullYear()',
+        reference: 'record.start_date',
+        rewrite: 'date(record.start_date).getFullYear()',
+      },
+      message:
+        '`record.start_date.getFullYear()` — `record.start_date` is a date field, and the runtime holds a date field as its text ' +
+        '(`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which this call does not accept: ' +
+        'this faults at runtime, so the field silently evaluates to null. ' +
+        'Parse the text into a timestamp first: `date(record.start_date).getFullYear()`.',
+    },
+  ],
+  'date-text-call-fail-closed': [
+    {
+      produce: () =>
+        onlyError('predicate', '!startsWith(isoDate(record.start_at), "2026")', {
+          scope: 'record',
+          fieldTypes: { start_at: 'datetime' },
+          faultOutcome: 'fail-closed',
+        }),
+      params: { call: 'isoDate(record.start_at)', reference: 'record.start_at', rewrite: 'isoDate(date(record.start_at))' },
+      message:
+        '`isoDate(record.start_at)` — `record.start_at` is a date field, and the runtime holds a date field as its text ' +
+        '(`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which this call does not accept: ' +
+        'this faults at runtime, and here an expression that cannot be evaluated fails closed: the write (or the operation ' +
+        'a hook guards) is refused, not skipped (it does not read null). ' +
+        'Parse the text into a timestamp first: `isoDate(date(record.start_at))`.',
+    },
+  ],
+  'date-text-call-fail-open': [
+    {
+      produce: () =>
+        onlyError('predicate', 'isoDatetime(record.start_at) > "2026"', {
+          scope: 'record',
+          fieldTypes: { start_at: 'datetime' },
+          faultOutcome: 'fail-open',
+        }),
+      params: {
+        call: 'isoDatetime(record.start_at)',
+        reference: 'record.start_at',
+        rewrite: 'isoDatetime(date(record.start_at))',
+      },
+      message:
+        '`isoDatetime(record.start_at)` — `record.start_at` is a date field, and the runtime holds a date field as its text ' +
+        '(`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which this call does not accept: ' +
+        'this faults at runtime, and here the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: ' +
+        'the write proceeds, the rule is never applied (its advisory never fires), and the only trace is a log line saying ' +
+        'it could not be evaluated. ' +
+        'Parse the text into a timestamp first: `isoDatetime(date(record.start_at))`.',
+    },
+  ],
+  'date-text-call-run-fails': [
+    {
+      produce: () =>
+        onlyError('predicate', 'isoDate(start_at) == "2026-11-01"', {
+          fields: ['start_at'],
+          fieldTypes: { start_at: 'datetime' },
+          faultOutcome: 'run-fails',
+        }),
+      params: { call: 'isoDate(start_at)', reference: 'start_at', rewrite: 'isoDate(date(start_at))' },
+      message:
+        '`isoDate(start_at)` — `start_at` is a date field, and the runtime holds a date field as its text ' +
+        '(`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which this call does not accept: ' +
+        'this faults at runtime, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Parse the text into a timestamp first: `isoDate(date(start_at))`.',
+    },
+  ],
+  'date-text-call-run-may-fail': [
+    {
+      produce: () =>
+        onlyError('predicate', 'isoDate(start_at) == "2026-11-01"', {
+          fields: ['start_at'],
+          fieldTypes: { start_at: 'datetime' },
+        }),
+      params: { call: 'isoDate(start_at)', reference: 'start_at', rewrite: 'isoDate(date(start_at))' },
+      message:
+        '`isoDate(start_at)` — `start_at` is a date field, and the runtime holds a date field as its text ' +
+        '(`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which this call does not accept: ' +
+        'this faults wherever `start_at` holds that text when the condition runs, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Parse the text into a timestamp first: `isoDate(date(start_at))`.',
+    },
+  ],
   'date-duration-value': [
     {
       produce: () =>
@@ -734,6 +835,9 @@ const SWEEP_SOURCES: readonly string[] = [
   'record.close_date - record.close_date',
   'today() - record.close_date',
   'close_date - close_date > duration("1h")',
+  // [#32595] A date field's text handed to a call that refuses text.
+  'isoDate(record.close_date)',
+  'isoDate(close_date) == "2026-01-01"',
   'record.name > 5',
   'record.active + 1 > 5',
   "record.account == 'a1' && record.account.name == 'x'",
