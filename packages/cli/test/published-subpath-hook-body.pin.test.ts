@@ -283,7 +283,7 @@ type ExtractedBodyHasExactlyTheseThreeFields = Expect<Equals<keyof ExtractedBody
 type ExtractedBodyMembersKeepTheirRatifiedTypes = Expect<
   Equals<
     ExtractedBody,
-    { source: string; capabilities: Array<'api.read' | 'api.write' | 'crypto.uuid' | 'log'>; isExpression: boolean }
+    { source: string; capabilities: Array<'api.read' | 'api.write' | 'crypto.uuid' | 'log' | 'email.send' | 'activity.append'>; isExpression: boolean }
   >
 >;
 

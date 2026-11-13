@@ -9,8 +9,9 @@
 import { extractRecords } from './extract-records.js';
 
 /**
- * The platform's hard row ceiling for a NON-GRID visualisation — gantt,
- * calendar, map and tree (objectui#7210, maintainer ruling a′, 2026-09-02).
+ * The platform's hard row ceiling for a NON-GRID visualisation — calendar,
+ * map and tree (objectui#7210, maintainer ruling a′, 2026-09-02). The gantt
+ * applies {@link GANTT_ROW_CEILING} instead, through the same mechanism.
  *
  * ## Why this lives in `@object-ui/core` (objectui#7508, ruling A′)
  *
@@ -51,7 +52,8 @@ import { extractRecords } from './extract-records.js';
  * ## Why 2,000, measured
  *
  * The ruling sets ONE constant across the four views, chosen after measuring
- * them, so the binding view decides it. Measured in this repo's jsdom lane
+ * them, so the binding view decides it. (The gantt has since left it for
+ * {@link GANTT_ROW_CEILING}; calendar, map and tree still share this one.) Measured in this repo's jsdom lane
  * (`@testing-library/react`, real child views, inline `value` provider, mount
  * to settled paint), DOM elements materialised and mount duration:
  *
@@ -92,6 +94,64 @@ import { extractRecords } from './extract-records.js';
 export const NON_GRID_ROW_CEILING = 2000;
 
 /**
+ * The gantt's OWN row ceiling (objectstack#32421, maintainer ruling B): the
+ * one view of the four that leaves {@link NON_GRID_ROW_CEILING}.
+ *
+ * The shared 2,000 is priced by the binding view, `ObjectTree`, and the table
+ * above shows the gantt paying the tree's limit without the tree's cost: it
+ * virtualises its task list and its timeline window, so its DOM is flat in
+ * rows. Everything else about ruling a′ holds unchanged for it: a NAMED
+ * CONSTANT IN THE RENDERER, ⛔ not an authorable key (`pagination.pageSize`
+ * and `limit` stay unread), ⛔ not read from a datasource's `external.rowCap`,
+ * and above it the same probe row and the same `NonGridRowCeilingNote`.
+ *
+ * ## Why 10,000, measured
+ *
+ * The target is the platform maximum of a datasource's `external.rowCap`
+ * (`EXTERNAL_ROW_CAP_CEILING` in `@objectstack/spec`), so a gantt over a
+ * capped external object never draws fewer rows than the server will serve.
+ * The value is a literal, not an import of that constant: raising the spec's
+ * cap must not raise this one unmeasured.
+ *
+ * Measured the same way as the table above (this repo's DOM test lane,
+ * `@testing-library/react`, `ObjectGantt` over the real `GanttView`, mount to
+ * settled paint), the gantt alone, on one box in one sitting. "adapter" is
+ * the same mount through a `find()` that parses the rows from a JSON wire
+ * string, the fetch's deserialisation half; "Chromium" is headless Chromium
+ * on the Console's Vite dev server, mount to the first frame after the rows
+ * reach the DOM:
+ *
+ * | rows   | DOM lane, inline | DOM lane, adapter          | Chromium      |
+ * |-------:|-----------------:|---------------------------:|--------------:|
+ * |  2,000 |    726 · 137ms   | 732 · 111ms (0.2 MB, 3ms)  | 623 · 396ms   |
+ * |  4,000 |    726 · 146ms   | 732 · 132ms (0.4 MB, 4ms)  | 623 · 466ms   |
+ * | 10,000 |    726 · 197ms   | 732 · 235ms (1.0 MB, 20ms) | 623 · 436ms   |
+ *
+ * The DOM stays flat (the task list and the timeline both window), and the
+ * cost in rows is the O(n) transform: 10,000 gantt rows mount in a tenth of
+ * the time 2,000 tree rows take in the table above. Ruling a′'s budget
+ * applied to the gantt — DOM elements far inside ~10,000, mount inside the
+ * ~3s the tree is held to — holds at 10,000 with room, so the target is the
+ * value. Past it (10,500 rows) the probe row cuts at 10,000 and
+ * `NonGridRowCeilingNote` shows, as below the shared ceiling.
+ *
+ * ⚠️ As with the table above: SHARED-BOX seconds and a reading taken once,
+ * when objectstack#32421 landed; nothing re-derives it. The DOM counts are
+ * the environment-independent half.
+ */
+export const GANTT_ROW_CEILING = 10000;
+
+/**
+ * The ceilings a non-grid view may apply — the closed set of named renderer
+ * constants above, never an arbitrary number. A literal-typed union rather
+ * than `number`, so a view-metadata value (`pagination.pageSize`, `limit`)
+ * cannot be handed to {@link nonGridRowCeilingQuery} or
+ * {@link applyNonGridRowCeiling} without a cast the reviewer sees: the
+ * ceiling is not authorable (ruling a′).
+ */
+export type NonGridRowCeiling = typeof NON_GRID_ROW_CEILING | typeof GANTT_ROW_CEILING;
+
+/**
  * The query keys a non-grid view sends to honour {@link NON_GRID_ROW_CEILING}:
  * `$top` is the ceiling plus ONE probe row.
  *
@@ -112,14 +172,21 @@ export const NON_GRID_ROW_CEILING = 2000;
  *
  * A fresh object per call, so a caller that mutates the query it built cannot
  * change what the next caller sends.
+ *
+ * `ceiling` defaults to the shared {@link NON_GRID_ROW_CEILING}; only the
+ * gantt passes {@link GANTT_ROW_CEILING}. A caller passes the SAME ceiling to
+ * {@link applyNonGridRowCeiling}, or the probe row is sliced at the wrong
+ * place.
  */
-export function nonGridRowCeilingQuery(): { $top: number } {
-  return { $top: NON_GRID_ROW_CEILING + 1 };
+export function nonGridRowCeilingQuery(
+  ceiling: NonGridRowCeiling = NON_GRID_ROW_CEILING,
+): { $top: number } {
+  return { $top: ceiling + 1 };
 }
 
 /** What {@link applyNonGridRowCeiling} tells a caller about its result set. */
 export interface NonGridCeilingResult<T = any> {
-  /** The rows to draw — never more than {@link NON_GRID_ROW_CEILING}. */
+  /** The rows to draw — never more than the ceiling the caller applied. */
   rows: T[];
   /**
    * The size of the whole filtered result set when the adapter reported one
@@ -133,10 +200,10 @@ export interface NonGridCeilingResult<T = any> {
 }
 
 /**
- * Cap a non-grid view's result set at {@link NON_GRID_ROW_CEILING} and report
- * whether it had to.
+ * Cap a non-grid view's result set at `ceiling` ({@link NON_GRID_ROW_CEILING}
+ * unless the caller is the gantt) and report whether it had to.
  *
- * Truncation is decided by the PROBE ROW (`rows.length > NON_GRID_ROW_CEILING`
+ * Truncation is decided by the PROBE ROW (`rows.length > ceiling`
  * against a query built by {@link nonGridRowCeilingQuery}), never by comparing
  * against `total`: `total` is optional on `QueryResult` and absent entirely
  * from a bare-array response, so a `total`-based test would silently stop
@@ -146,15 +213,18 @@ export interface NonGridCeilingResult<T = any> {
  * envelopes that helper does (objectui#6839) — pinned in
  * `non-grid-row-ceiling.contractEnvelope-6839.test.ts`.
  */
-export function applyNonGridRowCeiling<T = any>(result: unknown): NonGridCeilingResult<T> {
+export function applyNonGridRowCeiling<T = any>(
+  result: unknown,
+  ceiling: NonGridRowCeiling = NON_GRID_ROW_CEILING,
+): NonGridCeilingResult<T> {
   const all = extractRecords(result) as T[];
   const rawTotal =
     result && typeof result === 'object' && typeof (result as any).total === 'number'
       ? ((result as any).total as number)
       : undefined;
-  const truncated = all.length > NON_GRID_ROW_CEILING;
+  const truncated = all.length > ceiling;
   return {
-    rows: truncated ? all.slice(0, NON_GRID_ROW_CEILING) : all,
+    rows: truncated ? all.slice(0, ceiling) : all,
     total: rawTotal,
     truncated,
   };

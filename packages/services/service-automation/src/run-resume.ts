@@ -24,6 +24,7 @@ import { refuseNode } from './guard-refusal.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
+import { withDroppedFields } from './run-dropped-fields.js';
 import { noteTenantCurrencyReadFault } from './builtin/template.js';
 import { mapItemCancelledVariable, type MapItemCancelledMarker } from './builtin/map-node.js';
 // The values below (`buildRunTrigger`, `FlowRefusalSignal`, `isRefusalSignal`,
@@ -231,7 +232,13 @@ export async function seedRunGrants(
     // throws, answers nothing, or is not wired) carries none.
     if (needsGrants) {
         delete (runContext as SeededRunContext).posture;
-        delete (runContext as SeededRunContext).principalKind;
+        // [ADR-0151 Non-goals; ruling record 6812617393] The kind is dropped
+        // with the grants it stood beside wherever the resolution below
+        // re-seeds it. A `runAs:'system'` run resolves nothing (elevation
+        // reads no grants), so the kind its launch door forwarded is the only
+        // one it will carry, and it is kept: who started the elevated run
+        // (`resolveRunDataContext`'s system arm), where it narrows nothing.
+        if (runContext.runAs !== 'system') delete (runContext as SeededRunContext).principalKind;
         delete (runContext as SeededRunContext).permissionSetAddresses;
     }
     if (
@@ -1959,6 +1966,9 @@ export async function resumeInternal(
                 ),
                 flowLabel: flow.label,
                 summary,
+                // #32861 — like `summary`, over the WHOLE run: a drop before
+                // the pause reaches the answer the run finally gives.
+                ...withDroppedFields(steps),
             };
         } catch (err: unknown) {
             // [#15788] A resumed run reached a refusing `end` — the SECOND

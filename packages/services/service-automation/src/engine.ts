@@ -67,6 +67,8 @@ import { runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
 import { flowContentChecksum } from './flow-identity.js';
 import { carriedRefusalOfResult, readCarriedRefusal, type CarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
+import { withDroppedFields } from './run-dropped-fields.js';
+import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 // #5660 — the degrade registration reports a FOREIGN failure (a third-party
 // provider factory's text), so it renders it as structured `meta` rather than
 // interpolating it into the log message. See ./thrown-cause-diagnostics.ts.
@@ -432,6 +434,16 @@ export interface NodeExecutionResult {
      * copies them onto the {@link StepLogEntry}.
      */
     warnings?: string[];
+    /**
+     * #32861: the data engine's own drop events behind the strip warnings
+     * above — the structured half a write node (`create_record` /
+     * `update_record`) received from `onFieldsDropped`. Copied onto the
+     * {@link StepLogEntry} beside `warnings`, and folded from there onto the
+     * run's terminal answer (`AutomationResult.droppedFields`), so the door
+     * that started the run can tell its caller which values never landed.
+     * Omitted when nothing was dropped.
+     */
+    droppedFields?: DroppedFieldsEvent[];
     /** Used by decision nodes — returns the selected branch label */
     branchLabel?: string;
     /**
@@ -1109,6 +1121,14 @@ export interface StepLogEntry {
      * partially didn't land instead of a silent success.
      */
     warnings?: string[];
+    /**
+     * #32861: the structured drop events behind those warnings
+     * ({@link NodeExecutionResult.droppedFields}). On the step, not in a
+     * run-scoped side table, so a run that pauses keeps them with the steps it
+     * persists and the resumed run's terminal answer folds the whole run
+     * (`dropEventsOf`).
+     */
+    droppedFields?: DroppedFieldsEvent[];
     /**
      * #1479: structured-region grouping. When a step ran inside a `loop` /
      * `parallel` / `try_catch` body region, these tag it with its **immediate**
@@ -7158,7 +7178,9 @@ export class AutomationEngine implements IAutomationService {
      * copy of anybody else's.
      *
      * A `runAs:'system'` run, a user-less run, a context carrying every fact,
-     * and an engine with no resolver wired resolve nothing.
+     * and an engine with no resolver wired resolve nothing. A `runAs:'system'`
+     * run therefore keeps the `principalKind` its launch door forwarded: no
+     * resolution here would re-seed it (ADR-0151 Non-goals).
      */
     private seedRunGrants(
         flowName: string,
@@ -7637,6 +7659,9 @@ export class AutomationEngine implements IAutomationService {
                 // (a `subflow` roll-up, a runtime test asserting the sweep wrote
                 // something) never has to re-read the run to learn what it did.
                 summary,
+                // #32861 — the values a write step did not store, so the door
+                // that started the run can tell its caller. Omitted when none.
+                ...withDroppedFields(steps),
             };
         } catch (err: unknown) {
             // [#15788] The run REFUSED — an `end` node declaring

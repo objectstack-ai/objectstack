@@ -27,7 +27,7 @@ import type {
     RealtimeEventPayload,
 } from '@objectstack/spec/contracts';
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
-import { AutoEnqueuer, type HttpEnqueueFn } from './auto-enqueuer.js';
+import { AutoEnqueuer, WEBHOOK_DEDUP_DIGEST_PREFIX, type HttpEnqueueFn } from './auto-enqueuer.js';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
@@ -734,6 +734,30 @@ describe('AutoEnqueuer — bulk data events (#4639)', () => {
         // No record to name — that is the contract, not an omission.
         expect(payload.recordId).toBeUndefined();
         expect(payload.after).toBeUndefined();
+        await ae.stop();
+    });
+
+    // [#31699 round 3, M4] The bulk path keys its delivery with the same
+    // `webhookDedupKey` as the per-record path: past the column's cap (191) a
+    // fixed-length digest, never a key the outbox refuses at insert.
+    it('a dedup key past 191 is the digest on the bulk path too; one that fits is unchanged', async () => {
+        const longId = `wh_${'x'.repeat(160)}`;
+        const engine = new FakeEngine({ sys_webhook: [
+            webhook({ id: longId, name: 'bulk_long', triggers: 'bulk_update' }),
+            webhook({ id: 'wh-short', name: 'bulk_short', triggers: 'bulk_update' }),
+        ] });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
+        await ae.start();
+
+        await realtime.publish(bulkEvent('updated', 'contact', 3));
+        await flush();
+
+        const byRef = new Map(calls.map((c) => [c.refId, c.dedupKey]));
+        expect([...byRef.keys()].sort()).toEqual(['wh-short', longId].sort());
+        expect(byRef.get(longId)).toMatch(new RegExp(`^${WEBHOOK_DEDUP_DIGEST_PREFIX}[0-9a-f]{64}$`));
+        expect(byRef.get('wh-short')).toMatch(/^wh-short:contact:data\.records\.updated:/);
         await ae.stop();
     });
 

@@ -683,7 +683,63 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
   // `details` rides only on a refusal, as `/actions` serves no producer
   // context on a fault.
   const details = answer.status < 500 ? (err as { details?: unknown } | null | undefined)?.details : undefined;
-  return codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
+  const result = codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
+  // [#32757] Read, never stamped: `FLOW_FAILED` (a flow that RAN and failed)
+  // is the one arm whose `details` are the run's artefacts; `satisfies` keeps
+  // the spelling checked against the registered vocabulary.
+  const relay = answer.code === ('FLOW_FAILED' satisfies ErrorCode) ? flowFailureRelaySentence(details, answer.userMessage) : undefined;
+  return relay === undefined
+    ? result
+    : { ...result, content: [...result.content, { type: 'text' as const, text: `${FLOW_FAILURE_RELAY_LEAD}${relay}` }] };
+}
+
+/**
+ * [#32757] The lead of the plain sentence a failed flow run's tool error
+ * carries beside its envelope. Exported for the pin; not on the package entry.
+ */
+export const FLOW_FAILURE_RELAY_LEAD =
+  'Tell the user this reason, not the flow and node chain in the error message: ';
+
+/**
+ * [#32757] What a failed flow run tells its END USER, chosen by the console's
+ * own read order (`flowFailureMessage` in `ui/packages/app-shell/src/utils/
+ * flowResponse.ts`): the flow author's `errorMessage`, then the producer-marked
+ * `userMessage`, then the message of the refusal the run's write node met
+ * (`innerRefusal`, served without the node and operation prefixes). The run's
+ * own `message` is the console's last rung and is not repeated: a failure that
+ * carries none of the three gets no sentence, so this never invents one.
+ *
+ * ## Why a second content block, and not a promoted code
+ *
+ * Measured on the HTTP `/mcp` face: a flow action whose `update_record` met a
+ * `requiredWhen` refusal answered `FLOW_FAILED` with the message
+ * `Flow 'F' failed: Node 'N' failed: update_record(OBJECT) failed: …`, and an
+ * agent relayed that chain to the employee while the console's toast read the
+ * field's own sentence. The wire may not lead with the inner refusal instead:
+ * `FlowInnerRefusalSchema` (`@objectstack/spec/api`, ruling B′) keeps it a
+ * NESTED member, never promoted over `code` or `message`, and this tool answers
+ * what `/api/v1/actions` answers ({@link errorResultFromThrown}). So the
+ * envelope in `content[0]` stays byte for byte the door's, and the sentence
+ * rides as `content[1]`, plain text, read by the same order as the console —
+ * the maintainer's ruling on the card (options B and D together; the tool
+ * descriptions teach the same order).
+ *
+ * The details are read as the spec declares them (`FlowFailureDetailsSchema`):
+ * strings only, and an `innerRefusal` only when its `code` is a string, as the
+ * console reads it. ⛔ The permission and delegated-scope rungs the console
+ * substitutes are its own localized lines; here the refusal's sentence stands,
+ * and its language is the caller's locale's, decided upstream.
+ */
+function flowFailureRelaySentence(details: unknown, userMessage: string | undefined): string | undefined {
+  const run = details && typeof details === 'object' && !Array.isArray(details)
+    ? (details as { errorMessage?: unknown; innerRefusal?: unknown })
+    : {};
+  const usable = (text: unknown): string | undefined =>
+    typeof text === 'string' && text.trim() !== '' ? text : undefined;
+  const inner = run.innerRefusal as { code?: unknown; message?: unknown } | null | undefined;
+  return usable(run.errorMessage)
+    ?? usable(userMessage)
+    ?? (inner && typeof inner === 'object' && typeof inner.code === 'string' ? usable(inner.message) : undefined);
 }
 
 /**
@@ -1624,6 +1680,15 @@ function jsonText(value: unknown): string {
  * pass hands the validator the object's option-bearing fields on a formula
  * field's `expression` and nowhere else, so the tool asks the bridge for them
  * on the `formula` site only and answers every other site as the gate does.
+ *
+ * [#32640] `traversalHydration`: the sites where the gate runs the shared
+ * validator with `ExprSchemaHint.traversalHydration` — a validation rule's
+ * condition and a formula field's `expression`, the two seams the engine
+ * hydrates one relationship hop for (`@objectstack/lint`'s rule pass and
+ * `judgeFieldFormula`). There the validator refuses a reference read both
+ * through the relationship and as a plain value, and a second hop, in the
+ * gate's words; nothing hydrates a flow condition or a template, so the gate
+ * does not ask there and neither does the tool.
  */
 const VALIDATE_SITE_MAP: Record<
   string,
@@ -1632,6 +1697,7 @@ const VALIDATE_SITE_MAP: Record<
     scope: 'record' | 'flattened';
     slot: z.ZodType;
     optionLabels?: true;
+    traversalHydration?: true;
     /**
      * [#29904, #29926, #29959] What the gate's runtime does on a fault at this
      * site, from the caller's optional `severity` / `triggerKind` — the two
@@ -1647,14 +1713,16 @@ const VALIDATE_SITE_MAP: Record<
     }) => ExprFaultOutcome | undefined;
   }
 > = {
-  formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true },
+  formula: {
+    role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true, traversalHydration: true,
+  },
   // [#29904, #29926] A `severity: 'error'` rule (the default) fails closed: a
   // fault refuses the write. An advisory rule (`warning` / `info`) fails open:
   // the rule is skipped and the write proceeds. The gate grades a
   // text-vs-number comparison an error worded for each; the tool answers what
   // the gate will for the severity it is told.
   validation: {
-    role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema,
+    role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema, traversalHydration: true,
     faultOutcome: ({ severity }) => (severity === 'warning' || severity === 'info' ? 'fail-open' : 'fail-closed'),
   },
   // [#29926, #29959] A record-triggered flow's start, edge or `decision`
@@ -2215,7 +2283,8 @@ export function registerObjectTools(
       {
         description:
           'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns ' +
-          'build-time errors (bare field refs, unknown fields, unknown functions) and advisory warnings ' +
+          'build-time errors (bare field refs, unknown fields, unknown functions; at a `formula` or `validation` site, a ' +
+          'reference field read both through the relationship and as a plain value, or more than one hop) and advisory warnings ' +
           '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
           '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
           'a warning on any other flow; date-equality pitfalls), plus the fields and stdlib ' +
@@ -2304,7 +2373,8 @@ export function registerObjectTools(
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
-          const { role, scope, slot, optionLabels, faultOutcome: outcomeOf } = VALIDATE_SITE_MAP[site ?? 'formula'];
+          const { role, scope, slot, optionLabels, traversalHydration, faultOutcome: outcomeOf } =
+            VALIDATE_SITE_MAP[site ?? 'formula'];
           const faultOutcome = outcomeOf?.({
             severity: severity ?? 'error',
             triggerKind: triggerKind ?? 'record_change',
@@ -2322,6 +2392,8 @@ export function registerObjectTools(
             fieldTypes,
             scope,
             ...(optionFields ? { optionFields } : {}),
+            // [#32640] The gate's relationship-traversal checks, where it runs them.
+            ...(traversalHydration ? { traversalHydration } : {}),
             ...(faultOutcome ? { faultOutcome } : {}),
             // [#30250] A time-relative sweep's run is fired by no write: the
             // gate's run-fails sentence there names none, and so does this one.
@@ -2918,7 +2990,12 @@ export function registerActionTools(
         'but the action body itself runs as trusted application code with the app\'s full data authority. ' +
         'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
         'An action the author gated (list_actions reports requiresConfirmation) is REFUSED unless you also ' +
-        'send confirm: true — ask the human first, then retry; nothing runs on a refused call.' +
+        'send confirm: true — ask the human first, then retry; nothing runs on a refused call. ' +
+        // [#32757] The read order `flowFailureRelaySentence` applies, taught
+        // to the reader as well, as the console reads it.
+        'A flow action that fails answers error.code FLOW_FAILED with a message naming the flow and node, ' +
+        'which is for diagnosis: tell the user the reason in the second text block, which is the flow\'s ' +
+        'details.errorMessage, else userMessage, else details.innerRefusal.message — never the flow and node chain.' +
         // [#15705] Named only where `resume_run` is actually registered below,
         // so this description never points an agent at a tool it cannot call.
         (canResume
@@ -3089,7 +3166,8 @@ export function registerActionTools(
           '(author AI opt-in, your capabilities, your read access to the record). The rest of the flow runs ' +
           'the app\'s business logic and can mutate data. When list_actions reports requiresConfirmation for ' +
           'the action that started the run, send confirm: true (ask the human first); without it the call ' +
-          'is refused and the run stays paused.',
+          'is refused and the run stays paused. A run that fails answers as run_action does: tell the user ' +
+          'the reason in the second text block, never the flow and node chain in the error message.',
         inputSchema: strictToolInput(
           {
             surface: 'this resume_run call',

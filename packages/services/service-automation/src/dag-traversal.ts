@@ -21,6 +21,7 @@ import { isGuardRefusal } from './guard-refusal.js';
 import { gradeAfterTenantCurrencyReadFault } from './builtin/template.js';
 import { attachCarriedRefusal, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
+import { withDroppedFields } from './run-dropped-fields.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 // The values below (`AutomationEngine` for its public static
 // `MAX_NODE_REENTRIES`) are read only inside the function bodies, at call time,
@@ -414,6 +415,7 @@ export async function executeNode(
                 durationMs: Date.now() - stepStart,
                 error: { code: 'NODE_FAILURE', message: errMsg },
                 ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+                ...(result.droppedFields?.length ? { droppedFields: result.droppedFields } : {}),
                 // #4354 — a node that failed PART WAY may still have written
                 // rows; dropping its counts would understate what the run did.
                 ...(result.metrics ? { metrics: result.metrics } : {}),
@@ -494,6 +496,9 @@ export async function executeNode(
             completedAt: new Date().toISOString(),
             durationMs: Date.now() - stepStart,
             ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+            // #32861 — the structured events behind those warnings, folded
+            // onto the run's terminal answer (`dropEventsOf`).
+            ...(result.droppedFields?.length ? { droppedFields: result.droppedFields } : {}),
             ...(result.metrics ? { metrics: result.metrics } : {}),
         });
 
@@ -1358,7 +1363,8 @@ export async function executeWithoutRetry(
         const successMessage = this.renderFlowTerminalMessage(
             flowName, 'successMessage', flow.successMessage, variables, runContext,
         );
-        return { success: true, output, durationMs, successMessage, flowLabel: flow.label, summary };
+        // #32861 — same fold as `execute()`'s terminal exit, over this attempt's steps.
+        return { success: true, output, durationMs, successMessage, flowLabel: flow.label, summary, ...withDroppedFields(steps) };
     } catch (err: unknown) {
         // [#15788] The THIRD producer: an attempt that reached a refusing
         // `end`. A flow under `errorHandling.strategy: 'retry'` is handed

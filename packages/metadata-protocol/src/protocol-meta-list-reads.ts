@@ -47,9 +47,9 @@ import {
 } from './protocol-package-bindings.js';
 import { storedEntryRow } from './protocol-stored-overlay-types.js';
 import { viewIdentityPatch } from './protocol-view-normalization.js';
-import { isServedOverrideRowOf } from './served-override.js';
+import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { packageLessRowWithheld, pairMemberWithheldAt } from './protocol-exact-qualifier.js';
+import { declinesPackageLessRowAt, packageLessRowWithheld, pairMemberWithheldAt } from './protocol-exact-qualifier.js';
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItems`; the method's docblock there is its contract. */
 export async function getMetaItems(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean }) {
@@ -550,7 +550,16 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             // package-less rows. The by-name preview arm naming the
             // package serves that draft when the package has none.
             const packageAgnosticDrafts = packageId ? await queryDrafts(undefined) : [];
-            const standInDraftRecords = packageAgnosticDrafts.filter((record) => (record?.package_id ?? null) === null);
+            // [#32568] …except one the by-name preview naming the package
+            // does not serve there: an overlay type's draft of a name two or
+            // more packages hold ({@link packageLessRowWithheld}, as the
+            // active arm leaves it out), and a sealed type's, which is
+            // declined ({@link declinesPackageLessRowAt}, as the active arm
+            // declines its row).
+            const standInDraftRecords = packageAgnosticDrafts
+                .filter((record) => (record?.package_id ?? null) === null)
+                .filter((record) => !packageLessRowWithheld(host, request.type, record?.name)
+                    && !declinesPackageLessRowAt(host, request.type, String(record?.name ?? ''), record as ServedOverrideRow));
             // [#28409] …and the pair's drafts, as stand-ins, as its active
             // arm previews the pair's rows: the pending edit of the
             // package's declared override previews over its slot.

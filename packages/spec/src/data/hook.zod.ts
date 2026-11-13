@@ -200,6 +200,40 @@ function refuseElevatedIdentityAssignmentBodyWrite(
 }
 
 /*
+ * ── A hook body is not granted `email.send` ──────────────────────────────────
+ *
+ * [#32004, ruling 6843314411] A message cannot be taken back, and the write
+ * that runs a hook may still roll back, so a hook body sends no mail: mail on a
+ * record change goes through an action, a job or a flow. The runtime refuses
+ * to bind a hook body granted `email.send` (`hookBodyRunnerFactory`) and
+ * refuses `ctx.email.send` in a hook body at every call; the parse refuses the
+ * grant at every door that parses a hook — the metadata save door,
+ * `defineStack` / `os validate`, compile (where the build infers the grant from
+ * a handler's `ctx.email.send` call), an artifact's parse — so the author meets
+ * it before the hook is deployed. One issue, at the grant. An action or a job
+ * body is granted it as before.
+ */
+
+/** The object-level check that refuses a hook body granted `email.send`. See the block above. */
+function refuseHookBodyMailGrant(
+  hook: { body?: { language?: string; capabilities?: unknown } },
+  ctx: z.RefinementCtx,
+): void {
+  const granted = hook.body?.language === 'js' ? hook.body.capabilities : undefined;
+  if (!Array.isArray(granted)) return;
+  const index = granted.indexOf('email.send');
+  if (index < 0) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['body', 'capabilities', index],
+    message:
+      'A hook body cannot be granted `email.send`: a message cannot be taken back if the write that runs the hook '
+      + 'rolls back. Remove the grant and the `ctx.email.send` call, and send mail on a record change from an action, '
+      + 'a job or a flow.',
+  });
+}
+
+/*
  * ── A hook that declares `refusals` refuses by code only ────────────────────
  *
  * [#26170, maintainer ruling 6431311681 letter A] A hook's refusal catalogue
@@ -701,12 +735,13 @@ export const HookSchema = lazySchema(() => strictObject(
   ...MetadataProtectionFields,
   // [#21565] The object-level checks: the first pairs `object` with `body`,
   // [#25653] the second `runAs` with `body`, [#26170] the third `refusals`
-  // with `body`, pairs no field-level refine can see together. A schema
-  // DERIVED from this one by overriding a key must use `.safeExtend()` (zod
+  // with `body`, pairs no field-level refine can see together; [#32004] the
+  // fourth refuses a body's `email.send` grant, which only the hook can judge,
+  // since an action's body takes it. A schema DERIVED from this one by overriding a key must use `.safeExtend()` (zod
   // refuses `.extend()` over a refined object), which is what keeps every
   // check on the derived schema too.
 }).superRefine(refuseBodyOnStoredMetadataTarget).superRefine(refuseElevatedIdentityAssignmentBodyWrite)
-  .superRefine(refuseUndeclaredLiteralRefusalCode));
+  .superRefine(refuseUndeclaredLiteralRefusalCode).superRefine(refuseHookBodyMailGrant));
 
 /**
  * Hook Runtime Context

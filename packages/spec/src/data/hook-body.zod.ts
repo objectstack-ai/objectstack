@@ -34,6 +34,15 @@ const CRYPTO_HASH_RETIRED =
  *   alongside it to be useful (the transaction body still needs write access).
  * - `crypto.uuid` — `ctx.crypto.randomUUID()`
  * - `log`        — `ctx.log.info / warn / error`
+ * - `email.send` — `ctx.email.send(input)`: hand a message to the mail
+ *   service. The sender, the sending user and the organization are stamped by
+ *   the platform (`BodyMailSendInputSchema`). An action or a job body sends
+ *   mail; a hook body cannot, because a message cannot be taken back if the
+ *   write that runs the hook rolls back, and `HookSchema` refuses the grant.
+ * - `activity.append` — `ctx.activity.append(input)`: add one entry to a
+ *   record's activity timeline. The actor, the organization and the origin are
+ *   stamped by the platform (`BodyActivityAppendInputSchema`). The entry
+ *   commits or rolls back with the write that runs the body.
  *
  * `http.fetch` is intentionally absent — outbound calls go through Connector
  * recipes (separate spec) so they remain auditable and replayable.
@@ -51,6 +60,8 @@ export const HookBodyCapability = z.enum([
   'api.transaction',
   'crypto.uuid',
   'log',
+  'email.send',
+  'activity.append',
 ], {
   // Only the value that USED to be legal gets the retirement prescription —
   // telling the author of `crypto.hsah` that their value "was removed" would

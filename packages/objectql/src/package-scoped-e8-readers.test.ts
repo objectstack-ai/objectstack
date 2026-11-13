@@ -49,8 +49,8 @@ const P = 'com.acme.caller';
 
 /** The nine types this card wires, as the registry spells them. */
 const E8_TYPES = ['app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool', 'skill', 'agent'] as const;
-/** The types wired since, each by its own card: `api` (#32069), the email template (#31699), the picklist's bare read (#32070), `mapping` (#32071), `dataset` (#32072), `permission` (#32162) and `flow` (#31696). */
-const WIRED_SINCE = ['api', 'email_template', 'picklist', 'mapping', 'dataset', 'permission', 'flow'] as const;
+/** The types wired since, each by its own card: `api` (#32069), the email template (#31699), the picklist's bare read (#32070), `mapping` (#32071), `dataset` (#32072), `permission` (#32162), `flow` (#31696) and `webhook` (#31699 PR 2). */
+const WIRED_SINCE = ['api', 'email_template', 'picklist', 'mapping', 'dataset', 'permission', 'flow', 'webhook'] as const;
 /** Of them, the ones phase 1's one-holder refusal does not cover: two package holders can exist today. */
 const UNCOVERED = E8_TYPES.filter((t) => !(BARE_NAME_REGISTRY_TYPES as readonly string[]).includes(t));
 
@@ -341,10 +341,56 @@ describe('email_template joins the readers (ADR-0150 D9, child B #31699): the by
   });
 });
 
+describe('webhook joins the readers (ADR-0150 D9, #31699 PR 2): `/meta/webhook/NAME`', () => {
+  it('[FROM first-registered TO 409] a caller with no package is refused a name two packages ship, naming both', async () => {
+    ship('webhook', 'task_changed', A);
+    ship('webhook', 'task_changed', B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'webhook', name: 'task_changed' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => facade.get('webhook', 'task_changed'), 'ambiguous-in-environment', [A, B]);
+    expect(labelOf((await protocol.getMetaItem({ type: 'webhook', name: 'task_changed', packageId: B }))?.item)).toBe('beta webhook');
+  });
+
+  it('CONTROL — one holder is served to a caller with no package, as before', async () => {
+    ship('webhook', 'solo', A);
+    expect(labelOf((await protocol.getMetaItem({ type: 'webhook', name: 'solo' }))?.item)).toBe('alpha webhook');
+  });
+
+  // [#31699 PR 2 × #32183] The by-name read judges the served holders (#32497,
+  // merged from main), so a disabled co-holder holds no name for it, as the
+  // dispatcher already reads it. BASE (main: this head with `webhook` out of
+  // the three type sets, dists rebuilt): the first registered holder's when it
+  // is the enabled one, nothing when it is the disabled one, and the first
+  // registered again once both are enabled. This branch's round-3 head
+  // 2200b8c9, before #32497, answered 409 naming both (#32694's premise).
+  it.each([['alpha first', [A, B]], ['beta first', [B, A]]] as const)('[FROM the first registered, or nothing when it is the disabled one, TO the enabled holder\'s] one enabled and one disabled holder (%s): a caller with no package reads the enabled one\'s; re-enabled, FROM the first registered TO 409 naming both', async (_order, order) => {
+    for (const id of order) ship('webhook', 'twin_hook', id);
+    registry.disablePackage(B);
+    expect(labelOf((await protocol.getMetaItem({ type: 'webhook', name: 'twin_hook' }))?.item)).toBe('alpha webhook');
+    expect(labelOf(await facade.get('webhook', 'twin_hook'))).toBe('alpha webhook');
+    registry.enablePackage(B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'webhook', name: 'twin_hook' }), 'ambiguous-in-environment', [A, B]);
+  });
+
+  // BASE (2200b8c9, and this head with `webhook` out of the three type sets, as
+  // main has them; same fixture): the protocol read served nothing (404) already,
+  // while `MetadataFacade.get` / `getEntry` and `SchemaRegistry.resolveItem`
+  // answered the disabled package's body and `exists` true (#32497's row 1, now
+  // for the webhook).
+  it('[FROM the disabled body TO undefined, library] a lone disabled holder: the protocol read serves nothing, as before, and `MetadataFacade.get` answers undefined', async () => {
+    ship('webhook', 'gone_hook', B);
+    registry.disablePackage(B);
+    expect((await protocol.getMetaItem({ type: 'webhook', name: 'gone_hook' }))?.item ?? null).toBeNull();
+    expect(await facade.get('webhook', 'gone_hook')).toBeUndefined();
+    expect(facade.getEntry('webhook', 'gone_hook')).toBeUndefined();
+    expect(await facade.exists('webhook', 'gone_hook')).toBe(false);
+    expect(registry.resolveItem('webhook', 'gone_hook')).toBeUndefined();
+  });
+});
+
 describe('the types E8 does not wire keep the legacy read', () => {
-  it('a view (bucket 1) and a webhook (child B, not yet wired) are read by getItem, untouched', async () => {
-    ship('webhook', 'onboard', A);
-    expect(labelOf(await facade.get('webhook', 'onboard', P))).toBe('alpha webhook');
+  it('a view (bucket 1) and a connector (not wired; the flow and the webhook are, #31696 and #31699 PR 2) are read by getItem, untouched', async () => {
+    ship('connector', 'onboard', A);
+    expect(labelOf(await facade.get('connector', 'onboard', P))).toBe('alpha connector');
   });
 });
 

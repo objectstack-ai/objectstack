@@ -84,12 +84,10 @@ vi.mock('../../autoLayout', async (importOriginal) => {
     // this wrapper only reads what passed through it. Nothing here decides an
     // outcome, so a drifting stub cannot make a leg pass.
     applyDetailAutoLayout: ((
-      fields: Parameters<typeof actual.applyDetailAutoLayout>[0],
-      columns: Parameters<typeof actual.applyDetailAutoLayout>[1],
-      containerWidth?: Parameters<typeof actual.applyDetailAutoLayout>[2],
+      ...args: Parameters<typeof actual.applyDetailAutoLayout>
     ) => {
-      const out = actual.applyDetailAutoLayout(fields, columns, containerWidth);
-      recorder.calls.push({ columns, outColumns: out.columns, fields: out.fields });
+      const out = actual.applyDetailAutoLayout(...args);
+      recorder.calls.push({ columns: args[1], outColumns: out.columns, fields: out.fields });
       return out;
     }) as typeof actual.applyDetailAutoLayout,
   };

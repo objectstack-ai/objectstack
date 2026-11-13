@@ -199,8 +199,10 @@ describe('[#23686] the actions door answers the engine\'s duplicate as 409 UNIQU
     it('a handler whose engine write repeats a unique value', async () => {
         const response = await postAction(dispatcher, 'udoc/add_duplicate');
 
-        // The driver names no single column: the index is the tenancy-scoped composite.
-        expectUniqueViolation(response, ['developerMessage', 'object'], 'udoc');
+        // The index is the tenancy-scoped composite `(organization_id, email)`;
+        // its organization part is the implied scope, so the refusal names `email`.
+        expectUniqueViolation(response, ['developerMessage', 'field', 'object'], 'udoc');
+        expect(response.body.error.details.field).toBe('email');
         // Non-vacuity: the refusal is real, nothing was written.
         expect(await engine.find('udoc', { where: { email: TAKEN } })).toHaveLength(1);
     });
@@ -208,7 +210,8 @@ describe('[#23686] the actions door answers the engine\'s duplicate as 409 UNIQU
     it('a declarative `operation: \'update\'` action whose write repeats a unique value', async () => {
         const response = await postAction(dispatcher, 'udoc/take_email/r2');
 
-        expectUniqueViolation(response, ['developerMessage', 'object'], 'udoc');
+        expectUniqueViolation(response, ['developerMessage', 'field', 'object'], 'udoc');
+        expect(response.body.error.details.field).toBe('email');
         expect(((await engine.findOne('udoc', { where: { id: 'r2' } })) as any)?.email).toBe('other@example.com');
     });
 

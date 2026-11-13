@@ -69,6 +69,13 @@ interface TypeMismatchParams {
   readonly reference?: string;
 }
 
+/** The params every `date-text-call*` code interpolates; the codes differ in the outcome their sentence states. */
+interface DateTextCallParams {
+  readonly call: string;
+  readonly reference: string;
+  readonly rewrite: string;
+}
+
 /** Code → the params its message interpolates. The keys ARE the closed set. */
 export interface ExpressionRefusalParams {
   /** An envelope whose `source` is present but is not text. */
@@ -215,6 +222,25 @@ export interface ExpressionRefusalParams {
   /** [#30494] ERROR: `date-text-arithmetic`, at a `date-arithmetic-fail-open` site. */
   'date-text-arithmetic-fail-open': { readonly operands: string; readonly reference?: string };
   /**
+   * [#32595] A call handed a date field that no overload accepts on the text
+   * the runtime holds for it (`isoDate(record.start_time)`), judged with the
+   * field declared as that text: the evaluator faults on it on every row.
+   * `call` is the call as written, `reference` the date field as written, and
+   * `rewrite` the call with that field parsed by `date(…)` first, which the
+   * check proved clean. A flattened (flow) condition is
+   * `date-text-call-run-fails` / `-run-may-fail`; a fail-closed site is
+   * `date-text-call-fail-closed`, an advisory rule's `date-text-call-fail-open`.
+   */
+  'date-text-call': DateTextCallParams;
+  /** [#32595] ERROR: `date-text-call`, at a `date-arithmetic-run-fails` site. */
+  'date-text-call-run-fails': DateTextCallParams;
+  /** [#32595] ERROR: `date-text-call`, at a `date-arithmetic-run-may-fail` site. */
+  'date-text-call-run-may-fail': DateTextCallParams;
+  /** [#32595] ERROR: `date-text-call`, at a `date-arithmetic-fail-closed` site. */
+  'date-text-call-fail-closed': DateTextCallParams;
+  /** [#32595] ERROR: `date-text-call`, at a `date-arithmetic-fail-open` site. */
+  'date-text-call-fail-open': DateTextCallParams;
+  /**
    * A formula that computes a `google.protobuf.Duration`
    * (`today() - record.start_date`), which a field reads as `{}`. `reference`
    * is the date field it is computed from, when the expression names one.
@@ -329,6 +355,11 @@ const CODE_TABLE = {
   'date-text-arithmetic-fail-closed': true,
   'date-arithmetic-fail-open': true,
   'date-text-arithmetic-fail-open': true,
+  'date-text-call': true,
+  'date-text-call-run-fails': true,
+  'date-text-call-run-may-fail': true,
+  'date-text-call-fail-closed': true,
+  'date-text-call-fail-open': true,
   'date-duration-value': true,
   'type-mismatch': true,
   'type-mismatch-fail-closed': true,
