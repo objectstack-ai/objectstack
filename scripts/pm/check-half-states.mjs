@@ -1594,7 +1594,9 @@ export function markerMatches(marker, text) {
  * it says no. Measured on the live board 2026-11-13: one comment on #32929
  * carries four rules drawn as 40 `─` each, the census pinned a CPU on the first
  * of them, and the live sweep was cancelled at the job's 15-minute cap on three
- * runs in a row with nothing printed. The self-test times that line.
+ * runs in a row with nothing printed. The self-test times a 28-sigil run, which
+ * the nested spelling refuses in about 3 s, so a regression goes red by name
+ * instead of hanging the gate.
  *
  * Ordered MOST SPECIFIC FIRST: the form a line is named by is the first that
  * matches it, so `## __Release:__` is a heading rather than an emphasis, and
@@ -36483,15 +36485,23 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY68, '#18829 ordering: the form sits between `separator` and the two #18831 additions', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).slice(4, 7).join(','), 'separator,leading-sigil,heading-bare');
   b(BATTERY68, '#18829 ordering: …and steals no older form\'s fixture — every earlier member is still named by ITSELF', OWNERSHIP_MARKER_NEAR_MISS_FORMS.slice(0, 5).every((f) => miss68(f.example).form === f.id), true);
   b(BATTERY68, '#18829 boundary: a heading AND a sigil is named by no form — unseen on any thread read, left unnamed rather than guessed', ownershipMarkerNearMisses(rows68('## 🚨 Release: x')).length, 0);
-  // #32991 — a symbol run with no word after it must be refused in linear
-  // time. The 40-`─` rule is the line measured on #32929 (comment 6840027098)
-  // that hung the live sweep; the bound is generous on purpose, because the
-  // nested spelling took minutes on that line and the unrolled one takes
-  // under a millisecond.
-  const RULE_32929 = '─'.repeat(40);
+  // #32991 — a symbol run with no word after it must not cost exponential
+  // time. The nested spelling has 2^(n-1) ways to cut a run of n sigils, so
+  // the PIN is a run it still finishes: 28 `─` took about 3 s under it
+  // (24 took 37 ms), and the unrolled spelling takes well under 1 ms. The
+  // long shapes (the 40-`─` rule measured on #32929, comment 6840027098, and
+  // three longer runs) are evaluated ONLY after that pin passed, because under
+  // the nested spelling they never return and the gate would hang with no
+  // case printed, which is this card's own symptom.
   const timed32991 = (body) => { const t = Date.now(); const n = ownershipMarkerNearMisses(rows68(body)).length; return { n, ms: Date.now() - t }; };
-  const rule32991 = timed32991([RULE_32929, `> ${'`'.repeat(40)}`, `- ${'⚠️ '.repeat(40)}`, `${'═'.repeat(4000)}`].join('\n'));
-  b(BATTERY68, '#32991 ⭐ a long symbol run with no word after it (the 40-`─` rule on #32929) is refused in linear time — the census named nothing and took under a second', [rule32991.n, rule32991.ms < 1000].join(','), '0,true');
+  const pin32991 = timed32991(`${'─'.repeat(28)}!`);
+  const pinPassed32991 = pin32991.n === 0 && pin32991.ms < 250;
+  b(BATTERY68, '#32991 ⭐ a 28-sigil run with no word after it is refused in under 250 ms — the nested spelling took about 3 s on it', [pin32991.n, pin32991.ms < 250].join(','), '0,true');
+  const RULE_32929 = '─'.repeat(40);
+  const long32991 = pinPassed32991
+    ? timed32991([RULE_32929, `> ${'`'.repeat(40)}`, `- ${'⚠️ '.repeat(40)}`, `${'═'.repeat(4000)}`].join('\n'))
+    : null;
+  b(BATTERY68, '#32991 …and the long shapes (the 40-`─` rule on #32929, 40 backticks, 40 sigils under a bullet, 4,000 `═`) are not exponential either — nothing named, under a second', long32991 ? [long32991.n, long32991.ms < 1000].join(',') : 'NOT RUN: the 28-sigil pin above failed', '0,true');
   b(BATTERY68, '#32991 control: …and a sigil run of the same length IN FRONT of the word is still named `leading-sigil`', miss68(`${'⚠️ '.repeat(40)}Release: x`).form, 'leading-sigil');
 
   // SILENCE CONTROLS — a census that names prose is a census nobody reads, and
