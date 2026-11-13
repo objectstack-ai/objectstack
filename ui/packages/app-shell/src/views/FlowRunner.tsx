@@ -348,7 +348,7 @@ import {
   type ScreenSpec,
 } from './ScreenView.js';
 import { flowSuccessCopy, interpretFlowResponse } from '../utils/flowResponse.js';
-import { announceFlowDroppedFields } from '../utils/flowDroppedFields.js';
+import { announceFlowDroppedFields } from '../utils/flowLaunch.js';
 import { activeFlowsBundle, type FlowsTranslation } from '../utils/flowsBundle.js';
 
 export type { ScreenSpec, ScreenFieldSpec } from './ScreenView.js';

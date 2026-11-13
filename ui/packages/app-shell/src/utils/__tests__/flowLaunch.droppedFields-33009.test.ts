@@ -24,8 +24,7 @@ import { UNRECOGNIZED_DROP_REASON } from '@object-ui/data-objectstack';
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toasts }));
 
-import { announceFlowDroppedFields, flowAnswerDroppedFields } from '../flowDroppedFields';
-import { launchConsoleFlow } from '../flowLaunch';
+import { announceFlowDroppedFields, flowAnswerDroppedFields, launchConsoleFlow } from '../flowLaunch';
 
 const SCHEMAS: Record<string, { fields: Record<string, { label: string }> }> = {
   expense_report: { fields: { status: { label: 'Approval status' } } },
