@@ -193,7 +193,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       origin: {
         label: "Origin",
-        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry the platform recorded."
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry not written through the activity door."
       },
       changed_fields: {
         label: "الحقول المتغيّرة",
