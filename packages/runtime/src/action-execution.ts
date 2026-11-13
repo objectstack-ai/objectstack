@@ -5171,8 +5171,9 @@ function addressedActionHits(
  * package's action outlived the package's disable there.
  *
  * [ADR-0150 D4] Each row carries `packageId`: the package that holds the
- * declaration (a standalone item's `_packageId`, an embedded one's object's),
- * absent for the environment's own. Two holders' declarations of one key are
+ * declaration (a standalone item's `_packageId`; an embedded one's own stamp,
+ * else its object's, unless it is a tenant-authored item the registry attached
+ * there — {@link embeddedActionPackageOf}), absent for the environment's own. Two holders' declarations of one key are
  * BOTH rows — the key is `(package, objectName, name)`, for an embedded row as
  * for a standalone one — so a name two packages hold is listed twice and
  * resolved by the package rule ({@link resolveActionByName}), never by which
@@ -5266,7 +5267,9 @@ function embeddedActionPackageOf(action: unknown, obj: unknown): string | undefi
  * declaration's own stamp, else, for an action declared INSIDE its object's
  * `actions` (reference identity with that entry, which is what
  * {@link resolveRouteActionDeclaration} returns for an embedded action), the
- * object's. ⛔ A STANDALONE action never inherits the package of the object it
+ * object's — [#33029] unless that entry is a tenant-authored item the registry
+ * attached there, which is the environment's and has none
+ * ({@link embeddedActionPackageOf}). ⛔ A STANDALONE action never inherits the package of the object it
  * is bound to: unstamped, it has no package (the environment's own action),
  * whatever object its route names. `undefined` for no package. A reference
  * the action writes (a flow action's `target`) resolves from it.

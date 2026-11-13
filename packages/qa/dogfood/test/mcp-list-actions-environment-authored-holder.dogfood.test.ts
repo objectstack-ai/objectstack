@@ -27,14 +27,27 @@
 //     depends on the showcase; the showcase itself is read-only) arrives
 //     stamped with that package: listed once, under its namespace.
 //   - An environment-authored FLOW action whose `target` names a flow the
-//     showcase ships, by bare name, runs on both doors: the flow is read by
-//     the no-package rule now, not inside the showcase's package.
+//     showcase ships, by bare name, runs on both doors: a name ONE package
+//     holds resolves the same for every caller.
+//
+// ## The third narrowed place (contract review 6847350544, M1)
+//
+// The environment's action has no package (ADR-0150 D3), so the flow its
+// `target` names is read by the no-package rule. Where TWO packages hold that
+// flow name — the showcase (a derived configuration ships `qa_shared_flow`)
+// and a second code package in its own namespace (`qatwin`) — the call is
+// refused 409 naming both, on the face, the bare name and `_env`. Before, the
+// action was the object's package's, and ran that package's flow. The fix for
+// a caller: author the action with `?package=` of the package whose flow is
+// meant, or target a flow name one package holds.
 //
 // The file is ISOLATED: it writes `/meta` and creates a package.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { MCPServerPlugin } from '@objectstack/mcp';
+import { AppPlugin } from '@objectstack/runtime';
+import { defineStack } from '@objectstack/spec';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootShowcase } from './showcase-boot.js';
 
@@ -43,16 +56,30 @@ const ENV_ACTION = 'qa_env_authored_action';
 const ENV_FLOW_ACTION = 'qa_env_authored_flow_action';
 const SHIPPED_FLOW = 'showcase_recalc_task_estimate';
 const PKG_ACTION = 'qa_package_authored_action';
+const SHARED_FLOW = 'qa_shared_flow';
+const ENV_SHARED_FLOW_ACTION = 'qa_env_shared_flow_action';
 const SHIPPED = 'showcase_mark_done';
 const QA_PACKAGE = 'com.example.qaholder';
 const QA_NAMESPACE = 'qaholder';
+/** A second code package, in its own namespace, shipping a flow of the name the derived showcase ships. */
+const TWIN_PACKAGE = 'com.example.qatwin';
 
 /** The showcase with its shipped `showcase_mark_done` exposed to AI, in both places a stack carries it. */
 const SHIPPED_AI = { exposed: true, description: 'Mark the task done and its progress complete, for the listing pins.' };
 const exposeShipped = (a: any) => (a?.name === SHIPPED ? { ...a, ai: SHIPPED_AI } : a);
+const sharedFlow = (holder: string) => ({
+  name: SHARED_FLOW, label: `${holder} shared flow`, type: 'autolaunched', status: 'active',
+  nodes: [{ id: 'start', type: 'start', label: `${holder} start` }, { id: 'end', type: 'end', label: 'End' }],
+  edges: [{ id: 'e1', source: 'start', target: 'end' }],
+});
+const twinStack = defineStack({
+  manifest: { id: TWIN_PACKAGE, namespace: 'qatwin', name: 'qa_twin', version: '1.0.0', type: 'app' },
+  flows: [sharedFlow('qatwin')],
+} as never);
 const base: any = showcaseStack;
 const derived = {
   ...base,
+  flows: [...(base.flows ?? []), sharedFlow('showcase')],
   actions: (base.actions ?? []).map(exposeShipped),
   objects: (base.objects ?? []).map((o: any) => (o?.name === OBJECT ? { ...o, actions: (o.actions ?? []).map(exposeShipped) } : o)),
 };
@@ -87,7 +114,7 @@ describe('[#33029] list_actions files an environment-authored action on a packag
   const rowsNamed = (name: string) => rows.filter((a) => a.objectName === OBJECT && a.name === name);
 
   beforeAll(async () => {
-    stack = await bootShowcase({ extraPlugins: [new MCPServerPlugin()] }, derived);
+    stack = await bootShowcase({ extraPlugins: [new AppPlugin(twinStack as never), new MCPServerPlugin()] }, derived);
     admin = await stack.signIn();
     const ql: any = await stack.kernel.getServiceAsync('objectql');
     const found: any = await ql.find(OBJECT, { limit: 1 }, { context: { isSystem: true } });
@@ -110,6 +137,11 @@ describe('[#33029] list_actions files an environment-authored action on a packag
     expect(created.status, await created.clone().text()).toBe(201);
     const pkg = await stack.apiAs(admin, 'PUT', `/meta/action/${PKG_ACTION}?package=${QA_PACKAGE}`, authored(PKG_ACTION, 40));
     expect(pkg.status, await pkg.clone().text()).toBe(200);
+    const shared = await stack.apiAs(admin, 'PUT', `/meta/action/${ENV_SHARED_FLOW_ACTION}`, {
+      name: ENV_SHARED_FLOW_ACTION, label: ENV_SHARED_FLOW_ACTION, objectName: OBJECT, type: 'flow', target: SHARED_FLOW,
+      ai: ai('Run the flow of the shared name'),
+    });
+    expect(shared.status, await shared.clone().text()).toBe(200);
 
     const listed = await tool('list_actions', {});
     expect(listed.isError, listed.text).toBe(false);
@@ -158,6 +190,22 @@ describe('[#33029] list_actions files an environment-authored action on a packag
     expect(own.map((a) => [a.namespace, a.face]), JSON.stringify(own)).toEqual([[undefined, `${OBJECT}-${ENV_FLOW_ACTION}`]]);
     const faced = await tool('run_action', { actionName: `${OBJECT}-${ENV_FLOW_ACTION}`, recordId });
     expect([faced.isError, faced.payload.action], faced.text).toEqual([false, ENV_FLOW_ACTION]);
+  });
+
+  it('an environment-authored flow action whose target flow name two packages hold is refused 409 naming both, on the bare REST route, the face and `_env` (BASE: it ran the object\'s package\'s flow)', async () => {
+    const expectRefusedNamingBoth = (status: number, body: any) => {
+      const code = body?.error?.code ?? body?.code;
+      const message = String(body?.error?.message ?? body?.message ?? '');
+      expect([status, code], JSON.stringify(body)).toEqual([409, 'RESOURCE_CONFLICT']);
+      for (const holder of ['com.example.showcase', TWIN_PACKAGE]) expect(message, JSON.stringify(body)).toContain(holder);
+    };
+    const rest = await stack.apiAs(admin, 'POST', `/actions/${OBJECT}/${ENV_SHARED_FLOW_ACTION}`, { recordId });
+    expectRefusedNamingBoth(rest.status, await rest.json());
+    const env = await stack.apiAs(admin, 'POST', `/actions/_env/${OBJECT}/${ENV_SHARED_FLOW_ACTION}`, { recordId });
+    expectRefusedNamingBoth(env.status, await env.json());
+    const faced = await tool('run_action', { actionName: `${OBJECT}-${ENV_SHARED_FLOW_ACTION}`, recordId });
+    expect(faced.isError, faced.text).toBe(true);
+    expectRefusedNamingBoth(faced.payload.error?.status, faced.payload);
   });
 
   it('CONTROL: a package-shipped action on the same object lists once, under its namespace, and runs by its face', async () => {
