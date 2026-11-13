@@ -64,6 +64,7 @@ import {
     // `relateObjectSchemaMaskPosture`, read only by the published read's mask, moved with that
     // door to `meta-item-history-routes.ts` (#23050 slice 13e).
     resolveObjectSchemaMaskPosture,
+    objectSchemaReadDelegateSource,
     OBJECT_SCHEMA_MASK_NOT_APPLICABLE,
     // `foldVisibilityFingerprintIntoEtag`, `normalizeIfNoneMatch` and
     // `resolveObjectSchemaRuntimeView`, read only by the item read's conditional
@@ -2115,6 +2116,14 @@ export class RestServer {
      */
     private metadataServiceProvider?: (environmentId?: string) => Promise<unknown>;
     /**
+     * [decision 6840464379] Any kernel service, by name, in the request's
+     * environment — for the one lookup whose service name is DECLARED rather
+     * than known here: the `schemaReadDelegate` an object's definition names
+     * (`resolveObjectMasker`). `undefined` when no service is registered under
+     * that name.
+     */
+    private kernelServiceProvider?: (name: string, environmentId?: string) => Promise<unknown>;
+    /**
      * One-shot latch for the "no matcher wired" degradation notice below, so a
      * host that never wired {@link metadataServiceProvider} says so once per
      * server rather than once per request.
@@ -2169,6 +2178,12 @@ export class RestServer {
          * the export door records each export through.
          */
         auditServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
+        /**
+         * [decision 6840464379] Appended LAST for the #15256 reason above: the
+         * by-name service lookup an object's declared `schemaReadDelegate` is
+         * resolved through.
+         */
+        kernelServiceProvider?: (name: string, environmentId?: string) => Promise<unknown>,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -2191,6 +2206,7 @@ export class RestServer {
         this.metadataServiceProvider = metadataServiceProvider;
         this.tenancyServiceProvider = tenancyServiceProvider;
         this.auditServiceProvider = auditServiceProvider;
+        this.kernelServiceProvider = kernelServiceProvider;
     }
 
     /**
@@ -4496,12 +4512,24 @@ export class RestServer {
                 } catch { /* metrics are never load-bearing */ }
             },
         };
+        // [decision 6840464379] Where an object's declared `schemaReadDelegate`
+        // is found: the request's environment's engine and kernel, the ones
+        // `security` was resolved from. Built once per request, and resolved
+        // only when an object the read check refused needs it; a lookup that
+        // fails is the posture's 5xx fault, never a false absence.
+        let envId: Promise<string | undefined> | undefined;
+        const requestEnvironment = () => (envId ??= this.resolveRequestEnvironmentId(environmentId, req));
+        const schemaReadDelegates = objectSchemaReadDelegateSource({
+            engine: async () => this.objectQLProvider?.(await requestEnvironment()),
+            service: async (name) => this.kernelServiceProvider?.(name, await requestEnvironment()),
+        });
         return (objectName: string) => resolveObjectSchemaMaskPosture({
             objectName,
             context,
             security: security as any,
             enabled: true,
             telemetry,
+            schemaReadDelegates,
         });
     }
 

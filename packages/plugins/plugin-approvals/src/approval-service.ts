@@ -20,7 +20,11 @@ import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formul
 // (audit stamping, this approval-row writer, the automation-run recorder). A
 // writer-local re-derivation here was rejected by name (Option B): it would be
 // a third answer to a question the codebase already answered two ways.
-import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
+import {
+  createRecordOrganizationResolver,
+  type ObjectSchemaReadDelegate,
+  type RecordOrganizationResolver,
+} from '@objectstack/metadata-core';
 import { isObjectAbsentError, keysetWalk, strandedDecisionFailure } from '@objectstack/types';
 // [#15981 / #16166] Every built-in identity NAME is deliberately absent here:
 // both arms of `isOverrideActor` read an ADR-0095 capability rung, never a name.
@@ -1115,6 +1119,14 @@ export type ActionTokenOutcome =
 const SYSTEM_CTX: ExecutionContext = { isSystem: true, positions: [], permissions: [] };
 
 /**
+ * [decision 6840464379] The objects whose definition this service serves, as
+ * their `schemaReadDelegate`, to the callers its door admits
+ * ({@link ApprovalService.authorizeSchemaRead}). Both declare
+ * `schemaReadDelegate: 'approvals'`; the service refuses every other name.
+ */
+const SCHEMA_READ_DELEGATED_OBJECTS: ReadonlySet<string> = new Set(['sys_approval_request', 'sys_approval_action']);
+
+/**
  * [#13568] Bound on the pending requests one deleted record can carry into
  * {@link ApprovalService.cancelForDeletedRecord}.
  *
@@ -1937,7 +1949,7 @@ export function requestVisibilitySourceOf(service: ApprovalService): RequestVisi
   return source;
 }
 
-export class ApprovalService implements IApprovalService {
+export class ApprovalService implements IApprovalService, ObjectSchemaReadDelegate {
   private readonly engine: ApprovalEngine;
   private readonly clock: ApprovalClock;
   private readonly logger?: ApprovalServiceOptions['logger'];
@@ -10380,5 +10392,39 @@ export class ApprovalService implements IApprovalService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * `ObjectSchemaReadDelegate` — may this caller, whom the object read check
+   * refuses, be served the DEFINITION of `sys_approval_request` or
+   * `sys_approval_action`? (ADR-0106 as amended by ruling record 6787890900;
+   * exception by maintainer decision 6840464379; declared by both objects'
+   * `schemaReadDelegate`.)
+   *
+   * Both objects are closed on the data side on purpose, and their rows reach
+   * a member only through this service's door. The request page that door
+   * links to needs both definitions to render, so the callers the door serves
+   * a request to are the callers who need them: this answers by the door's
+   * own rule ({@link visibleRequestIds}, the one `getRequest` and
+   * `listActions` apply), asked without a named request — does the caller
+   * see at least one? That is a current approver, the submitter, a past
+   * actor, or the override holder; a member party to no request is refused
+   * and keeps the absent answer.
+   *
+   * The record-reader tier is not asked: it is evaluated only against a named
+   * record, and a definition read names none.
+   *
+   * Any other object name is refused: any object may name this service, and
+   * the service speaks only for its own two. Seeing a definition confers
+   * nothing: the rows stay behind this service's door and the data door's
+   * read check. Errors propagate (the outlet answers them as its 5xx fault);
+   * a failed visibility probe already reads as "nothing collected".
+   */
+  async authorizeSchemaRead(objectName: string, context: ExecutionContext): Promise<boolean> {
+    if (!SCHEMA_READ_DELEGATED_OBJECTS.has(objectName)) return false;
+    // `organizationId` is not on the envelope — see isOverrideActor().
+    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
+    const visible = await this.visibleRequestIds(context, tenantOrg ?? null);
+    return visible === null || visible.size > 0;
   }
 }

@@ -3885,6 +3885,41 @@ const ObjectSchemaBase = strictObject(
   ),
 
   /**
+   * Who else may see this object's DEFINITION on the metadata API (ADR-0106,
+   * as amended by ruling record 6787890900, exception by maintainer decision
+   * 6840464379).
+   *
+   * A caller the object read check refuses is answered as if the object did
+   * not exist, on every schema-serving outlet: absent from every list, and a
+   * read by name answered as for a name that names no object. That is right
+   * for an object whose rows reach callers through the data door. It is wrong
+   * for an object whose rows reach callers only through a service's own door:
+   * `sys_approval_request` is deliberately closed on the data side, yet the
+   * approver the approvals door serves a request to needs the object's
+   * definition to render that request.
+   *
+   * Naming a kernel service here lets that service answer for the callers its
+   * own door admits. The service must implement
+   * `authorizeSchemaRead(objectName, context) => boolean` (see
+   * `ObjectSchemaReadDelegate` in `@objectstack/metadata-core`), and is asked
+   * only after the object read check has refused the caller. A `true` verdict
+   * serves the definition exactly as a reader of the object is served it:
+   * projected by the caller's own field-level security. It opens no row: the
+   * data door still refuses the caller, and the service's door stays the only
+   * way to the rows.
+   *
+   * Fails CLOSED: a declared service that is missing or does not implement
+   * the method leaves the object absent for that caller; a service that
+   * throws is a fault the outlet answers as 5xx, never as a false absence.
+   */
+  schemaReadDelegate: z.string().optional().describe(
+    'Kernel service that decides whether a caller who may not read this object is still served its '
+    + 'definition on the metadata API, projected by that caller\'s field-level security. For objects whose '
+    + 'rows reach callers only through a service\'s own door (e.g. sys_approval_request → approvals); it '
+    + 'opens no row. Fails closed.',
+  ),
+
+  /**
    * Logic & Validation (Co-located)
    * Best Practice: Define rules close to data.
    */
