@@ -530,8 +530,20 @@ export const HookSchema = lazySchema(() => strictObject(
    *
    * Authoring convenience: `objectstack build` extracts inline TS handlers from
    * `*.hook.ts` files, AST-checks them, and emits the result here. See plan §6.
+   *
+   * A hook body cannot send mail (ruling 6843314411 on #32004): a message
+   * cannot be taken back if the write that runs the hook rolls back, so a
+   * `js` body granted `email.send` is refused at parse
+   * (`refuseHookBodyMailGrant`). Mail on a record change goes through an
+   * action, a job or a flow. A hook body may add a timeline entry
+   * (`activity.append`); the entry commits or rolls back with the write.
    */
-  body: HookBodySchema.optional().describe('Hook body — expression (L1) or sandboxed JS (L2)'),
+  body: HookBodySchema.optional().describe(
+    'Hook body — expression (L1) or sandboxed JS (L2). A hook body cannot send mail: a js body granted ' +
+      'email.send is refused, because a message cannot be taken back if the write that runs the hook rolls ' +
+      'back; send mail on a record change from an action, a job or a flow. A hook body may add a timeline ' +
+      'entry (activity.append), which commits or rolls back with the write.',
+  ),
 
   /**
    * Execution Order
