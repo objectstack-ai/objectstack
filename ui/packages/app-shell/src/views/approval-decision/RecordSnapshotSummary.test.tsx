@@ -44,7 +44,7 @@ describe('planSnapshotSummary (objectui#12483)', () => {
       FIELDS,
       undefined,
     );
-    expect(plan).toEqual({ lead: 'amount', rows: ['name', 'budget'], summed: null });
+    expect(plan).toEqual({ lead: 'amount', rows: ['name', 'budget'], attachments: [], summed: null });
   });
 
   it('a reference the service resolved is a row', () => {
@@ -53,9 +53,9 @@ describe('planSnapshotSummary (objectui#12483)', () => {
 
   it('the first non-zero declared currency leads, else the first declared currency; a name never does', () => {
     expect(planSnapshotSummary({ fee: 0, amount: 7 }, FIELDS, undefined).lead).toBe('amount');
-    expect(planSnapshotSummary({ fee: 0, amount: 0 }, FIELDS, undefined)).toEqual({ lead: 'fee', rows: ['amount'], summed: null });
+    expect(planSnapshotSummary({ fee: 0, amount: 0 }, FIELDS, undefined)).toEqual({ lead: 'fee', rows: ['amount'], attachments: [], summed: null });
     // `budget` is a key the sheet's name guess matches, declared `number`.
-    expect(planSnapshotSummary({ budget: 900 }, FIELDS, undefined)).toEqual({ lead: null, rows: ['budget'], summed: null });
+    expect(planSnapshotSummary({ budget: 900 }, FIELDS, undefined)).toEqual({ lead: null, rows: ['budget'], attachments: [], summed: null });
   });
 
   it('a hidden field is dropped before the row cut, so the next one takes its slot', () => {
@@ -142,14 +142,14 @@ const OTHER_LINE = { name: 'other_line', fields: { amount: { type: 'currency', l
 describe('planSnapshotSummary: a `sum` over a currency field is the amount (objectui#12534)', () => {
   it('leads once the summarized definition is given; before, it is a row and the plan names that one object', () => {
     expect(planSnapshotSummary({ name: 'N', total: 40 }, ROLLUPS, undefined))
-      .toEqual({ lead: null, rows: ['name', 'total'], summed: 'line' });
+      .toEqual({ lead: null, rows: ['name', 'total'], attachments: [], summed: 'line' });
     expect(planSnapshotSummary({ name: 'N', total: 40 }, ROLLUPS, undefined, LINE))
-      .toEqual({ lead: 'total', rows: ['name'], summed: 'line' });
+      .toEqual({ lead: 'total', rows: ['name'], attachments: [], summed: 'line' });
   });
 
   it('CONTROL: a summary that is not a `sum` is a row and asks for no definition', () => {
     expect(planSnapshotSummary({ lines: 3, peak: 9 }, ROLLUPS, undefined, LINE))
-      .toEqual({ lead: null, rows: ['lines', 'peak'], summed: null });
+      .toEqual({ lead: null, rows: ['lines', 'peak'], attachments: [], summed: null });
   });
 
   it('CONTROL: a `sum` over a field the summarized object does not declare `currency` is a row', () => {
@@ -165,7 +165,7 @@ describe('planSnapshotSummary: a `sum` over a currency field is the amount (obje
   it('the order is unchanged across both kinds: the first non-zero amount, else the first one', () => {
     // A non-zero currency ahead of the roll-up leads, and no definition is asked for.
     expect(planSnapshotSummary({ amount: 7, total: 40 }, ROLLUPS, undefined))
-      .toEqual({ lead: 'amount', rows: ['total'], summed: null });
+      .toEqual({ lead: 'amount', rows: ['total'], attachments: [], summed: null });
     expect(planSnapshotSummary({ amount: 0, total: 40 }, ROLLUPS, undefined, LINE).lead).toBe('total');
     expect(planSnapshotSummary({ total: 0, amount: 5 }, ROLLUPS, undefined, LINE).lead).toBe('amount');
     expect(planSnapshotSummary({ total: 0, amount: 0 }, ROLLUPS, undefined, LINE).lead).toBe('total');
@@ -175,7 +175,7 @@ describe('planSnapshotSummary: a `sum` over a currency field is the amount (obje
 
   it('only the first `sum`\'s object is read: a `sum` over another object stays a row', () => {
     const plan = planSnapshotSummary({ other: 9, total: 40 }, ROLLUPS, undefined, OTHER_LINE);
-    expect(plan).toEqual({ lead: 'other', rows: ['total'], summed: 'other_line' });
+    expect(plan).toEqual({ lead: 'other', rows: ['total'], attachments: [], summed: 'other_line' });
     expect(planSnapshotSummary({ other: 0, total: 40 }, ROLLUPS, undefined, OTHER_LINE).lead).toBe('other');
   });
 });
@@ -271,5 +271,139 @@ describe('RecordSnapshotSummary — a declared deadline is judged against the sn
     const cell = await dueCell();
     expect(cell?.textContent).toBe('Overdue 5d');
     expect(cell?.querySelector('.text-red-600')).not.toBeNull();
+  });
+});
+
+/**
+ * Object and list values (objectstack#32854): an attachment, a field whose
+ * type is in the spec's media family `FILE_REFERENCE_TYPES`, is drawn through
+ * its own cell, openable, after the rows and outside the row cut; every other
+ * object or list value is left out. The rule is in `RecordSnapshotSummary.tsx`'s
+ * header.
+ */
+const ID_A = 'fil_a1b2c3';
+const ID_B = 'fil_d4e5f6';
+const CLAIM: Record<string, Record<string, unknown>> = {
+  title: { type: 'text', label: 'Title' },
+  amount: { type: 'currency', label: 'Amount' },
+  category: { type: 'text', label: 'Category' },
+  reason: { type: 'text', label: 'Reason' },
+  invoice_no: { type: 'text', label: 'Invoice number' },
+  status: { type: 'text', label: 'Status' },
+  invoices: { type: 'file', label: 'E-invoices', multiple: true },
+  receipt: { type: 'file', label: 'Receipt' },
+  photo: { type: 'image', label: 'Photo' },
+  badge: { type: 'avatar', label: 'Badge' },
+  clip: { type: 'video', label: 'Clip' },
+  memo: { type: 'audio', label: 'Memo' },
+  private_scan: { type: 'file', label: 'Private scan', hidden: true },
+  address: { type: 'address', label: 'Address' },
+  spot: { type: 'location', label: 'Spot' },
+  extra: { type: 'json', label: 'Extra' },
+  labels: { type: 'multiselect', label: 'Labels', options: [{ label: 'A', value: 'a' }] },
+  watchers: { type: 'lookup', reference: 'sys_user', label: 'Watchers', multiple: true },
+};
+const LEFT_OUT = {
+  address: { street: '1 Main St', city: 'Springfield' },
+  spot: { latitude: 1, longitude: 2 },
+  extra: { a: 1 },
+  labels: ['a'],
+  watchers: ['u_1', 'u_2'],
+};
+
+describe('planSnapshotSummary: object and list values (objectstack#32854)', () => {
+  it('a `multiple` file field is an attachment, outside the row cut and never the lead', () => {
+    const plan = planSnapshotSummary(
+      { amount: 120, title: 'Trip', category: 'Travel', reason: 'Visit', invoice_no: 'F-1', status: 'open', invoices: [ID_A, ID_B] },
+      CLAIM, undefined, null, 2,
+    );
+    expect(plan).toEqual({ lead: 'amount', rows: ['title', 'category'], attachments: ['invoices'], summed: null });
+  });
+
+  it.each([
+    ['file (single, stored id)', 'receipt', ID_A],
+    ['file (single, expanded)', 'receipt', { id: ID_A, name: 'r.pdf', url: '/api/v1/storage/files/fil_a1b2c3' }],
+    ['image', 'photo', ID_A],
+    ['avatar', 'badge', ID_A],
+    ['video', 'clip', [ID_A]],
+    ['audio', 'memo', ID_A],
+  ])('a %s field is an attachment', (_kind, key, value) => {
+    expect(planSnapshotSummary({ title: 'T', [key]: value }, CLAIM, undefined)).toEqual(
+      { lead: null, rows: ['title'], attachments: [key], summed: null },
+    );
+  });
+
+  it('CONTROL: every other object or list value is left out, a row and an attachment alike', () => {
+    expect(planSnapshotSummary({ title: 'T', ...LEFT_OUT }, CLAIM, undefined)).toEqual(
+      { lead: null, rows: ['title'], attachments: [], summed: null },
+    );
+  });
+
+  it('CONTROL: an empty, hidden or undeclared attachment takes no row', () => {
+    const plan = planSnapshotSummary(
+      { title: 'T', invoices: [], receipt: '  ', photo: {}, clip: null, private_scan: ID_A, legacy_file: [ID_B] },
+      CLAIM, undefined,
+    );
+    expect(plan).toEqual({ lead: null, rows: ['title'], attachments: [], summed: null });
+  });
+});
+
+describe('RecordSnapshotSummary: attachments are drawn and open (objectstack#32854)', () => {
+  const claim = { name: 'expense_claim', fields: CLAIM };
+  const draw = async (snapshot: Record<string, unknown>) => {
+    mount({ expense_claim: claim }, { objectName: 'expense_claim', snapshot });
+    return screen.findByTestId('record-snapshot-summary');
+  };
+  const linksOf = (el: Element | null | undefined) =>
+    [...(el?.querySelectorAll('a[data-slot="file-download-link"]') ?? [])].map((a) => ({
+      href: a.getAttribute('href'),
+      target: a.getAttribute('target'),
+      name: a.textContent,
+    }));
+
+  it('a `multiple` file field draws each file as a link that opens it, after the six rows', async () => {
+    const summary = await draw({
+      amount: 120, title: 'Trip', category: 'Travel', reason: 'Visit', invoice_no: 'F-1', status: 'open',
+      invoices: [ID_A, { id: ID_B, name: 'invoice-2.pdf', url: '/api/v1/storage/files/fil_d4e5f6' }],
+    });
+    expect([...summary.querySelectorAll('[data-summary-field]')].map((r) => r.getAttribute('data-summary-field')))
+      .toEqual(['title', 'category', 'reason', 'invoice_no', 'status']);
+    const row = summary.querySelector('[data-summary-attachment="invoices"]');
+    expect(row?.firstElementChild?.textContent).toBe('E-invoices');
+    expect(linksOf(row)).toEqual([
+      { href: `/api/v1/storage/files/${ID_A}`, target: '_blank', name: 'File' },
+      { href: '/api/v1/storage/files/fil_d4e5f6', target: '_blank', name: 'invoice-2.pdf' },
+    ]);
+  });
+
+  it('a single file field draws its file as a link that opens it', async () => {
+    const summary = await draw({ title: 'Trip', receipt: { id: ID_A, name: 'receipt.pdf', url: '/api/v1/storage/files/fil_a1b2c3' } });
+    expect(linksOf(summary.querySelector('[data-summary-attachment="receipt"]'))).toEqual([
+      { href: `/api/v1/storage/files/${ID_A}`, target: '_blank', name: 'receipt.pdf' },
+    ]);
+  });
+
+  it.each([['video', 'clip'], ['audio', 'memo']])('a %s field draws its file as a link that opens it', async (_kind, key) => {
+    const summary = await draw({ title: 'Trip', [key]: [ID_A] });
+    expect(linksOf(summary.querySelector(`[data-summary-attachment="${key}"]`))).toEqual([
+      { href: `/api/v1/storage/files/${ID_A}`, target: '_blank', name: 'File' },
+    ]);
+  });
+
+  it.each([['image', 'photo'], ['avatar', 'badge']])('an %s field draws its thumbnail from the download endpoint', async (_kind, key) => {
+    const summary = await draw({ title: 'Trip', [key]: ID_A });
+    const img = summary.querySelector(`[data-summary-attachment="${key}"] img`);
+    expect(img?.getAttribute('src')).toBe(`/api/v1/storage/files/${ID_A}`);
+  });
+
+  it('CONTROL: a left-out kind draws nothing, and the scalar rows are unchanged', async () => {
+    const summary = await draw({ title: 'Trip', status: 'open', ...LEFT_OUT });
+    expect([...summary.querySelectorAll('[data-summary-field]')].map((r) => r.textContent)).toEqual(['TitleTrip', 'Statusopen']);
+    expect(summary.querySelectorAll('[data-summary-attachment]')).toHaveLength(0);
+  });
+
+  it('a snapshot holding only an attachment still draws the section', async () => {
+    const summary = await draw({ invoices: [ID_A] });
+    expect(linksOf(summary.querySelector('[data-summary-attachment="invoices"]'))).toHaveLength(1);
   });
 });
