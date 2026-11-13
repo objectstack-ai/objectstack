@@ -9,6 +9,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
+// The module under test reaches `@objectstack/lint` through `protocol.ts`; its
+// first load is paid at collection, never inside a case's clock
+// (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/lint';
 import { objectExtensionWriteFold, withTargetFoldedWithout } from './protocol-authoring-gate.js';
 
 describe('[#33072] objectExtensionWriteFold — which writes narrow the target, and to what', () => {
