@@ -31,7 +31,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { IRealtimeService, RealtimeEventHandler, RealtimeEventPayload } from '@objectstack/spec/contracts';
 import { HttpDelivery, MessagingService, SqlHttpOutbox, type EnqueueHttpInput } from '@objectstack/service-messaging';
-import { AutoEnqueuer } from './auto-enqueuer.js';
+import { AutoEnqueuer, WEBHOOK_DEDUP_DIGEST_PREFIX, webhookDedupKey } from './auto-enqueuer.js';
 import { DeclaredWebhookSource, declaredWebhookRefId } from './declared-webhooks.js';
 import { SysWebhook } from './sys-webhook.object.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
@@ -142,5 +142,79 @@ describe('#24835 — a webhook delivery is stored for an update on a real SqlDri
             await enqueuer.stop();
             await driver.disconnect();
         }
+    });
+});
+
+// [#31699 round 2, R2-C, epic red line 3] A declared webhook's reference names
+// its package, `declared:PKG/NAME`. Every name whose `declared:NAME` fitted the
+// old `ref_id` cap (128) still delivers: the cap is the longest package id plus
+// such a name (384), and a dedup key past its index-bound cap (191) is a
+// fixed-length digest. Measured: the dedup key binds first. This probe event's
+// id is `probe_task:<uuid>:created:<ISO timestamp>`, so `declared:NAME:<event>`
+// passed 191 from a name of about 100 characters on, below the 119 the
+// reference allowed.
+describe('#31699 — a declared webhook name at the old 128 boundary, one holder, is delivered on a real SqlDriver', () => {
+    const PKG = 'com.acme.boundary';
+    /** The longest name whose `declared:NAME` fitted the old cap: 128 - `declared:`. */
+    const LONG = `probe_${'x'.repeat(113)}`;
+
+    async function deliveriesFor(name: string) {
+        const driver = driverUnderTest();
+        const engine = new ObjectQL();
+        engine.registerDriver(driver, true);
+        await engine.init();
+        engine.registry.registerObject({ name: 'probe_task', label: 'Probe Task', fields: { title: { type: 'text', label: 'Title' } } } as any, 'test');
+        engine.registry.registerObject(HttpDelivery as any, 'test');
+        engine.registry.registerObject(SysWebhook as any, 'test');
+        await engine.syncSchemas();
+        await installDefaultOrganization(engine);
+        const realtime = new FakeRealtime();
+        engine.setRealtimeService(realtime);
+        const lost: string[] = [];
+        const logger = { info() {}, debug() {}, warn: (m: string) => { lost.push(m); }, error: (m: string) => { lost.push(m); } };
+        const messaging = new MessagingService({ logger: { info() {}, warn() {}, error() {}, debug() {} } as any });
+        messaging.setHttpOutbox(new SqlHttpOutbox(engine as any, { partitionCount: 1 }));
+        const declared = { ...DECLARED, name, _packageId: PKG };
+        const enqueuer = new AutoEnqueuer(engine as any, realtime, (input: EnqueueHttpInput) => messaging.enqueueHttp(input), {
+            refreshIntervalMs: 0,
+            declaredWebhooks: new DeclaredWebhookSource(engine, { list: (type: string) => (type === 'webhook' ? [declared] : []) }),
+            logger,
+        });
+        const deliveries = async () => (await engine.find('sys_http_delivery', {}, SYSTEM)) as any[];
+        try {
+            await enqueuer.start();
+            await engine.insert('probe_task', { title: 'seed' });
+            await waitFor(async () => (await deliveries()).length >= 1 || lost.length > 0);
+            return { rows: await deliveries(), lost };
+        } finally {
+            await enqueuer.stop();
+            await driver.disconnect();
+        }
+    }
+
+    it('[FROM lost TO delivered] its package-scoped reference is stored whole, and its dedup key past 191 is the digest', async () => {
+        expect(`declared:${LONG}`).toHaveLength(128);
+        const { rows, lost } = await deliveriesFor(LONG);
+        expect(lost).toEqual([]);
+        expect(rows.map((r) => r.ref_id)).toEqual([declaredWebhookRefId(LONG, PKG)]);
+        expect(rows[0].ref_id.length).toBeGreaterThan(128);
+        expect(rows[0].dedup_key).toMatch(new RegExp(`^${WEBHOOK_DEDUP_DIGEST_PREFIX}[0-9a-f]{64}$`));
+    });
+
+    it('CONTROL — a short name keeps the plain `<reference>:<event>` dedup key', async () => {
+        const { rows, lost } = await deliveriesFor(DECLARED.name);
+        expect(lost).toEqual([]);
+        expect(rows.map((r) => r.ref_id)).toEqual([declaredWebhookRefId(DECLARED.name, PKG)]);
+        expect(rows[0].dedup_key.startsWith(`${declaredWebhookRefId(DECLARED.name, PKG)}:probe_task:`)).toBe(true);
+    });
+
+    it('the dedup key on both sides of the cap: 191 characters stay as they are, 192 are digested, the same input to the same key', () => {
+        const at = webhookDedupKey('declared:x', 'e'.repeat(191 - 'declared:x:'.length));
+        expect(at).toHaveLength(191);
+        expect(at.startsWith('declared:x:')).toBe(true);
+        const past = webhookDedupKey('declared:x', 'e'.repeat(192 - 'declared:x:'.length));
+        expect(past).toMatch(new RegExp(`^${WEBHOOK_DEDUP_DIGEST_PREFIX}[0-9a-f]{64}$`));
+        expect(webhookDedupKey('declared:x', 'e'.repeat(192 - 'declared:x:'.length))).toBe(past);
+        expect(webhookDedupKey('declared:y', 'e'.repeat(192 - 'declared:y:'.length))).not.toBe(past);
     });
 });

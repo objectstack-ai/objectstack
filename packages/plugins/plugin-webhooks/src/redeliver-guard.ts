@@ -64,8 +64,15 @@
  *
  * ## A declared webhook's deliveries (ADR-0131 D2/D6)
  * A declared webhook has no `sys_webhook` row: its deliveries carry
- * `ref_id = declared:<name>` (`declaredWebhookRefId`), and the guard asks the
- * same questions of the declaration, through the reader the dispatcher uses.
+ * `ref_id = declared:<package>/<name>`, or `declared:<name>` for the
+ * environment's own (`declaredWebhookRefId`), and the guard asks the same
+ * questions of the declaration, through the reader the dispatcher uses. A
+ * `ref_id` naming a package is judged by exactly that package's declaration
+ * (ADR-0150 D5), never another holder's. One naming no package — the
+ * environment's, or a delivery written before the package coordinate, the
+ * 18.x ceremony's re-source among them — is judged by the declaration a
+ * caller with no package resolves (D3): with one holder exactly as before;
+ * with two it is refused naming both, and sent to neither.
  * Not declared any more is case 1, switched off (the activation ledger, or a
  * declared `isActive: false` no ledger row overrides) is case 2. Case 3 cannot
  * arise: the signing key is code, held with the declaration. A delivery whose
@@ -77,7 +84,9 @@
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import {
-    declaredWebhookNameOfRefId,
+    DeclaredWebhookAmbiguousError,
+    declaredWebhookActivationPath,
+    declaredWebhookAddressOfRefId,
     type DeclaredWebhookReader,
 } from './declared-webhooks.js';
 import {
@@ -120,8 +129,8 @@ export function createWebhookRedeliverGuard(
     return async (row) => {
         if (row.source !== 'webhook') return undefined;
 
-        const declaredName = declaredWebhookNameOfRefId(row.refId);
-        if (declaredName !== undefined) return judgeDeclared(declared, declaredName);
+        const address = declaredWebhookAddressOfRefId(row.refId);
+        if (address !== undefined) return judgeDeclared(declared, address);
 
         const subscription = (await engine.findOne(
             subscriptionsObject,
@@ -189,14 +198,60 @@ export function createWebhookRedeliverGuard(
 /**
  * The guard's answer for a delivery a declared webhook produced (see the module
  * doc). A lookup that throws propagates: "we could not check" never reads as
- * "allowed".
+ * "allowed". A delivery naming no package of a name two packages declare is
+ * refused naming both (ADR-0150 D3): it belongs to one of them, and nothing
+ * says which. Both are counted when one is disabled (`holdersOf`): the row is
+ * durable, and a disable does not say whose it is.
  */
 async function judgeDeclared(
     declared: DeclaredWebhookReader | undefined,
-    name: string,
+    address: { packageId?: string; name: string },
 ): Promise<string | undefined> {
-    const declaration = declared ? await declared.declaredWebhookNamed(name) : null;
+    const { name } = address;
+    // [#31699 round 3] A delivery row is durable, so a reference naming no
+    // package is judged against EVERY package holder of the name, a disabled
+    // package's included: the delivery may be the disabled one's (written
+    // before the upgrade), and nothing says it is not.
+    if (address.packageId === undefined && typeof declared?.holdersOf === 'function') {
+        const packages = (await declared.holdersOf(name)).filter((holder): holder is string => holder !== null);
+        if (packages.length > 1) {
+            return (
+                `this delivery of declared webhook '${name}' names no package, and the name is declared by more than one: `
+                + `${packages.map((packageId) => `package "${packageId}"`).join(', ')} (a disabled package counts: the `
+                + 'delivery may be its). It is refused rather than sent to a holder picked for it. New events are '
+                + 'delivered per package, each under its own reference.'
+            );
+        }
+    }
+    let declaration;
+    try {
+        declaration = !declared
+            ? null
+            : address.packageId !== undefined
+                ? await declared.declaredWebhookAt(address.packageId, name)
+                : await declared.declaredWebhookNamed(name);
+    } catch (err) {
+        if (!(err instanceof DeclaredWebhookAmbiguousError)) throw err;
+        return (
+            `this delivery of declared webhook '${name}' names no package, and the name is declared by more than one: `
+            + `${err.message} It is refused rather than sent to a holder picked for it. New events are delivered per `
+            + 'package, each under its own reference.'
+        );
+    }
     if (!declaration) {
+        // [#31699 round 2] The slot's package (or, for a reference naming no
+        // package, the name's one holder) still declares it but is disabled:
+        // a disabled package's webhooks are not served, so neither dispatched
+        // nor redelivered, until the package is enabled again.
+        const held = await declared?.holdersOf?.(name);
+        const owner = address.packageId ?? (held?.length === 1 ? held[0] ?? undefined : undefined);
+        if (owner !== undefined && held?.includes(owner)) {
+            return (
+                `declared webhook '${name}' of package '${owner}' is not served: the package is disabled, `
+                + 'and a disabled package\'s webhooks are not dispatched, so this delivery is refused. Enable the '
+                + 'package, then redeliver.'
+            );
+        }
         return (
             `the declared webhook '${name}' this delivery belongs to is no longer declared by the application, so `
             + 'there is nothing left to say whether it may still be signed and sent, and it is refused. Declare the '
@@ -207,7 +262,7 @@ async function judgeDeclared(
         return (
             `declared webhook '${name}' is switched off, and a switched-off webhook is skipped by the dispatcher, `
             + 'so this delivery is refused rather than sent to an endpoint that was switched off. Fix: switch it on '
-            + `(POST /api/v1/security/_activation/webhook/${name} with { "enabled": true }), then redeliver.`
+            + `(POST ${declaredWebhookActivationPath(name, declaration.namespace)} with { "enabled": true }), then redeliver.`
         );
     }
     return undefined;
