@@ -182,5 +182,7 @@ describe('[#31700] the probes read a widget\'s dataset from the publishing packa
         const [issue] = report.issues;
         expect(issue!.message).toContain('is held only outside the declared dependencies of package "com.qa.app"');
         expect(issue!.fix).toContain('Declare package "com.qa.app"\'s dependency');
+        // [#32967] …and the move, for a holder that already depends on the publishing package.
+        expect(issue!.fix).toContain('would be a cycle, so move the dashboard into that package');
     });
 });

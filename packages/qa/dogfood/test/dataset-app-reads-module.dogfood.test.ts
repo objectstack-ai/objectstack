@@ -1,24 +1,29 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#32929, ADR-0150 D3 (c)] An app package's dashboard on a dataset its own
-// module holds, on a booted build-shaped artifact of HotCRM's shape: one app
-// package (`com.qa.sib.app`) and one module package (`com.qa.sib.rev`) that
-// declares it, sharing a namespace. The module holds the object and the
-// dataset; the app's dashboard binds it.
+// [#32929, #32967, ADR-0150 D3 (c)] An app package's dashboard on a dataset
+// its own module holds — HotCRM's shape — on the two doors an author meets:
+// `os validate` on the composed config, and the dataset door of the booted
+// build-shaped artifact. One app package (`com.qa.sib.app`) and one module
+// package (`com.qa.sib.rev`) that declares it, sharing a namespace. The module
+// holds the object and the dataset.
 //
 // The maintainer ruled option two on #32929 (6840360115): the resolution rule
-// stays the declared closure (N1, 6729820123), so the app's reader is refused
-// `409 RESOURCE_CONFLICT` (outside-closure) — and because the module already
-// depends on the app, declaring it back is a cycle the kernel refuses at boot,
-// so the refusal also names the move (#32929 PR 1). `os validate` / `os build` refuse the same binding
-// (`packages/lint/src/validate-widget-bindings.artifact-datasets.test.ts`).
+// stays the declared closure (N1, 6729820123), and authoring refuses what the
+// runtime refuses. The three cells:
 //
-// CONTROL: the module's own dashboard on the same dataset answers 200, and the
-// bare read (a caller with no package) is unchanged.
+//   1. HotCRM's shape (the app's dashboard binds the module's dataset):
+//      `os validate` exits 1 naming the move (BASE main 2c98485d: exit 0), and
+//      the app's reader is refused `409 RESOURCE_CONFLICT` (outside-closure).
+//   2. Moved into the module (the dashboard is the module's): `os validate`
+//      exits 0, and the module's reader is served 200.
+//   3. The dependency the old sentence asked for (the app declaring its own
+//      module) is a cycle the kernel refuses at boot.
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { MetadataPlugin } from '@objectstack/metadata';
@@ -31,16 +36,17 @@ const DATASET = 'sib_product_metrics';
 
 const widget = (id: string) => ({ id, type: 'bar', title: id, dataset: DATASET, dimensions: ['category'], values: ['list_price_sum'], layout: { x: 0, y: 0, w: 6, h: 4 } });
 
-function artifactFor(appDependsOnModule: boolean) {
-  const app = defineStack({
+/** The two input stacks, as plain configs: `appReads` puts the dashboard in the app package (HotCRM's shape). */
+function inputsFor(appDependsOnModule: boolean, appReads = true) {
+  const app = {
     manifest: {
       id: APP, namespace: 'sib', name: 'qa_sib_app', version: '1.0.0', type: 'app',
       ...(appDependsOnModule ? { dependencies: { [REV]: '^1.0.0' } } : {}),
     },
     objects: [{ name: 'sib_account', label: 'Account', sharingModel: 'public_read_write', fields: { name: { type: 'text', label: 'Name' } } }],
-    dashboards: [{ name: 'sib_overview', label: 'Overview', columns: 12, widgets: [widget('top_products')] }],
-  } as never);
-  const module = defineStack({
+    ...(appReads ? { dashboards: [{ name: 'sib_overview', label: 'Overview', columns: 12, widgets: [widget('top_products')] }] } : {}),
+  };
+  const module = {
     manifest: { id: REV, namespace: 'sib', name: 'qa_sib_rev', version: '1.0.0', type: 'module', dependencies: { [APP]: '^1.0.0' } },
     objects: [{ name: 'sib_product', label: 'Product', sharingModel: 'public_read_write', fields: {
       name: { type: 'text', label: 'Name' }, category: { type: 'text', label: 'Category' }, list_price: { type: 'number', label: 'List price' },
@@ -51,9 +57,54 @@ function artifactFor(appDependsOnModule: boolean) {
       measures: [{ name: 'list_price_sum', label: 'List price', aggregate: 'sum', field: 'list_price' }],
     }],
     dashboards: [{ name: 'sib_rev_dashboard', label: 'Revenue', columns: 12, widgets: [widget('top_products')] }],
-  } as never);
-  return composeStacks([module, app], { manifest: 'preserve' }) as any;
+  };
+  return { module, app };
 }
+
+function artifactFor(appDependsOnModule: boolean) {
+  const { module, app } = inputsFor(appDependsOnModule);
+  return composeStacks([defineStack(module as never), defineStack(app as never)], { manifest: 'preserve' }) as any;
+}
+
+const CLI_BIN = join(dirname(createRequire(import.meta.url).resolve('@objectstack/cli/package.json')), 'bin', 'run.js');
+const SPEC_ROOT = dirname(createRequire(import.meta.url).resolve('@objectstack/spec/package.json'));
+
+/** `os validate` on the composed config an author writes (the `app-multi-package` shape), in a scratch directory. */
+function validate(appReads: boolean): { exitCode: number; output: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'dogfood-app-reads-module-validate-'));
+  try {
+    const { module, app } = inputsFor(false, appReads);
+    writeFileSync(
+      join(dir, 'objectstack.config.mjs'),
+      "import { composeStacks, defineStack } from '@objectstack/spec';\n\n"
+        + `export default composeStacks([defineStack(${JSON.stringify(module)}), defineStack(${JSON.stringify(app)})], { manifest: 'preserve' });\n`,
+    );
+    mkdirSync(join(dir, 'node_modules', '@objectstack'), { recursive: true });
+    symlinkSync(SPEC_ROOT, join(dir, 'node_modules', '@objectstack', 'spec'), 'dir');
+    const res = spawnSync(process.execPath, [CLI_BIN, 'validate'], {
+      cwd: dir, encoding: 'utf8', timeout: 120_000, env: { ...process.env, NO_COLOR: '1' },
+    });
+    return { exitCode: res.status ?? 1, output: `${res.stdout ?? ''}${res.stderr ?? ''}` };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe('[#32967] os validate refuses what the runtime refuses: the app\'s dashboard on its module\'s dataset', () => {
+  it('cell 1: HotCRM\'s shape exits 1, naming the dataset, both packages and the move (BASE: exit 0)', () => {
+    const run = validate(true);
+    expect(run.exitCode, run.output).toBe(1);
+    expect(run.output).toContain('widget-dataset-unknown');
+    expect(run.output).toContain(DATASET);
+    expect(run.output).toContain(REV);
+    expect(run.output).toContain('dependency cycle');
+  }, 180_000);
+
+  it('cell 2: the dashboard moved into the module exits 0', () => {
+    const run = validate(false);
+    expect(run.exitCode, run.output).toBe(0);
+  }, 180_000);
+});
 
 async function boot(artifact: unknown, dir: string): Promise<VerifyStack> {
   const artifactPath = join(dir, 'objectstack.json');
@@ -65,8 +116,8 @@ async function boot(artifact: unknown, dir: string): Promise<VerifyStack> {
 
 const codeOf = (b: any) => (b?.error && typeof b.error === 'object' ? b.error.code : undefined) ?? b?.code ?? null;
 const messageOf = (b: any) => String((b?.error && typeof b.error === 'object' ? b.error.message : b?.error) ?? b?.message ?? '');
-const MOVE = `Declare a dependency on the package that holds it (ADR-0141). If that package already depends on "${APP}", the dependency would be a cycle: `
-  + `move what reads it into that package, or move the dataset into "${APP}" (ADR-0150 D3).`;
+/** The runtime's refusal names the move beside the dependency (#32929 PR 1). */
+const CYCLE_MOVE = 'the dependency would be a cycle: move what reads it into that package';
 
 describe('[#32929] an app package\'s dashboard on its own module\'s dataset (ADR-0150 D3 (c))', () => {
   let stack: VerifyStack;
@@ -105,12 +156,11 @@ describe('[#32929] an app package\'s dashboard on its own module\'s dataset (ADR
     }
   });
 
-  it('the app\'s reader is refused 409 outside-closure, naming the move beside the dependency', async () => {
+  it('cell 1: the app\'s reader is refused 409 outside-closure, naming the move beside the dependency', async () => {
     const door = await query(`?callerPackage=${APP}`);
     expect([door.status, codeOf(door.body)], door.text).toEqual([409, 'RESOURCE_CONFLICT']);
-    expect(messageOf(door.body)).toBe(
-      `The dataset "${DATASET}" is held outside the declared dependency closure of package "${APP}": package "${REV}". ${MOVE}`,
-    );
+    expect(messageOf(door.body)).toContain(`The dataset "${DATASET}" is held outside the declared dependency closure of package "${APP}"`);
+    expect(messageOf(door.body)).toContain(CYCLE_MOVE);
   });
 
   it('the batch door refuses the same entry in the same words, one entry per query', async () => {
@@ -118,10 +168,10 @@ describe('[#32929] an app package\'s dashboard on its own module\'s dataset (ADR
     expect(res.status).toBe(200);
     const [entry] = ((await res.json()) as any).data.results;
     expect([entry.status, entry.error.code]).toEqual([409, 'RESOURCE_CONFLICT']);
-    expect(entry.error.message).toContain(MOVE);
+    expect(entry.error.message).toContain(CYCLE_MOVE);
   });
 
-  it('CONTROL: the module\'s own dashboard reads the dataset (200), and the bare read is unchanged', async () => {
+  it('cell 2: the module\'s own dashboard reads the dataset (200); CONTROL: the bare read is unchanged', async () => {
     const own = await query(`?callerPackage=${REV}`);
     expect(own.status, own.text).toBe(200);
     expect(own.body.rows).toHaveLength(2);
@@ -132,7 +182,7 @@ describe('[#32929] an app package\'s dashboard on its own module\'s dataset (ADR
 });
 
 describe('[#32929] the dependency the old sentence asked for is a cycle the kernel refuses', () => {
-  it('an app package that declares its own module does not boot', async () => {
+  it('cell 3: an app package that declares its own module does not boot', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dogfood-app-reads-module-cycle-'));
     let booted: VerifyStack | undefined;
     try {
