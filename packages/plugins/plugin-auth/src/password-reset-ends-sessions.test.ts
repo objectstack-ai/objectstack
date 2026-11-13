@@ -36,7 +36,7 @@
  *    sign-in stamp and the emailed-link reset are unchanged.
  */
 
-import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterAll, afterEach, beforeEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
@@ -679,4 +679,210 @@ describe('a password-state write names the person who caused it', () => {
       impersonatedBy: null,
     });
   }, 60_000);
+});
+
+describe('SSO-only mode keeps IdP-provisioned users off local passwords at the reset doors', () => {
+  const SSO_ONLY_ENV = 'OS_AUTH_SSO_ONLY';
+  const PHONE = '+15550177';
+  let savedSsoOnly: string | undefined;
+
+  beforeEach(() => {
+    savedSsoOnly = process.env[SSO_ONLY_ENV];
+    delete process.env[SSO_ONLY_ENV];
+  });
+  afterEach(() => {
+    if (savedSsoOnly === undefined) delete process.env[SSO_ONLY_ENV];
+    else process.env[SSO_ONLY_ENV] = savedSsoOnly;
+  });
+
+  const ssoOnly = () => {
+    process.env[SSO_ONLY_ENV] = 'true';
+  };
+
+  /** Who the reset doors judge a platform administrator: pinned per case, not inferred from staging. */
+  const platformAdmin = (standing: boolean) =>
+    vi
+      .spyOn(AuthManager.prototype as unknown as { isPlatformAdminUserId(id: string): Promise<boolean> }, 'isPlatformAdminUserId')
+      .mockResolvedValue(standing);
+
+  async function userIdOf(engine: ObjectQL): Promise<string> {
+    const [user] = (await engine.find('sys_user', { where: { email: EMAIL }, limit: 1 }, SYS)) as Array<{ id: string }>;
+    return user.id;
+  }
+
+  async function credentialOf(engine: ObjectQL): Promise<{ id: string; password?: unknown } | undefined> {
+    const rows = (await engine.find(
+      'sys_account',
+      { where: { user_id: await userIdOf(engine), provider_id: 'credential' } },
+      SYS,
+    )) as Array<{ id: string; password?: unknown }>;
+    return rows[0];
+  }
+
+  /**
+   * The staged account as the identity provider leaves one: `source`
+   * stamped `idp_provisioned` and, unless it is a holder, no local credential.
+   */
+  async function provisionedByIdp(a: Account, opts: { holdsPassword?: boolean } = {}): Promise<void> {
+    const id = await userIdOf(a.engine);
+    await a.engine.update('sys_user', { id, source: 'idp_provisioned' }, SYS);
+    if (!opts.holdsPassword) {
+      const credential = await credentialOf(a.engine);
+      await a.engine.delete('sys_account', { where: { id: credential!.id }, ...SYS });
+      expect(await credentialOf(a.engine), 'fixture invariant: the managed user holds no credential').toBeUndefined();
+    }
+  }
+
+  describe('the emailed reset link', () => {
+    it('refuses an idp_provisioned user with 409 RESOURCE_CONFLICT and writes no credential', async () => {
+      const a = await signedInAccount();
+      await provisionedByIdp(a);
+      platformAdmin(false);
+      const token = await requestResetToken(a);
+      ssoOnly();
+
+      const reset = await post(a.manager, '/reset-password', { token, newPassword: SECOND });
+      expect(await answer(reset)).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+      expect(await credentialOf(a.engine)).toBeUndefined();
+    }, 60_000);
+
+    it('an idp_provisioned user holding a password is refused too, and the password they hold still signs in', async () => {
+      const a = await signedInAccount();
+      await provisionedByIdp(a, { holdsPassword: true });
+      platformAdmin(false);
+      const token = await requestResetToken(a);
+      ssoOnly();
+
+      const reset = await post(a.manager, '/reset-password', { token, newPassword: SECOND });
+      expect(await answer(reset)).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+      const signIn = await post(a.manager, '/sign-in/email', { email: EMAIL, password: FIRST });
+      expect(signIn.status, await signIn.clone().text()).toBe(200);
+    }, 60_000);
+
+    it('admits an idp_provisioned platform administrator resetting their own break-glass password', async () => {
+      const a = await signedInAccount();
+      await provisionedByIdp(a);
+      platformAdmin(true);
+      const token = await requestResetToken(a);
+      ssoOnly();
+
+      const reset = await post(a.manager, '/reset-password', { token, newPassword: SECOND });
+      expect(reset.status, await reset.clone().text()).toBe(200);
+      expect(await credentialOf(a.engine)).toBeDefined();
+    }, 60_000);
+
+    it('answers an environment-native user as before', async () => {
+      const a = await signedInAccount();
+      platformAdmin(false);
+      const token = await requestResetToken(a);
+      ssoOnly();
+
+      const reset = await post(a.manager, '/reset-password', { token, newPassword: SECOND });
+      expect(reset.status, await reset.clone().text()).toBe(200);
+    }, 60_000);
+
+    it('a token that does not match answers exactly as it does with SSO-only mode off', async () => {
+      const a = await signedInAccount();
+      await provisionedByIdp(a);
+      platformAdmin(false);
+      await requestResetToken(a);
+
+      const off = await answer(await post(a.manager, '/reset-password', { token: 'not-the-issued-token', newPassword: SECOND }));
+      ssoOnly();
+      const on = await answer(await post(a.manager, '/reset-password', { token: 'not-the-issued-token', newPassword: SECOND }));
+      expect(off.status).toBe(400);
+      expect(on).toEqual(off);
+    }, 60_000);
+
+    it('CONTROL: SSO-only off, the idp_provisioned user resets as before', async () => {
+      const a = await signedInAccount();
+      await provisionedByIdp(a);
+      platformAdmin(false);
+      const token = await requestResetToken(a);
+
+      const reset = await post(a.manager, '/reset-password', { token, newPassword: SECOND });
+      expect(reset.status, await reset.clone().text()).toBe(200);
+      expect(await credentialOf(a.engine)).toBeDefined();
+    }, 60_000);
+  });
+
+  describe('the texted reset code', () => {
+    /** A phone-reset account: the SMS service records each text; returns the code a fresh request sends. */
+    async function phoneAccount(): Promise<{ a: Account; requestCode: () => Promise<string> }> {
+      const a = await signedInAccount({ plugins: { phoneNumber: true } });
+      const texts: Array<{ to: string; templateParams?: { code?: string } }> = [];
+      a.manager.setSmsService({
+        async send(input: { to: string; templateParams?: { code?: string } }) {
+          texts.push(input);
+          return { id: `sms${texts.length}`, status: 'sent' };
+        },
+        isConfigured: () => true,
+      } as never);
+      await a.engine.update('sys_user', { id: await userIdOf(a.engine), phone_number: PHONE, phone_number_verified: true }, SYS);
+      const requestCode = async () => {
+        const before = texts.length;
+        const requested = await post(a.manager, '/phone-number/request-password-reset', { phoneNumber: PHONE });
+        expect(requested.status, await requested.clone().text()).toBe(200);
+        await vi.waitFor(() => expect(texts.length).toBe(before + 1));
+        const code = String(texts[before].templateParams?.code ?? '');
+        expect(code, 'the reset text carries its code').not.toBe('');
+        return code;
+      };
+      return { a, requestCode };
+    }
+
+    it('refuses an idp_provisioned user presenting the right code with 409 and writes no credential', async () => {
+      const { a, requestCode } = await phoneAccount();
+      await provisionedByIdp(a);
+      platformAdmin(false);
+      const otp = await requestCode();
+      ssoOnly();
+
+      const reset = await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: SECOND });
+      expect(await answer(reset)).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+      expect(await credentialOf(a.engine)).toBeUndefined();
+    }, 60_000);
+
+    it('a wrong code answers exactly as it does with SSO-only mode off', async () => {
+      const { a, requestCode } = await phoneAccount();
+      await provisionedByIdp(a);
+      platformAdmin(false);
+      const otp = await requestCode();
+      const wrong = otp === '000000' ? '111111' : '000000';
+
+      const off = await answer(
+        await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp: wrong, newPassword: SECOND }),
+      );
+      ssoOnly();
+      const on = await answer(
+        await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp: wrong, newPassword: SECOND }),
+      );
+      expect(off.status).toBe(400);
+      expect(on).toEqual(off);
+      expect(await credentialOf(a.engine)).toBeUndefined();
+    }, 60_000);
+
+    it('admits an idp_provisioned platform administrator resetting their own break-glass password', async () => {
+      const { a, requestCode } = await phoneAccount();
+      await provisionedByIdp(a);
+      platformAdmin(true);
+      const otp = await requestCode();
+      ssoOnly();
+
+      const reset = await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: SECOND });
+      expect(reset.status, await reset.clone().text()).toBe(200);
+      expect(await credentialOf(a.engine)).toBeDefined();
+    }, 60_000);
+
+    it('CONTROL: SSO-only off, the idp_provisioned user resets with the code as before', async () => {
+      const { a, requestCode } = await phoneAccount();
+      await provisionedByIdp(a);
+      platformAdmin(false);
+      const otp = await requestCode();
+
+      const reset = await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: SECOND });
+      expect(reset.status, await reset.clone().text()).toBe(200);
+      expect(await credentialOf(a.engine)).toBeDefined();
+    }, 60_000);
+  });
 });
