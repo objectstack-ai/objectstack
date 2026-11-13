@@ -1601,8 +1601,10 @@ describe('blueprint field `expression` — the stored computed value', () => {
 
   it('neither describe gives a stored expression that reads another record or the clock', () => {
     // A stored expression reads only the row's own fields (ruling 6816315099):
-    // one reading another record is refused at authoring, one reading the clock
-    // or the acting user keeps its write-time value. The only lookup read in the
+    // one reading another record is warned at authoring
+    // (`stored-expression-cross-record-input`), one reading the clock or the
+    // acting user keeps its write-time value and is warned at authoring too
+    // (`stored-expression-volatile-input`). The only lookup read in the
     // describes is the formula's composed title, before the stored half.
     for (const root of [SolutionBlueprintSchema, SolutionBlueprintStrictSchema]) {
       const text = expressionDescribeOf(root);

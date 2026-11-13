@@ -38,7 +38,7 @@
 - 任一席→分诊:p0 嫌疑、main 红、确定性队列红 `Request: urgent-triage`。
 - 立锚卡者→分诊(缺则总监)`Request: main-red`,→破坏 PR 的席与锚卡车道 `Notify: main-red`。
 - 锚卡关闭:分诊(缺则总监)→正文带 `Waits-on: main-red #n` 的每张 open PR 之席 `Notify: main-green`。
-- 车道→分诊问卡去留路由定级 `Request: triage`;反向 p0/p1 发版阻塞定入 `Notify: release-blocker`。
+- 车道→分诊问卡去留路由定级 `Request: triage`;发版板生产者→车道 `Notify: release-blocker`。
 - 车道→cloud 席:缺 cloud 事实读数 `Request: cloud-confirm`;反向随记录 `Notify: cloud-confirm`。
 - 移卡入队者→车道:p0/p1 `Blocked-by` 关闭 `Notify: unblocked`;记裁决席→被改席 `Notify: ruling`。
 - 席→兄弟席或他车道:认领文件面相交或须先落 `Notify: serial`,先落者落地 `Notify: landed`。
