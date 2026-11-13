@@ -2977,7 +2977,7 @@ describe('[#32986] unregisterPackage of the host package keeps the environment\'
     for (const [type, name] of ITEMS) {
       const held = (m as any).registry.get(type)?.get(name) as { _packageId?: string } | undefined;
       const read = (await m.get(type, name)) as { label?: string } | undefined;
-      const rows = await driver.find('sys_metadata', { where: { type, name } } as any);
+      const rows = await driver.find('sys_metadata', { where: { type, name } } as never);
       out.push([type, held?._packageId ?? null, read?.label ?? null, rows.length]);
     }
     return out;
