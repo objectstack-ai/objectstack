@@ -484,7 +484,9 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
       + 'it yet).',
     ),
     // #32861 — mirrors `AutomationResult.droppedFields`; the element IS the
-    // data engine's `DroppedFieldsEventSchema`, so no new vocabulary.
+    // data engine's `DroppedFieldsEventSchema`, so no new vocabulary. The
+    // paused-child and `map`-item roll-up the describe says is not built yet
+    // is #33019.
     droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
       'Caller-supplied field values a write step of the run did not store (e.g. a `readonly` '
       + 'field an `update_record` step wrote): the data engine\'s own drop events, one per object '
@@ -492,7 +494,7 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
       + 'write. The steps still succeeded and the run\'s outcome is unchanged - this tells '
       + 'the caller which values never landed. Set on a terminal success only, and only when '
       + 'a field was dropped. Delegated writes: a `subflow` child that completes without pausing '
-      + 'rolls its drops up here; a child that paused, and a `map` item\'s run, do not yet (#33019), '
+      + 'rolls its drops up here; a child that paused, and a `map` item\'s run, do not yet, '
       + 'so an absent member is not proof that a delegated write dropped nothing.',
     ),
   }),
