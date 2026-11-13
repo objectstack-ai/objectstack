@@ -3975,19 +3975,31 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // Fenced on an object write: an extension is not the written object's
   // body, and an object write's snapshot carries none.
   for (const [target, entries] of objectWrite ? [] : objectExtensionsByTarget(stack)) {
-    const position = objects.findIndex((obj) => obj.name === target);
-    const base = position >= 0 ? objects[position] : undefined;
-    const servedTarget = position >= 0 ? typedObjects[position] : undefined;
-    const extensionFieldDefs = new Map<string, AnyRec>(servedTarget ? fieldEntries(servedTarget) : []);
-    if (base) {
-      for (const [n, def] of fieldEntries(base)) if (!extensionFieldDefs.has(n)) extensionFieldDefs.set(n, def);
-      for (const [n, def] of injectedColumnDefsFor(base)) if (!extensionFieldDefs.has(n)) extensionFieldDefs.set(n, def as AnyRec);
-    } else {
-      for (const { fields: added } of entries) {
-        for (const [n, def] of fieldEntries({ fields: added })) extensionFieldDefs.set(n, def);
+    // The target's position in `objects`, which is its position in
+    // `typedObjects` too (see `objectPosition` above); -1 when undeclared.
+    let position = -1;
+    let at = -1;
+    for (const obj of objects) {
+      at += 1;
+      if (obj.name === target) {
+        position = at;
+        break;
       }
     }
-    const extensionOptionFields = [...extensionFieldDefs]
+    const base = position >= 0 ? objects[position] : undefined;
+    const servedTarget = position >= 0 ? typedObjects[position] : undefined;
+    // Its fields by name as the registry serves them, built as the object
+    // walk builds its own `fieldDefs`.
+    const fieldDefs = new Map<string, AnyRec>(servedTarget ? fieldEntries(servedTarget) : []);
+    if (base) {
+      for (const [n, def] of fieldEntries(base)) if (!fieldDefs.has(n)) fieldDefs.set(n, def);
+      for (const [n, def] of injectedColumnDefsFor(base)) if (!fieldDefs.has(n)) fieldDefs.set(n, def as AnyRec);
+    } else {
+      for (const { fields: added } of entries) {
+        for (const [n, def] of fieldEntries({ fields: added })) fieldDefs.set(n, def);
+      }
+    }
+    const extensionOptionFields = [...fieldDefs]
       .filter(([, def]) => declaresOptionsOnceServed(def))
       .map(([n]) => n);
     for (const { path: entryPath, fields: added } of entries) {
@@ -3996,7 +4008,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         judgeFieldFormula(fname, f, {
           objectName: target,
           optionFields: extensionOptionFields,
-          fieldDefs: extensionFieldDefs,
+          fieldDefs,
           where: `object '${target}' · ${entryPath} · field '${fname}' expression`,
         });
       }
