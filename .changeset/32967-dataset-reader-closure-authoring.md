@@ -9,6 +9,8 @@ Clause-②: no (narrowing) — `os validate`, `os build` and `os lint` refuse (`
 Metadata-protocol: none
 Skills-docs: none — `skills/**` teaches neither cross-package dataset resolution nor `widget-dataset-unknown`.
 
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored shape changes: an authoring rule refuses what the runtime already refuses, and the fix is moving or declaring an item, which no migration can do for the author. -->
+
 fix(lint): `os validate` and `os build` resolve a dashboard's dataset through the reading package's declared dependency closure, as the runtime does
 
 Since 18.2.0 (#25514) the per-package authoring pass resolved a widget's `dataset` against every package of the artifact. The runtime does not: since 18.4.0 a package's dashboard resolves a dataset name in its own package, then in the packages its manifest declares in `dependencies` (transitively) plus `sys`, and refuses the rest (ADR-0150 D3, the maintainer's ruling on #32929). So `os validate` passed a dashboard that answered `409 RESOURCE_CONFLICT` once installed. HotCRM is the first-party app built this way: its app package's CRM Overview read `product_metrics`, which its revenue module holds. Repository examples affected: 0. Other first-party apps outside this repository: not measured.
