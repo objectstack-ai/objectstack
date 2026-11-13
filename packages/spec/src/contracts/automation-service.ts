@@ -830,7 +830,8 @@ export interface AutomationResult {
      * {@link DroppedFieldsEvent} (`object`, `fields`, `reason`), as the
      * `create_record` / `update_record` step received it — one event per
      * `(object, reason)`, its `fields` the union in first-seen order, so a
-     * loop that drops `status` on thirty rows is one fact, not thirty.
+     * loop that drops `status` on thirty rows is one fact, not thirty. A
+     * field named means at least one write dropped it, not every write.
      *
      * The step reports the strip as a warning and SUCCEEDS (#3407): a
      * `readonly` field the flow wrote was removed from the payload and the
@@ -845,6 +846,12 @@ export interface AutomationResult {
      * success only (the run's own write steps, before and after any pause
      * it resumed from), and only when at least one step dropped a field —
      * absent, never `[]`, otherwise.
+     *
+     * Delegated writes, as built: a `subflow` child that completes without
+     * pausing rolls its drops up onto this answer; a child that paused, and
+     * a `map` item's run, do not yet (#33019) — unlike {@link summary},
+     * which credits all three. Until then an absent member is not proof
+     * that a delegated write dropped nothing.
      */
     droppedFields?: DroppedFieldsEvent[];
 }

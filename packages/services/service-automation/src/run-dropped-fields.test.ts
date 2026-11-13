@@ -154,6 +154,41 @@ describe('AutomationResult.droppedFields (#32861)', () => {
         expect(done.droppedFields).toEqual([{ object: 'expense_report', fields: ['status'], reason: 'readonly' }]);
     });
 
+    it('a run under errorHandling.strategy \'retry\' answers the drop from the attempt that completed', async () => {
+        // The third terminal-success exit: `retryExecution` hands every attempt
+        // to `executeWithoutRetry`, whose completion is the run's answer.
+        const engine = makeEngine();
+        let attempts = 0;
+        engine.registerNodeExecutor({
+            type: 'flaky',
+            async execute() {
+                attempts++;
+                return attempts === 1 ? { success: false, error: 'transient 503' } : { success: true };
+            },
+        } as never);
+        engine.registerFlow('submit_with_retry', {
+            name: 'submit_with_retry', label: 'submit_with_retry', type: 'autolaunched', runAs: 'user',
+            errorHandling: { strategy: 'retry', maxRetries: 1, backoffMs: 0 },
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'submit', type: 'update_record', label: 'Submit', config: { objectName: 'expense_report', filter: { id: 'r1' }, fields: { status: 'submitted' } } },
+                { id: 'notify', type: 'flaky', label: 'Notify' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'submit' },
+                { id: 'e2', source: 'submit', target: 'notify' },
+                { id: 'e3', source: 'notify', target: 'end' },
+            ],
+        } as never);
+
+        const res = await engine.execute('submit_with_retry', CALLER);
+
+        expect(attempts).toBe(2); // the ladder really ran: attempt 1 failed, attempt 2 completed
+        expect(res.success).toBe(true);
+        expect(res.droppedFields).toEqual([{ object: 'expense_report', fields: ['status'], reason: 'readonly' }]);
+    });
+
     it('a subflow child\'s drop rides up onto the parent\'s answer', async () => {
         const engine = makeEngine();
         engine.registerFlow('child_submit', submitFlow('child_submit', { status: 'submitted' }));
