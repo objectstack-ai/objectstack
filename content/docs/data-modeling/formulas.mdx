@@ -632,7 +632,7 @@ Field.formula({
 - Use appropriate data types
 
 ❌ **DON'T:**
-- Create circular references
+- Create circular references: a formula may read another formula (it is computed after the one it reads), but a formula that reads itself, or two that read each other, has no value, and `os build` and the object save door refuse it
 - Use formulas for frequently changing data
 - Nest ternaries so deeply the expression stops being readable
 - Ignore null handling
