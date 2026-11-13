@@ -1,5 +1,607 @@
 # @objectstack/service-messaging
 
+## 18.4.0
+
+### Minor Changes
+
+- f56354c: feat(objectql)!: two packages of two namespaces may each ship an email template of the same name, a send resolves the name from the package it is made from, and `?package=` reads an email template exactly (ADR-0150 child B)
+  
+  Clause-②: yes (narrowing) — six refusals where an item was served or written before. (1) `GET /meta/email_template/NAME?package=X` (and `getMetaItem` with a `packageId`) for a name package X does not hold is refused `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`, naming every holder), where it served the first registered package's template; first-party callers that name a package: 0. (2) The bare `GET /meta/email_template/NAME` of a name two packages already held before the one-holder rule (a clash the cold boot seals with a warning) is refused `409` naming both, where it served the first registered one (ADR-0150, covered types). (3) A flow's `notify` node now sends its template as the flow's own package (`SendTemplateInput.callerPackageId`): from a package whose own flow body is armed, a template name no holder in that package's declared dependency closure holds (another package's template outside it, or a template only the environment authored) is refused `409` naming the holders, where the send served the one holder; first-party packaged flows that send a template: 0. (4) A read naming a package (`?package=X`, `getMetaItem` with a `packageId`, `/meta/TYPE/NS/NAME`) that reaches a package-less row (the environment's item, or a `sys_metadata` row bound to no package) of a name two or more packages hold is refused `409 RESOURCE_CONFLICT` (`ambiguous-in-closure`, naming every holder), where each holder's address served that row as its own, and the list scoped to a holder (which a send made from it reads) leaves the row out; for every type read by package (`PACKAGE_SCOPED_READ_TYPES`: `app`, `page`, `dashboard`, `report`, `book`, `analytics_cube`, `tool`, `skill`, `agent`, `api`, `email_template`, `picklist`, `mapping`, `dataset`, `permission`); first-party: 0, the full dogfood battery green with it. Widened beside it: the engine's package door (`SchemaRegistry.installPackage`), its item seam (`SchemaRegistry.registerItem`) and the cold boot's holder seal (`SchemaRegistry.sealBareNameHolders`) accept, for an email template, a second package holder they refused before: one that declares a namespace other than the holder's. (5) A rollback by name of an email template in the database loader (`DatabaseLoader.registerRollback`) whose name has more than one row slot (two packages' rows, or a package's row beside the package-less row) is refused `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming every holder) before any write, where it overwrote the first row the driver returned with a body that may be another holder's; with one row slot it restores the row of the member the restored body declares (its `locale`), and is refused as not found when that member has no row, where it overwrote whichever member's row came first. (6) A delete by name with no package of an email template two packages hold (`DatabaseLoader.delete`) is refused `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming both), where it deleted the first row the driver returned; a delete naming a package takes that package's rows, every member, and only those, where it took the first row when that row was the package's; with one holder a delete by name takes every row of the name, where it took the first. First-party callers that roll back or delete an email template two packages hold: 0. The loaders' unscoped reads (`loadMany`, `loadManyKeyed`) keep every member of every slot, one row per `(package, name, member)`, as before this change they answered every row.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored row changes shape: what moves is which email template a by-name read or a send answers, and which second package an install admits; the stored metadata is read exactly as before, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for six callers. A caller of `GET /meta/email_template/NAME?package=X` (or `/meta/email_template/NS/NAME`) whose package X does not hold the template now answers `409 RESOURCE_CONFLICT` naming the holders instead of another package's template: name the package that holds it, or read with no package. A deployment that already held one template name under two packages reads `409` naming both on the bare address: read each by its package. A packaged flow whose `notify` template is held only outside its package's declared dependencies (or only in the environment) now fails its delivery with `409` naming the holders: declare a dependency on the package that ships the template (ADR-0141), or ship the template in the flow's package. A read naming a package that reached a package-less row of a name two packages hold now answers `409` naming both, and the list scoped to either leaves the row out (`os migrate stored-references` lists each). For an email template that changes the mail with no refusal: once a second package holds the name, the first holder's send moves from the operator's customized package-less wording to its own shipped wording, until the row is saved into one holder's pair. Where one of the holders ships the item, save the customization into that holder's pair declaring it (`overrides.package`) and delete the row; otherwise no door binds the row to one package today, and it stays refused and listed until it is deleted. A rollback by name of an email template whose name two packages hold, or a package holds beside the package-less row, now answers `409` naming the holders instead of overwriting one row: roll back the package's own item, or remove the extra row first; a rollback whose restored body names a locale with no stored row is refused as not found instead of overwriting another locale. A delete by name with no package of an email template two packages hold now answers `409` naming both instead of deleting the first row: delete naming the package (`packageId`), which takes that package's rows only. Nothing in the workspace is in any of the six positions.
+  
+  The bare-name one-holder rule (`bare-name-one-holder.ts`) has narrowed for `email_template` from one package holder per deployment to one per namespace (ADR-0150 D2, D9). Its readers answer by `(package, name)`:
+  
+  - `GET /meta/email_template/NAME` refuses `409 RESOURCE_CONFLICT` naming every holder when two packages hold the name, at every locale; `?package=ID` and `GET /meta/email_template/NS/NAME` serve that package's own.
+  - A send (`IEmailService.sendTemplate` / `renderTemplate`) resolves the name from `callerPackageId`, a new optional member of `SendTemplateInput` and `RenderTemplateInput` (`@objectstack/spec`): that package's own template, else the one holder in its declared dependency closure, else `409` naming every candidate. A name two packages hold is then read at the resolved holder's own address only (its members and its pair's added members; a package-less overlay of a name two packages hold is left out), never mixed with the other holder's. A send that names no package keeps the bare-name meaning: the environment's own template, else the one package holder, else `409` naming every holder. The eight platform-requested `auth.*` mails resolve environment-wide whatever is passed.
+  - The flow `notify` node records the package whose own flow body is armed (`AutomationEngine.flowCallerPackage`, now public) beside its template reference (`template:`, or a template named in the node's literal `payload.template`, which the channels read alike), as the delivery payload's `templateCallerPackageId`; the email and inbox channels hand it to the send. An environment-authored flow, or an environment override of a packaged one, records none; a `templateCallerPackageId` key in the node's literal `payload` is dropped, never forwarded. A delivery row queued before this release carries no such key and sends as before, with no package.
+  
+  - `MetadataManager`'s in-memory store keeps one slot per `(package, name)` for `email_template` (`PACKAGE_SLOTTED_STORE_TYPES` in `@objectstack/metadata`, now `api`, `agent`, `skill`, `action`, `email_template` and `permission`): two packages' templates of one name both stay in it, `get(type, name, packageId)` answers that package's own (never another package's), and `get` naming no package of a two-holder name refuses `409` naming both (D3), where the second package's item overwrote the first's. The loaders follow the same rules (`DatabaseLoader`, `MemoryLoader`): a save fills `package_id`; a rollback and a delete by name are refused as (5) and (6) state; and their unscoped reads keep every member of every slot (one row per `(package, name, member)`, the canonical locale stored as `bundle_member` NULL), so no locale of any package's bundle is dropped. `MetadataManager.loadMany` and `loadManyKeyed` likewise answer one entry per `(package, name, member)` for an email template, where they answered one per name; `loadMany` reads a row's package from its `package_id` column when the body carries no stamp, and hands such a body on stamped with it (`_packageId`).
+  - The database loader's save of an email template (`DatabaseLoader.save`) writes the row of the member the body declares, FROM the slot's first row whatever its locale (so a save of `fr-FR` replaced the stored `en-US` body, and a boot's priming pass, which registers every stored member back, did so at every boot) TO that member's own row, inserting it with its `bundle_member` when the slot has none. It never writes over another member's row. A save whose body differs from its row only by a `_packageId` stamp naming the row's own package writes nothing. Every other type stored per `(package, name)` keeps one row per slot. Not a refusal: no write that succeeded before is refused.
+  - A boot no longer writes back rows it read from the same loader: the priming pass registers each stored item without saving it into the loader it was read from (`MetadataManager.register`'s `skipSourceLoader`), and a file-system item still seeds the database loader. So on a host that declares its package (`MetadataPlugin`'s `packageId`), a package-less `DatabaseLoader` row moves FROM saved back at boot with the host's stamp (`_packageId`, `_provenance`), a new version and a history row, and for a type stored per `(package, name)` bound to the host, TO left as stored. The one write the pass still makes into the loader a row came from binds a legacy row's empty `package_id` column to the package that row's own stored body names, the column only (`DatabaseLoader.bindReadRowPackage`); a row whose body names no package stays package-less. `DatabaseLoader`'s `loadMany` and `loadManyKeyed` hand out a copy of each cached body, so the pass's stamp no longer reaches the loader's read cache.
+  
+  So a package no longer has to rename an email template because a package of another namespace already ships one of that name, and each package's flows keep sending their own.
+  
+  A customization pair's member row (a locale Studio added in an App's pair) that two or more holders of the name could own, because two packages of the App each ship the template and the row declares no `overrides` naming its base, is no package's own: each such holder's exact read refuses it `409` naming every one, the list scoped to a holder leaves it out (a send there takes the locale ladder's next rung), and `os migrate stored-references` lists it under `pairMembers`. With one such holder it is that holder's, as before (#28390 ruling A); the App's own address keeps serving it unless the row declares another base; a row whose one owner is another package is that package's, never served at a package sharing the pair. A row that declares the base it customizes (`overrides.package`) is served by that base only (`SchemaRegistry.getPackageScopedItem` included: the App's address skips it and answers the App's own item), but the save gate writes that declaration only where the base ships the member (`declared_package_ships_no_such_item`, #28777), so no door binds an added member to one base today: such a row stays refused and listed until it is deleted.
+  
+  A package-less row of a name two or more packages hold (the environment's item, or a `sys_metadata` row bound to no package, written while one package held the name or before the one-holder rule) is the customization of one holder and cannot say which (ADR-0150 D4), so it is no holder's own (epic ruling on #31699): each holder's exact read refuses it `409` naming every holder, the list scoped to a holder leaves it out, and `os migrate stored-references` lists it under `packageLessRows`. With one holder it is that holder's customization, as before; the `_env` address is untouched; a name the platform requests by spelling (the `auth.*` mails) keeps its package-less row as the environment's. The rule sits in the exact qualifier (`packageLessRowOwners`, `@objectstack/metadata-protocol`), so it covers every type in `PACKAGE_SCOPED_READ_TYPES`, `agent` and `skill` (narrowed before this change) included.
+  
+  Not changed, and declared: the holder set of the email template doors (the bare read, `?package=`, the send) is the registry's own, so a package an operator disabled still counts as a holder there and is named in a refusal, while the served lists withhold its items; the install gate counts it too, as it must. This is the class #32183 tracks for every package-scoped type, and it is fixed there, once.
+  
+  Unchanged, and still refused with the same `422 NAMESPACE_CONFLICT` envelope and sentence:
+  
+  - a second package of the SAME namespace (a co-owner) holding the name (at `install-local`, a co-owner depends on the holder, so the ADR-0146 D2 override write gate refuses it first, `403 NOT_OVERRIDABLE`, as before);
+  - a package that declares no namespace, beside any other holder of the name, and any holder beside it;
+  - two packages of one shareable namespace (`base`, `system`, `sys`) holding the name;
+  - a built-in name;
+  - the eight platform-requested `auth.*` templates the authentication plugin sends with no package (`auth.password_reset`, `auth.verify_email`, `auth.magic_link`, `auth.invitation`, `auth.account_invitation`, `auth.two_factor_otp`, `auth.email_change_notice`, `auth.existing_account_sign_up`). They join core's `PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE`, so they resolve environment-wide and keep one overriding package per deployment: an app may still override the built-in, and a second app's override is refused naming the first.
+  
+  A package that ships only locales its base does not ship (an addition to the base's template) is still judged against the base whatever the namespaces, and refused naming it, as before; a send made from it resolves the name from its closure, as any other package of it would. A dependent's locale authored in Studio stays under the dependent: the exact qualifier (`?package=ID`) now reads it, and a customization pair's added locale on its base's address, as that package's own (`@objectstack/metadata-protocol`).
+  
+  Every other covered type still on one package holder per deployment (flow, action, webhook, connector, and the rest) keeps it. The webhook and connector halves of this child follow in their own changes.
+- e55347d: feat(plugin-webhooks)!: two packages of two namespaces may each declare a webhook of the same name, each is dispatched and switched as its own, and a delivery names the package it came from (ADR-0150 child B, webhook family 2/3)
+  
+  Clause-②: yes (narrowing) — eight answers move for a caller that worked before. (1) The bare `GET /meta/webhook/NAME` of a name two packages hold (a disabled package holds none here, #32497), and its published read `GET /meta/webhook/NAME/published` (which asks the bare item read for the item's package), are refused `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming both), where they served the first registered package's declaration; before this change that state existed only for a clash the cold boot sealed with a warning. (2) A declared webhook a package ships is subscribed, and its new deliveries are written, under `ref_id = declared:PKG/NAME`, where they carried `declared:NAME`; a consumer that selects deliveries by `ref_id = 'declared:NAME'` no longer matches the ones written after the upgrade. (3) The history, diff and rollback of a webhook name two packages saved through `DatabaseLoader` (`MetadataManager.getHistory` / `diff` / `rollback`), naming no package, are refused `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming both), where they answered every version of the one row both saves wrote, and a rollback to the version of a package removed since is refused `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`, naming it), where it wrote that body into the remaining holder's row: #32351's rules reach `webhook` with `PACKAGE_SLOTTED_STORE_TYPES`. (4) For a webhook name only disabled packages hold, `MetadataFacade.get` / `getEntry` and `SchemaRegistry.resolveItem` (`@objectstack/objectql`) answer `undefined` where they answered the disabled package's declaration, and `MetadataFacade.exists` answers false where it answered true: #32497's rule for the package-scoped readers reaches `webhook` with `PACKAGE_SCOPED_READ_TYPES`, and the by-name door already answered `404`. (5) On an existing PostgreSQL or MySQL database before `os migrate apply`, a one-holder webhook whose package id and name together pass 118 characters, so that its `declared:PKG/NAME` reference passes 128, has its new deliveries refused at insert (the event lost, logged once), where they were delivered as `declared:NAME`; once `os migrate apply` widens `sys_http_delivery.ref_id` to 384 they are delivered. (6) A redelivery of a `declared:NAME` delivery of a name one enabled and one disabled package hold is refused `409 DELIVERY_NOT_ELIGIBLE` naming both, where it was judged as the enabled holder's declaration (the last release's dispatcher reader withheld the disabled holder, as `main` does again since #32497). (7) The by-name read naming no package through `DatabaseLoader` (`MetadataManager.get` / `getDiagnosed`) of a webhook name stored as one package's row and a package-less row answers the package's row in either save order, where it answered the row saved first: the store keeps a row per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`), and the boot pass, which registers no webhook row, does not decide it. (8) A redelivery of a `declared:NAME` delivery of a name two enabled packages hold is refused `409 DELIVERY_NOT_ELIGIBLE` naming both, where it was judged as the first registered holder's declaration (the last release, `badf24dff` at 18.3.0, had no one-holder rule, so two packages could each declare a webhook name, and its dispatcher reader answered the first registered one). Widened beside them: the engine's package door, item seam and cold-boot seal admit a second package holder of a webhook name that declares another namespace, and the dispatcher, which subscribed neither holder of such a name, subscribes each one; a clash inside one namespace that install refuses but the cold boot sealed with a warning (two co-owners of one namespace, two packages of a shareable namespace, or a package with no namespace beside another holder), FROM neither holder dispatched TO both dispatched, each under its own `(package, name)`, while the bare and namespace doors answer `409` naming both, so only a package disable or a ledger row written directly stops one; the bare `GET /meta/webhook/NAME` of a name one enabled and one disabled package hold, where the disabled one registered first, answers the enabled holder's declaration (`200`) where it answered `404`; and the unscoped plural reads (`MemoryLoader` and `MetadataManager` `loadMany` / `loadManyKeyed`) of a webhook name two packages saved answer both, where they answered the one saved last.
+  Metadata-protocol: added
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored metadata changes shape: what moves is which second package an install admits, which declaration a by-name read answers, and the reference new delivery rows carry; stored rows are read as they are, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for eight callers. A deployment that already held one webhook name under two packages (sealed at boot with a warning) reads `409` naming both on `GET /meta/webhook/NAME`: read each by its package (`?package=ID`, or `/meta/webhook/NS/NAME`). A consumer of `sys_http_delivery` that matches a declared webhook's deliveries by `ref_id = 'declared:NAME'` must match `declared:PKG/NAME` for the deliveries written after this release (rows written before keep `declared:NAME`, so match both across the upgrade). A caller of `MetadataManager` history on a database-backed loader that reads, diffs or rolls back a webhook name two packages saved names the package (`{ packageId }`), once per package. An in-process caller of `MetadataFacade` or `SchemaRegistry.resolveItem` that reads a webhook name only disabled packages hold reads `undefined`, as it does for the other package-scoped types since #32497. An operator of an existing PostgreSQL or MySQL database runs `os migrate apply` with the upgrade, or a one-holder webhook whose reference passes 128 characters has its new deliveries refused at insert (5). A redelivery of a `declared:NAME` delivery of a name one enabled and one disabled package hold (6), or two enabled packages hold (8), is refused naming both: remove one of the two holders (uninstall it, or rename its webhook), and the remaining one judges it as before. An in-process caller of `MetadataManager.get` naming no package that reads a webhook name stored as one package's row and a package-less row reads the package's row whichever was saved first (7): delete the package-less row when it should not apply (a declared webhook is read-only, so such a row is residue). Nothing in the workspace is in any of the first four positions: `MetadataFacade` is never constructed in-tree, and the one door that reads `resolveItem`, the protocol's by-name read, already withheld the body.
+  
+  The bare-name one-holder rule (`bare-name-one-holder.ts`) has narrowed for `webhook` from one package holder per deployment to one per namespace (ADR-0150 D2, D9): `webhook` joins `NAMESPACE_SCOPED_BARE_NAME_TYPES` (`@objectstack/core`), `PACKAGE_SCOPED_READ_TYPES` (`@objectstack/objectql`) and `PACKAGE_SLOTTED_STORE_TYPES` (`@objectstack/metadata`). Every reader of a declared webhook answers by `(package, name)`:
+  
+  - **Install** (`SchemaRegistry.installPackage`, `registerItem`, `sealBareNameHolders`): a package declaring a webhook name a package of another namespace holds, FROM `422 NAMESPACE_CONFLICT` TO admitted. Still refused, with the same envelope and sentence: a co-owner of the holder's namespace, a package that declares no namespace beside any other holder, two packages of one shareable namespace (`base`, `system`, `sys`), and a built-in name (none for webhooks).
+  - **Dispatch** (`DeclaredWebhookSource.list`, `AutoEnqueuer`): a name two packages hold, FROM neither subscribed (refused, warned once) TO each holder's own declaration subscribed in its own slot, with its own URL, signing secret, headers and switch. A clash inside one namespace that the cold boot sealed with a warning (install still refuses it) is dispatched the same way, FROM neither subscribed TO both, each in its own slot: the dispatcher picks no holder and adds no warning to the seal's, which names both, and as neither door reaches either holder (the bare and namespace addresses answer `409` naming both), only a package disable or a `sys_metadata_activation` row written directly for one holder's `(package, name)` stops that holder (ADR-0150 D4). The two `neither subscribed` FROMs above are `main`'s since #31677; the last release (`badf24dff`, at 18.3.0, which had no one-holder rule) dispatched the first registered holder's declaration alone, as `declared:NAME`. The subscription id, which is the delivery's `ref_id` and partition key, is `declared:PKG/NAME` for a package's declaration and stays `declared:NAME` for the environment's own (`declaredWebhookRefId(name, packageId?)`). A package-less row customizing a name two packages hold says no holder (ADR-0150 D4), so as the registry binds it at run time it is no slot's and is not dispatched; each holder's own declaration is. After a restart the boot hydration declines a stored row of that shape too, as `main` declines a package-less row at a holder's address for a sealed type (#32741); not yet a stored row naming a package that does not declare the name, which it grafts onto the first-registered holder's slot, which then dispatches with it, and of two stored rows each naming a holder only the last loaded applies. Such rows are residue, as a declared webhook is read-only, and #32692 keys the hydration by `(package, name)` before this family closes. A host with no registry slots the metadata service's items by `_packageId`: two packages' items of one name, FROM refused TO one slot each; one holder listed twice, or the environment beside a package, is still refused, never first-picked. `MetadataManager` keeps one slot per `(package, name)` for a webhook, where the second package's item overwrote the first's.
+  - **The switch** (`sys_metadata_activation`, type `webhook`): each slot reads its own row, `(package_id, name)`, FROM the name's rows read by name alone. A slot with no row of its own reads the name's other rows (naming no package while the environment declares nothing of the name, or naming a package that no longer declares it) as before while the name has one holder (ADR-0150 D8; the boot backfill binds a package-less one). Under two holders such a row is no holder's own: switched off it keeps every holder with no row of its own off, switched on it turns none on, and the reader says so once per name naming both (epic ruling Q1 = A, the flow engine's rule).
+  - **The activation door** (`POST /api/v1/security/_activation/webhook/:name`): the webhook store is addressed by `(package, name)`, so a write for one holder never re-attributes another holder's row. A name two packages declare, FROM `503 SERVICE_UNAVAILABLE` (the reader's refusal carried no `refusal`) TO `409 RESOURCE_CONFLICT` with every candidate, nothing written. With one holder and no row of its own the answer is as before, and its row naming no package becomes the holder's own (`adoptPackageless`), the end state the name-addressed store wrote. With one holder whose own row sits beside a row naming no package, FROM `409 RESOURCE_CONFLICT` naming both rows, nothing written (the name-addressed store could mean either), TO the holder's own row written and the row naming no package left as it is. A row naming a package that no longer declares the name, FROM re-addressed to the holder TO left as it is with the holder's own row written beside it; the reader reads the holder's own row first, so the switch thrown is the one that applies.
+  - **New door** `POST /api/v1/security/_activation/webhook/:ns/:name` (mounted by the dispatcher plugin; route-ledger row, server-only): the holder among the packages of namespace `:ns`. Two co-owners holding the name answer `409` `ambiguous-in-namespace`; a namespace none of whose packages declares it answers `409` `not-held-by-qualifier` naming the holders; an unknown namespace, or a name nothing declares, `404`. Same body, gates and caller as the bare door; the answer names the package switched (`packageId`).
+  - **Redelivery** (`createWebhookRedeliverGuard`): a `declared:PKG/NAME` delivery is judged by exactly that package's declaration, never another holder's. A `declared:NAME` delivery (the environment's own, one written before this release, or one the 18.x ownership ceremony re-sourced, which keeps that shape) is judged by the declaration a caller with no package resolves: with one holder exactly as before; with two, refused `409 DELIVERY_NOT_ELIGIBLE` naming both, and sent to neither, FROM the first registered holder's declaration when both are enabled (8) and the enabled holder's when one is disabled (6), as the last release (`badf24dff`, which had no one-holder rule) judged it. A malformed reference (`declared:/NAME`, `declared:PKG/A/B`) addresses no slot and is refused as no longer declared.
+  - **The name guard** (`bindDeclaredWebhookNameGuard`): a `sys_webhook` write taking a name two packages declare, FROM the ambiguity refusal TO the declared-name conflict (`DeclaredWebhookNameConflictError`), both `409 RESOURCE_CONFLICT`.
+  - **`os migrate stored-references`** reads `webhook` with the other `PACKAGE_SCOPED_READ_TYPES`.
+  - **The exact and layered reads** of a name two packages declare (`GET /meta/webhook/NAME?package=ID`, the qualified path, `?layers=true&package=ID`): a package-less item (the environment's, or a stored row hydrated into the registry) is no holder's own, and as `main` declines such an item at a holder's exact address for a sealed type (#32741), each holder's exact and layered reads answer its own declaration, the package-less item declined, so nothing is picked between the holders. A row bound to a holder is served as that holder's. One holder answers as `main` does.
+  - **The metadata store** (`DatabaseLoader`): a webhook keeps a row per `(package, name)` with `package_id` filled, where a second package's save wrote over the one row of the name. Its history follows #32351: each history row names its package, where it named none; naming no package, a name two packages hold is refused `409` as in (3); naming a package reads, diffs and restores that package's own versions and row; after a package is removed, a rollback to its version, FROM writing its body into the remaining holder's row TO `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`) naming it, nothing written. `migrateDatabaseLoaderRowPackages` (`@objectstack/metadata/migrations`) now also binds a webhook loader row to the package its body names. The unscoped plural reads (`MemoryLoader` and `MetadataManager` `loadMany` / `loadManyKeyed`) of a webhook name two packages saved answer both, in the order first saved, where they answered the one saved last (#32687's rule, now reaching `webhook`); the by-name read still answers the one saved last. A webhook name stored as one package's row and a package-less row, read by name naming no package, FROM the row saved first TO the package's row in either order (7); the boot pass registers no webhook row, so, unlike the types it reads (#32791), it does not decide that read. No first-party door reaches `DatabaseLoader` history: the REST history, rollback and diff doors go through the protocol's own repository.
+  - **A disabled co-holder** (epic red line 1). The baseline of this bullet is the last release, read from the tree at `badf24dff` (`main` of 2026-11-05, at 18.3.0, before #31677; read, not booted); the by-name read's FROM is measured on `main`, where #32497 had not reached `webhook`. What serves or dispatches judges the served set, where a DISABLED package is no holder, as the registry's merged listing withholds its items (#25308). A name one enabled and one disabled package declare: the enabled holder's declaration is dispatched alone, as the last release dispatched it (its dispatcher read that listing), and the activation door's bare address and the name guard answer the enabled holder; `main` between #31677 and #32497 dispatched neither (it counted the disabled holder and refused the name naming both), and since #32497 dispatches the enabled holder, as here. The disabled one's is not dispatched, and a redelivery of a `declared:PKG/NAME` delivery of it is refused naming the disabled package, until the package is enabled again. A durable read counts every holder: under two holders, one of them disabled, a ledger row naming no package is still no holder's own (off keeps the enabled one off, on turns it on only by its own row), a disabled holder's own row stays its own, and the activation door's write for the enabled holder writes its own row beside the row naming no package, never takes it over (`adoptPackageless` reads the reader's new `holdersOf`). The boot backfill already read every holder. A namespace whose packages are all disabled answers its address `404` only when nothing else serves the name, as a name nothing declares; beside an enabled holder of another namespace it answers `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`) naming that holder. The protocol's by-name item read judges the same served set (#32497): under one enabled and one disabled holder, `GET /meta/webhook/NAME`, FROM the first registered holder's declaration when that holder is the enabled one and `404` when it is the disabled one, TO the enabled holder's declaration in either order (`MetadataFacade.get` the same), the `/published` read answering as for that holder alone; enabled again, FROM the first registered holder's declaration TO `409` naming both. A lone disabled holder answers `404` as before, as a name nothing declares, and `MetadataFacade.get`, FROM the disabled package's declaration TO `undefined` (4). A redelivery of a `declared:NAME` delivery is a durable read too: under two holders it is refused naming both, whichever of them is disabled, where an enabled holder beside a disabled one answered it as the enabled one's (6).
+  - **Delivery references** (`sys_http_delivery`, epic red line 3): every webhook name whose `declared:NAME` fitted the old `ref_id` cap still delivers as `declared:PKG/NAME`. `ref_id`'s cap, FROM 128 TO 384: `declared:`, the longest package id the metadata store holds (255), `/`, and the longest name that fitted 128 (119). Measured first: the `dedup_key` cap (191, the `(source, dedup_key)` unique index's key part) binds before it, so a webhook dedup key past 191 is, FROM refused at insert (the event lost) TO a fixed-length `sha256:` digest of the same `<subscription id>:<event id>` string, still at-most-once; a key that fits is unchanged (`webhookDedupKey`). On an existing PostgreSQL or MySQL database the wider column is the `safe` drift op `widen_varchar`, which `os migrate apply` performs (development boots reconcile it, production never alters a schema at boot). Until it runs there, a one-holder webhook whose package id and name together pass 118 characters moves FROM delivered as `declared:NAME` TO refused at insert as `declared:PKG/NAME` (the event lost, logged once); after it, delivered. No stored row changes.
+  - **The upgrade impact report** (`plugin-security`'s `upgrade-impact-report.ts`) reads webhooks by `(package, name)`: a webhook ledger row naming package P, FROM no finding while any package ships the name TO an orphan when P no longer does (its renamed names, P's own uncovered ones, are the suspected re-enablements); a `sys_webhook` row holding a name two packages declare, FROM one finding TO one per withheld holder. Its remedies name the namespace address `webhook/<namespace>/<name>`. One holder: the findings are as before.
+  - **Remedies** name the slot's namespace address `POST /api/v1/security/_activation/webhook/NS/NAME` when the slot names a package: the redelivery veto's switch-on, the declared-name conflict (each holder's address under two), and the dispatcher's withheld-row warning. The environment's own declaration keeps the bare address.
+  
+  Public surface: the one export that moves is `@objectstack/plugin-webhooks`'s `declaredWebhookRefId(name, packageId?)`, which gains the optional package. No package's entry point exports anything new. The new reader members and helpers are internal, module exports that only their own package's code and tests import: in `plugin-webhooks`, `DeclaredWebhookReader.declaredWebhookAt(packageId | null, name)`, `DeclaredWebhookReader.holdersOf(name)` (every holder, a disabled package's included), `DeclaredWebhook.namespace`, `declaredWebhookActivationPath(name, namespace?)`, `declaredWebhookAddressOfRefId` (replacing `declaredWebhookNameOfRefId`), `webhookSlotSwitch`, `DeclaredWebhookAmbiguousError.refusal`, `readWebhookActivation` (now per name, per package), `webhookDedupKey` and `WEBHOOK_DEDUP_DIGEST_PREFIX`; in `runtime`, `WEBHOOK_LEDGER_ADDRESSING` (`domains/catalog-activation.ts`).
+  
+  The upgrade (ADR-0150 D10). On PostgreSQL or MySQL, run `os migrate apply` when upgrading, before a declared webhook's reference passes 128 characters (`sys_http_delivery.ref_id` widens to 384). Declared subscriptions live in memory only, so there is nothing stored to re-key: after the upgrade a one-holder declaration is subscribed once, as `declared:PKG/NAME`, and an event is delivered once. A delivery written before the upgrade keeps `declared:NAME`, and a redelivery of it reaches the one holder as before. During a rolling upgrade a node of the previous release reads `declared:PKG/NAME` as a declared name containing a `/`, which no declaration can carry (`SnakeCaseIdentifierSchema`; a package id cannot carry one either), so it refuses a redelivery of such a row as no longer declared: it fails closed. A delivery row carries its own URL and signing material, and the outbox's send never resolves `ref_id` to a holder, so no row is sent to another holder. A webhook's partition key changes across the upgrade, so deliveries queued before it and after it are not ordered against each other.
+  
+  One holder: every answer is as before except the `ref_id` new deliveries carry, with (5) on a database `os migrate apply` has not yet widened, the activation door's write where a row naming no package sits beside the holder's own (`409` to written), and the stored by-name read of (7); a webhook's `DatabaseLoader` row and its history rows record the package (`package_id`), where they recorded none.
+  
+  The connector half of this child follows in its own change.
+- ada6a42: feat(messaging): the `org:members` audience reaches every member of the emitting organization, and `role:` / `team:` read every member instead of the first 10,000
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-automation/SKILL.md (its `notify` example names a recipient by id or envelope only; no audience selector, `org:members` included, is taught there)
+  
+  An administrator, or a flow, can now address an announcement to the whole organization. Before this, the only spelling was a list of every built-in role (`role:owner`, `role:admin`, `role:delegated_admin`, `role:member`), which missed every member holding no role, or one outside the four, without a word.
+  
+  - **`@objectstack/service-messaging`: the `org:members` audience.** `emit({ audience: 'org:members', organizationId })` resolves to every `sys_member` of `organizationId`, whatever the member's `role`. The organization is the emit's own, the one `role:` has always scoped to; it is never read from the audience string. An emit that names no organization resolves `org:members` to nobody, with a warning, and reads no membership at all. `org:` is reserved whole: any other value under it (`org:member`, `org:<id>`) resolves to nobody with a warning naming the one spelling, instead of being kept as a bare user id. The resolved count is logged at `info`. `ORGANIZATION_MEMBERS_AUDIENCE` is exported.
+  - **`@objectstack/service-messaging`: membership expansions page to the end.** `org:members`, `role:` and `team:` read their membership in pages of 1,000 rows (`membershipPageSize` on `RecipientResolver` overrides it), ordered by `id`, until a short page. `role:` and `team:` used to read one page of 10,000 and drop the rest without a word; a larger membership is now reached in full.
+  - **`@objectstack/service-automation`: a `notify` node passes `org:` recipients to the resolver.** Its written-address screen, which mirrors the resolver, no longer reads an `org:` value as an email address, as it already did not for `role:`, `team:` and `owner_of:`. `recipients: 'org:members'` reaches every member of the notification's organization: the run's, else that of the record the notification is about.
+  - **`@objectstack/plugin-audit`: the `@mention` gate keeps its list of audience prefixes in step with the resolver.** A mention of an `org:` value names no person and notifies nobody, as a mention of `role:`, `team:` or `owner_of:` already did.
+  
+  To reach the whole organization from a flow:
+  
+  ```ts
+  { id: 'announce', type: 'notify', label: 'Announce', config: {
+    recipients: 'org:members',
+    title: 'Maintenance window',
+    message: 'Saturday 02:00-04:00.',
+  } }
+  ```
+
+### Patch Changes
+
+- 8aa2e91: feat(notifications): the `push` channel — a `notify` node naming `push` reaches the recipient's phones through APNs and FCM
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **New package `@objectstack/service-push`.** `PushServicePlugin` registers the kernel's `push` service: APNs over HTTP/2 with token-based auth (an ES256 provider token signed with the `.p8` key, reused for fifty minutes) and FCM over the HTTP v1 API (an OAuth access token from the service account). It reads `PushServiceConfigSchema` from its `config` option and refuses an inline secret at boot with the schema's guidance. It serves the direct transport (`transport: 'direct'`, the operator's own APNs key and Firebase project, for a white-label build); the hosted relay, the schema's default and so also an empty config, is refused at init until its sender ships (#29920). Each secret is named by `credentialRef` and resolved when the transport first signs; in the open tier the reference is the name of an environment variable (ADR-0143 D3).
+  - **`@objectstack/service-messaging`: the `push` channel.** Mounted while a `push` service is registered, as the sms channel is while an `sms` service is. One delivery reaches every enabled device the recipient registered, on each vendor the push service has a transport for. The push carries the notification id and, when it is a same-server path (`PushRouteSchema`), the notification's `actionUrl` as `route`; any other `actionUrl` is left out and the delivery still goes. Each device's push also carries the origin stored on its row (`PushDeliveryDataSchema.origin`) when the row holds one; the registry does not store it yet, so today none does. A token the vendor reports dead (APNs `BadDeviceToken` / `Unregistered`, FCM `UNREGISTERED`) is retired through `invalidateDeviceToken`: the device row is kept, disabled, and the user's other devices still get the push. A recipient with no enabled device, or whose every device was reported dead, is graded `invalid_recipient`; no push service is refused `transport_not_configured`, as the sms and email channels refuse it.
+  - **`@objectstack/spec`: description and comment text only.** The `[PLANNED]` markers come off `PushServiceConfigSchema`, `PushDirectTransportConfigSchema`, `ApnsTransportConfigSchema`, `FcmTransportConfigSchema` and `PushDeliveryDataSchema`, which now have their reader and producer; `PushRelayTransportConfigSchema` keeps `[PLANNED — not yet served]`, now saying the push service refuses it at boot (#29920). `NotificationChannelSchema`'s JSDoc lists `push` among the registered channels, the docblocks name `@objectstack/service-push` where they named `plugin-notification-push`, and the `NOT_FOUND` synonym waiver's reason names service-messaging's own provenance row. No key, schema shape or export changes.
+- e8dc483: feat(messaging,spec): a push device's `origin` is stored at registration and every push to the device carries it back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-messaging`**: `sys_user_device` gains an optional `origin` column. `POST /api/v1/notifications/devices` stores the registration's `origin` on the device row (`null` when the registration names none, and a refresh replaces it as it does `appId` and `locale`); `listDevices` answers it; and the push channel, which already copied a device's `origin` into the push data, now finds one to copy. A mobile shell with several saved servers can therefore open a tapped push on the server that sent it. Registrations without `origin` behave exactly as before.
+  - **`@objectstack/spec`**: `RegisterDeviceRequestSchema.origin` and `UserDeviceSchema.origin` drop their `[PLANNED — not yet stored]` prefix, since the server now stores the value. The push server origin docblock names where its pattern is knowingly narrower than a URL origin (an underscore in a label, a trailing-dot host) and looser (a written-out default port, a leading zero or an out-of-range port, any bracketed run of hex digits, colons and dots), and that a dotted IPv4 host is accepted. Description and docblock text only; nothing a caller sends is accepted or refused differently.
+  - **`@objectstack/service-push`**: the `PushMessage` docblock names `origin` among the delivery data the transports forward. Docblock only; both transports already forward `data` whole.
+- bcdb1db: fix(spec,messaging): a push device's `locale` is described as what it is — stored for the device, and no push renders by it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/spec`**: `UserDeviceSchema.locale` and `RegisterDeviceRequestSchema.locale` no longer say pushes to the device are rendered in its locale. They now say the value is stored for the device and that a push arrives in the recipient's language: `sys_user.locale`, then the deployment default. Description text only; nothing a caller sends is accepted or refused differently.
+  - **`@objectstack/service-messaging`**: the `sys_user_device.locale` field description says the same, in all four shipped languages. A test now pins it end to end: with the real push channel over the real device registry, a phone registered with a locale other than its user's receives the push in the user's language, on the inline fan-out and on the durable outbox path alike.
+- 771b2db: fix(core,service-messaging,service-queue): an idle dispatch loop wakes at the next due time, and a sole writer's loop no longer re-runs the idle ramp after every boot
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/core`: `DispatchLoop` wakes at the next due time.** A new optional `DispatchLoopOptions.nextDueAt()` answers the earliest instant work becomes claimable (a deferred row, a claim's expiry). The loop asks it once per idle streak, after the first empty tick, and never sleeps past the answer, so a deferred row goes out within one tick of coming due whatever `maxIdleIntervalMs` is. The answer is remembered rather than re-read on every ceiling tick, so an idle loop's steady-state cost is unchanged; the new `DispatchLoop.wakeAt(dueAtMs)` lets a producer in the same process announce a deferred row at no read. An answer at or before the tick that found nothing is not chased, and a rejected tick or read still counts as idle, so neither can make the loop spin.
+  - **`@objectstack/core`: `DispatchLoopOptions.soleWriter`** (default `false`). On a host where no other process writes the store, an empty tick sleeps straight to the next due time or the ceiling instead of re-running the ramp from `intervalMs`, which only ever bought latency on rows another process wrote. A fresh sole-writer loop over an empty store now ticks once in its first minute; before, every boot re-ran the ramp (six ticks in the first minute at the dispatchers' 500 ms base, five at the queue's 1 s).
+  - **`@objectstack/service-messaging`:** `INotificationOutbox.nextDueAt` / `IHttpOutbox.nextDueAt` (optional; both built-in stores implement it: two reads, the earliest future `next_attempt_at` / `next_retry_at` and the oldest `in_flight` claim plus the claim TTL), wired into `NotificationDispatcher` and `HttpDispatcher`; `soleWriter` on both dispatchers' options, and `dispatchSoleWriter` on `MessagingServicePlugin`. Retries, quiet hours, digest windows and a crashed node's claims are taken at their due time instead of up to `dispatchMaxIdleIntervalMs` late.
+  - **`@objectstack/service-queue`:** `DbQueueAdapter` reads the earliest future `scheduled_for` of its subscribed queues (one read per idle streak), a deferred `publish()` announces its due time to the loop through `wakeAt` instead of waiting out the backoff, and `DbQueueAdapterOptions.soleWriter` (reachable as `QueueServicePlugin` `db.soleWriter`) skips the ramp.
+  
+  Nothing changes for a host that sets neither `soleWriter` flag except the due-time wake: the ramp keeps its shape, cut short only when a due row is earlier, and an idle stretch costs one extra read at its start.
+- 97e4249: feat(service-push)!: push sends through the hosted push relay, authenticated by the server's cloud binding
+  
+  Clause-②: yes (narrowing) — the relay transport (`transport: 'relay'`, and the default `{}`), refused at init until now, is served; the relay wire narrows: `PushRelayPayloadSchema.data` refuses a key `PushDeliveryDataSchema` does not declare instead of stripping it, and a `RATE_LIMIT_EXCEEDED` relay error must not answer `retryable: false`; `PUSH_RELAY_NOT_SERVED_MESSAGE` leaves `@objectstack/service-push`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/service-push#PUSH_RELAY_NOT_SERVED_MESSAGE) the retired export is the text of an init refusal that no longer happens; no packages/spec schema, registered node type, ADR-0087 conversion surface or stored shape names it. The two wire narrowings are on the server-to-relay request and the relay's error answer, which no metadata author writes and nothing stores, so there is nothing for objectstack migrate meta to rewrite -->
+  
+  **The hosted push relay is served.** A stack that requires `push` with a relay configuration (`transport: 'relay'`, `push: {}`, or no `push` key) now boots and sends each push to the cloud's push relay at `/api/v1/cloud/push/send` under the control-plane URL (`OS_CLOUD_URL`, else `https://cloud.objectos.ai`); a relay block's `endpoint` overrides it. Each request carries one ID-only delivery (the notification id, its same-server route, the server's origin and one generic line in the recipient's language); the title and body never leave the server.
+  
+  - **Authentication.** `@objectstack/cloud-connection` registers a new kernel service, `cloud-binding` (`ICloudBindingService` in `@objectstack/spec/contracts`: `credential()`, `bound()`, `controlPlaneUrl()`), and its own control-plane routes read the credential through it. The push service reads it on every send and puts it in the `Authorization` header only.
+  - **An unbound server boots.** It logs one warning at `kernel:ready`; until the server is bound on the Cloud connection setup page, the push service lists no vendor, so the push channel is suppressed as `transport_not_configured` and notifications reach users in the in-app inbox. The bind takes effect without a restart.
+  - **A deployment with no control plane** (`OS_CLOUD_URL=off`, `none`, `local` or `disabled`) refuses a relay configuration at boot, naming the in-app inbox and the direct transport as the two ways out. The direct transport is unchanged.
+  - **Answers.** `ok` is sent, `invalid` retires the device row, `retry` is retryable; a 401 fails the push without a retry, naming the lapsed binding; a 429 rate limit is retryable and a used-up quota is not.
+  - **The notice line.** The push channel picks the generic line by the recipient's language (`sys_user.locale`, then the deployment default, then English) and hands it to the push service as `PushMessage.notice`.
+  - `isControlPlaneDeclined` and the "no control plane" spellings move to `@objectstack/core`; `@objectstack/cloud-connection` re-exports `isControlPlaneDeclined` unchanged.
+  
+  **BREAKING — what narrows, and what to do:**
+  
+  - FROM `PUSH_RELAY_NOT_SERVED_MESSAGE` TO `PUSH_RELAY_AIR_GAPPED_MESSAGE` (both exported by `@objectstack/service-push`): the relay is no longer refused for being unserved, only on a deployment that declared it has no control plane. A test that matched the old text matches the new constant, or asserts that the relay boots.
+  - The relay payload's `data` is judged strictly: a sender puts only `notificationId`, `route` and `origin` in it. A content key such as `title` was stripped before and is now refused with the ID-only guidance.
+  - A relay's `RATE_LIMIT_EXCEEDED` error answers `retryable: true`, or leaves `retryable` out (it defaults to `true`). A relay that answered `retryable: false` on a rate limit is now refused by the wire schema.
+- 06cccd3: fix: the inbox's own notification list no longer shows the raw topic, and an MCP argument refusal ends at the fix
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-messaging`.** The `mine` list view of `sys_inbox_message` (a person's own notifications) showed a Topic column reading the producer's machine id, such as `notify` for a flow's notify node or `collab.mention` for a mention. Nothing labels those ids, so the column is gone from that view: it now shows the title, the severity and the time. The `topic` field itself is unchanged and still searchable, so a filter or another view can use it.
+  - **`@objectstack/mcp`.** When a tool call carries an argument the tool does not declare, the refusal names the argument and the spelling to send, and now stops there. It no longer ends with the sentence "This argument used to be dropped silently and the call still succeeded, …", which explained the history of the check to internal developers and gave the caller nothing to act on. Every tool still refuses an undeclared argument exactly as before; only the closing sentence is gone.
+- 4fae0be: feat(service-messaging): serve the notification topics and channels a preference or template can name
+  
+  Clause-②: yes (widening) — a new read-only route, `GET /api/v1/messaging/preference-options`, mounted by `MessagingServicePlugin` on the kernel's HTTP server; nothing existing is narrowed or refused.
+  Metadata-protocol: none
+  
+  The topic and channel of a notification preference stay free text, `*` is still stored as written, and nothing new is refused. What is new is a list the console can offer beside the text box, so an administrator picks a value instead of typing a machine name from memory.
+  
+  - **The route.** `GET /api/v1/messaging/preference-options` answers `{ topics, channels }`. `topics` starts with `*` and lists the platform's fixed topics (`approval.requested`, `collab.mention`, …), the topics this environment's flow `notify` steps send under (`notify` for a step that names none), and the topics already stored on this organization's notifications, each once with every source that names it. `channels` starts with `*` and lists every channel the service knows, with `configured: false` on one whose service is not set up yet (email with no email service, …). Any signed-in member may read it, as on `/api/v1/notifications`; an anonymous caller is refused `401`, a held sign-in `403`, and a query parameter `400`. A topic stored in one organization is never listed for another.
+  - **The fields.** `sys_notification_preference.topic` and `sys_notification_template.topic` declare `widget: 'notification-topic'`, and `sys_notification_preference.channel` declares `widget: 'notification-channel'`, for the console's pick-or-type inputs; until the console registers them, the fields render as the same text boxes. The template's channel keeps its existing refusal.
+  - **The help.** The preference channel's help now names `push`, available once a push service is configured, in every language.
+- a0c68ae: feat(approvals,messaging): approval requests, reminders and outcomes also go by e-mail, linking to the request page; messaging gains a code-declared notification template tier
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/plugin-approvals`: `approval.requested`, `approval.reminder`, `approval.approved` and `approval.rejected` request the `inbox` and `email` channels** in one emit. Before, every approval notice named no channel, so messaging delivered it to the in-app inbox alone and nobody who does not watch the Console bell heard of it. Every other `approval.*` topic stays inbox-only, and delivery preferences filter the e-mail as they filter any channel. The inbox is unchanged. On a deployment with no mail transport the e-mail is whatever the `email` channel answers there.
+  - **The approval e-mail** is the notice's own title as its subject and its body (in the recipient's language, as the inbox renders it) followed by one line that opens the request, in `en`, `zh-CN`, `ja-JP` and `es-ES`. The link is a new payload member, `approvalUrl`: the request page (`/system/approvals?request=ID`) under the deployment's public origin. `actionUrl` stays relative, as the Console routes on it. It opens the request for a signed-in reader and decides nothing; no ADR-0043 action link or token is in any payload.
+  - **`publicBaseUrl` now resolves when the option is unset**: `OS_AUTH_URL` (legacy `BETTER_AUTH_URL`), then `OS_BASE_URL`, never a guessed `localhost`. With none of them set, or a value that is not an absolute `http(s)` URL, links stay relative and the plugin warns once at start, naming the variable to set. The same origin also prefixes ADR-0043's `actionLinkUrl`, as its option always documented. To give approval e-mails a working link, set `OS_BASE_URL` (or `OS_AUTH_URL`) to the deployment's address.
+  - **`@objectstack/service-messaging`: `MessagingService.registerBuiltinTemplates(templates)`** (and the `BuiltinNotificationTemplate` type) declares `(topic, channel, locale)` notification templates in code. The channels' template store reads them at every rung of its locale ladder after the recipient organization's own `sys_notification_template` row: the rung's row, else the rung's built-in, else the next rung, else the generic title and body. Nothing is written to the database (ADR-0131 §1.4), so an organization that authors a row overrides the built-in with nothing to migrate. A malformed template, or a `(topic, channel, locale)` already declared, is refused with a `TypeError`, and nothing from that call is kept.
+- ede9e6b: fix(notifications): the `email` channel answers unavailable while the email service only has the log transport, so a notification is no longer recorded as delivered when no mail left the server
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **What was wrong.** plugin-email registers the `email` service on every boot; with no `mail` settings saved its live transport is the log transport, which writes the message to the server log and to `sys_email` and sends nothing. The `email` channel treated "an email service is registered" as "available", so fan-out wrote a `sys_notification_delivery` row per recipient and the dispatcher marked it `success` while nobody was mailed.
+  - **What changes.** The channel now asks the service's own deliverability answer, `IEmailService.isConfigured()`, on every call. While it answers `false`, `isAvailable()` answers `{ available: false, reason: 'transport_not_configured' }`: fan-out writes no delivery row and records the suppression on `sys_notification.suppressed_channels`, exactly as it does with no email service at all. `send()` refuses a row that was already written with the same `transport_not_configured` reason, graded permanent, and never hands it to the service. No new reason and no new error code.
+  - **No restart needed.** The answer is read from the live transport, so saving a working provider under Setup → Email makes the channel available on the next notification, and switching back to the log transport makes it unavailable again.
+  - **Unchanged.** An email service that does not implement `isConfigured` (it is optional on the contract) keeps today's behaviour: the channel stays available and sends through it. `EmailSenderSurface` gains the optional `isConfigured?(): boolean` member, mirroring the contract.
+- ca37605: i18n(service-messaging): the notification objects and the digest heading ship in Traditional Chinese, Arabic, French and Brazilian Portuguese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The messaging objects (`sys_inbox_message`, `sys_notification_receipt`, `sys_notification_delivery`, `sys_notification_preference`, `sys_notification_template`, `sys_http_delivery`, `sys_user_device`) and the digest heading "You have {{count}} notifications" now carry `zh-Hant`, `ar`, `fr` and `pt-BR` beside the existing `en`, `zh-CN`, `ja-JP` and `es-ES`, so a recipient in one of those languages reads the notification screens and the digest heading in their own language instead of English. `t()` selects no plural form, so the Arabic heading is worded as a tally (`عدد الإشعارات لديك: {{count}}`), correct for every count. A recipient whose language is `fr-FR` now reads the `fr` pack. Each new locale is registered under its platform-table tag with its source-hash companion and its messages, and the package's extract command lists the tags, so the existing `check:i18n` bundle check covers them. First half of package 5 of #30512; `ru`, `de` and `ko` follow in the second half.
+- cabdfe8: i18n(service-messaging): the notification objects and the digest heading ship in Russian, German and Korean
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The messaging objects and the digest heading "You have {{count}} notifications" now carry `ru`, `de` and `ko` as well, so the package ships all eleven platform languages. `t()` selects no plural form, so the Russian heading is worded as a tally (`Уведомлений: {{count}}`), correct for every count. Each new locale is registered under its platform-table tag with its source-hash companion and its messages, and the package's extract command lists the tags, so the existing `check:i18n` bundle check covers them. Second half of package 5 of #30512.
+- 6f9f008: feat(service-messaging): the notification preference's `quiet_hours` declares the `quiet-hours` widget
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_notification_preference.quiet_hours` now carries `widget: 'quiet-hours'`, so the console draws its quiet-hours control (a time-zone picker and two times) instead of the JSON editor, as `topic` and `channel` already name their pick-or-type inputs. The field stays `json` with the same stored shape, `{ tz?, start: 'HH:MM', end: 'HH:MM' }`, and nothing new is refused. `field-types.mdx` documents the three notification preference widgets.
+- f00fb1b: fix(core)!: every door that admits an API key records where the use came from on the `credential_use` row (#31898)
+  
+  Clause-②: yes (narrowing) — `RequestExecutionContextInput.transport` in `@objectstack/core` becomes a required key, typed `{ remoteAddress } | undefined`: a caller of `resolveRequestExecutionContext` now states the transport's peer address, or states that it hands none.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/request-execution-context.ts#RequestExecutionContextInput) the narrowed member is an input key of a runtime TypeScript interface, which the compiler names at every caller (TS2741); no packages/spec schema, registered node type, stored row or ADR-0087 conversion surface names it, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a TypeScript caller of `resolveRequestExecutionContext`.
+  
+  Since #31821 the `credential_use` audit row records the client address and user agent of the use that opened the window, but only REST, the runtime dispatcher (its `/mcp` face included) and the stdio MCP transport handed their client facts over. An API key admitted at any other door wrote `metadata.ip_address_absent: 'not_supplied'`. Every door that can admit an API key now hands them over, so no door writes `not_supplied`:
+  
+  - the storage family (its sign-in gate reader, the parent-governed download authorizer and the upload attacher), the settings routes, the sharing-rule shareable-objects list, the share-link routes, the notification preference options, the datasource admin routes, the print route, the own-row delete routes, the organization settings door, the cloud-connection status and setup doors, and the marketplace local-plugin install.
+  
+  Each door hands only its transport's own peer address and the request headers. The address recorded is the one the deployment establishes under its one client-address trust rule (`IAuthService.resolveClientAddress`): `X-Forwarded-For` / `X-Real-IP` only when `server.trustProxy` is declared, otherwise the peer. No door reads a forwarded header itself. `@objectstack/core` exports the one helper the doors use, `credentialUseClientFor(authService, { headers, remoteAddress })`, and `transportPeerAddressOf(c)` for a Hono door's socket peer.
+  
+  Which credentials a door admits does not change. Doors that read only a session (`credentials: 'session-only'`) read no key and write no row; they state `transport: undefined`.
+  
+  What to do on upgrade:
+  
+  - A caller of `resolveRequestExecutionContext` that omitted `transport` no longer compiles (`TS2741: Property 'transport' is missing`). Pass `transport: { remoteAddress }` with the transport's own peer address (`undefined` when it has none), or `transport: undefined` for a call that hands no client facts, such as a `'session-only'` call. Never pass a forwarded header as `remoteAddress`: the auth service applies the trust rule.
+- c6e709e: feat(service-messaging): a keyed inbox notification reads in the reader's language, not the language it was delivered in
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A notification whose text a producer keys (`EmitInput.keyedText`, as the approvals plugin does) is still rendered once at delivery, in the recipient's saved `sys_user.locale` or else the deployment default, and that text is still what `sys_inbox_message.title` / `body_md` store. A recipient with no saved locale in a Chinese console therefore read every such title in English ("Approval requested").
+  
+  - **New read-only field `sys_inbox_message.keyed_text`.** The inbox channel now stores the catalog keys and params the title and body were rendered from, on both delivery paths (the inline fan-out and the durable outbox dispatcher). It holds keys and params only, never text rendered in another language. It is not written on the template path (a `notify` node's `template`), whose text is the template's, and it is never taken from a producer's free-form `payload`.
+  - **Read in the reader's language.** A middleware on `sys_inbox_message` re-renders `title` and `body_md` from those keys on any read that carries a request locale (the data API's `Accept-Language`, else the localization settings), through the same renderer delivery uses, so a zh-CN reader reads the Chinese sentence and an English reader the English one from the same row. A member the reader's locale has no entry for keeps its stored text.
+  - **Unchanged.** Rows written before this release carry no keys and read as stored (no backfill). A read with no locale, including the `/api/v1/notifications` list (it reads as the system), and a deployment with no `i18n` service serve the stored text. A producer that keys nothing writes exactly the row it wrote before.
+  
+  `MessagingChannel` authors: the per-recipient `Notification` gains an optional `keyedText` member, the keys its `title` / `body` were rendered from. A channel that stores text may keep it; nothing else changes.
+- 2166743: fix(service-messaging)!: in-app inbox messages are written only by the notification system, so the generic data API and the console no longer create, edit or delete them
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped and no stored row is rewritten: a platform object's own declaration closes its generic write door. Existing inbox rows are kept and served as before. -->
+  
+  **BREAKING** for any caller that wrote `sys_inbox_message` rows through the generic data API. `sys_inbox_message` now declares `managedBy: 'engine-owned'` and `enable.apiMethods: ['get', 'list']`, the pair `sys_notification`, `sys_notification_receipt`, `sys_notification_delivery` and `sys_http_delivery` already declare. ADR-0030's single ingress says no producer writes an inbox row directly; the console's generic New form did, and a row written that way carries no notification id, so it could never be marked read and stayed on the recipient's unread badge until it expired.
+  
+  What moves:
+  
+  - `POST`, `PATCH` and `DELETE` on `/api/v1/data/sys_inbox_message` answer `405 OBJECT_API_METHOD_NOT_ALLOWED` (they answered `201` / `200`). `GET` and list are unchanged: a member still reads their own messages, an administrator still inspects them.
+  - The console offers no New, Edit, Delete or Import on the inbox list, and a user-context engine write to the object is refused `403 PERMISSION_DENIED` by the security plugin's engine-owned write guard.
+  - **Moved answer: organization delete.** Inbox rows now outlive the organization they name, as the four sibling objects' rows already do. An organization that holds inbox messages is no longer refused `DELETE_RESTRICTED` for them; the rows are kept and keep naming the deleted organization until their 90-day expiry. Until then they are still served in the recipient's bell, because the inbox list is read by recipient, not by organization.
+  
+  **Rows already written through the old door.** Such a row has no notification id, so it can never be marked read, and after this change a user can no longer delete it either: it stays on the recipient's unread badge until it expires (90 days). Before upgrading, delete the inbox rows that have no notification id over the data API (`DELETE /api/v1/data/sys_inbox_message/:id` for each row whose `notification_id` is empty); otherwise they stay unread until they expire.
+  
+  The inbox channel, the only first-party writer, writes as the system and is unaffected; messages delivered by `emit()` are still marked read as before.
+  
+  To send a user an in-app message, call `emit()` on the notification service (`MessagingService.emit({ topic, audience, payload })`); its inbox channel writes the row and its read receipt.
+  
+  Also: the field help of `sys_inbox_message` (`notification_id`, `delivery_id`, and `actor_id`, relabelled "Triggered By"), and the notification-id and delivery-id help on `sys_notification_delivery` and `sys_notification_receipt`, now describe the field for an administrator instead of carrying developer notes, in every shipped locale.
+- 5694bf5: feat(messaging): an organization administrator can send an in-app message to everyone in their organization, or to the members they pick, from Setup
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  Setup → Diagnostics → Notification Events now carries a **Send In-App Message** action. The message goes through the platform's single notification ingress, lands in each recipient's notifications, and appears on that list as one event.
+  
+  - **`@objectstack/service-messaging`: `POST /api/v1/messaging/in-app-messages`.** The body is `{ everyone, recipients, title, body, severity, link }`, and nothing else: either `everyone: true` or a `recipients` list of user ids, not both. The door requires the `setup.write` capability in the caller's current organization, refuses a request with no current organization, and never reads the organization from the body. `everyone` reaches every member of the caller's current organization and no one outside it; picked recipients must each be a member of it, and a request naming anyone else is refused by name with nothing sent. A picked id is always addressed as that one user, never read as an audience selector or an email address. `severity` is `info` (the default), `warning` or `critical`; `link` is a path on this site or an `http(s)` address. Each refusal says what to change and that nothing was sent. On success the answer is `{ notificationId, recipients, delivered, enqueued, failed }`, where `recipients` is how many people the message went to; a member whose notification preferences turn the topic (`org.announcement`) off is not sent it and not counted. `MessagingServicePlugin` mounts the door beside the notification-preference options door, on the same HTTP server.
+  - **`@objectstack/platform-objects`: the `send_in_app_message` action on `sys_notification`.** A list-toolbar `api` action aimed at that route, whose form is the door's body, one field per key. Its `requiredPermissions` is the door's own capability, `setup.write`, so the action is listed to exactly the callers the door admits: organization administrators and the platform administrator by default, and a custom permission set that grants `setup.write`. A plain member does not see it. Its labels are in the translation bundles.
+- 36f9477: fix(messaging): the inbox read API serves no message of a deleted organization
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An organization delete keeps its inbox messages (`sys_inbox_message` is engine-owned, so the rows live out their 90-day retention), and `GET /api/v1/notifications` went on listing them and counting them in `unreadCount`. The inbox list now leaves out every message whose organization no longer exists, and `unreadCount` no longer counts them. A message that names no organization is served as before, nothing is deleted, and `POST /api/v1/notifications/read` and `/read/all` still mark such a message read. When the organization table cannot be read, the inbox is served as stored and the service logs one warning. Not narrowed: the generic data API read of `sys_inbox_message` on a posture without an organization wall (`single`); on walled postures (`isolated`, `group`) the wall already hides a deleted organization's rows there.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [f6a429b]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [8fed00f]
+- Updated dependencies [25fea77]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [740edc5]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [6a8f415]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [eb68b98]
+- Updated dependencies [1ebe0c5]
+- Updated dependencies [2f05a46]
+- Updated dependencies [b126c13]
+- Updated dependencies [a11ef71]
+- Updated dependencies [deac7f4]
+- Updated dependencies [2ae3e30]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [ed4b832]
+- Updated dependencies [8c9260f]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [f5e23e2]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [d36d4ad]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [e735425]
+- Updated dependencies [1f37085]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [f4b4c8a]
+- Updated dependencies [db50231]
+- Updated dependencies [0e1311d]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [b6e6545]
+- Updated dependencies [90457e7]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [59630d9]
+- Updated dependencies [5e85952]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [96b9350]
+- Updated dependencies [d9a232f]
+- Updated dependencies [3487ccc]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [5b7269f]
+- Updated dependencies [2735ca4]
+- Updated dependencies [6dd196d]
+- Updated dependencies [d834a36]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [b96b875]
+- Updated dependencies [c62e72a]
+- Updated dependencies [450bfb6]
+- Updated dependencies [5defbfe]
+- Updated dependencies [f56354c]
+- Updated dependencies [e55347d]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [36a8700]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [5a8dbc7]
+- Updated dependencies [fb94249]
+- Updated dependencies [98ba756]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [8fca8f7]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [d9f626b]
+- Updated dependencies [1a66fcf]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [f00fb1b]
+- Updated dependencies [c655af8]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [aad7d2f]
+- Updated dependencies [4f6fb53]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [f75466c]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [9bff554]
+- Updated dependencies [1368536]
+- Updated dependencies [02498c9]
+- Updated dependencies [7aab601]
+- Updated dependencies [2830f31]
+- Updated dependencies [c419609]
+- Updated dependencies [e34723f]
+- Updated dependencies [9052363]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [e267b96]
+- Updated dependencies [1e474e3]
+- Updated dependencies [7575116]
+- Updated dependencies [0763bf6]
+- Updated dependencies [2b11a71]
+- Updated dependencies [de6d893]
+- Updated dependencies [c147fc2]
+- Updated dependencies [5192297]
+- Updated dependencies [326453e]
+- Updated dependencies [6d6f86b]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [0115280]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [cac0f1a]
+- Updated dependencies [3c18783]
+- Updated dependencies [e336a33]
+- Updated dependencies [3452dec]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [5694bf5]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [070e879]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [28a1527]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [d4b14a8]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [e542831]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [44a030b]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [1f3e6fd]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/platform-objects@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes
