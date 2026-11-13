@@ -121,45 +121,86 @@ describe('the door capabilities gate ctx.email.send and ctx.activity.append', ()
 });
 
 describe('a hook body\'s timeline entry carries the user whose write fired it, and a hook body sends no mail', () => {
-  it('stamps the session\'s user and organization, and the hook as the origin, and refuses the mail', async () => {
-    const sent: any[] = [];
+  const mailService = (sent: unknown[]) => ({
+    getDefaultFrom: () => ({ name: 'Acme CRM', address: 'noreply@acme.test' }),
+    send: async (input: unknown) => {
+      sent.push(input);
+      return { id: 'em_1', status: 'queued' };
+    },
+  });
+
+  it('stamps the session\'s user and organization, and the hook as the origin', async () => {
     const appended: any[] = [];
-    const ql = {
-      findOne: async (object: string, query: any) => (object === 'crm_contact' ? { id: query.where.id } : null),
-      count: async () => 0,
-    };
-    const getService = (name: string): unknown => {
-      if (name === 'email') {
-        return {
-          getDefaultFrom: () => ({ name: 'Acme CRM', address: 'noreply@acme.test' }),
-          send: async (input: unknown) => {
-            sent.push(input);
-            return { id: 'em_1', status: 'queued' };
-          },
-        };
-      }
-      if (name === 'audit') {
-        return {
-          appendAppActivity: async (entry: unknown, stamp: unknown) => {
-            appended.push({ entry, stamp });
-            return { id: 'act_1' };
-          },
-        };
-      }
-      return undefined;
-    };
+    const ql = { findOne: async (object: string, query: any) => (object === 'crm_contact' ? { id: query.where.id } : null) };
+    const getService = (name: string): unknown =>
+      name === 'audit'
+        ? {
+            appendAppActivity: async (entry: unknown, stamp: unknown) => {
+              appended.push({ entry, stamp });
+              return { id: 'act_1' };
+            },
+          }
+        : undefined;
     const factory = hookBodyRunnerFactory(runner, { ql, appId: 'com.acme.crm', getService } as any);
     const fn = factory({
-      name: 'mail_new_contact',
+      name: 'note_new_contact',
       object: 'crm_contact',
       events: ['afterInsert'],
       body: {
         language: 'js',
-        source:
-          "await ctx.activity.append({ object: 'crm_contact', recordId: 'c1', type: 'completed', summary: 'Welcome mail' });" +
-          "await ctx.email.send({ to: 'pat@example.test', subject: 'Welcome', text: 'Hello', related: { object: 'crm_contact', id: 'c1' } });",
-        capabilities: ['email.send', 'activity.append'],
+        source: "await ctx.activity.append({ object: 'crm_contact', recordId: 'c1', type: 'completed', summary: 'Welcomed' });",
+        capabilities: ['activity.append'],
       },
+    } as any);
+    await fn!({
+      object: 'crm_contact',
+      event: 'afterInsert',
+      input: {},
+      result: { id: 'c1' },
+      session: { userId: 'usr_ann', organizationId: 'org_acme' },
+    } as any);
+
+    expect(appended).toEqual([
+      {
+        entry: { object: 'crm_contact', recordId: 'c1', type: 'completed', summary: 'Welcomed' },
+        stamp: { actorId: 'usr_ann', organizationId: 'org_acme', origin: 'com.acme.crm/hook:note_new_contact' },
+      },
+    ]);
+  });
+
+  it('refuses to bind a hook body granted email.send', () => {
+    const sent: unknown[] = [];
+    const getService = (name: string): unknown => (name === 'email' ? mailService(sent) : undefined);
+    const factory = hookBodyRunnerFactory(runner, { ql: {}, appId: 'com.acme.crm', getService } as any);
+    let thrown: any;
+    try {
+      factory({
+        name: 'mail_new_contact',
+        object: 'crm_contact',
+        events: ['afterInsert'],
+        body: {
+          language: 'js',
+          source: "await ctx.email.send({ to: 'pat@example.test', subject: 'Welcome', text: 'Hello' });",
+          capabilities: ['email.send'],
+        },
+      } as any);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown?.message).toContain("Hook 'mail_new_contact' was not bound: its body is granted `email.send`");
+    expect(thrown).toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    expect(sent).toHaveLength(0);
+  });
+
+  it('refuses a hook body\'s mail call it was not granted, and sends nothing', async () => {
+    const sent: unknown[] = [];
+    const getService = (name: string): unknown => (name === 'email' ? mailService(sent) : undefined);
+    const factory = hookBodyRunnerFactory(runner, { ql: {}, appId: 'com.acme.crm', getService } as any);
+    const fn = factory({
+      name: 'mail_new_contact',
+      object: 'crm_contact',
+      events: ['afterInsert'],
+      body: { language: 'js', source: "await ctx.email.send({ to: 'pat@example.test', subject: 'Welcome', text: 'Hello' });" },
     } as any);
     const err: any = await fn!({
       object: 'crm_contact',
@@ -171,15 +212,8 @@ describe('a hook body\'s timeline entry carries the user whose write fired it, a
       () => null,
       (x: unknown) => x,
     );
-
-    expect(String(err?.innerMessage ?? err?.message ?? err)).toContain('ctx.email.send cannot be called from a hook body');
+    expect(String(err?.innerMessage ?? err?.message ?? err)).toContain("capability 'email.send' not granted to hook 'mail_new_contact'");
     expect(sent).toHaveLength(0);
-    expect(appended).toEqual([
-      {
-        entry: { object: 'crm_contact', recordId: 'c1', type: 'completed', summary: 'Welcome mail' },
-        stamp: { actorId: 'usr_ann', organizationId: 'org_acme', origin: 'com.acme.crm/hook:mail_new_contact' },
-      },
-    ]);
   });
 
   it('names the package that holds the body in the origin, not the bundle', async () => {

@@ -469,6 +469,21 @@ export function hookBodyRunnerFactory(
     }
     const body = parsed.data;
 
+    // [#32004] A hook body sends no mail: a message cannot be taken back if the
+    // write that runs the hook rolls back. The parse refuses the grant
+    // (`HookSchema`); a hook that reaches this bind without that parse is
+    // refused here, thrown like the binding refusal above.
+    if (body.language === 'js' && (body.capabilities ?? []).includes('email.send')) {
+      throw Object.assign(
+        new Error(
+          `Hook '${hook.name}' was not bound: its body is granted \`email.send\`, and a hook body cannot send mail, `
+            + 'because a message cannot be taken back if the write that runs the hook rolls back. Send mail on a '
+            + 'record change from an action, a job or a flow.',
+        ),
+        { code: 'PERMISSION_DENIED', status: 403, statusCode: 403 },
+      );
+    }
+
     // [#21520] A wildcard target names no family table, so it binds — but it
     // admits every object, the family's among them, and the boundary is that a
     // body never touches those tables. So the body is not run for a family

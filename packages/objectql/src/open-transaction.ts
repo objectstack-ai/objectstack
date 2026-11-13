@@ -14,9 +14,11 @@
  *    explicitly, ADR-0067). A write through the engine would take another
  *    connection, outside it.
  *
- * A handle whose unit has already closed counts as no transaction. Read
- * through the engine's own ambient store and unit ledger, so the answer is the
- * one the engine's write path acts on.
+ * A handle of a unit the engine opened that has since closed counts as no
+ * transaction. Read through the engine's own ambient store and unit ledger, so
+ * the answer is the one the engine's write path acts on; those members are
+ * private, and a real engine pins what is read off them
+ * (`body-doors-transaction.integration.test.ts`, `@objectstack/runtime`).
  */
 export type OpenTransactionKind = 'none' | 'joined' | 'separate';
 

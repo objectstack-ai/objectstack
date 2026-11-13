@@ -15,7 +15,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ObjectQL, bindHooksToEngine } from '@objectstack/objectql';
+import { ObjectQL, bindHooksToEngine, openTransactionKind } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { hookBodyRunnerFactory } from './body-runner.js';
 import { QuickJSScriptRunner } from './quickjs-runner.js';
@@ -67,7 +67,7 @@ describe('a body\'s door and the transaction of the write that runs it', () => {
       return undefined;
     };
     const bodyRunner = hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql: e, appId: 'txd', getService });
-    bindHooksToEngine(
+    const bound = bindHooksToEngine(
       e,
       [
         {
@@ -79,30 +79,31 @@ describe('a body\'s door and the transaction of the write that runs it', () => {
       ],
       { packageId: 'txd', bodyRunner },
     );
-    return { e, sent };
+    return { e, sent, bound };
   }
 
   const ann = { userId: 'usr_ann', tenantId: 'org_acme', permissions: ['reader'] };
   const mail = "await ctx.email.send({ to: 'pat@example.test', subject: 'Task added', text: 'x' });";
   const entry = "await ctx.activity.append({ object: 'txd_account', recordId: 'ACCOUNT_ID', type: 'completed', summary: 'Task added' });";
 
-  it('refuses mail from a hook body, and sends nothing', async () => {
-    const { e, sent } = await boot(mail, ['email.send']);
-    const err = await e
-      .insert('txd_task', { title: 'Call back' }, { context: ann } as any)
-      .then(() => null, (x: unknown) => x);
-    expect(String((err as Error | null)?.message ?? err)).toContain('ctx.email.send cannot be called from a hook body');
+  it('refuses to bind a hook body granted email.send, so its write sends no mail', async () => {
+    const { e, sent, bound } = await boot(mail, ['email.send']);
+    expect(bound.registered).toBe(0);
+    expect(bound.errors.map((x) => x.reason)).toEqual([
+      expect.stringContaining("Hook 'on_task' was not bound: its body is granted `email.send`"),
+    ]);
+    await e.insert('txd_task', { title: 'Call back' }, { context: ann } as any);
     expect(sent).toHaveLength(0);
   }, 30_000);
 
   it('sends no mail from a hook body whose write runs inside a transaction', async () => {
-    const { e, sent } = await boot(mail, ['email.send']);
+    const { e, sent } = await boot(mail, []);
     const err = await e
       .transaction(async (trx: any) => {
         await e.insert('txd_task', { title: 'Call back' }, { context: trx } as any);
       }, ann)
       .then(() => null, (x: unknown) => x);
-    expect(String((err as Error | null)?.message ?? err)).toContain('ctx.email.send cannot be called from a hook body');
+    expect(String((err as Error | null)?.message ?? err)).toContain("capability 'email.send' not granted to hook 'on_task'");
     expect(sent).toHaveLength(0);
     expect(await e.find('txd_task', {})).toHaveLength(0);
   }, 30_000);
@@ -137,5 +138,54 @@ describe('a body\'s door and the transaction of the write that runs it', () => {
     await e.createContext(ann as any).rollbackTransaction(dropped!.handle);
     expect(await e.find('txd_entry', {})).toHaveLength(1);
     expect(await e.find('txd_task', {})).toHaveLength(1);
+  }, 30_000);
+});
+
+describe('where a write stands with respect to a transaction, read off a real engine', () => {
+  let engine: ObjectQL | null = null;
+  let dir: string | null = null;
+
+  afterEach(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+    engine = null;
+    if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
+  });
+
+  async function boot() {
+    dir = mkdtempSync(join(tmpdir(), 'os-open-tx-'));
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'data.sqlite') }, useNullAsDefault: true });
+    await driver.initObjects([TASK]);
+    const e = new ObjectQL();
+    engine = e;
+    e.registerDriver(driver as any, true);
+    await e.init();
+    e.registry.registerObject(TASK as any);
+    return e;
+  }
+
+  const ann = { userId: 'usr_ann', tenantId: 'org_acme' };
+
+  it('answers none outside a transaction, and joined inside the engine\'s own, carried or not', async () => {
+    const e = await boot();
+    expect(openTransactionKind(e)).toBe('none');
+    const inside: string[] = [];
+    let handle: unknown;
+    await e.transaction(async (trx: any) => {
+      handle = trx.transaction;
+      inside.push(openTransactionKind(e), openTransactionKind(e, trx.transaction));
+      await e.insert('txd_task', { title: 'Inside' }, { context: trx } as any);
+      inside.push(openTransactionKind(e));
+    }, ann);
+    expect(inside).toEqual(['joined', 'joined', 'joined']);
+    expect(openTransactionKind(e)).toBe('none');
+    expect(openTransactionKind(e, handle)).toBe('none');
+  }, 30_000);
+
+  it('answers separate for an open handle the engine\'s own transaction does not hold', async () => {
+    const e = await boot();
+    const opened = await e.createContext(ann as any).beginTransaction();
+    expect(opened, 'precondition: the driver opens transactions').not.toBeNull();
+    expect(openTransactionKind(e, opened!.handle)).toBe('separate');
+    await e.createContext(ann as any).rollbackTransaction(opened!.handle);
   }, 30_000);
 });

@@ -38,7 +38,7 @@ const CRYPTO_HASH_RETIRED =
  *   service. The sender, the sending user and the organization are stamped by
  *   the platform (`BodyMailSendInputSchema`). An action or a job body sends
  *   mail; a hook body cannot, because a message cannot be taken back if the
- *   write that runs the hook rolls back.
+ *   write that runs the hook rolls back, and `HookSchema` refuses the grant.
  * - `activity.append` — `ctx.activity.append(input)`: add one entry to a
  *   record's activity timeline. The actor, the organization and the origin are
  *   stamped by the platform (`BodyActivityAppendInputSchema`). The entry
