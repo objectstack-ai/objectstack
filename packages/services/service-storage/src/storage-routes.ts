@@ -65,8 +65,11 @@ import { buildKey } from './storage-key.js';
 export { buildKey };
 // [#30892] The upload-link doors: the service verbs they call, the one
 // refusal an unusable link gets, and the page a link opens.
-import type { UploadLinkDoor, UploadLinkView } from './record-file-access.js';
+import type { UploadLinkDoor, UploadLinkUpload, UploadLinkView } from './record-file-access.js';
 import {
+  UPLOAD_LINK_FORM_COUNT_FIELD,
+  UPLOAD_LINK_FORM_FILE_PREFIX,
+  UPLOAD_LINK_MAX_FILES,
   UPLOAD_LINK_SEGMENT,
   UPLOAD_LINK_UNUSABLE_CODE,
   UPLOAD_LINK_UNUSABLE_MESSAGE,
@@ -1881,15 +1884,44 @@ export function registerStorageFamily(
       }
       // The declared length first, so an oversized body is refused before it
       // is read; the service judges the bytes read again, before the link is
-      // spent, so an oversized upload never uses it up.
+      // spent, so an oversized upload never uses it up. [#32747] A
+      // several-file submit (a form) may carry up to the link's cap of files,
+      // each within the limit; the service judges each file.
       const { maxUploadBytes } = currentLimits();
       const declaredBody = declaredContentLength(req);
+      const several = isUploadLinkForm(req.headers?.['content-type']);
+      const formLimit =
+        several && maxUploadBytes !== undefined
+          ? maxUploadBytes * UPLOAD_LINK_MAX_FILES + UPLOAD_LINK_FORM_OVERHEAD_BYTES
+          : undefined;
       const tooLarge =
         declaredBody === undefined
           ? null
-          : uploadSizeRefusal(declaredBody, maxUploadBytes, (n) => `The upload body is ${n} bytes`);
+          : formLimit !== undefined
+            ? declaredBody > formLimit
+              ? `The upload body is ${declaredBody} bytes, over the ${formLimit} bytes a several-file upload can carry ` +
+                `(${UPLOAD_LINK_MAX_FILES} files, each within the "Max upload size (MB)" storage setting).`
+              : null
+            : uploadSizeRefusal(declaredBody, maxUploadBytes, (n) => `The upload body is ${n} bytes`);
       if (tooLarge !== null) {
         sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, tooLarge, { userMessage: copy.tooLarge });
+        return;
+      }
+      if (several) {
+        const uploads = await uploadLinkFormFiles(req.body);
+        if (typeof uploads === 'string') {
+          sendError(res, 400, 'INVALID_REQUEST', uploads, { userMessage: copy.refused(uploads) });
+          return;
+        }
+        const outcome = await door.consumeUploadLinkFiles(String(req.params.token ?? ''), uploads, caller.userId as string);
+        const fileIds = outcome.files.map((file) => file.fileId);
+        sendOk(res, {
+          fileId: fileIds[0],
+          fileIds,
+          files: outcome.files,
+          ...(outcome.field !== undefined ? { field: outcome.field } : {}),
+          ...(outcome.attachmentId !== undefined ? { attachmentId: outcome.attachmentId } : {}),
+        });
         return;
       }
       let data: Buffer;
@@ -1913,6 +1945,8 @@ export function registerStorageFamily(
       );
       sendOk(res, {
         fileId: outcome.fileId,
+        // [#32747] Every answer names its ids as a list, one here.
+        fileIds: [outcome.fileId],
         size: outcome.size,
         ...(outcome.field !== undefined ? { field: outcome.field } : {}),
         ...(outcome.attachmentId !== undefined ? { attachmentId: outcome.attachmentId } : {}),
@@ -2410,6 +2444,70 @@ function relayUploadLinkRefusal(res: IHttpResponse, err: unknown, copy: UploadLi
     ...(declaredCode !== undefined ? { declaredCode } : {}),
   });
   return true;
+}
+
+/**
+ * [#32747] Room for a several-file submit's form framing (boundaries, part
+ * headers, the `count` field) beyond its files' own bytes, in the declared
+ * body cap.
+ */
+const UPLOAD_LINK_FORM_OVERHEAD_BYTES = 64 * 1024;
+
+/** [#32747] Is the submit a several-file form (`multipart/form-data`)? */
+function isUploadLinkForm(raw: string | string[] | undefined): boolean {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  return typeof first === 'string' && first.split(';')[0].trim().toLowerCase() === 'multipart/form-data';
+}
+
+/** [#32747] A form value that is a file: what a form parser hands for a file part. */
+interface FormFilePart {
+  name?: unknown;
+  type?: unknown;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+function isFormFilePart(value: unknown): value is FormFilePart {
+  return !!value && typeof value === 'object' && typeof (value as FormFilePart).arrayBuffer === 'function';
+}
+
+/**
+ * [#32747] The files of a several-file submit, in the order sent, or the
+ * reason the form is not one: `count` must name how many files it carries
+ * (a whole number), and parts `file0` … `fileN-1` must each be a file, with
+ * no other file part beside them, so a part a parser dropped (or one sent
+ * twice under one name, of which a parser keeps only the last) is refused
+ * rather than stored as fewer files than were picked. How many files the
+ * link takes is the service's to judge.
+ */
+async function uploadLinkFormFiles(body: unknown): Promise<UploadLinkUpload[] | string> {
+  const form = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  const rawCount = form[UPLOAD_LINK_FORM_COUNT_FIELD];
+  const countText = Array.isArray(rawCount) ? undefined : typeof rawCount === 'string' ? rawCount.trim() : undefined;
+  const count = countText !== undefined && /^[0-9]{1,3}$/.test(countText) ? Number(countText) : NaN;
+  if (!Number.isInteger(count) || count < 1) {
+    return (
+      `A several-file upload is a form naming how many files it carries (${UPLOAD_LINK_FORM_COUNT_FIELD}) ` +
+      `and each file as ${UPLOAD_LINK_FORM_FILE_PREFIX}0, ${UPLOAD_LINK_FORM_FILE_PREFIX}1, …`
+    );
+  }
+  const partName = new RegExp(`^${UPLOAD_LINK_FORM_FILE_PREFIX}(0|[1-9][0-9]*)$`);
+  const fileParts = Object.entries(form).filter(([key, value]) => isFormFilePart(value) || partName.test(key));
+  if (fileParts.length !== count) {
+    return `The form names ${count} file(s) in ${UPLOAD_LINK_FORM_COUNT_FIELD} but carries ${fileParts.length}.`;
+  }
+  const uploads: UploadLinkUpload[] = [];
+  for (let i = 0; i < count; i++) {
+    const part = form[`${UPLOAD_LINK_FORM_FILE_PREFIX}${i}`];
+    if (!isFormFilePart(part)) {
+      return `The form carries no file ${UPLOAD_LINK_FORM_FILE_PREFIX}${i}: the files are ${UPLOAD_LINK_FORM_FILE_PREFIX}0 … ${UPLOAD_LINK_FORM_FILE_PREFIX}${count - 1}.`;
+    }
+    uploads.push({
+      filename: uploadLinkFilename(typeof part.name === 'string' ? part.name : undefined),
+      mimeType: uploadLinkMimeType(typeof part.type === 'string' ? part.type : undefined),
+      data: Buffer.from(await part.arrayBuffer()),
+    });
+  }
+  return uploads;
 }
 
 /** The longest file name an upload link stores, in characters. */

@@ -24,3 +24,29 @@ export const UPLOAD_LINK_UNUSABLE_STATUS = 404;
 export const UPLOAD_LINK_UNUSABLE_CODE: StandardErrorCode = 'RESOURCE_NOT_FOUND';
 export const UPLOAD_LINK_UNUSABLE_MESSAGE =
   'This upload link cannot be used: it was used already, it has expired, it was made for someone else, or it does not exist. Ask for a new link.';
+
+/**
+ * [#32747] The most files one upload link takes in its one submit (ruling A:
+ * one link, several files, capped). Only a link for a file field declared
+ * `multiple: true` takes more than one; a single-file field link and an
+ * attachments link take one. File fields declare no item cap of their own, so
+ * this is the platform's. A submit carrying more is refused before the link is
+ * spent: 400 `VALIDATION_ERROR` ({@link UPLOAD_LINK_FILE_COUNT_CODE}).
+ */
+export const UPLOAD_LINK_MAX_FILES = 10;
+
+/** [#32747] The refusal of a submit carrying a number of files the link does not take. */
+export const UPLOAD_LINK_FILE_COUNT_STATUS = 400;
+export const UPLOAD_LINK_FILE_COUNT_CODE: StandardErrorCode = 'VALIDATION_ERROR';
+
+/**
+ * [#32747] The multipart form a several-file submit is sent as: one part per
+ * file named `file0` … `fileN-1`, in the order picked, and a `count` field
+ * naming N. Indexed names, because a form parser that keeps one value per
+ * name (Hono's `parseBody`, both transports) keeps only the last of a
+ * repeated one; `count` lets the door refuse a body that lost a part rather
+ * than store fewer files than were sent. Each part's file name is
+ * URI-encoded, as the single-file submit's `x-file-name` header is.
+ */
+export const UPLOAD_LINK_FORM_COUNT_FIELD = 'count';
+export const UPLOAD_LINK_FORM_FILE_PREFIX = 'file';
