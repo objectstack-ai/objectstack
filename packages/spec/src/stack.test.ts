@@ -1813,6 +1813,83 @@ describe('defineStack — a packages[] stack is judged per body, and its top lev
   });
 });
 
+describe('defineStack — a packages[] stack\'s namespace prefixes are judged per body, and its top level by the residual rule (ADR-0028, ADR-0130 D4)', () => {
+  // The load path registers each body under its own id, its objects under that
+  // body's own namespace, and a top-level object that no body declares under
+  // the stack's manifest id (`unclaimedTopLevel`, `@objectstack/metadata`).
+  // Strict `defineStack` judges a `packages[]` stack's prefixes the same way, so
+  // the two packages here declare DIFFERENT namespaces.
+  const objectOf = (name: string) => ({ name, label: name, fields: { title: { type: 'text' as const } } });
+  const pkg = (id: string, type: 'app' | 'module', namespace: string) =>
+    ({ id, version: '1.0.0', type, name: id, namespace });
+  const sales = () => defineStack({ manifest: pkg('com.example.crm', 'app', 'crm'), objects: [objectOf('crm_account')] });
+  const service = () => defineStack({ manifest: pkg('com.example.svc', 'module', 'svc'), objects: [objectOf('svc_case')] });
+  /** A suite artifact: two bodies of two namespaces, under the service package's manifest. */
+  const suite = () => composeStacks([sales(), service()], { manifest: 'preserve' });
+  /** The shape `resolveArtifactCollections` (`@objectstack/runtime`) returns: every body's objects merged onto the top level. */
+  const additive = () => ({ ...suite(), objects: [objectOf('crm_account'), objectOf('svc_case')] });
+
+  type Refusal = { code?: string; status?: number; issues?: readonly string[]; message: string };
+  const refusalOf = (stack: unknown): Refusal | null => {
+    try {
+      defineStack(stack as never);
+      return null;
+    } catch (e) {
+      return e as Refusal;
+    }
+  };
+
+  it('accepts an additive artifact whose top level repeats the objects of two bodies of different namespaces: each is judged with its own body', () => {
+    const artifact = additive();
+    // Anti-vacuity: a top-level object the manifest's namespace does not prefix.
+    expect(artifact.manifest?.namespace).toBe('svc');
+    expect(artifact.objects.map((o) => o.name)).toContain('crm_account');
+    expect(refusalOf(artifact)).toBeNull();
+  });
+
+  it('refuses a top-level object that no body declares when the manifest\'s namespace does not prefix it: the load path registers it under the manifest id', () => {
+    const artifact = additive();
+    const r = refusalOf({ ...artifact, objects: [...artifact.objects, objectOf('zzz_orphan')] });
+    expect(r, 'refused').not.toBeNull();
+    expect(r!.code).toBe('STACK_NAMESPACE_PREFIX_INVALID');
+    expect(r!.status).toBe(422);
+    expect(r!.issues).toEqual([
+      "Top-level objects[2], which no package body declares, is registered under package 'com.example.svc': " +
+        "Object 'zzz_orphan' is missing the package namespace prefix. Rename it to 'svc_zzz_orphan' (namespace = 'svc').",
+    ]);
+    // …and one the manifest's namespace prefixes is accepted.
+    expect(refusalOf({ ...artifact, objects: [...artifact.objects, objectOf('svc_orphan')] })).toBeNull();
+  });
+
+  it('refuses a body object its own body\'s namespace does not prefix, located at the body, though another body\'s namespace or the manifest\'s would', () => {
+    const artifact = suite();
+    const packages = artifact.packages!.map((entry, j) =>
+      (j === 0 ? { ...entry, manifest: { ...entry.manifest, objects: [...(entry.manifest.objects ?? []), objectOf('svc_stray')] } } : entry));
+    const r = refusalOf({ ...artifact, packages });
+    expect(r?.code).toBe('STACK_NAMESPACE_PREFIX_INVALID');
+    expect(r?.status).toBe(422);
+    expect(r?.issues).toEqual([
+      "Package 'com.example.crm' (packages[0].manifest.objects[1]): " +
+        "Object 'svc_stray' is missing the package namespace prefix. Rename it to 'crm_svc_stray' (namespace = 'crm').",
+    ]);
+  });
+
+  it('control: a stack without packages[] judges every object against its own namespace, with the rule\'s own sentence unchanged', () => {
+    const r = refusalOf({ manifest: pkg('com.example.svc', 'module', 'svc'), objects: [objectOf('svc_case'), objectOf('crm_account')] });
+    expect(r?.code).toBe('STACK_NAMESPACE_PREFIX_INVALID');
+    expect(r?.status).toBe(422);
+    expect(r?.issues).toEqual([
+      "Object 'crm_account' is missing the package namespace prefix. Rename it to 'svc_crm_account' (namespace = 'svc').",
+    ]);
+    expect(r?.message).toBe(
+      'defineStack namespace-prefix validation failed (1 issue):\n\n' +
+        "  ✗ Object 'crm_account' is missing the package namespace prefix. Rename it to 'svc_crm_account' (namespace = 'svc')." +
+        '\n\nEvery object.name must be `${manifest.namespace}_${shortName}`. This is the only supported writing style — ' +
+        'the platform does not provide ns() helpers or factory wrappers.',
+    );
+  });
+});
+
 // ── ADR-0087 D2 conversion notices reach the author ─────────────────────────
 //
 // Moved to `stack-conversion-notices.test.ts` with #23543 F5-http: the block
