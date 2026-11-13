@@ -433,13 +433,15 @@ export async function judgeRuntimeAuthoringRules(
     const listRegisteredCollection = (singularType: string, pluralType: string): unknown[] => {
         try {
             if (typeof this.engine.registry?.listItems !== 'function') return [];
+            // Keyed on the singular, so the plural retry below narrows too.
+            const narrow = extensionWrite !== undefined && singularType === 'object' ? extensionWrite : undefined;
             const list = (type: string): unknown[] => {
                 const items = [...this.engine.registry.listItems(type)];
-                if (extensionWrite === undefined || (type !== 'object' && type !== 'objects')) return items;
+                if (narrow === undefined) return items;
                 return withTargetFoldedWithout(
                     items,
-                    [...this.engine.registry.listItems(type, undefined, extensionWrite.options)],
-                    extensionWrite.target,
+                    [...this.engine.registry.listItems(type, undefined, narrow.options)],
+                    narrow.target,
                 );
             };
             const items = list(singularType);
