@@ -1586,6 +1586,16 @@ export function markerMatches(marker, text) {
  * one file over instead. And a heading AND a sigil (`## 🚨 Release:`) is named
  * by no form — no live line has shown it; add it WITH its fixture when one does.
  *
+ * ⛔ The sigil run is spelled UNROLLED — one sigil, its marks, then any further
+ * `blanks + sigil + marks` groups — and never as a repeated group that both
+ * starts with a sigil and may swallow the next one, `(?:S[S…]*[ \t]*)+` (#32991).
+ * That nested spelling reads the same lines, but a line that is a long symbol
+ * run with no word after it has 2^n ways to split, and V8 tries every one before
+ * it says no. Measured on the live board 2026-11-13: one comment on #32929
+ * carries four rules drawn as 40 `─` each, the census pinned a CPU on the first
+ * of them, and the live sweep was cancelled at the job's 15-minute cap on three
+ * runs in a row with nothing printed. The self-test times that line.
+ *
  * Ordered MOST SPECIFIC FIRST: the form a line is named by is the first that
  * matches it, so `## __Release:__` is a heading rather than an emphasis, and
  * `## Claim + dispatch` is `heading-bare` rather than `heading` only because
@@ -1633,7 +1643,7 @@ export const OWNERSHIP_MARKER_NEAR_MISS_FORMS = Object.freeze([
     id: 'leading-sigil',
     what: 'the directive led by a SIGIL — an emoji or symbol run before the word, which the shared stripper does not remove (it strips decoration, ⛔ never a sigil)',
     example: '🚨 **Release:** session `session_01JbZnqu8bt6YqfJsr9vaFb3` · 因:本卡已由 `os-litant` 在先认领,本席晚了 13 分钟 · 去向:让先到者',
-    re: /^[ \t]*>?[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(?:[\p{So}\p{Sm}\p{Sk}\p{Sc}][\p{So}\p{Sm}\p{Sk}\p{Sc}\p{Mn}\p{Me}\p{Cf}]*[ \t]*)+[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[:：]/iu,
+    re: /^[ \t]*>?[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?[\p{So}\p{Sm}\p{Sk}\p{Sc}][\p{So}\p{Sm}\p{Sk}\p{Sc}\p{Mn}\p{Me}\p{Cf}]*(?:[ \t]+[\p{So}\p{Sm}\p{Sk}\p{Sc}][\p{So}\p{Sm}\p{Sk}\p{Sc}\p{Mn}\p{Me}\p{Cf}]*)*[ \t]*[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[:：]/iu,
   }),
   Object.freeze({
     id: 'heading-bare',
@@ -36473,6 +36483,16 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY68, '#18829 ordering: the form sits between `separator` and the two #18831 additions', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).slice(4, 7).join(','), 'separator,leading-sigil,heading-bare');
   b(BATTERY68, '#18829 ordering: …and steals no older form\'s fixture — every earlier member is still named by ITSELF', OWNERSHIP_MARKER_NEAR_MISS_FORMS.slice(0, 5).every((f) => miss68(f.example).form === f.id), true);
   b(BATTERY68, '#18829 boundary: a heading AND a sigil is named by no form — unseen on any thread read, left unnamed rather than guessed', ownershipMarkerNearMisses(rows68('## 🚨 Release: x')).length, 0);
+  // #32991 — a symbol run with no word after it must be refused in linear
+  // time. The 40-`─` rule is the line measured on #32929 (comment 6840027098)
+  // that hung the live sweep; the bound is generous on purpose, because the
+  // nested spelling took minutes on that line and the unrolled one takes
+  // under a millisecond.
+  const RULE_32929 = '─'.repeat(40);
+  const timed32991 = (body) => { const t = Date.now(); const n = ownershipMarkerNearMisses(rows68(body)).length; return { n, ms: Date.now() - t }; };
+  const rule32991 = timed32991([RULE_32929, `> ${'`'.repeat(40)}`, `- ${'⚠️ '.repeat(40)}`, `${'═'.repeat(4000)}`].join('\n'));
+  b(BATTERY68, '#32991 ⭐ a long symbol run with no word after it (the 40-`─` rule on #32929) is refused in linear time — the census named nothing and took under a second', [rule32991.n, rule32991.ms < 1000].join(','), '0,true');
+  b(BATTERY68, '#32991 control: …and a sigil run of the same length IN FRONT of the word is still named `leading-sigil`', miss68(`${'⚠️ '.repeat(40)}Release: x`).form, 'leading-sigil');
 
   // SILENCE CONTROLS — a census that names prose is a census nobody reads, and
   // every one of these is a line MEASURED on the open board.
