@@ -508,7 +508,7 @@
         {
           "clause": "Studio chrome tells the truth: the item header's 'Draft · N unpublished' line and the numbered pill on the Changes button while pending, cleared after publish",
           "oracle": "screenshot",
-          "verify": "for a draft staged in a writable package (an env-wide draft is counted in no package scope, so it shows no pill): the draft line and the pill visible pre-publish, both gone post-publish and after a reload. A publish made outside Studio (the REST publish of steps[3]) shows in an open Studio tab without a reload: at once on switching back to the tab, or within the poll interval while the tab stays visible (preview/usePendingDrafts.ts#PENDING_DRAFTS_POLL_MS); Studio's own 'Publish all' clears them at once (QA run #24604) (the audit found this model 'reads consistently everywhere')",
+          "verify": "for a draft staged in a writable package (an env-wide draft is counted in no package scope, so it shows no pill): the draft line and the pill visible pre-publish, both gone post-publish and after a reload. A publish made outside Studio (the REST publish of steps[3]) shows in an open Studio tab without a reload: at once on switching back to the tab, or within the poll interval while the tab stays visible (ui/packages/app-shell/src/preview/usePendingDrafts.ts#PENDING_DRAFTS_POLL_MS); Studio's own 'Publish all' clears them at once (QA run #24604) (the audit found this model 'reads consistently everywhere')",
           "evidence": "before/after Studio screenshots"
         },
         {
