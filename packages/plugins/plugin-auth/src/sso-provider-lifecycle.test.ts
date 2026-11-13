@@ -1017,7 +1017,7 @@ describe('a registered provider is edited in place, without unlinking anyone', (
       expect(action.target).toBe('/api/v1/auth/admin/sso/update-provider');
       expect(action.visible).toMatchObject({ source: 'current_user.isPlatformAdmin == true' });
     }
-    expect(saml.params.map((p: any) => p.name)).toEqual(['providerId', 'issuer', 'entryPoint', 'cert', 'keepCurrentCert']);
+    expect(saml.params.map((p: any) => p.name)).toEqual(['providerId', 'issuer', 'entryPoint', 'cert', 'keepCurrentCert', 'logoutUrl']);
     expect(oidc.params.map((p: any) => p.name)).toEqual(['providerId', 'clientId', 'clientSecret', 'scopes']);
     const secret = oidc.params.find((p: any) => p.name === 'clientSecret');
     expect(secret.type).toBe('password');

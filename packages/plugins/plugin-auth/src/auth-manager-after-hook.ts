@@ -232,7 +232,7 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // Ruling record 6866334319: an OIDC provider saved with "sign out of the
   // company sign-in too" on keeps the end_session_endpoint its before-hook
   // read (`sso-sign-out-of-idp.ts`).
-  await this.settleSsoSignOutOfIdp(ctx);
+  if (ctx?.path === '/sso/register' || ctx?.path === '/sso/update-provider') await this.settleSsoSignOutOfIdp(ctx);
 
   // ── ADR-0069 D2: account lockout (counter) ──────────────────
   // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
