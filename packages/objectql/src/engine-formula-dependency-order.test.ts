@@ -28,6 +28,7 @@
 import { describe, expect, it } from 'vitest';
 import { formulaCycleMessage } from '@objectstack/formula';
 import { ObjectQL, evaluateFormulaField } from './engine.js';
+import { formulaReadsReference } from './engine-reference-name-visible.js';
 
 type Rec = Record<string, unknown>;
 
@@ -289,5 +290,25 @@ describe('#33100 — a cycle of formulas reads null, names the cycle, and does n
 
     expect(created.f_g).toBeNull();
     expect(String(faults('x_guarded', 'f_g')[0]?.meta?.error)).toContain(formulaCycleMessage('f_g', ['f_g']));
+  });
+});
+
+describe('#33100 — a gate admitting a formula judges the whole plan its read runs', () => {
+  const fields = {
+    city: { name: 'city', type: 'text' },
+    account: { name: 'account', type: 'lookup', reference: 'x_account' },
+    via: formula('via', 'record.account.name'),
+    heading: formula('heading', 'record.via + " / " + record.city'),
+    plain: formula('plain', 'record.city'),
+    blank: { name: 'blank', label: 'blank', type: 'formula' },
+  };
+
+  it('a formula is judged with every formula it reads', () => {
+    expect(formulaReadsReference('heading', fields.heading, fields)).toBe(true);
+    expect(formulaReadsReference('plain', fields.plain, fields)).toBe(false);
+  });
+
+  it('a formula with nothing to plan answers as before: not admitted', () => {
+    expect(formulaReadsReference('blank', fields.blank, fields)).toBe(true);
   });
 });
