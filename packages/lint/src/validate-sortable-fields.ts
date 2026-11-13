@@ -294,6 +294,7 @@ import {
 import { walkPageComponents } from './page-walk.js';
 import { LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, columnSummaryRefusal } from './validate-list-view-field-refs.js';
 import { PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED } from './validate-page-field-bindings.js';
+import type { UserTextParams } from './finding-user-text.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
@@ -340,6 +341,14 @@ export interface SortableFieldFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's user sentence interpolates
+   * (`validate-sortable-fields.user-text.ts`): set on `sort-field-unprovisioned`,
+   * the list-view advisory the publish door returns. The errors carry none, and
+   * so does the page-sort `page-field-unprovisioned` warning: that id's
+   * sentences belong to `validate-page-field-bindings.ts`, its owner.
+   */
+  userTextParams?: UserTextParams;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -487,6 +496,7 @@ export function checkSortDeclaration(
           rule: SORT_FIELD_UNPROVISIONED,
           where,
           path: `${path}${key.at}`,
+          userTextParams: { object: objectName, field: name },
           // [#22161] One verdict sentence: the shared short anchor clause and
           // this axis' consequence. The measured byte-identical reading and why
           // no door refuses it are the id's `os explain` entry.

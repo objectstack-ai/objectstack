@@ -47,6 +47,7 @@
 
 import { parseAutonumberFormat, referencedFields, resolveAutonumberFormat } from '@objectstack/spec/data';
 import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
+import type { UserTextParams } from './finding-user-text.js';
 
 export interface AutonumberLintFinding {
   where: string;
@@ -54,6 +55,12 @@ export interface AutonumberLintFinding {
   hint: string;
   rule: string;
   severity: 'error' | 'warning';
+  /**
+   * The names the finding's user sentence interpolates
+   * (`lint-autonumber-formats.user-text.ts`), set on the two advisory ids the
+   * object publish door returns. The errors carry none.
+   */
+  userTextParams?: UserTextParams;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -115,6 +122,12 @@ export function lintAutonumberFormats(stack: AnyRec): AutonumberLintFinding[] {
               : `Date tokens are case-sensitive and exact: {YYYY} {YY} {MM} {DD} {YYYYMMDD} (no spaces/punctuation inside). For a field value use {field_name}.`,
             rule: AUTONUMBER_LITERAL_TOKEN,
             severity: 'warning',
+            userTextParams: {
+              object: objectName,
+              field: name,
+              token: tok,
+              kind: isExtraSeq ? 'second-counter' : 'unknown-token',
+            },
           });
         }
       }
@@ -146,6 +159,7 @@ export function lintAutonumberFormats(stack: AnyRec): AutonumberLintFinding[] {
             hint: `Mark '${ref}' as \`required: true\` so it is always set before the record number is rendered.`,
             rule: AUTONUMBER_OPTIONAL_FIELD,
             severity: 'warning',
+            userTextParams: { object: objectName, field: name, ref },
           });
         }
       }
