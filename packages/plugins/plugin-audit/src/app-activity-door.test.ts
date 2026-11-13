@@ -87,6 +87,25 @@ describe('the activity door writes the actor, organization and origin the platfo
     expect(options.context).toEqual({ isSystem: true, tenantId: 'org_acme' });
   });
 
+  it('writes the entry, and reads its actor, under the transaction handle it is given', async () => {
+    const { engine, inserts } = fakeEngine(columns);
+    const read: unknown[] = [];
+    const writer = createAppActivityWriter({
+      getEngine: () => engine as any,
+      getActorSnapshot: () => async (scope: any) => {
+        read.push(scope.context);
+        return { name: 'Ann Lee', avatarUrl: null };
+      },
+    });
+    await writer.appendAppActivity(
+      entry,
+      { actorId: 'usr_ann', organizationId: 'org_acme', origin: 'p/hook:h' },
+      { transaction: 'trx_1' },
+    );
+    expect(inserts[0].options.context).toEqual({ isSystem: true, tenantId: 'org_acme', transaction: 'trx_1' });
+    expect(read).toEqual([{ isSystem: true, tenantId: 'org_acme', transaction: 'trx_1' }]);
+  });
+
   it('writes an entry with no user with an empty actor', async () => {
     const { engine, inserts } = fakeEngine(columns);
     const writer = createAppActivityWriter({ getEngine: () => engine as any, getActorSnapshot: () => snapshot });

@@ -77,6 +77,17 @@ export interface AppActivityStamp {
   origin: string;
 }
 
+/** How one entry is written. */
+export interface AppActivityWriteOptions {
+  /**
+   * The transaction handle the entry is written under, so it commits or rolls
+   * back with the write that runs the body: given when that write carries a
+   * handle the engine's ambient transaction does not hold. Without it, the
+   * entry joins the engine's ambient transaction, or stands alone.
+   */
+  transaction?: unknown;
+}
+
 /** The writer's dependencies, resolved at each call. */
 export interface AppActivityWriterDeps {
   getEngine: () => IDataEngine | undefined;
@@ -139,7 +150,11 @@ export function createAppActivityWriter(deps: AppActivityWriterDeps) {
   let probe: ((object: string, field: string) => boolean) | undefined;
   let probedEngine: IDataEngine | undefined;
   return {
-    async appendAppActivity(entry: AppActivityEntry, stamp: AppActivityStamp): Promise<{ id: string }> {
+    async appendAppActivity(
+      entry: AppActivityEntry,
+      stamp: AppActivityStamp,
+      options?: AppActivityWriteOptions,
+    ): Promise<{ id: string }> {
       const engine = deps.getEngine();
       if (!engine) throw new Error('The activity feed is not available: no data engine is registered.');
       if (probe === undefined || probedEngine !== engine) {
@@ -164,7 +179,11 @@ export function createAppActivityWriter(deps: AppActivityWriterDeps) {
         );
       }
 
-      const context = { isSystem: true, ...(stamp.organizationId ? { tenantId: stamp.organizationId } : {}) };
+      const context = {
+        isSystem: true,
+        ...(stamp.organizationId ? { tenantId: stamp.organizationId } : {}),
+        ...(options?.transaction != null ? { transaction: options.transaction } : {}),
+      };
       const snapshotOf = deps.getActorSnapshot();
       const actor: AuditActorSnapshot =
         stamp.actorId && snapshotOf

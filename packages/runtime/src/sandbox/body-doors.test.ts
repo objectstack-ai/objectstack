@@ -16,7 +16,7 @@ import {
   BODY_MAIL_ADDRESS_LIST_LIMIT,
   BODY_MAIL_RECIPIENT_LIMIT,
 } from '@objectstack/spec/data';
-import { buildBodyDoors, appMailHourlyLimit, callerScopeOf, DEFAULT_APP_MAIL_HOURLY_LIMIT, type BodyDoorCaller } from './body-doors.js';
+import { buildBodyDoors, appMailHourlyLimit, callerScopeOf, DEFAULT_APP_MAIL_HOURLY_LIMIT, type BodyDoorCaller, type BodyDoorTransaction } from './body-doors.js';
 import { APP_AUTOMATION_ELEVATION } from '@objectstack/core';
 
 const ANN: BodyDoorCaller = { userId: 'usr_ann', organizationId: 'org_acme', readContext: { userId: 'usr_ann', tenantId: 'org_acme' } };
@@ -26,7 +26,7 @@ function world(opts: { readable?: string[]; sentLastHour?: number; from?: unknow
   const reads: Array<{ object: string; context: unknown }> = [];
   const counts: Array<{ where: unknown }> = [];
   const sent: any[] = [];
-  const appended: Array<{ entry: any; stamp: any }> = [];
+  const appended: Array<{ entry: any; stamp: any; options?: any }> = [];
   const ql = {
     async findOne(object: string, query: any, options: any) {
       const id = query?.where?.id;
@@ -48,8 +48,8 @@ function world(opts: { readable?: string[]; sentLastHour?: number; from?: unknow
     },
   };
   const audit = {
-    async appendAppActivity(entry: any, stamp: any) {
-      appended.push({ entry, stamp });
+    async appendAppActivity(entry: any, stamp: any, options?: any) {
+      appended.push({ entry, stamp, ...(options !== undefined ? { options } : {}) });
       return { id: 'act_1' };
     },
   };
@@ -61,13 +61,19 @@ function world(opts: { readable?: string[]; sentLastHour?: number; from?: unknow
   return { ql, getService, reads, counts, sent, appended };
 }
 
-function doors(w: ReturnType<typeof world>, caller: BodyDoorCaller = ANN) {
+function doors(
+  w: ReturnType<typeof world>,
+  caller: BodyDoorCaller = ANN,
+  openTransaction?: () => BodyDoorTransaction,
+  kind: 'hook' | 'action' | 'job' = 'action',
+) {
   return buildBodyDoors({
     ql: w.ql,
     getService: w.getService,
     packageId: 'com.acme.crm',
-    origin: { kind: 'action', name: 'send_quote' },
+    origin: { kind, name: 'send_quote' },
     caller,
+    ...(openTransaction ? { openTransaction } : {}),
   });
 }
 
@@ -217,6 +223,54 @@ describe('ctx.activity.append adds an entry stamped with the caller and the body
 
   it('answers NOT_IMPLEMENTED where the deployment has no activity feed', async () => {
     await expect(doors(world({ noAudit: true })).activity.append(entry)).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED' });
+  });
+});
+
+describe('a hook body sends no mail', () => {
+  it('refuses mail from a hook body, with or without a transaction, and sends nothing', async () => {
+    for (const kind of ['none', 'joined', 'separate'] as const) {
+      const w = world();
+      await expect(doors(w, ANN, () => ({ kind }), 'hook').email.send(message)).rejects.toMatchObject({
+        code: 'PERMISSION_DENIED',
+        statusCode: 403,
+        message: expect.stringContaining('ctx.email.send cannot be called from a hook body'),
+      });
+      expect(w.sent).toHaveLength(0);
+      expect(w.counts).toHaveLength(0);
+    }
+  });
+
+  it('adds a hook body\'s timeline entry', async () => {
+    const w = world();
+    await expect(doors(w, ANN, undefined, 'hook').activity.append(entry)).resolves.toEqual({ id: 'act_1' });
+  });
+});
+
+describe('a door and the transaction of the write that runs the body', () => {
+  for (const kind of ['joined', 'separate'] as const) {
+    it(`refuses mail from an action inside a transaction (${kind}), and sends nothing`, async () => {
+      const w = world();
+      await expect(doors(w, ANN, () => ({ kind, handle: 'trx_1' })).email.send(message)).rejects.toMatchObject({
+        code: 'RESOURCE_CONFLICT',
+        statusCode: 409,
+      });
+      expect(w.sent).toHaveLength(0);
+      expect(w.counts).toHaveLength(0);
+    });
+  }
+
+  it('writes a timeline entry in the transaction the write joins, handing the writer no handle', async () => {
+    const w = world();
+    await expect(doors(w, ANN, () => ({ kind: 'joined' })).activity.append(entry)).resolves.toEqual({ id: 'act_1' });
+    expect(w.appended[0]).not.toHaveProperty('options');
+  });
+
+  it('writes a timeline entry under the handle the write carries, so it commits or rolls back with it', async () => {
+    const w = world();
+    await expect(doors(w, ANN, () => ({ kind: 'separate', handle: 'trx_1' })).activity.append(entry)).resolves.toEqual({
+      id: 'act_1',
+    });
+    expect(w.appended[0].options).toEqual({ transaction: 'trx_1' });
   });
 });
 

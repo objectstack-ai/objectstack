@@ -17,6 +17,11 @@ import { requiredOneOf } from '../shared/refinement-projection';
  * timeline entry and the origin naming the body that wrote it. A key outside
  * the shape is refused, never dropped, so a body that names one of those is
  * told at the call.
+ *
+ * A message cannot be taken back, so mail is sent from an action or a job
+ * body, never from a hook body; mail on a record change goes through an
+ * action, a job or a flow. A timeline entry is written with the write that
+ * runs the body, and commits or rolls back with it.
  */
 
 /** The most recipients one `ctx.email.send` call may name, across `to`, `cc` and `bcc`. */
@@ -69,7 +74,8 @@ export const BodyDoorRecordRefSchema = z
 export type BodyDoorRecordRef = z.input<typeof BodyDoorRecordRefSchema>;
 
 /**
- * `ctx.email.send(input)` — a message a body hands to the mail service.
+ * `ctx.email.send(input)` — a message an action or a job body hands to the
+ * mail service. A hook body cannot send mail.
  *
  * The sender is the deployment's configured sender, and the door names the
  * calling user beside the organization in its display name; a reply goes to
@@ -101,7 +107,7 @@ export const BodyMailSendInputSchema = z
     path: ['text'],
   })
   .describe(
-    'ctx.email.send input: a message a script body hands to the mail service. ' +
+    'ctx.email.send input: a message an action or a job body hands to the mail service; a hook body cannot send mail. ' +
       `At most ${BODY_MAIL_RECIPIENT_LIMIT} recipients across to, cc and bcc together; ` +
       `each of to, cc and bcc at most ${BODY_MAIL_ADDRESS_LIST_LIMIT} characters as recorded ` +
       '("Name" <address>, joined by ", "); ' +
@@ -111,7 +117,7 @@ export type BodyMailSendInput = z.input<typeof BodyMailSendInputSchema>;
 
 /**
  * `ctx.activity.append(input)` — one entry a body adds to a record's activity
- * timeline.
+ * timeline. The entry commits or rolls back with the write that runs the body.
  *
  * The door stamps the actor (the calling user), the organization, the time and
  * the origin (the package and the body that wrote it). `type` is the open
@@ -137,7 +143,7 @@ export const BodyActivityAppendInputSchema = z
   })
   .strict()
   .describe(
-    'ctx.activity.append input: one entry a script body adds to a record timeline. ' +
+    'ctx.activity.append input: one entry a script body adds to a record timeline; it commits or rolls back with the write that runs the body. ' +
       `metadata is at most ${BODY_ACTIVITY_METADATA_LIMIT} characters as JSON.`,
   );
 export type BodyActivityAppendInput = z.input<typeof BodyActivityAppendInputSchema>;

@@ -31,15 +31,19 @@
  * per message across `to`, `cc` and `bcc` (each slot by the schema, the sum
  * here), each slot and a `replyTo` within what the mail log's columns hold as
  * recorded; no send while the organization's mail log already records
- * {@link appMailHourlyLimit} messages in the last hour; and no send at all
- * unless the mail log records it (`requireLogRow`). The hourly count is read
+ * {@link appMailHourlyLimit} messages in the last hour; no send at all
+ * unless the mail log records it (`requireLogRow`). A message cannot be taken
+ * back, so none is sent from a hook body, whose write may still roll back, nor
+ * from an action or a job running inside a transaction. The hourly count is read
  * before the send and is not held across it, so callers racing the last free
  * slot can each pass it: the limit bounds a body's volume, not an exact count.
  *
  * Timeline: the entry is written by the activity feed's owner
  * (`appendAppActivity` on the `audit` service, `@objectstack/plugin-audit`),
  * which holds the ledger's own rules (no platform-only type or metadata key,
- * no excluded or append-only object) and writes the row as the platform.
+ * no excluded or append-only object) and writes the row as the platform. The
+ * entry is written in the transaction of the write that runs the body, and
+ * commits or rolls back with it.
  */
 
 import {
@@ -81,6 +85,20 @@ export interface BodyDoorOptions {
   packageId: string;
   origin: { kind: 'hook' | 'action' | 'job'; name: string };
   caller: BodyDoorCaller;
+  /**
+   * The transaction the write that runs this body stands in, read at call
+   * time: `kind` as `openTransactionKind` (`@objectstack/objectql`) answers it,
+   * and, for `'separate'`, the `handle` a write beside it carries to join it.
+   * Absent, `{ kind: 'none' }`.
+   */
+  openTransaction?: () => BodyDoorTransaction;
+}
+
+/** Where the write that runs a body stands with respect to a transaction. */
+export interface BodyDoorTransaction {
+  kind: 'none' | 'joined' | 'separate';
+  /** The handle a write beside it carries to join it; given for `'separate'`. */
+  handle?: unknown;
 }
 
 /** The host seams installed on the body's `ctx`. */
@@ -110,11 +128,18 @@ export function appMailHourlyLimit(env: Record<string, string | undefined> = pro
   return n;
 }
 
-type DoorCode = 'VALIDATION_ERROR' | 'RECORD_NOT_FOUND' | 'RATE_LIMIT_EXCEEDED' | 'NOT_IMPLEMENTED' | 'PERMISSION_DENIED';
+type DoorCode =
+  | 'VALIDATION_ERROR'
+  | 'RECORD_NOT_FOUND'
+  | 'RATE_LIMIT_EXCEEDED'
+  | 'NOT_IMPLEMENTED'
+  | 'PERMISSION_DENIED'
+  | 'RESOURCE_CONFLICT';
 const STATUS: Record<DoorCode, number> = {
   VALIDATION_ERROR: 400,
   PERMISSION_DENIED: 403,
   RECORD_NOT_FOUND: 404,
+  RESOURCE_CONFLICT: 409,
   RATE_LIMIT_EXCEEDED: 429,
   NOT_IMPLEMENTED: 501,
 };
@@ -323,10 +348,28 @@ async function refuseOverHourlyLimit(ql: any, caller: BodyDoorCaller): Promise<v
 export function buildBodyDoors(opts: BodyDoorOptions): BodyDoors {
   const { ql, getService, caller } = opts;
   const origin = `${opts.packageId}/${opts.origin.kind}:${opts.origin.name}`;
+  const transaction = (): BodyDoorTransaction => opts.openTransaction?.() ?? { kind: 'none' };
 
   return {
     email: {
       async send(input: unknown) {
+        // A message cannot be taken back, so it is never sent from a hook
+        // body, whose write may still roll back, and never from an action or
+        // a job running inside a transaction.
+        if (opts.origin.kind === 'hook') {
+          throw doorError(
+            'PERMISSION_DENIED',
+            'ctx.email.send cannot be called from a hook body: a message cannot be taken back if the write ' +
+              'that runs the hook rolls back. Send mail on a record change from an action, a job or a flow.',
+          );
+        }
+        if (transaction().kind !== 'none') {
+          throw doorError(
+            'RESOURCE_CONFLICT',
+            `ctx.email.send cannot be called while this ${opts.origin.kind} runs inside a transaction: ` +
+              'a message cannot be taken back if that transaction rolls back.',
+          );
+        }
         const message = parseInput<BodyMailSendInput>(BodyMailSendInputSchema as any, input, 'ctx.email.send');
         refuseOverRecordedLimits(message);
         const email = service<IEmailService>(getService, 'email');
@@ -366,17 +409,22 @@ export function buildBodyDoors(opts: BodyDoorOptions): BodyDoors {
             );
           }
         }
-        const audit = service<{ appendAppActivity?: (e: unknown, s: unknown) => Promise<{ id: string }> }>(getService, 'audit');
+        const audit = service<{
+          appendAppActivity?: (e: unknown, s: unknown, o?: { transaction?: unknown }) => Promise<{ id: string }>;
+        }>(getService, 'audit');
         if (!audit || typeof audit.appendAppActivity !== 'function') {
           throw doorError('NOT_IMPLEMENTED', 'ctx.activity.append: this deployment has no activity feed.');
         }
         await requireReadable(ql, { object: entry.object, id: entry.recordId }, caller, 'ctx.activity.append');
         if (entry.source) await requireReadable(ql, entry.source, caller, 'ctx.activity.append');
-        return audit.appendAppActivity(entry, {
-          actorId: caller.userId,
-          organizationId: caller.organizationId,
-          origin,
-        });
+        // The entry is written in the transaction of the write that runs the
+        // body, and commits or rolls back with it: the engine's ambient one
+        // joins by itself, and a handle the write carries is passed through.
+        const tx = transaction();
+        const stamp = { actorId: caller.userId, organizationId: caller.organizationId, origin };
+        return tx.kind === 'separate' && tx.handle != null
+          ? audit.appendAppActivity(entry, stamp, { transaction: tx.handle })
+          : audit.appendAppActivity(entry, stamp);
       },
     },
   };

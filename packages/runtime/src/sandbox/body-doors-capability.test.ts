@@ -120,8 +120,8 @@ describe('the door capabilities gate ctx.email.send and ctx.activity.append', ()
   });
 });
 
-describe('a hook body\'s mail and timeline entry carry the user whose write fired it', () => {
-  it('stamps the session\'s user and organization, and the hook as the origin', async () => {
+describe('a hook body\'s timeline entry carries the user whose write fired it, and a hook body sends no mail', () => {
+  it('stamps the session\'s user and organization, and the hook as the origin, and refuses the mail', async () => {
     const sent: any[] = [];
     const appended: any[] = [];
     const ql = {
@@ -156,21 +156,24 @@ describe('a hook body\'s mail and timeline entry carry the user whose write fire
       body: {
         language: 'js',
         source:
-          "await ctx.email.send({ to: 'pat@example.test', subject: 'Welcome', text: 'Hello', related: { object: 'crm_contact', id: 'c1' } });" +
-          "await ctx.activity.append({ object: 'crm_contact', recordId: 'c1', type: 'completed', summary: 'Welcome mail' });",
+          "await ctx.activity.append({ object: 'crm_contact', recordId: 'c1', type: 'completed', summary: 'Welcome mail' });" +
+          "await ctx.email.send({ to: 'pat@example.test', subject: 'Welcome', text: 'Hello', related: { object: 'crm_contact', id: 'c1' } });",
         capabilities: ['email.send', 'activity.append'],
       },
     } as any);
-    await fn!({
+    const err: any = await fn!({
       object: 'crm_contact',
       event: 'afterInsert',
       input: {},
       result: { id: 'c1' },
       session: { userId: 'usr_ann', organizationId: 'org_acme' },
-    } as any);
+    } as any).then(
+      () => null,
+      (x: unknown) => x,
+    );
 
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ sentBy: 'usr_ann', organizationId: 'org_acme', relatedObject: 'crm_contact', relatedId: 'c1' });
+    expect(String(err?.innerMessage ?? err?.message ?? err)).toContain('ctx.email.send cannot be called from a hook body');
+    expect(sent).toHaveLength(0);
     expect(appended).toEqual([
       {
         entry: { object: 'crm_contact', recordId: 'c1', type: 'completed', summary: 'Welcome mail' },

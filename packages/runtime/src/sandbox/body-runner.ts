@@ -78,7 +78,7 @@ import { mapDataError } from '@objectstack/types';
 import { resolveHookRefusal, type HookRefusalI18nSource } from './hook-refusal-catalogue.js';
 import { isRelayedSandboxRefusal } from './quickjs-runner.js';
 import { buildBodyDoors, callerScopeOf, type BodyDoorCaller } from './body-doors.js';
-import { deriveHookApi, seedHookUnreadMembership, seedHookUserGrants } from '@objectstack/objectql';
+import { deriveHookApi, openTransactionKind, seedHookUnreadMembership, seedHookUserGrants } from '@objectstack/objectql';
 
 interface FactoryOptions {
   ql: any;
@@ -493,7 +493,13 @@ export function hookBodyRunnerFactory(
         buildBodyLogSurface(opts, { kind: 'hook', name: hook.name }),
         buildTitleSurface(engineCtx, opts.ql, { kind: 'hook', name: hook.name }),
       );
-      installBodyDoors(sandboxCtx, opts, { kind: 'hook', name: hook.name }, hookDoorCaller(engineCtx, hook.name));
+      installBodyDoors(
+        sandboxCtx,
+        opts,
+        { kind: 'hook', name: hook.name },
+        hookDoorCaller(engineCtx, hook.name, opts.logger),
+        engineCtx?.transaction,
+      );
       try {
         opts.logger?.debug?.('[BodyRunner] hook fired', { appId: opts.appId, hook: hook.name });
         const result = await runner.run(body, sandboxCtx, {
@@ -605,7 +611,13 @@ export function actionBodyRunnerFactory(
         opts.ql,
         buildBodyLogSurface(opts, { kind: 'action', name: action.name }),
       );
-      installBodyDoors(sandboxCtx, opts, { kind: 'action', name: action.name }, actionDoorCaller(actionCtx));
+      installBodyDoors(
+        sandboxCtx,
+        opts,
+        { kind: 'action', name: action.name },
+        actionDoorCaller(actionCtx),
+        actionCtx?.executionContext?.transaction,
+      );
       try {
         opts.logger?.debug?.('[BodyRunner] action fired', {
           appId: opts.appId,
@@ -1194,6 +1206,7 @@ function installBodyDoors(
   opts: FactoryOptions,
   origin: { kind: 'hook' | 'action' | 'job'; name: string },
   caller: BodyDoorCaller,
+  threadedTransaction?: unknown,
 ): void {
   const doors = buildBodyDoors({
     ql: opts.ql,
@@ -1201,6 +1214,12 @@ function installBodyDoors(
     packageId: opts.originPackageId ?? opts.appId,
     origin,
     caller,
+    // Read at call time: the transaction the write that runs this body stands
+    // in, the engine's ambient one or the handle the write's context carries.
+    openTransaction: () => {
+      const kind = openTransactionKind(opts.ql, threadedTransaction);
+      return kind === 'separate' ? { kind, handle: threadedTransaction } : { kind };
+    },
   });
   sandboxCtx.email = doors.email;
   sandboxCtx.activity = doors.activity;
@@ -1227,7 +1246,7 @@ function nonEmptyString(value: unknown): string | undefined {
  * context assembled by hand) reads with the session's user and organization
  * and no elevation.
  */
-function hookDoorCaller(engineCtx: any, hookName: string): BodyDoorCaller {
+function hookDoorCaller(engineCtx: any, hookName: string, logger?: FactoryOptions['logger']): BodyDoorCaller {
   const session = engineCtx?.session;
   const userId = nonEmptyString(session?.userId);
   const organizationId = nonEmptyString(session?.organizationId);
@@ -1251,7 +1270,17 @@ function hookDoorCaller(engineCtx: any, hookName: string): BodyDoorCaller {
       });
       try {
         return await seedHookUserGrants(asUser);
-      } catch {
+      } catch (err) {
+        // The hook wrapper's fail-safe for the same step (`installRunAsApi`,
+        // `@objectstack/objectql`): the user's grants could not be read, so the
+        // read runs on the context's own grants and an empty membership set.
+        // It sees less, never more, so a record may answer as not found.
+        logger?.warn?.(
+          `[BodyRunner] hook '${hookName}': the calling user's grants could not be resolved for a door's record read, ` +
+            'so it reads with the triggering context\'s own grants and no membership; a record the user reads through ' +
+            'a permission set may answer as not found',
+          { hook: hookName, error: (err as { message?: unknown } | undefined)?.message },
+        );
         return seedHookUnreadMembership(asUser);
       }
     })());
