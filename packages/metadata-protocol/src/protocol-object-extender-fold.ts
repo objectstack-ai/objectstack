@@ -68,14 +68,18 @@ export function foldObjectExtendersFromRegistry(
         // [#33072] `withoutExtensionsOf`: that one package's `extend`
         // contributions are left out — the runtime authoring gate's view of an
         // `object_extension` write's target as it stands WITHOUT the written
-        // package's stored self, which the write replaces. Undefined for every
-        // other caller, which reaches the same call as before.
-        if (withoutExtensionsOf !== undefined) {
-            return registry.foldObjectExtendersOnto(name, body, { withoutExtensionsOf });
+        // package's stored self, which the write replaces.
+        //
+        // Neither given is the ordinary call, and `onlyExtensionsOf` alone is
+        // the call it always was. Both given are both handed to the registry,
+        // which leaves out a contribution either one leaves out.
+        if (onlyExtensionsOf === undefined && withoutExtensionsOf === undefined) {
+            return registry.foldObjectExtendersOnto(name, body);
         }
-        return onlyExtensionsOf === undefined
-            ? registry.foldObjectExtendersOnto(name, body)
-            : registry.foldObjectExtendersOnto(name, body, { onlyExtensionsOf });
+        return registry.foldObjectExtendersOnto(name, body, {
+            ...(onlyExtensionsOf !== undefined ? { onlyExtensionsOf } : {}),
+            ...(withoutExtensionsOf !== undefined ? { withoutExtensionsOf } : {}),
+        });
     } catch {
         // The fold is a read over in-memory contributors; a failure here
         // must not turn a served schema into a 5xx.

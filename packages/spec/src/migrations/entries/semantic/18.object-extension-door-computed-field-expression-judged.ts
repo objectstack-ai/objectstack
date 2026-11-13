@@ -34,5 +34,8 @@ export const entry: SemanticMigration = {
   acceptanceCriteria:
     'Publish each extension that adds a computed field again: the publish answers 200 with no '
     + '`expression-invalid` issue located at an `objectExtensions[0] · field` site, and a record of the extended '
-    + 'object holds a value in every computed field the extension adds.',
+    + 'object holds a value in every computed field the extension adds. A package-wide draft publish '
+    + '(`publishPackageDrafts`) whose drafts depend on a sibling extension draft is refused, because that '
+    + 'batch\'s pending set carries no extension drafts (#33152); publish the extension first through the '
+    + 'per-item door.',
 };

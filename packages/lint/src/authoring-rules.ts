@@ -833,7 +833,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // and location (`object 'TARGET' · objectExtensions[0] · field 'F'
     // expression`). MEASURED first: 0 first-party `objectExtensions` entries
     // carry a computed field (examples/**, packages/**, HotCRM), so the
-    // crossing refuses nothing the repository ships.
+    // crossing refuses nothing the repository ships. A package-wide draft
+    // publish (`publishPackageDrafts`) whose drafts depend on a sibling
+    // extension draft is refused, because that batch's pending set carries no
+    // extension drafts (#33152); publishing the extension first through the
+    // per-item door works.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page', 'object_extension'],
     run: (stack, ctx) =>

@@ -2271,6 +2271,10 @@ export interface StackExpressionOptions {
    * build locates it. The object walk reads an empty list (the carried
    * objects are the universe the field resolves in, not the subject) and so
    * does every other pass; the function returns after the extension walk.
+   * A package-wide draft publish (`publishPackageDrafts`) whose drafts depend
+   * on a sibling extension draft is refused, because that batch's pending set
+   * carries no extension drafts (#33152); publishing the extension first
+   * through the per-item door works.
    */
   runtimeWriteType?: string;
 }
