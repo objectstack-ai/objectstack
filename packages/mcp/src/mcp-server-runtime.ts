@@ -171,6 +171,13 @@ export function describeServedObject(def: ServedObjectDef): Record<string, unkno
  * at the field-level write gate. The served object carries the read projection
  * only, and the `describe_object` description says so.
  *
+ * ⚠️ Asked of the object as the caller is SERVED it, the only object this
+ * package's two readers hand over: the caller's mask deletes a readable
+ * field's `expression` when it names a field the caller cannot read, so for
+ * that caller the expression arm does not hold and the field is served
+ * `readonly: false` while the engine still computes it. The HTTP twin asks
+ * the declared field instead (the bridge holds the declaration it masks).
+ *
  * The twin is `writeNeverSetsField` in `packages/runtime/src/domains/mcp.ts`.
  */
 function writeNeverSetsField(f: ServedFieldDef | undefined): boolean {

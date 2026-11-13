@@ -606,13 +606,17 @@ async function warnIfSkillListIncomplete(
  * ⛔ never its condition, pattern or transition table: the rule's message is
  * what a refused write answers with, and its expression is server policy.
  *
+ * `declared` is the object `def` was projected from (the caller's mask
+ * applied to it gives `def`): `readonly` is judged on it,
+ * {@link writeNeverSetsField}. Nothing else is read from it.
+ *
  * The twin is `describeServedObject` in `packages/mcp/src/mcp-server-runtime.ts`,
  * which the stdio bridge and the `objectstack://objects/{name}` resource serve
  * (this package does not depend on `@objectstack/mcp`): the transports answer
  * one shape, and the `describe_object` description (`mcp-http-tools.ts`)
  * states it.
  */
-function describeServedObject(def: any): Record<string, unknown> {
+function describeServedObject(def: any, declared: any): Record<string, unknown> {
     return {
         name: def.name,
         label: def.label ?? def.name,
@@ -621,7 +625,12 @@ function describeServedObject(def: any): Record<string, unknown> {
             type: f?.type,
             label: f?.label ?? k,
             required: f?.required ?? false,
-            readonly: writeNeverSetsField(f),
+            // [#32530] Judged on the DECLARED field, never the served one: the
+            // caller's mask deletes a readable field's `expression` when it
+            // names a field they cannot read, and the engine still computes the
+            // field. Only the boolean is read there; the served definition,
+            // without that expression, is what the answer is built from.
+            readonly: writeNeverSetsField(declared?.fields?.[k]),
             system: f?.system === true,
             ...(declaresOptions(f) ? { options: describedOptions(f.options) } : {}),
             ...(f?.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {}),
@@ -650,7 +659,13 @@ function describeServedObject(def: any): Record<string, unknown> {
  * at the field-level write gate. The served object carries the read projection
  * only ({@link servedToCaller}), and the `describe_object` description says so.
  *
- * The twin is `writeNeverSetsField` in `packages/mcp/src/mcp-server-runtime.ts`.
+ * Asked of the DECLARED field ({@link describeServedObject}'s `declared`),
+ * because the caller's mask deletes an `expression` that names a field the
+ * caller cannot read, while the engine still computes the column from it.
+ *
+ * The twin is `writeNeverSetsField` in `packages/mcp/src/mcp-server-runtime.ts`,
+ * which has only the masked object to ask: there the expression arm holds where
+ * the caller is served the expression.
  */
 function writeNeverSetsField(f: any): boolean {
     if (!f || typeof f !== 'object') return false;
@@ -962,10 +977,13 @@ export function buildMcpBridge(
         // object among them) is "not found" here too.
         // [ADR-0106 D1/D5] …as this caller is served it ({@link readObjectForCaller}).
         describeObject: async (name: string) => {
-            const def: any = await readObjectForCaller(name);
+            // {@link readObjectForCaller}'s two steps, kept apart so the
+            // declaration it masks is in hand ([#32530] `readonly`).
+            const declared: any = await readServedObject(name);
+            const def: any = declared ? await servedToCaller(declared) : declared;
             if (!def) return null;
             // [#32435] …each field and rule carrying what a write needs.
-            return describeServedObject(def);
+            return describeServedObject(def, declared);
         },
         // [#28715] The fields `validate_expression` judges a `label()` call
         // against, from the object `describeObject` reads: the served object,

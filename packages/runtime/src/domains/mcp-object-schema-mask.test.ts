@@ -1518,7 +1518,7 @@ describe('[#32530] describe_object serves readonly where a write never stands â€
     let engine: ObjectQL;
     let services: Record<string, any>;
 
-    /** Denied the edit of `locked_note` (it may still read it); every other field is open. */
+    /** Denied the edit of `locked_note` (it may still read it) and any access to `hidden_cost`; every other field is open. */
     const MEMBER = { userId: 'usr_ticket_member', organizationId: 'org_ticket', tenantId: 'org_ticket', positions: [] as string[], permissions: ['mcp_ticket_member'], systemPermissions: [] as string[] };
 
     beforeAll(async () => {
@@ -1555,6 +1555,10 @@ describe('[#32530] describe_object serves readonly where a write never stands â€
                     doubled: { name: 'doubled', type: 'number', label: 'Doubled', expression: 'record.qty * 2' },
                     // Readable, not editable, for the member: the schema says writable.
                     locked_note: { name: 'locked_note', type: 'text', label: 'Locked note' },
+                    // Not readable for the member, and a stored expression over it: the
+                    // member's mask deletes `marked_up.expression`, the engine still computes it.
+                    hidden_cost: { name: 'hidden_cost', type: 'number', label: 'Hidden cost' },
+                    marked_up: { name: 'marked_up', type: 'number', label: 'Marked up', expression: 'record.hidden_cost * 2' },
                 },
             }],
         } as never);
@@ -1563,7 +1567,10 @@ describe('[#32530] describe_object serves readonly where a write never stands â€
         const sets = [
             PermissionSetSchema.parse({
                 name: 'mcp_ticket_member', label: 'Member', objects: { '*': all },
-                fields: { [`${OBJ}.locked_note`]: { readable: true, editable: false } },
+                fields: {
+                    [`${OBJ}.locked_note`]: { readable: true, editable: false },
+                    [`${OBJ}.hidden_cost`]: { readable: false, editable: false },
+                },
             }),
             PermissionSetSchema.parse({ name: 'mcp_ticket_staff', label: 'Staff', objects: { '*': all } }),
         ];
@@ -1646,5 +1653,25 @@ describe('[#32530] describe_object serves readonly where a write never stands â€
         const refused = await rejectionOf(() => bridge.create(OBJ, { title: 'Valve', locked_note: 'x' }));
         // The field-level write gate refuses the field the member may not edit.
         expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    });
+
+    it('a stored expression over a field the caller cannot read is still served readonly: true, and neither the expression nor that field is served', async () => {
+        const { bridge } = await bridgeFor(kernelOver(services), MEMBER);
+        const described: any = await bridge.describeObject(OBJ);
+        expect(readonlyOf(described).marked_up).toBe(true);
+        const text = JSON.stringify(described);
+        expect(described.fields.map((f: any) => f.name)).not.toContain('hidden_cost');
+        expect(text).not.toContain('hidden_cost');
+        expect(text).not.toContain('record.');
+        // Precondition: the member's served object is the masked one: the
+        // expression the declaration carries is not in it.
+        const { dispatcher } = await bridgeFor(kernelOver(services), MEMBER);
+        const meta = await dispatcher.handleMetadata(`/object/${OBJ}`, {
+            request: {}, environmentId: undefined, executionContext: { ...MEMBER },
+        } as any, 'GET');
+        const servedField = meta.response?.body?.data?.item?.fields?.marked_up ?? meta.response?.body?.data?.fields?.marked_up;
+        expect(servedField, 'precondition: the member is served the field').toBeDefined();
+        expect(servedField.expression, 'precondition: the mask deleted the expression').toBeUndefined();
+        expect((engine.getSchema(OBJ) as any).fields.marked_up.expression, 'the declaration still carries it').toBeDefined();
     });
 });
