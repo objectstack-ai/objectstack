@@ -1723,6 +1723,96 @@ describe('composeStacks — at most one App per package, judged on what the comp
   });
 });
 
+describe('defineStack — a packages[] stack is judged per body, and its top level by the residual rule composeStacks reads (ADR-0019 D3 as amended)', () => {
+  // The load path registers each body under its own id, and a top-level app
+  // that no body declares under the stack's manifest id (`unclaimedTopLevel`,
+  // `@objectstack/metadata`). Strict `defineStack` reads a `packages[]` stack
+  // the same way, through the judge `composeStacks` uses for its result.
+  const objectOf = (name: string) => ({ name, label: name, fields: { title: { type: 'text' as const } } });
+  const appOf = (name: string, objectName: string) => ({
+    name,
+    label: name,
+    navigation: [{ id: `nav_${objectName}`, type: 'object' as const, label: objectName, objectName }],
+  });
+  const pkg = (id: string, type: 'app' | 'module') => ({ id, version: '1.0.0', type, name: id, namespace: 'crm' });
+  const sales = () => defineStack({
+    manifest: pkg('com.example.crm', 'app'),
+    objects: [objectOf('crm_account')],
+    apps: [appOf('crm_sales', 'crm_account')],
+  });
+  const service = () => defineStack({
+    manifest: pkg('com.example.crm.service', 'module'),
+    objects: [objectOf('crm_case')],
+    apps: [appOf('crm_service', 'crm_case')],
+  });
+  /** A suite artifact: two bodies with one app each, under the service package's manifest. */
+  const suite = () => composeStacks([sales(), service()], { manifest: 'preserve' });
+
+  type Refusal = { code?: string; status?: number; issues?: readonly string[]; message: string };
+  const refusalOf = (stack: unknown): Refusal | null => {
+    try {
+      defineStack(stack as never);
+      return null;
+    } catch (e) {
+      return e as Refusal;
+    }
+  };
+
+  it('accepts an additive artifact whose top level repeats the apps two different bodies declare: each registers under its own body\'s id', () => {
+    const artifact = suite();
+    // The shape `resolveArtifactCollections` (`@objectstack/runtime`) returns:
+    // every body's collections merged onto the top level beside `packages[]`.
+    const additive = {
+      ...artifact,
+      objects: [objectOf('crm_account'), objectOf('crm_case')],
+      apps: [appOf('crm_sales', 'crm_account'), appOf('crm_service', 'crm_case')],
+    };
+    expect(additive.manifest?.type).toBe('module');
+    expect(refusalOf(additive)).toBeNull();
+  });
+
+  it('refuses a hand-built stack whose top-level app no body declares, which the load path registers under the manifest id beside that id\'s own body\'s app', () => {
+    const handBuilt = { ...suite(), apps: [appOf('crm_field_service', 'crm_case')] };
+    const r = refusalOf(handBuilt);
+    expect(r, 'refused').not.toBeNull();
+    expect(r!.code).toBe('STACK_SINGLE_APP_VIOLATION');
+    expect(r!.status).toBe(422);
+    expect(r!.issues).toHaveLength(1);
+    expect(r!.message.startsWith('defineStack single-app validation failed (1 issue):')).toBe(true);
+    const finding = r!.issues![0];
+    expect(finding).toMatch(/^A 'module' package must define at most one app/);
+    expect(finding).toContain("package 'com.example.crm.service' 2");
+    expect(finding).toContain("'crm_service' from its package body (packages[1])");
+    expect(finding).toContain("'crm_field_service' at its top level (apps[0]), which no package body declares");
+    expect(finding).not.toContain("'crm_sales'");
+  });
+
+  it('accepts one residual app when the manifest id\'s own body declares none, and refuses two', () => {
+    const revenue = defineStack({ manifest: pkg('com.example.crm.revenue', 'module'), objects: [objectOf('crm_quote')] });
+    const artifact = composeStacks([sales(), revenue], { manifest: 'preserve' });
+    expect(refusalOf({ ...artifact, apps: [appOf('crm_quotes', 'crm_quote')] })).toBeNull();
+    const r = refusalOf({ ...artifact, apps: [appOf('crm_quotes', 'crm_quote'), appOf('crm_pricing', 'crm_quote')] });
+    expect(r?.code).toBe('STACK_SINGLE_APP_VIOLATION');
+    expect(r?.status).toBe(422);
+    expect(r?.issues?.[0]).toContain("package 'com.example.crm.revenue' 2");
+  });
+
+  it('control: a stack without packages[] counts every app against its own package, unchanged', () => {
+    const flat = {
+      manifest: pkg('com.example.crm.service', 'module'),
+      objects: [objectOf('crm_case')],
+      apps: [appOf('crm_service', 'crm_case'), appOf('crm_field_service', 'crm_case')],
+    };
+    const r = refusalOf(flat);
+    expect(r?.code).toBe('STACK_SINGLE_APP_VIOLATION');
+    expect(r?.status).toBe(422);
+    expect(r?.issues).toEqual([
+      expect.stringContaining("package 'com.example.crm.service' defines 2 ('crm_service', 'crm_field_service')"),
+    ]);
+    expect(refusalOf({ ...flat, apps: [appOf('crm_service', 'crm_case')] })).toBeNull();
+  });
+});
+
 // ── ADR-0087 D2 conversion notices reach the author ─────────────────────────
 //
 // Moved to `stack-conversion-notices.test.ts` with #23543 F5-http: the block
