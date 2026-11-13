@@ -2942,7 +2942,8 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
  * shape — an explicit confirmation on the request, a loud registered refusal
  * when it is absent, and NO approval queue. Nothing is parked, nothing is held
  * for an operator to find later, and there is no resume path: a refused call
- * simply did not run, and the caller confirms and retries.
+ * simply did not run, and a caller acting for a person confirms with its
+ * human and retries (an AI service account cannot: see below).
  *
  * ## Which predicate gates the refusal — the DECLARED flag, never the heuristic
  *
@@ -2961,7 +2962,8 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
  * So `ai.requiresConfirmation: false` never refuses whatever the action looks
  * like, and an undeclared `mode: 'delete'` action is listed as
  * `requiresConfirmation: true` while remaining invokable without the member.
- * A client that confirms whenever the listing says `true` is always correct;
+ * A client acting for a person that confirms whenever the listing says `true`
+ * is always correct (an AI service account is refused whatever it sends);
  * the reverse inference is sound only because the listing predicate is wider.
  *
  * ## Only the boolean `true` is an attestation
@@ -2971,31 +2973,51 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
  *
  * ## What this gate is NOT
  *
- * `confirm: true` is an UNVERIFIABLE CALLER CLAIM. An agent that always sends
- * it bypasses the gate entirely; the ruling accepted that model knowingly.
+ * `confirm: true` from a person's client is an UNVERIFIABLE CALLER CLAIM; the
+ * ruling accepted that model knowingly.
  * ⇒ **The gate makes forgetting loud. It does not prove a human.**
  *
- * ## The enforced set is bounded by `ai.exposed`
+ * ## An AI service account never confirms for itself (ADR-0151 D3 rule 3)
  *
- * The doors that enforce this are the doors that enforce the author's AI opt-in
- * — today {@link invokeBusinessAction}, reached from the MCP `run_action` tool.
- * REST `/actions` (`domains/actions.ts`) is NOT `ai.exposed`-gated and sits
- * OUTSIDE this gate: an API-key agent on REST is understood to be outside it
- * rather than silently assumed inside it. Widening the set is its own decision,
- * not a thing to infer from this comment. The one place REST reads the opt-in
- * — an AI service account starting a `runAs: 'system'` flow
- * (`flow-start-admission.ts`, rule 2) — asks for the opt-in alone and does not
- * move this gate: no confirmation is asked there.
+ * The caller's envelope is the fifth argument. When it is an AI service
+ * account ({@link isAiServiceAccountCaller}: `principalKind: 'agent'` with no
+ * `onBehalfOf`), a gated action is refused WHATEVER the request carries: the
+ * confirmation member is not read for an account, because no person stands
+ * behind it. The refusal keeps the registered code, status and `details`, and
+ * its message states the rule instead of prescribing a retry: a person runs
+ * the action, until a hold door exists that hands the run to one. A delegated
+ * agent (`onBehalfOf` present) acts for the person it names and is gated as
+ * that person's client is. A missing envelope and the system context are not
+ * an account.
+ *
+ * ## The enforced set
+ *
+ * For an account, every door that runs an action: the one admitted sequence
+ * (`action-dispatch.ts`) asks this gate for an account under BOTH postures, so
+ * REST `/actions` and a host door on `rest` refuse it too, and the MCP
+ * `resume_run` door asks it for every candidate action.
+ *
+ * For every other caller, the doors that enforce the author's AI opt-in —
+ * today {@link invokeBusinessAction}, reached from the MCP `run_action` tool,
+ * and `resume_run`. REST `/actions` (`domains/actions.ts`) is NOT
+ * `ai.exposed`-gated and sits OUTSIDE this gate for a person and for a
+ * delegated agent. Widening that set is its own decision, not a thing to infer
+ * from this comment.
+ *
+ * The one place REST reads the opt-in — an AI service account starting a
+ * `runAs: 'system'` flow (`flow-start-admission.ts`, rule 2) — asks for the
+ * opt-in alone and is not this gate: no confirmation is asked there.
  *
  * Returns `undefined` when the call may proceed.
  */
 export const ACTION_CONFIRMATION_REQUIRED_CODE = 'ACTION_CONFIRMATION_REQUIRED';
 /**
  * 428 Precondition Required — the request is well-formed and the caller is
- * entitled; what is missing is a precondition the caller can add and retry
- * with. The code is registered rather than borrowing the standard
- * `PRECONDITION_REQUIRED` because this one says WHICH precondition, and the
- * `details` below make the retry mechanical.
+ * entitled; what is missing is a person's confirmation. A person's client adds
+ * it and retries; an AI service account cannot supply it (ADR-0151 D3 rule 3),
+ * and its refusal's message says so. The code is registered rather than
+ * borrowing the standard `PRECONDITION_REQUIRED` because this one says WHICH
+ * precondition, and the `details` below name the member a person's client sets.
  */
 export const ACTION_CONFIRMATION_REQUIRED_STATUS = 428;
 
@@ -3007,17 +3029,33 @@ export interface ActionConfirmationRefusal {
     details: ActionConfirmationRequiredDetails;
 }
 
+/**
+ * [ADR-0151 D3] Whether `ec` is an AI service account: an agent principal
+ * acting for itself (`principalKind: 'agent'`, no `onBehalfOf`), the spelling
+ * {@link dispatchFlowAction} forwards the account's kind under. A delegated
+ * agent (`onBehalfOf` present), a person, a missing envelope and the system
+ * context are not an account.
+ */
+export function isAiServiceAccountCaller(ec: unknown): boolean {
+    const caller = ec as { principalKind?: unknown; onBehalfOf?: unknown } | null | undefined;
+    return caller?.principalKind === 'agent' && !caller?.onBehalfOf;
+}
+
 export function actionConfirmationRefusal(
     _deps: ActionExecutionDeps,
     action: any,
     request: AIActionConfirmation | undefined,
-    objectName?: string,
+    objectName: string | undefined,
+    caller: unknown,
 ): ActionConfirmationRefusal | undefined {
     // The DECLARED flag only — see the docblock. `!== true` on purpose: an
     // author's `false`, and an absent key, both mean "no gate asked for".
     if (action?.ai?.requiresConfirmation !== true) return undefined;
+    // [ADR-0151 D3 rule 3] An AI service account never confirms for itself:
+    // for one, the member is not read at all.
+    const account = isAiServiceAccountCaller(caller);
     // Only the boolean `true` attests.
-    if (request?.[AI_ACTION_CONFIRMATION_MEMBER] === true) return undefined;
+    if (!account && request?.[AI_ACTION_CONFIRMATION_MEMBER] === true) return undefined;
 
     const actionName = String(action?.name ?? '');
     const details: ActionConfirmationRequiredDetails = {
@@ -3028,13 +3066,18 @@ export function actionConfirmationRefusal(
         confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
     };
     const on = objectName ? ` on '${objectName}'` : '';
+    const declared = `Action '${actionName}'${on} declares ai.requiresConfirmation: true — nothing was run. `;
     return {
         code: ACTION_CONFIRMATION_REQUIRED_CODE,
         status: ACTION_CONFIRMATION_REQUIRED_STATUS,
-        message:
-            `Action '${actionName}'${on} declares ai.requiresConfirmation: true — nothing was run. `
-            + `Confirm with the human in the loop, then retry this call with `
-            + `'${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`,
+        // For an account the message states the rule and prescribes no retry:
+        // nothing the account adds to the request runs this action.
+        message: account
+            ? declared
+                + 'An AI service account does not confirm an action for itself: a person runs this action.'
+            : declared
+                + `Confirm with the human in the loop, then retry this call with `
+                + `'${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`,
         details,
     };
 }
