@@ -485,7 +485,7 @@ describe('set-as-default over a refused clear of the previous default leaves ONE
   it('the set is issued only once the clear has landed (both views user-owned)', async () => {
     let landClear!: () => void;
     const clearPending = new Promise<void>((resolve) => { landClear = resolve; });
-    const updateView = vi.fn(async (_object: string, viewId: string) => {
+    const updateView = vi.fn(async (_object: string, viewId: string, _patch: Record<string, unknown>) => {
       if (viewId === OTHER_DEFAULT.name) await clearPending;
       return {};
     });
