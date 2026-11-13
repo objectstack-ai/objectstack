@@ -316,6 +316,23 @@ record means no file**, refused with the same `RECORD_NOT_FOUND`.
   `RECORD_LOCKED`). A field that becomes read-only after the link was made
   refuses the upload when it arrives, attaching nothing. Sending a file's
   bytes through the MCP protocol itself is not supported yet.
+- **A record not created yet.** A record whose file field is `required` (an
+  expense line and its invoice, say) cannot be created before the file
+  exists, so `create_upload_link` also takes `objectName` and `field` with no
+  `recordId`. That needs a user who may create records of the object and
+  write the field, and a field that is not `readonly`; an attachments link
+  still needs its record. The answer carries `fileIds`, the id the upload is
+  stored under. Once the user has uploaded (the page says the file was
+  received), the agent calls `create_record` with the field set to
+  `fileIds[0]`, or the array for a multi-file field; before the upload that
+  create is refused as an upload that never completed. The field's own
+  `accept` and `maxSize` are checked when the file arrives, before the link is
+  spent. The id is good for one hour after the upload, in one record, and
+  only for that user's own `create_record` or `update_record` into that field
+  of that object: another user's or a system write, another field or object,
+  a second record, or a write after the hour is refused at the field with the
+  reason. Until a record holds the file, only the user who uploaded it can
+  download it.
 
 Reading a PDF or Word document's text runs on a pool of worker threads, so the
 server keeps answering other requests while it does. Two host settings bound it, so
