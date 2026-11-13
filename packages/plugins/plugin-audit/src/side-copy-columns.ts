@@ -13,9 +13,10 @@
  *  - the at-rest rewrite (`side-copy-migration.ts`) removes them from copies
  *    written before;
  *  - until that rewrite has run, the two serve-time redactions drop them
- *    (`activity-field-redaction.ts`, `audit-log-field-redaction.ts`) and the
- *    two query guards refuse a non-system query that names a carrying column
- *    when its reach includes a listed object (`parent-field-query-guard.ts`).
+ *    (`activity-field-redaction.ts`, `audit-log-field-redaction.ts`), and the
+ *    two query guards judge a query pinned to a listed object that names a
+ *    carrying column as one that reaches every object
+ *    (`parent-field-query-guard.ts`): a copy may hold any object's fields.
  *
  * The list follows `key-material-copy.ts`: closed, declared, by object name.
  */

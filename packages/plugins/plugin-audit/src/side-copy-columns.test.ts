@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { SIDE_COPY_COLUMNS, SIDE_COPY_OBJECTS, omitSideCopyFromCopy, sideCopyColumnsOf } from './side-copy-columns.js';
 import { planSideCopyActivityRowPatch, planSideCopyAuditRowPatch } from './side-copy-migration.js';
-import { namedSideCopyCarriers } from './parent-field-query-guard.js';
+import { reachesSideCopy } from './parent-field-query-guard.js';
 import { redactAuditLogRows } from './audit-log-field-redaction.js';
 
 const REQUEST = 'sys_approval_request';
@@ -59,20 +59,20 @@ describe('[#32442] the at-rest rewrite plans', () => {
   });
 });
 
-describe('[#32442] the query guards refuse a carrying column whose reach includes a listed parent', () => {
+describe('[#32442] a query pinned to a listed parent and naming a carrier column reaches every object', () => {
   const named = (predicate: string[], aggregate: string[] = []) => ({ predicate, aggregate });
 
-  it('refuses metadata on the activity stream pinned to the request, or pinned to nothing', () => {
-    expect(namedSideCopyCarriers('sys_activity', REQUEST, named(['metadata']))).toEqual(named(['metadata']));
-    expect(namedSideCopyCarriers('sys_activity', null, named([], ['metadata']))).toEqual(named([], ['metadata']));
-    expect(namedSideCopyCarriers('sys_audit_log', REQUEST, named(['new_value', 'object_name'])))
-      .toEqual(named(['new_value']));
+  it('on the activity stream and on the ledger', () => {
+    expect(reachesSideCopy('sys_activity', REQUEST, named(['metadata']))).toBe(true);
+    expect(reachesSideCopy('sys_activity', REQUEST, named([], ['metadata']))).toBe(true);
+    expect(reachesSideCopy('sys_audit_log', REQUEST, named(['new_value', 'object_name']))).toBe(true);
   });
 
-  it('admits another parent, and a column that carries no copy', () => {
-    expect(namedSideCopyCarriers('sys_activity', 'crm_note', named(['metadata']))).toBeNull();
-    expect(namedSideCopyCarriers('sys_activity', REQUEST, named(['summary']))).toBeNull();
-    expect(namedSideCopyCarriers('sys_comment', REQUEST, named(['metadata']))).toBeNull();
+  it('not for another parent, no parent (already asked of every object), or a column that carries no copy', () => {
+    expect(reachesSideCopy('sys_activity', 'crm_note', named(['metadata']))).toBe(false);
+    expect(reachesSideCopy('sys_activity', null, named(['metadata']))).toBe(false);
+    expect(reachesSideCopy('sys_activity', REQUEST, named(['summary']))).toBe(false);
+    expect(reachesSideCopy('sys_comment', REQUEST, named(['metadata']))).toBe(false);
   });
 });
 

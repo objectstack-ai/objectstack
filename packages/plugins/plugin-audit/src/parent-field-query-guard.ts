@@ -109,7 +109,7 @@
  * read gate and the redaction.
  */
 
-import { SIDE_COPY_OBJECTS, sideCopyColumnsOf } from './side-copy-columns.js';
+import { sideCopyColumnsOf } from './side-copy-columns.js';
 import { FieldReferenceSchema } from '@objectstack/spec/data';
 import { ACTIVITY_STAMPED_COLUMNS } from './activity-changed-fields.js';
 import { resolveServedFields, type FieldRedactionLogger, type FieldVisibilitySource } from './served-fields.js';
@@ -168,26 +168,21 @@ export const SIDE_COPY_CARRIER_COLUMNS: ReadonlyMap<string, readonly string[]> =
 ]);
 
 /**
- * [#32442] The carrier columns `named` holds when the query can reach a
- * parent `side-copy-columns.ts` lists — the ONE parent it pins, or every
- * parent when it pins none — or `null` when it names none or reaches none.
- * Refused for every non-system reader, whatever their served fields, until
- * the at-rest rewrite has removed the column from every copy.
+ * [#32442] Whether a query pinned to `parent` names a carrier column of a
+ * parent `side-copy-columns.ts` lists. A copy of such a parent's row may hold
+ * field values of ANY object (the approvals request's subject snapshot), so
+ * the objects the query can reach are every registered object, and the guard
+ * asks the unpinned query's question ({@link readerWithholdsAnyDeclaredParentField}),
+ * not the pinned parent's. A query naming no parent already asks it.
  */
-export function namedSideCopyCarriers(
+export function reachesSideCopy(
   guarded: string,
   parent: string | null,
   named: NamedValueBearingColumns,
-): NamedValueBearingColumns | null {
+): boolean {
+  if (parent === null || sideCopyColumnsOf(parent).length === 0) return false;
   const carriers = SIDE_COPY_CARRIER_COLUMNS.get(guarded) ?? [];
-  if (carriers.length === 0) return null;
-  const reaches = parent === null ? SIDE_COPY_OBJECTS.length > 0 : sideCopyColumnsOf(parent).length > 0;
-  if (!reaches) return null;
-  const carried = {
-    aggregate: named.aggregate.filter((c) => carriers.includes(c)),
-    predicate: named.predicate.filter((c) => carriers.includes(c)),
-  };
-  return carried.aggregate.length > 0 || carried.predicate.length > 0 ? carried : null;
+  return [...named.aggregate, ...named.predicate].some((c) => carriers.includes(c));
 }
 
 /** The value-bearing columns a query names, by the role it names them in. */
@@ -420,11 +415,9 @@ function installParentFieldQueryGuard(
       const security = getSecurity();
       if (!security) return next();
       const parent = pinnedParentObject(ctx.ast.where, guard.object);
-      const carried = namedSideCopyCarriers(guard.object, parent, named);
-      if (carried) throw parentFieldQueryRefusal(guard, ctx.operation, carried);
       let refuse = true;
       try {
-        if (parent !== null) {
+        if (parent !== null && !reachesSideCopy(guard.object, parent, named)) {
           refuse = await readerWithholdsParentField(security, parent, ctx.context, logger);
         } else {
           refuse = await readerWithholdsAnyDeclaredParentField(engine, security, ctx.context, logger);

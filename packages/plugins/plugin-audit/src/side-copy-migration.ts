@@ -12,7 +12,7 @@
  * idempotent, counts only.
  *
  * Until it has run, the serve-time redactions drop the columns and the query
- * guards refuse a query that names a carrying column (`side-copy-columns.ts`).
+ * guards judge a query naming a carrying column against every object (`side-copy-columns.ts`).
  */
 
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
@@ -132,12 +132,12 @@ export interface SideCopyMigrationReport {
   failures: number;
 }
 
-/** The side-copy rewrite's list, planners and words; its CLI door is owed (`os migrate audit-side-copies`). */
+/** The side-copy rewrite's list, planners and words. Its command-line door is owed; until then a host drives the runners. */
 const SIDE_COPY_REWRITE: LedgerCopyRewriteSpec = {
   objectNames: SIDE_COPY_OBJECTS,
   planAudit: planSideCopyAuditRowPatch,
   planActivity: planSideCopyActivityRowPatch,
-  migration: 'os migrate audit-side-copies',
+  migration: 'side-copy-migration',
   tag: '[side-copy-migration]',
   summary: (report, label) =>
     `[side-copy-migration] ${report.apply ? 'removed' : 'would remove'} listed columns from ${report.rewritten} of ` +
