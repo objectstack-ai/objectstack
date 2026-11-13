@@ -4132,6 +4132,11 @@ export class ObjectStackProtocolImplementation implements
         const host: ThisParameterType<typeof readMetaItemFace> = {
             get engine() { return readEngine(); },
             readMetaItem: (...a) => this.readMetaItem(...a),
+            packagelessAddress: (...a) => this.packagelessAddress(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
+            readItemActiveRows: (...a) => this.readItemActiveRows(...a),
+            declinesStoredRow: (...a) => this.declinesStoredRow(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
         };
         return readMetaItemFace.call(host, request, face);
     }
@@ -4185,6 +4190,13 @@ export class ObjectStackProtocolImplementation implements
      * its in-process resolution readers (the security catalog echo, the
      * packaged-permission-set lock gate, `/published`) read the layers of a
      * name with no package and keep the answer they had.
+     *
+     * [#32354, ADR-0150 D3] While a package is disabled, a name the stored
+     * rows of two or more served packages hold beside it is refused here
+     * naming only those served packages (the plain read's own refusal), and a
+     * name with one served holder is no ambiguity: {@link getMetaItemLayered}
+     * reads it at that holder's address. Both are judged by the same
+     * `servedAddressJudgment`, which neither of them throws.
      */
     async packagelessLayeredReadRefusal(request: {
         type: string;
