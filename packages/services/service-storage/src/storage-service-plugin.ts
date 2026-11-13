@@ -79,6 +79,7 @@ import type {
   UploadLinkWorkspaceLocale,
 } from './storage-routes.js';
 import type { RecordFileAccessDeps, UploadLinkDoor } from './record-file-access.js';
+import { isUploaderOnlyFile } from './pre-record-upload.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
 import { installFileReferenceHooks, type FileReferenceEngine } from './file-reference-lifecycle.js';
 import { installSysFileStorageOwnedColumnsGuard } from './sys-file-storage-owned-columns.js';
@@ -1975,6 +1976,11 @@ async function judgeFileRead(
 ): Promise<'allow' | 'deny'> {
   // Uploader / owner may always download.
   if (file.owner_id && String(file.owner_id) === String(context.userId)) return 'allow';
+
+  // [#32686] A file uploaded through a link that names no record (or the row
+  // such a link reserved), while no record holds it: its uploader's alone,
+  // answered by the arm above. Every other file is judged below as before.
+  if (isUploaderOnlyFile(file as unknown as Record<string, unknown>)) return 'deny';
 
   // Field-owned (ADR-0104 D3 wave 2): exactly ONE record's field holds
   // this file, so access is that record's READ access — never a union.

@@ -32,6 +32,15 @@
  * `beforeUpdate` hook refusing an edit of one as the record-lock hook does
  * (`RECORD_LOCKED`, its status declared as `statusCode: 409`).
  *
+ * #32686 — a link that names no record (ruling A): the user uploads, then
+ * the creating write names the file id the link answered. Pinned through
+ * the same doors: an expense line with a required e-invoice is refused
+ * without it and taken with it; the id goes only into the uploader's write,
+ * into the object and field it was uploaded for, into one record, within its
+ * window; only the uploader downloads it until a record holds it; and a
+ * console-style upload and save is taken as before. The create verdict is a
+ * `security` service stood in for the span of the case that asks it.
+ *
  * #32712 — the page, and the refusals it shows, in the request's language:
  * `Accept-Language`, else the workspace default, else English. The workspace
  * default is the fixture's `settings` service, answering the `localization`
@@ -54,6 +63,8 @@ import type { SwappableStorageService } from './swappable-storage-service.js';
 import type { FileAttachmentService } from './file-attachment-service.js';
 import { installDefaultOrganization, DEFAULT_ORGANIZATION_ID } from './default-organization.testkit.js';
 import { UPLOAD_LINK_TTL_SECONDS } from './record-file-access.js';
+import { PRE_RECORD_CLAIM_WINDOW_SECONDS } from './pre-record-upload.js';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { UPLOAD_LINK_UNUSABLE_MESSAGE } from './upload-link-wire.js';
 import { UPLOAD_LINK_COPY } from './upload-link-copy.js';
 
@@ -86,6 +97,8 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
   let files: FileAttachmentService;
   let storage: SwappableStorageService;
   const routes = new Map<string, RouteHandler>();
+  /** The kernel's services; [#32686] a case may add a `security` service for its own span. */
+  const services = new Map<string, unknown>();
   const ids: Record<string, string> = {};
   /** [#32734] The claims a pending approval locks. */
   const locked = new Set<string>();
@@ -123,7 +136,6 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       },
     });
 
-    const services = new Map<string, unknown>();
     const phases = new Map<string, Array<() => unknown>>();
     const mount = (m: string) => (path: string, handler: RouteHandler) => { routes.set(`${m}:${path}`, handler); };
     const ctx = {
@@ -205,6 +217,14 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
           status: { name: 'status', type: 'text' },
           invoices: { name: 'invoices', label: 'Invoices', type: 'file', multiple: true, readonlyWhen: "record.status == 'approved'" },
           stamp: { name: 'stamp', label: 'Stamp', type: 'file', readonly: true },
+        },
+      }, {
+        // [#32686] The measured case: an expense line whose e-invoice is required.
+        name: 'expense_line',
+        label: 'Expense line',
+        fields: {
+          invoice_no: { name: 'invoice_no', type: 'text' },
+          invoice: { name: 'invoice', label: 'E-invoice', type: 'file', required: true },
         },
       }],
     } as never);
@@ -892,6 +912,238 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
         .toBe(zh.failed);
       expect((await says({ ok: false, body: { success: false, error: { code: 'RECORD_LOCKED', message: 'x', userMessage: zh.recordLocked } } })).after)
         .toBe(zh.recordLocked);
+    });
+  });
+
+  describe('#32686 — a link that names no record: the user uploads, then the creating write names the file id', () => {
+    const failureOf = (write: Promise<unknown>) => write.then(() => null, (e: unknown) => resolveThrownHttpError(e));
+    const insertAs = (who: { userId: string; tenantId?: string } | typeof SYS, object: string, data: Record<string, unknown>) =>
+      engine.insert(object, data, { context: who } as never);
+    const updateAs = (who: { userId: string; tenantId?: string }, object: string, id: string, data: Record<string, unknown>) =>
+      engine.update(object, data, { where: { id }, context: who } as never);
+    /** The one located refusal a write naming a file is answered with, as the HTTP boundary answers it. */
+    const refusedAt = (field: string, label: string, message: string) => ({
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      details: { fields: [{ field, code: 'invalid_value', message, label }] },
+    });
+    const unreadable = (label: string) =>
+      `${label} cannot reference this file: it is not a file you can open. Choose a file you can open, or upload it again.`;
+    const REMEDY = 'Ask for a new upload link for this field and upload the file again.';
+    /** Mint a link for `object`.`field` with no record as `who`, and use it once with `bytes`. */
+    const uploadForNewRecord = async (
+      object: string,
+      field: string,
+      bytes: Buffer = Buffer.from('%PDF-1.4 invoice'),
+      who: { userId: string; tenantId: string } = OWNER,
+    ) => {
+      const grant = await files.createUploadLinkForNewRecordAs(object, { field }, who as never);
+      const res = await useLink(tokenOf(grant.path), bytes, {}, who.userId);
+      expect(res._status, JSON.stringify(res._json)).toBe(200);
+      return { grant, fileId: grant.fileIds[0] as string };
+    };
+    const refOf = async (fileId: string) => {
+      const row = await fileRow(fileId);
+      return [row?.ref_object ?? null, row?.ref_id ?? null, row?.ref_field ?? null];
+    };
+    const UNCLAIMED = [null, null, null];
+    /** The download door's answer to `user` for a file. */
+    const downloadUrlAs = (fileId: string, user: string) =>
+      call('GET', `${BASE}/files/:fileId/url`, { params: { fileId }, headers: sessionOf(user) });
+    /** [#32686] Stand a security service in for the span of `fn`: the object create verdict and the writable fields. */
+    const withSecurity = async (security: Record<string, unknown>, fn: () => Promise<void>) => {
+      services.set('security', security);
+      try {
+        await fn();
+      } finally {
+        services.delete('security');
+      }
+    };
+
+    it('the measured case: an expense line is refused without its required e-invoice, and taken naming the uploaded file id', async () => {
+      // Reading 1: the record cannot exist without the file.
+      const bare = await failureOf(insertAs(OWNER, 'expense_line', { invoice_no: 'INV-0' }));
+      expect(bare).toMatchObject({ status: 400, code: 'VALIDATION_FAILED' });
+      expect(JSON.stringify(bare)).toContain('invoice');
+
+      // Call 1: the link names the object and the field, no record, and answers the file id up front.
+      const before = Date.now();
+      const grant = await files.createUploadLinkForNewRecordAs('expense_line', { field: 'invoice' }, OWNER as never);
+      expect(grant).toMatchObject({ object: 'expense_line', field: 'invoice', path: `${BASE}/upload-links/${grant.token}` });
+      expect(grant.fileIds).toEqual([grant.token.split('.')[0]]);
+      const ttl = Date.parse(grant.expiresAt) - before;
+      expect(ttl).toBeGreaterThan(UPLOAD_LINK_TTL_SECONDS * 1000 - 5_000);
+      expect(ttl).toBeLessThanOrEqual(UPLOAD_LINK_TTL_SECONDS * 1000 + 1_000);
+      const fileId = grant.fileIds[0];
+      const reserved = await fileRow(fileId);
+      expect(reserved).toMatchObject({ status: 'pending', owner_id: OWNER.userId, name: 'upload-link' });
+      expect(JSON.parse(reserved.metadata)).not.toHaveProperty('record_id');
+
+      // Before the upload, the create naming it is refused as an upload that never completed.
+      const early = await failureOf(insertAs(OWNER, 'expense_line', { invoice_no: 'INV-1', invoice: fileId }));
+      expect(early).toMatchObject(refusedAt(
+        'invoice', 'E-invoice', `E-invoice cannot reference file ${fileId}: its upload was never completed. Complete the upload, then save again.`,
+      ));
+
+      // The browser upload: the bytes land under the id the link answered, on no record.
+      const res = await useLink(tokenOf(grant.path), Buffer.from('%PDF-1.4 taxi receipt'));
+      expect(res._status, JSON.stringify(res._json)).toBe(200);
+      expect(res._json).toEqual({ success: true, data: { fileId, size: 21, field: 'invoice' } });
+      const landed = await fileRow(fileId);
+      expect(landed).toMatchObject({
+        status: 'committed', owner_id: OWNER.userId, size: 21, name: 'scan 1.pdf', mime_type: 'application/pdf',
+        ref_object: null, ref_id: null, ref_field: null,
+      });
+      const binding = JSON.parse(landed.metadata);
+      expect(binding).toMatchObject({ kind: 'pre_record_upload', object: 'expense_line', field: 'invoice', user_id: OWNER.userId, organization_id: ORG });
+      expect(String(landed.metadata)).not.toContain(grant.token.split('.')[1]);
+      const window = Date.parse(binding.claim_until) - Date.now();
+      expect(window).toBeGreaterThan(PRE_RECORD_CLAIM_WINDOW_SECONDS * 1000 - 60_000);
+      expect(window).toBeLessThanOrEqual(PRE_RECORD_CLAIM_WINDOW_SECONDS * 1000);
+      expect((await storage.download(landed.key)).toString()).toBe('%PDF-1.4 taxi receipt');
+      // The link is spent.
+      expect((await useLink(tokenOf(grant.path), Buffer.from('again')))._status).toBe(404);
+
+      // Call 2: the create naming the file id is taken, and the record owns the file.
+      const line = await insertAs(OWNER, 'expense_line', { invoice_no: 'INV-1', invoice: fileId });
+      expect(await refOf(fileId)).toEqual(['expense_line', String(line.id), 'invoice']);
+    });
+
+    it('the page says the file was received, not attached: no record holds it yet', async () => {
+      const grant = await files.createUploadLinkForNewRecordAs('claim', { field: 'policy' }, OWNER as never);
+      const html = String((await openLink(tokenOf(grant.path)))._sent);
+      expect(html).toContain(UPLOAD_LINK_COPY.en.received);
+      expect(html).not.toContain(UPLOAD_LINK_COPY.en.attached);
+      expect(html).not.toContain('policy');
+    });
+
+    it('another user\'s write is refused with the unreadable-file words, and the file stays unclaimed', async () => {
+      const { fileId } = await uploadForNewRecord('claim', 'policy');
+      const failure = await failureOf(insertAs(REVIEWER, 'claim', { name: 'R', owner: REVIEWER.userId, policy: fileId }));
+      expect(failure).toMatchObject(refusedAt('policy', 'Policy', unreadable('Policy')));
+      expect(await refOf(fileId)).toEqual(UNCLAIMED);
+    });
+
+    it('a system write is refused too: it names no user whose upload this is', async () => {
+      const { fileId } = await uploadForNewRecord('claim', 'policy');
+      const failure = await failureOf(insertAs(SYS, 'claim', { name: 'S', owner: OWNER.userId, policy: fileId }));
+      expect(failure).toMatchObject(refusedAt('policy', 'Policy', unreadable('Policy')));
+      expect(await refOf(fileId)).toEqual(UNCLAIMED);
+    });
+
+    it('the uploader\'s write into another field or another object is refused, naming the field it was uploaded for', async () => {
+      const { fileId } = await uploadForNewRecord('claim', 'policy');
+      const why = 'it was uploaded through an upload link for claim.policy, and goes into that field only';
+      expect(await failureOf(insertAs(OWNER, 'claim', { name: 'F', owner: OWNER.userId, receipt: fileId })))
+        .toMatchObject(refusedAt('receipt', 'Receipt', `Receipt cannot reference file ${fileId}: ${why}. ${REMEDY}`));
+      expect(await failureOf(insertAs(OWNER, 'expense_line', { invoice_no: 'INV-X', invoice: fileId })))
+        .toMatchObject(refusedAt('invoice', 'E-invoice', `E-invoice cannot reference file ${fileId}: ${why}. ${REMEDY}`));
+      expect(await refOf(fileId)).toEqual(UNCLAIMED);
+    });
+
+    it('goes into one record: a second record naming it within the window is refused, and the first keeps it', async () => {
+      const { fileId } = await uploadForNewRecord('claim', 'policy');
+      const first = await insertAs(OWNER, 'claim', { name: 'first', owner: OWNER.userId, policy: fileId });
+      const second = await failureOf(insertAs(OWNER, 'claim', { name: 'second', owner: OWNER.userId, policy: fileId }));
+      expect(second).toMatchObject(refusedAt('policy', 'Policy', `Policy cannot reference file ${fileId}: it was uploaded through an upload link and is already in another record; a file from an upload link goes into one record. ${REMEDY}`));
+      expect(await refOf(fileId)).toEqual(['claim', String(first.id), 'policy']);
+      expect((await claim(String(first.id))).policy).toBe(fileId);
+      // Rewriting the record's own value takes nothing and is not refused.
+      await updateAs(OWNER, 'claim', String(first.id), { policy: fileId, name: 'first again' });
+      expect((await claim(String(first.id))).name).toBe('first again');
+    });
+
+    it('expires: once the window has passed with no record holding it, the uploader\'s own write is refused', async () => {
+      const { fileId } = await uploadForNewRecord('claim', 'policy');
+      const binding = JSON.parse((await fileRow(fileId)).metadata);
+      await engine.update('sys_file', { metadata: JSON.stringify({ ...binding, claim_until: new Date(Date.now() - 1_000).toISOString() }) }, { where: { id: fileId }, context: SYS } as never);
+      const failure = await failureOf(insertAs(OWNER, 'claim', { name: 'late', owner: OWNER.userId, policy: fileId }));
+      expect(failure).toMatchObject(refusedAt('policy', 'Policy', `Policy cannot reference file ${fileId}: it was uploaded through an upload link, and no record took it within ${PRE_RECORD_CLAIM_WINDOW_SECONDS / 60} minutes of the upload. ${REMEDY}`));
+      expect(await refOf(fileId)).toEqual(UNCLAIMED);
+    });
+
+    it('the uploader\'s update of an existing record takes it as the create does', async () => {
+      const id = (await engine.insert('claim', { name: 'U', owner: OWNER.userId, organization_id: ORG }, { context: SYS } as never)).id;
+      const { fileId } = await uploadForNewRecord('claim', 'policy');
+      await updateAs(OWNER, 'claim', String(id), { policy: fileId });
+      expect((await claim(String(id))).policy).toBe(fileId);
+      expect(await refOf(fileId)).toEqual(['claim', String(id), 'policy']);
+    });
+
+    it('downloads: only the uploader while no record holds it; then the record\'s readers', async () => {
+      const { fileId } = await uploadForNewRecord('claim', 'policy');
+      expect((await downloadUrlAs(fileId, OWNER.userId))._status).toBe(200);
+      const denied = await downloadUrlAs(fileId, REVIEWER.userId);
+      expect(denied._status, JSON.stringify(denied._json)).toBe(403);
+      // Claimed: the record's read rule, and the reviewer reads every claim.
+      await insertAs(OWNER, 'claim', { name: 'D', owner: OWNER.userId, policy: fileId });
+      expect((await downloadUrlAs(fileId, REVIEWER.userId))._status).toBe(200);
+    });
+
+    it('control: a console-style upload (presign, PUT, complete) and save is taken as before, with no binding', async () => {
+      const presigned = await call('POST', `${BASE}/upload/presigned`, {
+        headers: sessionOf(OWNER.userId),
+        body: { filename: 'form.pdf', mimeType: 'application/pdf', size: 8 },
+      });
+      expect(presigned._status, JSON.stringify(presigned._json)).toBe(200);
+      const { fileId, uploadUrl } = presigned._json.data as { fileId: string; uploadUrl: string };
+      const put = await call('PUT', `${BASE}/_local/raw/:token`, {
+        params: { token: uploadUrl.slice(uploadUrl.lastIndexOf('/') + 1) },
+        rawBody: async () => Buffer.from('%PDF-1.4'),
+      });
+      expect(put._status, JSON.stringify(put._json)).toBe(200);
+      const done = await call('POST', `${BASE}/upload/complete`, { headers: sessionOf(OWNER.userId), body: { fileId } });
+      expect(done._status, JSON.stringify(done._json)).toBe(200);
+      expect(String((await fileRow(fileId)).metadata ?? '')).not.toContain('pre_record_upload');
+      const saved = await insertAs(OWNER, 'claim', { name: 'console', owner: OWNER.userId, policy: fileId });
+      expect(await refOf(fileId)).toEqual(['claim', String(saved.id), 'policy']);
+    });
+
+    describe('minting', () => {
+      it('refuses the system context, a field that is not a file field, a read-only field, and no field at all', async () => {
+        expect(await refusalOf(files.createUploadLinkForNewRecordAs('claim', { field: 'policy' }, SYS as never)))
+          .toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(await refusalOf(files.createUploadLinkForNewRecordAs('claim', { field: 'owner' }, OWNER as never)))
+          .toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(await refusalOf(files.createUploadLinkForNewRecordAs('claim', { field: 'stamp' }, OWNER as never)))
+          .toMatchObject({ code: 'FIELD_NOT_ACCESSIBLE', status: 403 });
+        expect(await refusalOf(files.createUploadLinkForNewRecordAs('claim', {} as never, OWNER as never)))
+          .toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+      });
+
+      it('asks the object\'s create verdict and the field\'s writability, as the security service answers them', async () => {
+        const asked: Array<{ object: string; operation: string }> = [];
+        let mayCreate = false;
+        let writable: string[] | undefined = undefined;
+        await withSecurity({
+          explain: async (request: { object: string; operation: string }) => {
+            asked.push({ object: request.object, operation: request.operation });
+            return { allowed: mayCreate };
+          },
+          getWritableFields: async () => writable,
+        }, async () => {
+          expect(await refusalOf(files.createUploadLinkForNewRecordAs('claim', { field: 'policy' }, OWNER as never)))
+            .toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+          expect(asked).toEqual([{ object: 'claim', operation: 'create' }]);
+          mayCreate = true;
+          writable = ['name'];
+          expect(await refusalOf(files.createUploadLinkForNewRecordAs('claim', { field: 'policy' }, OWNER as never)))
+            .toMatchObject({ code: 'FIELD_NOT_ACCESSIBLE', status: 403 });
+          writable = ['name', 'policy'];
+          const grant = await files.createUploadLinkForNewRecordAs('claim', { field: 'policy' }, OWNER as never);
+          expect(grant.fileIds).toHaveLength(1);
+        });
+      });
+    });
+
+    it('a file the field\'s own maxSize refuses is refused when it arrives, nothing stored and the link not spent', async () => {
+      const grant = await files.createUploadLinkForNewRecordAs('claim', { field: 'receipt' }, OWNER as never);
+      const big = await useLink(tokenOf(grant.path), Buffer.alloc(100, 1));
+      expect(big._status, JSON.stringify(big._json)).toBe(400);
+      expect(big._json.error.code).toBe('ERR_FILE_CONSTRAINT');
+      expect(await fileRow(grant.fileIds[0])).toMatchObject({ status: 'pending', name: 'upload-link' });
+      const small = await useLink(tokenOf(grant.path), Buffer.from('ok'));
+      expect(small._status, JSON.stringify(small._json)).toBe(200);
     });
   });
 });

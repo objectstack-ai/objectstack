@@ -9,6 +9,9 @@ import type { StandardErrorCode } from '@objectstack/spec/api';
  * own so the doors import no service code.
  */
 
+/** The marker a link row's `metadata` carries, so no other pending row reads as a link. */
+export const UPLOAD_LINK_KIND = 'upload_link';
+
 /** The path segment the upload-link doors are mounted under, below the storage base path. */
 export const UPLOAD_LINK_SEGMENT = 'upload-links';
 

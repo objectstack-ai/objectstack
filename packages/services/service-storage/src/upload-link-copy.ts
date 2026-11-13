@@ -68,6 +68,11 @@ export interface UploadLinkCopy extends UploadLinkRefusalCopy {
   send: string;
   uploading: string;
   attached: string;
+  /**
+   * [#32686] Done, for a link that names no record: the file was stored and
+   * waits for the record the assistant creates, so nothing was attached yet.
+   */
+  received: string;
   /** The upload failed and the answer carried no sentence to show. */
   failed: string;
   connectionLost: string;
@@ -91,6 +96,7 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     send: 'Send',
     uploading: 'Uploading…',
     attached: 'Done. The file was attached; you can close this page.',
+    received: 'Done. The file was received; go back to the assistant to finish.',
     failed: 'The upload failed.',
     connectionLost: 'The upload failed: the connection was lost. Ask for a new link if this one no longer works.',
     unusableTitle: 'Upload link',
@@ -122,6 +128,7 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     send: '发送',
     uploading: '正在上传…',
     attached: '完成，文件已添加。你可以关闭此页面。',
+    received: '完成，文件已收到。请回到助手那里完成后续操作。',
     failed: '上传失败。',
     connectionLost: '上传失败：连接已中断。如果此链接已无法使用，请索取新的链接。',
     unusableTitle: '上传链接',
@@ -151,6 +158,7 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     send: '傳送',
     uploading: '正在上傳…',
     attached: '完成，檔案已新增。你可以關閉此頁面。',
+    received: '完成，檔案已收到。請回到助理那裡完成後續操作。',
     failed: '上傳失敗。',
     connectionLost: '上傳失敗：連線已中斷。如果此連結已無法使用，請索取新的連結。',
     unusableTitle: '上傳連結',
@@ -180,6 +188,7 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     send: '送信',
     uploading: 'アップロード中…',
     attached: '完了しました。ファイルが追加されました。このページは閉じてかまいません。',
+    received: '完了しました。ファイルを受け取りました。アシスタントに戻って続きを進めてください。',
     failed: 'アップロードに失敗しました。',
     connectionLost: 'アップロードに失敗しました: 接続が切れました。このリンクが使えなくなった場合は、新しいリンクを依頼してください。',
     unusableTitle: 'アップロードリンク',
@@ -209,6 +218,7 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     send: '보내기',
     uploading: '업로드 중…',
     attached: '완료되었습니다. 파일이 추가되었으니 이 페이지를 닫아도 됩니다.',
+    received: '완료되었습니다. 파일을 받았습니다. 어시스턴트로 돌아가 마무리하세요.',
     failed: '업로드에 실패했습니다.',
     connectionLost: '업로드에 실패했습니다: 연결이 끊어졌습니다. 이 링크가 더 이상 작동하지 않으면 새 링크를 요청하세요.',
     unusableTitle: '업로드 링크',
@@ -238,6 +248,7 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     send: 'Enviar',
     uploading: 'Subiendo…',
     attached: 'Listo. El archivo se ha adjuntado; puedes cerrar esta página.',
+    received: 'Listo. Se ha recibido el archivo; vuelve al asistente para terminar.',
     failed: 'La subida ha fallado.',
     connectionLost: 'La subida ha fallado: se ha perdido la conexión. Pide un enlace nuevo si este ya no funciona.',
     unusableTitle: 'Enlace de subida',
@@ -267,6 +278,7 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     send: 'إرسال',
     uploading: 'جارٍ الرفع…',
     attached: 'تم. أُرفق الملف؛ يمكنك إغلاق هذه الصفحة.',
+    received: 'تم. استُلم الملف؛ عد إلى المساعد لإكمال العملية.',
     failed: 'فشل الرفع.',
     connectionLost: 'فشل الرفع: انقطع الاتصال. اطلب رابطًا جديدًا إذا لم يعد هذا الرابط يعمل.',
     unusableTitle: 'رابط الرفع',
@@ -296,6 +308,7 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     send: 'Envoyer',
     uploading: 'Envoi en cours…',
     attached: 'Terminé. Le fichier a été joint ; vous pouvez fermer cette page.',
+    received: 'Terminé. Le fichier a été reçu ; revenez à l’assistant pour terminer.',
     failed: 'L’envoi a échoué.',
     connectionLost: 'L’envoi a échoué : la connexion a été perdue. Demandez un nouveau lien si celui-ci ne fonctionne plus.',
     unusableTitle: 'Lien d’envoi',
@@ -325,6 +338,7 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     send: 'Enviar',
     uploading: 'Enviando…',
     attached: 'Pronto. O arquivo foi anexado; você pode fechar esta página.',
+    received: 'Pronto. O arquivo foi recebido; volte ao assistente para concluir.',
     failed: 'O envio falhou.',
     connectionLost: 'O envio falhou: a conexão foi perdida. Peça um novo link se este não funcionar mais.',
     unusableTitle: 'Link de envio',
@@ -354,6 +368,7 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     send: 'Отправить',
     uploading: 'Загрузка…',
     attached: 'Готово. Файл прикреплён; эту страницу можно закрыть.',
+    received: 'Готово. Файл получен; вернитесь к ассистенту, чтобы завершить.',
     failed: 'Не удалось загрузить файл.',
     connectionLost: 'Не удалось загрузить файл: соединение прервалось. Если эта ссылка больше не работает, попросите новую.',
     unusableTitle: 'Ссылка для загрузки',
@@ -383,6 +398,7 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     send: 'Senden',
     uploading: 'Wird hochgeladen…',
     attached: 'Fertig. Die Datei wurde angehängt; Sie können diese Seite schließen.',
+    received: 'Fertig. Die Datei ist angekommen; kehren Sie zum Assistenten zurück, um abzuschließen.',
     failed: 'Das Hochladen ist fehlgeschlagen.',
     connectionLost: 'Das Hochladen ist fehlgeschlagen: Die Verbindung wurde unterbrochen. Fordern Sie einen neuen Link an, wenn dieser nicht mehr funktioniert.',
     unusableTitle: 'Upload-Link',

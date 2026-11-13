@@ -13,6 +13,11 @@ import {
   unreadableFileMessage,
   type FileReferenceReadAuthorizer,
 } from './referenceable-file.js';
+import {
+  PRE_RECORD_CLAIM_WINDOW_SECONDS,
+  preRecordReferenceRefusal,
+  type PreRecordReferenceRefusal,
+} from './pre-record-upload.js';
 
 export type { FileReferenceReadAuthorizer } from './referenceable-file.js';
 
@@ -92,6 +97,18 @@ export type { FileReferenceReadAuthorizer } from './referenceable-file.js';
  * The read verdict above would admit a `public_read` file to such a caller,
  * and keep any other id as written; neither is a file the anonymous caller
  * may provide. An empty or absent file field is written as before.
+ *
+ * ### A file uploaded before its record goes into one slot
+ *
+ * [#32686] An upload link that names an object and a file field but no
+ * record (ruling A) answers a file id the agent writes when it creates the
+ * record. The file carries a binding (`pre-record-upload.ts`): its uploader,
+ * the object and field, and a deadline. Asked after the read check, before
+ * the completed-upload check: while no record holds the file, only the
+ * uploader's write into that object and field, before the deadline, takes
+ * it; once a record holds it, no user's write puts it in a second record
+ * until the deadline. Every refusal is one `invalid_value` entry at the
+ * field, and a writer who is not the uploader gets the unreadable-file words.
  *
  * ### A released file keeps its record's rule
  *
@@ -337,6 +354,40 @@ function refuseIncompleteUpload(
   };
 }
 
+/** The user a write runs as, or `null` for a system or context-less write. */
+function writerUserIdOf(caller: ExecutionContext | null): string | null {
+  return caller && typeof caller.userId === 'string' && caller.userId.length > 0 ? caller.userId : null;
+}
+
+/**
+ * [#32686] The refusal of a field naming a file uploaded before its record
+ * exists, by the file's own uploader, for a slot it may not go into: it was
+ * uploaded for another field, it is in another record already, or its time to
+ * be used ran out. The writer is the uploader, so it names the file and the
+ * remedy. (Any other writer gets {@link refuseUnreadableFile}.)
+ */
+function refusePreRecordFile(
+  engine: FileReferenceEngine,
+  object: string,
+  field: string,
+  fileId: string,
+  refusal: Exclude<PreRecordReferenceRefusal, { kind: 'not_yours' }>,
+): FileFieldRefusal {
+  const label = fieldLabelOf(engine, object, field);
+  const why =
+    refusal.kind === 'other_slot'
+      ? `it was uploaded through an upload link for ${refusal.object}.${refusal.field}, and goes into that field only`
+      : refusal.kind === 'spent'
+        ? 'it was uploaded through an upload link and is already in another record; a file from an upload link goes into one record'
+        : `it was uploaded through an upload link, and no record took it within ${PRE_RECORD_CLAIM_WINDOW_SECONDS / 60} minutes of the upload`;
+  return {
+    field,
+    code: 'invalid_value',
+    message: `${label} cannot reference file ${fileId}: ${why}. Ask for a new upload link for this field and upload the file again.`,
+    label,
+  };
+}
+
 /**
  * [#25694] Ruling C at every anonymous write door: an anonymous write carries
  * no file. A file is provided by a signed-in caller, through the authenticated
@@ -572,7 +623,7 @@ function matchesAcceptEntry(entry: string, mime: string, name: string): boolean 
  * `mime_type` cannot fail an `accept` test, and one with no `size` cannot fail
  * `maxSize`. Missing metadata is not evidence of a violation.
  */
-function assertFileConstraints(
+export function assertFileConstraints(
   fieldDef: any,
   field: string,
   file: Record<string, unknown>,
@@ -753,6 +804,7 @@ async function applyCopyOnClaim(
     const rows: Array<[string, Record<string, unknown>]> = [];
     const incomplete: string[] = [];
     let fieldRefused = false;
+    let boundRefusal: FileFieldRefusal | null = null;
     for (const token of [...new Set(tokens)]) {
       const found = await findReferenceableFile(engine, token, organizationId, caller, authorizeRead);
       // [#26043] A file this write's caller may not read, or one the acting
@@ -766,14 +818,29 @@ async function applyCopyOnClaim(
       // (`systemReadContext`). Left verbatim — the read resolver ignores it
       // for the same reason.
       if (!found) continue;
+      const held = recordId !== null && isSameSlot(found, object, recordId, field);
+      // [#32686] A file uploaded before its record exists goes only into the
+      // slot it was uploaded for, by its uploader's write, in time — asked
+      // after the read check, so a file the caller may not read is refused
+      // with that check's words above. Another writer is answered in the same
+      // words, so the refusal says nothing about whose upload it is.
+      const bound = preRecordReferenceRefusal(found, { object, field, heldHere: held }, writerUserIdOf(caller), Date.now());
+      if (bound?.kind === 'not_yours') {
+        fieldRefused = true;
+        break;
+      }
+      if (bound) {
+        boundRefusal = refusePreRecordFile(engine, object, field, token, bound);
+        break;
+      }
       // [#26479] A file the caller may read, whose upload never completed —
       // unless this slot already holds it (an update rewriting the value it
       // has), which claims nothing.
-      const held = recordId !== null && isSameSlot(found, object, recordId, field);
       if (caller && !held && !isCompletedUpload(found)) incomplete.push(token);
       else rows.push([token, found]);
     }
     if (fieldRefused) refused.push(refuseUnreadableFile(engine, object, field));
+    else if (boundRefusal) refused.push(boundRefusal);
     else if (incomplete.length > 0) refused.push(refuseIncompleteUpload(engine, object, field, incomplete));
     else if (rows.length > 0) named.push({ field, value, rows });
   }
