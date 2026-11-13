@@ -2702,23 +2702,46 @@ function collectPackageBodySingleAppErrors(stack: unknown): string[] {
  *
  * An app package (`manifest.type === 'app'`) or a module package
  * (`manifest.type === 'module'`) must not define **more than one** app: a
- * package that holds N apps is the shape D3 removes. The stack's own package is
- * judged, and so is every `packages[]` body it carries
- * ({@link collectPackageBodySingleAppErrors}). The finding names the package,
- * every app found and the remedy: one app per package, so each further app
- * moves into a module package of its own and the packages are composed under
- * `manifest: 'preserve'` (an app package may instead fold its apps into one app
- * with several tabs). Zero apps is allowed (a module may contribute objects and
- * navigation to another package's app, and a package may still be under
- * authoring).
+ * package that holds N apps is the shape D3 removes. What is judged is what
+ * the load path registers under each package id:
+ *
+ * - **A stack with no `packages[]`** is its one package, so every app it
+ *   carries counts against `manifest.id`.
+ * - **A stack with `packages[]`** (ADR-0130 D4) is judged per body
+ *   ({@link collectPackageBodySingleAppErrors}), and its top level by the
+ *   residual rule: a top-level app that no body declares is registered under
+ *   `manifest.id`, beside the apps of that id's own body, and two or more of
+ *   them are refused; a top-level app a body declares is a copy of that body's
+ *   app (an additive artifact's merged collections) and counts against no
+ *   package but that body's ({@link residualSingleAppFinding}).
+ *
+ * The finding names the package, every app found and the remedy: one app per
+ * package, so each further app moves into a module package of its own and the
+ * packages are composed under `manifest: 'preserve'` (an app package may
+ * instead fold its apps into one app with several tabs). Zero apps is allowed
+ * (a module may contribute objects and navigation to another package's app,
+ * and a package may still be under authoring).
  *
  * Mirrors {@link validateNamespacePrefix}: returns one error per violation;
- * `defineStack` aggregates and throws. `composeStacks` judges its result by the
- * same rule ({@link collectComposedSingleAppErrors}).
+ * `defineStack` aggregates and throws. `composeStacks` judges a result that
+ * carries `packages[]` by the same residual judge, and a flat result as one
+ * package ({@link collectComposedSingleAppErrors}).
  */
 function validateSingleApp(config: ObjectStackDefinition): string[] {
   const type = config.manifest?.type;
-  const own = singleAppFinding(type, singleAppPackageLabel(config.manifest), config.apps ?? []);
+  const label = singleAppPackageLabel(config.manifest);
+  const apps: readonly unknown[] = config.apps ?? [];
+  const own = !Array.isArray(config.packages)
+    ? singleAppFinding(type, label, apps)
+    : typeof type === 'string' && SINGLE_APP_PACKAGE_TYPES.has(type)
+      ? residualSingleAppFinding(config as unknown as Record<string, unknown>, config.packages, type, {
+        head: 'the stack gives',
+        residual: (isResidual) => apps.flatMap((app, i) =>
+          (isResidual('apps', app) ? [`${quotedAppNames([app])[0]} at its top level (apps[${i}]), which no package body declares`] : [])),
+        remedy: 'declare each such app inside the package body it belongs to, or give it a ' +
+          "'module' package of its own and compose with",
+      })
+      : undefined;
   return [...(own === undefined ? [] : [own]), ...collectPackageBodySingleAppErrors(config)];
 }
 
@@ -3822,8 +3845,11 @@ class StackNamespacePrefixInvalidError extends StackRefusalError {
  * TWO raise sites since #32810, one rule and one code, the header naming the
  * pass (as {@link StackCrossReferenceError}'s two do):
  *
- * - `defineStack` — the stack's own package and every `packages[]` body it
- *   carries. Header: `defineStack single-app validation failed (N issues):`.
+ * - `defineStack` — the stack's own package; for a stack that carries
+ *   `packages[]`, every body and the stack's manifest id with the top-level
+ *   apps no body declares, the judge `composeStacks` shares
+ *   ({@link validateSingleApp}). Header:
+ *   `defineStack single-app validation failed (N issues):`.
  * - `composeStacks` — what a composition puts under each package id: a flat
  *   composition's one selected manifest, every `packages[]` body, and the
  *   artifact's manifest id with the top-level apps no body declares
@@ -8833,7 +8859,8 @@ function collectArtifactCrossReferenceErrors(
  *   declares is registered too, under the artifact's manifest id, by the boot's
  *   residual rule (`unclaimedTopLevel`, `@objectstack/metadata`, mirrored here
  *   by {@link isResidualTopLevelItem}), beside the apps of that id's own body,
- *   so those are judged together ({@link residualSingleAppFinding}). Under
+ *   so those are judged together ({@link residualSingleAppFinding}, the judge
+ *   `defineStack` reads a `packages[]` stack through too). Under
  *   `'preserve'` every input with a manifest is assembled into a body of its
  *   own, so a one-app-per-package composition leaves no residual app and is
  *   accepted as before; a residual app comes from an input with no manifest, or
@@ -8859,7 +8886,21 @@ function collectComposedSingleAppErrors(
   if (typeof type === 'string' && SINGLE_APP_PACKAGE_TYPES.has(type)) {
     const option = typeof manifestOption === 'number' ? String(manifestOption) : `'${manifestOption}'`;
     const finding = Array.isArray(composed.packages)
-      ? residualSingleAppFinding(stacks, composed, composed.packages, type, option)
+      ? residualSingleAppFinding(composed, composed.packages, type, {
+        head: `composeStacks with manifest: ${option} gives`,
+        // The composed `apps` is every input's own `apps` concatenated (step 3
+        // of `composeBuiltStacks`), so walking the inputs finds each residual
+        // app and the input it came from.
+        residual: (isResidual) => stacks.flatMap((stack, i) => {
+          const own: unknown = (stack as Record<string, unknown>).apps;
+          if (!Array.isArray(own)) return [];
+          return own
+            .filter((app) => isResidual('apps', app))
+            .map((app) => `'${String((app as { name?: unknown }).name)}' from ${stackLabel(stack, i)}, which no package body declares`);
+        }),
+        remedy: "give each input that defines an app a manifest of its own (a 'module' package), declare a nested " +
+          "artifact's apps inside one of its package bodies, and compose with",
+      })
       : flatSingleAppFinding(stacks, composed, type, option);
     if (finding !== undefined) errors.push(finding);
   }
@@ -8894,35 +8935,47 @@ function flatSingleAppFinding(
   );
 }
 
+/** How one door names the residual apps and the remedy in a {@link residualSingleAppFinding}. */
+interface ResidualSingleAppDoor {
+  /** The finding's subject, e.g. `composeStacks with manifest: 'preserve' gives`. */
+  readonly head: string;
+  /**
+   * Each residual app, quoted and located, found with the residual predicate
+   * the shared judge derives from the stack's bodies.
+   */
+  readonly residual: (isResidual: (key: string, item: unknown) => boolean) => string[];
+  /** The door's remedy, completed by the shared `composeStacks(stacks, { manifest: 'preserve' })` clause. */
+  readonly remedy: string;
+}
+
 /**
- * {@link collectComposedSingleAppErrors} for a result with `packages[]`: the
- * apps registered under the artifact's manifest id are the apps of the body
- * with that id plus every top-level app no body declares (the residual rule),
- * and two or more of them, one at least residual, are refused. With no
- * residual app the bodies alone are judged, each by its own rule.
+ * The single-app rule (ADR-0019 D3 as amended) on what the load path registers
+ * under a `packages[]` stack's manifest id: the apps of the body with that id
+ * plus every top-level app no body declares, registered there by the boot's
+ * residual rule (`unclaimedTopLevel`, `@objectstack/metadata`, mirrored by
+ * {@link isResidualTopLevelItem}). Two or more of them, one at least residual,
+ * are refused. With no residual app the bodies alone are judged, each by its
+ * own rule ({@link collectPackageBodySingleAppErrors}), so a top-level app a
+ * body declares (a copy of that body's app: an additive artifact's merged
+ * collections) never counts against the manifest.
+ *
+ * ONE judge for both doors: `composeStacks` reads its result through it
+ * ({@link collectComposedSingleAppErrors}) and `defineStack` reads a stack
+ * that carries `packages[]` through it ({@link validateSingleApp}); `door`
+ * only names where each residual app came from and the remedy.
  */
 function residualSingleAppFinding(
-  stacks: readonly ObjectStackDefinition[],
-  composed: Record<string, unknown>,
+  stack: Record<string, unknown>,
   entries: readonly unknown[],
   type: string,
-  option: string,
+  door: ResidualSingleAppDoor,
 ): string | undefined {
   const bodies = entries.flatMap((entry) => (isRecord(entry) && isRecord(entry.manifest) ? [entry.manifest] : []));
-  const isResidual = isResidualTopLevelItem(bodies);
-  // The composed `apps` is every input's own `apps` concatenated (step 3), so
-  // walking the inputs finds each residual app and the input it came from.
-  const residual = stacks.flatMap((stack, i) => {
-    const own: unknown = (stack as Record<string, unknown>).apps;
-    if (!Array.isArray(own)) return [];
-    return own
-      .filter((app) => isResidual('apps', app))
-      .map((app) => `'${String((app as { name?: unknown }).name)}' from ${stackLabel(stack, i)}, which no package body declares`);
-  });
+  const residual = door.residual(isResidualTopLevelItem(bodies));
   if (residual.length === 0) return undefined;
   // The id the residual rule registers under (`unclaimedTopLevel`'s `ownerId`).
-  const manifest = composed.manifest as Record<string, unknown>;
-  const ownerId = manifest.id ?? composed.id;
+  const manifest = isRecord(stack.manifest) ? stack.manifest : {};
+  const ownerId = manifest.id ?? stack.id;
   const inBody = bodies.flatMap((body) => {
     if (ownerId === undefined || body.id !== ownerId || !Array.isArray(body.apps)) return [];
     const at = entries.findIndex((entry) => isRecord(entry) && entry.manifest === body);
@@ -8931,11 +8984,10 @@ function residualSingleAppFinding(
   const count = inBody.length + residual.length;
   if (count <= 1) return undefined;
   return (
-    `${singleAppPackageKind(type)} must define at most one app, but composeStacks with manifest: ${option} ` +
-    `gives package '${singleAppPackageLabel(manifest)}' ${count} (${[...inBody, ...residual].join(', ')}): an ` +
+    `${singleAppPackageKind(type)} must define at most one app, but ${door.head} ` +
+    `package '${singleAppPackageLabel(stack.manifest)}' ${count} (${[...inBody, ...residual].join(', ')}): an ` +
     `app that no package body declares is registered under the artifact's manifest id, beside the apps of that ` +
-    `package's own body. Keep one app per package: give each input that defines an app a manifest of its own ` +
-    `(a 'module' package), declare a nested artifact's apps inside one of its package bodies, and compose with ` +
+    `package's own body. Keep one app per package: ${door.remedy} ` +
     `composeStacks(stacks, { manifest: 'preserve' }), which registers each package body under its own id — ` +
     `${SINGLE_APP_RULE}.`
   );
