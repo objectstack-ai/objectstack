@@ -146,9 +146,9 @@ describe('[#22877] each by-name /meta door declares a closed query set, the memb
     it('the measured sets — paging, switches and the read a frame down included', () => {
         expect([...META_ITEM_READ_PARAMS].sort()).toEqual(['callerPackage', 'layers', 'locale', 'member', 'package', 'preview', 'state']);
         expect([...META_ITEM_RESET_PARAMS].sort()).toEqual(['dropStorage', 'member', 'package', 'state']);
-        expect([...META_ITEM_HISTORY_PARAMS].sort()).toEqual(['limit', 'member', 'sinceSeq']);
+        expect([...META_ITEM_HISTORY_PARAMS].sort()).toEqual(['limit', 'member', 'package', 'sinceSeq']);
         expect([...META_ITEM_PUBLISH_PARAMS].sort()).toEqual(['member', 'package']);
-        expect([...META_ITEM_ROLLBACK_PARAMS].sort()).toEqual(['member', 'toVersion']);
+        expect([...META_ITEM_ROLLBACK_PARAMS].sort()).toEqual(['member', 'package', 'toVersion']);
     });
 
     for (const { door, method, path, set, call, body } of DOORS) {
