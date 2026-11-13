@@ -53,15 +53,15 @@ import {
 const BYPASS_LABEL = {
   en: { view: 'View All Records', modify: 'Modify All Records' },
   'zh-Hans': { view: '查看所有记录', modify: '修改所有记录' },
-  'zh-Hant': { view: '檢視所有記錄', modify: '修改所有記錄' },
-  es: { view: 'Ver todos los registros', modify: 'Modificar todos los registros' },
-  ar: { view: 'عرض كل السجلات', modify: 'تعديل كل السجلات' },
-  fr: { view: 'Afficher tous les enregistrements', modify: 'Modifier tous les enregistrements' },
-  'pt-BR': { view: 'Ver todos os registros', modify: 'Modificar todos os registros' },
-  ru: { view: 'Просмотр всех записей', modify: 'Изменение всех записей' },
-  de: { view: 'Alle Datensätze anzeigen', modify: 'Alle Datensätze ändern' },
-  ja: { view: 'すべてのレコードの参照', modify: 'すべてのレコードの変更' },
-  ko: { view: '모든 레코드 보기', modify: '모든 레코드 수정' },
+  'zh-Hant': { view: '查看所有記錄', modify: '修改所有記錄' },
+  es: { view: 'View All Records', modify: 'Modify All Records' },
+  ar: { view: 'View All Records', modify: 'Modify All Records' },
+  fr: { view: 'View All Records', modify: 'Modify All Records' },
+  'pt-BR': { view: 'View All Records', modify: 'Modify All Records' },
+  ru: { view: 'View All Records', modify: 'Modify All Records' },
+  de: { view: 'View All Records', modify: 'Modify All Records' },
+  ja: { view: 'View All Records', modify: 'Modify All Records' },
+  ko: { view: 'View All Records', modify: 'Modify All Records' },
 } as const;
 
 const bypassLabel = (locale: keyof typeof BYPASS_LABEL, p: UserTextParams): string =>
@@ -82,38 +82,38 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
     es: (p) =>
       `Los titulares del conjunto de permisos "${p.permissionSet}" solo ven los registros de "${p.object}" que poseen ` +
       `o que se comparten con ellos: "${p.object}" es privado y el conjunto concede lectura sin un ámbito de lectura. ` +
-      `Si deben ver más, asigne un ámbito de lectura al conjunto o amplíe el uso compartido del objeto.`,
+      `Si deben ver más, asigne un ámbito de lectura (Read scope) al conjunto o amplíe el uso compartido del objeto.`,
     ar: (p) =>
       `لا يرى حاملو مجموعة الأذونات "${p.permissionSet}" إلا سجلات "${p.object}" التي يملكونها أو التي تمت مشاركتها ` +
       `معهم: الكائن "${p.object}" خاص، والمجموعة تمنح القراءة دون نطاق قراءة. إذا كان ينبغي أن يروا المزيد، فحدّد ` +
-      `نطاق قراءة للمجموعة أو وسّع مشاركة الكائن.`,
+      `نطاق قراءة (Read scope) للمجموعة أو وسّع مشاركة الكائن.`,
     fr: (p) =>
       `Les détenteurs de l’ensemble d’autorisations « ${p.permissionSet} » ne voient que les enregistrements de ` +
       `« ${p.object} » qui leur appartiennent ou qui sont partagés avec eux : « ${p.object} » est privé et ` +
       `l’ensemble accorde la lecture sans portée de lecture. S’ils doivent en voir davantage, définissez une portée ` +
-      `de lecture sur l’ensemble ou élargissez le partage de l’objet.`,
+      `de lecture (Read scope) sur l’ensemble ou élargissez le partage de l’objet.`,
     'pt-BR': (p) =>
       `Os titulares do conjunto de permissões "${p.permissionSet}" veem apenas os registros de "${p.object}" que ` +
       `possuem ou que foram compartilhados com eles: "${p.object}" é privado e o conjunto concede leitura sem um ` +
-      `escopo de leitura. Se eles devem ver mais, defina um escopo de leitura no conjunto ou amplie o ` +
+      `escopo de leitura. Se eles devem ver mais, defina um escopo de leitura (Read scope) no conjunto ou amplie o ` +
       `compartilhamento do objeto.`,
     ru: (p) =>
       `Владельцы набора разрешений «${p.permissionSet}» видят только те записи «${p.object}», которыми владеют ` +
       `сами или которые им предоставлены: объект «${p.object}» закрытый, а набор даёт право чтения без области ` +
-      `чтения. Если им нужно видеть больше, задайте набору область чтения или расширьте общий доступ к объекту.`,
+      `чтения. Если им нужно видеть больше, задайте набору область чтения (Read scope) или расширьте общий доступ к объекту.`,
     de: (p) =>
       `Inhaber des Berechtigungssatzes „${p.permissionSet}“ sehen nur die Datensätze von „${p.object}“, die ihnen ` +
       `gehören oder für sie freigegeben sind: „${p.object}“ ist privat, und der Satz gewährt Lesezugriff ohne ` +
-      `Lesebereich. Sollen sie mehr sehen, legen Sie für den Satz einen Lesebereich fest oder erweitern Sie die ` +
+      `Lesebereich. Sollen sie mehr sehen, legen Sie für den Satz einen Lesebereich (Read scope) fest oder erweitern Sie die ` +
       `Freigabe des Objekts.`,
     ja: (p) =>
       `権限セット「${p.permissionSet}」の保持者には、自分が所有しているか共有されている「${p.object}」のレコードしか` +
-      `表示されません。「${p.object}」は非公開で、この権限セットは参照範囲なしで参照権限を付与しているためです。` +
-      `より多くのレコードを表示させる場合は、権限セットに参照範囲を設定するか、オブジェクトの共有設定を広げてください。`,
+      `表示されません。「${p.object}」は非公開で、この権限セットは読み取り範囲なしで読み取り権限を付与しているためです。` +
+      `より多くのレコードを表示させる場合は、権限セットに読み取り範囲（Read scope）を設定するか、オブジェクトの共有設定を広げてください。`,
     ko: (p) =>
-      `권한 집합 "${p.permissionSet}"의 보유자는 자신이 소유하거나 공유받은 "${p.object}" 레코드만 볼 수 있습니다. ` +
-      `"${p.object}"은(는) 비공개이고, 이 권한 집합은 읽기 범위 없이 읽기 권한을 부여합니다. 더 많은 레코드를 ` +
-      `보아야 한다면 권한 집합에 읽기 범위를 지정하거나 개체의 공유 설정을 넓히세요.`,
+      `권한 세트 "${p.permissionSet}"의 보유자는 자신이 소유하거나 공유받은 "${p.object}" 레코드만 볼 수 있습니다. ` +
+      `"${p.object}"은(는) 비공개이고, 이 권한 세트는 읽기 범위 없이 읽기 권한을 부여합니다. 더 많은 레코드를 ` +
+      `보아야 한다면 권한 세트에 읽기 범위(Read scope)를 지정하거나 개체의 공유 설정을 넓히세요.`,
   },
   [SECURITY_MASTER_DETAIL_UNGRANTED]: {
     en: (p) =>
@@ -124,70 +124,70 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
           `refused it. Grant it in the permission sets that grant its master object.`,
     'zh-Hans': (p) =>
       p.master
-        ? `没有任何权限集授予对“${p.object}”（“${p.master}”的明细对象）的访问权限，因此除管理员外的所有用户都会被拒绝。` +
+        ? `没有任何权限集授予对“${p.object}”（“${p.master}”的子对象）的访问权限，因此除管理员外的所有用户都会被拒绝。` +
           `请在授予“${p.master}”的权限集中同时授予它。`
-        : `没有任何权限集授予对明细对象“${p.object}”的访问权限，因此除管理员外的所有用户都会被拒绝。` +
-          `请在授予其主对象的权限集中同时授予它。`,
+        : `没有任何权限集授予对子对象“${p.object}”的访问权限，因此除管理员外的所有用户都会被拒绝。` +
+          `请在授予其父对象的权限集中同时授予它。`,
     'zh-Hant': (p) =>
       p.master
-        ? `沒有任何權限集授予對「${p.object}」（「${p.master}」的明細物件）的存取權限，因此除管理員外的所有使用者都會被拒絕。` +
+        ? `沒有任何權限集授予對「${p.object}」（「${p.master}」的子物件）的存取權限，因此除管理員外的所有使用者都會被拒絕。` +
           `請在授予「${p.master}」的權限集中一併授予它。`
-        : `沒有任何權限集授予對明細物件「${p.object}」的存取權限，因此除管理員外的所有使用者都會被拒絕。` +
-          `請在授予其主物件的權限集中一併授予它。`,
+        : `沒有任何權限集授予對子物件「${p.object}」的存取權限，因此除管理員外的所有使用者都會被拒絕。` +
+          `請在授予其父物件的權限集中一併授予它。`,
     es: (p) =>
       p.master
-        ? `Ningún conjunto de permisos concede acceso a "${p.object}", un detalle de "${p.master}", así que se ` +
+        ? `Ningún conjunto de permisos concede acceso a "${p.object}", un objeto secundario de "${p.master}", así que se ` +
           `deniega a todos excepto a los administradores. Concédalo en los conjuntos de permisos que conceden ` +
           `"${p.master}".`
-        : `Ningún conjunto de permisos concede acceso al objeto de detalle "${p.object}", así que se deniega a ` +
+        : `Ningún conjunto de permisos concede acceso al objeto secundario "${p.object}", así que se deniega a ` +
           `todos excepto a los administradores. Concédalo en los conjuntos de permisos que conceden su objeto principal.`,
     ar: (p) =>
       p.master
-        ? `لا تمنح أي مجموعة أذونات حق الوصول إلى "${p.object}"، وهو كائن تفاصيل للكائن "${p.master}"، لذا يُرفض ` +
+        ? `لا تمنح أي مجموعة أذونات حق الوصول إلى "${p.object}"، وهو كائن فرعي للكائن "${p.master}"، لذا يُرفض ` +
           `وصول الجميع باستثناء المسؤولين. امنح الوصول إليه في مجموعات الأذونات التي تمنح "${p.master}".`
-        : `لا تمنح أي مجموعة أذونات حق الوصول إلى كائن التفاصيل "${p.object}"، لذا يُرفض وصول الجميع باستثناء ` +
-          `المسؤولين. امنح الوصول إليه في مجموعات الأذونات التي تمنح الكائن الرئيسي له.`,
+        : `لا تمنح أي مجموعة أذونات حق الوصول إلى الكائن الفرعي "${p.object}"، لذا يُرفض وصول الجميع باستثناء ` +
+          `المسؤولين. امنح الوصول إليه في مجموعات الأذونات التي تمنح الكائن الأصل له.`,
     fr: (p) =>
       p.master
-        ? `Aucun ensemble d’autorisations n’accorde l’accès à « ${p.object} », un détail de « ${p.master} » : il ` +
+        ? `Aucun ensemble d’autorisations n’accorde l’accès à « ${p.object} », un objet enfant de « ${p.master} » : il ` +
           `est donc refusé à tous sauf aux administrateurs. Accordez-le dans les ensembles d’autorisations qui ` +
           `accordent « ${p.master} ».`
-        : `Aucun ensemble d’autorisations n’accorde l’accès à l’objet de détail « ${p.object} » : il est donc ` +
+        : `Aucun ensemble d’autorisations n’accorde l’accès à l’objet enfant « ${p.object} » : il est donc ` +
           `refusé à tous sauf aux administrateurs. Accordez-le dans les ensembles d’autorisations qui accordent son ` +
-          `objet principal.`,
+          `objet parent.`,
     'pt-BR': (p) =>
       p.master
-        ? `Nenhum conjunto de permissões concede acesso a "${p.object}", um detalhe de "${p.master}", então ele é ` +
+        ? `Nenhum conjunto de permissões concede acesso a "${p.object}", um objeto filho de "${p.master}", então ele é ` +
           `negado a todos, exceto administradores. Conceda-o nos conjuntos de permissões que concedem "${p.master}".`
-        : `Nenhum conjunto de permissões concede acesso ao objeto de detalhe "${p.object}", então ele é negado a ` +
-          `todos, exceto administradores. Conceda-o nos conjuntos de permissões que concedem seu objeto mestre.`,
+        : `Nenhum conjunto de permissões concede acesso ao objeto filho "${p.object}", então ele é negado a ` +
+          `todos, exceto administradores. Conceda-o nos conjuntos de permissões que concedem seu objeto pai.`,
     ru: (p) =>
       p.master
-        ? `Ни один набор разрешений не даёт доступа к «${p.object}» (подчинённому объекту «${p.master}»), поэтому ` +
+        ? `Ни один набор разрешений не даёт доступа к «${p.object}» (дочернему объекту «${p.master}»), поэтому ` +
           `всем, кроме администраторов, в доступе отказано. Предоставьте доступ в тех наборах разрешений, которые ` +
           `дают доступ к «${p.master}».`
-        : `Ни один набор разрешений не даёт доступа к подчинённому объекту «${p.object}», поэтому всем, кроме ` +
+        : `Ни один набор разрешений не даёт доступа к дочернему объекту «${p.object}», поэтому всем, кроме ` +
           `администраторов, в доступе отказано. Предоставьте доступ в тех наборах разрешений, которые дают доступ к ` +
-          `его главному объекту.`,
+          `его родительскому объекту.`,
     de: (p) =>
       p.master
-        ? `Kein Berechtigungssatz gewährt Zugriff auf „${p.object}“, ein Detail von „${p.master}“, daher wird er ` +
+        ? `Kein Berechtigungssatz gewährt Zugriff auf „${p.object}“, ein untergeordnetes Objekt von „${p.master}“, daher wird er ` +
           `allen außer Administratoren verweigert. Gewähren Sie ihn in den Berechtigungssätzen, die „${p.master}“ ` +
           `gewähren.`
-        : `Kein Berechtigungssatz gewährt Zugriff auf das Detailobjekt „${p.object}“, daher wird er allen außer ` +
-          `Administratoren verweigert. Gewähren Sie ihn in den Berechtigungssätzen, die sein Masterobjekt gewähren.`,
+        : `Kein Berechtigungssatz gewährt Zugriff auf das untergeordnete Objekt „${p.object}“, daher wird er allen außer ` +
+          `Administratoren verweigert. Gewähren Sie ihn in den Berechtigungssätzen, die sein übergeordnetes Objekt gewähren.`,
     ja: (p) =>
       p.master
-        ? `「${p.object}」（「${p.master}」の詳細オブジェクト）へのアクセスを付与している権限セットがないため、` +
+        ? `「${p.object}」（「${p.master}」の子オブジェクト）へのアクセスを付与している権限セットがないため、` +
           `管理者以外のユーザーはアクセスを拒否されます。「${p.master}」を付与している権限セットで、このオブジェクトも付与してください。`
-        : `詳細オブジェクト「${p.object}」へのアクセスを付与している権限セットがないため、管理者以外のユーザーは` +
-          `アクセスを拒否されます。マスターオブジェクトを付与している権限セットで、このオブジェクトも付与してください。`,
+        : `子オブジェクト「${p.object}」へのアクセスを付与している権限セットがないため、管理者以外のユーザーは` +
+          `アクセスを拒否されます。親オブジェクトを付与している権限セットで、このオブジェクトも付与してください。`,
     ko: (p) =>
       p.master
-        ? `"${p.object}"("${p.master}"의 세부 개체)에 대한 액세스를 부여하는 권한 집합이 없어 관리자를 제외한 모든 ` +
-          `사용자가 거부됩니다. "${p.master}"을(를) 부여하는 권한 집합에서 이 개체도 부여하세요.`
-        : `세부 개체 "${p.object}"에 대한 액세스를 부여하는 권한 집합이 없어 관리자를 제외한 모든 사용자가 ` +
-          `거부됩니다. 마스터 개체를 부여하는 권한 집합에서 이 개체도 부여하세요.`,
+        ? `"${p.object}"("${p.master}"의 하위 개체)에 대한 액세스를 부여하는 권한 세트가 없어 관리자를 제외한 모든 ` +
+          `사용자가 거부됩니다. "${p.master}"을(를) 부여하는 권한 세트에서 이 개체도 부여하세요.`
+        : `하위 개체 "${p.object}"에 대한 액세스를 부여하는 권한 세트가 없어 관리자를 제외한 모든 사용자가 ` +
+          `거부됩니다. 상위 개체를 부여하는 권한 세트에서 이 개체도 부여하세요.`,
   },
   [SECURITY_BOOK_AUDIENCE_UNKNOWN_SET]: {
     en: (p) =>
@@ -228,8 +228,8 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       `いないため、誰もこのブックを開けません。既存の権限セットに限定するか、「${p.permissionSet}」を別のインストール済み` +
       `パッケージが提供している場合はこのメッセージを無視してください。`,
     ko: (p) =>
-      `문서 북 "${p.book}"은(는) 권한 집합 "${p.permissionSet}"(으)로 제한되어 있지만 이 권한 집합이 정의되어 있지 ` +
-      `않아 아무도 이 북을 열 수 없습니다. 기존 권한 집합으로 제한하거나, "${p.permissionSet}"을(를) 설치된 다른 ` +
+      `문서 북 "${p.book}"은(는) 권한 세트 "${p.permissionSet}"(으)로 제한되어 있지만 이 권한 세트가 정의되어 있지 ` +
+      `않아 아무도 이 북을 열 수 없습니다. 기존 권한 세트로 제한하거나, "${p.permissionSet}"을(를) 설치된 다른 ` +
       `패키지가 제공한다면 이 메시지를 무시하세요.`,
   },
   [SECURITY_SUPERUSER_FIELD_MASK_INERT]: {
@@ -291,18 +291,18 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
         read:
           `En el conjunto de permisos "${p.permissionSet}", ocultar el campo "${p.field}" no tiene efecto: el ` +
           `permiso "${b}" del conjunto sobre "${p.object}" permite a todos sus titulares leer todos los campos de ` +
-          `ese objeto. Quite "${b}" y conceda el acceso a los registros con un ámbito de lectura o escritura, o ` +
+          `ese objeto. Quite "${b}" y conceda el acceso a los registros con un ámbito de lectura (Read scope) o de escritura (Write scope), o ` +
           `permita que el conjunto lea el campo si ese acceso es intencionado.`,
         edit:
           `En el conjunto de permisos "${p.permissionSet}", dejar el campo "${p.field}" en solo lectura no tiene ` +
           `efecto: el permiso "${b}" del conjunto sobre "${p.object}" permite a todos sus titulares editar todos ` +
-          `los campos de ese objeto. Quite "${b}" y conceda el acceso a los registros con un ámbito de lectura o ` +
-          `escritura, o elimine la restricción del campo si ese acceso es intencionado.`,
+          `los campos de ese objeto. Quite "${b}" y conceda el acceso a los registros con un ámbito de lectura (Read scope) o ` +
+          `de escritura (Write scope), o elimine la restricción del campo si ese acceso es intencionado.`,
         both:
           `En el conjunto de permisos "${p.permissionSet}", ocultar el campo "${p.field}" y dejarlo en solo lectura ` +
           `no tiene efecto: el permiso "${b}" del conjunto sobre "${p.object}" permite a todos sus titulares leer y ` +
           `editar todos los campos de ese objeto. Quite "${b}" y conceda el acceso a los registros con un ámbito de ` +
-          `lectura o escritura, o elimine la restricción del campo si ese acceso es intencionado.`,
+          `lectura (Read scope) o de escritura (Write scope), o elimine la restricción del campo si ese acceso es intencionado.`,
       });
     },
     ar: (p) => {
@@ -311,15 +311,15 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
         read:
           `في مجموعة الأذونات "${p.permissionSet}"، لا يكون لإخفاء الحقل "${p.field}" أي أثر: إذن "${b}" الذي ` +
           `تملكه المجموعة على "${p.object}" يتيح لجميع حامليها قراءة كل حقول هذا الكائن. أزل "${b}" وامنح الوصول ` +
-          `إلى السجلات عبر نطاق قراءة أو كتابة، أو اسمح للمجموعة بقراءة الحقل إذا كان هذا الوصول مقصودًا.`,
+          `إلى السجلات عبر نطاق قراءة (Read scope) أو نطاق كتابة (Write scope)، أو اسمح للمجموعة بقراءة الحقل إذا كان هذا الوصول مقصودًا.`,
         edit:
           `في مجموعة الأذونات "${p.permissionSet}"، لا يكون لجعل الحقل "${p.field}" للقراءة فقط أي أثر: إذن "${b}" ` +
           `الذي تملكه المجموعة على "${p.object}" يتيح لجميع حامليها تعديل كل حقول هذا الكائن. أزل "${b}" وامنح ` +
-          `الوصول إلى السجلات عبر نطاق قراءة أو كتابة، أو احذف تقييد الحقل إذا كان هذا الوصول مقصودًا.`,
+          `الوصول إلى السجلات عبر نطاق قراءة (Read scope) أو نطاق كتابة (Write scope)، أو احذف تقييد الحقل إذا كان هذا الوصول مقصودًا.`,
         both:
           `في مجموعة الأذونات "${p.permissionSet}"، لا يكون لإخفاء الحقل "${p.field}" وجعله للقراءة فقط أي أثر: ` +
           `إذن "${b}" الذي تملكه المجموعة على "${p.object}" يتيح لجميع حامليها قراءة كل حقول هذا الكائن وتعديلها. ` +
-          `أزل "${b}" وامنح الوصول إلى السجلات عبر نطاق قراءة أو كتابة، أو احذف تقييد الحقل إذا كان هذا الوصول مقصودًا.`,
+          `أزل "${b}" وامنح الوصول إلى السجلات عبر نطاق قراءة (Read scope) أو نطاق كتابة (Write scope)، أو احذف تقييد الحقل إذا كان هذا الوصول مقصودًا.`,
       });
     },
     fr: (p) => {
@@ -328,18 +328,18 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
         read:
           `Dans l’ensemble d’autorisations « ${p.permissionSet} », masquer le champ « ${p.field} » n’a aucun effet : ` +
           `l’autorisation « ${b} » de l’ensemble sur « ${p.object} » permet à tous ses détenteurs de lire tous les ` +
-          `champs de cet objet. Retirez « ${b} » et accordez l’accès aux enregistrements avec une portée de lecture ` +
-          `ou d’écriture, ou autorisez l’ensemble à lire le champ si cet accès est voulu.`,
+          `champs de cet objet. Retirez « ${b} » et accordez l’accès aux enregistrements avec une portée de lecture (Read scope) ` +
+          `ou d’écriture (Write scope), ou autorisez l’ensemble à lire le champ si cet accès est voulu.`,
         edit:
           `Dans l’ensemble d’autorisations « ${p.permissionSet} », mettre le champ « ${p.field} » en lecture seule ` +
           `n’a aucun effet : l’autorisation « ${b} » de l’ensemble sur « ${p.object} » permet à tous ses détenteurs ` +
           `de modifier tous les champs de cet objet. Retirez « ${b} » et accordez l’accès aux enregistrements avec ` +
-          `une portée de lecture ou d’écriture, ou supprimez la restriction du champ si cet accès est voulu.`,
+          `une portée de lecture (Read scope) ou d’écriture (Write scope), ou supprimez la restriction du champ si cet accès est voulu.`,
         both:
           `Dans l’ensemble d’autorisations « ${p.permissionSet} », masquer le champ « ${p.field} » et le mettre en ` +
           `lecture seule n’a aucun effet : l’autorisation « ${b} » de l’ensemble sur « ${p.object} » permet à tous ` +
           `ses détenteurs de lire et de modifier tous les champs de cet objet. Retirez « ${b} » et accordez l’accès ` +
-          `aux enregistrements avec une portée de lecture ou d’écriture, ou supprimez la restriction du champ si cet ` +
+          `aux enregistrements avec une portée de lecture (Read scope) ou d’écriture (Write scope), ou supprimez la restriction du champ si cet ` +
           `accès est voulu.`,
       });
     },
@@ -349,18 +349,18 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
         read:
           `No conjunto de permissões "${p.permissionSet}", ocultar o campo "${p.field}" não tem efeito: a permissão ` +
           `"${b}" do conjunto em "${p.object}" permite que todos os seus titulares leiam todos os campos desse ` +
-          `objeto. Remova "${b}" e conceda o acesso aos registros com um escopo de leitura ou gravação, ou permita ` +
+          `objeto. Remova "${b}" e conceda o acesso aos registros com um escopo de leitura (Read scope) ou de gravação (Write scope), ou permita ` +
           `que o conjunto leia o campo se esse acesso for intencional.`,
         edit:
           `No conjunto de permissões "${p.permissionSet}", deixar o campo "${p.field}" como somente leitura não tem ` +
           `efeito: a permissão "${b}" do conjunto em "${p.object}" permite que todos os seus titulares editem todos os ` +
-          `campos desse objeto. Remova "${b}" e conceda o acesso aos registros com um escopo de leitura ou ` +
-          `gravação, ou exclua a restrição do campo se esse acesso for intencional.`,
+          `campos desse objeto. Remova "${b}" e conceda o acesso aos registros com um escopo de leitura (Read scope) ou ` +
+          `de gravação (Write scope), ou exclua a restrição do campo se esse acesso for intencional.`,
         both:
           `No conjunto de permissões "${p.permissionSet}", ocultar o campo "${p.field}" e deixá-lo como somente ` +
           `leitura não tem efeito: a permissão "${b}" do conjunto em "${p.object}" permite que todos os seus ` +
           `titulares leiam e editem todos os campos desse objeto. Remova "${b}" e conceda o acesso aos registros ` +
-          `com um escopo de leitura ou gravação, ou exclua a restrição do campo se esse acesso for intencional.`,
+          `com um escopo de leitura (Read scope) ou de gravação (Write scope), ou exclua a restrição do campo se esse acesso for intencional.`,
       });
     },
     ru: (p) => {
@@ -369,17 +369,17 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
         read:
           `В наборе разрешений «${p.permissionSet}» скрытие поля «${p.field}» не действует: право «${b}» этого ` +
           `набора для «${p.object}» позволяет всем его владельцам читать все поля этого объекта. Уберите «${b}» и ` +
-          `предоставьте доступ к записям через область чтения или записи либо разрешите набору читать это поле, ` +
+          `предоставьте доступ к записям через область чтения (Read scope) или записи (Write scope) либо разрешите набору читать это поле, ` +
           `если такой доступ задуман.`,
         edit:
           `В наборе разрешений «${p.permissionSet}» режим «только чтение» для поля «${p.field}» не действует: право ` +
           `«${b}» этого набора для «${p.object}» позволяет всем его владельцам изменять все поля этого объекта. ` +
-          `Уберите «${b}» и предоставьте доступ к записям через область чтения или записи либо удалите ограничение ` +
+          `Уберите «${b}» и предоставьте доступ к записям через область чтения (Read scope) или записи (Write scope) либо удалите ограничение ` +
           `поля, если такой доступ задуман.`,
         both:
           `В наборе разрешений «${p.permissionSet}» скрытие поля «${p.field}» и режим «только чтение» для него не ` +
           `действуют: право «${b}» этого набора для «${p.object}» позволяет всем его владельцам читать и изменять ` +
-          `все поля этого объекта. Уберите «${b}» и предоставьте доступ к записям через область чтения или записи ` +
+          `все поля этого объекта. Уберите «${b}» и предоставьте доступ к записям через область чтения (Read scope) или записи (Write scope) ` +
           `либо удалите ограничение поля, если такой доступ задуман.`,
       });
     },
@@ -389,18 +389,18 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
         read:
           `Im Berechtigungssatz „${p.permissionSet}“ ist das Ausblenden des Felds „${p.field}“ wirkungslos: Die ` +
           `Berechtigung „${b}“ des Satzes für „${p.object}“ lässt alle Inhaber jedes Feld dieses Objekts lesen. ` +
-          `Entfernen Sie „${b}“ und gewähren Sie den Zugriff auf Datensätze über einen Lese- oder Schreibbereich, ` +
+          `Entfernen Sie „${b}“ und gewähren Sie den Zugriff auf Datensätze über einen Lesebereich (Read scope) oder Schreibbereich (Write scope), ` +
           `oder erlauben Sie dem Satz, das Feld zu lesen, wenn dieser Zugriff beabsichtigt ist.`,
         edit:
           `Im Berechtigungssatz „${p.permissionSet}“ ist der Schreibschutz des Felds „${p.field}“ wirkungslos: Die ` +
           `Berechtigung „${b}“ des Satzes für „${p.object}“ lässt alle Inhaber jedes Feld dieses Objekts ` +
-          `bearbeiten. Entfernen Sie „${b}“ und gewähren Sie den Zugriff auf Datensätze über einen Lese- oder ` +
-          `Schreibbereich, oder löschen Sie die Feldeinschränkung, wenn dieser Zugriff beabsichtigt ist.`,
+          `bearbeiten. Entfernen Sie „${b}“ und gewähren Sie den Zugriff auf Datensätze über einen Lesebereich (Read scope) oder ` +
+          `Schreibbereich (Write scope), oder löschen Sie die Feldeinschränkung, wenn dieser Zugriff beabsichtigt ist.`,
         both:
           `Im Berechtigungssatz „${p.permissionSet}“ sind das Ausblenden des Felds „${p.field}“ und sein ` +
           `Schreibschutz wirkungslos: Die Berechtigung „${b}“ des Satzes für „${p.object}“ lässt alle Inhaber jedes ` +
           `Feld dieses Objekts lesen und bearbeiten. Entfernen Sie „${b}“ und gewähren Sie den Zugriff auf ` +
-          `Datensätze über einen Lese- oder Schreibbereich, oder löschen Sie die Feldeinschränkung, wenn dieser ` +
+          `Datensätze über einen Lesebereich (Read scope) oder Schreibbereich (Write scope), oder löschen Sie die Feldeinschränkung, wenn dieser ` +
           `Zugriff beabsichtigt ist.`,
       });
     },
@@ -409,18 +409,18 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       return fieldMaskSentence(p, {
         read:
           `権限セット「${p.permissionSet}」では、項目「${p.field}」を非表示にする設定が効いていません。この権限セットは` +
-          `「${p.object}」に「${b}」を持っており、すべての保持者がこのオブジェクトのすべての項目を参照できるためです。` +
-          `「${b}」を外して参照範囲または書き込み範囲でレコードへのアクセスを付与するか、このアクセスが意図したもので` +
-          `あれば、この権限セットにこの項目の参照を許可してください。`,
+          `「${p.object}」に「${b}」を持っており、すべての保持者がこのオブジェクトのすべての項目を読み取れるためです。` +
+          `「${b}」を外して読み取り範囲（Read scope）または書き込み範囲（Write scope）でレコードへのアクセスを付与するか、このアクセスが意図したもので` +
+          `あれば、この権限セットにこの項目の読み取りを許可してください。`,
         edit:
           `権限セット「${p.permissionSet}」では、項目「${p.field}」を読み取り専用にする設定が効いていません。この権限` +
           `セットは「${p.object}」に「${b}」を持っており、すべての保持者がこのオブジェクトのすべての項目を編集できる` +
-          `ためです。「${b}」を外して参照範囲または書き込み範囲でレコードへのアクセスを付与するか、このアクセスが` +
+          `ためです。「${b}」を外して読み取り範囲（Read scope）または書き込み範囲（Write scope）でレコードへのアクセスを付与するか、このアクセスが` +
           `意図したものであれば、この項目の制限を削除してください。`,
         both:
           `権限セット「${p.permissionSet}」では、項目「${p.field}」を非表示かつ読み取り専用にする設定が効いていません。` +
           `この権限セットは「${p.object}」に「${b}」を持っており、すべての保持者がこのオブジェクトのすべての項目を` +
-          `参照・編集できるためです。「${b}」を外して参照範囲または書き込み範囲でレコードへのアクセスを付与するか、` +
+          `読み取り・編集できるためです。「${b}」を外して読み取り範囲（Read scope）または書き込み範囲（Write scope）でレコードへのアクセスを付与するか、` +
           `このアクセスが意図したものであれば、この項目の制限を削除してください。`,
       });
     },
@@ -428,19 +428,19 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       const b = bypassLabel('ko', p);
       return fieldMaskSentence(p, {
         read:
-          `권한 집합 "${p.permissionSet}"에서 필드 "${p.field}"을(를) 숨기는 설정은 효과가 없습니다. 이 권한 집합은 ` +
+          `권한 세트 "${p.permissionSet}"에서 필드 "${p.field}"을(를) 숨기는 설정은 효과가 없습니다. 이 권한 세트는 ` +
           `"${p.object}"에 대해 "${b}" 권한을 가지므로 모든 보유자가 이 개체의 모든 필드를 읽을 수 있습니다. ` +
-          `"${b}"을(를) 제거하고 읽기 또는 쓰기 범위로 레코드 액세스를 부여하거나, 이 액세스가 의도된 것이라면 ` +
-          `권한 집합이 이 필드를 읽을 수 있도록 하세요.`,
+          `"${b}"을(를) 제거하고 읽기 범위(Read scope) 또는 쓰기 범위(Write scope)로 레코드 액세스를 부여하거나, 이 액세스가 의도된 것이라면 ` +
+          `권한 세트가 이 필드를 읽을 수 있도록 하세요.`,
         edit:
-          `권한 집합 "${p.permissionSet}"에서 필드 "${p.field}"을(를) 읽기 전용으로 하는 설정은 효과가 없습니다. ` +
-          `이 권한 집합은 "${p.object}"에 대해 "${b}" 권한을 가지므로 모든 보유자가 이 개체의 모든 필드를 편집할 수 ` +
-          `있습니다. "${b}"을(를) 제거하고 읽기 또는 쓰기 범위로 레코드 액세스를 부여하거나, 이 액세스가 의도된 ` +
+          `권한 세트 "${p.permissionSet}"에서 필드 "${p.field}"을(를) 읽기 전용으로 하는 설정은 효과가 없습니다. ` +
+          `이 권한 세트는 "${p.object}"에 대해 "${b}" 권한을 가지므로 모든 보유자가 이 개체의 모든 필드를 편집할 수 ` +
+          `있습니다. "${b}"을(를) 제거하고 읽기 범위(Read scope) 또는 쓰기 범위(Write scope)로 레코드 액세스를 부여하거나, 이 액세스가 의도된 ` +
           `것이라면 이 필드 제한을 삭제하세요.`,
         both:
-          `권한 집합 "${p.permissionSet}"에서 필드 "${p.field}"을(를) 숨기고 읽기 전용으로 하는 설정은 효과가 ` +
-          `없습니다. 이 권한 집합은 "${p.object}"에 대해 "${b}" 권한을 가지므로 모든 보유자가 이 개체의 모든 필드를 ` +
-          `읽고 편집할 수 있습니다. "${b}"을(를) 제거하고 읽기 또는 쓰기 범위로 레코드 액세스를 부여하거나, 이 ` +
+          `권한 세트 "${p.permissionSet}"에서 필드 "${p.field}"을(를) 숨기고 읽기 전용으로 하는 설정은 효과가 ` +
+          `없습니다. 이 권한 세트는 "${p.object}"에 대해 "${b}" 권한을 가지므로 모든 보유자가 이 개체의 모든 필드를 ` +
+          `읽고 편집할 수 있습니다. "${b}"을(를) 제거하고 읽기 범위(Read scope) 또는 쓰기 범위(Write scope)로 레코드 액세스를 부여하거나, 이 ` +
           `액세스가 의도된 것이라면 이 필드 제한을 삭제하세요.`,
       });
     },
@@ -462,36 +462,36 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       `deniega no se le indica qué registro principal necesita el cambio. Haga el campo legible, o manténgalo ` +
       `oculto si se pretende un rechazo genérico.`,
     ar: (p) =>
-      `تُخفي مجموعة الأذونات "${p.permissionSet}" الحقل "${p.field}"، وهو الرابط إلى السجل الرئيسي. لا يزال هذا ` +
-      `الرابط يحدد ما إذا كان بإمكان حامليها تعديل السجل، ولا يُبلَّغ من يُرفض طلبه بالسجل الرئيسي الذي يتطلبه ` +
+      `تُخفي مجموعة الأذونات "${p.permissionSet}" الحقل "${p.field}"، وهو الرابط إلى السجل الأصل. لا يزال هذا ` +
+      `الرابط يحدد ما إذا كان بإمكان حامليها تعديل السجل، ولا يُبلَّغ من يُرفض طلبه بالسجل الأصل الذي يتطلبه ` +
       `التعديل. اجعل الحقل قابلاً للقراءة، أو أبقِه مخفياً إذا كان الرفض العام مقصوداً.`,
     fr: (p) =>
       `L’ensemble d’autorisations « ${p.permissionSet} » masque le champ « ${p.field} », le lien vers ` +
-      `l’enregistrement principal. Ce lien décide toujours si ses détenteurs peuvent modifier l’enregistrement, et ` +
-      `un détenteur refusé n’apprend pas quel enregistrement principal la modification exige. Rendez le champ ` +
+      `l’enregistrement parent. Ce lien décide toujours si ses détenteurs peuvent modifier l’enregistrement, et ` +
+      `un détenteur refusé n’apprend pas quel enregistrement parent la modification exige. Rendez le champ ` +
       `lisible, ou laissez-le masqué si un refus générique est voulu.`,
     'pt-BR': (p) =>
-      `O conjunto de permissões "${p.permissionSet}" oculta o campo "${p.field}", o vínculo com o registro mestre. ` +
+      `O conjunto de permissões "${p.permissionSet}" oculta o campo "${p.field}", o vínculo com o registro pai. ` +
       `Esse vínculo ainda decide se os titulares podem alterar o registro, e quem for recusado não fica sabendo ` +
-      `qual registro mestre a alteração exige. Torne o campo legível ou mantenha-o oculto se uma recusa genérica ` +
+      `qual registro pai a alteração exige. Torne o campo legível ou mantenha-o oculto se uma recusa genérica ` +
       `for intencional.`,
     ru: (p) =>
-      `Набор разрешений «${p.permissionSet}» скрывает поле «${p.field}» — ссылку на главную запись. Эта ссылка ` +
+      `Набор разрешений «${p.permissionSet}» скрывает поле «${p.field}» — ссылку на родительскую запись. Эта ссылка ` +
       `по-прежнему определяет, могут ли владельцы набора изменять запись, а получивший отказ не узнает, какая ` +
-      `главная запись нужна для изменения. Сделайте поле доступным для чтения или оставьте его скрытым, если ` +
+      `родительская запись нужна для изменения. Сделайте поле доступным для чтения или оставьте его скрытым, если ` +
       `задуман общий отказ.`,
     de: (p) =>
       `Der Berechtigungssatz „${p.permissionSet}“ blendet das Feld „${p.field}“ aus, die Verknüpfung zum ` +
-      `Masterdatensatz. Diese Verknüpfung entscheidet weiterhin, ob die Inhaber den Datensatz ändern dürfen, und ` +
-      `ein abgewiesener Inhaber erfährt nicht, welchen Masterdatensatz die Änderung erfordert. Machen Sie das Feld ` +
+      `übergeordneten Datensatz. Diese Verknüpfung entscheidet weiterhin, ob die Inhaber den Datensatz ändern dürfen, und ` +
+      `ein abgewiesener Inhaber erfährt nicht, welchen übergeordneten Datensatz die Änderung erfordert. Machen Sie das Feld ` +
       `lesbar oder lassen Sie es ausgeblendet, wenn eine allgemeine Ablehnung beabsichtigt ist.`,
     ja: (p) =>
-      `権限セット「${p.permissionSet}」は、マスターレコードへの参照である項目「${p.field}」を非表示にしています。` +
+      `権限セット「${p.permissionSet}」は、親レコードへの参照である項目「${p.field}」を非表示にしています。` +
       `この項目は保持者がレコードを変更できるかどうかを引き続き決定しており、拒否された保持者には、変更に必要な` +
-      `マスターレコードが伝えられません。項目を参照可能にするか、一般的な拒否メッセージで構わない場合は非表示のままにしてください。`,
+      `親レコードが伝えられません。項目を読み取り可能にするか、一般的な拒否メッセージで構わない場合は非表示のままにしてください。`,
     ko: (p) =>
-      `권한 집합 "${p.permissionSet}"은(는) 마스터 레코드에 대한 연결인 필드 "${p.field}"을(를) 숨깁니다. 이 필드는 ` +
-      `여전히 보유자가 레코드를 변경할 수 있는지를 결정하며, 거부된 보유자는 변경에 필요한 마스터 레코드가 무엇인지 ` +
+      `권한 세트 "${p.permissionSet}"은(는) 상위 레코드에 대한 연결인 필드 "${p.field}"을(를) 숨깁니다. 이 필드는 ` +
+      `여전히 보유자가 레코드를 변경할 수 있는지를 결정하며, 거부된 보유자는 변경에 필요한 상위 레코드가 무엇인지 ` +
       `안내받지 못합니다. 필드를 읽을 수 있게 하거나, 일반적인 거부 메시지를 의도했다면 숨긴 상태로 두세요.`,
   },
   [SECURITY_UPDATE_POLICY_NO_CHECK]: {
@@ -499,40 +499,40 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       `Policy "${p.policy}" in permission set "${p.permissionSet}" sets no check condition, so an update may also ` +
       `save rows that the default ownership rule allows. Add a check condition to limit what an update may write.`,
     'zh-Hans': (p) =>
-      `权限集“${p.permissionSet}”中的策略“${p.policy}”没有设置检查条件，因此更新时也可能写入默认所有权规则所允许的行。` +
-      `请添加检查条件，以限制更新可以写入的内容。`,
+      `权限集“${p.permissionSet}”中的策略“${p.policy}”没有设置 CHECK（写入过滤）条件，因此更新时也可能写入默认所有权规则所允许的行。` +
+      `请添加 CHECK 条件，以限制更新可以写入的内容。`,
     'zh-Hant': (p) =>
-      `權限集「${p.permissionSet}」中的策略「${p.policy}」沒有設定檢查條件，因此更新時也可能寫入預設擁有權規則所允許的資料列。` +
-      `請新增檢查條件，以限制更新可以寫入的內容。`,
+      `權限集「${p.permissionSet}」中的策略「${p.policy}」沒有設定 CHECK（寫入過濾）條件，因此更新時也可能寫入預設擁有權規則所允許的資料列。` +
+      `請新增 CHECK 條件，以限制更新可以寫入的內容。`,
     es: (p) =>
       `La política "${p.policy}" del conjunto de permisos "${p.permissionSet}" no define ninguna condición de ` +
       `comprobación, así que una actualización también puede guardar filas que la regla de propiedad ` +
-      `predeterminada permite. Añada una condición de comprobación para limitar lo que puede escribir una actualización.`,
+      `predeterminada permite. Añada una condición de comprobación (CHECK) para limitar lo que puede escribir una actualización.`,
     ar: (p) =>
       `لا تحدد السياسة "${p.policy}" في مجموعة الأذونات "${p.permissionSet}" أي شرط تحقق، لذا قد يحفظ التحديث ` +
-      `أيضاً صفوفاً تسمح بها قاعدة الملكية الافتراضية. أضف شرط تحقق لتقييد ما يمكن أن يكتبه التحديث.`,
+      `أيضاً صفوفاً تسمح بها قاعدة الملكية الافتراضية. أضف شرط تحقق (CHECK) لتقييد ما يمكن أن يكتبه التحديث.`,
     fr: (p) =>
       `La politique « ${p.policy} » de l’ensemble d’autorisations « ${p.permissionSet} » ne définit aucune ` +
       `condition de vérification : une mise à jour peut donc aussi enregistrer des lignes que la règle de propriété ` +
-      `par défaut autorise. Ajoutez une condition de vérification pour limiter ce qu’une mise à jour peut écrire.`,
+      `par défaut autorise. Ajoutez une condition de vérification (CHECK) pour limiter ce qu’une mise à jour peut écrire.`,
     'pt-BR': (p) =>
       `A política "${p.policy}" do conjunto de permissões "${p.permissionSet}" não define condição de verificação, ` +
       `então uma atualização também pode gravar linhas que a regra de propriedade padrão permite. Adicione uma ` +
-      `condição de verificação para limitar o que uma atualização pode gravar.`,
+      `condição de verificação (CHECK) para limitar o que uma atualização pode gravar.`,
     ru: (p) =>
       `Политика «${p.policy}» в наборе разрешений «${p.permissionSet}» не задаёт условия проверки, поэтому ` +
       `обновление может сохранить и строки, которые допускает правило владения по умолчанию. Добавьте условие ` +
-      `проверки, чтобы ограничить то, что может записать обновление.`,
+      `проверки (CHECK), чтобы ограничить то, что может записать обновление.`,
     de: (p) =>
       `Die Richtlinie „${p.policy}“ im Berechtigungssatz „${p.permissionSet}“ legt keine Prüfbedingung fest, daher ` +
       `kann eine Aktualisierung auch Zeilen speichern, die die Standard-Besitzregel zulässt. Fügen Sie eine ` +
-      `Prüfbedingung hinzu, um zu begrenzen, was eine Aktualisierung schreiben darf.`,
+      `Prüfbedingung (CHECK) hinzu, um zu begrenzen, was eine Aktualisierung schreiben darf.`,
     ja: (p) =>
       `権限セット「${p.permissionSet}」のポリシー「${p.policy}」にはチェック条件がないため、更新時に既定の所有権ルールが` +
-      `許可する行も書き込まれる可能性があります。チェック条件を追加して、更新で書き込める内容を制限してください。`,
+      `許可する行も書き込まれる可能性があります。チェック条件（CHECK）を追加して、更新で書き込める内容を制限してください。`,
     ko: (p) =>
-      `권한 집합 "${p.permissionSet}"의 정책 "${p.policy}"에는 검사 조건이 없어, 업데이트가 기본 소유권 규칙이 ` +
-      `허용하는 행까지 저장할 수 있습니다. 검사 조건을 추가해 업데이트가 쓸 수 있는 내용을 제한하세요.`,
+      `권한 세트 "${p.permissionSet}"의 정책 "${p.policy}"에는 검사 조건이 없어, 업데이트가 기본 소유권 규칙이 ` +
+      `허용하는 행까지 저장할 수 있습니다. 검사 조건(CHECK)을 추가해 업데이트가 쓸 수 있는 내용을 제한하세요.`,
   },
   [SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN]: {
     en: (p) =>
@@ -549,7 +549,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       `权限集“${p.permissionSet}”中的更新策略“${p.policy}”永远无法让它所指的用户单独获得“${p.object}”的编辑权限：` +
       `“${p.object}”的编辑权限来自其主记录，因此该策略只能缩小可编辑的人员范围。` +
       ownerPolicyRemedy(p, {
-        'allow-owner-edit': `请在“${p.object}”的共享设置中允许记录所有者编辑，或删除该策略。`,
+        'allow-owner-edit': `请在“${p.object}”的共享设置中开启“所有者可编辑”，或删除该策略。`,
         'key-owner-id': '请让该策略以记录所有者（owner_id）为条件——这是主记录检查唯一比对的用户——或删除该策略。',
         'add-owner-id': `请为“${p.object}”添加记录所有者（owner_id）并让该策略以它为条件，或删除该策略。`,
       }),
@@ -557,7 +557,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       `權限集「${p.permissionSet}」中的更新策略「${p.policy}」永遠無法讓它所指的使用者單獨取得「${p.object}」的編輯權限：` +
       `「${p.object}」的編輯權限來自其主記錄，因此該策略只能縮小可編輯的人員範圍。` +
       ownerPolicyRemedy(p, {
-        'allow-owner-edit': `請在「${p.object}」的共用設定中允許記錄擁有者編輯，或刪除該策略。`,
+        'allow-owner-edit': `請在「${p.object}」的共用設定中開啟「擁有者可編輯」，或刪除該策略。`,
         'key-owner-id': '請讓該策略以記錄擁有者（owner_id）為條件——這是主記錄檢查唯一比對的使用者——或刪除該策略。',
         'add-owner-id': `請為「${p.object}」新增記錄擁有者（owner_id）並讓該策略以它為條件，或刪除該策略。`,
       }),
@@ -567,7 +567,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       `registro principal, así que la política solo puede restringir quién puede editarlo. ` +
       ownerPolicyRemedy(p, {
         'allow-owner-edit':
-          `Permita que los propietarios del registro editen "${p.object}" en su configuración de uso compartido, ` +
+          `Active "El propietario puede editar" en la configuración de uso compartido de "${p.object}", ` +
           'o elimine la política.',
         'key-owner-id':
           'Base la política en el propietario del registro (owner_id), el único usuario que compara la ' +
@@ -577,26 +577,26 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       }),
     ar: (p) =>
       `لا تسمح سياسة التحديث "${p.policy}" في مجموعة الأذونات "${p.permissionSet}" بمفردها أبداً للمستخدم الذي ` +
-      `تحدده بتعديل "${p.object}": إذ يُستمد حق تعديل "${p.object}" من سجله الرئيسي، لذا لا يمكن للسياسة إلا ` +
+      `تحدده بتعديل "${p.object}": إذ يُستمد حق تعديل "${p.object}" من سجله الأصل، لذا لا يمكن للسياسة إلا ` +
       `تضييق نطاق من يمكنهم تعديله. ` +
       ownerPolicyRemedy(p, {
-        'allow-owner-edit': `اسمح لمالكي السجلات بتعديل "${p.object}" في إعدادات المشاركة الخاصة به، أو احذف السياسة.`,
+        'allow-owner-edit': `فعّل "يجوز للمالك التعديل" في إعدادات المشاركة الخاصة بـ "${p.object}"، أو احذف السياسة.`,
         'key-owner-id':
-          'اربط السياسة بمالك السجل (owner_id)، وهو المستخدم الوحيد الذي يقارنه تحقق السجل الرئيسي، أو احذف السياسة.',
+          'اربط السياسة بمالك السجل (owner_id)، وهو المستخدم الوحيد الذي يقارنه تحقق السجل الأصل، أو احذف السياسة.',
         'add-owner-id': `أضف مالك سجل (owner_id) إلى "${p.object}" واربط السياسة به، أو احذف السياسة.`,
       }),
     fr: (p) =>
       `La politique de mise à jour « ${p.policy} » de l’ensemble d’autorisations « ${p.permissionSet} » ne permet ` +
       `jamais à elle seule à l’utilisateur qu’elle désigne de modifier « ${p.object} » : « ${p.object} » tient son ` +
-      `accès en modification de son enregistrement principal, donc la politique ne peut que restreindre qui peut le ` +
+      `accès en modification de son enregistrement parent, donc la politique ne peut que restreindre qui peut le ` +
       `modifier. ` +
       ownerPolicyRemedy(p, {
         'allow-owner-edit':
-          `Autorisez les propriétaires d’enregistrement à modifier « ${p.object} » dans ses paramètres de partage, ` +
+          `Activez « Le propriétaire peut modifier » dans les paramètres de partage de « ${p.object} », ` +
           'ou supprimez la politique.',
         'key-owner-id':
           'Fondez la politique sur le propriétaire de l’enregistrement (owner_id), le seul utilisateur que compare ' +
-          'la vérification de l’enregistrement principal, ou supprimez la politique.',
+          'la vérification de l’enregistrement parent, ou supprimez la politique.',
         'add-owner-id':
           `Donnez à « ${p.object} » un propriétaire d’enregistrement (owner_id) et fondez la politique dessus, ou ` +
           'supprimez la politique.',
@@ -604,65 +604,65 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
     'pt-BR': (p) =>
       `A política de atualização "${p.policy}" do conjunto de permissões "${p.permissionSet}" nunca permite, ` +
       `sozinha, que o usuário que ela indica edite "${p.object}": "${p.object}" recebe o acesso de edição do seu ` +
-      `registro mestre, então a política só pode restringir quem pode editá-lo. ` +
+      `registro pai, então a política só pode restringir quem pode editá-lo. ` +
       ownerPolicyRemedy(p, {
         'allow-owner-edit':
-          `Permita que os proprietários do registro editem "${p.object}" nas configurações de compartilhamento ` +
-          'dele ou remova a política.',
+          `Ative "Proprietário pode editar" nas configurações de compartilhamento de "${p.object}" ` +
+          'ou remova a política.',
         'key-owner-id':
           'Baseie a política no proprietário do registro (owner_id), o único usuário que a verificação do registro ' +
-          'mestre compara, ou remova a política.',
+          'pai compara, ou remova a política.',
         'add-owner-id':
           `Dê a "${p.object}" um proprietário de registro (owner_id) e baseie a política nele, ou remova a política.`,
       }),
     ru: (p) =>
       `Политика обновления «${p.policy}» в наборе разрешений «${p.permissionSet}» сама по себе никогда не ` +
       `позволяет указанному в ней пользователю редактировать «${p.object}»: право на редактирование «${p.object}» ` +
-      `определяется его главной записью, поэтому политика может только сузить круг тех, кто может его редактировать. ` +
+      `определяется его родительской записью, поэтому политика может только сузить круг тех, кто может его редактировать. ` +
       ownerPolicyRemedy(p, {
         'allow-owner-edit':
-          `Разрешите владельцам записей редактировать «${p.object}» в его настройках общего доступа или удалите политику.`,
+          `Включите «Владелец может редактировать» в настройках общего доступа объекта «${p.object}» или удалите политику.`,
         'key-owner-id':
           'Привяжите политику к владельцу записи (owner_id) — единственному пользователю, которого сравнивает ' +
-          'проверка главной записи, — или удалите политику.',
+          'проверка родительской записи, — или удалите политику.',
         'add-owner-id':
           `Добавьте объекту «${p.object}» владельца записи (owner_id) и привяжите к нему политику или удалите политику.`,
       }),
     de: (p) =>
       `Die Aktualisierungsrichtlinie „${p.policy}“ im Berechtigungssatz „${p.permissionSet}“ erlaubt dem ` +
       `Benutzer, den sie nennt, allein nie, „${p.object}“ zu bearbeiten: „${p.object}“ erhält seinen ` +
-      `Bearbeitungszugriff vom Masterdatensatz, daher kann die Richtlinie nur einschränken, wer es bearbeiten darf. ` +
+      `Bearbeitungszugriff vom übergeordneten Datensatz, daher kann die Richtlinie nur einschränken, wer es bearbeiten darf. ` +
       ownerPolicyRemedy(p, {
         'allow-owner-edit':
-          `Erlauben Sie in den Freigabeeinstellungen von „${p.object}“ den Datensatzbesitzern das Bearbeiten, oder ` +
+          `Aktivieren Sie in den Freigabeeinstellungen von „${p.object}“ die Option „Eigentümer darf bearbeiten“, oder ` +
           'entfernen Sie die Richtlinie.',
         'key-owner-id':
-          'Knüpfen Sie die Richtlinie an den Datensatzbesitzer (owner_id), den einzigen Benutzer, den die ' +
-          'Master-Prüfung vergleicht, oder entfernen Sie die Richtlinie.',
+          'Knüpfen Sie die Richtlinie an den Datensatzeigentümer (owner_id), den einzigen Benutzer, den die ' +
+          'Prüfung des übergeordneten Datensatzes vergleicht, oder entfernen Sie die Richtlinie.',
         'add-owner-id':
-          `Geben Sie „${p.object}“ einen Datensatzbesitzer (owner_id) und knüpfen Sie die Richtlinie daran, oder ` +
+          `Geben Sie „${p.object}“ einen Datensatzeigentümer (owner_id) und knüpfen Sie die Richtlinie daran, oder ` +
           'entfernen Sie die Richtlinie.',
       }),
     ja: (p) =>
       `権限セット「${p.permissionSet}」の更新ポリシー「${p.policy}」だけでは、対象のユーザーが「${p.object}」を` +
-      `編集できるようにはなりません。「${p.object}」の編集権限はマスターレコードから決まるため、このポリシーは` +
+      `編集できるようにはなりません。「${p.object}」の編集権限は親レコードから決まるため、このポリシーは` +
       `編集できるユーザーを絞り込むことしかできません。` +
       ownerPolicyRemedy(p, {
-        'allow-owner-edit': `「${p.object}」の共有設定でレコード所有者による編集を許可するか、このポリシーを削除してください。`,
+        'allow-owner-edit': `「${p.object}」の共有設定で「所有者は編集可」をオンにするか、このポリシーを削除してください。`,
         'key-owner-id':
-          'ポリシーの条件をレコード所有者（owner_id）にするか（マスターのチェックが比較する唯一のユーザーです）、' +
+          'ポリシーの条件をレコード所有者（owner_id）にするか（親レコードのチェックが比較する唯一のユーザーです）、' +
           'このポリシーを削除してください。',
         'add-owner-id':
           `「${p.object}」にレコード所有者（owner_id）を追加してポリシーの条件にするか、このポリシーを削除してください。`,
       }),
     ko: (p) =>
-      `권한 집합 "${p.permissionSet}"의 업데이트 정책 "${p.policy}"만으로는 해당 사용자가 "${p.object}"을(를) ` +
-      `편집할 수 없습니다. "${p.object}"의 편집 권한은 마스터 레코드에서 결정되므로, 이 정책은 편집할 수 있는 ` +
+      `권한 세트 "${p.permissionSet}"의 업데이트 정책 "${p.policy}"만으로는 해당 사용자가 "${p.object}"을(를) ` +
+      `편집할 수 없습니다. "${p.object}"의 편집 권한은 상위 레코드에서 결정되므로, 이 정책은 편집할 수 있는 ` +
       `사용자를 좁힐 수만 있습니다. ` +
       ownerPolicyRemedy(p, {
-        'allow-owner-edit': `"${p.object}"의 공유 설정에서 레코드 소유자의 편집을 허용하거나, 이 정책을 삭제하세요.`,
+        'allow-owner-edit': `"${p.object}"의 공유 설정에서 "소유자 편집 허용"을 켜거나, 이 정책을 삭제하세요.`,
         'key-owner-id':
-          '정책 조건을 레코드 소유자(owner_id)로 지정하거나(마스터 검사가 비교하는 유일한 사용자입니다), 이 정책을 삭제하세요.',
+          '정책 조건을 레코드 소유자(owner_id)로 지정하거나(상위 레코드 검사가 비교하는 유일한 사용자입니다), 이 정책을 삭제하세요.',
         'add-owner-id':
           `"${p.object}"에 레코드 소유자(owner_id)를 추가하고 정책 조건으로 지정하거나, 이 정책을 삭제하세요.`,
       }),
