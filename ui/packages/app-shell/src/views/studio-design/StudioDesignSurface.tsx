@@ -359,7 +359,16 @@ import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { SuggestedBindingsPanel } from '../../components/SuggestedBindingsPanel.js';
-import { AppNavCanvas, navPayloadOf } from '../metadata-admin/previews/AppNavCanvas.js';
+import {
+  AppNavCanvas,
+  heldNavEntriesOf,
+  heldNavKey,
+  navPayloadOf,
+  readHeldNav,
+  withHeldNavEntries,
+  writeHeldNav,
+} from '../metadata-admin/previews/AppNavCanvas.js';
+import { ActiveOrganizationStorage } from '@object-ui/auth';
 import {
   FlowRegistrationContext,
   FlowRuntimeContext,
@@ -589,6 +598,19 @@ function publishRefusalKey(type: string, name: string): string {
 }
 
 const NO_PUBLISH_REFUSALS: ReadonlyMap<string, StudioRefusal> = new Map();
+
+/**
+ * The app document as the nav editor holds it: `body` with the entries this
+ * browser holds for the app at `packageId` (`HeldNavEntry`: an entry a nav save
+ * left out for want of a target) put back in their places. `body` itself when
+ * none is put back.
+ */
+function withHeldNav(body: Record<string, unknown>, packageId: string, appName: string): Record<string, unknown> {
+  const navigation = Array.isArray(body.navigation) ? (body.navigation as unknown[]) : [];
+  const held = readHeldNav(heldNavKey(ActiveOrganizationStorage.get(), packageId, appName));
+  const kept = withHeldNavEntries(navigation, held);
+  return kept === navigation ? body : { ...body, navigation: kept };
+}
 
 export interface StudioDesignSurfaceProps {
   /** Open-core slot — the cloud edition injects its AI copilot panel here. */
@@ -1400,7 +1422,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // the package-less scope: its one pillar keeps its own aside, and its build
   // thread would be a package's, with no package here to build into
   // (objectui#11553).
-  const slotHost = chatDockMode && packageId !== null;
+  // objectstack#32615 — nor in a package that is not there (`pkgMissing`): its
+  // copilot would offer to "edit this app" and write drafts under an id no
+  // package has.
+  const slotHost = chatDockMode && packageId !== null && !pkgMissing;
   // Shown or hidden from the top bar, remembered per tab under the key the
   // Studio dock kept its collapse in (#2477 item 2): an author who hid the
   // copilot finds the slot hidden. Under `md` the slot overlays the page and
@@ -1550,7 +1575,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
         {/* The ADR-0080 `aiSlot` seam — a cloud edition may still inject its own
           * left copilot panel; the built-in copilot is the RIGHT dock below. */}
-        {aiSlot ? (
+        {/* objectstack#32615 — not beside a package that is not there. */}
+        {aiSlot && !pkgMissing ? (
           <aside className="w-64 shrink-0 overflow-auto border-r bg-muted/40">{aiSlot}</aside>
         ) : null}
 
@@ -2745,7 +2771,11 @@ export function InterfacesPillar({
         // that sends the edit signals again, and that re-read installs. A
         // package switch replaces the buffer, as it always has.
         if (!isSameApp || !navCommittedRef.current.dirty) {
-          setAppDraft(body);
+          // The buffer is the document plus the entries this browser holds
+          // for it (an entry a save left out for want of a target), so the
+          // editor keeps showing them, marked incomplete. The baseline below
+          // stays the document as served.
+          setAppDraft(withHeldNav(body, navReadAt, name));
           setAppDraftFor(`app:${name}`);
           // objectui#11773 — the next nav save is pinned to what this read
           // served, unless it is the read-back of this pillar's own nav save
@@ -3613,6 +3643,10 @@ export function InterfacesPillar({
       }
       navEchoRef.current = publishNonce;
       navBaselineRef.current = saved;
+      // The entries this save left out for want of a target are held in this
+      // browser, in their places, so the next read of the app puts them back
+      // (`withHeldNav`); a save that leaves none out drops what was held.
+      writeHeldNav(heldNavKey(ActiveOrganizationStorage.get(), target, appName), heldNavEntriesOf(editorNav));
       setNavHasDraft(true);
       // The rail's mark reads the declaration the server now serves.
       if (entering) setServedNonce((n) => n + 1);
@@ -3796,7 +3830,9 @@ export function InterfacesPillar({
         // through the nav editor's own save, as an edit there would be: its
         // refusal shows in the canvas strip and keeps the buffer dirty, so the
         // leave guard holds and the next nav edit sends it again.
-        const base = navBaselineRef.current;
+        // The buffer as the load installed it: held entries included, so the
+        // save below keeps holding them.
+        const base = appName ? withHeldNav(navBaselineRef.current, packageId, appName) : navBaselineRef.current;
         const navigation = Array.isArray(base.navigation) ? (base.navigation as NavNode[]) : [];
         const entry = interfaceNavEntry(kind, name, label, navigation);
         const linked = { ...base, navigation: [...navigation, entry] };
@@ -5735,6 +5771,22 @@ export function DataPillar({
   // conflict's "reload" re-runs the load below for the open object.
   const [objReloadNonce, setObjReloadNonce] = React.useState(0);
   const reloadObjDraft = React.useCallback(() => setObjReloadNonce((n) => n + 1), []);
+  // objectstack#32610 — the copilot shares this document (ADR-0057 P3c): a
+  // draft its tool writes, and the discard its undo runs, are announced on the
+  // assistant bus, the pulse the rail above already re-reads on. The open
+  // object and its extension re-read on it too, so the field properties, the
+  // Form canvas and the header's own reading follow the server's draft. Held
+  // while either buffer carries work not yet sent (an edit, a save in flight):
+  // the pulse is released once that work is saved, never applied over it.
+  const objBuffersHeld = dirty || extDirty || saving !== false;
+  const objRefreshNonce = useMetadataRefreshNonce(objBuffersHeld);
+  const objBuffersHeldRef = React.useRef(objBuffersHeld);
+  React.useLayoutEffect(() => {
+    objBuffersHeldRef.current = objBuffersHeld;
+  });
+  // Set by a re-read on the pulse as it installs: the selection is judged
+  // once against what the re-read left (see the effect below the loads).
+  const refreshInstalledRef = React.useRef(false);
   const {
     save: saveObjDraft,
     recordRead: recordObjRead,
@@ -5933,15 +5985,20 @@ export function DataPillar({
     // clobber the in-progress form-layout draft the designer is editing.
     // Keyed by object + publishNonce: a package publish (nonce++) re-reads the
     // fresh published baseline; otherwise we never clobber an in-progress draft.
-    const loadKey = `${current.name}#${publishNonce}#${objReloadNonce}`;
+    const baseKey = `${current.name}#${publishNonce}#${objReloadNonce}`;
+    const loadKey = `${baseKey}#${objRefreshNonce}`;
     if (loadedNameRef.current === loadKey) return;
+    // objectstack#32610 — a re-read of the same object on the pulse alone
+    // keeps what the author has open (the selected field, the canvas): only
+    // what it shows is replaced. Any other load starts the object afresh.
+    const refreshOnly = loadedNameRef.current?.startsWith(`${baseKey}#`) === true;
     loadedNameRef.current = loadKey;
     let cancelled = false;
     // objectui#11331 — whether this run's load has settled (see the cleanup).
     let settled = false;
     setLoading(true);
     setError(null);
-    setFieldSel(null);
+    if (!refreshOnly) setFieldSel(null);
     // objectstack#27485 — kept CEL verdicts judged the buffer this load replaces.
     setCelVerdicts({});
     setPanelCelVerdicts({});
@@ -5990,6 +6047,10 @@ export function DataPillar({
           setError({ message: t('engine.studio.refusal.draftUnreadable', locale) });
           return;
         }
+        // objectstack#32610 — an edit begun while the re-read was in flight
+        // keeps its buffer; its save is pinned to the read it was made on.
+        if (refreshOnly && objBuffersHeldRef.current) return;
+        if (refreshOnly) refreshInstalledRef.current = true;
         setObjDraft(authored.body);
         setServedOnly(
           servedOnlyFields((draftBody ?? baseline).fields, [
@@ -6038,7 +6099,7 @@ export function DataPillar({
         loadedNameRef.current = null;
       }
     };
-  }, [client, current, packageId, publishNonce, objReloadNonce, recordObjRead]);
+  }, [client, current, packageId, publishNonce, objReloadNonce, objRefreshNonce, recordObjRead]);
 
   // objectstack#28575 — the pair's extension of the open base object: its
   // pending draft at the pair, else its published row there, else a new
@@ -6051,14 +6112,20 @@ export function DataPillar({
       return;
     }
     const name = current.name;
-    const loadKey = `${name}#${publishNonce}#${extReloadNonce}`;
+    const baseKey = `${name}#${publishNonce}#${extReloadNonce}`;
+    const loadKey = `${baseKey}#${objRefreshNonce}`;
     if (extLoadedRef.current === loadKey) return;
+    // objectstack#32610 — a re-read on the pulse alone keeps the extension
+    // shown until its answer replaces it (see the object load above).
+    const refreshOnly = extLoadedRef.current?.startsWith(`${baseKey}#`) === true;
     extLoadedRef.current = loadKey;
     let cancelled = false;
     let settled = false;
-    setExt(null);
-    setExtDirty(false);
-    setExtHasDraft(false);
+    if (!refreshOnly) {
+      setExt(null);
+      setExtDirty(false);
+      setExtHasDraft(false);
+    }
     const pair = extReadPairRef.current;
     (async () => {
       try {
@@ -6080,10 +6147,12 @@ export function DataPillar({
             });
             return;
           }
+          if (refreshOnly && objBuffersHeldRef.current) return;
           draft = objectExtensionBodyOf(extractDraftBody(draftRead.answer), name);
           published = objectExtensionBodyOf(publishedRow, name);
           recordExtRead(OBJECT_EXTENSION_TYPE, name, pair, draftRead.pin);
         }
+        if (refreshOnly) refreshInstalledRef.current = true;
         setExt({ for: name, body: draft ?? published ?? { extend: name }, published: new Set(extensionFieldNames(published)) });
         setExtHasDraft(draft !== null);
       } catch (e) {
@@ -6097,7 +6166,17 @@ export function DataPillar({
       // A load cancelled before it settled takes its claim back (see the object load above).
       if (!settled) extLoadedRef.current = null;
     };
-  }, [client, current, extendsBase, publishNonce, extReloadNonce, recordExtRead]);
+  }, [client, current, extendsBase, publishNonce, extReloadNonce, objRefreshNonce, recordExtRead]);
+
+  // objectstack#32610 — a field the pulse's re-read no longer has (a discard
+  // took it away) is not left selected; one it still has stays open.
+  React.useEffect(() => {
+    if (!refreshInstalledRef.current) return;
+    refreshInstalledRef.current = false;
+    const shown = extOpen ? foldObjectExtension(objDraft, extOpen.body, extOpen.published) : objDraft;
+    const kept = new Set(readFields(shown.fields).entries.map((e) => e.name));
+    setFieldSel((sel) => (sel?.kind === 'field' && !kept.has(String(sel.id)) ? null : sel));
+  }, [objDraft, extOpen]);
 
   // The header counts the fields the canvas shows, and names the platform's
   // own columns apart: "2 fields (+8 system)". objectstack#29793 — the
@@ -9770,6 +9849,17 @@ export function AccessPillar({
   const navigate = useNavigate();
   const location = useLocation();
   const [newSimilarOpen, setNewSimilarOpen] = React.useState(false);
+  // objectstack#32774 — the package "New similar" clones the open set from,
+  // as the matrix read it: named only where the set's name has more than one
+  // holder (`onCloneSourceRead`), so a name with one holder is cloned by name.
+  const [newSimilarSource, setNewSimilarSource] = React.useState<{ name: string; sourcePackage: string | undefined } | null>(
+    null,
+  );
+  const onCloneSourceRead = React.useCallback((name: string, sourcePackage: string | undefined) => {
+    setNewSimilarSource((prev) =>
+      prev && prev.name === name && prev.sourcePackage === sourcePackage ? prev : { name, sourcePackage },
+    );
+  }, []);
   const [newSimilarStrip, setNewSimilarStrip] = React.useState<NewSimilarStrip | null>(() => {
     // objectstack#28572 — a copy that landed in the base's pair arrives on
     // the base's surface; matched by the spec's pairing rule (a read).
@@ -10466,6 +10556,7 @@ export function AccessPillar({
               studio={{
                 tab: accessTab,
                 onTabChange: setAccessTab,
+                onCloneSourceRead,
                 leading: accessRailToggleEl,
                 chips: currentAddedIn ? (
                   <>
@@ -10521,6 +10612,7 @@ export function AccessPillar({
       {newSimilarOpen && current && (
         <PermissionSetCloneDialog
           source={current}
+          sourcePackage={newSimilarSource?.name === current ? newSimilarSource.sourcePackage : undefined}
           locale={locale}
           onClose={() => setNewSimilarOpen(false)}
           onCloned={onNewSimilarSaved}

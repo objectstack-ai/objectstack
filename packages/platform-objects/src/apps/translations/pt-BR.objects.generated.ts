@@ -1209,11 +1209,12 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motivo da revogação",
-        help: "Por que a chave foi revogada, quando isso decide quem pode restaurá-la. Redefinição de senha pelo administrador: somente um administrador da plataforma pode restaurar a chave. Fim da associação à organização: o proprietário saiu da organização e ninguém pode restaurar a chave; um membro cria uma nova. Suspensa por um administrador: um administrador da plataforma revogou uma chave que não é dele, e somente um administrador da plataforma pode restaurá-la. Limpo quando a chave é restaurada. Vazio para uma chave que o proprietário revogou na lista de Chaves de API.",
+        help: "Por que a chave foi revogada, quando isso decide quem pode restaurá-la. Redefinição de senha pelo administrador: somente um administrador da plataforma pode restaurar a chave. Fim da associação à organização: o proprietário saiu da organização e ninguém pode restaurar a chave; um membro cria uma nova. Suspensa por um administrador: um administrador da plataforma revogou uma chave que não é dele, e somente um administrador da plataforma pode restaurá-la. Desativada pelo diretório: o diretório da organização (SCIM) desativou ou excluiu o proprietário, e ninguém pode restaurar a chave, nem mesmo depois que o proprietário for reativado; o proprietário cria uma nova. Limpo quando a chave é restaurada. Vazio para uma chave que o proprietário revogou na lista de Chaves de API.",
         options: {
           admin_password_reset: "Redefinição de senha pelo administrador",
           organization_membership_ended: "Fim da associação à organização",
-          administrator_suspended: "Suspensa por um administrador"
+          administrator_suspended: "Suspensa por um administrador",
+          scim_deactivated: "Desativada pelo diretório"
         }
       },
       key: {
@@ -3079,6 +3080,34 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "Por tópico"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "Enviar mensagem no aplicativo",
+        description: "Envie uma mensagem para todos da sua organização ou para os membros que você escolher. Ela aparece nas notificações de cada destinatário.",
+        successMessage: "Mensagem enviada. Destinatários: {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "Todos nesta organização",
+            helpText: "Enviar para todos os membros da sua organização atual. Deixe desativado para escolher os destinatários abaixo."
+          },
+          recipients: {
+            label: "Destinatários",
+            helpText: "Os membros da sua organização para quem enviar, quando a mensagem não for para todos."
+          },
+          title: {
+            label: "Título",
+            helpText: "A linha que cada destinatário vê nas notificações."
+          },
+          body: {
+            label: "Mensagem"
+          },
+          link: {
+            label: "Link",
+            helpText: "Opcional. Uma página deste aplicativo (começando com /) ou um endereço da web que a mensagem abre."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3753,9 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "Versão"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "Tipo de operação",

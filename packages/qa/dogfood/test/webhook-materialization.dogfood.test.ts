@@ -106,7 +106,8 @@ describe('objectstack verify WEBHOOK: a declared webhook is dispatched from the 
     expect(enqueued, 'spec `object` did not remap to the runtime subscription key').toHaveLength(1);
     expect(enqueued[0]).toMatchObject({
       source: 'webhook',
-      refId: 'declared:wm_task_changed',
+      // [ADR-0150 D5, #31699 PR 2] The fixture package's own slot.
+      refId: 'declared:com.dogfood.webhook-fixture/wm_task_changed',
       url: 'https://hooks.example/wm-task',
     });
   });

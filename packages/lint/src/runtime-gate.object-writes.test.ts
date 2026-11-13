@@ -302,6 +302,12 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateObjectFieldRefs',
       'validateRelatedListRefs',
       'validateChartBindings',
+      // [#32666] The seventh, and the first whose subjects are not on the
+      // written object: the written package's live flows, carried on an object
+      // write as judged subjects (`RuntimeStackContext.flows`). Measured over
+      // the shipped corpus, 0 findings; its pins live in
+      // `runtime-gate.object-readonly-flow-writes.test.ts`.
+      'validateReadonlyFlowWrites',
     ]);
     // Every crossed member still judges flow snapshots — the #4463 P1 surface
     // is not narrowed by the member axis existing.

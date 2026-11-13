@@ -386,4 +386,23 @@ describe('[#23944] the revoked refusal agrees with the declared restore action',
     expect(suspendedMessage).toContain('Restore API Key');
     expect(suspendedMessage).toContain('POST /api/v1/keys');
   });
+
+  it('a key the directory deactivation revoked names no restorer, only the new-key road', async () => {
+    // `revoked_reason: scim_deactivated` is stamped by plugin-auth when the
+    // organization's directory deactivates or deletes the owner through SCIM,
+    // and its restore door refuses every user-context restore on that reason,
+    // a platform administrator's included, after a re-activation too. The text
+    // follows the door: it offers no restore anyone could make. Code, status
+    // and every carried field stay those of any revoked key.
+    const deactivated = await resolveApiKeyAdmission(
+      makeQl({ revoked: true, revoked_reason: 'scim_deactivated' }), headers(), NOW, undefined, undefined, policy(),
+    );
+
+    expect(deactivated.outcome === 'lifecycle' && deactivated.refusal).toMatchObject({ code: 'API_KEY_REVOKED', keyId: KEY_ID, userId: OWNER });
+    const deactivatedMessage = deactivated.outcome === 'lifecycle' ? deactivated.refusal.message : '';
+    expect(deactivatedMessage).toMatch(/directory deactivated its owner, and it cannot be restored/);
+    expect(deactivatedMessage).not.toMatch(/can restore it/);
+    expect(deactivatedMessage).not.toContain('Restore API Key');
+    expect(deactivatedMessage).toContain('POST /api/v1/keys');
+  });
 });

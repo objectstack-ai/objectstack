@@ -475,13 +475,28 @@ describe('composeStacks + defineStack integration', () => {
     const todo = defineStack({
       manifest: manifest2,
       objects: { task: { fields: { title: { type: 'text' } } } },
-      apps: { todo_app: { label: 'Todo', objects: ['task'] } },
     }, { strict: false });
 
     const combined = composeStacks([crm, todo]);
     expect(combined.objects).toHaveLength(2);
-    expect(combined.apps).toHaveLength(2);
+    expect(combined.apps).toHaveLength(1);
     expect(combined.manifest?.name).toBe('todo'); // last-wins default
+
+    // Each with an app of its own, the flat composition would put both apps
+    // under the one manifest it keeps — refused (ADR-0019 D3 as amended: at
+    // most one app per package); `manifest: 'preserve'` keeps each package's id.
+    const todoWithApp = defineStack({
+      manifest: manifest2,
+      objects: { task: { fields: { title: { type: 'text' } } } },
+      apps: { todo_app: { label: 'Todo', objects: ['task'] } },
+    }, { strict: false });
+    let refused: { code?: string; status?: number } | undefined;
+    try {
+      composeStacks([crm, todoWithApp]);
+    } catch (e) {
+      refused = e as { code?: string; status?: number };
+    }
+    expect([refused?.code, refused?.status]).toEqual(['STACK_SINGLE_APP_VIOLATION', 422]);
   });
 
   it('composed result should be valid for defineStack re-validation', () => {
@@ -728,7 +743,7 @@ describe('composeStacks - a nested artifact\'s package bodies are read for objec
     ]);
   });
 
-  it("CONTROL — an input whose own top level also carries the body's object is judged by the top-level walk, as before", () => {
+  it("CONTROL — under 'error' an input whose own top level also carries the body's object is refused by the top-level walk, as before", () => {
     const loose = defineStack({ objects: [obj('loose_item', 'loose')] } as never);
     // A manifest-less input keeps the flattened copy, so this artifact carries
     // `alpha_shared` at its top level AND in p1's body: the top level claims it.
@@ -758,5 +773,143 @@ describe('composeStacks - a nested artifact\'s package bodies are read for objec
     ]);
     const flattened = composeStacks([nested(), r]);
     expect((flattened.objects ?? []).map((o) => o.name)).toEqual(['gamma_r_item']);
+  });
+});
+
+/**
+ * [ADR-0150 D4 · #32516] Under `'override'` / `'merge'`, three more shapes put
+ * one object name in a package body of the composed artifact and a second
+ * declaration beside it. No strategy reaches into a body, and at boot a
+ * package body's declaration is registered over any other, so each is refused
+ * at compose time like the nested pair above.
+ *
+ * Measured on `main` e5428312 through a real boot (p1 and q co-own namespace
+ * alpha and both declare `alpha_shared`; m is a manifest-less stack):
+ *
+ * ```
+ * any shape, 'error'                          : REFUSED by the flat walk (unchanged)
+ * 1 additive nested (top level AND p1's body carry X) + q, override/merge
+ *     'preserve' : COMPOSED — the boot refuses DUPLICATE_ARTIFACT_OBJECT_NAME 422
+ *     default    : COMPOSED — the boot serves p1's body X; q's override / the merge is gone
+ * 2 flat p1 + q, override/merge, 'preserve'   : COMPOSED — bodies p1{X} + q{X}; the boot refuses DUPLICATE_ARTIFACT_OBJECT_NAME 422
+ * 3 flat p1 + m declaring X, override/merge, 'preserve'
+ *                                             : COMPOSED — the boot serves p1's body X; m's / the merge is gone
+ * 2 and 3 under the default manifest          : COMPOSED and booted as composed (CONTROL)
+ * ```
+ */
+describe('composeStacks - an object name in a package body is refused beside another declaration under every strategy', () => {
+  const CONFLICT = 'STACK_COMPOSE_OBJECT_CONFLICT';
+  const X = 'alpha_shared';
+  const obj = (name: string, from: string) => ({
+    name,
+    label: `${name} from ${from}`,
+    fields: { [`only_${from}`]: { type: 'text' as const, label: from } },
+  });
+  const pkg = (id: string, namespace: string, objects: ReturnType<typeof obj>[], extra: Record<string, unknown> = {}) =>
+    defineStack({
+      manifest: { id: `com.example.${id}`, name: id, version: '1.0.0', type: 'module' as const, namespace, ...extra },
+      objects,
+    } as never);
+  const p1 = () => pkg('p1', 'alpha', [obj(X, 'p1'), obj('alpha_p1_item', 'p1')]);
+  const q = () => pkg('q', 'alpha', [obj(X, 'q')], { dependencies: { 'com.example.p1': '^1.0.0' } });
+  const loose = () => defineStack({ objects: [obj('loose_item', 'loose')] } as never);
+  const looseX = () => defineStack({ objects: [obj(X, 'm')] } as never);
+  /** p1 + a manifest-less input under 'preserve': one package entry, so the top level is kept beside p1's body. */
+  const additive = () => composeStacks([p1(), loose()], { manifest: 'preserve' });
+  const thrown = (fn: () => unknown): { code?: string; status?: number; issues?: unknown } | undefined => {
+    try {
+      fn();
+      return undefined;
+    } catch (e) {
+      return e as { code?: string; status?: number; issues?: unknown };
+    }
+  };
+  const ADDITIVE_SITES =
+    "'com.example.p1' (stack #N) at stack.objects[0] and 'com.example.p1' (stack #N) at " +
+    "packages[0].objects['alpha_shared'] (package 'com.example.p1', namespace 'alpha')";
+  const additiveSites = (n: number) => ADDITIVE_SITES.replaceAll('#N', `#${n}`);
+
+  it('the additive input carries the object at its top level AND in its body (shape 1)', () => {
+    const a = additive();
+    expect((a.objects ?? []).map((o) => o.name)).toEqual([X, 'alpha_p1_item', 'loose_item']);
+    expect((a.packages ?? []).map((p) => (p.manifest as { objects?: { name: string }[] }).objects?.[0]?.name)).toEqual([X]);
+  });
+
+  for (const objectConflict of ['override', 'merge'] as const) {
+    for (const manifest of ['preserve', undefined] as const) {
+      const opts: ComposeStacksOptions = { objectConflict, ...(manifest ? { manifest } : {}) };
+      it(`shape 1: refuses an additive nested input beside q under '${objectConflict}', manifest ${manifest ?? 'default'}, in either order`, () => {
+        const additiveFirst = thrown(() => composeStacks([additive(), q()], opts));
+        expect([additiveFirst?.code, additiveFirst?.status]).toEqual([CONFLICT, 422]);
+        expect(additiveFirst?.issues).toEqual([
+          `object '${X}' is defined in multiple stacks: ${additiveSites(0)} and 'com.example.q' (stack #1) at stack.objects[0].`,
+        ]);
+        const flatFirst = thrown(() => composeStacks([q(), additive()], opts));
+        expect([flatFirst?.code, flatFirst?.status]).toEqual([CONFLICT, 422]);
+        expect(flatFirst?.issues).toEqual([
+          `object '${X}' is defined in multiple stacks: 'com.example.q' (stack #0) at stack.objects[0] and ${additiveSites(1)}.`,
+        ]);
+      });
+    }
+
+    it(`shape 2: refuses the flat pair p1 + q under '${objectConflict}' with manifest 'preserve', in either order`, () => {
+      const opts: ComposeStacksOptions = { objectConflict, manifest: 'preserve' };
+      for (const [inputs, first, second] of [
+        [[p1(), q()], 'com.example.p1', 'com.example.q'],
+        [[q(), p1()], 'com.example.q', 'com.example.p1'],
+      ] as const) {
+        const err = thrown(() => composeStacks([...inputs], opts));
+        expect([err?.code, err?.status]).toEqual([CONFLICT, 422]);
+        expect(err?.issues).toEqual([
+          `object '${X}' is defined in multiple stacks: '${first}' (stack #0) at stack.objects[0] and '${second}' (stack #1) at stack.objects[0].`,
+        ]);
+      }
+    });
+
+    it(`shape 3: refuses p1 beside a manifest-less input declaring the object under '${objectConflict}' with manifest 'preserve', in either order`, () => {
+      const opts: ComposeStacksOptions = { objectConflict, manifest: 'preserve' };
+      const p1First = thrown(() => composeStacks([p1(), looseX()], opts));
+      expect([p1First?.code, p1First?.status]).toEqual([CONFLICT, 422]);
+      expect(p1First?.issues).toEqual([
+        `object '${X}' is defined in multiple stacks: 'com.example.p1' (stack #0) at stack.objects[0] and stack #1 at stack.objects[0].`,
+      ]);
+      const looseFirst = thrown(() => composeStacks([looseX(), p1()], opts));
+      expect([looseFirst?.code, looseFirst?.status]).toEqual([CONFLICT, 422]);
+      expect(looseFirst?.issues).toEqual([
+        `object '${X}' is defined in multiple stacks: stack #0 at stack.objects[0] and 'com.example.p1' (stack #1) at stack.objects[0].`,
+      ]);
+    });
+
+    it(`CONTROL — shapes 2 and 3 under '${objectConflict}' with the default manifest still compose into one object`, () => {
+      const pair = composeStacks([p1(), q()], { objectConflict });
+      expect(pair.packages).toBeUndefined();
+      const fromQ = pair.objects?.find((o) => o.name === X);
+      expect(fromQ?.label).toBe(`${X} from q`);
+      expect(Object.keys(fromQ?.fields ?? {})).toEqual(objectConflict === 'merge' ? ['only_p1', 'only_q'] : ['only_q']);
+      const withLoose = composeStacks([p1(), looseX()], { objectConflict });
+      expect(withLoose.packages).toBeUndefined();
+      expect(withLoose.objects?.find((o) => o.name === X)?.label).toBe(`${X} from m`);
+    });
+  }
+
+  it("CONTROL — under 'error' every shape is refused by the flat walk with its own issue, as before", () => {
+    for (const manifest of ['preserve', undefined] as const) {
+      for (const inputs of [[additive(), q()], [p1(), q()], [p1(), looseX()]]) {
+        const err = thrown(() => composeStacks(inputs, manifest ? { manifest } : {}));
+        expect([err?.code, err?.status]).toEqual([CONFLICT, 422]);
+        expect(err?.issues).toEqual([`object '${X}' is defined in multiple stacks.`]);
+      }
+    }
+  });
+
+  it('CONTROL — an additive nested input beside a package declaring a different object still composes, output unchanged', () => {
+    const r = pkg('r', 'gamma', [obj('gamma_r_item', 'r')]);
+    for (const objectConflict of ['override', 'merge'] as const) {
+      const preserved = composeStacks([additive(), r], { objectConflict, manifest: 'preserve' });
+      expect((preserved.packages ?? []).map((p) => (p.manifest as { id?: string }).id)).toEqual(['com.example.p1', 'com.example.r']);
+      expect((preserved.objects ?? []).map((o) => o.name)).toEqual([X, 'alpha_p1_item', 'loose_item', 'gamma_r_item']);
+      const flattened = composeStacks([additive(), r], { objectConflict });
+      expect((flattened.objects ?? []).map((o) => o.name)).toEqual([X, 'alpha_p1_item', 'loose_item', 'gamma_r_item']);
+    }
   });
 });

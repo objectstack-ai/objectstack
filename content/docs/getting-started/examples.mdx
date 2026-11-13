@@ -318,11 +318,20 @@ import CrmApp from '../examples/app-crm/objectstack.config';
 import TodoApp from '../examples/app-todo/objectstack.config';
 
 // composeStacks merges objects, apps, and other metadata from each stack.
-// The combined manifest is selected per the `manifest` option; the last
-// stack's manifest is used by default. Duplicate object names throw unless
-// you pass an `objectConflict` strategy ('override' | 'merge').
-export default composeStacks([CrmApp, TodoApp]);
+// `manifest: 'preserve'` keeps each stack as a package of its own in the
+// artifact's `packages[]`, so each app stays under its own package id; the
+// artifact's own manifest is the last stack's. Duplicate object names throw.
+export default composeStacks([CrmApp, TodoApp], { manifest: 'preserve' });
 ```
+
+Each of the two stacks defines an app, so they are composed with
+`manifest: 'preserve'`. A flat composition — the default `manifest: 'last'`,
+`'first'` or an index — keeps ONE manifest and puts every stack's apps under
+it, and a package defines at most one app (ADR-0019 D3 as amended), so
+`composeStacks([CrmApp, TodoApp])` is refused with `STACK_SINGLE_APP_VIOLATION`.
+Flat composition, with an `objectConflict` strategy (`'override'` | `'merge'`)
+to reconcile duplicate object names, is for stacks that together make one
+package with at most one app.
 
 Single-valued configuration keys — `i18n`, `api`, `server`, `runtimeModule` —
 are neither overridden nor merged: identical declarations pass through, and two

@@ -307,10 +307,11 @@ describe('AuthPlugin', () => {
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
 
-      // Mock the authManager's handleRequest to return a 500 response
-      // We access the private authManager through the registered service
+      // Mock the authManager's vendor entry (what the catch-all forwards to) to
+      // return a 500 response. We access the private authManager through the
+      // registered service
       const registeredAuthManager = (mockContext.registerService as any).mock.calls[0][1];
-      vi.spyOn(registeredAuthManager, 'handleRequest').mockResolvedValue(errorResponse);
+      vi.spyOn(registeredAuthManager, 'handleVendorRequest').mockResolvedValue(errorResponse);
 
       const mockHonoCtx = {
         req: {

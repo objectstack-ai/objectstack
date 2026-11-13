@@ -85,6 +85,7 @@ import {
   type OrganizationReach,
 } from './organization-reach.js';
 import { derivePosture } from './posture-ladder.js';
+import { boundGrantPackages, staleGrantBesideBoundGrant } from './stale-grant-beside-bound.js';
 import {
   permissionSetHolderIsPlatform,
   resolveCatalogReference,
@@ -104,11 +105,14 @@ export interface ResolvedAuthzContext {
   /**
    * The ACTIVE organization this request operates in.
    *
-   * ⚠️ [#15409] For a session principal under a wall-enforcing posture this is
-   * a VETTED value, never the stored `activeOrganizationId` as read: a claim
-   * that is not in {@link accessible_org_ids} is dropped and the context
-   * resolves with no active organization at all. Absent here is the fail-closed
-   * state, not a missing lookup — Layer 0 denies on it.
+   * ⚠️ [#15409] For a session principal this is a VETTED value, never the
+   * stored `activeOrganizationId` as read: a claim that is not in
+   * {@link accessible_org_ids} is dropped and the context resolves with no
+   * active organization at all. Absent here is the fail-closed state, not a
+   * missing lookup — Layer 0 denies on it. [ADR-0093 D8.1, as amended] The
+   * claim is vetted under EVERY tenancy posture, `single` included: a person's
+   * data access requires a current membership in the organization, judged on
+   * each request.
    */
   tenantId?: string;
   email?: string;
@@ -143,6 +147,11 @@ export interface ResolvedAuthzContext {
    * `group` tenancy posture (Layer 0 becomes `organization_id IN (...)`).
    * Resolved here, once, so no surface re-derives it; empty for an anonymous or
    * membership-less principal, which fails the group wall closed.
+   *
+   * [ADR-0093 D8.1, as amended] Empty for an authenticated person is also what
+   * places them OUTSIDE every organization under any posture
+   * (`isOutsideEveryOrganization`, `tenant-layer0-verdict.ts`): Layer 0 then
+   * walls them out of every organization's tenant rows, `single` included.
    */
   accessible_org_ids: string[];
   /**
@@ -238,9 +247,14 @@ export interface ResolveAuthzInput {
    * enforced (ADR-0093 D4/D5).
    *
    * Supplied by the transport because this resolver is deliberately
-   * kernel-agnostic. OMITTING it disables the two posture-conditional API-key
-   * refusals and leaves behaviour exactly as it was — so an unwired caller is
-   * never made WORSE, only less strict.
+   * kernel-agnostic. OMITTING it disables the posture-conditional org-less
+   * API-key refusal (`organization_required`) — so an unwired caller is never
+   * made WORSE there, only less strict.
+   *
+   * [ADR-0093 D8.1, as amended] The membership rule does NOT read it: an
+   * organization claim — a session's or an API key's — needs a current
+   * membership in that organization under every posture and with no posture
+   * supplied ({@link vetOrganizationClaim}).
    */
   tenancyPosture?: TenancyPosture;
   /**
@@ -734,9 +748,11 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   // this very user to build `accessible_org_ids`, so this is a set membership
   // test on data already in hand — zero additional queries.
   //
-  // Scoped to the walled postures on purpose. Under `single` there is no
-  // organization boundary to cross, and a deployment with no membership rows
-  // at all would otherwise refuse every stamped key it has.
+  // [ADR-0093 D8.1, as amended] Asked under EVERY tenancy posture, `single`
+  // included: a person's data access requires a current membership in the
+  // organization, judged on each request, and an API key is its owner's
+  // credential (ADR-0090 D10, the 2026-09-16 note) — the principal it admits is
+  // the owner, so the owner's membership rule is the key's rule.
   //
   // The result is NO PRINCIPAL, not a degrade to a user-only principal.
   // Degrading would hand back exactly the `200 + total 0` silent-empty this
@@ -744,11 +760,11 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   // success while reading nothing.
   //
   // [#20604] The membership rule is {@link vetOrganizationClaim}, the one the
-  // session arm below asks: a walled posture, and no current membership backing
-  // the key's organization. Only the CONSEQUENCE is this arm's own — the key is
-  // refused (#15256 2A) where the session arm drops the claim.
+  // session arm below asks: no current membership backing the key's
+  // organization. Only the CONSEQUENCE is this arm's own — the key is refused
+  // (#15256 2A) where the session arm drops the claim.
   if (keyPrincipal?.tenantId) {
-    if (vetOrganizationClaim(keyPrincipal.tenantId, grants.accessible_org_ids, input.tenancyPosture) === undefined) {
+    if (vetOrganizationClaim(keyPrincipal.tenantId, grants.accessible_org_ids) === undefined) {
       // [#15256 / 2A] The `organization_membership_ended` decision point — AFTER
       // grants, because the membership set is what decides it. One line, here.
       warnApiKeyRefusal({
@@ -800,6 +816,10 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   // 0 is ALREADY fail-closed — `!input.organizationId ⇒ RLS_DENY_FILTER` in
   // `plugin-security/src/tenant-layer.ts`'s `isolated` branch, and an empty
   // `accessible_org_ids` denies under `group`. This uses the branch that exists.
+  // [ADR-0093 D8.1, as amended] Under `single` the same verdict holds for a
+  // person left with NO membership at all — the one wall that posture has, the
+  // organization's own (`isOutsideEveryOrganization`, `tenant-layer0-verdict.ts`).
+  // A person who still holds a membership keeps the wall-less `single` reach.
   //
   // ⛔ And no session revocation: revoking on a membership change is an EVENT
   // trigger, covering exactly the removal paths someone remembered to wire — a
@@ -828,10 +848,14 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   //
   // [#20580] The check itself is {@link vetOrganizationClaim}, so the
   // permission explainer asks the same question about the user it explains.
+  //
+  // [ADR-0093 D8.1, as amended] Asked under EVERY tenancy posture, `single`
+  // included: a person's data access requires a current membership in the
+  // organization, judged on each request.
   if (
     !keyPrincipal
     && tenantId
-    && vetOrganizationClaim(tenantId, grants.accessible_org_ids, input.tenancyPosture) === undefined
+    && vetOrganizationClaim(tenantId, grants.accessible_org_ids) === undefined
   ) {
     // [#15256 / 2A, mirrored] The one decision point where the drop is decided.
     warnSessionOrganizationClaimDropped({
@@ -871,13 +895,17 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
  * principal that CLAIMS `claimedOrganizationId` is resolved in: the claim
  * itself while a current membership backs it, `undefined` once it does not.
  *
- * This is the session arm of {@link resolveAuthzContext}, as one function.
- * Under a wall-enforcing posture (`isolated`, `group`) a claim on an
- * organization absent from `accessibleOrgIds` (the principal's
+ * This is the session arm of {@link resolveAuthzContext}, as one function. A
+ * claim on an organization absent from `accessibleOrgIds` (the principal's
  * {@link UserAuthzGrants.accessible_org_ids}, which does not depend on the
  * organization the grants were resolved in) is dropped, and the principal
- * resolves with NO active organization. Under `single`, or with no posture
- * supplied, there is no wall and the claim stands as made.
+ * resolves with NO active organization.
+ *
+ * [ADR-0093 D8.1, as amended] Under EVERY tenancy posture, and with no posture
+ * supplied: a person's data access requires a current membership in the
+ * organization, judged on each request. The posture does not decide it, so the
+ * third parameter is not read; it stays in the signature only so a caller that
+ * still passes it keeps compiling.
  *
  * [#20580] A second reader asks it: the permission explainer, about the user
  * it explains in the caller's organization. That is how `security/explain`
@@ -891,10 +919,13 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
 export function vetOrganizationClaim(
   claimedOrganizationId: string | undefined,
   accessibleOrgIds: readonly string[],
-  tenancyPosture: TenancyPosture | undefined,
+  /**
+   * @deprecated Not read since ADR-0093 D8.1 was amended: the claim is vetted
+   * under every tenancy posture. Kept so existing three-argument callers compile.
+   */
+  _tenancyPosture?: TenancyPosture | undefined,
 ): string | undefined {
   if (!claimedOrganizationId) return undefined;
-  if (!tenancyPosture || !postureEnforcesWall(tenancyPosture)) return claimedOrganizationId;
   return accessibleOrgIds.includes(claimedOrganizationId) ? claimedOrganizationId : undefined;
 }
 
@@ -1461,6 +1492,28 @@ export function permissionSetSwitchedOff(
 /** [ADR-0150 D8 R4] Each ambiguous ledger row is said once per process, not once per request. */
 const ambiguousLedgerRowsSaid = new Set<string>();
 
+/** [ADR-0150 D8] Each grant withheld beside a bound one is said once per process, not once per request. */
+const staleGrantsBesideBoundSaid = new Set<string>();
+
+/**
+ * [ADR-0150 D8] Say, once per process, that the stored grant `grant` confers
+ * nothing: its package no longer serves its set, and another grant of the
+ * same user, set and organization is bound to the holder `body` it reads.
+ */
+function sayStaleGrantBesideBound(userId: string, grant: unknown, body: CatalogSetBody): void {
+  const column = String((grant as Record<string, unknown>).permission_set_package ?? '').trim();
+  const organizationId = grantOrganizationOf(grant);
+  const said = `${userId}\u0000${column}\u0000${body.name}\u0000${organizationId ?? ''}`;
+  if (staleGrantsBesideBoundSaid.has(said)) return;
+  staleGrantsBesideBoundSaid.add(said);
+  console.warn(
+    `[security] a sys_user_permission_set grant of user "${userId}" in organization "${organizationId ?? ''}" names permission set `
+    + `"${body.name}" of package "${column}", which no longer serves it; the set now reads package "${body.packageId}"'s, and `
+    + 'another grant of the same user, set and organization is bound to that package. This grant confers nothing: the bound '
+    + 'grant, with its validity window, grants the set. Remove this grant; the boot report lists every such grant.',
+  );
+}
+
 /**
  * [ADR-0150 D8 R4] The holders one switched-off `permission` row of the
  * ledger disables, read the way every other stored reference to a set is: the
@@ -1482,6 +1535,12 @@ async function ledgerRowHolders(
   const answer = await resolveCatalogReference(catalog, 'permission', name, scope);
   if (answer.status === 'resolved') return [catalogEntryAddress(answer.entry).packageId];
   if (answer.status === 'not-found') return [named];
+  // [#31698] A stale column the catalog refuses because the holder the rule
+  // answers is outside its package's namespace (it confers nothing there)
+  // still switches that holder off: a switch-off is never read as none.
+  if (answer.reason === 'not-held-by-qualifier' && answer.holders && answer.holders.length > 0) {
+    return answer.holders.map((holder) => (holder.kind === 'package' ? holder.packageId : null));
+  }
   const holders = (await catalog.list('permission'))
     .filter((entry) => entry.name === name)
     .map((entry) => catalogEntryAddress(entry).packageId);
@@ -2627,15 +2686,26 @@ export async function resolveUserAuthzGrants(
     takenHolders.add(key);
     psRowsAll.push({ ...body, active });
   };
+  // [ADR-0150 D8] The holders the user's stored grants are bound to — every
+  // row, its validity window open or not (`staleGrantBesideBoundGrant`).
+  const boundHolders = boundGrantPackages(upsRowsAll);
   for (const grant of applyingGrants) {
     const name = grantSetNameOf(grant);
     if (!name) continue;
     // [ADR-0150 D8 R1] A grant whose `permission_set_package` names its
     // holder reads that package's set and no other; a null column resolves
     // with no caller (D3), so two holders confer nothing and nothing is
-    // picked (`storedPermissionSetScope`).
+    // picked (`storedPermissionSetScope`). A stale column reads inside its
+    // package's namespace only (the catalog's stored-column arm, #31698).
     const body = await catalogSetBody(catalog, name, undefined, storedPermissionSetScope((grant as Record<string, unknown>).permission_set_package));
     if (!body) continue;
+    // [ADR-0150 D8] A stale column read onto a holder another grant of this
+    // user, set and organization is bound to confers nothing: that bound
+    // grant, and its validity window, grant the holder's set.
+    if (staleGrantBesideBoundGrant(grant, body.packageId, boundHolders)) {
+      sayStaleGrantBesideBound(userId, grant, body);
+      continue;
+    }
     // [ADR-0150 D3] Platform standing is the PLATFORM's `admin_full_access`:
     // another package's set of that name is granted as any set is, where its
     // grant applies, and never anchors standing — nor carries its grant across

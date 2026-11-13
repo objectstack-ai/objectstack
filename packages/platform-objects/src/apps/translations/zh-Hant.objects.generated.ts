@@ -1209,11 +1209,12 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "撤銷原因",
-        help: "金鑰被撤銷的原因，僅在它決定誰能恢復金鑰時記錄。管理員強制重設密碼：只有平台管理員能恢復該金鑰。組織成員資格已結束：擁有者已離開組織，任何人都不能恢復該金鑰，由組織成員建立新的金鑰。已被管理員暫停：平台管理員撤銷了不屬於自己的金鑰，只有平台管理員能恢復該金鑰。金鑰恢復後清除。擁有者從 API 金鑰清單撤銷的金鑰此項為空。",
+        help: "金鑰被撤銷的原因，僅在它決定誰能恢復金鑰時記錄。管理員強制重設密碼：只有平台管理員能恢復該金鑰。組織成員資格已結束：擁有者已離開組織，任何人都不能恢復該金鑰，由組織成員建立新的金鑰。已被管理員暫停：平台管理員撤銷了不屬於自己的金鑰，只有平台管理員能恢復該金鑰。已被目錄停用：組織的目錄（SCIM）停用或刪除了擁有者，任何人都不能恢復該金鑰，即使擁有者被重新啟用後也不能，由擁有者建立新的金鑰。金鑰恢復後清除。擁有者從 API 金鑰清單撤銷的金鑰此項為空。",
         options: {
           admin_password_reset: "管理員強制重設密碼",
           organization_membership_ended: "組織成員資格已結束",
-          administrator_suspended: "已被管理員暫停"
+          administrator_suspended: "已被管理員暫停",
+          scim_deactivated: "已被目錄停用"
         }
       },
       key: {
@@ -3079,6 +3080,34 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "依主題"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "傳送站內訊息",
+        description: "向組織內的所有人或你挑選的成員傳送一則訊息，它會出現在每位收件人的通知中。",
+        successMessage: "訊息已傳送給 {{ result.recipients }} 人",
+        params: {
+          everyone: {
+            label: "本組織所有人",
+            helpText: "傳送給目前組織的每位成員。不開啟則在下方挑選收件人。"
+          },
+          recipients: {
+            label: "收件人",
+            helpText: "訊息不是發給所有人時，要傳送給的本組織成員。"
+          },
+          title: {
+            label: "標題",
+            helpText: "每位收件人在通知中看到的那一行。"
+          },
+          body: {
+            label: "內文"
+          },
+          link: {
+            label: "連結",
+            helpText: "選填。訊息開啟的本應用頁面（以 / 開頭）或網址。"
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3753,9 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "版本"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "操作類型",

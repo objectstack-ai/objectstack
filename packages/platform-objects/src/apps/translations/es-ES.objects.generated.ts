@@ -1209,11 +1209,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motivo de la revocación",
-        help: "Por qué se revocó la clave, cuando eso decide quién puede restaurarla. Restablecimiento forzado de la contraseña por un administrador: solo un administrador de la plataforma puede restaurar la clave. Fin de la pertenencia a la organización: el propietario dejó la organización y nadie puede restaurar la clave; un miembro crea una nueva. Suspendida por un administrador: un administrador de la plataforma revocó una clave que no es suya, y solo un administrador de la plataforma puede restaurarla. Se borra cuando la clave se restaura. Vacío para una clave que su propietario revocó desde la lista de claves de API.",
+        help: "Por qué se revocó la clave, cuando eso decide quién puede restaurarla. Restablecimiento forzado de la contraseña por un administrador: solo un administrador de la plataforma puede restaurar la clave. Fin de la pertenencia a la organización: el propietario dejó la organización y nadie puede restaurar la clave; un miembro crea una nueva. Suspendida por un administrador: un administrador de la plataforma revocó una clave que no es suya, y solo un administrador de la plataforma puede restaurarla. Desactivada por el directorio: el directorio de la organización (SCIM) desactivó o eliminó al propietario, y nadie puede restaurar la clave, ni siquiera después de reactivar al propietario; el propietario crea una nueva. Se borra cuando la clave se restaura. Vacío para una clave que su propietario revocó desde la lista de claves de API.",
         options: {
           admin_password_reset: "Restablecimiento forzado de la contraseña por un administrador",
           organization_membership_ended: "Fin de la pertenencia a la organización",
-          administrator_suspended: "Suspendida por un administrador"
+          administrator_suspended: "Suspendida por un administrador",
+          scim_deactivated: "Desactivada por el directorio"
         }
       },
       key: {
@@ -3079,6 +3080,34 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "Por tema"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "Enviar mensaje en la aplicación",
+        description: "Envía un mensaje a todos los miembros de tu organización o a los que elijas. Aparece en las notificaciones de cada destinatario.",
+        successMessage: "Mensaje enviado. Destinatarios: {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "Todos en esta organización",
+            helpText: "Envía a todos los miembros de tu organización actual. Déjalo desactivado para elegir los destinatarios abajo."
+          },
+          recipients: {
+            label: "Destinatarios",
+            helpText: "Los miembros de tu organización a los que enviar, cuando el mensaje no es para todos."
+          },
+          title: {
+            label: "Título",
+            helpText: "La línea que cada destinatario ve en sus notificaciones."
+          },
+          body: {
+            label: "Mensaje"
+          },
+          link: {
+            label: "Enlace",
+            helpText: "Opcional. Una página de esta aplicación (que empiece por /) o una dirección web que abre el mensaje."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3753,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "Versión"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "Tipo de operación",

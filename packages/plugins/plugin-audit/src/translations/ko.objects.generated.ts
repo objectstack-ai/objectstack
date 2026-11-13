@@ -191,6 +191,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "메타데이터",
         help: "JSON으로 직렬화된 추가 컨텍스트"
       },
+      origin: {
+        label: "Origin",
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry not written through the activity door."
+      },
       changed_fields: {
         label: "변경된 필드",
         help: "기록된 변경의 키 집합입니다. 수정이면 기록된 이전/새 값이 가리키는 모든 필드이고, 그 밖의 행은 비어 있습니다. 쓰기 시점에 플랫폼이 기록하며, 읽는 사람에게 제공되는 필드로 좁혀서 제공됩니다. NULL은 아직 기록되지 않은 행입니다(`os migrate activity-changed-fields` 실행)."
@@ -410,6 +414,85 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       private_handle: {
         label: "Private Key Handle",
         help: "The sys_secret row holding the wrapped private half"
+      }
+    }
+  },
+  sys_audit_amendment: {
+    label: "Audit Amendment",
+    pluralLabel: "Audit Amendments",
+    description: "Signed records of redactions and expiries of sealed audit rows. Written only by the platform.",
+    fields: {
+      id: {
+        label: "Amendment ID"
+      },
+      kind: {
+        label: "Kind",
+        options: {
+          redaction: "Redaction",
+          expiry: "Expiry"
+        }
+      },
+      sealed_object: {
+        label: "Sealed Object"
+      },
+      chain_key: {
+        label: "Chain Key",
+        help: "`org:` and the organization id, or `deployment` for rows about no organization"
+      },
+      tenant_id: {
+        label: "Organization",
+        help: "The organization of the amended chain; empty for the deployment chain"
+      },
+      amended_at: {
+        label: "Amended At"
+      },
+      checkpoint_sequence: {
+        label: "Checkpoint Sequence",
+        help: "The sequence, in this chain, of the checkpoint that sealed the row"
+      },
+      row_id: {
+        label: "Row ID"
+      },
+      column_name: {
+        label: "Column"
+      },
+      sealed_commitment: {
+        label: "Sealed Commitment"
+      },
+      rewritten_commitment: {
+        label: "Rewritten Commitment"
+      },
+      rewritten_by: {
+        label: "Rewritten By",
+        help: "The migration that rewrote the value"
+      },
+      first_sequence: {
+        label: "First Sequence"
+      },
+      last_sequence: {
+        label: "Last Sequence"
+      },
+      covered_from: {
+        label: "Covered From"
+      },
+      covered_to: {
+        label: "Covered To"
+      },
+      last_removed_digest: {
+        label: "Last Removed Digest"
+      },
+      policy: {
+        label: "Policy",
+        help: "The retention policy that expired the range, e.g. archive.keep"
+      },
+      policy_value: {
+        label: "Policy Value"
+      },
+      signing_key_id: {
+        label: "Signing Key"
+      },
+      signature: {
+        label: "Signature"
       }
     }
   }

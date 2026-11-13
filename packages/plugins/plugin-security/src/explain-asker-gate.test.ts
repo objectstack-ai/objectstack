@@ -78,8 +78,8 @@ const MEMBER = 'usr_ag_member';
  * The organization the rig runs in. A grant applies only in its own
  * organization, so the member's grant rows are this organization's and every
  * asker acts in it: the explained member is resolved in the asker's
- * organization (#20515), and under `single` the claim stands without a
- * membership row.
+ * organization (#20515) — a current member of it, since the claim needs a
+ * current membership under every posture (ADR-0093 D8.1, as amended).
  */
 const ORG = 'org_ag';
 
@@ -108,7 +108,8 @@ const USER_ADMIN_SET = PermissionSetSchema.parse({
 /** `manage_users` alone: no data grant at all (it is not a data-read grant). */
 const USERS_ONLY_SET = PermissionSetSchema.parse({ name: 'qa_ag_users_only', objects: {}, systemPermissions: ['manage_users'] });
 
-const SELF = { userId: MEMBER, tenantId: ORG, positions: [] as string[], permissions: [MEMBER_SET.name] };
+/** The member as its request resolves it: a current member of {@link ORG}, so it holds `org_member`. */
+const SELF = { userId: MEMBER, tenantId: ORG, positions: ['org_member'], permissions: [MEMBER_SET.name], accessible_org_ids: [ORG] };
 const ADMIN = { userId: 'usr_ag_admin', tenantId: ORG, positions: [] as string[], permissions: [USER_ADMIN_SET.name] };
 /** A user administrator held to the member's read policy. */
 const BLIND_ADMIN = { userId: 'usr_ag_blind', tenantId: ORG, positions: [] as string[], permissions: [MEMBER_SET.name, USERS_ONLY_SET.name] };
@@ -184,6 +185,10 @@ beforeAll(async () => {
   const e = engine as unknown as { insert: (o: string, row: unknown, opts: never) => Promise<unknown> };
   for (const id of [MEMBER, ADMIN.userId, BLIND_ADMIN.userId, DELEGATE.userId, REFUSED_ADMIN.userId, REFUSED_DELEGATE.userId, EDIT_ONLY_USER]) {
     await e.insert('sys_user', { id, name: id, email: `${id}@example.test` }, SYS);
+  }
+  // The explained users are current members of the rig's organization.
+  for (const id of [MEMBER, EDIT_ONLY_USER]) {
+    await e.insert('sys_member', { id: `mem_${id}`, user_id: id, organization_id: ORG, role: 'member' }, SYS);
   }
   // [C8 stage 8b] The catalogue rows below carry no organization: under `single`
   // the engine stamps or refuses such a platform insert (ADR-0131 D9), so the

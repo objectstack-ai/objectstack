@@ -337,8 +337,10 @@ export const ERROR_CODE_LEDGER = {
     // whose AUTHOR declared `ai.requiresConfirmation: true` when the request
     // does not carry the confirmation member as `true` — 428, the standard
     // catalog's "request is missing a required precondition" status, because
-    // the request is VALID and merely incomplete: the identical call with the
-    // member set succeeds, and nothing about server state changed. Never
+    // the request is VALID and merely incomplete: for a caller acting for a
+    // person the identical call with the member set succeeds, and nothing about
+    // server state changed. An AI service account is refused the same way
+    // whatever it sends (ADR-0151 D3 rule 3): no retry of its own succeeds. Never
     // carries `status: 'failed'`: nothing dispatched, no action body ran, no
     // record was read or written.
     // Contract, including which request member and what `error.details` carries:
@@ -587,6 +589,14 @@ export const ERROR_CODE_LEDGER = {
     'AUTH_REQUIRED',
     'ERR_FILE_CONSTRAINT',
     'ERR_FILE_REFERENCE_COPY',
+    // [#32754] 403 from the storage service's own per-object attachment opt-in
+    // gate (`attachment-files-opt-in.ts`): a `sys_attachment` insert, or an
+    // update that re-points one, onto an object that does not declare
+    // `enable.files: true`, thrown from its engine hook and answered by every
+    // attach door as it was thrown. Second EMITTER of the code
+    // `@objectstack/plugin-audit` registers for its own gate on the same
+    // declaration. Provenance, not identity (see above).
+    'FILES_DISABLED',
     'FILE_DOWNLOAD_DENIED',
     'FILE_FIELD_BULK_WRITE_REFUSED', // a multi/predicate update wrote a file id into a file-class field (#7102)
     'FILE_NOT_FOUND',
@@ -603,6 +613,14 @@ export const ERROR_CODE_LEDGER = {
     // carries more than the door accepts — one code a client branches on
     // without reading the status. Provenance, not identity (see above).
     'PAYLOAD_TOO_LARGE',
+    // [#32734] 409 from `create_upload_link` for a file field of a record a
+    // pending approval locks (`record-file-access.ts`, asked of
+    // `IApprovalService.getRecordLock` before a link is minted), so no link is
+    // issued that the record-lock hook would refuse on use. Second EMITTER of
+    // the code `@objectstack/plugin-approvals` registers for that hook's own
+    // refusal, which the upload-link door relays as it was thrown. Provenance,
+    // not identity (see above).
+    'RECORD_LOCKED',
     'UPLOAD_SESSION_EXPIRED',     // chunk/complete against a session past its own expires_at (#7667)
     'UPLOAD_SESSION_NOT_FOUND',
   ],
@@ -614,6 +632,7 @@ export const ERROR_CODE_LEDGER = {
     'ACCOUNT_LOCKED',
     'ASYNC_NOT_SUPPORTED',
     'AUTH_CONFIG_ERROR',
+    'BANNED_USER',                // 403 on a sign-in by a banned account: better-auth's admin-plugin code, passed through for an administrator's ban and stamped by plugin-auth (`banned-user-refusal-cause.ts`) on `/sign-in/email` with `details.cause: 'scim_deactivated'` when the identity provider deactivated the account through SCIM; a client tells the two apart by that field, never by the message
     'CREATE_FAILED',
     'CREDENTIALS_NAME_DIFFERENT_ACCOUNTS', // 401, before every gate and the endpoint: the request's session cookie and its bearer token name two different signed-in accounts, so it is refused and nothing runs for either; an auth request is judged and executed as one account (one credential, one account, or a credential naming no live account is unaffected)
     'DOMAIN_VERIFICATION_DISABLED', // domain verification is off on this deployment
@@ -1837,7 +1856,12 @@ export const ERROR_CODE_LEDGER = {
     // `os validate` / `os build` for an unmarked default export — see its row.
     'STACK_PROVENANCE_MISSING',                  // the value was not built by `defineStack` / `composeStacks` (`hasStackProvenance` is false)
     'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
-    'STACK_SINGLE_APP_VIOLATION',                // an `app` package declares more than one app (ADR-0019 D3)
+    // [ADR-0019 D3 as amended · #32810] Two raise sites, one rule: `defineStack`
+    // (the stack's own package and each `packages[]` body) and `composeStacks`
+    // (a flat composition's one selected manifest, each `packages[]` body, and
+    // the artifact's manifest id with the top-level apps no body declares).
+    // `door: 'none'` on the same reading as the rows around it.
+    'STACK_SINGLE_APP_VIOLATION',                // an `app` or `module` package declares more than one app (ADR-0019 D3 as amended)
     'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers` or `automation` (the pair installs its trigger)
     // [ADR-0131 D6] The eighth `defineStack` refusal, same family and same
     // reading (`door: 'none'`, `status: 422`): the package permits the

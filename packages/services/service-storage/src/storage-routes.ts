@@ -15,6 +15,12 @@ import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 // The commit door's attach arm relays the attach verb's declared refusals as
 // the print door relays its service's: the producer's code and status.
 import { declaredRefusalMessage, demotedDeclaredCode, resolveThrownHttpError } from '@objectstack/types';
+// [#32712] The upload-link `PUT` relays a refusal for a person: the producer's
+// own code prefix off its text, the `/api/v1/data` door's rule, and a text the
+// producer marked for the user kept verbatim.
+import { declaredUserMessage, withoutDeclaredCodePrefix } from '@objectstack/types';
+// [#32712] The request's language, read as every other door reads it.
+import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 // [#15999] The BRAND predicate, never `instanceof` — this error crosses package
 // boundaries and a monorepo resolves the same module through more than one path
 // (`src` under vitest aliases, `dist` under the published `exports`), so two
@@ -67,6 +73,7 @@ import {
   UPLOAD_LINK_UNUSABLE_STATUS,
 } from './upload-link-wire.js';
 import { sendUnusableUploadLinkPage, sendUploadLinkPage } from './upload-link-page.js';
+import { uploadLinkCopy, uploadLinkRefusalText, type UploadLinkCopy } from './upload-link-copy.js';
 // [#22283] The `storage` settings namespace's Limits group — read and resolved
 // in ONE module, called per request by the doors below.
 // [#23306] The size refusal itself lives there too, beside the limit it
@@ -508,6 +515,14 @@ export function registerStorageRoutes(
  */
 export type StorageGatedSessionReader = (req: IHttpRequest) => Promise<unknown>;
 
+/**
+ * [#32712] The workspace's default locale for a signed-in caller of the
+ * upload-link doors (the `localization` settings), or `undefined` for none.
+ * Asked only when the request names no language of its own; bound by
+ * `composeStorageRoutes`, absent on a mount that composes no settings read.
+ */
+export type UploadLinkWorkspaceLocale = (caller: StorageUploadSession) => Promise<string | undefined>;
+
 /** What the commit door's `attachTo` names: the upload, and the record it is attached to. */
 export interface StorageUploadAttachment {
   fileId: string;
@@ -581,6 +596,7 @@ export function registerStorageFamily(
   readGatedSessionUser: StorageGatedSessionReader | undefined,
   attachUpload: StorageUploadAttacher | undefined = undefined,
   getUploadLinkDoor?: () => UploadLinkDoor | undefined,
+  uploadLinkWorkspaceLocale?: UploadLinkWorkspaceLocale,
 ): void {
   const basePath = opts.basePath ?? '/api/v1/storage';
   const downloadTtl = opts.downloadTtl ?? DEFAULT_DOWNLOAD_TTL;
@@ -1779,12 +1795,29 @@ export function registerStorageFamily(
   // the bytes, and answer.
   // ---------------------------------------------------------------------------
 
+  // [#32712] The language a link request is answered in: the request's own
+  // (`Accept-Language`), else the workspace default for the signed-in user
+  // (`localization` settings, read through the one resolver), else English.
+  // The doors read no query parameter, so `?locale` is not a source here.
+  const uploadLinkCopyFor = async (req: IHttpRequest, caller: StorageUploadSession | null): Promise<UploadLinkCopy> => {
+    const asked = preferredLocaleFromHeader(headerValue(req.headers?.['accept-language']));
+    if (asked !== undefined || caller === null || !uploadLinkWorkspaceLocale) return uploadLinkCopy(asked);
+    let workspace: string | undefined;
+    try {
+      workspace = await uploadLinkWorkspaceLocale(caller);
+    } catch {
+      // A default that cannot be read is no default: the page is English.
+      workspace = undefined;
+    }
+    return uploadLinkCopy(workspace);
+  };
+
   // The signed-in user a link request carries, or `null` once the 401 is sent.
   // No resolver wired (a kernel without an auth service) fails CLOSED here,
   // unlike the bare-kernel upload doors: a link is minted for a user, so a
   // request whose user cannot be read can never be that user. A resolver that
   // throws fails closed too.
-  const uploadLinkCaller = async (req: IHttpRequest, res: IHttpResponse): Promise<string | null> => {
+  const uploadLinkCaller = async (req: IHttpRequest, res: IHttpResponse): Promise<StorageUploadSession | null> => {
     let session: StorageUploadSession | null | undefined = null;
     if (opts.resolveSession) {
       try {
@@ -1793,49 +1826,57 @@ export function registerStorageFamily(
         session = null;
       }
     }
-    if (session?.userId) return String(session.userId);
+    if (session?.userId) return { userId: String(session.userId), organizationId: session.organizationId };
+    const copy = await uploadLinkCopyFor(req, null);
     sendError(
       res,
       401,
       'AUTH_REQUIRED',
       'Sign in as the person this upload link was made for, then open the link again.',
+      { userMessage: copy.signInRequired },
     );
     return null;
   };
 
   mountFamilyRoute('get', `${basePath}/${UPLOAD_LINK_SEGMENT}/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
+    let copy = uploadLinkCopy(undefined);
     try {
       const caller = await uploadLinkCaller(req, res);
       if (caller === null) return;
+      copy = await uploadLinkCopyFor(req, caller);
       const door = getUploadLinkDoor?.();
       if (!door) {
-        sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS);
+        sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS, copy);
         return;
       }
       let view: UploadLinkView;
       try {
-        view = await door.inspectUploadLink(String(req.params.token ?? ''), caller);
+        view = await door.inspectUploadLink(String(req.params.token ?? ''), caller.userId as string);
       } catch (err) {
         if (isUnusableUploadLink(err)) {
-          sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS);
+          sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS, copy);
           return;
         }
         throw err;
       }
-      sendUploadLinkPage(res, view);
+      sendUploadLinkPage(res, view, copy);
     } catch (err: any) {
-      if (relayUploadLinkRefusal(res, err)) return;
+      if (relayUploadLinkRefusal(res, err, copy)) return;
       sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
   mountFamilyRoute('put', `${basePath}/${UPLOAD_LINK_SEGMENT}/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
+    let copy = uploadLinkCopy(undefined);
     try {
       const caller = await uploadLinkCaller(req, res);
       if (caller === null) return;
+      copy = await uploadLinkCopyFor(req, caller);
       const door = getUploadLinkDoor?.();
       if (!door) {
-        sendError(res, UPLOAD_LINK_UNUSABLE_STATUS, UPLOAD_LINK_UNUSABLE_CODE, UPLOAD_LINK_UNUSABLE_MESSAGE);
+        sendError(res, UPLOAD_LINK_UNUSABLE_STATUS, UPLOAD_LINK_UNUSABLE_CODE, UPLOAD_LINK_UNUSABLE_MESSAGE, {
+          userMessage: copy.unusable,
+        });
         return;
       }
       // The declared length first, so an oversized body is refused before it
@@ -1843,10 +1884,12 @@ export function registerStorageFamily(
       // spent, so an oversized upload never uses it up.
       const { maxUploadBytes } = currentLimits();
       const declaredBody = declaredContentLength(req);
-      if (
-        declaredBody !== undefined &&
-        !requireWithinUploadLimit(declaredBody, maxUploadBytes, (n) => `The upload body is ${n} bytes`, res)
-      ) {
+      const tooLarge =
+        declaredBody === undefined
+          ? null
+          : uploadSizeRefusal(declaredBody, maxUploadBytes, (n) => `The upload body is ${n} bytes`);
+      if (tooLarge !== null) {
+        sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, tooLarge, { userMessage: copy.tooLarge });
         return;
       }
       let data: Buffer;
@@ -1855,7 +1898,8 @@ export function registerStorageFamily(
       } else if (Buffer.isBuffer(req.body)) {
         data = req.body;
       } else {
-        sendError(res, 400, 'INVALID_REQUEST', 'Binary body required: the file bytes, as the request body');
+        const message = 'Binary body required: the file bytes, as the request body';
+        sendError(res, 400, 'INVALID_REQUEST', message, { userMessage: copy.refused(message) });
         return;
       }
       const outcome = await door.consumeUploadLink(
@@ -1865,7 +1909,7 @@ export function registerStorageFamily(
           mimeType: uploadLinkMimeType(req.headers?.['content-type']),
           data,
         },
-        caller,
+        caller.userId as string,
       );
       sendOk(res, {
         fileId: outcome.fileId,
@@ -1874,7 +1918,7 @@ export function registerStorageFamily(
         ...(outcome.attachmentId !== undefined ? { attachmentId: outcome.attachmentId } : {}),
       });
     } catch (err: any) {
-      if (relayUploadLinkRefusal(res, err)) return;
+      if (relayUploadLinkRefusal(res, err, copy)) return;
       sendServerFault(res, 500, 'INTERNAL', 'Upload failed', err);
     }
   });
@@ -2295,6 +2339,12 @@ function isMissingLocalFile(err: unknown): boolean {
  */
 export const DEFAULT_DOWNLOAD_TTL = 300;
 
+/** [#32712] A request header's one value: the first, when a transport hands a list. */
+function headerValue(raw: string | string[] | undefined): string | undefined {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  return typeof first === 'string' ? first : undefined;
+}
+
 /** [#30892] Is `err` the one refusal an unusable upload link gets? */
 function isUnusableUploadLink(err: unknown): boolean {
   const e = err as { code?: unknown; status?: unknown } | null;
@@ -2308,18 +2358,40 @@ function isUnusableUploadLink(err: unknown): boolean {
  * outages (the authorization store's, and a `503` `SERVICE_UNAVAILABLE`),
  * so a fault's own text never reaches the link's holder — every other throw
  * is the route's `500`.
+ *
+ * [#32734] The declared status is read over both spellings producers use
+ * (`resolveThrownHttpError`'s `declaredStatus`: `status`, then `statusCode`):
+ * a lifecycle hook's refusal declares `statusCode` — the record lock's
+ * `409 RECORD_LOCKED` — and reading `status` alone answered it `500`.
+ *
+ * [#32712] The page shows the refusal as `userMessage`, composed in the
+ * request's language (`copy`): the producer's own user-facing text when it
+ * marked one, else the page's sentence for the code (`upload-link-copy.ts`),
+ * which names no record, object or field. `message` keeps the producer's
+ * text, its own code prefix stripped the way the `/api/v1/data` door strips
+ * it (`withoutDeclaredCodePrefix`).
  */
-function relayUploadLinkRefusal(res: IHttpResponse, err: unknown): boolean {
+function relayUploadLinkRefusal(res: IHttpResponse, err: unknown, copy: UploadLinkCopy): boolean {
   if (isAuthzStoreUnavailableError(err)) {
-    sendError(res, err.status, err.code, err.message);
+    sendError(res, err.status, err.code, err.message, {
+      userMessage: uploadLinkRefusalText(copy, err.status, err.code, err.message),
+    });
     return true;
   }
-  const e = err as { code?: unknown; status?: unknown; message?: unknown } | null;
-  if (!e || typeof e.code !== 'string' || typeof e.status !== 'number') return false;
-  const relayable =
-    (e.status >= 400 && e.status < 500) || (e.status === 503 && e.code === 'SERVICE_UNAVAILABLE');
+  const e = err as { code?: unknown; message?: unknown } | null;
+  if (!e || typeof e.code !== 'string') return false;
+  const status = resolveThrownHttpError(err).declaredStatus;
+  if (status === undefined) return false;
+  const relayable = (status >= 400 && status < 500) || (status === 503 && e.code === 'SERVICE_UNAVAILABLE');
   if (!relayable) return false;
-  sendError(res, e.status, e.code as ErrorCode, typeof e.message === 'string' ? e.message : 'Upload refused');
+  // [#32712] The producer's own code prefix (`RECORD_LOCKED: …`) is off the
+  // text, as the `/api/v1/data` door strips it: `code` carries the token.
+  const stripped = typeof e.message === 'string' ? withoutDeclaredCodePrefix(e.message, err) : '';
+  const message = stripped.length > 0 ? stripped : 'Upload refused';
+  // [#32712] What the page shows: a text the producer marked for the user,
+  // verbatim; else the page's own sentence for the code, in its language.
+  const userMessage = declaredUserMessage(err) ?? uploadLinkRefusalText(copy, status, e.code, message);
+  sendError(res, status, e.code as ErrorCode, message, { userMessage });
   return true;
 }
 

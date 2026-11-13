@@ -28,6 +28,7 @@ import {
   type EncodedAttachments,
 } from './sys-email-payload.js';
 import { withRecoveredHeaders } from './internal-header-readback.js';
+import { SENDER_HEADER_NAMES } from '@objectstack/core';
 import {
   EMAIL_ATTACHMENT_RECLAIM_QUEUE,
   EMAIL_ATTACHMENT_RECLAIM_GRACE_MS,
@@ -113,6 +114,33 @@ export interface DeliverAttemptOptions {
    * accumulates across queue redeliveries instead of resetting to 1.
    */
   priorAttempts?: number;
+  /**
+   * Send the row from the configured sender ({@link EmailService.getDefaultFrom})
+   * with no sender header of its own (`SENDER_HEADER_NAMES`, `@objectstack/core`),
+   * whatever the row says. The outbox drain passes it for a row the service did
+   * not write. With no configured sender the row lands at `failed`.
+   */
+  asConfiguredSender?: boolean;
+}
+
+/**
+ * {@link DeliverAttemptOptions.asConfiguredSender}: the message sent from the
+ * configured sender, with every sender header taken off. Throws when no sender
+ * is configured, which lands the row at `failed`.
+ */
+function asConfiguredSender(message: NormalizedEmailMessage, configured: EmailAddress | undefined): NormalizedEmailMessage {
+  if (configured == null) {
+    throw new Error('no configured sender: a mail-log row the mail service did not write is sent only from the configured sender');
+  }
+  const out: NormalizedEmailMessage = { ...message, from: formatAddress(configured) };
+  if (message.headers) {
+    const kept = Object.fromEntries(
+      Object.entries(message.headers).filter(([name]) => !SENDER_HEADER_NAMES.has(name.trim().toLowerCase())),
+    );
+    if (Object.keys(kept).length > 0) out.headers = kept;
+    else delete out.headers;
+  }
+  return out;
 }
 
 /**
@@ -379,12 +407,64 @@ function assertTextField(value: unknown, field: MessageTextField): void {
   throw new Error(`VALIDATION_FAILED: \`${field}\` must be a string, not ${kindOf(value)}`);
 }
 
+/** A JSON-shaped object: an `Object` or a null-prototype object. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/** How an attachment refusal names a value's kind; never the value itself. */
+function attachmentKindOf(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (ArrayBuffer.isView(value)) return 'a typed array';
+  if (value instanceof ArrayBuffer) return 'an ArrayBuffer';
+  if (typeof (value as { pipe?: unknown }).pipe === 'function') return 'a stream';
+  if (typeof value === 'object' && !Array.isArray(value) && !isPlainObject(value)) return 'a class instance';
+  return kindOf(value);
+}
+
+/**
+ * An attachment's content is a string or a Buffer — the whole of
+ * `EmailAttachment.content`, judged where an in-process caller or a JSON body
+ * can carry any value.
+ *
+ * `attachments`, when present and not `null`, is an array of plain objects,
+ * and each one's `content` is a `string` or a `Buffer` (`Buffer.isBuffer`).
+ * Anything else — a missing or `null` `content`, an object, a typed array
+ * other than a `Buffer`, a stream, a non-array `attachments`, a `null`
+ * element — is the caller's `VALIDATION_FAILED`, naming the position and the
+ * kind and never the value, refused before any `sys_email` delivery row or
+ * transport call (the same refusal path as {@link assertTextField}).
+ */
+function assertAttachments(value: unknown): void {
+  if (value === undefined || value === null) return;
+  if (!Array.isArray(value)) {
+    throw new Error(`VALIDATION_FAILED: \`attachments\` must be an array, not ${attachmentKindOf(value)}`);
+  }
+  for (let i = 0; i < value.length; i++) {
+    const attachment: unknown = value[i];
+    if (!isPlainObject(attachment)) {
+      throw new Error(
+        `VALIDATION_FAILED: \`attachments[${i}]\` must be a plain object, not ${attachmentKindOf(attachment)}`,
+      );
+    }
+    const content = attachment.content;
+    if (typeof content === 'string' || Buffer.isBuffer(content)) continue;
+    throw new Error(
+      `VALIDATION_FAILED: \`attachments[${i}].content\` must be a string or a Buffer, not ${attachmentKindOf(content)}`,
+    );
+  }
+}
+
 /**
  * Validate input + apply default-from + canonicalize recipients.
  * Throws Error('VALIDATION_FAILED: REASON') for malformed payloads — a
- * non-string `subject` / `text` / `html` ({@link assertTextField}) and a
- * malformed caller-supplied address (`to` / `cc` / `bcc` / `replyTo`)
- * included. An unsendable `from` is the one malformed address that is NOT a
+ * non-string `subject` / `text` / `html` ({@link assertTextField}), an
+ * attachment whose content is not a string or a Buffer
+ * ({@link assertAttachments}) and a malformed caller-supplied address
+ * (`to` / `cc` / `bcc` / `replyTo`) included. An unsendable `from` is the one malformed address that is NOT a
  * `VALIDATION_FAILED`: see {@link formatCallerAddress}.
  */
 export function normalizeMessage(
@@ -397,6 +477,7 @@ export function normalizeMessage(
   assertTextField(input.subject, 'subject');
   assertTextField(input.text, 'text');
   assertTextField(input.html, 'html');
+  assertAttachments(input.attachments);
   const subject = String(input.subject ?? '').trim();
   if (!subject) throw new Error('VALIDATION_FAILED: subject is required');
   if (!input.text && !input.html) {
@@ -916,6 +997,18 @@ export class EmailService implements IEmailService {
     let encodedAttachments: EncodedAttachments = this.options.persistence
       ? encodeAttachmentsForRow(normalized.attachments)
       : { kind: 'none' };
+    // A second check of the rule `normalizeMessage` already enforces: an
+    // attachment's content is a string or a Buffer. Unreachable from `send`
+    // while that refusal stands; if the two ever disagree, the send stops
+    // here — before any row, queue job or transport call — and never falls
+    // back to delivering the message inline.
+    if (encodedAttachments.kind === 'unsupported') {
+      throw new Error(
+        'EmailService: an attachment passed validation with content that is not a string or a Buffer — '
+        + 'normalizeMessage and the sys_email attachment encoder disagree about EmailAttachment.content. '
+        + 'The message was not sent.',
+      );
+    }
 
     // The row id is minted BEFORE the offload because the storage key embeds
     // it (`sys_email/attachments/<rowId>/…`) and the content must be in place
@@ -1018,6 +1111,16 @@ export class EmailService implements IEmailService {
         // delete them here rather than create the one orphan class this design
         // is built to make impossible.
         await this.discardOrphanedAttachmentContent(storageKeys, 'the sys_email row could not be persisted');
+      }
+      if (!rowPersisted && input.requireLogRow === true) {
+        // The caller sends only what the mail log records (`SendEmailInput.requireLogRow`):
+        // refused before any delivery, so nothing goes out unrecorded.
+        throw Object.assign(
+          new Error(
+            `SERVICE_UNAVAILABLE: the message was not sent, because the mail log (${object}) could not record it. Try again later.`,
+          ),
+          { code: 'SERVICE_UNAVAILABLE', status: 503, statusCode: 503 },
+        );
       }
       if (queue) {
         // Queue mode delivers the ROW, so a row that never landed leaves the
@@ -1166,14 +1269,8 @@ export class EmailService implements IEmailService {
       );
       return undefined;
     }
-    if (encodedAttachments.kind === 'unsupported') {
-      this.options.logger?.info(
-        'EmailService: queue delivery skipped for one message — '
-        + `${encodedAttachments.detail}, so it cannot be reconstructed from a sys_email row. The message was `
-        + 'delivered inline (in-process retries only) rather than queued without the attachment.',
-      );
-      return undefined;
-    }
+    // No `unsupported` arm: `sendInternal` stops such a message before it
+    // asks (the second check after `encodeAttachmentsForRow`).
 
     if (!this.options.persistence) {
       this.reportQueueDegradation(
@@ -1508,6 +1605,7 @@ export class EmailService implements IEmailService {
       // the reason, which is the whole point: an unfetchable attachment must
       // never become a message delivered without it.
       normalized = await rowToNormalizedAsync(source, { fetchContent: this.attachmentFetcher() });
+      if (opts?.asConfiguredSender) normalized = asConfiguredSender(normalized, this.getDefaultFrom());
     } catch (err: any) {
       const errMessage = String(err?.message ?? err ?? 'invalid row').slice(0, 1000);
       await this.updateRow(rowId, {

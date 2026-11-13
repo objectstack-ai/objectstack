@@ -1209,11 +1209,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Revoke Reason",
-        help: "Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Suspended by an administrator: a platform administrator revoked a key that is not theirs, and only a platform administrator can restore it. Cleared when the key is restored. Empty for a key its owner revoked from the API Keys list.",
+        help: "Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Suspended by an administrator: a platform administrator revoked a key that is not theirs, and only a platform administrator can restore it. Deactivated by the directory: the organization's directory (SCIM) deactivated or deleted the owner, and no one can restore the key, even after the owner is re-activated; the owner creates a new one. Cleared when the key is restored. Empty for a key its owner revoked from the API Keys list.",
         options: {
           admin_password_reset: "Administrator password reset",
           organization_membership_ended: "Organization membership ended",
-          administrator_suspended: "Suspended by an administrator"
+          administrator_suspended: "Suspended by an administrator",
+          scim_deactivated: "Deactivated by the directory"
         }
       },
       key: {
@@ -3079,6 +3080,34 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "By Topic"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "Send In-App Message",
+        description: "Send a message to everyone in your organization, or to the members you pick. It appears in each recipient’s notifications.",
+        successMessage: "Message sent. Recipients: {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "Everyone in this organization",
+            helpText: "Send to every member of your current organization. Leave it off to pick the recipients below."
+          },
+          recipients: {
+            label: "Recipients",
+            helpText: "The members of your organization to send to, when the message is not for everyone."
+          },
+          title: {
+            label: "Title",
+            helpText: "The line each recipient sees in their notifications."
+          },
+          body: {
+            label: "Message"
+          },
+          link: {
+            label: "Link",
+            helpText: "Optional. A page in this app (starting with /) or a web address the message opens."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3753,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "Version"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "Operation Type",

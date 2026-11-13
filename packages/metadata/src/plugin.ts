@@ -14,6 +14,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
+import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, isBundledStoreType, storedItemPackageId } from './package-slotted-store.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -801,7 +802,11 @@ export class MetadataPlugin implements Plugin {
         this.manager = new NodeMetadataManager({
             rootDir,
             watch: effectiveWatch,
-            formats: ['yaml', 'json', 'typescript', 'javascript']
+            formats: ['yaml', 'json', 'typescript', 'javascript'],
+            // [#32154] The kernel's logger arrives in `init()`; until then the
+            // manager holds its debug/info lines and replays them through it,
+            // so they follow the boot's level.
+            awaitHostLogger: true,
         });
 
         // Initialize with default type registry
@@ -812,6 +817,9 @@ export class MetadataPlugin implements Plugin {
         // [#10772] Retained for `destroy()`, which the kernel calls with no
         // context. Assigned before anything that can throw.
         this.initCtx = ctx;
+        // [#32154] Every line of the manager follows the kernel's level from
+        // here, the lines it held since construction included.
+        this.manager.useHostLogger(ctx.logger);
         ctx.logger.info('Initializing Metadata Manager', {
             root: this.options.rootDir || process.cwd(),
             watch: this.options.watch,
@@ -1656,7 +1664,15 @@ export class MetadataPlugin implements Plugin {
                 });
 
                 if (items.length > 0) {
-                    for (const item of items) {
+                    // [#32488 R7-C] The loader that first registered each bundle
+                    // identity in this pass. `loadMany` keeps the earlier loader's
+                    // item of one `(package, name, member)`, but it keys an unstamped
+                    // item (a file's) package-less, so a row of the host's package
+                    // the file once seeded passes it. Keyed after the host's stamp,
+                    // the earlier loader's item keeps the entry — the file over its
+                    // own stale seed. One loader's own items never shadow each other.
+                    const primedBy = new Map<string, string | undefined>();
+                    for (const item of primingOrder(entry.type, items)) {
                         const meta = item as any;
                         if (meta?.name) {
                             // Stamp package provenance when the host declared
@@ -1665,9 +1681,22 @@ export class MetadataPlugin implements Plugin {
                             // uses, so both load paths produce identical
                             // _packageId/_provenance state. No-op when the
                             // option is unset or the item is already stamped.
+                            // [#32521, #32812] Never a package-less stored row
+                            // of a type stored per `(package, name)`: it stays
+                            // the environment's own item, which the store files
+                            // by its write rule (`unstampedStoredRow`). The
+                            // host's own file item is stamped as before.
                             applyProtection(meta, {
-                                packageId: this.options.packageId,
+                                packageId: unstampedStoredRow(entry.type, meta, this.manager.sourceLoaderProtocolOf(meta))
+                                    ? undefined
+                                    : this.options.packageId,
                             });
+                            const identity = bundleEntryKey(entry.type, meta.name, meta);
+                            if (identity !== undefined) {
+                                const from = this.manager.sourceLoaderOf(meta);
+                                if (!primedBy.has(identity)) primedBy.set(identity, from);
+                                else if (primedBy.get(identity) !== from) continue;
+                            }
                             // Silent: boot-time priming, before any consumer
                             // has cached a definition to go stale. Post-boot
                             // edits to these files reach watchers through the
@@ -1692,4 +1721,52 @@ export class MetadataPlugin implements Plugin {
             registeredTypes: sortedTypes.length,
         });
     }
+}
+
+/** The protocol of a loader whose items are stored rows: `DatabaseLoader`'s, and any loader's that declares it. */
+const STORED_ROW_PROTOCOL = 'datasource:';
+
+/**
+ * [#32521, #32812; epic #31527 red line 2, ADR-0150 D4] Whether the boot
+ * priming pass keeps the host's declared package off `item`: a package-less
+ * STORED ROW (an item a `datasource:` loader, `DatabaseLoader` or another of
+ * that protocol, handed on that names no package, as `loadMany` hands it on)
+ * of a type stored per `(package, name)`. Such a row is the
+ * environment's own item, or the customization of the one package that holds
+ * its name (D4), and the store files it where it files any write that carries
+ * no package. Stamped with the host's package, the registry filed it into the
+ * host's slot while the loaders still stored it package-less: the host was
+ * counted as a holder it is not (a third holder beside two packages, #32521;
+ * a second beside one, which after a package-less write named the host in
+ * the bare read's refusal, #32812), and the read naming the holder served
+ * the holder's own row over its customization. Unstamped, every read answers
+ * what it answers on a host that declares no package. The host's own file items, and every other
+ * type's items, are stamped as before.
+ */
+function unstampedStoredRow(type: string, item: unknown, protocol: string | undefined): boolean {
+    return PACKAGE_SLOTTED_STORE_TYPES.has(type) && storedItemPackageId(item) === undefined && protocol === STORED_ROW_PROTOCOL;
+}
+
+/**
+ * [#32521; epic #31527 red line 2] The order the boot priming pass registers a
+ * type's items in. `MetadataManager.loadMany` hands on every holder of a name
+ * two or more packages hold, of a type stored per `(package, name)`, and one
+ * item for any other name. For an unbundled such type the items a package
+ * holds are registered first, each into its own slot, and then the ones no
+ * package holds, which the store's write rule files where it files them at
+ * any later write: under a name two packages hold, the name's bare slot (the
+ * environment's own item). Registered between two packages' items, a
+ * package-less item would be filed into the first one's slot as its
+ * customization and answer a read naming that package; registered before
+ * them, the first one's item would take its bare slot over and `list` would
+ * drop it. With the host's package stamp kept off a package-less stored row
+ * (`unstampedStoredRow`), the registry holds what a read without the pass
+ * answers, whatever order the loaders handed the items in and whatever
+ * package the host declares. A name one package holds
+ * hands on one item, whose order does not move. Every other type: as handed.
+ */
+function primingOrder(type: string, items: unknown[]): unknown[] {
+    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || isBundledStoreType(type)) return items;
+    const held = (item: unknown) => storedItemPackageId(item) !== undefined;
+    return [...items.filter(held), ...items.filter((item) => !held(item))];
 }

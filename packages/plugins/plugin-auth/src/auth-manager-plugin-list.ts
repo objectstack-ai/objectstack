@@ -116,6 +116,7 @@ export interface PluginListHost {
   emailLocaleArg: AuthManager['emailLocaleArg'];
   enforceSessionControls: AuthManager['enforceSessionControls'];
   getAppName: AuthManager['getAppName'];
+  getAudience: AuthManager['getAudience'];
   getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
   getEmailService: AuthManager['getEmailService'];
@@ -263,6 +264,7 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         get config() { return readConfig(); },
         emailLocaleArg: (...a) => this.emailLocaleArg(...a),
         getAppName: (...a) => this.getAppName(...a),
+        getAudience: (...a) => this.getAudience(...a),
         getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
         getDataEngine: (...a) => this.getDataEngine(...a),
         getEmailService: (...a) => this.getEmailService(...a),
@@ -766,10 +768,13 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
     // authenticated user). Requires the `organization` plugin — on by default.
     // `domainVerification.enabled` (ADR-0135 D6, opt-in via OS_SSO_DOMAIN_VERIFICATION):
     // when on, @better-auth/sso mounts /sso/request-domain-verification +
-    // /sso/verify-domain (DNS TXT proof-of-ownership) AND enforces that an
-    // external IdP's email domain be DNS-verified before it may complete a
-    // login — preventing an org admin from registering a provider for a domain
-    // they don't control. Off by default to preserve the register→login flow.
+    // /sso/verify-domain (DNS TXT proof-of-ownership of every domain the
+    // provider lists) and signs nobody in through a provider until its domain
+    // list is verified; editing the list clears it. A new account is limited
+    // to an email address at a domain the provider has proven, by plugin-auth's
+    // own rule at the `validateUserInfo` gate (`sso-account-at-proven-domain.ts`),
+    // asked through the same decision (`AuthManager.isSsoDomainVerificationEnabled`).
+    // Off by default to preserve the register→login flow.
     //
     // Per-provider sign-in options (ruling record 6718355623, `sso-sign-in-options.ts`):
     // `allowIdpInitiated` and `allowJit` are provider additional fields, both
@@ -832,10 +837,10 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   if (enabled.scim) {
     await this.addOptionalPlugin(plugins, 'scim', async () => {
       const { scim } = await import('@better-auth/scim');
-      const { verifyScimBearerToken, recordScimRequestConnection, ScimCredentialLastUseStamper } = await import(
-        './scim-connection-service.js'
-      );
+      const { verifyScimBearerToken, recordScimRequestConnection, ScimCredentialLastUseStamper, scimRequestScope } =
+        await import('./scim-connection-service.js');
       const { createScimGroupProjection } = await import('./scim-group-projection.js');
+      const { createScimSsoAdoptionResolver } = await import('./scim-sso-adoption.js');
       const secret = this.resolveAuthSecret();
       // [#32120] One stamper for this manager's SCIM plugin, so its
       // per-credential minute claims are shared by every request it verifies.
@@ -890,7 +895,17 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         // sessions. Routed to the platform's own ban write; the break-glass
         // last-administrator guard judges it at the engine. See
         // `reconcileScimUserLifecycle` for the contract and the measurement.
+        //
+        // [#32148] The other host half: a create whose email an account SSO
+        // JIT made already holds LINKS that account, under the three ruled
+        // conditions and never on the email alone; anything else creates and
+        // collides, 409 as before. The connection's organization is the one
+        // the request's verified credential names. See `scim-sso-adoption.ts`.
         identity: {
+          resolveUser: createScimSsoAdoptionResolver({
+            getEngine: () => this.getDataEngine() as never,
+            readConnection: () => scimRequestScope.getStore(),
+          }),
           reconcileUser: (state, context) => this.reconcileScimUserLifecycle(state, context),
         },
         // [ADR-0134 D4, filled for permission sets] A pushed group grants the

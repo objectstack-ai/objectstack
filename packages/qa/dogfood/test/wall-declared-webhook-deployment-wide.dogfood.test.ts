@@ -28,7 +28,8 @@ import { WebhookOutboxPlugin } from '@objectstack/plugin-webhooks';
 import { webhookFixtureStack } from './fixtures/webhook-materialization-fixture.js';
 
 const SYS = { isSystem: true, positions: [], permissions: [] };
-const DECLARED_REF = 'declared:wm_task_changed';
+/** [ADR-0150 D5, #31699 PR 2] The fixture package's own slot: `declared:PKG/NAME`. */
+const DECLARED_REF = 'declared:com.dogfood.webhook-fixture/wm_task_changed';
 const DELIVERY_READER = 'dw_delivery_reader';
 
 /** The realtime surface the engine publishes to and the dispatcher subscribes through. */

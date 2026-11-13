@@ -290,6 +290,14 @@ const STUDIO_EN: Record<string, string> = {
     'The copy was saved in package \'{package}\', beside the original rather than in place of it, and travels with that package. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
   'perm.clone.notice.inCreatedPackage':
     'The copy was saved in package \'{package}\', created for it to hold your changes to the package the set came from, beside the original rather than in place of it, and travels with that package. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
+  // objectstack#32537 — a door refused a permission-set name more than one
+  // package holds (409 RESOURCE_CONFLICT naming every holder, ADR-0150 D3):
+  // the holders are offered as a pick, never chosen by order
+  // (`PermissionSetHolderPick.tsx`). The server's sentence is shown above it.
+  'perm.holder.pick.title': 'Which package\'s {name}?',
+  'perm.holder.pick.hint': 'Choose the package whose permission set this applies to.',
+  'perm.holder.pick.package': 'Package {package}',
+  'perm.holder.pick.environment': 'This environment\'s own set',
   // A save that still reached the server and was refused as a packaged set:
   // the same guidance as the lock, keyed on the refusal's code (never its
   // prose), instead of the transport's generic message.
@@ -362,6 +370,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.section.basic': 'Basic',
   'designer.field.section.advanced': 'Advanced',
   'designer.field.section.options': '{type} options',
+  'designer.field.section.computed': 'Computed value',
   'designer.field.apiName': 'API name',
   'designer.field.label': 'Label',
   // objectui#11782 — under the Label input: the label a translation shows instead.
@@ -461,6 +470,14 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.relatedList.filterHelp': 'Only child records matching these conditions are listed, on top of the match on the parent record; the tab count matches the list.',
   'designer.field.relatedList.filterAdvanced': 'This filter uses nested or OR conditions the builder cannot show; it is kept exactly as stored.',
   'designer.field.formula': 'Formula (CEL)',
+  'designer.field.formula.storedHint':
+    'Computed on read, a formula stores no value, so it cannot be summed or averaged. To total it, change Type to its return type (Number, Date, …): the expression is kept, and the value is computed and stored on every write.',
+  // A stored field's `expression` (objectstack#32576): computed and stored on every write.
+  'designer.field.storedExpression': 'Computed from (CEL)',
+  'designer.field.storedExpression.hint':
+    'Leave empty for a value people enter. With an expression, the value is computed from the record and stored on every write, so it can be summed, averaged and sorted.',
+  'designer.field.storedExpression.computed':
+    'Computed and read-only: no form, grid or import sets this value, and it is computed and stored on every write. Records saved before the expression was set stay empty until each is saved again. The expression is evaluated at the write, so now(), today() and the current user keep the value they had then.',
   // Roll-up summary (summaryOperations)
   'designer.field.summary.object': 'Child object',
   'designer.field.summary.function': 'Aggregation',
@@ -1536,6 +1553,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.hook.capabilities': 'Capabilities',
   'engine.inspector.hook.capabilitiesHint': 'The ctx APIs this body may call. A call it is not granted throws when the hook runs.',
   'engine.inspector.hook.capabilityUnknown': '(not a capability the sandbox grants)',
+  'engine.inspector.hook.capabilityNotForHook': '(a hook body cannot be granted this; send mail from an action, a job or a flow)',
   'engine.inspector.hook.options': 'Options',
   'engine.inspector.hook.priority': 'Priority',
   'engine.inspector.hook.async': 'Run asynchronously (after commit)',
@@ -4451,6 +4469,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.appNav.empty': 'Empty — click “Add nav item” to start',
   'engine.appNav.emptyReadonly': 'No top-level nav items yet',
   'engine.appNav.item': 'Item {n}',
+  'engine.appNav.incomplete': 'Incomplete',
+  'engine.appNav.incompleteHint':
+    'No target chosen yet. This browser keeps the item here, and the saved navigation leaves it out until a target is chosen.',
   'engine.appNav.itemOne': 'item',
   'engine.appNav.itemOther': 'items',
   // The translation preview, the designer table's last family: held out of S6

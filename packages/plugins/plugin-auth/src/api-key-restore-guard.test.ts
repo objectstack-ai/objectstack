@@ -45,6 +45,10 @@ import {
   registerApiKeyRestoreGuard,
 } from './api-key-restore-guard.js';
 import { AuthPlugin } from './auth-plugin.js';
+import {
+  revokeDirectoryDeactivatedApiKeys,
+  SCIM_DEACTIVATION_REVOKE_REASON,
+} from './scim-deactivation-key-revocation.js';
 
 const SYS = { context: { isSystem: true } } as any;
 const ADMIN = 'usr_admin';
@@ -503,6 +507,135 @@ describe('a key revoked because its owner\'s membership ended is restored by no 
 
     expect(verdict.code).toBe('API_KEY_REVOKED');
     expect(verdict.message).toMatch(/membership in the organization ended, and it cannot be restored/);
+    expect(verdict.message).not.toMatch(/can restore it/);
+  });
+});
+
+describe('a key the directory deactivation revoked is restored by no one from a user context', () => {
+  const DEACTIVATED_ROW = { revoked: true, revoked_reason: SCIM_DEACTIVATION_REVOKE_REASON };
+
+  /** The engine context a transport builds for a user: the grants `resolveUserAuthzGrants` answers. */
+  const contextOf = async (engine: ObjectQL, userId: string): Promise<any> => {
+    const grants = await resolveUserAuthzGrants(engine, userId);
+    return { context: { userId, positions: grants.positions, permissions: grants.permissions } };
+  };
+
+  it('the deactivation revokes every key the user owns with scim_deactivated, restamping a reason someone could lift', async () => {
+    const engine = await rig();
+    const liveRaw = await mint(engine, 'key_live');
+    await mint(engine, 'key_owner_revoked');
+    await engine.update('sys_api_key', { id: 'key_owner_revoked', revoked: true }, asOwner);
+    await mint(engine, 'key_reset');
+    await engine.update('sys_api_key', { id: 'key_reset', revoked: true, revoked_reason: FORCED_RESET_REVOKE_REASON }, SYS);
+    await mint(engine, 'key_suspended');
+    await engine.update('sys_api_key', { id: 'key_suspended', revoked: true, revoked_reason: ADMINISTRATOR_SUSPENDED_REVOKE_REASON }, SYS);
+    await mint(engine, 'key_left');
+    await engine.update('sys_api_key', { id: 'key_left', revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON }, SYS);
+    const otherRaw = await mint(engine, 'key_other', ADMIN);
+
+    const outcome = await revokeDirectoryDeactivatedApiKeys(engine as any, OWNER);
+
+    expect(outcome).toEqual({ apiKeys: 4, failed: 0, complete: true });
+    // A live key, and every key someone could restore, ends at the reason no one lifts.
+    for (const id of ['key_live', 'key_owner_revoked', 'key_reset', 'key_suspended']) {
+      expect({ id, ...(await row(engine, id)) }).toEqual({ id, ...DEACTIVATED_ROW });
+    }
+    // A key no one restores already keeps the reason it carries.
+    expect(await row(engine, 'key_left')).toEqual({ revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON });
+    // Another user's key is not the deactivated user's.
+    expect(await row(engine, 'key_other')).toEqual({ revoked: false, revoked_reason: null });
+    expect((await door(engine, otherRaw)).outcome).toBe('admitted');
+    expect((await door(engine, liveRaw)).code).toBe('API_KEY_REVOKED');
+
+    // Idempotent: a second pass finds nothing left to write.
+    expect(await revokeDirectoryDeactivatedApiKeys(engine as any, OWNER)).toEqual({ apiKeys: 0, failed: 0, complete: true });
+  });
+
+  it('a write that does not land is counted, and the outcome is never complete', async () => {
+    const engine = await rig();
+    await mint(engine, 'key_a');
+    await mint(engine, 'key_b');
+    const refusing = {
+      find: (...args: Parameters<ObjectQL['find']>) => engine.find(...args),
+      update: async (...args: Parameters<ObjectQL['update']>) => {
+        if ((args[1] as { id?: unknown }).id === 'key_b') throw new Error('write refused (test)');
+        return engine.update(...args);
+      },
+    };
+
+    const outcome = await revokeDirectoryDeactivatedApiKeys(refusing, OWNER);
+
+    expect(outcome).toEqual({ apiKeys: 1, failed: 1, complete: false });
+    expect(await row(engine, 'key_a')).toEqual(DEACTIVATED_ROW);
+    expect(await row(engine, 'key_b')).toEqual({ revoked: false, revoked_reason: null });
+    // No read surface at all is never reported as complete.
+    expect(await revokeDirectoryDeactivatedApiKeys({ update: refusing.update }, OWNER))
+      .toEqual({ apiKeys: 0, failed: 0, complete: false });
+  });
+
+  it('the owner\'s restore is refused 403 PERMISSION_DENIED, naming the directory and the new-key road', async () => {
+    const engine = await rig();
+    const raw = await mint(engine, 'key_live');
+    await revokeDirectoryDeactivatedApiKeys(engine as any, OWNER);
+
+    const err = await refusalOf(engine.update('sys_api_key', { id: 'key_live', revoked: false }, asOwner));
+
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(String(err.message)).toContain('directory deactivated its owner');
+    expect(String(err.message)).toContain('POST /api/v1/keys');
+    expect(await row(engine, 'key_live')).toEqual(DEACTIVATED_ROW);
+    expect((await door(engine, raw)).code).toBe('API_KEY_REVOKED');
+  });
+
+  it('a platform administrator by grant (admin_full_access) is refused too, while the same caller restores a reset-revoked key', async () => {
+    const engine = await rig();
+    const raw = await mint(engine, 'key_live');
+    await revokeDirectoryDeactivatedApiKeys(engine as any, OWNER);
+    const admin = await contextOf(engine, ADMIN);
+    expect(await hasPlatformAdminStanding(engine, ADMIN)).toBe(true);
+
+    const err = await refusalOf(engine.update('sys_api_key', { id: 'key_live', revoked: false }, admin));
+
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(String(err.message)).toContain('directory deactivated its owner');
+    expect(await row(engine, 'key_live')).toEqual(DEACTIVATED_ROW);
+    expect((await door(engine, raw)).code).toBe('API_KEY_REVOKED');
+
+    // CONTROL: the refusal is the reason's, not a caller who cannot reach the row or lacks the standing.
+    await mint(engine, 'key_reset');
+    await engine.update('sys_api_key', { id: 'key_reset', revoked: true, revoked_reason: FORCED_RESET_REVOKE_REASON }, SYS);
+    await engine.update('sys_api_key', { id: 'key_reset', revoked: false }, admin);
+    expect(await row(engine, 'key_reset')).toEqual({ revoked: false, revoked_reason: null });
+  });
+
+  it('re-revoking keeps the reason, an administrator\'s revoke included, and the restore after it is still refused', async () => {
+    const engine = await rig();
+    await mint(engine, 'key_live');
+    await revokeDirectoryDeactivatedApiKeys(engine as any, OWNER);
+    const admin = await contextOf(engine, ADMIN);
+
+    await engine.update('sys_api_key', { id: 'key_live', revoked: true }, asOwner);
+    await engine.update('sys_api_key', { id: 'key_live', revoked: true, revoked_reason: null }, asOwner);
+    // Rule 4 never replaces a stored reason with one a platform administrator could lift.
+    await engine.update('sys_api_key', { id: 'key_live', revoked: true }, admin);
+    expect(await row(engine, 'key_live')).toEqual(DEACTIVATED_ROW);
+
+    for (const [who, caller] of [['owner', asOwner], ['platform administrator', admin]] as Array<[string, any]>) {
+      const err = await refusalOf(engine.update('sys_api_key', { id: 'key_live', revoked: false }, caller));
+      expect({ who, code: err?.code, status: err?.status }).toEqual({ who, code: 'PERMISSION_DENIED', status: 403 });
+    }
+    expect(await row(engine, 'key_live')).toEqual(DEACTIVATED_ROW);
+  });
+
+  it('the key door says the key cannot be restored and names no restorer', async () => {
+    const engine = await rig();
+    const raw = await mint(engine, 'key_live');
+    await revokeDirectoryDeactivatedApiKeys(engine as any, OWNER);
+
+    const verdict = await door(engine, raw);
+
+    expect(verdict.code).toBe('API_KEY_REVOKED');
+    expect(verdict.message).toMatch(/directory deactivated its owner, and it cannot be restored/);
     expect(verdict.message).not.toMatch(/can restore it/);
   });
 });

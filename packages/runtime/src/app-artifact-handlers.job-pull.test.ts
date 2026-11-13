@@ -43,10 +43,10 @@ import { runImport, type ExportFieldMeta, type ImportProtocolLike, type ImportRu
 import { ObjectQL } from '@objectstack/objectql';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { CronJobAdapter } from '@objectstack/service-job';
+import { CronJobAdapter, IntervalJobAdapter } from '@objectstack/service-job';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
-import { collectJobsWithoutBody, jobDeclaringPackages, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
+import { collectJobNameCollisions, collectJobsWithoutBody, jobDeclaringPackages, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
 // The source under test reaches `@objectstack/metadata` by dynamic import
 // (`app-plugin.ts`); paid here, at collection, not inside a case's clock.
 import '@objectstack/metadata';
@@ -717,7 +717,7 @@ describe('[#32071] a pull job names the package that declares it', () => {
         // No `packages[]`: every job is the app's.
         expect(jobDeclaringPackages({ id: APP_ID, jobs: [PULL_JOB] }, APP_ID)(PULL_JOB)).toBe(APP_ID);
     });
-    it('two bodies each declaring job `sync`, loaded as top-level copies: neither run pulls as the other — each is refused 409 naming both', async () => {
+    it('two bodies each declaring job `sync`, loaded as top-level copies: attributed to neither — and, both enabled, refused at bind naming both', async () => {
         // A JSON-loaded artifact binds the flattened top-level copies, so the
         // job is met by name, and the name is the two bodies'.
         const h = harness();
@@ -734,19 +734,19 @@ describe('[#32071] a pull job names the package that declares it', () => {
         }));
         const of = jobDeclaringPackages(bundle, 'com.example.top');
         expect(typeof of({ ...sync }), 'never the first body').toBe('object');
-        await scheduleAppArtifactJobs(
+        const out = await scheduleAppArtifactJobs(
             { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
             bundle,
             { appId: 'com.example.top', ql: undefined, source: 'Test' },
         );
-        expect(runs.length).toBeGreaterThan(0);
-        for (const run of runs) {
-            const err = await run({ jobId: 'sync' }).then(() => undefined, (e: unknown) => e as { code?: string; status?: number; message?: string });
-            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
-            expect(err?.message).toContain('com.example.alpha');
-            expect(err?.message).toContain('com.example.beta');
-        }
-        // Before any call or write: no pull was asked for, as any package or as none.
+        // [#32411] Two enabled jobs of one name: the job service would keep one, so neither is scheduled.
+        expect(out.refused).toEqual(['sync', 'sync']);
+        expect(runs).toEqual([]);
+        const refused = h.logger.error.mock.calls.find(([, err]) => err instanceof Error)?.[1] as { code?: string; status?: number; message?: string };
+        expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect(refused?.message).toContain('com.example.alpha');
+        expect(refused?.message).toContain('com.example.beta');
+        // No pull was asked for, as any package or as none.
         expect(h.pulls).toEqual([]);
     });
 
@@ -771,6 +771,68 @@ describe('[#32071] a pull job names the package that declares it', () => {
     });
 });
 
+// The #32355 / #32411 / #32412 fixtures: package bodies, a manifest-less input (the residual) and the artifact a build emits.
+
+/** The two real job services the binder schedules on in a test: both key a job by its name and replace on a second schedule. */
+type RealJobService = CronJobAdapter | IntervalJobAdapter;
+
+const SYNCED = { name: 'order', label: 'Order', managedBy: 'synced', fields: { external_id: { type: 'text', label: 'External id' } } };
+const mappingOf = (name: string, connector: string) => ({ ...MAPPING, name, connectorSource: { connector, action: 'request' } });
+const pullJob = (name: string, mapping: string) => ({ name, schedule: INTERVAL, pull: { mapping } });
+const alpha = (jobs: unknown[]) => defineStack({
+    manifest: { id: 'com.example.alpha', name: 'Alpha', version: '0.1.0', type: 'module' },
+    objects: [SYNCED],
+    mappings: [mappingOf('alpha_map', 'alpha_api')],
+    jobs,
+} as never);
+// No `manifest`: its jobs reach the artifact's top level and no package body.
+const host = (jobs: unknown[]) => defineStack({
+    objects: [{ ...SYNCED, name: 'host_record', label: 'Host record' }],
+    mappings: [{ ...mappingOf('host_map', 'host_api'), targetObject: 'host_record' }],
+    jobs,
+} as never);
+const beta = defineStack({
+    manifest: { id: 'com.example.beta', name: 'Beta', version: '0.1.0', type: 'app' },
+    objects: [{ ...SYNCED, name: 'beta_record', label: 'Beta record' }],
+} as never);
+/** The artifact as `os build` writes it and a boot reads it back: composed, then through JSON. */
+const jsonLoaded = (stacks: unknown[]) =>
+    JSON.parse(JSON.stringify(composeStacks(stacks as never[], { manifest: 'preserve' }))) as Record<string, any>;
+
+/**
+ * Schedule `bundle` as `appId` on a real job service (`CronJobAdapter` unless `makeAdapter` says otherwise), then fire every job it holds:
+ * what each run answered, and every pull asked. Real, because the service keys both jobs of a shared
+ * name under one key and the later replaces the earlier, so which job survives is the service's to say.
+ */
+async function scheduleAndRun(bundle: unknown, appId: string, makeAdapter: () => RealJobService = () => new CronJobAdapter()) {
+    const h = harness();
+    const adapter = makeAdapter();
+    type Thrown = { code?: string; status?: number; message?: string };
+    const thrown = new Map<string, Thrown>();
+    const schedule = adapter.schedule.bind(adapter);
+    adapter.schedule = (key, when, run, options) => schedule(key, when, async (c) => {
+        try { return await run(c); } catch (e) { thrown.set(key, e as Thrown); throw e; }
+    }, options);
+    h.services.job = adapter;
+    try {
+        const out = await scheduleAppArtifactJobs(
+            { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
+            bundle,
+            { appId, ql: undefined, source: 'Test' },
+        );
+        const answers: Array<Thrown & { key: string; run?: string }> = [];
+        for (const key of await adapter.listJobs()) {
+            await adapter.trigger(key);
+            const err = thrown.get(key);
+            const run = (await adapter.getExecutions(key)).at(-1)?.status;
+            answers.push({ key, run, code: err?.code, status: err?.status, message: err?.message });
+        }
+        return { out, answers, pulls: h.pulls, logger: h.logger };
+    } finally {
+        await adapter.destroy();
+    }
+}
+
 /**
  * [#32355, ADR-0150 D3] A job name a package body declares and the residual
  * carries too. `composeStacks(…, { manifest: 'preserve' })` with an input that
@@ -780,67 +842,12 @@ describe('[#32071] a pull job names the package that declares it', () => {
  * the name is attributed to neither: each run is refused before any call or
  * write, naming the declaring body and the residual. The job service keys both
  * under the one name and keeps the later; when that is the residual's job, it
- * was pulled as the body before.
+ * was pulled as the body before. [#32411] With both jobs enabled the binder now
+ * refuses the name at bind and schedules neither; a run meets the attribution
+ * refusal when the name's twin is disabled (the fail-closed pin below).
  */
 describe('[#32355] a job name a package body declares and the residual carries is attributed to neither', () => {
     withPosture(undefined);
-
-    const SYNCED = { name: 'order', label: 'Order', managedBy: 'synced', fields: { external_id: { type: 'text', label: 'External id' } } };
-    const mappingOf = (name: string, connector: string) => ({ ...MAPPING, name, connectorSource: { connector, action: 'request' } });
-    const pullJob = (name: string, mapping: string) => ({ name, schedule: INTERVAL, pull: { mapping } });
-    const alpha = (jobs: unknown[]) => defineStack({
-        manifest: { id: 'com.example.alpha', name: 'Alpha', version: '0.1.0', type: 'module' },
-        objects: [SYNCED],
-        mappings: [mappingOf('alpha_map', 'alpha_api')],
-        jobs,
-    } as never);
-    // No `manifest`: its jobs reach the artifact's top level and no package body.
-    const host = (jobs: unknown[]) => defineStack({
-        objects: [{ ...SYNCED, name: 'host_record', label: 'Host record' }],
-        mappings: [{ ...mappingOf('host_map', 'host_api'), targetObject: 'host_record' }],
-        jobs,
-    } as never);
-    const beta = defineStack({
-        manifest: { id: 'com.example.beta', name: 'Beta', version: '0.1.0', type: 'app' },
-        objects: [{ ...SYNCED, name: 'beta_record', label: 'Beta record' }],
-    } as never);
-    /** The artifact as `os build` writes it and a boot reads it back: composed, then through JSON. */
-    const jsonLoaded = (stacks: unknown[]) =>
-        JSON.parse(JSON.stringify(composeStacks(stacks as never[], { manifest: 'preserve' }))) as Record<string, any>;
-
-    /**
-     * Schedule `bundle` as `appId` on a real job service (`CronJobAdapter`), then fire every job it holds:
-     * what each run answered, and every pull asked. Real, because the service keys both jobs of a shared
-     * name under one key and the later replaces the earlier, so which job survives is the service's to say.
-     */
-    async function scheduleAndRun(bundle: unknown, appId: string) {
-        const h = harness();
-        const adapter = new CronJobAdapter();
-        type Thrown = { code?: string; status?: number; message?: string };
-        const thrown = new Map<string, Thrown>();
-        const schedule = adapter.schedule.bind(adapter);
-        adapter.schedule = (key, when, run, options) => schedule(key, when, async (c) => {
-            try { return await run(c); } catch (e) { thrown.set(key, e as Thrown); throw e; }
-        }, options);
-        h.services.job = adapter;
-        try {
-            const out = await scheduleAppArtifactJobs(
-                { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
-                bundle,
-                { appId, ql: undefined, source: 'Test' },
-            );
-            const answers: Array<Thrown & { key: string; run?: string }> = [];
-            for (const key of await adapter.listJobs()) {
-                await adapter.trigger(key);
-                const err = thrown.get(key);
-                const run = (await adapter.getExecutions(key)).at(-1)?.status;
-                answers.push({ key, run, code: err?.code, status: err?.status, message: err?.message });
-            }
-            return { out, answers, pulls: h.pulls };
-        } finally {
-            await adapter.destroy();
-        }
-    }
 
     it('the artifact a build emits carries the pair: the body job copied to the top level, and the residual\'s own job of the same name', () => {
         const bundle = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
@@ -850,19 +857,18 @@ describe('[#32355] a job name a package body declares and the residual carries i
             .toEqual([['com.example.alpha', ['sync']], ['com.example.beta', []]]);
     });
 
-    it('JSON-loaded, on a real job service: the run of the name is refused 409 naming the body and the residual — never pulled as the body', async () => {
+    it('JSON-loaded, on a real job service: the name is attributed to neither, and both enabled jobs are refused at bind — never pulled as the body', async () => {
         const bundle = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
         const { out, answers, pulls } = await scheduleAndRun(bundle, 'com.example.beta');
-        // Both are scheduled, under one key: the later (the residual's, `host_map`) replaces the body's copy.
-        expect(out.pulls).toEqual(['sync', 'sync']);
-        // Before any call or write: no pull was asked for, as any package or as none —
+        // [#32411] Neither is scheduled: one key would have held only the later (the residual's, `host_map`).
+        expect(out.pulls).toEqual([]);
+        expect(out.refused).toEqual(['sync', 'sync']);
+        // No pull was asked for, as any package or as none —
         // never `host_map` pulled as `com.example.alpha`, the body that declares the name.
         expect(pulls).toEqual([]);
-        expect(answers.map((a) => [a.key, a.run])).toEqual([['sync', 'failed']]);
-        expect({ code: answers[0].code, status: answers[0].status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
-        expect(answers[0].message).toContain('package "com.example.alpha"');
-        expect(answers[0].message).toContain('package "com.example.beta"');
-        // Every job of the name, by name: the refusal, with both packages its candidates.
+        expect(answers).toEqual([]);
+        // Every job of the name, by name: the refusal, with the body and the residual its candidates —
+        // [#32412] the residual by its own kind, not as `com.example.beta`, whose body declares no `sync`.
         const of = jobDeclaringPackages(bundle, 'com.example.beta');
         for (const job of bundle.jobs) {
             expect(of(job)).toMatchObject({
@@ -870,24 +876,29 @@ describe('[#32355] a job name a package body declares and the residual carries i
                 reason: 'ambiguous-in-environment',
                 type: 'job',
                 name: 'sync',
-                candidates: [{ kind: 'package', packageId: 'com.example.alpha' }, { kind: 'package', packageId: 'com.example.beta' }],
+                candidates: [{ kind: 'package', packageId: 'com.example.alpha' }, { kind: 'residual', ownerId: 'com.example.beta' }],
             });
         }
-        // A residual whose owner is no package (no body carries the top-level id): named all the same.
+        // A residual whose owner is no package (no body carries the top-level id): named all the same —
+        // [#32412] as a candidate too, never a one-candidate "ambiguous" refusal.
         const noPackage = jobDeclaringPackages(bundle, 'com.example.top')(bundle.jobs[1]) as { status?: string; candidates?: unknown; message?: string };
         expect(noPackage.status).toBe('refused');
-        expect(noPackage.candidates).toEqual([{ kind: 'package', packageId: 'com.example.alpha' }]);
+        expect(noPackage.candidates).toEqual([{ kind: 'package', packageId: 'com.example.alpha' }, { kind: 'residual', ownerId: 'com.example.top' }]);
         expect(noPackage.message).toContain('names no package');
     });
 
-    it('control: the residual\'s owner IS the one declaring body — one holder, that body', async () => {
+    it('control: the residual\'s owner IS the one declaring body — one holder, that body; both enabled, refused at bind', async () => {
         // `alpha` last: the artifact's id is alpha's, so the residual runs as alpha, the body that declares `sync`.
         const bundle = jsonLoaded([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]);
         expect(bundle.manifest.id).toBe('com.example.alpha');
-        const { answers, pulls } = await scheduleAndRun(bundle, 'com.example.alpha');
-        expect(answers.map((a) => [a.key, a.run, a.code])).toEqual([['sync', 'success', undefined]]);
-        // One key for the pair: the later (the body's copy, `alpha_map`) replaces the residual's, and runs as alpha.
-        expect(pulls.map((p: any) => [p.mapping, p.callerPackageId])).toEqual([['alpha_map', 'com.example.alpha']]);
+        // Attribution: one holder, alpha, for every job of the name — as before.
+        const of = jobDeclaringPackages(bundle, 'com.example.alpha');
+        for (const job of bundle.jobs) expect(of(job)).toBe('com.example.alpha');
+        // [#32411] Scheduling: one key would have held only the later (the body's copy), and `host_map` never ran. Neither is scheduled.
+        const { out, answers, pulls } = await scheduleAndRun(bundle, 'com.example.alpha');
+        expect(out.refused).toEqual(['sync', 'sync']);
+        expect(answers).toEqual([]);
+        expect(pulls).toEqual([]);
     });
 
     it('controls: a residual job with a name of its own binds as today, and a body job with no residual twin binds to its body', async () => {
@@ -907,11 +918,12 @@ describe('[#32355] a job name a package body declares and the residual carries i
         // Only the shared name is refused.
         expect(typeof of(byName('sync'))).toBe('object');
 
-        const { answers, pulls } = await scheduleAndRun(bundle, 'com.example.beta');
+        const { out, answers, pulls } = await scheduleAndRun(bundle, 'com.example.beta');
+        // [#32411] The shared name, both enabled, is refused at bind; the other two bind and run as today.
+        expect(out.refused).toEqual(['sync', 'sync']);
         expect(answers.map((a) => [a.key, a.run, a.code])).toEqual([
             ['alpha_only', 'success', undefined],
             ['host_sync', 'success', undefined],
-            ['sync', 'failed', 'RESOURCE_CONFLICT'],
         ]);
         // `CronJobAdapter.trigger()` hands `trigger: 'manual'` and the binder forwards it; that adapter writes
         // no run row, so no `jobRunId` rides along.
@@ -937,6 +949,286 @@ describe('[#32355] a job name a package body declares and the residual carries i
             expect(out.pulls).toEqual(['sync']);
             expect(answers.map((a) => [a.key, a.run, a.code, a.status])).toEqual([['sync', 'failed', 'RESOURCE_CONFLICT', 409]]);
             expect(pulls).toEqual([]);
+        }
+    });
+});
+
+/**
+ * [#32411, ADR-0150 D3] Two enabled jobs of one name in one artifact. The binder schedules every job of an
+ * artifact under the artifact's id, and a job service keys a job by its name and REPLACES the job it already
+ * holds under that name (`CronJobAdapter.schedule`, `IntervalJobAdapter.store`): the later job would replace the
+ * earlier one, which then never runs, and nothing would say so. The binder refuses the name at bind instead —
+ * none of its jobs is scheduled, and one coded refusal at `error` names every job of the name — whichever
+ * holders declare them: a package body and the residual (whoever the residual runs as), two package bodies, or
+ * a single-package artifact listing the name twice. A disabled twin collides with nothing, so it is not refused
+ * here (the run-time refusal of #32355 still answers its enabled twin, pinned above).
+ */
+describe('[#32411] two enabled jobs of one name in one artifact are refused at bind, naming both', () => {
+    withPosture(undefined);
+
+    const ADAPTERS = [
+        ['CronJobAdapter', () => new CronJobAdapter()],
+        ['IntervalJobAdapter', () => new IntervalJobAdapter()],
+    ] as const;
+    // Both owner arrangements of the residual: the artifact's id is beta's (no body declaring `sync` carries it),
+    // or alpha's (the residual runs as alpha, the one body declaring `sync`).
+    const ARRANGEMENTS = [
+        ['the residual runs as a package that does not declare the name', (jobs: { body: unknown[]; residual: unknown[] }) =>
+            ({ bundle: jsonLoaded([alpha(jobs.body), host(jobs.residual), beta]), appId: 'com.example.beta' })],
+        ['the residual runs as the one body that declares the name', (jobs: { body: unknown[]; residual: unknown[] }) =>
+            ({ bundle: jsonLoaded([host(jobs.residual), alpha(jobs.body)]), appId: 'com.example.alpha' })],
+    ] as const;
+
+    /** The `error` calls that carry the coded refusal for `name`: the message, and the error's code and status. */
+    const refusalsOf = (logger: { error: { mock: { calls: unknown[][] } } }, name: string) => logger.error.mock.calls
+        .filter(([, err, meta]) => (meta as { job?: unknown } | undefined)?.job === name && err instanceof Error)
+        .map(([, err]) => err as Error & { code?: string; status?: number; refusal?: { candidates?: unknown } });
+
+    for (const [adapterName, makeAdapter] of ADAPTERS) {
+        for (const [arrangement, compose] of ARRANGEMENTS) {
+            it(`${adapterName}, ${arrangement}: neither job of the name is scheduled, and one 409 refusal names both`, async () => {
+                const { bundle, appId } = compose({ body: [pullJob('sync', 'alpha_map')], residual: [pullJob('sync', 'host_map')] });
+                const { out, answers, pulls, logger } = await scheduleAndRun(bundle, appId, makeAdapter);
+                expect(out.pulls).toEqual([]);
+                expect(out.refused).toEqual(['sync', 'sync']);
+                // Nothing of the name is on the job service, so nothing runs: never one of the two, silently.
+                expect(answers).toEqual([]);
+                expect(pulls).toEqual([]);
+                const refusals = refusalsOf(logger, 'sync');
+                expect(refusals.map((e) => ({ code: e.code, status: e.status }))).toEqual([{ code: 'RESOURCE_CONFLICT', status: 409 }]);
+                // Both jobs named: the body's (its package and its mapping) and the residual's.
+                expect(refusals[0].message).toContain('package "com.example.alpha"');
+                expect(refusals[0].message).toContain('"alpha_map"');
+                expect(refusals[0].message).toContain('"host_map"');
+                expect(refusals[0].message).toContain('top level');
+                // [#32412] The holders as candidates, each by its own kind: the declaring body, then the residual.
+                expect(refusals[0].refusal?.candidates).toEqual([
+                    { kind: 'package', packageId: 'com.example.alpha' },
+                    { kind: 'residual', ownerId: appId },
+                ]);
+            });
+
+            it(`${adapterName}, ${arrangement}: CONTROL — one job of each name binds and runs as today`, async () => {
+                const { bundle, appId } = compose({ body: [pullJob('sync', 'alpha_map')], residual: [pullJob('host_sync', 'host_map')] });
+                const { out, answers, pulls, logger } = await scheduleAndRun(bundle, appId, makeAdapter);
+                expect(out.refused).toEqual([]);
+                expect([...out.pulls].sort()).toEqual(['host_sync', 'sync']);
+                expect(answers.map((a) => [a.key, a.run, a.code]).sort()).toEqual([['host_sync', 'success', undefined], ['sync', 'success', undefined]]);
+                expect(pulls.map((p: any) => p.mapping).sort()).toEqual(['alpha_map', 'host_map']);
+                expect(refusalsOf(logger, 'sync')).toEqual([]);
+            });
+        }
+    }
+
+    it('two package bodies each declaring a body job of one name: neither is scheduled, and the refusal names both packages', async () => {
+        const tick = (note: string) => ({ name: 'tick', schedule: INTERVAL, body: { language: 'js', capabilities: [], source: `return; // ${note}` } });
+        const gamma = defineStack({ manifest: { id: 'com.example.gamma', name: 'Gamma', version: '0.1.0', type: 'module' }, jobs: [tick('gamma')] } as never);
+        const delta = defineStack({ manifest: { id: 'com.example.delta', name: 'Delta', version: '0.1.0', type: 'app' }, jobs: [tick('delta')] } as never);
+        const bundle = jsonLoaded([gamma, delta]);
+        const { out, answers, logger } = await scheduleAndRun(bundle, 'com.example.delta', () => new IntervalJobAdapter());
+        expect(out.bodies).toEqual([]);
+        expect(out.refused).toEqual(['tick', 'tick']);
+        expect(answers).toEqual([]);
+        const refusals = refusalsOf(logger, 'tick');
+        expect(refusals.map((e) => ({ code: e.code, status: e.status }))).toEqual([{ code: 'RESOURCE_CONFLICT', status: 409 }]);
+        expect(refusals[0].refusal?.candidates).toEqual([
+            { kind: 'package', packageId: 'com.example.gamma' },
+            { kind: 'package', packageId: 'com.example.delta' },
+        ]);
+    });
+
+    it('a single-package artifact listing one name twice (no build refused it: a JSON artifact handed to a door): refused, naming both', async () => {
+        const bundle = { id: APP_ID, version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [
+            { ...PULL_JOB, name: 'twice' },
+            { ...PULL_JOB, name: 'twice', schedule: { type: 'interval', intervalMs: 120000 } },
+            PULL_JOB,
+        ] };
+        const { out, answers, pulls, logger } = await scheduleAndRun(bundle, APP_ID);
+        expect(out.refused).toEqual(['twice', 'twice']);
+        // The job of a name of its own is untouched.
+        expect(out.pulls).toEqual(['orders_pull_hourly']);
+        expect(answers.map((a) => [a.key, a.run])).toEqual([['orders_pull_hourly', 'success']]);
+        expect(pulls).toHaveLength(1);
+        const refusals = refusalsOf(logger, 'twice');
+        expect(refusals.map((e) => ({ code: e.code, status: e.status }))).toEqual([{ code: 'RESOURCE_CONFLICT', status: 409 }]);
+        expect(refusals[0].refusal?.candidates).toEqual([{ kind: 'package', packageId: APP_ID }]);
+    });
+
+    it('a twin that would not have bound still refuses the name: the twin that binds is not scheduled either', async () => {
+        // On main this pair scheduled exactly one job (the other is NOT scheduled at warn, its mapping missing), and it ran.
+        // The name is refused before any limb judges a job, so neither is scheduled now.
+        const bundle = { id: APP_ID, version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [
+            { ...PULL_JOB, name: 'paired' },
+            { ...PULL_JOB, name: 'paired', pull: { mapping: 'no_such_mapping' } },
+        ] };
+        const { out, answers, pulls, logger } = await scheduleAndRun(bundle, APP_ID, () => new IntervalJobAdapter());
+        expect(out.refused).toEqual(['paired', 'paired']);
+        expect(out.pulls).toEqual([]);
+        expect(out.notScheduled).toEqual([]);
+        expect(answers).toEqual([]);
+        expect(pulls).toEqual([]);
+        expect(refusalsOf(logger, 'paired').map((e) => ({ code: e.code, status: e.status }))).toEqual([{ code: 'RESOURCE_CONFLICT', status: 409 }]);
+    });
+
+    it('a refused name cancels the job of that name an earlier install of the package scheduled', async () => {
+        const adapter = new CronJobAdapter();
+        const h = harness();
+        h.services.job = adapter;
+        const ctx = { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext;
+        try {
+            const first = { id: APP_ID, version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [{ ...PULL_JOB, name: 'twice' }] };
+            await scheduleAppArtifactJobs(ctx, first, { appId: APP_ID, ql: undefined, source: 'Test' });
+            expect(await adapter.listJobs()).toEqual(['twice']);
+            const second = { ...first, version: '0.2.0', jobs: [{ ...PULL_JOB, name: 'twice' }, { ...PULL_JOB, name: 'twice' }] };
+            const out = await scheduleAppArtifactJobs(ctx, second, { appId: APP_ID, ql: undefined, source: 'Test' });
+            expect(out.refused).toEqual(['twice', 'twice']);
+            expect(out.cancelled).toEqual(['twice']);
+            expect(await adapter.listJobs()).toEqual([]);
+        } finally {
+            await adapter.destroy();
+        }
+    });
+});
+
+/**
+ * [#32412, ADR-0150 D3, ADR-0130 D4] The residual-twin refusal names BOTH holders in `candidates`, each by
+ * its own kind: every declaring body as a `package`, and the residual — the artifact's top level outside
+ * every package body — as `{ kind: 'residual', ownerId }`, the artifact's id. Never a one-candidate
+ * "ambiguous" refusal (no body carries the id), and never the body carrying the id as a plain `package`
+ * holder, whose body declares no such job. The one-holder answer (the residual's owner IS the one
+ * declaring body) is unchanged.
+ */
+describe('[#32412] the residual-twin job refusal names the residual as a holder of its own kind', () => {
+    withPosture(undefined);
+
+    const ALPHA = { kind: 'package', packageId: 'com.example.alpha' } as const;
+    const betaWith = (jobs: unknown[]) => defineStack({
+        manifest: { id: 'com.example.beta', name: 'Beta', version: '0.1.0', type: 'app' },
+        objects: [{ ...SYNCED, name: 'beta_record', label: 'Beta record' }],
+        mappings: [{ ...mappingOf('beta_map', 'beta_api'), targetObject: 'beta_record' }],
+        jobs,
+    } as never);
+    const twin = () => jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
+
+    it('no body carries the artifact\'s id: two candidates — the declaring body and the residual — never one', () => {
+        const bundle = twin();
+        const of = jobDeclaringPackages(bundle, 'com.example.top');
+        for (const job of bundle.jobs) {
+            const refusal = of(job) as { status?: string; reason?: string; candidates?: unknown; message?: string };
+            expect(refusal).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment', type: 'job', name: 'sync' });
+            expect(refusal.candidates).toEqual([ALPHA, { kind: 'residual', ownerId: 'com.example.top' }]);
+            expect(refusal.message).toContain('names no package');
+        }
+    });
+
+    it('a body that declares no such job carries the artifact\'s id: the residual is named as the residual, not as that package', () => {
+        const bundle = twin();
+        const of = jobDeclaringPackages(bundle, 'com.example.beta');
+        for (const job of bundle.jobs) {
+            const refusal = of(job) as { candidates?: unknown; message?: string };
+            expect(refusal.candidates).toEqual([ALPHA, { kind: 'residual', ownerId: 'com.example.beta' }]);
+            // Where it runs stays in the sentence: as the body that carries the artifact's id.
+            expect(refusal.message).toContain('runs as package "com.example.beta"');
+        }
+    });
+
+    it('the residual\'s owner is one of several declaring bodies: every body, then the residual', () => {
+        const bundle = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), betaWith([pullJob('sync', 'beta_map')])]);
+        expect(bundle.manifest.id).toBe('com.example.beta');
+        const of = jobDeclaringPackages(bundle, 'com.example.beta');
+        for (const job of bundle.jobs) {
+            expect((of(job) as { candidates?: unknown }).candidates)
+                .toEqual([ALPHA, { kind: 'package', packageId: 'com.example.beta' }, { kind: 'residual', ownerId: 'com.example.beta' }]);
+        }
+    });
+
+    it('on a real job service: both twins enabled, the bind refusal names the residual; one twin disabled, the run\'s refusal reaches the job run record naming it', async () => {
+        // [#32411] Both enabled: neither is scheduled, and the bind refusal carries both holders.
+        const both = await scheduleAndRun(twin(), 'com.example.top');
+        expect(both.out.refused).toEqual(['sync', 'sync']);
+        expect(both.answers).toEqual([]);
+        const bound = both.logger.error.mock.calls.find(([, err]) => err instanceof Error)?.[1] as { refusal?: { candidates?: unknown } } | undefined;
+        expect(bound?.refusal?.candidates).toEqual([ALPHA, { kind: 'residual', ownerId: 'com.example.top' }]);
+        // The body's twin disabled: the residual's job is scheduled, and its run is refused naming both holders.
+        const off = jsonLoaded([alpha([{ ...pullJob('sync', 'alpha_map'), enabled: false }]), host([pullJob('sync', 'host_map')]), beta]);
+        const h = harness();
+        const adapter = new CronJobAdapter();
+        let thrown: { refusal?: { candidates?: unknown } } | undefined;
+        const schedule = adapter.schedule.bind(adapter);
+        adapter.schedule = (key, when, run, options) => schedule(key, when, async (c) => {
+            try { return await run(c); } catch (e) { thrown = e as typeof thrown; throw e; }
+        }, options);
+        h.services.job = adapter;
+        try {
+            await scheduleAppArtifactJobs(
+                { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
+                off,
+                { appId: 'com.example.top', ql: undefined, source: 'Test' },
+            );
+            await adapter.trigger('sync');
+            expect((await adapter.getExecutions('sync')).at(-1)?.status).toBe('failed');
+            expect(thrown?.refusal?.candidates).toEqual([ALPHA, { kind: 'residual', ownerId: 'com.example.top' }]);
+            expect(h.pulls).toEqual([]);
+        } finally {
+            await adapter.destroy();
+        }
+    });
+
+    it('controls: the one holder (the residual\'s owner IS the one declaring body) and two bodies with no residual twin keep their answers', () => {
+        const owned = jsonLoaded([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]);
+        for (const job of owned.jobs) expect(jobDeclaringPackages(owned, 'com.example.alpha')(job)).toBe('com.example.alpha');
+        const twoBodies = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), betaWith([pullJob('sync', 'beta_map')])]);
+        // No residual job: met by name, the #32071 refusal names the two bodies and nothing else.
+        expect((jobDeclaringPackages(twoBodies, 'com.example.beta')(pullJob('sync', 'alpha_map')) as { candidates?: unknown }).candidates)
+            .toEqual([ALPHA, { kind: 'package', packageId: 'com.example.beta' }]);
+    });
+});
+
+/**
+ * [#32572, ADR-0150 D3] `collectJobNameCollisions` — what the install-local door refuses a package by — is the
+ * binder's own judgement of a shared job name, not a second copy: for every arrangement the bind refuses, it
+ * answers exactly the refusals the binder logs (name, reason, candidates, message), one per shared name; for
+ * distinct names and for a disabled twin it answers none, as the binder schedules them.
+ */
+describe('[#32572] collectJobNameCollisions answers the refusals the binder refuses a shared job name by', () => {
+    withPosture(undefined);
+
+    /** The coded refusals the binder logged at `error`, in order. */
+    const loggedRefusals = (logger: { error: { mock: { calls: unknown[][] } } }) => logger.error.mock.calls
+        .map(([, err]) => (err as { refusal?: unknown } | undefined)?.refusal)
+        .filter((refusal) => refusal !== undefined);
+
+    const ARRANGEMENTS = [
+        ['a package body and the residual (the residual runs as no declaring body)',
+            () => ({ bundle: jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]), appId: 'com.example.beta' })],
+        ['a package body and the residual (the residual runs as that body)',
+            () => ({ bundle: jsonLoaded([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]), appId: 'com.example.alpha' })],
+        ['a single-package artifact listing two names twice',
+            () => ({ bundle: { id: APP_ID, version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [
+                { ...PULL_JOB, name: 'twice' }, { ...PULL_JOB, name: 'again' }, { ...PULL_JOB, name: 'twice' }, { ...PULL_JOB, name: 'again' },
+            ] }, appId: APP_ID })],
+    ] as const;
+
+    for (const [arrangement, compose] of ARRANGEMENTS) {
+        it(`${arrangement}: the same refusals the binder logs, one per name`, async () => {
+            const { bundle, appId } = compose();
+            const { logger } = await scheduleAndRun(bundle, appId);
+            const logged = loggedRefusals(logger);
+            expect(logged.length).toBeGreaterThan(0);
+            expect(collectJobNameCollisions(bundle, appId)).toEqual(logged);
+        });
+    }
+
+    it('CONTROLS: distinct names, and a disabled twin, answer no refusal — and the binder refuses none', async () => {
+        const distinct = { bundle: jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('host_sync', 'host_map')]), beta]), appId: 'com.example.beta' };
+        const disabled = { bundle: { id: APP_ID, version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [
+            { ...PULL_JOB, name: 'twice' }, { ...PULL_JOB, name: 'twice', enabled: false },
+        ] }, appId: APP_ID };
+        for (const { bundle, appId } of [distinct, disabled]) {
+            expect(collectJobNameCollisions(bundle, appId)).toEqual([]);
+            const { out, logger } = await scheduleAndRun(bundle, appId);
+            expect(out.refused).toEqual([]);
+            expect(loggedRefusals(logger)).toEqual([]);
         }
     });
 });

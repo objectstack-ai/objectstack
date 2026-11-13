@@ -218,6 +218,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     why: 'the Capabilities block is a toggle grid; apiMethods is a method whitelist (array of ApiMethod) that needs its own control, and is authored on the object body rather than as a switch',
   },
   {
+    kind: 'omit',
+    type: 'object',
+    path: 'enable',
+    key: 'aiReadable',
+    why: "the read-only AI exposure of a system object (ruling A on the read half of #32442): the parse refuses it on any object whose name does not start with sys_, and the Studio object editor authors business objects, so a toggle there would offer a value every save of that object refuses. Its writers are system objects declared in code (sys_approval_request first, the server half's)",
+  },
+  {
     kind: 'subset',
     type: 'object',
     path: 'fields',
@@ -384,6 +391,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'apps',
     why: "live, not offered in this form — the console opens the scoped page inside each app the list names (the page assignment reads the route's app), but no registered form widget spells a list of app names: there is no app picker, and a free-text list would let an author type a package id or a label where an app name is required, which the parse refuses only after the fact. Authored in source or the page JSON until an app-name picker exists",
   },
+  // #32955 — an object's schema-read delegate is `live` (the object-schema
+  // posture asks it), and deliberately never offered: each declaration is a
+  // recorded exception to ruling record 6787890900 (ADR-0106, "Exception
+  // (2026-11-13)"), and the service it names exists only in code.
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'schemaReadDelegate',
+    why: "live, reserved to code — the key names a kernel service whose `authorizeSchemaRead` serves this object's definition to callers the object read check refuses, and ADR-0106 makes every declaration a further exception to ruling record 6787890900 that is recorded in the ADR and reviewed before it ships. The service exists only where a plugin registers it, so the declaration belongs in that plugin's own object source beside the service (as `sys_approval_request` and `sys_approval_action` declare `approvals`). A form control would hand every author a declaration the ADR reserves, and one naming a service the deployment lacks leaves the object absent anyway",
+  },
   // #28022 — an app's per-audience landing list lands spec-first the same way:
   // `planned` in the liveness ledger, read by no console until the landing
   // redirect card. Offering it in the app form first would be the UI half of
@@ -416,6 +434,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'renamedFrom',
     why: "planned, not yet read — the earlier keys of a field are validated at parse (each a field key, once, never the field's own key, a key another field still declares, or an old key another field also claims), but no package upgrade carries a column on them until the rename execution lands. It is a package author's declaration about the field's history, written in the package source beside the rename itself; a form control offered today would let an author declare a rename no upgrade performs",
+  },
+  // #32983 (ruling A1) — a position's earlier names are the package author's
+  // declaration about the position's history, the field `renamedFrom` above's
+  // sibling, and like it are written in the package source, not in Setup.
+  {
+    kind: 'omit',
+    type: 'position',
+    path: ROOT_PATH,
+    key: 'renamedFrom',
+    why: "a package author's declaration, not a Setup setting — the earlier names of a position are validated at parse (each a position name, once, never the position's own name, a name another position still declares, or an old name another position also claims) and read by the boot holder carry, which moves every holder of an old name to this position in every organization. It belongs in the package source beside the rename itself; a form control would let an administrator point a position at another name's holders from Setup",
   },
   // [ADR-0144 D5] A record-mode amount's home-currency projection lands
   // spec-first the same way: declared and judged at parse, written by nothing

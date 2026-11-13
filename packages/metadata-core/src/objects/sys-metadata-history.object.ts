@@ -29,6 +29,11 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *    `MAX(version) + 1 WHERE type = T AND name = N` so delete + recreate
  *    continues incrementing instead of restarting at 1.
  *
+ *  • `package_id` names whose row a snapshot of a type stored per
+ *    `(package, name)` was taken of (ADR-0150 D3/D4); such a type's
+ *    `version` is numbered per name across its packages' rows, so the
+ *    unique `(type, name, version)` holds. NULL on every other row.
+ *
  *  • `metadata` / `checksum` are nullable — DELETE rows have no body or
  *    hash. Readers must tolerate null on both columns.
  *
@@ -90,6 +95,23 @@ export const SysMetadataHistoryObject = ObjectSchema.create({
       label: 'Version',
       required: true,
       readonly: true,
+    }),
+
+    /**
+     * [ADR-0150 D3/D4] The package whose row this snapshot was taken of, for a
+     * type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`,
+     * `@objectstack/metadata`): its versions are numbered per name across the
+     * packages' rows, so this column, not the version, says whose version it is.
+     * NULL for every other type, for a package-less row, for a row written
+     * before the column existed (its package is then the one its stored body
+     * names, as for a `sys_metadata` row), and for every row
+     * `SysMetadataRepository` writes. Nullable: adding it rewrites no row.
+     */
+    package_id: Field.text({
+      label: 'Package ID',
+      required: false,
+      readonly: true,
+      maxLength: 255,
     }),
 
     /** Type of operation that created this history entry */

@@ -10,6 +10,7 @@ import {
   // differences as the function's named parameters and keeps only its own
   // facts (see `buildFileReadAuthorizer`).
   resolveRequestExecutionContext,
+  resolveLocalizationContext,
   type RequestAuthService,
   type TenancyServiceResolver,
   isAuthzStoreUnavailableError,
@@ -45,6 +46,7 @@ import {
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type {
+  IApprovalService,
   IHttpServer,
   IDataEngine,
   II18nService,
@@ -74,6 +76,7 @@ import type {
   StorageGatedSessionReader,
   StorageUploadAttacher,
   StorageUploadSession,
+  UploadLinkWorkspaceLocale,
 } from './storage-routes.js';
 import type { RecordFileAccessDeps, UploadLinkDoor } from './record-file-access.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
@@ -86,6 +89,8 @@ import {
   installAttachmentReadVisibility,
 } from './attachment-access-hooks.js';
 import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
+import { contributeAttachmentMemberGrant } from './attachment-member-grant.js';
+import { installAttachmentFilesOptInGate } from './attachment-files-opt-in.js';
 import {
   FileAttachmentService,
   type FileAttachmentEngine,
@@ -424,6 +429,16 @@ export class StorageServicePlugin implements Plugin {
             return null;
           }
         },
+        // [#32734] Whether a pending approval locks the record a field upload
+        // link would write, asked when the link is minted. No approvals
+        // plugin: no record is locked.
+        getApprovals: () => {
+          try {
+            return ctx.getService<IApprovalService>('approvals');
+          } catch {
+            return null;
+          }
+        },
         // [#30892] The record-file verbs (read a record's file, mint and spend
         // an upload link), bound over the download door's own verdict.
         recordFiles: bindRecordFileAccess(
@@ -525,6 +540,12 @@ export class StorageServicePlugin implements Plugin {
         // that name a `sys_file` id — a file-class field and a
         // `sys_attachment` row — so a reference and the door cannot diverge.
         const authorizeFileReference = buildFileReferenceReadAuthorizer(toGateRegistry(ctx), engine);
+        // The per-object attachment opt-in (`enable.files`) on every write that
+        // makes a row target an object, enforced by this service itself so it
+        // holds wherever the object does (maintainer ruling on #32754, route
+        // A). Installed first, so an object that has not opted in answers with
+        // its own refusal before any question about the caller.
+        const filesOptInInstalled = installAttachmentFilesOptInGate(engine as any);
         // Parent-derived access on the join rows (#2755, ADR-0049) — the
         // sharing service resolves lazily so plugin order doesn't matter.
         installAttachmentAccessHooks(
@@ -580,7 +601,8 @@ export class StorageServicePlugin implements Plugin {
         // object only when the security service answers `canReadObject`;
         // resolved on every read (the security plugin may start after this
         // one), and without it every read takes the bounded probe.
-        if (typeof (engine as any).registerMiddleware === 'function') {
+        const readVisibilityInstalled = typeof (engine as any).registerMiddleware === 'function';
+        if (readVisibilityInstalled) {
           installAttachmentReadVisibility(engine as any, ctx.logger, () => {
             try {
               return ctx.getService<ISecurityService>('security');
@@ -589,6 +611,28 @@ export class StorageServicePlugin implements Plugin {
             }
           });
         }
+        // Every member's object grant on sys_attachment (read and create),
+        // handed to the member baseline HERE, after the last of the row gates
+        // it relies on, and only when all four are in place: the opt-in gate
+        // and the write rule above, the read-visibility gate just installed,
+        // and the download door's parent-record check, which binds wherever an
+        // auth service and a queryable engine exist (`buildFileReadAuthorizer`,
+        // the same binding `composeStorageRoutes` makes). Each flag is the
+        // installation's own answer, and every gate is this service's, so no
+        // other plugin's order is involved. On a kernel lacking any of them the
+        // object grant would judge the rows alone, so nothing is contributed
+        // and members stay refused (maintainer ruling; the reasoning is in
+        // `attachment-member-grant.ts`).
+        contributeAttachmentMemberGrant(
+          {
+            writeRule: true,
+            readVisibility: readVisibilityInstalled,
+            downloadCheck: buildFileReadAuthorizer(toGateRegistry(ctx), engine) !== undefined,
+            filesOptIn: filesOptInInstalled,
+          },
+          () => ctx.getService<unknown>('security'),
+          ctx.logger,
+        );
         // Field-reference ownership (ADR-0104 D3 wave 2) — keeps
         // sys_file.ref_object/ref_id/ref_field in step with what records hold,
         // and copies bytes rather than sharing a row when a second field slot
@@ -681,6 +725,20 @@ export class StorageServicePlugin implements Plugin {
         // `PlatformObjectsPlugin` with the `sys_migration` registration it
         // belongs to (#4243) — the ledger and its bookkeeping are platform
         // infrastructure, present with or without this service.
+      } else if (engine) {
+        // An engine the attachment gates cannot be installed on: members get
+        // no attachment grant, and the warning says which gates are missing.
+        contributeAttachmentMemberGrant(
+          {
+            writeRule: false,
+            readVisibility: false,
+            downloadCheck: buildFileReadAuthorizer(toGateRegistry(ctx), engine) !== undefined,
+            // The installer's own answer here too: it needs the hook seam this engine lacks.
+            filesOptIn: installAttachmentFilesOptInGate(engine as any),
+          },
+          () => ctx.getService<unknown>('security'),
+          ctx.logger,
+        );
       }
 
       // ── HTTP routes (existing behaviour) ───────────────────────────
@@ -1291,6 +1349,8 @@ export function composeStorageRoutes(
     // [#30892] The upload-link doors, served by the `file-attachments`
     // service when the kernel has the storage plugin's.
     resolveUploadLinkDoor(registry),
+    // [#32712] The workspace default those doors' page falls back to.
+    buildUploadLinkWorkspaceLocale(registry, engine),
   );
 
   return {
@@ -1336,8 +1396,9 @@ function resolveUploadLinkDoor(registry: StorageGateRegistry): () => UploadLinkD
  *  - `resolveUserContext`: the minting user, resolved now. Their grants are
  *    read fresh (`bypassGrantsCache`, the `runAs: 'user'` precedent: a link is
  *    not request-shaped), in the organization the link was minted in while a
- *    current membership backs it under a walled posture
- *    (`vetOrganizationClaim`, the session arm of `resolveAuthzContext`). A
+ *    current membership backs it — under every posture since ADR-0093 D8.1
+ *    was amended (`vetOrganizationClaim`, the session arm of
+ *    `resolveAuthzContext`). A
  *    claim that is no longer backed answers `null`: the user cannot act there
  *    now, so nothing lands. A posture read that fails throws the branded
  *    outage, never a verdict.
@@ -1445,6 +1506,37 @@ function buildAuthSessionResolver(
     } catch {
       return null;
     }
+  };
+}
+
+/**
+ * [#32712] The workspace's default locale for an upload-link caller: the
+ * `localization` settings for the caller's organization and user, through the
+ * platform's one resolver (`resolveLocalizationContext`, the reference
+ * localization every authenticated door's execution context carries). The
+ * settings service is looked up per request, so a kernel that registers it
+ * later is still read. `undefined` for none: no settings service and no
+ * engine leaves the resolver's built-in `en-US`, which the page reads as
+ * English anyway.
+ */
+function buildUploadLinkWorkspaceLocale(
+  registry: StorageGateRegistry,
+  engine: IDataEngine | null,
+): UploadLinkWorkspaceLocale {
+  return async (caller: StorageUploadSession) => {
+    let settings: unknown;
+    try {
+      settings = registry.getService<unknown>('settings');
+    } catch {
+      settings = undefined;
+    }
+    const { locale } = await resolveLocalizationContext({
+      ql: engine,
+      settings,
+      organizationId: caller.organizationId,
+      userId: caller.userId,
+    });
+    return locale;
   };
 }
 

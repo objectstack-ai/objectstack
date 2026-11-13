@@ -19,6 +19,7 @@ import {
   NAMESPACE_SCOPED_BARE_NAME_TYPES,
   OVERRIDABLE_BASELINE_PACKAGES,
   PackageScopedNameRefusedError,
+  describePackageScopedHolder,
   RUNTIME_COMPATIBILITY_PACKAGE_ID,
   isNamespaceScopedBareNameType,
   isPackageScopedType,
@@ -26,6 +27,7 @@ import {
   packageScopedHolderSource,
   resolvePackageScopedHolders,
   type PackageResolutionClosureOf,
+  type PackageScopedHolder,
   type PackageScopedResolvableType,
 } from './package-scoped-resolution.js';
 
@@ -71,6 +73,24 @@ describe('ADR-0150 D3 over a supplied holder set — a caller that belongs to a 
   it('a holder that lacks what was asked answers not-found, never another holder', () => {
     const source = { packageHolders: [A], packageItem: () => undefined, environmentItem: () => undefined };
     expect(resolvePackageScopedHolders({ type: 'email_template', name: 'welcome', callerPackageId: P }, source, closure([A]))).toEqual({ status: 'not-found' });
+  });
+});
+
+describe('[#32929] the outside-closure sentence names both fixes', () => {
+  it('keeps the dependency fix and adds the move for a holder that already depends on the reader', () => {
+    const answer = resolvePackageScopedHolders({ type: 'dataset', name: 'n', callerPackageId: P }, packageScopedHolderSource([[A, 'a']]), closure([]));
+    expect(answer).toMatchObject({ status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'package', packageId: A }] });
+    expect((answer as { message: string }).message).toBe(
+      `The dataset "n" is held outside the declared dependency closure of package "${P}": package "${A}". `
+      + 'Declare a dependency on the package that holds it (ADR-0141). '
+      + `If that package already depends on "${P}", the dependency would be a cycle: move what reads it into that package, `
+      + `or move the dataset into "${P}" (ADR-0150 D3).`,
+    );
+  });
+
+  it('names the type in its own words', () => {
+    const answer = resolvePackageScopedHolders({ type: 'email_template', name: 'n', callerPackageId: P }, packageScopedHolderSource([[A, 'a']]), closure([]));
+    expect((answer as { message: string }).message).toContain(`or move the email template into "${P}"`);
   });
 });
 
@@ -235,11 +255,22 @@ describe('the types narrowed to the namespace (ADR-0150 D2/D9)', () => {
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES.length).toBeGreaterThan(0);
     for (const type of NAMESPACE_SCOPED_BARE_NAME_TYPES) {
       expect(BARE_NAME_ONE_HOLDER_TYPES, type).toContain(type);
-      expect(isPackageScopedType(type), type).toBe(true);
+      // [#31700] The engine's function registry is the one member that is no
+      // metadata type: it keeps its holders per package itself (D4's last row).
+      expect(isPackageScopedType(type), type).toBe(type !== ENGINE_FUNCTION_TYPE);
       expect(isNamespaceScopedBareNameType(type), type).toBe(true);
     }
-    expect(isNamespaceScopedBareNameType('flow')).toBe(false);
+    // [#31696, #31699 PR 2] The flow and the webhook have narrowed (they are in the set above); a connector has not.
+    expect(isNamespaceScopedBareNameType('flow')).toBe(true);
+    expect(isNamespaceScopedBareNameType('webhook')).toBe(true);
+    expect(isNamespaceScopedBareNameType('connector')).toBe(false);
     expect(isNamespaceScopedBareNameType(undefined)).toBe(false);
+  });
+
+  it('[#31700] the picklist family has narrowed: picklist, mapping, dataset, api and the engine function', () => {
+    for (const type of ['picklist', 'mapping', 'dataset', 'api', ENGINE_FUNCTION_TYPE]) {
+      expect(isNamespaceScopedBareNameType(type), type).toBe(true);
+    }
   });
 });
 
@@ -260,5 +291,13 @@ describe('[#32244, review 6781770671 N1] packageScopedActionOwnersSentence', () 
     expect(packageScopedActionOwnersSentence(new Map([[A, ['account']], [B, ['account']]]))).toBe(
       `Package "${A}" binds it to object "account"; package "${B}" binds it to object "account".`,
     );
+  });
+});
+
+describe('[#32412] a stack\'s residual as a holder (ADR-0130 D4): named as the top level outside every package body', () => {
+  it('describes the residual by its owner id, never as a package', () => {
+    const holder: PackageScopedHolder = { kind: 'residual', ownerId: 'com.example.top' };
+    expect(describePackageScopedHolder(holder)).toBe('the top level of stack "com.example.top" outside every package body (its residual)');
+    expect(describePackageScopedHolder(holder)).not.toContain('package "com.example.top"');
   });
 });

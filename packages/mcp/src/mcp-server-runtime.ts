@@ -56,6 +56,9 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { describePackageScopedHolder } from '@objectstack/core';
 import { deriveAiFaceName } from '@objectstack/spec/ai';
 import { z } from 'zod';
+// [#28715] The engine's own reading of "this field declares options" (its
+// `label()` map is built from it), never a second spelling here.
+import { declaresOptions } from '@objectstack/formula';
 
 /**
  * Configuration for the MCP Server Runtime.
@@ -81,6 +84,122 @@ interface ObjectDef {
   label?: string;
   fields?: Record<string, { name?: string; type?: string; label?: string; required?: boolean }>;
   enable?: Record<string, boolean>;
+}
+
+/** An object definition as served to the caller: the keys {@link describeServedObject} reads. */
+export interface ServedObjectDef {
+  name: string;
+  label?: string;
+  fields?: Record<string, ServedFieldDef>;
+  validations?: unknown[];
+  enable?: Record<string, unknown>;
+}
+
+/** One field of a served object definition: the keys {@link describeServedObject} reads. */
+interface ServedFieldDef {
+  type?: string;
+  label?: string;
+  required?: boolean;
+  readonly?: boolean;
+  system?: boolean;
+  options?: unknown[];
+  defaultValue?: unknown;
+}
+
+/**
+ * [#32435] `describe_object`'s answer: what an agent needs to WRITE a record,
+ * read off the object as the caller is served it — so a field, an option or a
+ * rule the caller's view withholds (ADR-0106 D1: the served view drops a rule
+ * that names a denied field anywhere, its message included) is not described.
+ *
+ * Per field: `required`, `readonly` and `system` (an auto-injected column such
+ * as `created_at` is `readonly` and `system`), the allowed `options` as value +
+ * label for a field that declares them (a picklist-bound field carries its
+ * list's resolved options on the served object, {@link declaresOptions}), and
+ * the `defaultValue` an INSERT applies. Per active validation rule: its name,
+ * kind, message, severity, the write events it runs on, and the fields it names
+ * — ⛔ never its condition, pattern or transition table: the rule's message is
+ * what a refused write answers with, and its expression is server policy.
+ *
+ * One projection for this package's two readers of it: the stdio bridge's
+ * `describeObject` (`stdio-data-bridge.ts`) and the `objectstack://objects/{name}`
+ * resource ({@link buildObjectSchemaResource}), each handing it the object as
+ * the caller is served it, so the two answer alike (#25245). The HTTP bridge's
+ * twin is `describeServedObject` in `packages/runtime/src/domains/mcp.ts`
+ * (`@objectstack/runtime` does not depend on this package): the transports
+ * answer one shape, and the `describe_object` description (`mcp-http-tools.ts`)
+ * states it.
+ */
+export function describeServedObject(def: ServedObjectDef): Record<string, unknown> {
+  return {
+    name: def.name,
+    label: def.label ?? def.name,
+    fields: Object.entries(def.fields ?? {}).map(([key, f]) => ({
+      name: key,
+      type: f?.type,
+      label: f?.label ?? key,
+      required: f?.required ?? false,
+      readonly: f?.readonly === true,
+      system: f?.system === true,
+      ...(declaresOptions(f) ? { options: describedOptions(f.options as unknown[]) } : {}),
+      ...(f?.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {}),
+    })),
+    validations: describedRules(def.validations),
+    enableFeatures: def.enable ?? {},
+  };
+}
+
+/** A field's options as value + label: the stored value a write sends, and what a person reads. */
+function describedOptions(options: unknown[]): Array<{ value: unknown; label: unknown }> {
+  return options
+    .filter((o): o is { value: unknown; label?: unknown } => !!o && typeof o === 'object' && 'value' in o)
+    .map((o) => ({ value: o.value, label: o.label ?? o.value }));
+}
+
+/**
+ * How deep a `conditional` rule's `then` / `otherwise` is described: the depth
+ * the engine's own rule-message index walks (`MAX_VALIDATION_DEPTH`,
+ * `@objectstack/objectql`'s `engine-validation-messages.ts`).
+ */
+const MAX_DESCRIBED_RULE_DEPTH = 10;
+
+/** The object's ACTIVE validation rules, described without their expressions ({@link describeServedObject}). */
+function describedRules(rules: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(rules)) return [];
+  const out: Array<Record<string, unknown>> = [];
+  for (const rule of rules) {
+    const described = describedRule(rule, 0);
+    if (described) out.push(described);
+  }
+  return out;
+}
+
+function describedRule(raw: unknown, depth: number): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object' || depth >= MAX_DESCRIBED_RULE_DEPTH) return undefined;
+  const rule = raw as Record<string, unknown>;
+  // An inactive rule never runs on a write, so it is not part of what a write needs.
+  if (rule.active === false) return undefined;
+  const fields: string[] = [];
+  if (typeof rule.field === 'string') fields.push(rule.field);
+  if (Array.isArray(rule.fields)) {
+    for (const name of rule.fields) if (typeof name === 'string' && !fields.includes(name)) fields.push(name);
+  }
+  const described: Record<string, unknown> = {
+    name: rule.name,
+    type: rule.type,
+    message: rule.message,
+    // The spec's defaults (`ValidationRuleSchema`), stated so a reader need not know them.
+    severity: rule.severity ?? 'error',
+    events: Array.isArray(rule.events) ? rule.events : ['insert', 'update'],
+    fields,
+  };
+  if (rule.type === 'conditional') {
+    const then = describedRule(rule.then, depth + 1);
+    const otherwise = describedRule(rule.otherwise, depth + 1);
+    if (then) described.then = then;
+    if (otherwise) described.otherwise = otherwise;
+  }
+  return described;
 }
 
 /**
@@ -1197,25 +1316,12 @@ export async function buildObjectSchemaResource(
     });
   }
 
-  const def = objectDef as ObjectDef;
-  const fields = def.fields ?? {};
-  const fieldSummary = Object.entries(fields).map(([key, f]) => ({
-    name: key,
-    type: f.type,
-    label: f.label ?? key,
-    required: f.required ?? false,
-  }));
-
+  // [#32435] The projection `describe_object` serves, so the two answer alike (#25245).
   return {
     contents: [{
       uri,
       mimeType: 'application/json',
-      text: JSON.stringify({
-        name: def.name,
-        label: def.label ?? def.name,
-        fields: fieldSummary,
-        enableFeatures: def.enable ?? {},
-      }, null, 2),
+      text: JSON.stringify(describeServedObject(objectDef as ServedObjectDef), null, 2),
     }],
   };
 }
@@ -1531,18 +1637,42 @@ export function registerAuthoringTools(
  * `handleHttpRequest`'s own options so that the authoring family stays its
  * only reader: it is read under {@link grantsAuthoringTools}, the one
  * predicate that admits the registry in {@link registerAuthoringTools}. A
- * grant that registers the family is answered with the host's text; a
- * `data:read` / `data:write` / `actions:execute` token, an empty grant, and
- * the undefined grant of an API key or a session are not, whatever the host
- * injected — they fall through to the configured or default instructions.
+ * grant that registers the family is answered with the host's
+ * `instructions`; a `data:read` / `data:write` / `actions:execute` token, an
+ * empty grant, and the undefined grant of an API key or a session are not,
+ * whatever the host injected.
+ *
+ * [#32766] Those requests read the injection's `dataOnlyInstructions`
+ * instead — the exact complement under the same predicate, so a request is
+ * answered with at most one of the two host texts. It is how a host that
+ * mounts a build door says, on a connection that cannot build, how to get
+ * one that can (cloud#4329, ruled B: the hint only where a build door is
+ * mounted). A host with no build door injects no registry, so it has no
+ * injection to carry the text, and the default below never promises
+ * building. Either host text omitted or blank falls through to the
+ * configured or default instructions.
  */
-function authoringInstructions(
+function hostInstructions(
   authoring: McpAuthoringInjection | undefined,
   grantedScopes: readonly string[] | undefined,
 ): string | undefined {
-  if (!authoring || !grantsAuthoringTools(grantedScopes)) return undefined;
-  return authoring.instructions;
+  if (!authoring) return undefined;
+  const text = grantsAuthoringTools(grantedScopes) ? authoring.instructions : authoring.dataOnlyInstructions;
+  // Blank is absent: an empty answer would replace the configured or default
+  // text with nothing, which no host means by an empty string.
+  return text?.trim() ? text : undefined;
 }
+
+/**
+ * [#32766] The `initialize` instructions an HTTP request gets when neither the
+ * host's per-request text nor the runtime's configured text answers it. It
+ * says only that the tool list follows the connection's grant — true for
+ * every grant (a `metadata:write`-only or `actions:execute`-only token lists
+ * no data tool) and with or without a build door mounted, so it never
+ * promises building to a deployment that has none.
+ */
+const DEFAULT_HTTP_INSTRUCTIONS =
+  'ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted.';
 
 /**
  * [#31605] Who an HTTP request was admitted as, as the HOST resolved it — the
@@ -2382,7 +2512,9 @@ export class MCPServerRuntime {
    * **Prompts (#3905).** When the bridge can also read this environment's
    * `skill` metadata (`listSkills`), the server additionally serves the MCP
    * `prompts` primitive: every authored skill that carries `instructions`
-   * becomes a prompt the client can `prompts/list` and `prompts/get`. The
+   * becomes a prompt the client can `prompts/list` and `prompts/get`, unless
+   * it binds a tool this request's server does not serve (#32767: a `data:read`
+   * token is not offered a playbook for tools it cannot call). The
    * projection is read from the SAME per-request, environment-scoped bridge the
    * tools use — never from server-held state — so a multi-tenant host cannot
    * serve one environment's skills to another. A bridge without `listSkills`
@@ -2396,7 +2528,8 @@ export class MCPServerRuntime {
    * @param opts.toolOptions  Tool exposure options (system objects, query limits, the token's `grantedScopes`).
    * @param opts.authoring    [#26464] The host's authoring registry plus the token principal and environment
    *                          that become each call's provenance; registered only for a `metadata:write` grant.
-   *                          [#31022] Its optional `instructions` answer `initialize` under that same grant.
+   *                          [#31022] Its optional `instructions` answer `initialize` under that same grant;
+   *                          [#32766] its optional `dataOnlyInstructions` answer it under every other grant.
    * @param opts.caller       [#31605] The `ExecutionContext` the host admitted this request as and the
    *                          environment it dispatched it for: the principal a tool-call interceptor reads
    *                          for every call on this request. Read only when an interceptor is installed.
@@ -2461,13 +2594,15 @@ export class MCPServerRuntime {
         capabilities: { ...(skillBridge ? { prompts: {} } : {}) },
         // [#31022] A host's per-request instructions ride the authoring
         // injection and are read under the grant that admits the family
-        // (`authoringInstructions`), so a request the family does not
-        // register for — a `data:read` token, a key, a session — is answered
-        // with the configured or default text and never sees them.
+        // (`hostInstructions`), so a request the family does not register
+        // for — a `data:read` token, a key, a session — never sees them.
+        // [#32766] Such a request reads the injection's
+        // `dataOnlyInstructions` instead; without one, it gets the configured
+        // or default text.
         instructions:
-          authoringInstructions(opts.authoring, opts.toolOptions?.grantedScopes) ??
+          hostInstructions(opts.authoring, opts.toolOptions?.grantedScopes) ??
           this.config.instructions ??
-          'ObjectStack MCP Server — query and modify your app\'s data objects as tools.',
+          DEFAULT_HTTP_INSTRUCTIONS,
       },
     );
 

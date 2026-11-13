@@ -1209,11 +1209,12 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "취소 사유",
-        help: "키가 취소된 이유로, 누가 키를 복원할 수 있는지를 결정합니다. 관리자 비밀번호 재설정: 플랫폼 관리자만 키를 복원할 수 있습니다. 조직 멤버십 종료: 소유자가 조직을 떠났으며 아무도 키를 복원할 수 없고, 구성원이 새 키를 만듭니다. 관리자에 의해 정지됨: 플랫폼 관리자가 본인 소유가 아닌 키를 취소했으며, 플랫폼 관리자만 키를 복원할 수 있습니다. 키가 복원되면 지워집니다. 소유자가 API 키 목록에서 취소한 키는 비어 있습니다.",
+        help: "키가 취소된 이유로, 누가 키를 복원할 수 있는지를 결정합니다. 관리자 비밀번호 재설정: 플랫폼 관리자만 키를 복원할 수 있습니다. 조직 멤버십 종료: 소유자가 조직을 떠났으며 아무도 키를 복원할 수 없고, 구성원이 새 키를 만듭니다. 관리자에 의해 정지됨: 플랫폼 관리자가 본인 소유가 아닌 키를 취소했으며, 플랫폼 관리자만 키를 복원할 수 있습니다. 디렉터리에 의해 비활성화됨: 조직의 디렉터리(SCIM)가 소유자를 비활성화하거나 삭제했으며, 소유자가 다시 활성화된 후에도 아무도 키를 복원할 수 없고, 소유자가 새 키를 만듭니다. 키가 복원되면 지워집니다. 소유자가 API 키 목록에서 취소한 키는 비어 있습니다.",
         options: {
           admin_password_reset: "관리자 비밀번호 재설정",
           organization_membership_ended: "조직 멤버십 종료",
-          administrator_suspended: "관리자에 의해 정지됨"
+          administrator_suspended: "관리자에 의해 정지됨",
+          scim_deactivated: "디렉터리에 의해 비활성화됨"
         }
       },
       key: {
@@ -3079,6 +3080,34 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "주제별"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "앱 내 메시지 보내기",
+        description: "조직의 모든 구성원 또는 선택한 구성원에게 메시지를 보냅니다. 각 수신자의 알림에 표시됩니다.",
+        successMessage: "{{ result.recipients }}명에게 메시지를 보냈습니다",
+        params: {
+          everyone: {
+            label: "이 조직의 모든 구성원",
+            helpText: "현재 조직의 모든 구성원에게 보냅니다. 끄면 아래에서 수신자를 선택할 수 있습니다."
+          },
+          recipients: {
+            label: "수신자",
+            helpText: "메시지가 모두를 위한 것이 아닐 때 보낼 조직 구성원입니다."
+          },
+          title: {
+            label: "제목",
+            helpText: "각 수신자가 알림에서 보게 되는 한 줄입니다."
+          },
+          body: {
+            label: "본문"
+          },
+          link: {
+            label: "링크",
+            helpText: "선택 사항. 메시지가 여는 이 앱의 페이지(/로 시작) 또는 웹 주소입니다."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3753,9 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "버전"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "작업 유형",

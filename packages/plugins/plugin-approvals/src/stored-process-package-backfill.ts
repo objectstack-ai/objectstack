@@ -16,8 +16,10 @@
  *
  * The row records WHICH flow it belongs to (D4 identity), so the answer is
  * the flow's one holder in this environment when the backfill runs: the
- * automation engine's `flowHolder(name)`, which asks the one ADR-0150 D3 rule
- * as a caller with no package over the whole registry. An environment
+ * automation engine's `durableFlowHolder(name)`, which asks the one ADR-0150
+ * D3 rule as a caller with no package over the whole registry, a disabled
+ * package's holding included (#32183): the binding is written once, and a
+ * disable is reversible. An environment
  * override of P's flow is the overlay of P's item, not a second one (D4), so
  * its requests bind to P. ⛔ Not `armedFlowPackage`, a caller's answer. ⛔ No
  * second rule, no first-registered fallback:
@@ -30,13 +32,13 @@
  *    opened with no flow name, whose `process_name` carries the node id):
  *    left null, and named.
  *
- * ## What it does not change
+ * ## Its readers
  *
- * No reader or writer moves onto the column (ADR-0150 red line 3): the
- * revise-edge check, the resubmit window, the progress strip and the labels
- * still read the flow by name, and `openNodeRequest` does not stamp it — a
- * request opened after a boot is bound by the next one. Its reader-to-be is
- * the flow's trailing child (B) and S4's upgrade report. No key changes.
+ * `openNodeRequest` stamps the column from the run's own slot (#31696), so a
+ * request opened since carries it already. Once two packages hold the name,
+ * the revise-edge check, the resubmit window, the progress strip and the
+ * step's queue package read the request's flow by it, else by its run
+ * (`ApprovalService.requestFlow`). No key changes.
  *
  * ## Re-runnable
  *
@@ -63,9 +65,15 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 /** Rows per page of the walk. */
 const PAGE_SIZE = 500;
 
-/** The automation engine's reader of a flow's identity (`AutomationEngine.flowHolder`). */
+/**
+ * The automation engine's readers of a flow's identity. The backfill asks
+ * `durableFlowHolder` (#32183: over every holder, a disabled package's
+ * included). An engine of a release before it offers only `flowHolder`, whose
+ * answer there already counted every holder, so the backfill asks that one.
+ */
 export interface FlowHolderSource {
   flowHolder(name: string): PackageScopedResolution | undefined;
+  durableFlowHolder?(name: string): PackageScopedResolution | undefined;
 }
 
 /** A flow name and how many open requests carry it. */
@@ -133,7 +141,9 @@ export async function backfillProcessPackages(
       if (id === null || id === undefined || typeof processName !== 'string' || !processName.startsWith(FLOW_PREFIX)) continue;
       const name = processName.slice(FLOW_PREFIX.length);
       if (name === '') continue;
-      if (!answers.has(name)) answers.set(name, flows.flowHolder(name));
+      if (!answers.has(name)) {
+        answers.set(name, typeof flows.durableFlowHolder === 'function' ? flows.durableFlowHolder(name) : flows.flowHolder(name));
+      }
       const answer = answers.get(name);
       if (answer?.status === 'resolved') {
         if (answer.holder.kind === 'package') {
@@ -178,7 +188,7 @@ export function logProcessPackageBackfill(report: ProcessPackageBackfillReport, 
   if (report.ambiguous.length > 0) {
     logger.warn(
       `[approvals] ${at}: more than one holder holds these flows, so none is picked and each open request is left naming ` +
-        'no package. Every reader still reads the flow by name as before — ' +
+        'no package. Each such request reads its flow through its run, else is refused naming every holder — ' +
         report.ambiguous.map((a) => `'${a.name}' (${rowsOf(a.rows)}; held by ${a.candidates.join('; ')})`).join(', ') + '.',
       { ambiguous: report.ambiguous },
     );

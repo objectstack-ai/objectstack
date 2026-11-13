@@ -91,12 +91,53 @@ export const TokenStorage = {
 
 /**
  * Better-auth client error shape: a human message plus an HTTP status and an
- * optional machine-readable `code` (e.g. `INVALID_EMAIL_OR_PASSWORD`).
+ * optional machine-readable `code` (e.g. `INVALID_EMAIL_OR_PASSWORD`). The rest
+ * of the JSON body rides along (better-fetch spreads it), which is where
+ * `dependents` and `userMessage` arrive from.
  */
 interface BetterAuthErrorLike {
   message?: string;
   status?: number;
   code?: string;
+  dependents?: unknown;
+  userMessage?: unknown;
+  details?: unknown;
+}
+
+/**
+ * One table a refused delete names: plugin-auth's 409 `DELETE_RESTRICTED`
+ * body lists `dependents: [{ object, count }]`, `count` absent where the
+ * server withholds it.
+ */
+interface AuthErrorDependent {
+  object: string;
+  count?: number;
+}
+
+/** The thrown value of every auth-client rejection that goes through {@link toAuthError}. */
+type AuthClientError = Error & {
+  code?: string;
+  dependents?: AuthErrorDependent[];
+  userMessage?: string;
+  details?: Record<string, unknown>;
+};
+
+/**
+ * The `dependents` list in the shape the server declares, or `undefined` when
+ * the body carries none: an entry without a non-empty `object` is dropped, as
+ * plugin-auth's `wireDependents` drops it on the server side of the same list,
+ * and a `count` that is not a non-negative integer is left out.
+ */
+function readDependents(raw: unknown): AuthErrorDependent[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: AuthErrorDependent[] = [];
+  for (const entry of raw) {
+    const object = (entry as { object?: unknown } | null)?.object;
+    if (typeof object !== 'string' || object === '') continue;
+    const count = (entry as { count?: unknown }).count;
+    out.push(typeof count === 'number' && Number.isInteger(count) && count >= 0 ? { object, count } : { object });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /**
@@ -122,16 +163,44 @@ interface BetterAuthErrorLike {
  * producer discarded. `message` is unchanged for every caller — this only stops
  * throwing away the half of the pair that was already being computed.
  * `packages/auth/src/__tests__/org-error-code-4474.test.ts` pins both halves.
+ *
+ * ## The structured half of a refusal survives too (objectstack#32648)
+ *
+ * The same reasoning covers the rest of the body. An organization delete the
+ * server refuses because the organization still owns records answers 409
+ * `DELETE_RESTRICTED` with `dependents: [{ object, count }]`; the console
+ * renders that list itself, by object label, so it is carried on the thrown
+ * error ({@link readDependents}). So is `userMessage`, the producer-marked
+ * user-facing sentence of the error envelope, when the server sends one.
+ *
+ * ## And so is `details` (objectstack#32432)
+ *
+ * One code can name more than one cause. plugin-auth answers a password
+ * sign-in by an account its identity provider deactivated through SCIM with
+ * better-auth's own `403 BANNED_USER` and adds `details: { cause:
+ * 'scim_deactivated' }`; an administrator's ban answers the same code with no
+ * `details`. The server's instruction to clients is to branch on `code` and
+ * `details.cause`, never on the message, so the body's `details` object is
+ * carried on the thrown error as the server sent it. A `details` that is not a
+ * plain object is not carried.
  */
 function toAuthError(
   error: BetterAuthErrorLike,
   fallbackMessage?: string,
-): Error & { code?: string } {
+): AuthClientError {
   const err = new Error(
     error.message ?? fallbackMessage ?? `Auth request failed with status ${error.status}`,
-  ) as Error & { code?: string };
+  ) as AuthClientError;
   if (error.code) err.code = error.code;
+  const dependents = readDependents(error.dependents);
+  if (dependents) err.dependents = dependents;
+  if (typeof error.userMessage === 'string' && error.userMessage.trim()) err.userMessage = error.userMessage;
+  if (isPlainObject(error.details)) err.details = error.details;
   return err;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** The error half of a better-auth `twoFactor.*` answer. */

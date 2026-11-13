@@ -185,6 +185,14 @@ the boot writes no row for them:
 | `member_default` | Per-org | Standard end-user CRUD; **writes owner-scoped** via `positions: ['org_member']`-domained RLS | The additive baseline — applies to every authenticated request *in addition to* explicit grants (ADR-0090 D5) |
 | `viewer_readonly` | Per-org | Read access only | Auditors / read-only stakeholders |
 
+A platform service can contribute a baseline set of its own beside
+`member_default`, through the security service, during boot only, and only for
+read and create on objects it registers itself. The storage service contributes
+`storage_attachment_member` (read and create on `sys_attachment`), which every
+member holds through the `everyone` anchor wherever the storage service installs
+its attachment gates; see
+[Who holds the object grant](/docs/permissions/attachments-access#who-holds-the-object-grant).
+
 **Who holds `admin_full_access` is not (only) a grant row.** `PLATFORM_ADMIN`
 standing is derived at a single site from **two anchors**. Which of them is
 sufficient depends on the deployment's
@@ -256,6 +264,20 @@ holder's grants are resolved; a name the catalog does not hold confers nothing.
 The position's definition is the only binding that grants: the retired
 `sys_position_permission_set` junction object is no longer registered, and a
 row an older database still holds confers nothing.
+
+A set is identified by its package and its name (ADR-0150 D4), so a direct
+grant can name the owning package in `permission_set_package`. A set one
+package holds needs none: the grant is stored with that package. A set two
+packages hold, granted with no package, is refused `409` `RESOURCE_CONFLICT`,
+and the message names every holder. A package that does not hold the set is
+refused `409` whatever the number of holders, and nothing is stored. One user
+holds one grant of a set per organization, as before, except that when two
+packages hold the set the user may hold each package's set once. A second
+grant written through the engine is refused as a duplicate record (`409`
+`UNIQUE_VIOLATION` on the wire). Below the engine the store's indexes keep one
+grant per set, package and organization, and one grant that names no package
+per set and organization; the in-memory driver (`driver-memory`) builds no
+index for grants that name no package.
 
 The assignment writes are **governed** (ADR-0090 D12): tenant-level admins pass
 through to the ordinary checks; a delegated admin needs a covering
@@ -472,6 +494,13 @@ the source never reach the copy.
   a new snake_case machine name: a name failing that rule answers `400`, and a
   name any permission set already uses (the source's own included) answers `409`
   `RESOURCE_CONFLICT`. An unknown source answers `404`.
+- **Two packages' sets of one name (ADR-0150 D3).** `?package=<id>` names
+  the source's package; the body's `package` still names where the copy lands.
+  When two packages hold a set of the source's name, a clone with no
+  `?package=` answers `409` `RESOURCE_CONFLICT` with `details.candidates`, and
+  a package that does not hold the set answers `409` too. A target name two
+  packages hold is taken (`409`). `package` is the only query parameter: any
+  other, or a repeated or blank one, answers `400`.
 - **Every permission facet is copied** — `objects`, `fields`,
   `systemPermissions`, `tabPermissions`, `rowLevelSecurity`, `description`.
 - **The server drops a declared set of keys**: the package provenance

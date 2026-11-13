@@ -32,10 +32,10 @@
     },
     "type": {
       "status": "live",
-      "evidence": "packages/spec/src/stack.zod.ts#validateSingleApp (`if (config.manifest?.type !== 'app') return []` — the single-app rule applies to consumer packages only); packages/runtime/src/domains/packages.ts#handlePackagesRequest (`packages.filter((p) => p.manifest?.type === query.type)` — the package listing filter)",
-      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/stack.zod.ts#validateSingleApp (`const type = config.manifest?.type` — the single-app rule judges the package types of `SINGLE_APP_PACKAGE_TYPES`, `app` and `module`, the two a suite is made of under ADR-0019 D3 as amended); packages/runtime/src/domains/packages.ts#handlePackagesRequest (`packages.filter((p) => p.manifest?.type === query.type)` — the package listing filter)",
+      "verifiedAt": "2026-11-12",
       "evidenceScope": "in-repo",
-      "note": "2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) — both citations were still ACCURATE (`stack.zod.ts:855` and `domains/packages.ts:275` each name their read on the nose), so this is a pure grammar migration with no repair. Worth recording as one of the batch's control cases: both consumers sit in files under 2300 lines that have not been restructured since the 2026-08-23 seeding, which is the shape under which a line citation survives. Re-closed by hand against c459da6bc."
+      "note": "2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) — both citations were still ACCURATE (`stack.zod.ts:855` and `domains/packages.ts:275` each name their read on the nose), so this is a pure grammar migration with no repair. Worth recording as one of the batch's control cases: both consumers sit in files under 2300 lines that have not been restructured since the 2026-08-23 seeding, which is the shape under which a line citation survives. Re-closed by hand against c459da6bc. 2026-11-12: the stack.zod.ts citation's quoted read REWRITTEN, anchor unchanged — `validateSingleApp` now holds a `module` package to at most one app as well as an `app` package (ADR-0019 D3 as amended), so the old quote and its 'consumer packages only' gloss no longer described the read; the packages.ts citation was re-read and still names its read."
     },
     "scope": {
       "status": "live",

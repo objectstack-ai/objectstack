@@ -38,6 +38,10 @@ import { declaresOptions } from '@objectstack/formula';
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
 // engine result identically.
 import { classifyResumeResult } from './automation.js';
+// [ADR-0150 D3/D4, #31696] A flow action's `target` read from the action's own
+// package; a run's flow read off the slot key it carries.
+import { flowHolderForCaller, flowServiceForCaller, runFlowOf, runSlotPackage } from '../flow-slot-view.js';
+import { automationAddressRegistryOf, bareNameRefusal } from './automation-address.js';
 // [ADR-0106 D1/D5] The `/meta` door's object-schema masker and projection —
 // imported, never restated, so `describe_object` and `list_objects` answer a
 // caller the same field set the `/meta` object read answers that caller.
@@ -582,6 +586,99 @@ async function warnIfSkillListIncomplete(
 }
 
 /**
+ * [#32435] `describe_object`'s answer: what an agent needs to WRITE a record,
+ * read off the object as THIS caller is served it — so a field, an option or a
+ * rule the caller's view withholds (ADR-0106 D1: the served view drops a rule
+ * that names a denied field anywhere, its message included) is not described.
+ *
+ * Per field: `required`, `readonly` and `system` (an auto-injected column such
+ * as `created_at` is `readonly` and `system`), the allowed `options` as value +
+ * label for a field that declares them (a picklist-bound field carries its
+ * list's resolved options on the served object, `declaresOptions`), and the
+ * `defaultValue` an INSERT applies. Per active validation rule: its name, kind,
+ * message, severity, the write events it runs on, and the fields it names —
+ * ⛔ never its condition, pattern or transition table: the rule's message is
+ * what a refused write answers with, and its expression is server policy.
+ *
+ * The twin is `describeServedObject` in `packages/mcp/src/mcp-server-runtime.ts`,
+ * which the stdio bridge and the `objectstack://objects/{name}` resource serve
+ * (this package does not depend on `@objectstack/mcp`): the transports answer
+ * one shape, and the `describe_object` description (`mcp-http-tools.ts`)
+ * states it.
+ */
+function describeServedObject(def: any): Record<string, unknown> {
+    return {
+        name: def.name,
+        label: def.label ?? def.name,
+        fields: Object.entries(def.fields ?? {}).map(([k, f]: [string, any]) => ({
+            name: k,
+            type: f?.type,
+            label: f?.label ?? k,
+            required: f?.required ?? false,
+            readonly: f?.readonly === true,
+            system: f?.system === true,
+            ...(declaresOptions(f) ? { options: describedOptions(f.options) } : {}),
+            ...(f?.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {}),
+        })),
+        validations: describedRules(def.validations),
+        enableFeatures: def.enable ?? {},
+    };
+}
+
+/** A field's options as value + label: the stored value a write sends, and what a person reads. */
+function describedOptions(options: unknown[]): Array<{ value: unknown; label: unknown }> {
+    return options
+        .filter((o): o is { value: unknown; label?: unknown } => !!o && typeof o === 'object' && 'value' in o)
+        .map((o) => ({ value: o.value, label: o.label ?? o.value }));
+}
+
+/**
+ * How deep a `conditional` rule's `then` / `otherwise` is described: the depth
+ * the engine's own rule-message index walks (`MAX_VALIDATION_DEPTH`,
+ * `@objectstack/objectql`'s `engine-validation-messages.ts`).
+ */
+const MAX_DESCRIBED_RULE_DEPTH = 10;
+
+/** The object's ACTIVE validation rules, described without their expressions ({@link describeServedObject}). */
+function describedRules(rules: unknown): Array<Record<string, unknown>> {
+    if (!Array.isArray(rules)) return [];
+    const out: Array<Record<string, unknown>> = [];
+    for (const rule of rules) {
+        const described = describedRule(rule, 0);
+        if (described) out.push(described);
+    }
+    return out;
+}
+
+function describedRule(raw: unknown, depth: number): Record<string, unknown> | undefined {
+    if (!raw || typeof raw !== 'object' || depth >= MAX_DESCRIBED_RULE_DEPTH) return undefined;
+    const rule = raw as Record<string, unknown>;
+    // An inactive rule never runs on a write, so it is not part of what a write needs.
+    if (rule.active === false) return undefined;
+    const fields: string[] = [];
+    if (typeof rule.field === 'string') fields.push(rule.field);
+    if (Array.isArray(rule.fields)) {
+        for (const name of rule.fields) if (typeof name === 'string' && !fields.includes(name)) fields.push(name);
+    }
+    const described: Record<string, unknown> = {
+        name: rule.name,
+        type: rule.type,
+        message: rule.message,
+        // The spec's defaults (`ValidationRuleSchema`), stated so a reader need not know them.
+        severity: rule.severity ?? 'error',
+        events: Array.isArray(rule.events) ? rule.events : ['insert', 'update'],
+        fields,
+    };
+    if (rule.type === 'conditional') {
+        const then = describedRule(rule.then, depth + 1);
+        const otherwise = describedRule(rule.otherwise, depth + 1);
+        if (then) described.then = then;
+        if (otherwise) described.otherwise = otherwise;
+    }
+    return described;
+}
+
+/**
  * Build a principal-bound {@link McpDataBridge}: every method runs AS the
  * request's ExecutionContext through {@link callData} (RLS/permissions) and
  * the per-env metadata reads (the protocol's merged listing, or the metadata
@@ -831,18 +928,8 @@ export function buildMcpBridge(
         describeObject: async (name: string) => {
             const def: any = await readObjectForCaller(name);
             if (!def) return null;
-            const fields = def.fields ?? {};
-            return {
-                name: def.name,
-                label: def.label ?? def.name,
-                fields: Object.entries(fields).map(([k, f]: [string, any]) => ({
-                    name: k,
-                    type: f?.type,
-                    label: f?.label ?? k,
-                    required: f?.required ?? false,
-                })),
-                enableFeatures: def.enable ?? {},
-            };
+            // [#32435] …each field and rule carrying what a write needs.
+            return describeServedObject(def);
         },
         // [#28715] The fields `validate_expression` judges a `label()` call
         // against, from the object `describeObject` reads: the served object,
@@ -1017,12 +1104,16 @@ export function buildMcpBridge(
                 // omits the optional `getFlow` — or a flow the registry does
                 // not hold — simply summarizes as before, since the fallback
                 // is "no `params` key", exactly today's answer.
+                // [ADR-0150 D3, #31696] Read from the action's own package, as
+                // `run_action` runs it: on a flow name two namespaces hold, the
+                // bare read refuses, while the action runs its package's own.
                 let flow: any;
                 if (action?.type === 'flow' && typeof action?.target === 'string' && typeof automation?.getFlow === 'function') {
                     try {
-                        flow = await automation.getFlow(action.target);
+                        flow = await flowServiceForCaller(automation, listingEngine?.registry, action.target, packageId)
+                            .getFlow(action.target);
                     } catch {
-                        flow = undefined; // a registry that cannot answer is not a listing failure
+                        flow = undefined; // a registry that cannot answer, or a refused name, is not a listing failure
                     }
                 }
                 // [#28178] An api action whose target cannot read the caller's
@@ -1574,7 +1665,9 @@ function notResumableRunMessage(runId: string): string {
  *     was not started by a flow action, and the call is refused 403.
  *     The confirmation gate applies here too because the flow's writes happen
  *     after the screen, so on resume. A run started with `confirm: true` still
- *     needs `confirm: true` to resume.
+ *     needs `confirm: true` to resume. An AI service account never confirms
+ *     an action for itself (ADR-0151 D3 rule 3), so its resume of a gated
+ *     action is refused whatever it sends.
  *  4. **The subject record, read again as the caller.** This is #16370's rule,
  *     with the same two shared functions: `loadActionSubjectRecord` and
  *     `refuseDeniedSubjectLoad`. A record the caller could read when the run
@@ -1646,18 +1739,35 @@ export async function resumeActionRun(
     }
 
     // ── 3. the flow action that admits it, through run_action's gates ────────
-    const flowName: unknown = run.flowName;
+    // [ADR-0150 D4, #31696] A run of a flow name two packages hold carries its
+    // slot key, `PACKAGE/NAME`: the run's flow is that NAME, of that package.
+    // A candidate targets the name, and its target reaches the run's package
+    // from the action's own (`run_action`'s resolution of it): the action that
+    // could have started this run. A run whose key carries no package, of a
+    // name two packages hold, is the one holder's whose slot is filed under
+    // the key (`runSlotPackage`), else refused naming every holder.
+    const runFlow = runFlowOf(run.flowName);
+    const flowName: unknown = runFlow?.name ?? run.flowName;
     const runObject = typeof trigger?.object === 'string' && trigger.object !== '' ? trigger.object : undefined;
     const meta: any = await getMeta();
     const objectsListing = await readObjects?.();
     const declarations = await actionExec.collectActionDeclarations(deps, meta, objectsListing, await readActions?.());
-    const candidates = declarations.filter(({ action, objectName }) =>
+    const activationEngine: any = await deps.getObjectQL(context, envId).catch(() => undefined);
+    let runPackage = runFlow?.packageId;
+    const runName = runPackage === undefined && typeof flowName === 'string' ? flowName.replace(/^\u0000/, '') : '';
+    const shared = runName ? bareNameRefusal(automationAddressRegistryOf(activationEngine), 'flow', runName) : undefined;
+    if (shared) {
+        runPackage = runSlotPackage(automation, runName, run.flowName, shared.candidates.flatMap((c) => (c.kind === 'package' ? [c.packageId] : [])));
+        if (runPackage === undefined) throw resumeDoorError(deps, shared.message, 409, { candidates: shared.candidates });
+    }
+    const candidates = declarations.filter(({ action, objectName, packageId }) =>
         action?.type === 'flow'
         && !actionExec.isDeclarativeUpdateAction(action)
         && typeof action?.target === 'string'
         && action.target === flowName
+        && (runPackage === undefined
+            || flowHolderForCaller(activationEngine?.registry, action.target, packageId) === runPackage)
         && (runObject === undefined ? actionExec.isObjectLessActionKey(objectName) : objectName === runObject));
-    const activationEngine: any = await deps.getObjectQL(context, envId).catch(() => undefined);
     let admitted: { action: any; objectName: string } | undefined;
     let firstRefusal: Error | undefined;
     // [ADR-0106 D1] A candidate this caller is not shown does not exist for
@@ -1795,7 +1905,9 @@ function resumeAdmissionRefusal(
     if (permission) return resumeDoorError(deps, permission, 403);
     const disabled = actionExec.disabledActionRefusal(deps, activationEngine, action);
     if (disabled) return resumeDoorError(deps, disabled.message, disabled.status, { code: disabled.code });
-    const confirmation = actionExec.actionConfirmationRefusal(deps, action, request, objectName);
+    // [ADR-0151 D3 rule 3] The caller's envelope rides along: an AI service
+    // account never confirms for itself, so it is refused whatever it sends.
+    const confirmation = actionExec.actionConfirmationRefusal(deps, action, request, objectName, ec);
     if (confirmation) {
         return resumeDoorError(deps, confirmation.message, confirmation.status, {
             code: confirmation.code,

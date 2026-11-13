@@ -1209,11 +1209,12 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motif de la révocation",
-        help: "Motif de la révocation de la clé, lorsqu'il détermine qui peut la restaurer. Réinitialisation du mot de passe par un administrateur : seul un administrateur de la plateforme peut restaurer la clé. Fin de l'appartenance à l'organisation : le propriétaire a quitté l'organisation et personne ne peut restaurer la clé ; un membre en crée une nouvelle. Suspendue par un administrateur : un administrateur de la plateforme a révoqué une clé qui ne lui appartient pas, et seul un administrateur de la plateforme peut la restaurer. Effacé lorsque la clé est restaurée. Vide pour une clé que son propriétaire a révoquée depuis la liste Clés API.",
+        help: "Motif de la révocation de la clé, lorsqu'il détermine qui peut la restaurer. Réinitialisation du mot de passe par un administrateur : seul un administrateur de la plateforme peut restaurer la clé. Fin de l'appartenance à l'organisation : le propriétaire a quitté l'organisation et personne ne peut restaurer la clé ; un membre en crée une nouvelle. Suspendue par un administrateur : un administrateur de la plateforme a révoqué une clé qui ne lui appartient pas, et seul un administrateur de la plateforme peut la restaurer. Désactivée par l'annuaire : l'annuaire de l'organisation (SCIM) a désactivé ou supprimé le propriétaire, et personne ne peut restaurer la clé, même après la réactivation du propriétaire ; le propriétaire en crée une nouvelle. Effacé lorsque la clé est restaurée. Vide pour une clé que son propriétaire a révoquée depuis la liste Clés API.",
         options: {
           admin_password_reset: "Réinitialisation du mot de passe par un administrateur",
           organization_membership_ended: "Fin de l'appartenance à l'organisation",
-          administrator_suspended: "Suspendue par un administrateur"
+          administrator_suspended: "Suspendue par un administrateur",
+          scim_deactivated: "Désactivée par l'annuaire"
         }
       },
       key: {
@@ -3079,6 +3080,34 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "Par sujet"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "Envoyer un message dans l’application",
+        description: "Envoyez un message à tous les membres de votre organisation, ou aux membres que vous choisissez. Il apparaît dans les notifications de chaque destinataire.",
+        successMessage: "Message envoyé. Destinataires : {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "Tout le monde dans cette organisation",
+            helpText: "Envoyer à chaque membre de votre organisation actuelle. Laissez désactivé pour choisir les destinataires ci-dessous."
+          },
+          recipients: {
+            label: "Destinataires",
+            helpText: "Les membres de votre organisation à qui envoyer, lorsque le message n’est pas pour tout le monde."
+          },
+          title: {
+            label: "Titre",
+            helpText: "La ligne que chaque destinataire voit dans ses notifications."
+          },
+          body: {
+            label: "Contenu du message"
+          },
+          link: {
+            label: "Lien",
+            helpText: "Facultatif. Une page de cette application (commençant par /) ou une adresse web que le message ouvre."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3753,9 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "Version"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "Type d’opération",

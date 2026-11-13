@@ -40,7 +40,12 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
-import { NON_GRID_ROW_CEILING, nonGridRowCeilingQuery, ValueDataSource } from '@object-ui/core';
+import {
+  GANTT_ROW_CEILING,
+  NON_GRID_ROW_CEILING,
+  nonGridRowCeilingQuery,
+  ValueDataSource,
+} from '@object-ui/core';
 import { SchemaRendererProvider, SchemaRenderer, notifyDataChanged } from '@object-ui/react';
 import type { DataSource, DeclaredNode, ObjectGanttBlockNode } from '@object-ui/types';
 import { safeValidateSchema } from '@object-ui/types/zod';
@@ -253,6 +258,8 @@ describe('ObjectGantt.fetchGate-7225', () => {
 
 /**
  * objectui#7210, half 2 — maintainer ruling a′ (2026-09-02), on the gantt.
+ * The ceiling the gantt applies is its own, `GANTT_ROW_CEILING`, since
+ * objectstack#32421 (ruling B); the mechanism and the footnote are a′'s.
  *
  * The ruling, and the pin it names: a non-grid visualisation may fetch the
  * whole FILTERED result set, because a truthful range needs all of it, but the
@@ -272,7 +279,7 @@ describe('ObjectGantt.fetchGate-7225', () => {
  * separate commits on this branch for that reason.
  *
  * REVERSE VERIFICATION — MEASURED, and corrected from what this docblock used
- * to predict (objectui#7507). Removing `...nonGridRowCeilingQuery()` from
+ * to predict (objectui#7507). Removing `...nonGridRowCeilingQuery(…)` from
  * `ObjectGantt`'s reload turns the truncation case red at the **`$top`
  * assertion**; the below-ceiling case stays green. ⚠️ The pass/fail TALLY that
  * used to be quoted here is deliberately gone: objectui#8769 changed how many
@@ -284,7 +291,7 @@ describe('ObjectGantt.fetchGate-7225', () => {
  * reader trusts it while deciding what an edit is safe to break. What actually
  * happens: an adapter with no `$top` answers with the WHOLE filtered set, so
  * `applyNonGridRowCeiling` sees far more rows than the ceiling, slices to it,
- * and reports `truncated` from the rows in hand. The drawn count stays 2,000
+ * and reports `truncated` from the rows in hand. The drawn count stays at the ceiling
  * and the note still names both numbers. The probe row bounds the RESPONSE; it
  * is not what makes truncation detectable once an unbounded one has arrived.
  * So in this file the `$top` is graded by the `$top` assertion and by nothing
@@ -300,8 +307,8 @@ describe('ObjectGantt.rowCeiling-7210', () => {
     );
   });
 
-  /** The whole filtered result set the store holds. */
-  const TOTAL_ROWS = 4321;
+  /** The whole filtered result set the store holds — past the gantt's ceiling. */
+  const TOTAL_ROWS = GANTT_ROW_CEILING + 321;
 
   function makeRows(n: number) {
     return Array.from({ length: n }, (_, i) => ({
@@ -362,7 +369,7 @@ describe('ObjectGantt.rowCeiling-7210', () => {
       await waitFor(() => expect(screen.getByTestId('gantt-view')).toBeTruthy());
       await waitFor(() =>
         expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe(
-          String(NON_GRID_ROW_CEILING),
+          String(GANTT_ROW_CEILING),
         ),
       );
 
@@ -370,15 +377,65 @@ describe('ObjectGantt.rowCeiling-7210', () => {
       // the cut a fact about the rows in hand rather than a guess.
       expect(calls.length).toBeGreaterThan(0);
       for (const params of calls) {
-        expect(params.$top).toBe(nonGridRowCeilingQuery().$top);
+        expect(params.$top).toBe(nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top);
       }
 
       // ⭐ The half the ruling cares about: the truncation is NOT silent.
       const note = await screen.findByRole('note');
       expect(note.getAttribute('data-row-ceiling-note')).toBe('non-grid');
-      expect(note.textContent).toContain(String(NON_GRID_ROW_CEILING));
+      expect(note.textContent).toContain(String(GANTT_ROW_CEILING));
       expect(note.textContent).toContain(String(TOTAL_ROWS));
       expect(note.textContent).toMatch(/narrow the filter/i);
+    });
+
+    /**
+     * objectstack#32421, ruling B — the gantt left the shared ceiling. A
+     * result set past the shared 2,000 and inside the gantt's own ceiling is
+     * the card's production case (a 4,999-row schedule): every row draws, and
+     * there is no footnote, because nothing was cut.
+     */
+    it('between the shared and the gantt ceiling: every row draws and there is NO footnote', async () => {
+      const between = 4999;
+      expect(between).toBeGreaterThan(NON_GRID_ROW_CEILING);
+      expect(between).toBeLessThan(GANTT_ROW_CEILING);
+      const dataSource = makeDataSource(between);
+
+      render(<ObjectGantt schema={schema} dataSource={dataSource} />);
+
+      await waitFor(() =>
+        expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe(
+          String(between),
+        ),
+      );
+      expect(calls.length).toBeGreaterThan(0);
+      for (const params of calls) {
+        expect(params.$top).toBe(GANTT_ROW_CEILING + 1);
+      }
+      expect(screen.queryByRole('note')).toBeNull();
+    });
+
+    /**
+     * Ruling B keeps ruling a′'s "not authorable": an authored
+     * `pagination.pageSize` (or `limit`) does not reach the gantt's query in
+     * either direction — a small one does not cap it, a large one does not
+     * lift it past the constant.
+     */
+    it('an authored `pagination.pageSize` changes nothing, small or large', async () => {
+      for (const pageSize of [50, 50000]) {
+        calls = [];
+        const dataSource = makeDataSource(4999);
+        const { unmount } = render(
+          <ObjectGantt schema={{ ...schema, pagination: { pageSize }, limit: pageSize }} dataSource={dataSource} />,
+        );
+        await waitFor(() =>
+          expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe('4999'),
+        );
+        for (const params of calls) {
+          expect(params.$top).toBe(GANTT_ROW_CEILING + 1);
+        }
+        expect(screen.queryByRole('note')).toBeNull();
+        unmount();
+      }
     });
 
     it('below the ceiling: the full set draws and there is NO footnote', async () => {
@@ -407,7 +464,7 @@ describe('ObjectGantt.rowCeiling-7210', () => {
      * ceiling's own file states the exemption boundary in one place.
      */
     it('an inline `value` data set IS capped, and says so', async () => {
-      const total = nonGridRowCeilingQuery().$top + 500;
+      const total = nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top + 500;
       const inline: any = {
         ...schema,
         data: { provider: 'value', items: makeRows(total) },
@@ -417,11 +474,11 @@ describe('ObjectGantt.rowCeiling-7210', () => {
 
       await waitFor(() =>
         expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe(
-          String(NON_GRID_ROW_CEILING),
+          String(GANTT_ROW_CEILING),
         ),
       );
       const note = await screen.findByRole('note');
-      expect(note.textContent).toContain(String(NON_GRID_ROW_CEILING));
+      expect(note.textContent).toContain(String(GANTT_ROW_CEILING));
       expect(note.textContent).toContain(String(total));
     });
 
@@ -432,7 +489,7 @@ describe('ObjectGantt.rowCeiling-7210', () => {
      * have no `total` to name in a footnote.
      */
     it('a host `data` prop is still never capped, and never footnoted', async () => {
-      const rows = makeRows(nonGridRowCeilingQuery().$top + 500);
+      const rows = makeRows(nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top + 500);
 
       render(<ObjectGantt schema={schema} {...({ data: rows } as any)} />);
 
@@ -586,7 +643,7 @@ describe('ObjectGantt.hostDataProp-7210', () => {
         // Not `pagination.pageSize` (2), and not absent either: the platform
         // ceiling, one probe row wide so the cut is detectable.
         expect(params.$top).not.toBe(2);
-        expect(params.$top).toBe(nonGridRowCeilingQuery().$top);
+        expect(params.$top).toBe(nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top);
         expect(params.$skip).toBeUndefined();
       }
     });
@@ -972,37 +1029,38 @@ describe('ObjectGantt.inlineQueryKeys-8769', () => {
         <ObjectGantt
           schema={{
             ...base,
-            data: { provider: 'value', items: makeRows(nonGridRowCeilingQuery().$top + 500) },
+            data: { provider: 'value', items: makeRows(nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top + 500) },
           }}
         />,
       );
-      await waitFor(() => expect(drawn().count).toBe(String(NON_GRID_ROW_CEILING)));
+      await waitFor(() => expect(drawn().count).toBe(String(GANTT_ROW_CEILING)));
     });
 
     it('ceilingNote: the cut is LOUD — the footnote names both numbers', async () => {
-      const total = nonGridRowCeilingQuery().$top + 500;
+      const total = nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top + 500;
       render(
         <ObjectGantt schema={{ ...base, data: { provider: 'value', items: makeRows(total) } }} />,
       );
-      await waitFor(() => expect(drawn().count).toBe(String(NON_GRID_ROW_CEILING)));
+      await waitFor(() => expect(drawn().count).toBe(String(GANTT_ROW_CEILING)));
 
       const note = await screen.findByRole('note');
       expect(note.getAttribute('data-row-ceiling-note')).toBe('non-grid');
-      expect(note.textContent).toContain(String(NON_GRID_ROW_CEILING));
+      expect(note.textContent).toContain(String(GANTT_ROW_CEILING));
       expect(note.textContent).toContain(String(total));
     });
 
     it('ceilingOrder: the ceiling is applied to the FILTERED set, not to the raw one', async () => {
-      // Over the ceiling before filtering, under it after: 2,400 rows of which
-      // only every third is `open` (800). Filter-then-ceiling draws all 800 and
-      // stays quiet; ceiling-then-filter could not.
-      const rows = makeRows(2400, (i) => (i % 3 === 0 ? 'open' : 'closed'));
+      // Over the ceiling before filtering, under it after: 12,000 rows of which
+      // only every third is `open` (4,000). Filter-then-ceiling draws all 4,000
+      // and stays quiet; ceiling-then-filter could not.
+      const raw = GANTT_ROW_CEILING + 2000;
+      const rows = makeRows(raw, (i) => (i % 3 === 0 ? 'open' : 'closed'));
       render(
         <ObjectGantt
           schema={{ ...base, data: { provider: 'value', items: rows }, filter: OPEN_FILTER }}
         />,
       );
-      await waitFor(() => expect(drawn().count).toBe('800'));
+      await waitFor(() => expect(drawn().count).toBe(String(raw / 3)));
       expect(screen.queryByRole('note')).toBeNull();
     });
 

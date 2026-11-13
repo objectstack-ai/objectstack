@@ -23,12 +23,28 @@
  * middleware scopes every non-system read of `claim` to the caller's own rows
  * (the reviewer reads every claim), and a `sharing` service's `checkEdit`
  * lets only a claim's owner edit it.
+ *
+ * #32734 — a link is not issued for a field the caller's write could not
+ * change, and an upload the field does not take is refused, never answered as
+ * attached. The approval lock is the fixture's stand-in for
+ * `@objectstack/plugin-approvals`, in its two shapes: an `approvals` service
+ * whose `getRecordLock` answers for the claims in `locked`, and a
+ * `beforeUpdate` hook refusing an edit of one as the record-lock hook does
+ * (`RECORD_LOCKED`, its status declared as `statusCode: 409`).
+ *
+ * #32712 — the page, and the refusals it shows, in the request's language:
+ * `Accept-Language`, else the workspace default, else English. The workspace
+ * default is the fixture's `settings` service, answering the `localization`
+ * namespace's `locale` from `workspaceLocale` and announcing a change to it
+ * as the real service does (`subscribe`), so the one resolver's cache drops
+ * the earlier answer.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { runInNewContext } from 'node:vm';
 import type { RouteHandler } from '@objectstack/spec/contracts';
 import { RAW_FILE_VALUES_CONTEXT_KEY, type EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
@@ -39,6 +55,7 @@ import type { FileAttachmentService } from './file-attachment-service.js';
 import { installDefaultOrganization, DEFAULT_ORGANIZATION_ID } from './default-organization.testkit.js';
 import { UPLOAD_LINK_TTL_SECONDS } from './record-file-access.js';
 import { UPLOAD_LINK_UNUSABLE_MESSAGE } from './upload-link-wire.js';
+import { UPLOAD_LINK_COPY } from './upload-link-copy.js';
 
 const BASE = '/api/v1/storage';
 const SYS = { isSystem: true };
@@ -70,6 +87,15 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
   let storage: SwappableStorageService;
   const routes = new Map<string, RouteHandler>();
   const ids: Record<string, string> = {};
+  /** [#32734] The claims a pending approval locks. */
+  const locked = new Set<string>();
+  /** [#32712] The workspace's default locale, as the `localization` settings answer it; none unless a case sets one. */
+  let workspaceLocale: string | undefined;
+  const localizationChanged: Array<() => void> = [];
+  const setWorkspaceLocale = (locale: string | undefined) => {
+    workspaceLocale = locale;
+    for (const fn of localizationChanged) fn();
+  };
 
   beforeAll(async () => {
     rootDir = join(tmpdir(), `os-30892-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -134,6 +160,27 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       },
     });
 
+    // [#32712] The settings service's `localization` namespace, as the one
+    // localization resolver reads it: a grouped read, and a change announced.
+    ctx.registerService('settings', {
+      get: async (ns: string, key: string) =>
+        ns === 'localization' && key === 'locale' && workspaceLocale ? { value: workspaceLocale } : undefined,
+      getMany: async (ns: string) =>
+        ns === 'localization' && workspaceLocale ? { locale: { value: workspaceLocale } } : {},
+      subscribe: (ns: string, fn: () => void) => {
+        if (ns === 'localization') localizationChanged.push(fn);
+      },
+    });
+
+    // [#32734] The approvals service's record-anchored lock answer: for a
+    // caller who reads the record, whether a pending approval locks it.
+    ctx.registerService('approvals', {
+      getRecordLock: async (object: string, id: string, context: unknown) => {
+        const row = await engine.findOne(object, { where: { id } }, { context } as never);
+        return row ? { locked: locked.has(id) } : null;
+      },
+    });
+
     const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir }, bindToSettings: false });
     await plugin.init(ctx as any);
 
@@ -153,11 +200,30 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
           policy: { name: 'policy', label: 'Policy', type: 'file' },
           photos: { name: 'photos', label: 'Photos', type: 'image', multiple: true },
           receipt: { name: 'receipt', label: 'Receipt', type: 'file', maxSize: 64 },
+          // [#32734] A claim's state, a field it locks once approved, and one
+          // no user's write changes.
+          status: { name: 'status', type: 'text' },
+          invoices: { name: 'invoices', label: 'Invoices', type: 'file', multiple: true, readonlyWhen: "record.status == 'approved'" },
+          stamp: { name: 'stamp', label: 'Stamp', type: 'file', readonly: true },
         },
       }],
     } as never);
     await engine.syncSchemas();
     await installDefaultOrganization(engine);
+    // The callers are current members of the organization their links are
+    // minted in: a person's data access requires one, under every posture
+    // (ADR-0093 D8.1, as amended). Data at rest, seeded through the driver.
+    engine.registry.registerObject(
+      {
+        name: 'sys_member', label: 'Member', managedBy: 'better-auth',
+        fields: { user_id: { type: 'text', label: 'User' }, organization_id: { type: 'text', label: 'Organization' }, role: { type: 'text', label: 'Role' } },
+      },
+      '@objectstack/service-storage',
+    );
+    await engine.syncSchemas();
+    for (const { userId } of [OWNER, REVIEWER, OUTSIDER]) {
+      await engine.getDriverForObject('sys_member')!.create('sys_member', { id: `mem_${userId}`, user_id: userId, organization_id: ORG, role: 'member' });
+    }
 
     // Row-level security, as the fixture stands it in: a caller reads its own
     // claims; the reviewer reads every claim.
@@ -177,6 +243,16 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
         }
       }
       return next();
+    }, { object: 'claim' });
+    // [#32734] The record-lock hook's shape: an edit of a locked claim is
+    // refused `RECORD_LOCKED`, its status declared as `statusCode`.
+    engine.registerHook('beforeUpdate', async (hook: any) => {
+      const id = String(hook?.input?.id ?? '');
+      if (!locked.has(id) || hook?.session?.isSystem) return;
+      const err: any = new Error(`RECORD_LOCKED: Claim '${id}' is locked while an approval is in progress`);
+      err.code = 'RECORD_LOCKED';
+      err.statusCode = 409;
+      throw err;
     }, { object: 'claim' });
 
     await plugin.start(ctx as any);
@@ -534,6 +610,257 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect((await claim(ids.claimB)).receipt ?? null).toBeNull();
       const stray = (await engine.find('sys_file', { where: { size: 65 }, context: SYS } as never)) as any[];
       expect(stray).toEqual([]);
+    });
+  });
+
+  describe('#32734 — a field the write cannot change: no link, and never "attached"', () => {
+    const openLinkRows = async () =>
+      engine.count('sys_file', { where: { name: 'upload-link', status: 'pending' }, context: SYS } as never);
+    const filesNamed = async (name: string) =>
+      (await engine.find('sys_file', { where: { name }, context: SYS } as never)) as any[];
+    const draftClaim = async (name: string) =>
+      (await engine.insert('claim', { name, owner: OWNER.userId, status: 'draft', organization_id: ORG }, { context: SYS } as never)).id as string;
+
+    /** Run the picker page's own script against a stubbed DOM and `fetch` answer; resolves the status line it shows. */
+    const pageSays = async (html: string, answer: { ok: boolean; body: unknown }): Promise<string> => {
+      const script = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html)?.[1];
+      expect(script, 'the page carries its upload script').toBeTruthy();
+      const handlers: Record<string, () => void> = {};
+      const el = (id: string) => ({
+        id, disabled: id === 'send', textContent: '',
+        files: id === 'file' ? [{ name: 'scan.pdf', type: 'application/pdf' }] : undefined,
+        addEventListener: (event: string, fn: () => void) => { handlers[`${id}:${event}`] = fn; },
+      });
+      const els: Record<string, ReturnType<typeof el>> = { file: el('file'), send: el('send'), status: el('status') };
+      runInNewContext(script!, {
+        document: { getElementById: (id: string) => els[id] },
+        location: { pathname: '/api/v1/storage/upload-links/t' },
+        fetch: async () => ({ ok: answer.ok, json: async () => answer.body }),
+      });
+      handlers['send:click']!();
+      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+      return els.status.textContent;
+    };
+
+    it('minting refuses a readonly field 403 FIELD_NOT_ACCESSIBLE, and writes no link', async () => {
+      const before = await openLinkRows();
+      const r = await refusalOf(files.createUploadLinkAs('claim', ids.claimA, { field: 'stamp' }, OWNER as never));
+      expect(r).toMatchObject({ code: 'FIELD_NOT_ACCESSIBLE', status: 403 });
+      expect(r?.message).toContain('claim.stamp');
+      expect(await openLinkRows()).toBe(before);
+    });
+
+    it('minting refuses a record a pending approval locks 409 RECORD_LOCKED and writes no link; once unlocked, it mints', async () => {
+      const id = await draftClaim('locked at mint');
+      locked.add(id);
+      try {
+        const before = await openLinkRows();
+        const r = await refusalOf(files.createUploadLinkAs('claim', id, { field: 'invoices' }, OWNER as never));
+        expect(r).toMatchObject({ code: 'RECORD_LOCKED', status: 409 });
+        expect(await openLinkRows()).toBe(before);
+      } finally {
+        locked.delete(id);
+      }
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'invoices' }, OWNER as never);
+      expect(grant.path).toBe(`${BASE}/upload-links/${grant.token}`);
+    });
+
+    it('a draft takes the upload; once its readonlyWhen holds, an upload through a link minted before is refused 403 with the reason, attaching and keeping nothing', async () => {
+      const id = await draftClaim('approved after mint');
+      const first = await uploadThroughLink({ field: 'invoices' }, Buffer.from('invoice one'), id);
+      expect((await claim(id)).invoices).toEqual([first.fileId]);
+
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'invoices' }, OWNER as never);
+      await engine.update('claim', { status: 'approved' }, { where: { id }, context: SYS } as never);
+      const put = await useLink(tokenOf(grant.path), Buffer.from('invoice two'), { 'x-file-name': 'late-invoice.pdf' });
+
+      expect(put._status, JSON.stringify(put._json)).toBe(403);
+      expect(put._json).toEqual({
+        success: false,
+        error: expect.objectContaining({ code: 'FIELD_NOT_ACCESSIBLE', message: expect.stringContaining('claim.invoices') }),
+      });
+      expect(put._json.error.message).toMatch(/^Nothing was attached: /);
+      expect((await claim(id)).invoices).toEqual([first.fileId]);
+      expect(await filesNamed('late-invoice.pdf')).toEqual([]);
+      expect(await fileRow(tokenOf(grant.path).split('.')[0])).toBeUndefined();
+    });
+
+    it('a record locked after the link was minted refuses the upload 409 RECORD_LOCKED, not 500, keeping nothing', async () => {
+      const id = await draftClaim('locked after mint');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      locked.add(id);
+      try {
+        const put = await useLink(tokenOf(grant.path), Buffer.from('locked claim'), { 'x-file-name': 'locked-claim.pdf' });
+        expect(put._status, JSON.stringify(put._json)).toBe(409);
+        expect(put._json.error).toMatchObject({ code: 'RECORD_LOCKED' });
+        expect(put._json.error.message).toContain('locked while an approval is in progress');
+        // [#32712] The producer's code prefix is off the text; `code` carries the token.
+        expect(put._json.error.message).not.toMatch(/^RECORD_LOCKED/);
+        expect((await claim(id)).policy ?? null).toBeNull();
+        expect(await filesNamed('locked-claim.pdf')).toEqual([]);
+      } finally {
+        locked.delete(id);
+      }
+    });
+
+    it('the page says attached only for an answer naming the stored file; a refusal shows the text written for its user', async () => {
+      const grant = await files.createUploadLinkAs('claim', ids.claimB, { field: 'policy' }, OWNER as never);
+      const html = String((await openLink(tokenOf(grant.path)))._sent);
+      expect(await pageSays(html, { ok: true, body: { success: true, data: { fileId: 'f1', size: 3, field: 'policy' } } }))
+        .toBe('Done. The file was attached; you can close this page.');
+      expect(await pageSays(html, { ok: true, body: { success: true, data: {} } })).toBe('The upload failed.');
+      const reason = 'Nothing was attached: the field this link was made for is read-only on this record, so it cannot take a file.';
+      const diagnostic = 'Nothing was attached: claim.invoices is read-only on this record in its current state, so it cannot take a file.';
+      expect(await pageSays(html, {
+        ok: false,
+        body: { success: false, error: { code: 'FIELD_NOT_ACCESSIBLE', message: diagnostic, userMessage: reason } },
+      })).toBe(reason);
+      // [#32712] An answer carrying no text for its user shows the page's own sentence, never the diagnostic.
+      expect(await pageSays(html, { ok: false, body: { success: false, error: { code: 'INTERNAL', message: 'Upload failed' } } }))
+        .toBe('The upload failed.');
+    });
+  });
+
+  describe('#32712 — the page and its refusals in the request\'s language', () => {
+    const zh = UPLOAD_LINK_COPY['zh-CN'];
+    const en = UPLOAD_LINK_COPY.en;
+    const ZH = { 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' };
+    const openLinkIn = (token: string, headers: Record<string, string>, user: string | null = OWNER.userId) =>
+      call('GET', `${BASE}/upload-links/:token`, { params: { token }, headers: { ...headers, ...sessionOf(user) } });
+    const draftClaim = async (name: string) =>
+      (await engine.insert('claim', { name, owner: OWNER.userId, status: 'draft', organization_id: ORG }, { context: SYS } as never)).id as string;
+
+    afterEach(() => setWorkspaceLocale(undefined));
+
+    /** The page's visible copy: no record, object, field or user named, whatever the language. */
+    const expectNamesNothing = (text: string, recordId: string) => {
+      for (const named of [recordId, 'claim', 'policy', 'invoices', OWNER.userId]) expect(text).not.toContain(named);
+    };
+
+    it('serves the picker page in the request\'s language: lang, every sentence, the expiry', async () => {
+      const grant = await files.createUploadLinkAs('claim', ids.claimB, { field: 'policy' }, OWNER as never);
+      const page = await openLinkIn(tokenOf(grant.path), ZH);
+      expect(page._status).toBe(200);
+      const html = String(page._sent);
+      expect(html).toContain('<html lang="zh-CN" dir="ltr">');
+      expect(html).toContain(`<title>${zh.pageTitle}</title>`);
+      for (const sentence of [zh.wanted('field'), zh.once, zh.fileLabel, zh.send]) expect(html).toContain(sentence);
+      // The expiry, written the Chinese way and named as UTC.
+      expect(html).toMatch(/链接将于 \d{4}年\d{1,2}月\d{1,2}日 UTC \d{2}:\d{2} 失效。/);
+      for (const english of ['Upload a file', 'A file was asked for', 'This link works once', 'It stops working']) {
+        expect(html).not.toContain(english);
+      }
+      expectNamesNothing(html, ids.claimB);
+    });
+
+    it('with no language of its own, the request gets the workspace default; a language it names wins over the default', async () => {
+      setWorkspaceLocale('zh-CN');
+      const grant = await files.createUploadLinkAs('claim', ids.claimB, { attachments: true }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const byDefault = String((await openLinkIn(token, {}))._sent);
+      expect(byDefault).toContain('<html lang="zh-CN" dir="ltr">');
+      expect(byDefault).toContain(zh.wanted('attachments'));
+      const asked = String((await openLinkIn(token, { 'accept-language': 'en-US,en;q=0.9' }))._sent);
+      expect(asked).toContain('<html lang="en" dir="ltr">');
+      expect(asked).toContain(en.wanted('attachments'));
+      // No default and no language asked: English, as every page was before.
+      setWorkspaceLocale(undefined);
+      expect(String((await openLinkIn(token, {}))._sent)).toContain('<html lang="en" dir="ltr">');
+    });
+
+    it('the unusable-link page, and the PUT\'s unusable and sign-in refusals, speak the request\'s language', async () => {
+      const page = await openLinkIn('not-a-token', ZH);
+      expect(page._status).toBe(404);
+      expect(String(page._sent)).toContain(`<h1>${zh.unusableHeading}</h1><p>${zh.unusable}</p>`);
+      const put = await call('PUT', `${BASE}/upload-links/:token`, {
+        params: { token: 'not-a-token' }, headers: { ...ZH, ...sessionOf(OWNER.userId) }, rawBody: async () => Buffer.from('x'),
+      });
+      expect(put._status).toBe(404);
+      // `message` keeps its diagnostic wording; `userMessage` is the page's.
+      expect(put._json.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', message: UPLOAD_LINK_UNUSABLE_MESSAGE, userMessage: zh.unusable });
+      const anonymous = await call('PUT', `${BASE}/upload-links/:token`, {
+        params: { token: 'not-a-token' }, headers: ZH, rawBody: async () => Buffer.from('x'),
+      });
+      expect(anonymous._status).toBe(401);
+      expect(anonymous._json.error).toMatchObject({ code: 'AUTH_REQUIRED', userMessage: zh.signInRequired });
+    });
+
+    it('a record locked after minting: the PUT answers the page\'s lock sentence, with no code prefix and no record named', async () => {
+      const id = await draftClaim('locked, zh');
+      const grantZh = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      const grantEn = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      locked.add(id);
+      try {
+        const put = await useLink(tokenOf(grantZh.path), Buffer.from('locked'), ZH);
+        expect(put._status, JSON.stringify(put._json)).toBe(409);
+        expect(put._json.error).toMatchObject({ code: 'RECORD_LOCKED', userMessage: zh.recordLocked });
+        expect(put._json.error.message).not.toMatch(/^RECORD_LOCKED/);
+        expectNamesNothing(put._json.error.userMessage, id);
+        const putEn = await useLink(tokenOf(grantEn.path), Buffer.from('locked'));
+        expect(putEn._json.error).toMatchObject({ code: 'RECORD_LOCKED', userMessage: en.recordLocked });
+        expect(putEn._json.error.userMessage).not.toMatch(/RECORD_LOCKED/);
+        expectNamesNothing(putEn._json.error.userMessage, id);
+      } finally {
+        locked.delete(id);
+      }
+    });
+
+    it('a field read-only once its readonlyWhen holds: the page\'s sentence, naming neither object nor field', async () => {
+      const id = await draftClaim('approved, zh');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'invoices' }, OWNER as never);
+      await engine.update('claim', { status: 'approved' }, { where: { id }, context: SYS } as never);
+      const put = await useLink(tokenOf(grant.path), Buffer.from('late invoice'), ZH);
+      expect(put._status, JSON.stringify(put._json)).toBe(403);
+      expect(put._json.error).toMatchObject({ code: 'FIELD_NOT_ACCESSIBLE', userMessage: zh.fieldReadOnly });
+      expectNamesNothing(put._json.error.userMessage, id);
+    });
+
+    it('over the upload limit: the page\'s sentence in the workspace default, the link still usable', async () => {
+      setWorkspaceLocale('zh-CN');
+      const grant = await files.createUploadLinkAs('claim', ids.claimB, { attachments: true }, OWNER as never);
+      const token = tokenOf(grant.path);
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 1, authored: true } } as never);
+      try {
+        const declared = await useLink(token, Buffer.alloc(10, 7), { 'content-length': String(MIB + 1) });
+        expect(declared._status).toBe(413);
+        expect(declared._json.error).toMatchObject({ code: 'PAYLOAD_TOO_LARGE', userMessage: zh.tooLarge });
+        const read = await useLink(token, Buffer.alloc(MIB + 1, 7));
+        expect(read._status).toBe(413);
+        expect(read._json.error).toMatchObject({ code: 'PAYLOAD_TOO_LARGE', userMessage: zh.tooLarge });
+        expect((await useLink(token, Buffer.alloc(16, 7)))._status).toBe(200);
+      } finally {
+        storage.setLimitsSnapshot({} as never);
+      }
+    });
+
+    it('the page\'s script writes its status lines in its language and shows the refusal the door wrote', async () => {
+      const grant = await files.createUploadLinkAs('claim', ids.claimB, { field: 'policy' }, OWNER as never);
+      const html = String((await openLinkIn(tokenOf(grant.path), ZH))._sent);
+      const script = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? '';
+      const says = async (answer: { ok: boolean; body: unknown }) => {
+        const handlers: Record<string, () => void> = {};
+        const el = (id: string) => ({
+          id, disabled: id === 'send', textContent: '',
+          files: id === 'file' ? [{ name: 'scan.pdf', type: 'application/pdf' }] : undefined,
+          addEventListener: (event: string, fn: () => void) => { handlers[`${id}:${event}`] = fn; },
+        });
+        const els: Record<string, ReturnType<typeof el>> = { file: el('file'), send: el('send'), status: el('status') };
+        runInNewContext(script, {
+          document: { getElementById: (id: string) => els[id] },
+          location: { pathname: '/api/v1/storage/upload-links/t' },
+          fetch: async () => ({ ok: answer.ok, json: async () => answer.body }),
+        });
+        handlers['send:click']!();
+        const uploading = els.status.textContent;
+        for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+        return { uploading, after: els.status.textContent };
+      };
+      const done = await says({ ok: true, body: { success: true, data: { fileId: 'f1', size: 3, field: 'policy' } } });
+      expect(done).toEqual({ uploading: zh.uploading, after: zh.attached });
+      expect((await says({ ok: false, body: { success: false, error: { code: 'INTERNAL', message: 'Upload failed' } } })).after)
+        .toBe(zh.failed);
+      expect((await says({ ok: false, body: { success: false, error: { code: 'RECORD_LOCKED', message: 'x', userMessage: zh.recordLocked } } })).after)
+        .toBe(zh.recordLocked);
     });
   });
 });

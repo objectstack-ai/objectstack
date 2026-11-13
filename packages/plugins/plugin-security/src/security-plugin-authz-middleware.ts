@@ -106,6 +106,7 @@ import { isGuestEnvelope, readUnlessRefused, requiredCapsForOperation } from './
 import {
   assertAppAutomationAppendOnlyWriteAllowed,
   assertFlowSystemIdentityWriteAllowed,
+  warnAppAutomationAppendOnlyInsert,
 } from './flow-system-identity-write-refusal.js';
 import { delegatedUnitReadScope, isUnreadableAddressedRowRefusal } from './delegated-admin-gate.js';
 import { isRowWriteProbe, logGateRefusal, type AuthzMiddlewareFn } from './record-row-write-probe.js';
@@ -226,7 +227,9 @@ function userFacingDenialMessage(
 /**
  * The catalog keys this middleware renders. The first three are the `message`
  * of the gates #7414 / #7451 localized; the rest are the `userMessage` of the
- * owner-anchor, queue and field-write refusals ({@link withUserMessage}).
+ * owner-anchor, queue and field-write refusals ({@link withUserMessage}); the
+ * last two are the list rules `field_edit_denied`'s `{{fields}}` is spelled by
+ * ({@link labelList}).
  */
 type UserFacingDenialKey =
   | 'permission_denied'
@@ -238,7 +241,9 @@ type UserFacingDenialKey =
   | 'record_queue_change_denied'
   | 'record_queue_assign_denied'
   | 'field_edit_denied'
-  | 'field_edit_denied_opaque';
+  | 'field_edit_denied_opaque'
+  | 'field_label_quoted'
+  | 'field_label_list_separator';
 
 /**
  * The deployment's `II18nService.t`, when one is registered: the override rung
@@ -329,19 +334,19 @@ function fieldEditDenialMessage(
     if (label === undefined || label === field) return userFacingDenialMessage(ctx, 'field_edit_denied_opaque', locale);
     labels.push(label);
   }
-  return userFacingDenialMessage(ctx, 'field_edit_denied', locale, { fields: labelList(labels, loc) });
+  return userFacingDenialMessage(ctx, 'field_edit_denied', locale, { fields: labelList(ctx, labels, locale) });
 }
 
 /**
- * The labels as one phrase in the caller's locale: each quoted the way the
- * catalog quotes a field label (`delete_restricted`'s templates), and listed
- * with the locale's enumeration mark.
+ * The labels as one phrase in the caller's locale: each quoted by the
+ * catalog's `field_label_quoted` and joined by its `field_label_list_separator`
+ * — the list rules live in the operation-message catalog beside the sentence
+ * they fill, so they resolve by the catalog's own locale ladder and a
+ * deployment's `errors.<key>` override applies to them as to the sentence.
  */
-function labelList(labels: readonly string[], locale: string): string {
-  const lang = locale.toLowerCase();
-  if (lang.startsWith('zh') || lang.startsWith('ja')) return labels.map((l) => `「${l}」`).join('、');
-  if (lang.startsWith('es')) return labels.map((l) => `«${l}»`).join(', ');
-  return labels.map((l) => `“${l}”`).join(', ');
+function labelList(ctx: PluginContext, labels: readonly string[], locale: string | undefined): string {
+  const separator = userFacingDenialMessage(ctx, 'field_label_list_separator', locale);
+  return labels.map((label) => userFacingDenialMessage(ctx, 'field_label_quoted', locale, { label })).join(separator);
 }
 
 /**
@@ -537,6 +542,13 @@ export function registerAuthzMiddleware(
     // names. See `flow-system-identity-write-refusal.ts`.
     assertAppAutomationAppendOnlyWriteAllowed(opCtx, (object) =>
       typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined,
+    );
+    // The same elevation's insert into an append-only object is told, once,
+    // that it is deprecated, naming the two doors that replace it.
+    warnAppAutomationAppendOnlyInsert(
+      opCtx,
+      (object) => (typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined),
+      (line) => ctx.logger.warn(line),
     );
 
     // System operations bypass security

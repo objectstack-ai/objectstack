@@ -77,6 +77,7 @@ import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
+import { runAdminBanUser, runAdminUnbanUser } from './admin-ban-endpoints.js';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
@@ -85,10 +86,15 @@ import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-
 import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './identity-write-guard.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { SCIM_DEACTIVATION_BAN_REASON } from './user-ban-write.js';
+import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
+import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
+import { FORCED_RESET_REVOKE_REASON } from './forced-reset-revocation.js';
+import { MEMBERSHIP_ENDED_REVOKE_REASON } from './membership-ended-session.js';
+import { SCIM_DEACTIVATION_REVOKE_REASON } from './scim-deactivation-key-revocation.js';
 import { runSetUserManager } from './admin-set-user-manager.js';
 import { runAdminSetUserPassword } from './admin-user-endpoints.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_STATUS } from './cloud-managed.js';
-import { resetCloudManagedForTesting } from '@objectstack/core';
+import { hashApiKey, resetCloudManagedForTesting, resolveApiKeyAdmission } from '@objectstack/core';
 import { backfillScimProvisionedIdentitySource, type ScimIdentitySourceEngine } from './scim-identity-source.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit.js';
@@ -264,10 +270,15 @@ async function bootEngine(): Promise<BootedSqliteEngine> {
   // break-glass guard, like the resolver, resolves a grant's set name to.
   bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
 
-  // The two engine guards `auth-plugin.ts` registers at `kernel:ready`, in
-  // the same order (ADR-0092 at priority 10, break-glass at 20).
+  // The engine guards `auth-plugin.ts` registers at `kernel:ready`, in the
+  // same order (ADR-0092 at priority 10, the API key restore guard at 15,
+  // break-glass at 20), with the whitelists it registers before them.
   registerManagedUpdateWhitelist('sys_user', SYS_USER_PROFILE_EDIT_FIELDS);
+  for (const [object, fields] of Object.entries(MANAGED_EXTENSION_EDITABLE_FIELDS)) {
+    if (object !== 'sys_user') registerManagedUpdateWhitelist(object, fields);
+  }
   registerIdentityWriteGuard(engine, { packageId: 'test.identity-write-guard' });
+  registerApiKeyRestoreGuard(engine, { packageId: 'test.api-key-restore-guard' });
   registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, {
     packageId: 'test.last-admin-guard',
   });
@@ -513,6 +524,132 @@ describe('[#14360] SCIM active:false disables the account through the platform b
     expect((await setActive(h, dana.scimId, true)).status).toBe(200);
     expect((await setActive(h, dana.scimId, true)).status).toBe(200);
     expect(isBanned(await userRow(h, dana.email))).toBe(false);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// The refusal's cause — a deactivation and an administrator's ban, told apart
+// ---------------------------------------------------------------------------
+
+/** A sign-in's answer, read once: the status and the parsed body. */
+async function signInAnswer(
+  h: Harness,
+  email: string,
+  password = PASSWORD,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const res = await h.send(
+    new Request(`${AUTH}/sign-in/email`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: BASE },
+      body: JSON.stringify({ email, password }),
+    }),
+  );
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+}
+
+/**
+ * An administrator's ban, through the ban mount's own handler (the platform
+ * administrator gate in front of it is not the subject). The target must not
+ * be the last local-credential holder, or the mount refuses the ban.
+ */
+async function adminBan(h: Harness, userId: string, banReason?: string): Promise<void> {
+  const res = await runAdminBanUser(
+    { getAuthContext: () => h.manager.getAuthContext() },
+    { id: 'usr_platform_admin' } as never,
+    new Request(`${AUTH}/admin/ban-user`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId, ...(banReason !== undefined ? { banReason } : {}) }),
+    }),
+  );
+  expect(res.status, `admin ban failed: ${JSON.stringify(res.body)}`).toBe(200);
+}
+
+describe('a sign-in refused for a SCIM deactivation names that cause; an administrator\'s ban does not', () => {
+  it('SCIM active:false ⇒ 403 BANNED_USER with details.cause scim_deactivated, under any spelling of the address', async () => {
+    const h = await boot();
+    const dana = await provision(h, 'dana');
+    await attachPassword(h, dana);
+    expect((await setActive(h, dana.scimId, false)).status).toBe(200);
+    expect((await userRow(h, dana.email))?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+
+    for (const spelling of [dana.email, dana.email.toUpperCase()]) {
+      const { status, body } = await signInAnswer(h, spelling);
+      expect(status, `${spelling}: ${JSON.stringify(body)}`).toBe(403);
+      expect(body.code).toBe('BANNED_USER');
+      // The whole of `details`: one machine token, nothing about the directory.
+      expect(body.details).toEqual({ cause: 'scim_deactivated' });
+    }
+  }, 60_000);
+
+  it('SCIM DELETE /Users/{id} ⇒ the same cause', async () => {
+    const h = await boot();
+    const gus = await provision(h, 'gus');
+    await attachPassword(h, gus);
+    expect((await h.send(scimRequest(h, 'DELETE', `/Users/${gus.scimId}`))).status).toBe(204);
+
+    const { status, body } = await signInAnswer(h, gus.email);
+    expect(status, JSON.stringify(body)).toBe(403);
+    expect(body.code).toBe('BANNED_USER');
+    expect(body.details).toEqual({ cause: 'scim_deactivated' });
+  }, 60_000);
+
+  it('an administrator\'s ban ⇒ 403 BANNED_USER exactly as before: no details, the same message', async () => {
+    const h = await boot();
+    const frank = await provision(h, 'frank');
+    await attachPassword(h, frank);
+    // A second local-password holder, so the ban mount's last-credential guard lets the ban through.
+    const dana = await provision(h, 'dana');
+    await attachPassword(h, dana);
+    await adminBan(h, frank.userId, 'Policy violation');
+    await adminBan(h, dana.userId);
+    expect((await userRow(h, dana.email))?.ban_reason).toBe('No reason');
+
+    const withReason = await signInAnswer(h, frank.email);
+    const noReason = await signInAnswer(h, dana.email);
+    for (const { status, body } of [withReason, noReason]) {
+      expect(status, JSON.stringify(body)).toBe(403);
+      expect(body.code).toBe('BANNED_USER');
+      expect(body).not.toHaveProperty('details');
+    }
+
+    // The deactivation's refusal differs from an administrator's by `details`
+    // alone: the vendor's status, code and message are kept.
+    expect((await setActive(h, dana.scimId, true)).status).toBe(200); // the IdP cannot lift an administrator's ban
+    await h.engine.update('sys_user', { id: dana.userId, banned: false, ban_reason: null }, SYSTEM);
+    expect((await setActive(h, dana.scimId, false)).status).toBe(200);
+    const deactivated = await signInAnswer(h, dana.email);
+    expect(deactivated.body.details).toEqual({ cause: 'scim_deactivated' });
+    const { details: _cause, ...rest } = deactivated.body;
+    expect(rest).toEqual(withReason.body);
+  }, 60_000);
+
+  it('a deactivation over an administrator\'s ban keeps the administrator\'s reason, and answers as that ban', async () => {
+    const h = await boot();
+    const frank = await provision(h, 'frank');
+    await attachPassword(h, frank);
+    const dana = await provision(h, 'dana');
+    await attachPassword(h, dana);
+    await adminBan(h, frank.userId, 'Policy violation');
+    expect((await setActive(h, frank.scimId, false)).status).toBe(200);
+    expect((await userRow(h, frank.email))?.ban_reason).toBe('Policy violation');
+
+    const { status, body } = await signInAnswer(h, frank.email);
+    expect(status, JSON.stringify(body)).toBe(403);
+    expect(body.code).toBe('BANNED_USER');
+    expect(body).not.toHaveProperty('details');
+  }, 60_000);
+
+  it('a wrong password for a deactivated account is the ordinary credential refusal: the cause is told only to the password holder', async () => {
+    const h = await boot();
+    const dana = await provision(h, 'dana');
+    await attachPassword(h, dana);
+    expect((await setActive(h, dana.scimId, false)).status).toBe(200);
+
+    const { status, body } = await signInAnswer(h, dana.email, 'not-the-password-14360');
+    expect(status, JSON.stringify(body)).toBe(401);
+    expect(body.code).toBe('INVALID_EMAIL_OR_PASSWORD');
+    expect(body).not.toHaveProperty('details');
   }, 60_000);
 });
 
@@ -842,6 +979,195 @@ describe('[#14360] DELETE /Users/{id} leaves the tombstoned account disabled', (
     expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
     expect(await sessionCount(h, gus.userId)).toBe(0);
     await expectSignInBanned(h, gus.email);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// (i) — a directory deactivation revokes the user's API keys
+// ---------------------------------------------------------------------------
+
+/** Mint a key the way `POST /api/v1/keys` writes the row (system context, hash only). */
+async function mintKey(h: Harness, userId: string, id: string): Promise<string> {
+  const raw = `osk_${id}_${'x'.repeat(24)}`;
+  await h.engine.insert(
+    'sys_api_key',
+    { id, name: id, key: hashApiKey(raw), prefix: raw.slice(0, 12), user_id: userId, revoked: false },
+    SYSTEM,
+  );
+  return raw;
+}
+
+async function keyRow(h: Harness, id: string): Promise<{ revoked: boolean; revoked_reason: string | null }> {
+  const found = (await h.engine.findOne(
+    'sys_api_key',
+    { where: { id }, fields: ['id', 'revoked', 'revoked_reason'] },
+    SYSTEM,
+  )) as Record<string, unknown> | null;
+  expect(found, `sys_api_key '${id}' must still exist`).toBeTruthy();
+  return {
+    revoked: found!.revoked === true || found!.revoked === 1,
+    revoked_reason: (found!.revoked_reason as string | null | undefined) ?? null,
+  };
+}
+
+/** The key door's verdict for a raw key: `admitted`, a lifecycle code, or a refusal reason. */
+async function keyDoor(h: Harness, raw: string): Promise<string> {
+  const admission = await resolveApiKeyAdmission(h.engine, { 'x-api-key': raw }, Date.now(), undefined, undefined, undefined);
+  if (admission.outcome === 'lifecycle') return admission.refusal.code;
+  if (admission.outcome === 'refused') return `refused:${admission.reason}`;
+  return admission.outcome;
+}
+
+const SCIM_REVOKED = { revoked: true, revoked_reason: SCIM_DEACTIVATION_REVOKE_REASON };
+const LIVE = { revoked: false, revoked_reason: null };
+
+/** The owner's own restore through the data path, as the Restore API Key action sends it. */
+async function ownerRestore(h: Harness, userId: string, keyId: string): Promise<{ code?: string; status?: number } | undefined> {
+  return h.engine
+    .update('sys_api_key', { id: keyId, revoked: false }, { context: { userId, positions: [], permissions: [] } } as never)
+    .then(() => undefined, (e: { code?: string; status?: number }) => ({ code: e?.code, status: e?.status }));
+}
+
+describe('a directory deactivation revokes the user\'s API keys, and a re-activation re-arms none of them', () => {
+  it('(i) active:false revokes every key with scim_deactivated; active:true leaves them revoked and the key door refuses them', async () => {
+    const h = await boot();
+    const kai = await provision(h, 'kai');
+    const rawA = await mintKey(h, kai.userId, 'key_kai_a');
+    const rawB = await mintKey(h, kai.userId, 'key_kai_b');
+    // Control: before the directory deactivates, both keys work.
+    expect([await keyDoor(h, rawA), await keyDoor(h, rawB)]).toEqual(['admitted', 'admitted']);
+
+    expect((await setActive(h, kai.scimId, false)).status).toBe(200);
+    expect([await keyRow(h, 'key_kai_a'), await keyRow(h, 'key_kai_b')]).toEqual([SCIM_REVOKED, SCIM_REVOKED]);
+    expect(await keyDoor(h, rawA)).toBe('API_KEY_REVOKED');
+
+    const res = await setActive(h, kai.scimId, true);
+    expect(res.status, `SCIM PATCH active:true failed: ${await res.clone().text()}`).toBe(200);
+    // The ban is lifted (the directory's to lift) …
+    expect(isBanned(await userRow(h, kai.email))).toBe(false);
+    // … and the keys stay revoked: the door refuses them on their own state.
+    expect([await keyRow(h, 'key_kai_a'), await keyRow(h, 'key_kai_b')]).toEqual([SCIM_REVOKED, SCIM_REVOKED]);
+    expect([await keyDoor(h, rawA), await keyDoor(h, rawB)]).toEqual(['API_KEY_REVOKED', 'API_KEY_REVOKED']);
+
+    // The re-activated owner cannot restore one either; a new key is the road.
+    expect(await ownerRestore(h, kai.userId, 'key_kai_a')).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(await keyRow(h, 'key_kai_a')).toEqual(SCIM_REVOKED);
+    const fresh = await mintKey(h, kai.userId, 'key_kai_new');
+    expect(await keyDoor(h, fresh)).toBe('admitted');
+  }, 60_000);
+
+  it('(i) a key revoked earlier with a reason someone could lift is restamped; organization_membership_ended is kept', async () => {
+    const h = await boot();
+    const lea = await provision(h, 'lea');
+    await mintKey(h, lea.userId, 'key_lea_owner_revoked');
+    await h.engine.update('sys_api_key', { id: 'key_lea_owner_revoked', revoked: true }, SYSTEM);
+    await mintKey(h, lea.userId, 'key_lea_reset');
+    await h.engine.update('sys_api_key', { id: 'key_lea_reset', revoked: true, revoked_reason: FORCED_RESET_REVOKE_REASON }, SYSTEM);
+    await mintKey(h, lea.userId, 'key_lea_left');
+    await h.engine.update('sys_api_key', { id: 'key_lea_left', revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON }, SYSTEM);
+
+    expect((await setActive(h, lea.scimId, false)).status).toBe(200);
+
+    expect(await keyRow(h, 'key_lea_owner_revoked')).toEqual(SCIM_REVOKED);
+    expect(await keyRow(h, 'key_lea_reset')).toEqual(SCIM_REVOKED);
+    expect(await keyRow(h, 'key_lea_left')).toEqual({ revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON });
+
+    expect((await setActive(h, lea.scimId, true)).status).toBe(200);
+    expect(await ownerRestore(h, lea.userId, 'key_lea_owner_revoked')).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(await keyRow(h, 'key_lea_owner_revoked')).toEqual(SCIM_REVOKED);
+  }, 60_000);
+
+  it('(i) DELETE /Users/{id} keeps the key rows and revokes them the same way; a re-link through the tombstone re-arms none', async () => {
+    const h = await boot();
+    const body = {
+      schemas: [USER_SCHEMA],
+      userName: 'mia@example.com',
+      externalId: 'ext-mia',
+      name: { givenName: 'mia', familyName: 'Example' },
+      displayName: 'mia Example',
+      emails: [{ value: 'mia@example.com', primary: true, type: 'work' }],
+      active: true,
+    };
+    const created = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(created.status, `SCIM POST /Users failed: ${await created.clone().text()}`).toBe(201);
+    const scimId = ((await created.json()) as { id: string }).id;
+    const userId = String((await userRow(h, 'mia@example.com'))!.id);
+    const raw = await mintKey(h, userId, 'key_mia');
+
+    const del = await h.send(scimRequest(h, 'DELETE', `/Users/${scimId}`));
+    expect(del.status, `SCIM DELETE /Users/{id} failed: ${await del.clone().text()}`).toBe(204);
+    // The user row and its key rows survive the vendor's tombstone; the key is revoked.
+    expect(await keyRow(h, 'key_mia')).toEqual(SCIM_REVOKED);
+    expect(await keyDoor(h, raw)).toBe('API_KEY_REVOKED');
+
+    const again = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(again.status, `SCIM re-link POST /Users failed: ${await again.clone().text()}`).toBe(201);
+    expect(String((await userRow(h, 'mia@example.com'))!.id), 'the tombstone re-links the same user').toBe(userId);
+    expect(isBanned(await userRow(h, 'mia@example.com'))).toBe(false);
+    expect(await keyRow(h, 'key_mia')).toEqual(SCIM_REVOKED);
+    expect(await keyDoor(h, raw)).toBe('API_KEY_REVOKED');
+  }, 60_000);
+
+  it('(i) CONTROL: an administrator\'s ban and unban leave the keys as they are, and the key works again after the unban', async () => {
+    const h = await boot();
+    const ned = await provision(h, 'ned');
+    const raw = await mintKey(h, ned.userId, 'key_ned');
+
+    await adminBan(h, ned.userId, 'Policy violation');
+    expect(await keyRow(h, 'key_ned')).toEqual(LIVE);
+    // Refused while the ban holds, on the owner's ban, not on the key.
+    expect(await keyDoor(h, raw)).toBe('refused:owner_banned');
+
+    const unban = await runAdminUnbanUser(
+      { getAuthContext: () => h.manager.getAuthContext() },
+      { id: 'usr_platform_admin' } as never,
+      new Request(`${AUTH}/admin/unban-user`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: ned.userId }),
+      }),
+    );
+    expect(unban.status, `admin unban failed: ${JSON.stringify(unban.body)}`).toBe(200);
+    expect(await keyRow(h, 'key_ned')).toEqual(LIVE);
+    expect(await keyDoor(h, raw)).toBe('admitted');
+  }, 60_000);
+
+  it('(i) a key revocation that cannot be written still bans the account, and says so once at error', async () => {
+    const h = await boot();
+    const ora = await provision(h, 'ora');
+    const raw = await mintKey(h, ora.userId, 'key_ora');
+    let refused = 0;
+    const real = h.engine;
+    const refusing = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'update') {
+          return (object: string, data: Record<string, unknown>, options?: unknown) => {
+            if (object === 'sys_api_key') {
+              refused += 1;
+              throw new Error('key revocation write refused (test)');
+            }
+            return target.update(object, data as never, options as never);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(refusing as never);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await setActive(h, ora.scimId, false);
+      expect(res.status, `SCIM PATCH failed: ${await res.clone().text()}`).toBe(200);
+      expect(refused).toBe(1);
+      const row = await userRow(h, ora.email);
+      expect(isBanned(row)).toBe(true);
+      expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+      expect(await keyRow(h, 'key_ora')).toEqual(LIVE);
+      expect(await keyDoor(h, raw)).toBe('refused:owner_banned');
+      expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('API key revocation INCOMPLETE'))).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
   }, 60_000);
 });
 

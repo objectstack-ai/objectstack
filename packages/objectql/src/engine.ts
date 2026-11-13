@@ -96,7 +96,7 @@ import {
 import { enforceTransactionOrigin, execute, warnTransactionUnsupported } from './engine-execute-transactions.js';
 // [#25522 cut 8] The compatibility-API bodies; the methods of the same names
 // below hand each body the members it reads (`CompatibilityApiHost`).
-import { getConfigs, introspectDatasource, registerObject, removePackage, syncObjectSchema, syncSchemas } from './engine-compatibility-api.js';
+import { applyPublishedColumnChanges, getConfigs, introspectDatasource, registerObject, removePackage, syncObjectSchema, syncSchemas, type PublishedColumnChangeReport } from './engine-compatibility-api.js';
 // [#25522 cut 9] The hook-context caller-envelope builders; the methods of the
 // same names below call them, and none of the bodies reads a member.
 import { buildEvalUser, buildProvenance, buildSession, buildUser } from './engine-execution-plumbing.js';
@@ -361,6 +361,7 @@ import { ObjectRepositoryFacet } from './engine-object-repository.js';
 import { ScopedContextFacet } from './engine-scoped-context.js';
 // [#30052 codemod] The scoped facets' hosts, one per instance, which each class's static block builds.
 import { objectRepositoryHost, scopedContextHost } from './engine-scoped-hosts.js';
+import { captureStoredExpressions, type StoredExpressionCapture } from './stored-expression-backfill.js';
 
 // [#29986 codemod] The statics of `ObjectQL` its facet modules read, private ones included, as
 // the class declares them (an indexed access on the class). The static block at the end of
@@ -755,7 +756,16 @@ export class ObjectQL implements IObjectQLEngine {
     return HooksAndFunctionsFacet.registerFunction.call(hooksAndFunctionsHost.of(this), name, handler, packageIdOrOptions);
   }
 
-  /** Look up a registered function by name. */
+  /**
+   * Look up a registered function by name, with no package: the last
+   * registration of the name. [ADR-0150 D3/D4, #31700; epic seat ruling R2-C]
+   * A name two packages hold (two namespaces may each bind one) is refused,
+   * `409 RESOURCE_CONFLICT` naming every holder, never answered with one of
+   * them; a reader that knows its package resolves through
+   * {@link functionHoldersOf}.
+   *
+   * @throws {PackageScopedNameRefusedError} for a name two packages hold.
+   */
   resolveFunction(name: string): HookHandler | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
     return HooksAndFunctionsFacet.resolveFunction.call(hooksAndFunctionsHost.of(this), name);
@@ -767,7 +777,9 @@ export class ObjectQL implements IObjectQLEngine {
    * it"; a caller that must also report what the call did (the automation
    * engine's `script` node, feeding the #4354 run summary) needs the
    * declaration, and reading it off the same registry keeps the two from
-   * drifting.
+   * drifting. Refused alike for a name two packages hold (above).
+   *
+   * @throws {PackageScopedNameRefusedError} for a name two packages hold.
    */
   resolveFunctionEntry(name: string): Readonly<FunctionEntry> | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
@@ -783,15 +795,20 @@ export class ObjectQL implements IObjectQLEngine {
    * over, in the calling flow's package. A snapshot, taken at the call. The flow
    * `script` node resolves through it (#32073), and `bindHooksToEngine` reads
    * a hook's own package's entry from it. `resolveFunction` and
-   * `resolveFunctionEntry` keep answering the one last-registered entry per
-   * name.
+   * `resolveFunctionEntry` answer the one last-registered entry per name, and
+   * refuse a name two packages hold (#31700).
    */
   functionHoldersOf(name: string): PackageScopedHolderSource<Readonly<FunctionEntry>> {
     // [#31716] The body lives in `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
     return HooksAndFunctionsFacet.functionHoldersOf.call(hooksAndFunctionsHost.of(this), name);
   }
 
-  /** Remove all functions registered under a given `packageId`. */
+  /**
+   * Remove all functions registered under a given `packageId`, from the bare
+   * map and the holder set ({@link functionHoldersOf}); answers how many bare
+   * entries left. [#32534] When the last registration of a name leaves and
+   * exactly one holder of it remains, the bare read answers that holder.
+   */
   unregisterFunctionsByPackage(packageId: string): number {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
     return HooksAndFunctionsFacet.unregisterFunctionsByPackage.call(hooksAndFunctionsHost.of(this), packageId);
@@ -1705,6 +1722,20 @@ export class ObjectQL implements IObjectQLEngine {
     onFault?: (field: string, message: string) => void,
   ): Promise<Array<Record<string, unknown>>> {
     return SecurityResolversFacet.computeStoredExpressionsOver.call(securityResolversHost.of(this), object, rows, context, onFault);
+  }
+
+  /**
+   * [#32527] Capture `object`'s stored computed fields before a metadata door
+   * makes a change to it live, and hand back the fill that change owes:
+   * {@link StoredExpressionCapture.fillChanged}, called once the change is
+   * served, fills every stored row of each stored computed field that now
+   * computes something new (added, turned from a formula, its expression
+   * changed) with the write's own computation — `stored-expression-backfill.ts`
+   * carries the contract. The metadata protocol reaches it through its host
+   * engine, which cannot import this package.
+   */
+  captureStoredExpressions(object: string): StoredExpressionCapture {
+    return captureStoredExpressions(this, this.logger, object);
   }
 
   private formulaOptionLabels(
@@ -5469,6 +5500,31 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#32590] Bring an existing object's table to its PUBLISHED declaration for
+   * the column changes the driver can make without losing data or failing on
+   * existing rows — a `date` column under a field now declared `datetime`, a
+   * NOT NULL column under `storage: { notNull: false }` — and answer what it
+   * applied and what it could not (`SqlDriver.applyPublishedColumnChanges`
+   * names the set). The metadata publish calls it right after
+   * {@link syncObjectSchema}, which stays additive for every caller, the
+   * boot's sync among them.
+   *
+   * `undefined` when there is nothing to ask: no such object, no driver for
+   * it, a federated (external) object whose remote owns its schema, or a
+   * driver without the door (memory, Mongo — no column type or constraint to
+   * bring to a declaration).
+   */
+  async applyPublishedColumnChanges(objectName: string): Promise<PublishedColumnChangeReport | undefined> {
+    // [#32590] The body is in `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof applyPublishedColumnChanges> = {
+      getDriverForObject: (...a) => this.getDriverForObject(...a),
+      get _registry() { return readRegistry(); },
+    };
+    return applyPublishedColumnChanges.call(host, objectName);
+  }
+
+  /**
    * Drop the physical storage (table/collection) backing an object — the
    * inverse of {@link syncObjectSchema}. DESTRUCTIVE: deletes all rows in the
    * table. Used by the protocol delete path when the caller explicitly opts
@@ -6375,17 +6431,24 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    *    verbatim, so a narrowed ceiling is never re-broadened; only a context
    *    with no `permissions` takes the resolved ones;
    *  - a context that already carries a peer list keeps it;
+   *  - a context that already carries a membership set
+   *    (`accessible_org_ids`) keeps it, and one that carries none takes the
+   *    resolver's, so the organization wall judges the hook as it judges the
+   *    user's request (ADR-0093 D8.1, as amended);
    *  - a context that already carries an email keeps it verbatim (the
    *    session's, on a request-resolved context); only a context with none
    *    takes the resolved one;
-   *  - a context that needs none of the three resolves nothing and is
+   *  - a context that needs none of the four resolves nothing and is
    *    returned as is. One that lacks only the email is NOT that context: it
    *    resolves, and takes the email alone.
    *
    * The peer list is the members of the context's `tenantId`, the user
    * included; a context with no `tenantId` gets the user alone, as an
    * organisation-less request does. A resolver failure (an unreadable
-   * permission store) is thrown to the caller, which keeps the unseeded api.
+   * permission store) is thrown to the caller, which then asks again with
+   * `membershipUnread`: that call resolves nothing, and a context that carries
+   * no membership set takes an empty one — a membership the hook could not
+   * read is not a current one (ADR-0093 D8.1, as amended).
    *
    * Called on the api {@link withRunAs}`('user')` derived, which is never
    * elevated, so it does not re-judge the elevation flag.
@@ -6394,9 +6457,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * export, so it is no nameable member of this class's published face (see
    * the symbol's docblock in `hook-run-as.ts`).
    */
-  [SEED_USER_GRANTS](): Promise<ScopedContext> {
+  [SEED_USER_GRANTS](opts?: { membershipUnread?: true }): Promise<ScopedContext> {
     // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
-    return ScopedContextFacet.seedUserGrants.call(scopedContextHost.of(this));
+    return ScopedContextFacet.seedUserGrants.call(scopedContextHost.of(this), opts);
   }
 
   /**

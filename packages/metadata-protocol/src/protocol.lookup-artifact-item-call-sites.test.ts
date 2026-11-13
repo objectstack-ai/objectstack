@@ -116,7 +116,13 @@ function sitesOf(source: string, header: RegExp): Site[] {
     return sites;
 }
 
-type Disposition = 'definition' | 'served-package envelope' | 'no';
+/**
+ * [#32501] `exact-address envelope`: the by-name read at an admitted exact
+ * address looks its envelope up at the one package that address reads, and
+ * keeps the artifact only when it is that package's own
+ * (`exactAddressArtifact`), so no first-registered fallback reaches it.
+ */
+type Disposition = 'definition' | 'served-package envelope' | 'exact-address envelope' | 'no';
 
 /**
  * The recorded disposition of every site. `noPackage`: it passes no package,
@@ -130,14 +136,16 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: '[#25467 cut 15] the definition\'s body, the function the class member delegates to' },
     { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item)', noPackage: true, disposition: 'served-package envelope',
         why: 'the by-name read\'s envelope: naming no package, the package of the item it serves (the list\'s rule); [#23074] at the served item\'s own bundle member' },
+    { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, packageId, bundleMemberOf(request.type, item)', noPackage: false, disposition: 'exact-address envelope',
+        why: '[#32501] the by-name read\'s envelope at an admitted exact address: the package the address reads, its own artifact only (`exactAddressArtifact` drops another package\'s), never the pair id\'s first-registered fallback' },
     { file: LIST_READS_FILE, member: 'readFlattenedMetaItems', args: 'request.type, itemName, itemPackageId, bundleMemberOf(request.type, it)', noPackage: true, disposition: 'served-package envelope',
         why: 'the list\'s envelope: each item\'s own package, the rule the by-name read shares; [#23074] at each item\'s own bundle member' },
     { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
         why: 'the shipped-flow arm: the served body IS this artifact, and the envelope is looked up at its own package' },
     { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, request.packageId, wantedMember', noPackage: true, disposition: 'no',
         why: '[#22877] a bundled type\'s addressed member (the selector\'s, else the canonical one) when no stored row of it exists: the served body IS this artifact, and the envelope is looked up at its own package' },
-    { file: LAYERED_READS_FILE, member: 'getMetaItemLayered', args: 'request.type, request.name, request.packageId, wantedMember', noPackage: true, disposition: 'no',
-        why: 'the layered read\'s code LAYER: body and envelope are one artifact, and its provenance fields are read off that layer; [#26699] at the addressed member (the selector\'s, else the canonical one)' },
+    { file: LAYERED_READS_FILE, member: 'getMetaItemLayered', args: 'request.type, request.name, request.packageId || judgedPackageId, wantedMember', noPackage: true, disposition: 'no',
+        why: 'the layered read\'s code LAYER: body and envelope are one artifact, and its provenance fields are read off that layer; [#26699] at the addressed member (the selector\'s, else the canonical one); [#32365] a bare action read at the one enabled holder its judge answered' },
     { file: 'protocol-discovery-and-bases.ts', member: 'packagedArtifactBase', args: 'type, name', noPackage: true, disposition: 'no',
         why: 'the packaged base the translators compare a served body against: nothing of it is grafted onto the body' },
     { file: 'protocol-discovery-and-bases.ts', member: 'readCodeLayerForCarryForward', args: 'type, name, pkg', noPackage: true, disposition: 'no',
@@ -156,8 +164,10 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: '[#25467 E2] the host factory\'s closure in the class\'s static block: it forwards the moved bodies\' calls (their rows above, in their modules) unchanged, so its disposition is theirs' },
     { member: 'shippedArtifactsOf', args: '...a', noPackage: true, disposition: 'no',
         why: '[#25467 cut 15] the class member\'s host closure: it forwards the moved body\'s two calls (the rows above) unchanged, so its disposition is theirs' },
-    { file: 'protocol-registry-hydration.ts', member: 'hydrateOverlayIntoRegistry', args: 'type, (data as any).name, options.packageId ?? undefined, bundleMemberOf(type, data)', noPackage: true, disposition: 'no',
-        why: 'scoped to the row\'s own package; undefined only for a package-less row, whose body names no package; [#23074] at the row\'s own bundle member' },
+    { file: 'protocol-registry-hydration.ts', member: 'hydrateOverlayIntoRegistry', args: 'type, (data as any).name, envelopePackage ?? undefined, bundleMemberOf(type, data)', noPackage: true, disposition: 'no',
+        why: 'scoped to the row\'s own package; [#32568] for a package-less row of a type ADR-0150 addresses by (package, name), its one holder, and no lookup at all with two (never the first-registered\'s); undefined only for another type\'s package-less row, whose body names no package; [#23074] at the row\'s own bundle member' },
+    { file: 'protocol-exact-qualifier.ts', member: 'declinedCopyReplaced', args: 'request.type, request.name, holder, wantedMember', noPackage: false, disposition: 'no',
+        why: '[#32568] the admitted holder\'s own shipped item, served in place of a declined package-less copy at that holder\'s exact address: body and envelope are one artifact of the address\'s holder' },
     { file: 'protocol-registry-hydration.ts', member: 'expandRuntimeViewContainer', args: 'type, String(item.name), ownPackageId', noPackage: false, disposition: 'no',
         why: 'not called without a package, and kept only when it is the container\'s own package\'s' },
     { file: 'protocol-registry-hydration.ts', member: 'shippedViewContainerOf', args: 'type, name, packageId', noPackage: false, disposition: 'no',

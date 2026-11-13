@@ -53,7 +53,7 @@ model: opus
    - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条 `class:`+`reach:`+证据,或 `carrier:`。
    - `carrier:` = 卡号或人,⛔ 非下个 PR;涉 cloud 写 `carrier: cloud`;无则 `none`;皆无只进该节。
    - 前提实为平台缺陷 ⇒ 停手报 `carrier: objectstack` 附证据,⛔ 不在应用仓绕行。
-   - 同族发现 ⛔ 不开单点卡,报告点名并入该族收口卡;收口卡定义住 pm-dispatch 报告契约。
+   - 同族发现 ⛔ 不开单点卡,报告点名并入该族收口卡(一卡覆盖全族位置,带枚举钉子)。
    - dev ⛔ 不查重、不扫 open issues、不拉板,只附 3–5 个查重词;查询与命中数由立卡席写。
    - GitHub 写一律经 `scripts/pm/` 写工具;云容器里经 `fleet-write` 中继落为 `objectstack-fleet[bot]`。
    - 归属 = 文本里的 session ID,非 `user.login`;`git push` 不是 REST 写,不走中继。

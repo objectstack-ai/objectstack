@@ -97,7 +97,7 @@ metadata in every case; select options and lookups carry through. A parent
 `summary` field rolls child values up server-side (see objectstack-data).
 
 **Line-item grid behaviors (`grid` mode).** The editable grid is a real
-spreadsheet-style line editor (the QuickBooks / Stripe / NetSuite pattern), and
+spreadsheet-style line editor, and
 every behaviour is derived from the DATA MODEL — computed columns, catalog
 typeahead auto-fill, persisted drag-reorder, and the live Subtotal → Tax → Total
 stack: **objectstack-data → Relationships → Inline Editing**. Three things are
@@ -134,13 +134,19 @@ each child row.
 
 ## App Navigation
 
-An **App** groups objects, dashboards, reports, and custom pages into a
-structured navigation tree. Build with `App.create({...})` from
+Build an App with `App.create({...})` from
 `@objectstack/spec/ui` and register under `defineStack({ apps: [...] })`.
 
-⛔ **Exactly one App per `type: 'app'` package** — `defineStack` refuses a
-second at load, per ADR-0019 (app-as-consumer-unit) D3. More audiences are
-`requiredPermissions`-gated groups **inside** that one app, never a second app.
+⛔ **At most one App per package** (ADR-0019 (app-as-consumer-unit) D3 as
+amended): `defineStack` refuses a second app in a `type: 'app'` and a
+`type: 'module'` package alike. A suite (an app package plus its modules) may
+surface more apps: each further app goes in a module of its own with the
+objects it shows, served under that module's package id and gone when it is
+disabled. Audiences sharing one product and its objects stay
+`requiredPermissions`-gated groups **inside** one app.
+
+Who sees an app (`tabPermissions`) and who may open it (app
+`requiredPermissions`): [Navigation](./rules/navigation.md#who-sees-or-opens-an-app).
 
 ### Navigation Item Types
 
@@ -178,8 +184,6 @@ There is no `chart` report type — a report *visualizes* via its embedded
 ---
 
 ## CRM UI Blueprint (Metadata-First)
-
-Use this CRM-style structure as the canonical UI assembly reference:
 
 | UI Surface | Typical Location | Pattern to Follow |
 |:--|:--|:--|
@@ -259,10 +263,9 @@ it; the option `value`, never its label. A multi-step operation is
 
 2. **Putting widget grid placement in `position`.**
    The grid-placement field is `layout: { x, y, w, h }` — `position` is not a
-   widget key and the closed schema REJECTS it by name (it was silently
-   dropped before protocol 17). `layout` is optional: omit it and the widget
-   auto-flows (the Studio designer relies on this); set it only when you want
-   an explicit grid position.
+   widget key and the closed schema REJECTS it by name.
+   `layout` is optional: omit it and the widget
+   auto-flows.
 
 ---
 

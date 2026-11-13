@@ -219,6 +219,12 @@ function makeHarness(
         /** [ADR-0106 D1] The object's fields, and the `security` service judging the caller's view of them. */
         fields?: Record<string, unknown>;
         security?: unknown;
+        /** The `audit` slot, so a pin can read the invocation rows the door writes. */
+        audit?: boolean;
+        /** [ADR-0150 D3, #31696] The package that ships the object (its embedded actions inherit it). */
+        objectPackage?: string;
+        /** [ADR-0150 D3, #31696] The registry's holder table, merged into the ObjectQL registry double. */
+        registry?: Record<string, unknown>;
     } = {},
 ) {
     const engine = opts.engine ?? makeEngine();
@@ -232,10 +238,11 @@ function makeHarness(
         label: 'Lead',
         fields: opts.fields ?? {},
         actions: opts.actions ?? [SCHEDULE, WIZARD, GATED, CONFIRMED, CONSOLE_ONLY],
+        ...(opts.objectPackage ? { _packageId: opts.objectPackage } : {}),
     };
     const ql: any = {
         executeAction: vi.fn(),
-        registry: { getObject: () => object },
+        registry: { getObject: () => object, ...opts.registry },
         // Row-level security, as the data plane applies it: a caller reads only
         // the leads it owns, and a row it cannot read is simply not there.
         find: vi.fn(async (_o: string, q: any) => {
@@ -252,8 +259,11 @@ function makeHarness(
         getObject: vi.fn(async () => object),
         loadMany: vi.fn(async () => (opts.merged ? [] : opts.standalone ?? [])),
     };
+    const invocations: any[] = [];
+    const audit = { recordActionInvocation: vi.fn(async (event: any) => { invocations.push(event); }) };
     const services: Record<string, unknown> = {
         objectql: ql, data: ql, metadata, automation: engine, ...(opts.security ? { security: opts.security } : {}),
+        ...(opts.audit ? { audit } : {}),
     };
     const protocol = {
         getMetaItems: vi.fn(async (request: { type: string }) => {
@@ -288,6 +298,11 @@ function makeHarness(
         disable: (name: string) => { disabled = new Set([...disabled, name]); },
         bridgeFor: (userId: string, systemPermissions: string[] = []) =>
             (dispatcher as any).buildMcpBridge(ctxFor(userId, systemPermissions)),
+        /** The bridge for a caller whose whole envelope the pin states. */
+        bridgeAs: (executionContext: Record<string, unknown>) =>
+            (dispatcher as any).buildMcpBridge({ request: {}, environmentId: 'platform', executionContext }),
+        ql,
+        invocations,
     };
 }
 
@@ -457,6 +472,49 @@ describe('MCP resumeRun — (b) a caller who may not resume is refused before th
         const refused = await refusalOf(h.bridgeFor('u1').resumeRun(runId, {}));
         expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
         expect(h.engine.resume).not.toHaveBeenCalled();
+    });
+});
+
+describe('[ADR-0151 D3 rule 3] MCP resumeRun — an AI service account does not confirm an action for itself', () => {
+    /** An AI service account: an agent principal acting for itself. */
+    const ACCOUNT_EC = { userId: 'bot_1', principalKind: 'agent', systemPermissions: [] as string[] };
+    /** An OAuth-delegated agent: it acts for the person it names. */
+    const DELEGATED_EC = { userId: 'u1', principalKind: 'agent', onBehalfOf: { userId: 'u1', principalKind: 'human' }, systemPermissions: [] as string[] };
+
+    it('an account\'s resume of a confirmation-gated action is refused 428 with the confirmation member and without it: nothing resumed, no record read, no invocation row', async () => {
+        const h = makeHarness({ audit: true });
+        h.leads[0].owner = 'bot_1';
+        const started: any = await h.engine.execute(CONFIRMED.target, { userId: 'bot_1', object: OBJECT, record: { id: 'lead_1' } });
+        for (const input of [{ values: { subject: 'x' }, confirm: true }, { values: { subject: 'x' } }]) {
+            const refused = await refusalOf(h.bridgeAs(ACCOUNT_EC).resumeRun(started.runId, input));
+            expect(refused, JSON.stringify(input)).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+            expect(refused.details).toEqual({ actionName: CONFIRMED.name, objectName: OBJECT, confirmationMember: 'confirm' });
+            expect(refused.message).not.toMatch(/retry/i);
+        }
+        expect(h.engine.resume).not.toHaveBeenCalled();
+        expect(h.engine.runs.get(started.runId)?.status).toBe('paused');
+        expect(h.ql.find).not.toHaveBeenCalled();
+        expect(h.invocations).toHaveLength(0);
+        expect(h.engine.tasks).toHaveLength(0);
+    });
+
+    it('CONTROL: an account resumes a run of an action that declares no confirmation, as before', async () => {
+        const h = makeHarness({ audit: true });
+        h.leads[0].owner = 'bot_1';
+        const started: any = await h.engine.execute(SCHEDULE.target, { userId: 'bot_1', object: OBJECT, record: { id: 'lead_1' } });
+        const done = await h.bridgeAs(ACCOUNT_EC).resumeRun(started.runId, { values: { subject: 'x' } });
+        expect(done).toMatchObject({ ok: true, action: SCHEDULE.name });
+        expect(h.engine.tasks).toEqual([expect.objectContaining({ by: 'bot_1' })]);
+        expect(h.invocations).toHaveLength(1);
+    });
+
+    it('CONTROL: a delegated agent resumes a gated action as before — refused without the member, completed with it', async () => {
+        const h = makeHarness();
+        const started: any = await h.engine.execute(CONFIRMED.target, { userId: 'u1', object: OBJECT, record: { id: 'lead_1' } });
+        const refused = await refusalOf(h.bridgeAs(DELEGATED_EC).resumeRun(started.runId, { values: { subject: 'x' } }));
+        expect(refused).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+        await h.bridgeAs(DELEGATED_EC).resumeRun(started.runId, { values: { subject: 'x' }, confirm: true });
+        expect(h.engine.tasks).toHaveLength(1);
     });
 });
 
@@ -727,4 +785,92 @@ describe('[ADR-0106 D1] resume_run: a flow action the caller is not shown admits
         expect(resumed.ok).toBe(true);
         expect(h.engine.tasks).toHaveLength(1);
     });
+});
+
+/**
+ * [ADR-0150 D4, #31696] A run of a flow name two namespaces' packages hold
+ * carries its slot key, `PACKAGE/NAME`. `resume_run` reads the run's flow as
+ * that NAME, of that package, and admits a flow action targeting the name
+ * whose target reaches the run's package from the action's own (as
+ * `run_action` resolves it): the action that could have started this run.
+ */
+describe('MCP resumeRun — a run of a flow name two namespaces hold (ADR-0150 D4)', () => {
+    const CRM = 'com.crm.pkg';
+    const HR = 'com.hr.pkg';
+    const holders = [CRM, HR];
+    const registry = {
+        packageScopedHoldersOf: (type: string, name: string) => (type === 'flow' && name === SCHEDULE.target ? holders : []),
+        getPackageScopedItem: (type: string, name: string, packageId: string) =>
+            (type === 'flow' && name === SCHEDULE.target && holders.includes(packageId) ? { name, _packageId: packageId } : undefined),
+        getEnvironmentScopedItem: () => undefined,
+        getPackage: (id: string) => ({ manifest: { id, namespace: id === CRM ? 'crm' : 'hr' }, source: 'code' }),
+        getAllPackages: () => holders.map((id) => ({ manifest: { id, namespace: id === CRM ? 'crm' : 'hr' }, source: 'code' })),
+    };
+    /** A paused run of `pkg`'s `schedule_followup`, started by `u1` on `lead_1`, keyed as the engine keys it (or `key`). */
+    const parkedRunOf = (h: ReturnType<typeof makeHarness>, pkg: string, key = `${pkg}/${SCHEDULE.target}`): string => {
+        const runId = `run_${pkg}`;
+        h.engine.runs.set(runId, {
+            runId, flowName: key, status: 'paused',
+            userId: 'u1', object: OBJECT, recordId: 'lead_1', screens: [SCREEN_1],
+        });
+        return runId;
+    };
+
+    it('P\'s paused run is resumed through P\'s own flow action, and completes once', async () => {
+        const h = makeHarness({ actions: [SCHEDULE], objectPackage: CRM, registry });
+        const runId = parkedRunOf(h, CRM);
+        const resumed = await h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Call back' } });
+        expect(resumed).toMatchObject({ ok: true, action: SCHEDULE.name, objectName: OBJECT, recordId: 'lead_1' });
+        expect(h.engine.resume.mock.calls.map((c: unknown[]) => c[0])).toEqual([runId]);
+        expect(h.engine.tasks).toHaveLength(1);
+    });
+
+    it('a run of ANOTHER package\'s slot is refused: no action of P\'s could have started it, and it stays parked', async () => {
+        const h = makeHarness({ actions: [SCHEDULE], objectPackage: CRM, registry });
+        const runId = parkedRunOf(h, HR);
+        const refusal = await refusalOf(h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Call back' } }));
+        expect(refusal.status).toBe(403);
+        expect(refusal.message).toContain(`flow '${SCHEDULE.target}'`);
+        expect(h.engine.resume).not.toHaveBeenCalled();
+        expect(h.engine.runs.get(runId)?.status).toBe('paused');
+    });
+
+    it('CONTROL — an action with no package reaches neither holder (its run_action refuses the name): refused, stays parked', async () => {
+        const h = makeHarness({ actions: [SCHEDULE], registry });
+        const runId = parkedRunOf(h, CRM);
+        const refusal = await refusalOf(h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Call back' } }));
+        expect(refusal.status).toBe(403);
+        expect(h.engine.resume).not.toHaveBeenCalled();
+        expect(h.engine.runs.get(runId)?.status).toBe('paused');
+    });
+
+    /** The engine's slot entries, filing `filed`'s slots of the name under the bare name (the engine holds one slot: M1). */
+    const slotted = (h: ReturnType<typeof makeHarness>, filed: string[]) => Object.assign(h.engine, {
+        executeSlot: vi.fn(), getFlowSlot: vi.fn(), toggleFlowSlot: vi.fn(),
+        flowSlotKey: (pkg: string, name: string) => (name === SCHEDULE.target && filed.includes(pkg) ? name : undefined),
+    });
+
+    it('[R3-B] a run under the bare name the engine files CRM\'s one slot under is CRM\'s: CRM\'s action resumes it, HR\'s does not', async () => {
+        const crm = makeHarness({ actions: [SCHEDULE], objectPackage: CRM, registry });
+        slotted(crm, [CRM]);
+        const resumed = await crm.bridgeFor('u1').resumeRun(parkedRunOf(crm, CRM, SCHEDULE.target), { values: { subject: 'Call back' } });
+        expect(resumed).toMatchObject({ ok: true, action: SCHEDULE.name });
+
+        const hr = makeHarness({ actions: [SCHEDULE], objectPackage: HR, registry });
+        slotted(hr, [CRM]);
+        const runId = parkedRunOf(hr, CRM, SCHEDULE.target);
+        expect((await refusalOf(hr.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Call back' } }))).status).toBe(403);
+        expect(hr.engine.resume).not.toHaveBeenCalled();
+    });
+
+    for (const [filed, what] of [[[], 'no holder\'s slot'], [[CRM, HR], 'both holders\' slots (CONTROL)']] as const) {
+        it(`[R3-B] a run under a key ${what} is filed under is refused 409 naming every holder, and stays parked`, async () => {
+            const h = makeHarness({ actions: [SCHEDULE], objectPackage: CRM, registry });
+            slotted(h, [...filed]);
+            const runId = parkedRunOf(h, CRM, SCHEDULE.target);
+            const refusal = await refusalOf(h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Call back' } }));
+            expect([refusal.status, refusal.message.includes(CRM) && refusal.message.includes(HR)]).toEqual([409, true]);
+            expect([h.engine.resume.mock.calls.length, h.engine.runs.get(runId)?.status]).toEqual([0, 'paused']);
+        });
+    }
 });

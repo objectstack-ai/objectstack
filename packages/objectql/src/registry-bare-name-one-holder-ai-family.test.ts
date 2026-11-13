@@ -327,7 +327,7 @@ describe('the narrowing — agent and skill hold one name per namespace (ADR-015
 
   it('the switch holds agent and skill, the later families\' narrowed types, and no other covered type', () => {
     // Later child B cards append their own type, each pinned in its family's file.
-    const SWITCHED: readonly string[] = [...NARROWED, 'action', 'email_template'];
+    const SWITCHED: readonly string[] = [...NARROWED, 'action', 'email_template', 'flow', 'picklist', 'mapping', 'dataset', 'api', 'function', 'webhook'];
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toEqual(SWITCHED);
     for (const type of BARE_NAME_ONE_HOLDER_TYPES) {
       // A type that has not narrowed meets every holder, namespaces or not.
@@ -502,7 +502,9 @@ describe('the refusal\'s reason names the consumers of the types it lists', () =
  * the second register overwrites the first.
  */
 describe('every namespace-scoped type is stored per (package, name) in the metadata service\'s in-memory store (#32151)', () => {
-  it.each([...NAMESPACE_SCOPED_BARE_NAME_TYPES])('%s: two packages\' same-named items are both kept, each answered to a read naming its package', async (type) => {
+  // [#31700] The engine's `function` is narrowed too, but is no metadata
+  // type: the engine keeps its holders per package itself (`functionHoldersOf`).
+  it.each(NAMESPACE_SCOPED_BARE_NAME_TYPES.filter((type) => type !== 'function'))('%s: two packages\' same-named items are both kept, each answered to a read naming its package', async (type) => {
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
     const name = `shared_${type}`;
     for (const [packageId, tag] of [['com.acme.alpha', 'alpha'], ['com.acme.beta', 'beta']] as const) {

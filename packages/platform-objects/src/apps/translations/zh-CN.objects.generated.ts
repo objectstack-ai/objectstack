@@ -1209,11 +1209,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "撤销原因",
-        help: "密钥被撤销的原因，仅在它决定谁能恢复密钥时记录。管理员强制重置密码：只有平台管理员能恢复该密钥。组织成员资格已结束：所有者已离开组织，任何人都不能恢复该密钥，由组织成员创建新的密钥。已被管理员暂停：平台管理员撤销了不属于自己的密钥，只有平台管理员能恢复该密钥。密钥恢复后清除。所有者从 API 密钥列表撤销的密钥此项为空。",
+        help: "密钥被撤销的原因，仅在它决定谁能恢复密钥时记录。管理员强制重置密码：只有平台管理员能恢复该密钥。组织成员资格已结束：所有者已离开组织，任何人都不能恢复该密钥，由组织成员创建新的密钥。已被管理员暂停：平台管理员撤销了不属于自己的密钥，只有平台管理员能恢复该密钥。已被目录停用：组织的目录（SCIM）停用或删除了所有者，任何人都不能恢复该密钥，即使所有者被重新启用后也不能，由所有者创建新的密钥。密钥恢复后清除。所有者从 API 密钥列表撤销的密钥此项为空。",
         options: {
           admin_password_reset: "管理员强制重置密码",
           organization_membership_ended: "组织成员资格已结束",
-          administrator_suspended: "已被管理员暂停"
+          administrator_suspended: "已被管理员暂停",
+          scim_deactivated: "已被目录停用"
         }
       },
       key: {
@@ -3079,6 +3080,34 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "按主题"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "发送站内消息",
+        description: "向组织内的所有人或你挑选的成员发送一条消息，它会出现在每位收件人的通知中。",
+        successMessage: "消息已发送给 {{ result.recipients }} 人",
+        params: {
+          everyone: {
+            label: "本组织所有人",
+            helpText: "发送给当前组织的每位成员。不打开则在下方挑选收件人。"
+          },
+          recipients: {
+            label: "收件人",
+            helpText: "消息不是发给所有人时，要发送给的本组织成员。"
+          },
+          title: {
+            label: "标题",
+            helpText: "每位收件人在通知中看到的那一行。"
+          },
+          body: {
+            label: "正文"
+          },
+          link: {
+            label: "链接",
+            helpText: "可选。消息打开的本应用页面（以 / 开头）或网址。"
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3753,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "版本"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "操作类型",

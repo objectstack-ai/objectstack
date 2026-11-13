@@ -143,6 +143,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
 import { InterfacesPillar, StudioNavItemInspector } from './StudioDesignSurface';
+// The source loads `@objectstack/lint` with a function-body `import()`: paid
+// here, at collection, never inside a case's clocked window.
+import '@objectstack/lint';
 import { navPayloadOf } from '../metadata-admin/previews/AppNavCanvas';
 import { registerAppComponent } from '../../services/componentRegistry';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -204,6 +207,9 @@ const SPEC_NAV_ITEM_TYPES = specNavItemTypes().sort();
 const key = (type: string, name: string) => `${type}/${name}`;
 
 beforeEach(() => {
+  // A case's unbound entries are held in this browser (`writeHeldNav`): each
+  // case starts from a browser that holds none.
+  localStorage.clear();
   server.active.clear();
   server.drafts.clear();
   server.appSaves.length = 0;

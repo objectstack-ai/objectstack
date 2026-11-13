@@ -348,6 +348,31 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
     expect((await manager.matchEndpoint(B_PATH))?.endpoint.target).toBe('b');
   });
 
+  // [#31700] The API narrowed to one holder per namespace: two namespaces may
+  // each publish an api of one name. The publish gate puts each path under
+  // `/api/v1/apps/<namespace>/` (`apis-publish-gates.test.ts`: "rejects a path
+  // under ANOTHER package's namespace"), so their routes differ and the
+  // matcher's duplicate-claim rule is never reached between them.
+  const duplicateClaims = (manager: MetadataManager) =>
+    (manager as unknown as { logger: { error: ReturnType<typeof vi.fn> } }).logger.error.mock.calls
+      .map((c) => String(c[0]))
+      .filter((m) => m.includes('duplicate endpoint claim'));
+
+  it('[#31700] two namespaces\' same-named apis are both indexed, each on its own path, with no duplicate claim', async () => {
+    const manager = twoHolders();
+    expect((await manager.matchEndpoint(A_PATH))?.endpoint.target).toBe('a');
+    expect((await manager.matchEndpoint(B_PATH))?.endpoint.target).toBe('b');
+    expect(duplicateClaims(manager)).toEqual([]);
+  });
+
+  it('CONTROL — the same two items on ONE path is a duplicate claim, announced at error', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('api', 'feed', shipped('com.acme.alpha', A_PATH.path, 'a'));
+    manager.registerInMemory('api', 'feed', shipped('com.acme.beta', A_PATH.path, 'b'));
+    expect((await manager.matchEndpoint(A_PATH))?.endpoint.target).toBeDefined();
+    expect(duplicateClaims(manager)).toHaveLength(1);
+  });
+
   it('a read naming a package answers that package\'s item, both faces alike; a package holding no slot answers nothing', async () => {
     const manager = twoHolders();
     expect(((await manager.get('api', 'feed', 'com.acme.alpha')) as any)?.target).toBe('a');
@@ -426,20 +451,23 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
 
   it('a type outside the slotted set keeps one item per name: the later write replaces the earlier', async () => {
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
-    manager.registerInMemory('flow', 'f', { name: 'f', _packageId: 'com.acme.alpha' });
+    // A connector: `flow` (#31696) and `webhook` (#31699 PR 2) joined the slotted set.
+    manager.registerInMemory('connector', 'f', { name: 'f', _packageId: 'com.acme.alpha' });
     const later = { name: 'f', _packageId: 'com.acme.beta' };
-    manager.registerInMemory('flow', 'f', later);
-    expect(await manager.get('flow', 'f')).toBe(later);
-    expect(await manager.list('flow')).toEqual([later]);
+    manager.registerInMemory('connector', 'f', later);
+    expect(await manager.get('connector', 'f')).toBe(later);
+    expect(await manager.list('connector')).toEqual([later]);
   });
 });
 
 /**
  * [ADR-0150 D3/D4, #32151] The in-memory store keeps one slot per
  * `(package, name)` for every type whose one-holder rule has narrowed to the
- * namespace — today `agent` and `skill` (objectql's
+ * namespace — `agent` and `skill` (objectql's
  * `NAMESPACE_SCOPED_BARE_NAME_TYPES`, #31701; objectql pins that set a subset
- * of `PACKAGE_SLOTTED_STORE_TYPES`). Two packages of two namespaces may each
+ * of `PACKAGE_SLOTTED_STORE_TYPES`), `flow` (#31696), and [#31700] the
+ * picklist family's `picklist`, `mapping` and `dataset` (`api` has its own
+ * describe above, the object-less `action` its own file). Two packages of two namespaces may each
  * install such a name, and the artifact door registers every package body's
  * items here through `register(…, { notify: false })`, stamped by
  * `applyProtection` (`_packageId`). On main 45f0f81f the store was keyed by
@@ -448,7 +476,7 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
  * answered the survivor.
  */
 describe('the in-memory store keeps one slot per (package, name) for every namespace-scoped type (ADR-0150 D4, #32151)', () => {
-  const NAMESPACE_SCOPED = ['agent', 'skill'] as const;
+  const NAMESPACE_SCOPED = ['agent', 'skill', 'flow', 'picklist', 'mapping', 'dataset'] as const;
   const A = 'com.acme.alpha';
   const B = 'com.acme.beta';
   const shipped = (type: string, packageId: string, tag: string, envelope = false) => ({
@@ -726,7 +754,8 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
 
   it('the live set is the one these pins iterate, and it is not empty', () => {
     expect(SLOTTED.length).toBeGreaterThan(0);
-    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill']));
+    // [#31700] The picklist family is iterated here since it joined the set.
+    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'picklist', 'mapping', 'dataset']));
   });
 
   it.each(SLOTTED)('%s: `unregisterPackage` removes each package\'s `_packageId`-only item from its own slot and leaves the other\'s, in either order (BASE: it removed nothing)', async (type) => {
@@ -796,6 +825,30 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
     await ctx.manager.unregister(type, ctx.name, { packageId: B });
     expect(ctx.rowBodies(), 'beta\'s row: deleted with beta').toEqual([]);
     // No slot of the name is left; the residue pin below reads what is served now (#32246).
+  });
+
+  /**
+   * [#31700, epic seat ruling R2-B (a)] A removal naming a package that holds
+   * no slot of the name takes nothing: that package's slot is empty. Outside
+   * the set the store keeps one item per name and the removal takes it
+   * whatever package it names, which is what `picklist`, `mapping` and
+   * `dataset` did before #31700. The announcement is unchanged and is not
+   * this move: `unregister` announces every call, an absent name's too — the
+   * watcher hears `deleted` by name and the realtime event names the package
+   * the call named.
+   */
+  it.each(SLOTTED)('%s: `unregister(type, name, { packageId })` naming a package that holds no slot of a one-holder name removes nothing (BASE, outside the set: the item and its row went)', async (type) => {
+    const ctx = await boot(type, [A]);
+    await ctx.manager.unregister(type, ctx.name, { packageId: B });
+    expect(await ctx.labels()).toEqual([`alpha ${type}`]);
+    expect(((await ctx.manager.get(type, ctx.name)) as any)?.label).toBe(`alpha ${type}`);
+    expect(ctx.rowBodies()).toEqual([`alpha ${type}`]);
+    expect(ctx.watched.map((event) => [event.type, event.name])).toEqual([['deleted', ctx.name]]);
+    if (hasRealtimeDeleted(type)) {
+      expect(ctx.published.map((event) => (event.payload as any).packageId)).toEqual([B]);
+    } else {
+      expect(ctx.published).toEqual([]);
+    }
   });
 
   describe.each(SLOTTED)('CONTROL — %s, one holder: a removal naming no package is unchanged', (type) => {
@@ -956,7 +1009,8 @@ describe('per-package loader storage for every type stored per package (ADR-0150
 
   it('the live set is the one these pins iterate, and it is not empty', () => {
     expect(SLOTTED.length).toBeGreaterThan(0);
-    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill']));
+    // [#31700] The picklist family is iterated here since it joined the set.
+    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'picklist', 'mapping', 'dataset']));
   });
 
   it.each(SLOTTED)('%s: each package\'s item has its own row with `package_id` filled, and its own entry in the door\'s store (BASE: one row and one entry, the body saved last)', async (type) => {
@@ -987,9 +1041,10 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     await loader.save(type, nameOf(type), doorItem(type, B));
     await loader.save(type, nameOf(type), { ...doorItem(type, A), label: 'alpha again' });
     expect(rows(type).map((row) => [row.package_id, row.version])).toEqual([[A, 3], [B, 2]]);
-    // A bundled type keeps each package's member (#31699 R3-B); every other type, the row saved last.
+    // Each package's row, the one saved last of its slot: a bundled type's member (#31699 R3-B),
+    // [#32521] every other type's too (BEFORE #32521: one per name, `alpha again`).
     expect((await loader.loadManyKeyed(type)).map((entry) => (entry.data as any).label).sort())
-      .toEqual(isBundledStoreType(type) ? ['alpha again', label(type, B)] : ['alpha again']);
+      .toEqual(['alpha again', label(type, B)]);
   });
 
   describe.each([
@@ -1032,8 +1087,11 @@ describe('per-package loader storage for every type stored per package (ADR-0150
   /**
    * The loaders' own unscoped reads — what `MetadataManager.load`,
    * `loadDiagnosed`, `loadMany` and `loadManyKeyed` read, and what the action
-   * router's third rung and objectql's action audit call — still answer one
-   * item per name, the one saved last, as when each loader kept one entry.
+   * router's third rung and objectql's action audit call. The by-name reads
+   * still answer one item per name, the one saved last, as when each loader
+   * kept one entry. [#32521] The plural reads keep one item per `(package,
+   * name)` over the stored rows, so the boot priming pass registers every
+   * holder, as over the door's store [#32517].
    */
   it.each(BUNDLED)('%s: the loaders\' unscoped reads keep each package\'s member; the by-name read still answers the one saved last (#31699 R3-B)', async (type) => {
     const ctx = await boot(type);
@@ -1045,14 +1103,42 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     }
   });
 
-  it.each(UNBUNDLED)('%s: the loaders\' unscoped reads still answer one item per name, the one saved last (unchanged)', async (type) => {
+  it.each(BUNDLED)('%s: [#32517] a read the registry cannot answer, over the database\'s rows of one package\'s two members, answers what it answered before members had keys (BASE: the same)', async (type) => {
+    const { driver } = rowDriver();
+    const db = new DatabaseLoader({ driver, tableName: 'sys_metadata' });
+    const body = (locale: string, subject: string) => ({ name: nameOf(type), label: subject, locale, subject, _packageId: A, _provenance: 'package' });
+    await db.save(type, nameOf(type), body('en-US', 'en'));
+    await db.save(type, nameOf(type), body('fr-FR', 'fr'));
+    await db.save(type, nameOf(type), body('en-US', 'en again'));
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+    expect(((await manager.get(type, nameOf(type))) as any)?.subject).toBe('en again');
+    expect(((await manager.get(type, nameOf(type), A)) as any)?.subject).toBe('en again');
+    expect(((await manager.list(type))[0] as any)?.subject).toBe('en again');
+  });
+
+  it.each(UNBUNDLED)('%s: the loaders\' by-name reads still answer the item saved last; the plural reads answer every package\'s item, over the door\'s store [#32517] and over the stored rows (#32521; BEFORE: the database\'s one row per name, the one saved last)', async (type) => {
     const ctx = await boot(type);
     for (const peer of [ctx.peer(['database']), ctx.peer(['door'])]) {
       expect(((await peer.load(type, nameOf(type))) as any)?.label).toBe(label(type, B));
       expect((((await peer.loadDiagnosed(type, nameOf(type))).data) as any)?.label).toBe(label(type, B));
-      expect(labelsOf(await peer.loadMany(type))).toEqual([label(type, B)]);
-      expect((await peer.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([[nameOf(type), label(type, B)]]);
     }
+    // [#32521] BASE: the database's plural reads answered the row saved last
+    // alone, `[label(type, B)]`.
+    const database = ctx.peer(['database']);
+    expect(labelsOf(await database.loadMany(type))).toEqual([label(type, A), label(type, B)]);
+    expect((await database.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([
+      [nameOf(type), label(type, A)],
+      [nameOf(type), label(type, B)],
+    ]);
+    // [#32517] BASE: the door's plural reads folded the two packages' slots
+    // into the one saved last, `[label(type, B)]`.
+    const door = ctx.peer(['door']);
+    expect(labelsOf(await door.loadMany(type))).toEqual([label(type, A), label(type, B)]);
+    expect((await door.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([
+      [nameOf(type), label(type, A)],
+      [nameOf(type), label(type, B)],
+    ]);
   });
 
   it.each(SLOTTED)('%s: with one package\'s slot in the registry, `list` adds the other package\'s stored item, and no second copy of the first (BASE: the registry\'s item only)', async (type) => {
@@ -1335,6 +1421,386 @@ describe('per-package loader storage for every type stored per package (ADR-0150
 });
 
 /**
+ * [#32352, card amendment S7] An action's removal over the artifact door's
+ * `MemoryLoader` and a `DatabaseLoader`: the manager judges holders by package
+ * over every slot of the name, as `DatabaseLoader` keys its rows (`(package,
+ * name)`, whatever object the action is bound to), so the two agree.
+ *
+ * BASE (main 89d815c5): the manager counted only the object-less slot's
+ * holders, so a bare removal of a name two packages bind passed its judgment;
+ * the door's store dropped every slot, `DatabaseLoader.delete` counted two
+ * holders and threw, the manager logged that as a failed delete, dropped the
+ * registry's slots and announced `deleted` — while both rows stayed and kept
+ * answering `list` and `get`.
+ */
+describe('[#32352] an action\'s removal: the manager\'s holder count agrees with the loaders\' row key (ADR-0150 D3/D4, S7)', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  const NAME = 'digest';
+  const item = (packageId: string, objectName: string | undefined) => ({
+    name: NAME,
+    label: packageId === A ? 'alpha' : 'beta',
+    type: 'script',
+    _packageId: packageId,
+    _provenance: 'package',
+    ...(objectName === undefined ? {} : { objectName }),
+  });
+
+  async function boot(holders: ReadonlyArray<readonly [string, string | undefined]>) {
+    const { driver, rows } = rowDriver();
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+    const published: RealtimeEventPayload[] = [];
+    manager.setRealtimeService({
+      publish: async (event: RealtimeEventPayload) => { published.push(event); },
+      subscribe: async () => 'sub-1',
+      unsubscribe: async () => undefined,
+    } as IRealtimeService);
+    const door = new MemoryLoader();
+    for (const [packageId, objectName] of holders) {
+      await door.save('action', NAME, item(packageId, objectName));
+      await manager.register('action', NAME, item(packageId, objectName), { notify: false });
+    }
+    manager.registerLoader(door);
+    const watched: MetadataWatchEvent[] = [];
+    manager.subscribe('action', (event) => { watched.push(event); });
+    published.length = 0;
+    const served = async () => ((await manager.list('action')) as any[]).map((entry) => entry.label);
+    const doorHolders = async () => (await door.loadSlots('action', NAME)).map((slot) => slot.packageId);
+    const rowHolders = () => rows('action').map((row) => row.package_id);
+    const loggedErrors = (manager as any).logger.error as ReturnType<typeof vi.fn>;
+    return { manager, published, watched, served, doorHolders, rowHolders, loggedErrors };
+  }
+
+  it.each([
+    ['bound to ONE object', 'shared_item', 'shared_item'],
+    ['bound to two different objects', 'alpha_item', 'beta_item'],
+    ['one bound, one object-less', 'alpha_item', undefined],
+  ] as const)('two packages\' action %s: a removal naming none is refused (409) naming both, before anything is touched — registry, door and rows kept, nothing announced, no failed delete logged (BASE: registry and door dropped, rows kept, `deleted` announced)', async (_shape, alphaObject, betaObject) => {
+    const ctx = await boot([[A, alphaObject], [B, betaObject]]);
+    expect(ctx.rowHolders(), 'a row per package').toEqual([A, B]);
+    const err = await ctx.manager.unregister('action', NAME).then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+    expect(err, 'the removal refuses').toBeInstanceOf(PackageScopedNameRefusedError);
+    expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: A },
+      { kind: 'package', packageId: B },
+    ]);
+    expect(await ctx.served()).toEqual(['alpha', 'beta']);
+    expect(await ctx.doorHolders()).toEqual([A, B]);
+    expect(ctx.rowHolders()).toEqual([A, B]);
+    expect(ctx.published).toEqual([]);
+    expect(ctx.watched).toEqual([]);
+    expect(ctx.loggedErrors).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['bound to ONE object', 'shared_item', 'shared_item'],
+    ['bound to two different objects', 'alpha_item', 'beta_item'],
+  ] as const)('two packages\' action %s: a removal naming one package takes its registry slot, door entry and row, keeps the other\'s, and names it on the event (BASE: its registry slot stayed and was served)', async (_shape, alphaObject, betaObject) => {
+    const ctx = await boot([[A, alphaObject], [B, betaObject]]);
+    await ctx.manager.unregister('action', NAME, { packageId: A });
+    expect(await ctx.manager.get('action', NAME, A), 'the removed package\'s action is gone').toBeUndefined();
+    expect(await ctx.served()).toEqual(['beta']);
+    expect(await ctx.doorHolders()).toEqual([B]);
+    expect(ctx.rowHolders()).toEqual([B]);
+    expect(ctx.published.map((event) => (event.payload as any).packageId)).toEqual([A]);
+    expect(ctx.loggedErrors).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['bound to ONE object', 'shared_item', 'shared_item'],
+    ['bound to two different objects', 'alpha_item', 'beta_item'],
+    ['one bound, one object-less', 'alpha_item', undefined],
+  ] as const)('the artifact door\'s `MemoryLoader`, asked directly: `delete(\'action\', name)` naming no package, of a name two packages\' actions %s hold, is the same 409 naming both, and keeps every slot (BASE: it deleted every slot); naming a package takes every slot of that package only', async (_shape, alphaObject, betaObject) => {
+    const door = new MemoryLoader();
+    await door.save('action', NAME, item(A, alphaObject));
+    await door.save('action', NAME, item(B, betaObject));
+    const holders = async () => (await door.loadSlots('action', NAME)).map((slot) => slot.packageId);
+    const err = await door.delete('action', NAME).then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+    expect(err, 'the door refuses').toBeInstanceOf(PackageScopedNameRefusedError);
+    expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: A },
+      { kind: 'package', packageId: B },
+    ]);
+    expect(err!.message.toLowerCase()).toContain(`package "${A}" binds it to object "${alphaObject}"`);
+    expect(await holders(), 'nothing deleted').toEqual([A, B]);
+    await door.delete('action', NAME, { packageId: A });
+    expect(await holders()).toEqual([B]);
+  });
+
+  it('CONTROL — one package\'s bound action: a removal naming none takes its slot, door entry and row, as before', async () => {
+    const ctx = await boot([[A, 'alpha_item']]);
+    await ctx.manager.unregister('action', NAME);
+    expect(await ctx.served()).toEqual([]);
+    expect(await ctx.doorHolders()).toEqual([]);
+    expect(ctx.rowHolders()).toEqual([]);
+    expect(ctx.loggedErrors).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * [#32540, ADR-0150 D4/D6] One package may bind one action name to several
+ * objects (D6, the #5510 HotCRM shape: `log_call` on five objects), and an
+ * object-bound action's identity is `(package, objectName, name)` (D4). The
+ * in-memory store keeps a slot per binding; `DatabaseLoader` keeps a row per
+ * binding too: the store's unique key `(type, name, package_id,
+ * bundle_member)` is kept, and an object-bound action row names its object in
+ * `bundle_member` (an object-less one: NULL), as a bundled type's row names its
+ * member. A row written before (`bundle_member` NULL) reads its object off its
+ * body, and is bound to it before a write could collide with it.
+ *
+ * The driver here enforces that unique key as the real index does
+ * (`COALESCE(package_id, '')`, `COALESCE(bundle_member, '')`).
+ *
+ * BASE (main 874166b6, step 0 `card-32540/step0.md`): one row per `(package,
+ * name)`; the later binding's save updated it in place, so a read of the rows
+ * served the binding saved last and every other one was gone, with no error.
+ */
+describe('[#32540] one package\'s action name bound to several objects keeps a row per binding (ADR-0150 D4/D6)', () => {
+  const A = 'com.acme.alpha';
+  const NAME = 'digest';
+  const item = (objectName: string | undefined, label = `alpha@${objectName ?? 'global'}`) => ({
+    name: NAME,
+    label,
+    type: 'script',
+    _packageId: A,
+    _provenance: 'package',
+    ...(objectName === undefined ? {} : { objectName }),
+  });
+
+  /** {@link rowDriver} with `sys_metadata`'s overlay unique key enforced. */
+  function keyedRowDriver() {
+    const base = rowDriver();
+    const keyOf = (row: Record<string, unknown>) =>
+      JSON.stringify([row.type, row.name, row.package_id ?? '', row.bundle_member ?? '']);
+    const clash = (candidate: Record<string, unknown>, id?: unknown) =>
+      base.rows(String(candidate.type)).some((row) => row.id !== id && keyOf(row) === keyOf(candidate));
+    const refused = () => new Error('rowDriver: UNIQUE constraint failed: sys_metadata.type, name, package_id, bundle_member');
+    const driver = {
+      ...base.driver,
+      create: async (table: string, data: Record<string, unknown>) => {
+        if (table === 'sys_metadata' && clash(data)) throw refused();
+        return (base.driver as any).create(table, data);
+      },
+      update: async (table: string, id: string, data: Record<string, unknown>) => {
+        if (table === 'sys_metadata') {
+          const current = base.rows('action').find((row) => row.id === id) ?? {};
+          if (clash({ ...current, ...data }, id)) throw refused();
+        }
+        return (base.driver as any).update(table, id, data);
+      },
+    } as unknown as IDataDriver;
+    return { ...base, driver };
+  }
+
+  /** The door's boot (door `MemoryLoader` saved, then `register`), with one writable `DatabaseLoader`. */
+  async function boot(bindings: ReadonlyArray<readonly [string | undefined, string?]>, seed?: (driver: IDataDriver) => Promise<unknown>) {
+    const { driver, rows, history } = keyedRowDriver();
+    await seed?.(driver);
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    const loader = new DatabaseLoader({ driver, tableName: 'sys_metadata' });
+    manager.registerLoader(loader);
+    const door = new MemoryLoader();
+    for (const [objectName, label] of bindings) {
+      await door.save('action', NAME, item(objectName, label));
+      await manager.register('action', NAME, item(objectName, label), { notify: false });
+    }
+    manager.registerLoader(door);
+    const stored = () => rows('action')
+      .map((row) => `${row.package_id}|${row.bundle_member ?? '-'}:${JSON.parse(String(row.metadata)).label}`)
+      .sort();
+    /** A cold boot: a new manager over the same rows, no door. */
+    const coldServed = async () => {
+      const cold = new MetadataManager({ formats: ['json'], loaders: [] });
+      cold.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+      return ((await cold.list('action')) as any[]).map((entry) => entry.label).sort();
+    };
+    return { manager, loader, driver, rows, history, stored, coldServed };
+  }
+
+  it.each([
+    ['o1 then o2', [['o1'], ['o2']], ['com.acme.alpha|o1:alpha@o1', 'com.acme.alpha|o2:alpha@o2']],
+    ['o2 then o1', [['o2'], ['o1']], ['com.acme.alpha|o1:alpha@o1', 'com.acme.alpha|o2:alpha@o2']],
+    ['bound to o1, then object-less', [['o1'], [undefined]], ['com.acme.alpha|-:alpha@global', 'com.acme.alpha|o1:alpha@o1']],
+    ['object-less, then bound to o1', [[undefined], ['o1']], ['com.acme.alpha|-:alpha@global', 'com.acme.alpha|o1:alpha@o1']],
+    ['three objects', [['o1'], ['o2'], ['o3']], ['com.acme.alpha|o1:alpha@o1', 'com.acme.alpha|o2:alpha@o2', 'com.acme.alpha|o3:alpha@o3']],
+  ] as const)('%s: a row per binding, each naming its object in `bundle_member`, and a cold read of the rows serves every binding (BASE: one row, the binding saved last)', async (_shape, bindings, expected) => {
+    const ctx = await boot(bindings as ReadonlyArray<readonly [string | undefined]>);
+    expect(ctx.stored()).toEqual(expected);
+    expect(await ctx.coldServed()).toEqual(expected.map((entry) => entry.split(':')[1]).sort());
+    // Versions stay numbered per name across the rows, so history never collides.
+    expect(ctx.history('action').map((row) => row.version)).toEqual(expected.map((_, i) => i + 1));
+  });
+
+  it('a later edit of one binding updates that binding\'s row only (BASE: it overwrote the one row, and the other binding was gone)', async () => {
+    const ctx = await boot([['o1'], ['o2'], ['o1', 'alpha@o1 v2']]);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1 v2', 'com.acme.alpha|o2:alpha@o2']);
+    expect(await ctx.coldServed()).toEqual(['alpha@o1 v2', 'alpha@o2']);
+    expect(ctx.history('action').map((row) => row.version)).toEqual([1, 2, 3]);
+  });
+
+  /** A row as main wrote it: one per `(package, name)`, `bundle_member` NULL, its body bound to `o1`. */
+  const legacyRow = (driver: IDataDriver) => driver.create('sys_metadata', {
+    id: 'legacy-o1', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item('o1')),
+    state: 'active', version: 1, source: 'database', checksum: 'x',
+  });
+
+  it('C3 — a row written before (`bundle_member` NULL, body on o1), then object-less, then o1, then o2: the legacy row is named o1 before the object-less save could collide with it on the unique key, the o1 save updates it in place (one binding), and a cold read serves all three bindings (BASE: one row, each save overwrote it)', async () => {
+    const ctx = await boot([[undefined]], legacyRow);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|-:alpha@global', 'com.acme.alpha|o1:alpha@o1']);
+    await ctx.manager.register('action', NAME, item('o1', 'alpha@o1 v2'), { notify: false });
+    await ctx.manager.register('action', NAME, item('o2'), { notify: false });
+    expect(ctx.stored()).toEqual(['com.acme.alpha|-:alpha@global', 'com.acme.alpha|o1:alpha@o1 v2', 'com.acme.alpha|o2:alpha@o2']);
+    expect(ctx.rows('action').find((row) => row.id === 'legacy-o1')?.bundle_member, 'the legacy row is the o1 binding\'s row').toBe('o1');
+    expect(await ctx.coldServed()).toEqual(['alpha@global', 'alpha@o1 v2', 'alpha@o2']);
+  });
+
+  it('C3/C9 — a rollback is a write of the slot: a row written before is named first, and the restored body\'s binding is the row restored', async () => {
+    const ctx = await boot([], legacyRow);
+    await ctx.loader.registerRollback('action', NAME, item('o1', 'alpha@o1 restored'), 1);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1 restored']);
+  });
+
+  it('C9 — a rollback to a body bound to an object the slot holds no row of (a row written before, later re-bound from o1 to o2) restores that binding as its own row, and keeps the o2 binding (BASE: it overwrote the one row, moving the binding back)', async () => {
+    const ctx = await boot([], async (driver) => {
+      await driver.create('sys_metadata', {
+        id: 'legacy', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item('o2')),
+        state: 'active', version: 2, source: 'database', checksum: 'x',
+      });
+    });
+    await ctx.loader.registerRollback('action', NAME, item('o1', 'alpha@o1 restored'), 1);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1 restored', 'com.acme.alpha|o2:alpha@o2']);
+    expect(ctx.history('action').map((row) => row.version), 'one revert, numbered past every row of the name').toEqual([3]);
+    expect(await ctx.coldServed()).toEqual(['alpha@o1 restored', 'alpha@o2']);
+  });
+
+  it('C8 — an object name longer than `bundle_member` stores is refused at the write, naming the action, the object and the limit; nothing is stored and nothing truncated', async () => {
+    const ctx = await boot([['o1']]);
+    const long = `o_${'x'.repeat(99)}`;
+    await expect(ctx.loader.save('action', NAME, item(long))).rejects.toThrow(
+      new RegExp(`action "${NAME}" is bound to object "${long}" \\(101 characters\\), but sys_metadata\\.bundle_member stores at most 100`),
+    );
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1']);
+  });
+
+  // [#32540 C3; contract record 6820015366 item 1] The plural read's column-only bind, over rows as every released writer left them.
+  it.each([
+    ['the package\'s bound row on o2', 'o2', 'o2'],
+    ['the package\'s object-less row', undefined, null],
+  ] as const)('C3 — `bindReadRowPackage` of a legacy package-less row on o1 beside %s, every `bundle_member` NULL under the unique key: bound, its object named in the same update, the package\'s row named first (main: no-op, one slot; before this fix: UNIQUE constraint failed)', async (_shape, objectName, named) => {
+    const ctx = await boot([], async (driver) => {
+      await driver.create('sys_metadata', {
+        id: 'bound', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item(objectName)),
+        state: 'active', version: 1, source: 'database', checksum: 'x',
+      });
+      await driver.create('sys_metadata', {
+        id: 'legacy-o1', type: 'action', name: NAME, metadata: JSON.stringify(item('o1')),
+        state: 'active', version: 2, source: 'database', checksum: 'y',
+      });
+    });
+    const [handed] = (await ctx.loader.loadMany('action')) as object[];
+    await ctx.loader.bindReadRowPackage('action', NAME, handed!);
+    const byId = (id: string) => ctx.rows('action').find((row) => row.id === id);
+    expect([byId('legacy-o1')?.package_id, byId('legacy-o1')?.bundle_member]).toEqual([A, 'o1']);
+    expect(byId('bound')?.bundle_member ?? null).toBe(named);
+  });
+
+  describe('C8 — a row written before, bound to an object longer than `bundle_member` stores, refuses only a write into the place it holds', () => {
+    const long = `o_${'x'.repeat(99)}`;
+    const legacyLong = (driver: IDataDriver) => driver.create('sys_metadata', {
+      id: 'legacy-long', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item(long)),
+      state: 'active', version: 1, source: 'database', checksum: 'x',
+    });
+
+    it('a save of another object is stored beside it; the long row is left as it is, never truncated (head 17256ba20: refused)', async () => {
+      const ctx = await boot([['o2']], legacyLong);
+      expect(ctx.stored()).toEqual([`com.acme.alpha|-:alpha@${long}`, 'com.acme.alpha|o2:alpha@o2']);
+    });
+
+    it('a rollback restoring another object\'s binding recreates it beside the long row (head 17256ba20: refused)', async () => {
+      const ctx = await boot([], legacyLong);
+      await ctx.loader.registerRollback('action', NAME, item('o1', 'alpha@o1 restored'), 1);
+      expect(ctx.stored()).toEqual([`com.acme.alpha|-:alpha@${long}`, 'com.acme.alpha|o1:alpha@o1 restored']);
+    });
+
+    it('the object-less binding, saved or recreated by a rollback, is refused naming the long row, its object and the limit; nothing is written (main: it overwrote the long row)', async () => {
+      const ctx = await boot([], legacyLong);
+      const refusal = new RegExp(`action "${NAME}" of package "${A}" cannot store its object-less binding: row legacy-long, .*object "${long}" \\(101 characters\\), longer than the 100`);
+      await expect(ctx.loader.save('action', NAME, item(undefined))).rejects.toThrow(refusal);
+      await expect(ctx.loader.registerRollback('action', NAME, item(undefined, 'alpha@global restored'), 1)).rejects.toThrow(refusal);
+      expect(ctx.stored()).toEqual([`com.acme.alpha|-:alpha@${long}`]);
+      expect(ctx.history('action')).toEqual([]);
+    });
+
+    it('a rollback recreating a binding on an object longer than the column stores is refused before any write (C8 on the rollback path)', async () => {
+      const ctx = await boot([['o1']]);
+      await expect(ctx.loader.registerRollback('action', NAME, item(long), 1)).rejects.toThrow(
+        new RegExp(`action "${NAME}" is bound to object "${long}" \\(101 characters\\), but sys_metadata\\.bundle_member stores at most 100`),
+      );
+      expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1']);
+      expect(ctx.history('action').map((row) => row.version)).toEqual([1]);
+    });
+  });
+
+  it('a package-less row on o1, then the package saves o2: the row is kept and named o1, the package\'s o2 binding is its own row (main: the o2 save took the row over)', async () => {
+    const ctx = await boot([['o2']], (driver) => driver.create('sys_metadata', {
+      id: 'loose-o1', type: 'action', name: NAME, metadata: JSON.stringify({ ...item('o1'), _packageId: undefined, label: 'loose@o1' }),
+      state: 'active', version: 1, source: 'database', checksum: 'x',
+    }));
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o2:alpha@o2', 'undefined|o1:loose@o1']);
+  });
+
+  it('a rollback to an object-less body in a slot holding only bound rows recreates the object-less binding as its own row (main: restored over the one row)', async () => {
+    const ctx = await boot([['o1']]);
+    await ctx.loader.registerRollback('action', NAME, item(undefined, 'alpha@global restored'), 1);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|-:alpha@global restored', 'com.acme.alpha|o1:alpha@o1']);
+  });
+
+  it('the naming pass names any writer\'s row of the slot, the column only: a protocol overlay row (`source` sys-metadata-repo) on o1 is named o1 when the package saves o2 (carried with the overlay write path by #32609)', async () => {
+    const ctx = await boot([['o2']], (driver) => driver.create('sys_metadata', {
+      id: 'overlay-o1', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item('o1', 'overlay@o1')),
+      state: 'active', version: 1, source: 'sys-metadata-repo', checksum: 'x',
+    }));
+    const overlay = ctx.rows('action').find((row) => row.id === 'overlay-o1');
+    expect([overlay?.bundle_member, overlay?.source, JSON.parse(String(overlay?.metadata)).label]).toEqual(['o1', 'sys-metadata-repo', 'overlay@o1']);
+  });
+
+  it('a removal naming the package takes every binding\'s row; the name stays one holder (#32352)', async () => {
+    const ctx = await boot([['o1'], ['o2'], [undefined]]);
+    await ctx.manager.unregister('action', NAME, { packageId: A });
+    expect(ctx.stored()).toEqual([]);
+    const again = await boot([['o1'], ['o2']]);
+    await again.manager.unregister('action', NAME);
+    expect(again.stored(), 'one package on two objects is one holder: a removal naming none takes both').toEqual([]);
+  });
+
+  it('a rollback by name restores the row of the object the restored body is bound to, never another binding\'s (BASE: one row, restored over whichever binding it held)', async () => {
+    const ctx = await boot([['o1'], ['o2']]);
+    await ctx.loader.registerRollback('action', NAME, item('o1', 'alpha@o1 restored'), 1);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1 restored', 'com.acme.alpha|o2:alpha@o2']);
+  });
+
+  // [#32517 location 2, after #32651] The unscoped plural reads keep one entry
+  // per (package, name): one package's bindings answer the one saved last, on
+  // the door, the database and the service alike (main the same); `list`
+  // answers every binding. Two packages' items of one name are two entries.
+  it('[#32517] the unscoped plural reads keep one package\'s bindings as one entry, the one saved last; `list` serves every binding', async () => {
+    const ctx = await boot([['o1'], ['o2']]);
+    const cold = new MetadataManager({ formats: ['json'], loaders: [] });
+    cold.registerLoader(new DatabaseLoader({ driver: ctx.driver, tableName: 'sys_metadata' }));
+    const labels = (items: unknown[]) => (items as any[]).map((entry) => entry.label).sort();
+    for (const reader of [ctx.loader, cold]) {
+      expect(labels(await reader.loadMany('action'))).toEqual(['alpha@o2']);
+      expect((await reader.loadManyKeyed!('action')).map((entry) => (entry.data as any).label)).toEqual(['alpha@o2']);
+    }
+    expect(labels(await ctx.manager.loadMany('action'))).toEqual(['alpha@o2']);
+    expect(await ctx.coldServed()).toEqual(['alpha@o1', 'alpha@o2']);
+  });
+});
+
+/**
  * [#32353] The non-slotted half of #32246: a removal of a type outside
  * `PACKAGE_SLOTTED_STORE_TYPES` deletes the artifact door's in-memory copy
  * too, by name, so the removed item stops answering. Pinned per first-party
@@ -1430,5 +1896,137 @@ describe('a removal of a type outside the set deletes the door\'s copy too (#323
     expect(await readsOf(ctx.peer(), type, kept)).toEqual({ listed: [`door ${type}`], get: `door ${type}`, exists: true });
     await ctx.manager.register(type, ctx.name, doorItem(type), { notify: false });
     expect(await readsOf(ctx.manager, type, ctx.name)).toEqual({ listed: [`door ${type}`], get: `door ${type}`, exists: true });
+  });
+});
+
+describe('[#32560] a removal naming none of an action beside the environment\'s own item removes what the bare read answers, in the registry and the rows (ADR-0150 D3)', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  const NAME = 'digest';
+  const item = (packageId: string | undefined, label: string, objectName: string | undefined) => ({
+    name: NAME, label, type: 'script',
+    ...(packageId === undefined ? {} : { _packageId: packageId, _provenance: 'package' }),
+    ...(objectName === undefined ? {} : { objectName }),
+  });
+
+  /**
+   * Each package's item registered (its slot and its row); the environment's
+   * item, if any, as the environment's store holds it beside a package's:
+   * its own package-less row (a register would bind it to the one holder's
+   * row, D4) and its registry slot.
+   */
+  async function boot(items: ReadonlyArray<ReturnType<typeof item>>) {
+    const { driver, rows } = rowDriver();
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+    for (const entry of items) {
+      if ('_packageId' in entry) {
+        await manager.register('action', NAME, entry, { notify: false });
+        continue;
+      }
+      const [model] = rows('action');
+      await driver.create('sys_metadata', {
+        ...model, id: 'env-row', package_id: null,
+        metadata: typeof model!.metadata === 'string' ? JSON.stringify(entry) : entry,
+      });
+      manager.registerInMemory('action', NAME, entry);
+    }
+    const served = async () => ((await manager.list('action')) as any[]).map((entry) => entry.label);
+    const rowHolders = () => rows('action').map((row) => row.package_id ?? null);
+    const loggedErrors = (manager as any).logger.error as ReturnType<typeof vi.fn>;
+    return { manager, served, rowHolders, loggedErrors };
+  }
+
+  it.each([
+    ['on another object', 'contact'],
+    ['object-less', undefined],
+  ] as const)('A\'s action and the environment\'s %s: the bare read answers the environment\'s, and a removal naming none takes its slot and row only — A\'s slot and row are kept (BASE: both slots and both rows taken)', async (_shape, envObject) => {
+    const ctx = await boot([item(A, 'alpha', 'account'), item(undefined, 'env', envObject)]);
+    expect(ctx.rowHolders(), 'a row each').toEqual([A, null]);
+    expect(((await ctx.manager.get('action', NAME)) as any)?.label).toBe('env');
+    await ctx.manager.unregister('action', NAME);
+    expect(await ctx.served()).toEqual(['alpha']);
+    expect(ctx.rowHolders()).toEqual([A]);
+    expect(((await ctx.manager.get('action', NAME)) as any)?.label).toBe('alpha');
+    expect(ctx.loggedErrors).not.toHaveBeenCalled();
+  });
+
+  it('A\'s, B\'s and the environment\'s: the removal is refused naming all three, as the read is; nothing is touched', async () => {
+    const ctx = await boot([item(A, 'alpha', 'account'), item(B, 'beta', 'contact'), item(undefined, 'env', 'lead')]);
+    const err = await ctx.manager.unregister('action', NAME).then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+    expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: A }, { kind: 'package', packageId: B }, { kind: 'environment' },
+    ]);
+    expect(err!.message).toContain('held by 3 holders');
+    expect(ctx.rowHolders()).toEqual([A, B, null]);
+    expect(await ctx.served()).toEqual(['alpha', 'beta', 'env']);
+  });
+
+  it('CONTROL — A\'s action alone: a removal naming none takes its slot and row, as before', async () => {
+    const ctx = await boot([item(A, 'alpha', 'account')]);
+    await ctx.manager.unregister('action', NAME);
+    expect(await ctx.served()).toEqual([]);
+    expect(ctx.rowHolders()).toEqual([]);
+  });
+
+  /**
+   * The artifact door's boot: the door's `MemoryLoader` holds the package's
+   * body alone (its sink saves it, then registers it with `{ notify: false }`)
+   * and the `DatabaseLoader` holds A's row and the environment's. Each loader
+   * judges a delete by its own slots, so a loader that holds A alone must be
+   * told the manager's judgment — the environment's own item only — or its
+   * "one holder, every slot" rule takes A.
+   */
+  it.each([
+    ['on another object', 'contact'],
+    ['object-less', undefined],
+  ] as const)('the door holding A\'s action alone, the rows holding A\'s and the environment\'s %s: a removal naming none takes the environment\'s row and slot, and the door keeps A (BASE: the door\'s copy of A was deleted)', async (_shape, envObject) => {
+    const door = new MemoryLoader();
+    const alpha = item(A, 'alpha', 'account');
+    await door.save('action', NAME, alpha);
+    const ctx = await boot([alpha, item(undefined, 'env', envObject)]);
+    ctx.manager.registerLoader(door);
+    const doorHolders = async () => (await door.loadSlots('action', NAME)).map((slot) => slot.packageId ?? null);
+    expect(await doorHolders(), 'the door holds A alone').toEqual([A]);
+    expect(ctx.rowHolders(), 'a row each').toEqual([A, null]);
+    expect(((await ctx.manager.get('action', NAME)) as any)?.label).toBe('env');
+
+    await ctx.manager.unregister('action', NAME);
+
+    expect(await doorHolders(), 'the door keeps A').toEqual([A]);
+    expect(ctx.rowHolders()).toEqual([A]);
+    expect(await ctx.served()).toEqual(['alpha']);
+    expect(((await ctx.manager.get('action', NAME)) as any)?.label).toBe('alpha');
+    // A manager over the door alone still answers A.
+    const overDoor = new MetadataManager({ formats: ['json'], loaders: [door] });
+    expect(((await overDoor.get('action', NAME)) as any)?.label).toBe('alpha');
+    expect(ctx.loggedErrors).not.toHaveBeenCalled();
+  });
+
+  it('each loader told the judgment deletes the name\'s package-less slots only: the rows keep A\'s, the door keeps A\'s (BASE: a store holding A alone took it)', async () => {
+    const alpha = item(A, 'alpha', 'account');
+    const ctx = await boot([alpha, item(undefined, 'env', 'contact')]);
+    const [database] = [...(ctx.manager as any).loaders.values()] as DatabaseLoader[];
+    await database.delete('action', NAME, { packagelessOnly: true });
+    expect(ctx.rowHolders(), 'the environment\'s row taken').toEqual([A]);
+    await database.delete('action', NAME, { packagelessOnly: true });
+    expect(ctx.rowHolders(), 'A\'s row alone is kept').toEqual([A]);
+    const door = new MemoryLoader();
+    await door.save('action', NAME, alpha);
+    await door.delete('action', NAME, { packagelessOnly: true });
+    expect((await door.loadSlots('action', NAME)).map((slot) => slot.packageId)).toEqual([A]);
+  });
+
+  it('CONTROL — the door holding A\'s action alone and no environment item: a removal naming none takes A from the door and the rows, as before', async () => {
+    const door = new MemoryLoader();
+    const alpha = item(A, 'alpha', 'account');
+    await door.save('action', NAME, alpha);
+    const ctx = await boot([alpha]);
+    ctx.manager.registerLoader(door);
+    await ctx.manager.unregister('action', NAME);
+    expect(await door.loadSlots('action', NAME)).toEqual([]);
+    expect(ctx.rowHolders()).toEqual([]);
+    expect(await ctx.served()).toEqual([]);
   });
 });
