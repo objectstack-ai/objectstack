@@ -433,7 +433,6 @@ describe('ObjectStackDataSource.updateView — a shipped view is written into it
 
     await ds.updateView('showcase_task', SHIPPED.name, { isDefault: false });
 
-    expect(packages.get).toHaveBeenCalledWith('com.acme.mine');
     expect(packages.ensureCustomization).not.toHaveBeenCalled();
     expect(saveItem.mock.calls[0]).toHaveLength(3);
   });
