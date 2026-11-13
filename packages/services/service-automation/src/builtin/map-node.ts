@@ -6,6 +6,7 @@ import type { MapConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
+import { foldDropEvents } from '../run-dropped-fields.js';
 import { carriedRefusalOfResult } from '../inner-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
 import { collectionNotAList, resolveCollectionSlot, resolveValueSlotMap } from './value-slot-map.js';
@@ -206,6 +207,19 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       let failures = 0;
       let failuresTracked = false;
       const rolledFailures = (): { failures?: number } => (failuresTracked ? { failures } : {});
+      // #33019 — the drop events of the items that COMPLETED during this
+      // entry, rolled onto this step beside their totals and through the one
+      // fold, so the parent's answer (`AutomationResult.droppedFields`, folded
+      // from its steps) names a value an item's write did not store. Same
+      // per-entry rule as the totals: a PAUSED item's drops are credited to
+      // this step by the engine when its run bubbles back
+      // (AutomationEngine.creditChildRun). A failed or refused item's answer
+      // carries none.
+      const itemDrops: unknown[] = [];
+      const rolledDrops = () => {
+        const droppedFields = foldDropEvents(itemDrops);
+        return droppedFields ? { droppedFields } : {};
+      };
 
       // Drive items in order. Synchronous items advance inline; a pausing item
       // suspends the run and is resumed via re-entry.
@@ -261,6 +275,7 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
             // item's own totals to this same step when its child run bubbles
             // back (AutomationEngine.creditChildRun).
             metrics: { selected, acted, ...(unmeasured ? { unmeasuredEffect: true } : {}), ...rolledFailures() },
+            ...rolledDrops(),
           };
         }
         if (!child.success) {
@@ -287,6 +302,10 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
               ...(unmeasured || child.summary?.unmeasured ? { unmeasuredEffect: true } : {}),
               ...rolledFailures(),
             },
+            // The items that completed before it keep their drops too: a
+            // `try_catch` or `fault` edge that contains this failure lets the
+            // run complete, and its answer folds this step.
+            ...rolledDrops(),
           };
         }
         if (child.status === 'refused') {
@@ -330,6 +349,7 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
                 ? { failures: failures + child.summary.failed }
                 : rolledFailures()),
             },
+            ...rolledDrops(),
           };
         }
         // Synchronous completion — record and advance.
@@ -340,6 +360,7 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
         // One uncountable effect anywhere in the batch makes the batch's
         // `acted` incomplete — the flag rides out with this entry's metrics.
         if (child.summary?.unmeasured) unmeasured = true;
+        itemDrops.push(child.droppedFields);
         // #15617 — this item went on and contained its failures, so they are
         // this run's to answer for. `undefined` is "the child tracked no
         // count", so it neither adds nor flips the presence bit.
@@ -379,6 +400,7 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
         // slot in `results` but is never counted as a run (#27971).
         output: { results: state.results, count: state.results.filter(r => !isMapItemCancelledMarker(r)).length },
         metrics: { selected, acted, ...(unmeasured ? { unmeasuredEffect: true } : {}), ...rolledFailures() },
+        ...rolledDrops(),
       };
     },
   });

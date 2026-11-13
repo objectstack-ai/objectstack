@@ -1,5 +1,531 @@
 # @objectstack/service-external-datasource
 
+## 18.4.0
+
+### Minor Changes
+
+- 4dde0ae: fix(spec)!: a SQLite datasource's `config.filename` must name a database: `''` and a name that starts with `:` without being exactly `:memory:` are refused by the stack parse and the metadata save door, not only by the datasource admin doors
+  
+  Clause-②: no (narrowing) — `SqliteConfigSchema.filename` and `SqliteWasmConfigSchema.filename` refuse `''` and any `:`-prefixed value other than exactly `:memory:`, so `defineStack` / `os validate` / `os build` and `PUT /api/v1/meta/datasource/NAME` refuse a `sqlite` / `sqlite-wasm` datasource they accepted before. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/**` teaches no SQLite `filename` value, and `content/docs/**` teaches only `:memory:` and file paths, which stay accepted. The prescription ships in the refusal text, the FROM → TO below and the upgrade-guide entry.
+  
+  <!-- adr-0087: registered sqlite-filename-names-no-database-refused -->
+  
+  **BREAKING** accept-set narrowing on `SqliteConfigSchema.filename` and `SqliteWasmConfigSchema.filename` (`@objectstack/spec`), and so at every door that judges a datasource against the spec: `defineStack`, `os validate`, `os build` and `PUT /api/v1/meta/datasource/NAME`.
+  
+  - **Before.** Both schemas typed `filename` as any placeholder-free string. `:memory:/srv/data/parts.db` (the New datasource dialog's prefilled `:memory:` with a path typed after it) and `''` parsed. Every layer reads a name that starts with `:` as fileless, so no file was ever opened: a `sqlite` datasource opened it as a relative path whose directory does not exist and every statement failed, and a `sqlite-wasm` one opened a throwaway in-memory database whose writes were gone at the next connect. The datasource admin doors (Test connection, create, update) already refused both; a datasource declared in a stack or saved through the metadata door was stored anyway, and the admin door's update would not take it back.
+  - **Now.** The parse answers one issue at `filename` (`config.filename` on a datasource, `datasources.N.config.filename` in a stack) that names the value, says why and prescribes the fix: `'…' is neither ':memory:' nor a file path. A name that starts with ':' is not read as a file, so this datasource would store nothing: use exactly ':memory:' …`, or `'' is empty and names no database file. …`. `defineStack` raises it as `STACK_SCHEMA_INVALID` (422); the metadata door answers `422 INVALID_METADATA`.
+  - **Unchanged.** Exactly `:memory:`, an absent `filename` (still defaulting to `:memory:`), and relative, absolute, Windows-drive and `file:` paths parse as before. Whether a path can be opened or created is still judged only at runtime, by the datasource admin doors; the schema cannot touch the file system.
+  - **`@objectstack/service-datasource`.** The admin doors give the same answers as before, word for word. The two arms the string alone decides now come from the driver-contract parse they already run, so `sqlite-database-filename.ts` keeps only its filesystem arm: one definition, in the spec.
+  - **`@objectstack/spec`.** The upgrade-guide entry `sqlite-filename-names-no-database-refused` (a semantic migration: no automatic rewrite, because whether the author meant an ephemeral database or the path typed after the prefix is a judgement about the datasource).
+  
+  **FROM → TO.** `config: { filename: ':memory:/srv/data/parts.db' }` → `filename: '/srv/data/parts.db'` to keep the data in that file, or `filename: ':memory:'` for an ephemeral database; `filename: ''` → `':memory:'` or a file path.
+- 8c75f83: feat(spec, driver-sql, service-datasource): SQL Server as a federation-only dialect — an `external` datasource over Microsoft SQL Server reads live, and with the double opt-in writes live
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: generated only — `skills/objectstack-data/references/_index.md` gains the `driver/mssql.zod.ts` row (`gen:skill-refs`); no hand-written skill text enumerates a datasource driver-id roster or teaches per-dialect federation behaviour. `content/docs/data-modeling/external-datasources.mdx` gains the SQL Server section (§8, after Oracle's) (config shape, federation-only scope, schema-qualified tables, the 2017 floor), and `content/docs/references/data/driver-mssql.mdx` is generated.
+  
+  - **`@objectstack/spec`**: the driver vocabulary gains `mssql` (aliases `sqlserver`, `tedious`), a second `federationOnly` row after `oracle`, with `hasLocalDefault: false`: no boot host offers it, and a `managed` datasource declaring it is refused at parse, at `schemaMode`, by the same refusal as `oracle`. `FEDERATION_ONLY_DRIVER_IDS` and `isFederationOnlyDriver()` now answer both drivers, and `DatabaseSelectionDriverId` excludes both. The boot-host selection tables are now built without the federation-only rows, so the withdrawal holds by the column rather than by each row's empty `aliases`. `MssqlConfigSchema` is the closed config: `host`, `port` (1433), `instanceName`, `database`, `username`, `ssl`; an inline password, a connection URL and `autoMigrate` are refused with the reason. Its `ssl` docblock documents a self-signed server as the datasource-level `ssl: { enabled: true, rejectUnauthorized: false }`, because a block without `enabled: true` turns encryption off. `type-compat`'s `SqlDialect` gains `'mssql'`, and `DIALECT_ALIASES.mssql` maps SQL Server's types (`nvarchar`/`nchar`/`ntext`/`xml` → text, `bit` → boolean, `datetime2`/`datetimeoffset`/`smalldatetime` → datetime, `uniqueidentifier` → uuid, `money`/`decimal`/`numeric` → decimal, `timestamp`/`rowversion` → binary). Oracle's exact-to-lossy demotion and SQL Server's added lossy pairing are now one table, `DIALECT_LOSSY_RULES` (`demoteExact` / `addLossy`, only ever toward `'lossy'`): on `mssql`, a text column backs a `json`, `tags` or `multiselect` field as `'lossy'`, because SQL Server keeps JSON in `nvarchar(max)`; Oracle's answers are unchanged. ADR-0015 §4.6 lists the dialect, and §5.1's federation-only arm names both drivers.
+  - **`@objectstack/driver-sql`**: `dialectName` reads `'mssql'` for knex's `mssql` client, so nothing falls to `'unknown'`. Text predicates keep the #6518 contract on SQL Server's case-insensitive default collations (a `Latin1_General_100_BIN2` comparison, `TRANSLATE` for the ASCII fold, `[` escaped); a `bit` aggregand is cast for SUM/AVG/MIN/MAX; writes use `INSERT … OUTPUT inserted.*` through a temp table, so a table with triggers accepts them; a `uniqueidentifier` reads back in the canonical lower-case form (tedious `lowerCaseGuids`, unless the host sets it), so a GUID written as a string reads back as that string and filters by it in either case; an unsorted page of a federated table is ordered by its own single-column primary key, read from the catalog; `limit: 0` compiles to `TOP (0)`; JSON fields read back from `nvarchar`; introspection lists every user table as `schema.table` (`dbo.Orders`) with its primary key, foreign keys, unique columns and indexes. Managed DDL is refused as federation-only (`SQL_DIALECT_EMISSION_UNSUPPORTED`, through the same `'federation-only'` reason and message renderer as Oracle), and `$contains` / `$empty` on a multi-value field is refused rather than approximated.
+  - **`@objectstack/service-datasource`**: the datasource driver factory builds an `mssql` datasource on `SqlDriver` with the `tedious` connection (`server`, `port`, `database`, `user`, the bound secret as password, `encrypt` / `trustServerCertificate` / `instanceName` from the config and the datasource `ssl` block), and reports `@@VERSION`. The `ssl` block's resolution moves, unchanged, to its own leaf module (`datasource-ssl-option.ts`).
+  
+  Nothing existing changes for the other drivers.
+- 3aa0b42: feat(spec,driver-sql,service-datasource): Oracle Database as a federation dialect: read live, write behind both opt-ins, never managed
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`@objectstack/spec`**: a datasource may name `driver: 'oracle'` (alias `oracledb`), with `OracleConfigSchema` as its `config` contract: `connectString`, or `host` / `port` (default 1521) / `serviceName`, and `username`. `password` (the credential is the bound secret), `url`, and the TLS keys are refused by name with the spelling that works. The row is federation-only (`FEDERATION_ONLY_DRIVER_IDS`, `isFederationOnlyDriver`) with no local default. It is never a boot selection, and a `managed` oracle datasource, including the default mode, is refused at `defineStack` with the scope and the fix named. A datasource `ssl` block that asks for TLS is refused on oracle too, because Thin mode takes TLS from a `tcps://` connect string and would drop the block. A private certificate authority is reached through a PEM wallet the connect string names (`?wallet_location=DIR`, or `MY_WALLET_DIRECTORY` in a descriptor). Two published types narrow with no runtime change: `resolveDatabaseDriverId()` now returns `DatabaseSelectionDriverId | undefined` and `DATABASE_DRIVER_SELECTION_IDS` is `readonly DatabaseSelectionDriverId[]` (new types `DatabaseSelectionDriverId` and `FederationOnlyDriverId`), because no selection spelling resolves to a federation-only id. A consumer that asks `DATABASE_DRIVER_SELECTION_IDS.includes(id)` with a wider `BuiltinDriverId` widens the list first: `(DATABASE_DRIVER_SELECTION_IDS as readonly string[]).includes(id)`. The type-compatibility matrix gains `'oracle'` (`DIALECT_ALIASES.oracle`, `NUMBER(p,s)` / `RAW(16)` parameterised), and ADR-0015 §4.6 lists it. On oracle, `isCompatible` answers `'lossy'` for every field over a `RAW(16)` uuid column, `lookup` included, because the driver cannot yet filter or write it by its UUID string.
+  - **`@objectstack/driver-sql`**: `client: 'oracledb'` speaks Oracle over node-oracledb in Thin mode, with no Oracle Client libraries. `oracledb` is an optional peer. Minimum Oracle 12c Release 1. Paging uses `OFFSET … ROWS FETCH NEXT … ROWS ONLY`. Identifiers are quoted as the catalog folds them (UPPER). `LIKE` gets a bound `ESCAPE`, and the `$icontains` fold is ASCII-only. A NUMBER(1) flag reads as a boolean. Datetime and date comparands and writes bind as instants on a UTC session, and DATE / TIMESTAMP reads are repaired from Thin's local-clock decode. RAW(16) reads as a UUID string. `$empty` on a text column is its NULL row. Catalog introspection covers the current schema: ALL_TABLES, ALL_TAB_COLUMNS, and PK/unique/FK from ALL_CONSTRAINTS. Refusals: every DDL operation (`UnsupportedDialectEmissionError`, reason `federation-only`); a `''` equality or range comparand (`INVALID_FILTER`, because Oracle stores `''` as NULL and would answer IS NULL); JSON-array membership (`INVALID_FILTER`); and upsert (`NOT_IMPLEMENTED`, 501, because no MERGE is emitted).
+  - **`@objectstack/service-datasource`**: the shared driver factory builds the oracle arm. It composes `host:port/serviceName` or passes `connectString` verbatim, and the password is the bound secret. A missing `oracledb` package is answered with that package's install.
+  
+  Held to the shared conformance case-sets over a live Oracle 23ai (`OS_TEST_ORACLE_URL`, declared skip without it, `OS_EXPECT_LIVE_ORACLE=1` to require it). The Oracle section of the external-datasources guide states the minimum version, the config shape, and each refusal.
+
+### Patch Changes
+
+- 9ed2ee1: refactor(metadata-core): the customization pair of a package is looked up through the App that carries it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `@objectstack/metadata-core` exports `pairOf(base)`, `isPairOf(pairId, base)` and `appOf(packageId)`: the pair of a package is `customizationPackageId(appOf(base))` (ADR-0146 D3, with the customization unit being the App per ruling record 6691022506). `appOf` is the identity today, so every package is still its own App for customization and every answer is the one `customizationPackageId` / `isCustomizationPairOf` gave before: the same pair ids, the same refusals, the same served overrides, write gates, list and layered reads, uninstall refusal, flow precedence remedy and datasource import landing.
+  
+  The served `/meta` reads and writes, the ensure-customization door and the package routes answer exactly as before. Code that asks "which pair customizes this package?" should call `pairOf` / `isPairOf` instead of the spec id rule directly; the parse direction (`customizationBasePackageId`, `isCustomizationPackage`) is unchanged.
+- 769adff: feat(metadata-protocol, metadata-core)!: the ensure door creates no customization pair for a kernel package, and every pair question carries the installed manifests
+  
+  Clause-②: yes (narrowing) — both arms. Narrowing: `POST /api/v1/packages/:id/ensure-customization` (and the protocol's `ensureCustomizationPackage`) answers a kernel base, a package of scope `system` or `cloud`, with `409 RESOURCE_CONFLICT` and a sentence saying kernel objects are not customizable in this version, where it created `<id>.custom`; `POST /api/v1/automation/:name/clone` of a flow a kernel package ships, with no `package` named, answers that `409` where it answered `200` with the copy in `<id>.custom`; and the exported `pairOf`, `isPairOf` and `appOf` (`@objectstack/metadata-core`), `isServedOverrideRowOf` and the `installed` member of `OverrideWriteClosure` (`@objectstack/metadata-protocol`), and `resolveFlowPrecedence` / `describeFlowContender` (`@objectstack/service-automation`) take the installed-manifest lookup as a required argument. Widening: five new exports, `installedManifestsOf`, `InstalledManifestLookup`, `AppLookupManifest` and `InstalledPackageSource` (`@objectstack/metadata-core`) and `kernelPackageScope` (`@objectstack/metadata-protocol`), and one new `noticeCode` value on the permission-set clone answer, `PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE`, for a copy of a kernel-shipped set that now lands environment-wide.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped and no stored row is read differently, converted or dropped: the narrowing is one runtime refusal at one door, for one kind of base, whose remedy is that no pair exists to create; the existing pairs and the overrides in them stay served exactly as before. The retyped exports are runtime functions with no metadata surface, and the compiler names every caller that has not passed the new argument, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for a caller that ensures the customization pair of a kernel package — a platform package of scope `system` (users, organizations, security, settings and the rest of the platform suite) or `cloud` — and for a TypeScript importer of the pair helpers named above.
+  
+  - **Why (ruling records 6691022506 and 6691217245 on ADR-0146 D3).** The customization unit is the App, and the kernel is not an App a customer owns: it ships with the runtime, at the runtime's version (installing it whole is the goal ruling 6691022506 records, not yet what every `serve` tier does). In this version no kernel object is customizable, so the door creates no pair for one. Which kernel objects a later version opens (a whitelist) is that version's decision.
+  - **What the door answers.** `409 RESOURCE_CONFLICT`, the status and code the door already answers when a base's state rules the pair out (a writable base, no namespace, a version that is not SemVer). Nothing is created or written. Every other base is answered exactly as before.
+  - **A kernel pair that already exists stays.** An earlier version of the door may have created `<kernel id>.custom` on a deployment. It stays installed, the overrides inside it stay served by every read of the kernel item's name, and a further save into it is still admitted. Only the ensure call is refused.
+  - **A copy of a platform permission set.** `POST /api/v1/security/permission-sets/:name/clone` with no `package` named landed the copy of a kernel-shipped set (`member_default` and the platform's other sets) in `<kernel id>.custom`. It now saves the copy environment-wide, as it already does for a set authored in the environment, with the notice code `PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE` and a sentence naming the kernel package and `package`. A Console that does not know the new code shows that sentence as sent. Naming a writable package with `package` still lands the copy there. The flow clone door answers a kernel-shipped flow with the ensure door's sentence.
+  - **The closes stay shut on a kernel item.** A package-less write, or a write naming the kernel package, onto an item a kernel package ships is still refused `403 NOT_OVERRIDABLE` exactly where it was refused before (ADR-0146 D11). The sentence no longer names the pair as the fix, since there is none to ensure: it says kernel objects are not customizable in this version. A later version's kernel whitelist is what opens such an item.
+  - **The lookup.** Which pair customizes a package is asked through the installed manifests of the registry the caller serves (`installedManifestsOf(registry)`). Today the answer is unchanged for every package: `appOf` is still the identity. The argument is threaded through every site now so that resolving a module to its App is one change in `appOf`.
+  - **`os validate`'s customization-namespace advisory** now skips a package that is itself a pair through `isCustomizationPackage`, the one spelling of that question. An id ending in `.custom` that no base derives (`a.custom.custom`, a bare `.custom`) is now judged like any other package.
+  - **Who moves, and the fix.** A script or client that ensured a kernel package's pair drops that call: the kernel item is served as it ships, and an existing pair keeps serving what it holds. A vendor package that declares `scope: 'system'` or `'cloud'` in its own manifest is read as kernel here, as `isWritablePackage` already reads it; its remedy is to drop the scope, which belongs to the platform's own packages. A TypeScript importer of the helpers passes `installedManifestsOf(engine.registry)`, or `installedManifestsOf(undefined)` where it holds no registry.
+- 5cdaddb: fix(service-datasource)!: a datasource update whose new configuration fails to connect stores none of it, and a whitespace-only `secret` is refused like an empty one
+  
+  Clause-②: yes (narrowing) — `PATCH /api/v1/datasources/:name` and `POST /api/v1/datasources` refuse one more body that used to answer 200 / 201: a `secret` whose value is whitespace only (`"   "`, a tab and a newline), now `400 DATASOURCE_ADMIN_ERROR` with the empty-secret answer. The widening half: the `reregisterPool` member of the exported `DatasourceAdminServiceConfig` may now answer `{ previousPoolKept: boolean }` (still optional; a seam that answers nothing reads as before).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: secret is the doors' own credential channel, split off the body before the datasource draft is judged. A blank value seals nothing usable, so there is nothing at rest for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the datasource admin doors (`@objectstack/service-datasource`): a whitespace-only `secret` is refused.
+  
+  - **Before.** A `PATCH` whose new configuration failed to connect (a wrong password, a blank `secret`, a changed `config` that does not reach the database) answered `200` with `status: "error"` and a reason saying the previous pool was kept and the new configuration was NOT in force. It had already stored the new record, repointed `external.credentialsRef` at a new `sys_secret` row and removed the working one, so the next restart connected the configuration that failed. A whitespace-only `secret` passed the empty-secret guard and reached this path.
+  - **Now.** The update rebuilds the pool before it stores anything. When the previous pool is kept, nothing of the patch is stored: the record, its `credentialsRef` and every other key of the patch stay as they were, and the `sys_secret` row sealed for the patch is removed again. The answer is unchanged (`200`, `status: "error"`, "the new configuration is NOT in force"), and now true: a restart connects the configuration that was serving. A configuration that connects is stored and in force, and the replaced secret is retired, as before. A whitespace-only `secret` is refused before anything is written, by the same guard and with the same message as the empty string; a value with whitespace around other characters is still sealed as sent.
+  - **Who moves.** The console sends `secret` only when the field holds a value. A script or SDK call that sends a whitespace-only `secret` gets the 400. A host that wires its own `reregisterPool` seam keeps today's behaviour until it answers `{ previousPoolKept: true }` for a rebuild that kept the previous pool.
+  
+  **The remedy.** To keep the stored credential, leave `secret` out of the request (or send `null`). To replace it, send the new credential.
+- 22f0d65: fix(service-datasource)!: Test connection and Save refuse a SQLite filename that is neither `:memory:` nor a usable file path, where Test connection used to pass it
+  
+  Clause-②: yes (narrowing) — `POST /api/v1/datasources/test`, `POST /api/v1/datasources` and a `PATCH /api/v1/datasources/:name` that touches `config` or `driver` refuse a `sqlite` / `sqlite-wasm` `config.filename` that is empty, starts with `:` without being exactly `:memory:`, or names a path that can be neither opened nor created. The test answered `ok: true` for the first two and the save stored all three; both now answer with the value and the reason (`result.ok: false` from the test, `400 DATASOURCE_ADMIN_ERROR` from the save), the envelope every invalid `config` already gets.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: SqliteConfigSchema still types filename as a string, and the build and meta doors judge it as before. A stored row keeps loading at boot as it did; only a write through the admin doors that touches its config is judged, so there is nothing at rest for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the datasource admin doors (`@objectstack/service-datasource`): a SQLite filename that names no usable database is refused by Test connection and by Save (#30331).
+  
+  - **Before.** The New datasource dialog's `:memory:` with a typed path after it (`:memory:/srv/data/parts.db`) tested green. Every layer reads a name that starts with `:` as fileless, so the probe's missing-file check skipped it. Saved, a `sqlite` datasource then opened it as a relative path under the server's working directory whose directory does not exist, so every query failed while the health check answered `false` (which the probe did not read as a failure); a `sqlite-wasm` one opened an ephemeral in-memory database, so writes succeeded and were gone at the next restart. An empty filename tested green too, and a path under a regular file or in a directory the server may not write could be saved.
+  - **Now.** Test connection answers `ok: false` and Save answers `400 DATASOURCE_ADMIN_ERROR`, under `Invalid configuration for driver '…'`, with a `config.filename:` line that names the value and why: not `:memory:` and not a file path, empty, or the operating system's reason the file cannot be opened or created.
+  - **Unchanged.** Exactly `:memory:` tests green and saves. An existing database file tests green and saves. A creatable path that does not exist yet is still refused by the test (which never creates it, #27512) and accepted by Save, which creates it on connect. `turso` names its target as a url and is not judged here.
+  
+  **The remedy.** Use exactly `:memory:` for an ephemeral database, or the path of a database file with nothing in front of it.
+- 94cef75: fix(service-datasource): Test connection answers `ok: false` when the driver connects but its own health check answers `false` (#30407)
+  
+  Clause-②: no — a served answer comes to match the driver's own health answer; no accept set changes.
+  Metadata-protocol: none
+  
+  The datasource probe awaited the handle's `ping` (the driver's `checkHealth()`) and dropped its boolean, so a connect that only warned and then reported itself unhealthy answered Test connection `ok: true`. The probe now reads that answer: a literal `false` answers `ok: false` with a sentence saying the driver connected but its health check reported the database as unhealthy. A connect or ping that throws keeps answering the thrown message, and a handle whose `ping` answers nothing keeps answering `ok: true`.
+- ae5bd5b: fix(service-datasource): the refusal to delete a datasource that objects still use names its reason and the objects in `error.details`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - `DELETE /api/v1/datasources/:name` on a runtime datasource that objects are still bound to keeps answering `400` `DATASOURCE_ADMIN_ERROR` with the same English message, and now also carries `error.details`: `{ reason: 'objects_bound', count, objects }`. `reason` tells this refusal apart from every other 400 of the datasource admin routes, `count` is the number in the message, and `objects` lists the bound objects' names, sorted, so a client can name them in its own language without reading object metadata. The names come from the same read as the count, so the two cannot disagree.
+  - `DatasourceAdminServiceConfig.countBoundObjectsDiagnosed` may now return `objects` (the names it counted); the shipped plugin wiring does. A host whose read reports only a number keeps working, and its refusal carries `count` without `objects`.
+  - Every other 400 of these routes answers exactly as before, with no `details`. The degraded-read refusal (`503` `SERVICE_UNAVAILABLE`) is unchanged.
+- 135c2fb: fix(service-datasource)!: an object imported from a package's external datasource is saved into that package, or into its customization package
+  
+  Clause-②: yes (narrowing) — `POST /api/v1/datasources/:name/external/tables/:remote/import` (and the MCP `import_object` tool) now saves the object into the package that declares the datasource, or into that package's customization package `<base>.custom` when the package is read-only, and names it in that package's namespace. An explicit `name` in the read-only base's own namespace (`showcase_orders` over the showcase's `showcase_external`) is now refused with ADR-0028's message naming the pair-prefixed name (`showcase_custom_orders`); under a walled tenancy posture (`group`, `isolated`) an import that needs a customization package that does not exist yet is refused, naming the platform operator and the ensure door. `ExternalDatasourceServiceConfig` gains the optional `resolveImportLanding`, `persistObject` an optional third `packageId` argument, and the package exports the `ImportLanding` type.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the imported object's definition keeps its shape, and the import request and its answer keep theirs. What moves is which package the import door saves the object into and therefore which namespace its name carries; rows already stored are not rewritten, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the external-datasource import door (`@objectstack/service-datasource`), ruling B on where an imported object lives (ruling record 6660988968).
+  
+  - **Where an import lands.** The datasource's owning package decides. A datasource no package declares (added in Setup) keeps today's answer: a package-less row, environment metadata that no package export carries (ADR-0146 D11). A datasource declared by a writable package saves the object into that package. A datasource declared by a read-only installed package (a booted code package or a marketplace install) saves it into that package's customization package `<base>.custom`, which the import obtains from the ensure door first (ADR-0146 D2/D3), so `os package export` and `GET /api/v1/packages/<base>.custom/export` carry it.
+  - **The name it gets.** The save door judges the name against the package written into, so an import over a read-only package's datasource is named in the pair's namespace: the showcase's `customers` table imports as `showcase_custom_customers`, where it imported as `showcase_customers`. The draft door (`…/tables/:remote/draft`, the `*.object.ts` an author commits into the package's own source) still names it in the datasource package's namespace.
+  - **Walled postures.** Under `group` and `isolated` the platform operator alone creates a customization package. The import never creates it: it saves into one that already exists, and while none does it is refused (`400 EXTERNAL_IMPORT_ERROR`) with a message naming the platform operator and `POST /api/v1/packages/<base>/ensure-customization`. It is never saved package-less instead.
+  - **Objects imported before this release** stay where they are, package-less and under their old names. Importing the same table again makes a second object under the new name in the customization package; delete the old one once nothing points at it.
+- 898145b: fix(service-datasource): an object drafted or imported from an external datasource table gives each field a readable label
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every field of a generated object draft (`generateObjectDraft`, `importObject`, `os datasource introspect`) now carries a `label`, derived from the field's name by the same snake_case to Title Case step that already labels the object: a table with columns `part_no` and `part_name` yields fields labelled `Part No` and `Part Name`, so the record form of a synced object no longer shows raw column names. The label follows the name the field is saved under (after `rename` and the numbering of a taken name), a lookup keeps the label of the column it replaces, and the rendered `*.object.ts` source carries the same label. The object's own label is unchanged. Objects imported before this release keep their stored fields; re-import or edit the labels to change them.
+- c35fed1: fix(service-datasource): the datasource driver catalog serves its words in the requester's language, so the New datasource dialog reads in one language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /api/v1/datasources/drivers` now serves each driver's label and description, and each connection field's `title` and `description` (Filename, Auto-migrate schema, Host, Port, …), in the language the request names: the top `Accept-Language` tag, else `?locale=`. The code is read through the platform locale table (`platformLocaleTagOf`, shortened one subtag at a time), so `zh-TW` and `zh-HK` get Traditional Chinese, `zh`, `zh-CN` and `zh-SG` Simplified, `pt` Brazilian Portuguese and `fr-CA` French. Every language on the table is translated for every offered driver: Simplified and Traditional Chinese, Spanish, Arabic, French, Brazilian Portuguese, Russian, German, Japanese and Korean. English requests, codes the table does not name, and product names (SQLite, PostgreSQL, MySQL / MariaDB, MongoDB) are served the English text, never a key. `DRIVER_CATALOG` stays the English catalog, and the new `driverCatalogFor(locale)` in the package source builds the localized one; ids, icons, types and defaults are unchanged in every language.
+- ce965cf: feat(service-datasource): the Studio connection form offers Oracle and SQL Server, federation only
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `GET /api/v1/datasources/drivers` now lists `oracle` (Oracle Database) and `mssql` (SQL Server). Each entry's connection fields are projected from the driver's config contract in `@objectstack/spec`, like every other entry, and its words are served in every language on the platform locale table.
+  
+  Both drivers serve federation only (ADR-0015 §4.6), so their entries carry a new key, `federationOnly: true`, read from the spec's `FEDERATION_ONLY_DRIVER_IDS`. The key is absent on every other entry; a client that does not read it sees two more entries and nothing else changed.
+  
+  The New datasource dialog reads that key from the catalog: for Oracle and SQL Server its Schema mode select offers External and Validate only, never Managed (the spec refuses a managed datasource naming either), and one sentence under it says why. A Managed choice made on another driver moves to External when one of them is chosen. As with PostgreSQL and MySQL, the database client (`oracledb`, `tedious`) is an optional install next to the server. A SQL Server datasource whose `tedious` is missing is now refused with the install of `tedious` as its remedy, like the other clients; it used to be told to rebuild the workspace.
+- 9e1f1f9: fix(cluster): a Redis outage no longer crashes replicas, is logged once, and caches re-read on reconnect
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Every API addition below is a new export or an optional member (a widening). The one new default is the bounded command time on the redis driver. Multi-replica deployments on the `redis` cluster driver only. The single-node default (the in-process `memory` driver, no declared replicas) behaves exactly as before: it never loses a connection, so none of the paths below runs on it.
+  
+  - **No crash on a dead lock (`@objectstack/service-job`).** `CronJobAdapter` leader-elects every scheduled fire on the cluster lock. When the lock store was unreachable, `acquire` rejected inside a timer callback, the rejection went unhandled, and every replica exited at its next tick. A failed `acquire` now skips that fire (no node can prove it alone runs it) and the next tick asks again; a failed `release` after the fire ran is absorbed (the lease expires on its TTL). The adapter logs ONE warning per lock outage — not one per tick — and one info line when the lock answers again. No process-wide `unhandledRejection` handler is added.
+  - **The driver watches its connections (`@objectstack/service-cluster-redis`).** Every ioredis client the driver holds (the command connection and the pub/sub subscriber) now has an `error` listener, so ioredis no longer prints `[ioredis] Unhandled error event` with a stack per reconnect attempt. The driver logs one warning when the store becomes unreachable (naming `host:port`, never the URL or a password) and one info line when it returns. New option: `driverOptions.logger` (`{ warn, info? }`, default `console`).
+  - **Bounded commands.** `createRedisClient()` now sets `commandTimeout: REDIS_COMMAND_TIMEOUT_MS` (2000 ms; exported). A black-holed Redis (a socket that accepts and never answers) used to hold a caller about 30 s — a sign-in counting through the shared cache included, since the cache derives its connection with `client.duplicate()`, which inherits the bound. Every command the driver and the shared cache issue is O(1); a caller that needs longer passes its own `options.commandTimeout`, or its own client through `driverOptions.client`.
+  - **`cluster.resync` (`@objectstack/service-cluster`).** Cross-node cache hints ride at-most-once pub/sub, so a hint published during an outage was lost and a peer kept serving what it had cached until restart. When the driver's connection returns after an outage it now emits ONE local `cluster.resync` event (never published to peers). New exports: `onClusterResync(cluster, handler)` to subscribe (a no-op on the memory driver), `readClusterDriverHealth(cluster)` (a passive reading of the driver's connection state, type `ClusterDriverLivenessHealth`: `{ driver, nodeId, state: 'unknown' | 'up' | 'down', since, outages, lastError? }`, `undefined` on the memory driver; the active store probe `/ready` uses is `probeClusterDriverHealth()`), and `ClusterDriverLiveness` / `offerClusterDriverLiveness` for driver authors, plus `CLUSTER_RESYNC_EVENT`, `describeConnectionError` and `redactCredentials`.
+  - **The caches re-read on it.** `MetadataClusterBridgePlugin` calls each attached lane's resync seam: `MetadataManager.resyncClusterPubSub()` (`@objectstack/metadata`: drops every list cache and the endpoint index, so the next `list()` re-reads the loaders; registry entries are kept), `DatasourceAdminService.resyncDatasourceMutationPubSub()` (`@objectstack/service-datasource`: re-converges every stored datasource and every held pool from this replica's own read), and `AutomationEngine.resyncConnectorCredentialPubSub()` (`@objectstack/service-automation`: the connector reconcile a peer's signal runs; the connector-credential door gains an optional `resyncFromCluster()`). `AuthzClusterBridgePlugin` advances the engine's write epoch (reason `remote`), retiring cached grants. The `metadata.mutated` registry lane has no resync yet; it still converges per item on delivered signals and fully at boot.
+- f00fb1b: fix(core)!: every door that admits an API key records where the use came from on the `credential_use` row (#31898)
+  
+  Clause-②: yes (narrowing) — `RequestExecutionContextInput.transport` in `@objectstack/core` becomes a required key, typed `{ remoteAddress } | undefined`: a caller of `resolveRequestExecutionContext` now states the transport's peer address, or states that it hands none.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/request-execution-context.ts#RequestExecutionContextInput) the narrowed member is an input key of a runtime TypeScript interface, which the compiler names at every caller (TS2741); no packages/spec schema, registered node type, stored row or ADR-0087 conversion surface names it, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a TypeScript caller of `resolveRequestExecutionContext`.
+  
+  Since #31821 the `credential_use` audit row records the client address and user agent of the use that opened the window, but only REST, the runtime dispatcher (its `/mcp` face included) and the stdio MCP transport handed their client facts over. An API key admitted at any other door wrote `metadata.ip_address_absent: 'not_supplied'`. Every door that can admit an API key now hands them over, so no door writes `not_supplied`:
+  
+  - the storage family (its sign-in gate reader, the parent-governed download authorizer and the upload attacher), the settings routes, the sharing-rule shareable-objects list, the share-link routes, the notification preference options, the datasource admin routes, the print route, the own-row delete routes, the organization settings door, the cloud-connection status and setup doors, and the marketplace local-plugin install.
+  
+  Each door hands only its transport's own peer address and the request headers. The address recorded is the one the deployment establishes under its one client-address trust rule (`IAuthService.resolveClientAddress`): `X-Forwarded-For` / `X-Real-IP` only when `server.trustProxy` is declared, otherwise the peer. No door reads a forwarded header itself. `@objectstack/core` exports the one helper the doors use, `credentialUseClientFor(authService, { headers, remoteAddress })`, and `transportPeerAddressOf(c)` for a Hono door's socket peer.
+  
+  Which credentials a door admits does not change. Doors that read only a session (`credentials: 'session-only'`) read no key and write no row; they state `transport: undefined`.
+  
+  What to do on upgrade:
+  
+  - A caller of `resolveRequestExecutionContext` that omitted `transport` no longer compiles (`TS2741: Property 'transport' is missing`). Pass `transport: { remoteAddress }` with the transport's own peer address (`undefined` when it has none), or `transport: undefined` for a call that hands no client facts, such as a `'session-only'` call. Never pass a forwarded header as `remoteAddress`: the auth service applies the trust rule.
+- 327ef0f: fix(service-datasource, rest): every datasource refusal names its reason in `details.reason` and answers a one-line `message`, with the rationale moved to `details.hint`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Part of #32169. A refusal of the datasource admin doors (`/api/v1/datasources/**`) answered `400 DATASOURCE_ADMIN_ERROR` with the reason buried in a `message` of up to 1,300 characters: the rule, its history and the remedy in one string, which a toast cannot show and a client cannot branch on. The external-datasource (federation) refusals had the same shape under `EXTERNAL_DATASOURCE_ERROR`.
+  
+  Now each refusal carries three parts:
+  
+  - `message`: one line, at most 160 characters, naming what was refused (the datasource and the key).
+  - `details.reason`: a snake_case discriminator, one per condition (`invalid_name`, `reserved_name`, `already_exists`, `code_defined`, `driver_required`, `invalid_config`, `invalid_record`, `undeclared_key`, `empty_secret`, `credentials_ref_on_create`, `inline_ssl_key`, `pool_unsupported`, `external_binding_conflict`, `connector_not_lendable`, `objects_bound`; and for the federation doors `primary_not_federated`, `not_federation_source`, `schema_filter_unattributed`, `table_required`).
+  - `details.hint`: the rationale and the remedy the message used to carry, when there is more to say than the line does. Facts the reason is about ride beside it (`keys` for `undeclared_key`, `objects` for `external_binding_conflict`, `connector` for `connector_not_lendable`).
+  
+  The error code and the HTTP status of every refusal are unchanged: a reason is a member of `details`, never a new code (ADR-0112). The connection test's `{ ok: false, error }` answer keeps the whole account (line, then hint) in its one string.
+  
+  `@objectstack/rest`'s federation twins (`/api/v1/external-datasources/**`) now relay the `details` of a refusal that declared its own `400` under the door's code, the same three conditions the admin routes' relay already required; any other error keeps answering its bare sentence.
+  
+  A client that matched on the old long `message` text should branch on `details.reason` instead, and show `details.hint` where it wants the rationale.
+- adab62a: fix(service-datasource)!: the datasource admin door asks the walled-catalog verdict on every row-writing verb, as the /meta door does
+  
+  Clause-②: no (narrowing) — under the `isolated` and `group` tenancy postures, creating, changing or removing a datasource at the datasource admin routes (`POST /api/v1/datasources`, `PATCH` and `DELETE /api/v1/datasources/:name`, `POST /api/v1/datasources/:name/migrate-credential`) is a write to the environment's metadata catalog, and it is the platform operator's, as every other write to that catalog is.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and nothing at rest changes: which caller the datasource admin routes admit to a datasource write under a walled tenancy posture is all that moves, and every stored datasource stays as it is. -->
+  
+  **BREAKING** accept-set narrowing at the datasource admin routes (`@objectstack/service-datasource`) under a walled tenancy posture.
+  
+  - **The rule.** Under `isolated` and `group` every organization shares the environment's metadata catalog, and a write to it is admitted only for the platform operator and for the engine's own writes (ADR-0131 D3, D12 items 7–8, D11). A datasource is a `datasource` item of that catalog, the same record `PUT /api/v1/meta/datasource/:name` writes. So each datasource admin route that writes a datasource record (create, update, remove, migrate-credential) asks the walled-catalog verdict the `/meta` write doors ask (`walledCatalogWriteVerdict`, `@objectstack/metadata-core`) for the type `datasource`, after the `manage_platform_settings` capability gate and before the datasource service is looked up.
+  - **The answer.** A refused call answers `403 PERMISSION_DENIED` with the verdict's sentence for a `datasource` item, the one the `/meta` write doors answer, naming the posture. Nothing is stored, no secret is sealed or removed, and no pool is rebuilt or evicted.
+  - **Unchanged.** The platform operator writes datasources under a wall as before. Under `single`, and on a deployment with no `tenancy` service, every caller holding `manage_platform_settings` writes datasources as before. Listing, reading, the driver catalog, both connection tests, the remote-table listing and the object draft are unchanged, and the capability gate answers first, as before.
+  - **Who moves.** On a walled deployment, a datasource create, update, removal or credential migration by a caller below the platform operator, an organization's `admin_full_access` holder included, is refused; the platform operator performs it.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [f6a429b]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [60fe44f]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [8d7f906]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [6990b0d]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [45916c9]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [e735425]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [f4b4c8a]
+- Updated dependencies [db50231]
+- Updated dependencies [0e1311d]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [e2e6ec7]
+- Updated dependencies [e2e6ec7]
+- Updated dependencies [77a675d]
+- Updated dependencies [77a675d]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [b6e6545]
+- Updated dependencies [836d408]
+- Updated dependencies [90457e7]
+- Updated dependencies [06060c6]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [59630d9]
+- Updated dependencies [82a3ed2]
+- Updated dependencies [5e85952]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [3487ccc]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [5b7269f]
+- Updated dependencies [6dd196d]
+- Updated dependencies [d834a36]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [b96b875]
+- Updated dependencies [c62e72a]
+- Updated dependencies [450bfb6]
+- Updated dependencies [5defbfe]
+- Updated dependencies [f56354c]
+- Updated dependencies [e55347d]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [f647430]
+- Updated dependencies [36a8700]
+- Updated dependencies [31ae944]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [5a8dbc7]
+- Updated dependencies [fb94249]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [8fca8f7]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [d9f626b]
+- Updated dependencies [1a66fcf]
+- Updated dependencies [2b880f1]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [f00fb1b]
+- Updated dependencies [4d398be]
+- Updated dependencies [c72ec19]
+- Updated dependencies [c655af8]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [aad7d2f]
+- Updated dependencies [4f6fb53]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [9bff554]
+- Updated dependencies [1368536]
+- Updated dependencies [7aab601]
+- Updated dependencies [c419609]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [48d6b47]
+- Updated dependencies [e765a09]
+- Updated dependencies [1e474e3]
+- Updated dependencies [7575116]
+- Updated dependencies [0763bf6]
+- Updated dependencies [de6d893]
+- Updated dependencies [5192297]
+- Updated dependencies [326453e]
+- Updated dependencies [6d6f86b]
+- Updated dependencies [a95cb06]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [cac0f1a]
+- Updated dependencies [3c18783]
+- Updated dependencies [76684a7]
+- Updated dependencies [e336a33]
+- Updated dependencies [3452dec]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [070e879]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [a2cb3aa]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [28a1527]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [6d10967]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [d4b14a8]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [dcb5fb3]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [e542831]
+- Updated dependencies [3299873]
+- Updated dependencies [7d13a33]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/metadata-core@18.4.0
+  - @objectstack/driver-sql@18.4.0
+  - @objectstack/driver-turso@18.4.0
+  - @objectstack/types@18.4.0
+  - @objectstack/driver-mongodb@18.4.0
+  - @objectstack/driver-memory@18.4.0
+  - @objectstack/driver-sqlite-wasm@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

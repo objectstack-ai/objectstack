@@ -57,6 +57,8 @@ import {
   type UploadLinkGrant,
   type UploadLinkOutcome,
   type UploadLinkTarget,
+  type NewRecordUploadLinkGrant,
+  type NewRecordUploadLinkTarget,
   type UploadLinkUpload,
   type UploadLinkView,
 } from './record-file-access.js';
@@ -359,6 +361,14 @@ export class FileAttachmentService
     context: ExecutionContext,
   ): Promise<UploadLinkGrant> {
     return this.recordFilesOrRefuse().createUploadLinkAs(object, recordId, target, context);
+  }
+
+  async createUploadLinkForNewRecordAs(
+    object: string,
+    target: NewRecordUploadLinkTarget,
+    context: ExecutionContext,
+  ): Promise<NewRecordUploadLinkGrant> {
+    return this.recordFilesOrRefuse().createUploadLinkForNewRecordAs(object, target, context);
   }
 
   async inspectUploadLink(token: string, callerUserId: string): Promise<UploadLinkView> {

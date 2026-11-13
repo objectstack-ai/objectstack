@@ -468,9 +468,11 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
       expect(thrown?.message).toContain(`has no package-scoped resolver for '${type}' items`);
     });
 
-    it('CONTROL: a covered type not narrowed (tool) keeps `getItem` on the same view', async () => {
-      shipValid('tool', 'solo', A);
-      expect(labelOf(await readsNothingByPackage.getMetaItem({ type: 'tool', name: 'solo' }))).toBe('alpha tool');
+    // [#31985] `tool` has narrowed, so the CONTROL is a package-scoped type no
+    // one-holder rule covers: no child B card ever narrows it.
+    it('CONTROL: a package-scoped type not narrowed (dashboard) keeps `getItem` on the same view', async () => {
+      shipValid('dashboard', 'solo', A);
+      expect(labelOf(await readsNothingByPackage.getMetaItem({ type: 'dashboard', name: 'solo' }))).toBe('alpha dashboard');
     });
 
     it('CONTROL: the registry WITH the resolver reads the narrowed AI types by package and serves them', async () => {
@@ -1939,7 +1941,12 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
       }
     };
 
-    for (const type of ['action', 'queue']) {
+    // [#31985, epic ruling 3 on 6840825374] `tool` is sealed too (its registry
+    // entry has `allowEnvironmentOverlay: false`), and its narrowing makes two
+    // namespaces' holders of one name reachable, so the sealed-type rule is
+    // pinned for it by name: each holder's exact address serves its own, in
+    // every hydration state and both registration orders.
+    for (const type of ['action', 'queue', 'tool']) {
       for (const order of [[A, B], [B, A]]) {
         for (const state of STATES) {
           it(`${type}, two holders (${order.map((p) => p.split('.').pop()).join(' then ')}), ${state}: each exact address serves its own; the layered read reports no overlay (BASE: in the describe header)`, async () => {
@@ -1974,7 +1981,7 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
     // read's code step judged as the plain read judges it: the copy is
     // declined there too, never the holder's `code` (one holder) nor a 409
     // naming both (two).
-    for (const type of ['action', 'queue']) {
+    for (const type of ['action', 'queue', 'tool']) {
       for (const holders of [[A], [A, B]]) {
         it(`${type}, ${holders.length} holder(s): a service copy of the package-less row is declined on the plain read and the layered read's code layer alike`, async () => {
           for (const p of holders) shipSealed(type, p);
@@ -2030,7 +2037,7 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
     // environment's row as its own until the next unscoped hydration (the
     // re-enable heal, a follow-up under #32568).
     const BOTH = [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }];
-    for (const type of ['email_template', 'action', 'queue']) {
+    for (const type of ['email_template', 'action', 'queue', 'tool']) {
       it(`${type}, two holders, one disabled while the read-side hydrator runs, then re-enabled: one answer per state on the exact read`, async () => {
         const overlay = type === 'email_template';
         if (overlay) {

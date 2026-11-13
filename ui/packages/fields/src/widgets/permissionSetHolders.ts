@@ -92,9 +92,10 @@ export function addressingPackageOf(
  * the holder (the stamp hook keeps a named package that holds the name and
  * refuses one that does not with `409 RESOURCE_CONFLICT`). So a form writes
  * it on a create only — the record form's renderer hands this widget its
- * sibling writer on a create form alone, and the record form's write payload
- * keeps the column only on a create, only for this object
- * (`@object-ui/plugin-form`'s `createHolderPackagePayload`).
+ * sibling writer on a create form alone, and every record form's write
+ * payload, the modal and drawer forms' included, keeps the column only on a
+ * create, only for this object (`@object-ui/plugin-form`'s
+ * `createHolderPackagePayload`, reached through `createWritePayload`).
  */
 export const PERMISSION_SET_GRANT_COLUMNS = Object.freeze({
   object: 'sys_user_permission_set',
@@ -108,6 +109,10 @@ export const PERMISSION_SET_GRANT_COLUMNS = Object.freeze({
  * followed parent object, `FOLLOWED_PARENT_OBJECT_KEY`): a widget receives one
  * field, not the object, so it could not otherwise tell the grant's name
  * column from a column of the same name on another object.
+ *
+ * A key on a field definition only: the app shell's URL parameter of the same
+ * spelling (`RECORD_FORM_OBJECT_PARAM`) lives in the address bar, and neither
+ * reads the other.
  */
 export const FORM_OBJECT_KEY = 'formObject';
 
@@ -117,7 +122,10 @@ const FORM_OBJECT_READING_WIDGETS: ReadonlySet<string> = new Set(['permission-re
 /**
  * `def` with `objectName` stamped under {@link FORM_OBJECT_KEY} when `def`
  * declares a widget that reads it (`permission-ref`), else `def` itself. Every
- * other field definition is handed on untouched.
+ * other field definition is handed on untouched — including one whose author
+ * wrote the key, when no object name is given; a form that knows its object
+ * stamps over it. Only the record form's two field builders call this, so an
+ * action param is never stamped and names a set by its name alone.
  */
 export function withFormObject<T extends object>(def: T, objectName: unknown): T {
   const widget = (def as { widget?: unknown } | null | undefined)?.widget;
@@ -154,7 +162,9 @@ export function holderPackageFieldOf(objectName: unknown, fieldName: unknown): s
  * row, never the object, so the row carrying the pair's other column is what
  * says it is the grant's pair. A row without that column (a call site that
  * hands no row, a list that did not read the column, another object) labels
- * the name by its name alone, exactly as before.
+ * the name by its name alone, exactly as before — and for a name more than one
+ * holder serves, that is the label of whichever holder the catalog served last
+ * under the name. Display only: nothing is written from a cell.
  */
 export function rowHolderPackageFieldOf(
   fieldName: unknown,

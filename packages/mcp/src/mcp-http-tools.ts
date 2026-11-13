@@ -3052,6 +3052,11 @@ export function registerActionTools(
         'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
         'An action the author gated (list_actions reports requiresConfirmation) is REFUSED unless you also ' +
         'send confirm: true — ask the human first, then retry; nothing runs on a refused call. ' +
+        // [ADR-0151 D3 rule 3] `actionConfirmationRefusal` (runtime) never reads
+        // the member for an AI service account, so no retry is taught to one.
+        'Under an AI service account\'s own key (an agent acting for itself, for no person) the call is ' +
+        'refused whatever it sends and nothing runs: hand the action to a person, or its author declares ' +
+        'ai.requiresConfirmation: false when it is safe unattended. ' +
         // [#32757] The read order `flowFailureRelaySentence` applies, taught
         // to the reader as well, as the console reads it.
         'A flow action that fails answers error.code FLOW_FAILED with a message naming the flow and node, ' +
@@ -3130,7 +3135,8 @@ export function registerActionTools(
             'Set to true to confirm a call the app author gated with ai.requiresConfirmation '
             + '(list_actions reports requiresConfirmation for each action). Assert this only when '
             + 'the human in the loop has approved THIS call; without it a gated action is refused '
-            + 'and nothing runs.',
+            + 'and nothing runs. Under an AI service account\'s own key it is not read: the call is '
+            + 'refused whatever it sends.',
           ),
         },
       ),
@@ -3227,8 +3233,10 @@ export function registerActionTools(
           '(author AI opt-in, your capabilities, your read access to the record). The rest of the flow runs ' +
           'the app\'s business logic and can mutate data. When list_actions reports requiresConfirmation for ' +
           'the action that started the run, send confirm: true (ask the human first); without it the call ' +
-          'is refused and the run stays paused. A run that fails answers as run_action does: tell the user ' +
-          'the reason in the second text block, never the flow and node chain in the error message.',
+          'is refused and the run stays paused. Under an AI service account\'s own key the call is refused ' +
+          'whatever it sends and the run stays paused: hand it to a person. A run that fails answers as ' +
+          'run_action does: tell the user the reason in the second text block, never the flow and node chain ' +
+          'in the error message.',
         inputSchema: strictToolInput(
           {
             surface: 'this resume_run call',
@@ -3270,7 +3278,8 @@ export function registerActionTools(
                 'Set to true to confirm resuming a run of an action the app author gated with '
                 + 'ai.requiresConfirmation (list_actions reports requiresConfirmation). Assert this only when '
                 + 'the human in the loop has approved THIS call; without it the call is refused and the run '
-                + 'stays paused.',
+                + 'stays paused. Under an AI service account\'s own key it is not read: the call is refused '
+                + 'whatever it sends.',
               ),
           },
         ),
@@ -3415,16 +3424,37 @@ export function registerFileTools(
 
   if (canWrite && typeof bridge.createUploadLink === 'function') {
     const linkFn = bridge.createUploadLink.bind(bridge);
+    // [#32686] Ruling A: a link for a file field of a record not yet created,
+    // where the bridge serves it.
+    const newRecordLinkFn =
+      typeof bridge.createUploadLinkForNewRecord === 'function' ? bridge.createUploadLinkForNewRecord.bind(bridge) : undefined;
+    // `recordId` is optional exactly where a link can name no record, so the
+    // listed schema says what the handler takes; the handler reads it as
+    // possibly absent either way.
+    const uploadLinkRecordId: z.ZodType<string | undefined> = newRecordLinkFn
+      ? z.string().optional().describe(`${RECORD_ID_DESCRIPTION} Omit it for a record not yet created (with field).`)
+      : z.string().describe(RECORD_ID_DESCRIPTION);
     server.registerTool(
       note('create_upload_link'),
       {
         description:
           'Create a link through which the user uploads one file onto a record: into a file field (field) or ' +
           'as an attachment (attachments: true). Give the link to the user to open in a browser where they are ' +
-          'signed in to this deployment as themselves; it works only for them, once, for this record and field ' +
-          'only, and expires (see expiresAt). The upload is stored as the user, so they must be able to edit the ' +
-          'record (and the field): a record a pending approval locks, or a read-only field, gets no link, and an ' +
-          'upload the field cannot take when it arrives is refused with the reason, attaching nothing.',
+          'signed in to this deployment as themselves; it works only for them, once, for this record and this ' +
+          'field (or its attachments) only, and expires (see expiresAt). The upload is stored as the user, so they ' +
+          'must be able to edit the record. A field link also needs a field they may write, and gets no link for ' +
+          'a field declared read-only (readonly), a field read-only on this record in its current state ' +
+          '(readonlyWhen), or a record a pending approval locks. An attachments link asks only what attaching ' +
+          'asks, so a record a pending approval locks still takes attachments. An upload refused when it arrives ' +
+          '(for a field link: the field became read-only, or the record was locked, after the link was made) ' +
+          'answers the reason and attaches nothing.' +
+          (newRecordLinkFn
+            ? ' For a record you have not created yet (a required file field), omit recordId and name the field: ' +
+              'the user must be able to create such records, and the answer carries fileIds, the id(s) the upload ' +
+              'is stored under. Once the user has uploaded, create the record with the field set to fileIds[0] ' +
+              '(the array, for a multi-file field). The id works only for this user\'s own write into that field ' +
+              'of that object, in one record, within an hour of the upload.'
+            : ''),
         inputSchema: strictToolInput(
           {
             surface: 'this create_upload_link call',
@@ -3438,7 +3468,7 @@ export function registerFileTools(
           },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
+            recordId: uploadLinkRecordId,
             field: z.string().optional().describe('A file or image field of the record the upload fills'),
             attachments: z
               .literal(true)
@@ -3453,6 +3483,34 @@ export function registerFileTools(
         if (bad) return errorResult(bad);
         if ((field === undefined) === (attachments === undefined)) {
           return errorResult('Say where the upload lands: either field (a file field of the record) or attachments: true.');
+        }
+        if (recordId === undefined) {
+          // [#32686] No record yet: a file field only, where the bridge serves it.
+          if (field === undefined) {
+            return errorResult(
+              'An attachment needs its record: create the record first, then ask for a link with its recordId. ' +
+                'For a file field of a record not yet created, name the field instead.',
+            );
+          }
+          if (!newRecordLinkFn) return errorResult('recordId is required: name the record the upload lands on.');
+          try {
+            const link = await newRecordLinkFn(objectName, { field });
+            return textResult({
+              url: link.url,
+              expiresAt: link.expiresAt,
+              singleUse: true,
+              objectName,
+              field,
+              fileIds: link.fileIds,
+              instructions:
+                'Give this link to the user to open in a browser where they are signed in to this deployment, and ' +
+                'pick the file. It works only for them, once, until expiresAt. Once they have uploaded, create the ' +
+                `record with ${field} set to fileIds[0] (the array, for a multi-file field). Before the upload, ` +
+                'that create is refused as an upload that never completed.',
+            });
+          } catch (err) {
+            return errorResultWithCode(err);
+          }
         }
         try {
           const target = field !== undefined ? { field } : { attachments: true as const };

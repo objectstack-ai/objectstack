@@ -303,6 +303,9 @@ export type { SummaryRecomputeFailure } from './summary-errors.js';
 // holding the other realm's copy of the class gets `instanceof` === false,
 // silently.
 export { ReadonlyFieldRejectedError, READONLY_FIELD_REJECTED_CODE } from './readonly-strict-errors.js';
+// [#32768] What `ObjectQL#judgeFieldWriteLock` answers for a field its
+// `readonlyWhen` locks now: the drop reason and the strict refusal's phrase.
+export type { FieldWriteLock } from './engine-field-write-lock.js';
 // [#14095] Thrown by `engine.insert` when a driver refuses a row as a unique
 // violation. Exported so an application implementing the platform's own
 // "declare a unique index, attempt the insert, swallow the violation" idiom can

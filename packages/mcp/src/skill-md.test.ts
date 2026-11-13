@@ -100,6 +100,11 @@ describe('renderSkillMarkdown', () => {
     // the server REFUSES without it has learned nothing it can act on.
     expect(md).toContain('ACTION_CONFIRMATION_REQUIRED');
     expect(md).toContain('requiresConfirmation');
+    // [ADR-0151 D3 rule 3] The retry is a person's or a delegated agent's; an
+    // AI service account is refused whatever it sends, and is told so.
+    expect(md).toContain("Under an AI service\n  account's own key");
+    expect(md).toContain('refused whatever it sends and nothing runs: hand the action to a person');
+    expect(md).toContain("its refusal under an AI service account's own key whatever the call sends");
   });
 
   it('is generic — it does not enumerate any concrete schema', () => {

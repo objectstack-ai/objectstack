@@ -847,11 +847,15 @@ export interface AutomationResult {
      * it resumed from), and only when at least one step dropped a field —
      * absent, never `[]`, otherwise.
      *
-     * Delegated writes, as built: a `subflow` child that completes without
-     * pausing rolls its drops up onto this answer; a child that paused, and
-     * a `map` item's run, do not yet (#33019) — unlike {@link summary},
-     * which credits all three. Until then an absent member is not proof
-     * that a delegated write dropped nothing.
+     * Delegated writes roll up onto this answer too: a `subflow` child's run
+     * and each `map` item's run, whether it completed without pausing or
+     * paused and resumed (#33019), as {@link summary} credits them. Unlike
+     * `summary`, a child run that FAILED answers no drops, so where a
+     * `try_catch` or `fault` edge contains that failure an absent member is
+     * not proof the failed child dropped nothing. A `map` item whose paused
+     * run an operator cancelled (#27971) answers none either: the map goes
+     * on with the cancelled marker in the item's `results` slot, and that
+     * run's drops, like its totals, reach the parent nowhere.
      */
     droppedFields?: DroppedFieldsEvent[];
 }

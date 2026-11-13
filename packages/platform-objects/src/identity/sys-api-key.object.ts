@@ -387,9 +387,10 @@ export const SysApiKey = ObjectSchema.create({
     }),
 
     // Why the key was revoked, recorded only where the reason changes WHO may
-    // restore it. Three values. The first two are the same word the platform
+    // restore it. Four values. The first two are the same word the platform
     // writes on `sys_session.revoke_reason` for the same event; a session has
-    // no counterpart of the third, because a session is never restored:
+    // no counterpart of the last two, because a session is never restored (and
+    // a directory deactivation deletes the user's sessions outright):
     //
     //  - `admin_password_reset`: an administrator's forced password reset
     //    revokes the user's keys by default because the reset may answer a
@@ -411,6 +412,14 @@ export const SysApiKey = ObjectSchema.create({
     //    restores it. The restore guard stamps it on that revoke; a host that
     //    stops a key itself writes it in the system context, beside
     //    `revoked: true`.
+    //  - `scim_deactivated`: the organization's directory deactivated or
+    //    deleted the key's owner through SCIM, and the deactivation revoked
+    //    every key the owner had. Nobody restores such a key from a user
+    //    context, a platform administrator included: a re-activation lifts the
+    //    directory's ban and re-arms no key, and the re-activated owner creates
+    //    a new one. Its one writer is plugin-auth
+    //    `scim-deactivation-key-revocation.ts`, in the system context, beside
+    //    `revoked: true`.
     //
     // One hook keeps it in step with `revoked` (plugin-auth
     // `api-key-restore-guard.ts`): it refuses the user-context restores each
@@ -428,9 +437,10 @@ export const SysApiKey = ObjectSchema.create({
         { label: 'Administrator password reset', value: 'admin_password_reset' },
         { label: 'Organization membership ended', value: 'organization_membership_ended' },
         { label: 'Suspended by an administrator', value: 'administrator_suspended' },
+        { label: 'Deactivated by the directory', value: 'scim_deactivated' },
       ],
       description:
-        'Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Suspended by an administrator: a platform administrator revoked a key that is not theirs, and only a platform administrator can restore it. Cleared when the key is restored. Empty for a key its owner revoked from the API Keys list.',
+        'Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Suspended by an administrator: a platform administrator revoked a key that is not theirs, and only a platform administrator can restore it. Deactivated by the directory: the organization\'s directory (SCIM) deactivated or deleted the owner, and no one can restore the key, even after the owner is re-activated; the owner creates a new one. Cleared when the key is restored. Empty for a key its owner revoked from the API Keys list.',
       group: 'Lifecycle',
     }),
 

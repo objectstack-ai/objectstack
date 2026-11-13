@@ -8573,10 +8573,21 @@ export class AutomationEngine implements IAutomationService {
      * `!childRes.success` before reaching here — which is what lets #15617's
      * `failures` ride this seam under exactly its declared rule: the contained
      * failures of a child that COMPLETED, never a failed child's own `failed`.
+     *
+     * #33019 — the same seam carries the child's `droppedFields` (its own
+     * answer's), folded onto that awaiting step through the one fold
+     * (`foldDropEvents`), so the parent's terminal answer — folded from its
+     * steps — reports a paused child's or a `map` item's dropped values
+     * wherever this method credits its totals. A failed child answers none.
      */
-    private creditChildRun(steps: StepLogEntry[], nodeId: string, child: FlowRunSummary | undefined): void {
+    private creditChildRun(
+        steps: StepLogEntry[],
+        nodeId: string,
+        child: FlowRunSummary | undefined,
+        childDroppedFields?: readonly DroppedFieldsEvent[],
+    ): void {
         // The body lives in ./run-resume.ts (#25222).
-        creditChildRun(steps, nodeId, child);
+        creditChildRun(steps, nodeId, child, childDroppedFields);
     }
 
     /**
@@ -8592,6 +8603,11 @@ export class AutomationEngine implements IAutomationService {
      *   because it is engine-internal control flow, not data the parent's
      *   variable map should ever see — the reserved-name guard
      *   (`applyResumeSignal`) polices that map, and a refusal is not a variable.
+     * @param childDroppedFields - #33019: the drop events of the child run
+     *   whose completion triggered this resume (the up-bubble path), folded
+     *   onto the awaiting step beside `childSummary`. A parameter for the same
+     *   reason: the parent's answer reads them from its steps, never from its
+     *   variable map.
      */
     private resumeInternal(
         runId: string,
@@ -8604,6 +8620,7 @@ export class AutomationEngine implements IAutomationService {
         skipBubble: boolean,
         childSummary?: FlowRunSummary,
         childRefusal?: ChildRunRefusal,
+        childDroppedFields?: readonly DroppedFieldsEvent[],
     ): Promise<AutomationResult> {
         // The body lives in ./run-resume.ts (#25222).
         const host: ThisParameterType<typeof resumeInternal> = {
@@ -8635,7 +8652,7 @@ export class AutomationEngine implements IAutomationService {
             failAncestors: (...a) => this.failAncestors(...a),
             renderFlowTerminalMessage: (...a) => this.renderFlowTerminalMessage(...a),
         };
-        return resumeInternal.call(host, runId, signal, skipBubble, childSummary, childRefusal);
+        return resumeInternal.call(host, runId, signal, skipBubble, childSummary, childRefusal, childDroppedFields);
     }
 
     /**
@@ -8807,6 +8824,11 @@ export class AutomationEngine implements IAutomationService {
          * control flow, not a variable.
          */
         refusal?: ChildRunRefusal,
+        /**
+         * #33019 — this child's drop events (the ones its own terminal answer
+         * carries), credited to the parent's awaiting step beside `summary`.
+         */
+        droppedFields?: readonly DroppedFieldsEvent[],
     ): Promise<void> {
         const ctx = run.context as Record<string, unknown> | undefined;
         const parentRunId = ctx?.$parentRunId;
@@ -8821,7 +8843,7 @@ export class AutomationEngine implements IAutomationService {
                 // the one writer allowed to set them (#3853 follow-up).
                 ? engineBuilt({ variables: { [`${mapNode}.$mapItemOutput`]: output ?? null, [`${mapNode}.$mapItemDone`]: true } })
                 : this.buildSubflowResumeSignal(run.context, output);
-            const parentRes = await this.resumeInternal(parentRunId, sig, false, summary, refusal);
+            const parentRes = await this.resumeInternal(parentRunId, sig, false, summary, refusal, droppedFields);
             if (!parentRes.success) {
                 // #6499 — `parentRes.error` is the envelope field that carries
                 // a failing node's / driver's text VERBATIM (#5912 left it

@@ -306,8 +306,40 @@ record means no file**, refused with the same `RECORD_NOT_FOUND`.
   `401`, and a second use, an expired link, an unknown link and another user's
   link all get the same `404`. The upload is stored as that user, with their
   access checked again when the file arrives, and it meets the storage
-  service's maximum upload size before the link is spent. Sending a file's
-  bytes through the MCP protocol itself is not supported yet.
+  service's maximum upload size before the link is spent. A field that cannot
+  take the upload now gets no link: a `readonly` field, or one whose
+  `readonlyWhen` holds on this record as it stands (refused `403`
+  `FIELD_NOT_ACCESSIBLE`, naming the lock in the words the engine update's
+  strict refusal (`strictReadonlyWrites`) uses for it; `update_record` reports
+  the same lock under `droppedFields` with reason `readonly_when`), and a
+  record a pending approval locks (`409`
+  `RECORD_LOCKED`). Those are a field link's refusals: an attachments link
+  asks only what attaching asks (the permission to create attachments and a
+  record the caller may edit), so a record a pending approval locks still
+  takes attachments. A field that becomes read-only, or a record that becomes
+  locked, after the link was made refuses the upload when it arrives,
+  attaching nothing. Sending a file's bytes through the MCP protocol itself
+  is not supported yet.
+- **A record not created yet.** A record whose file field is `required` (an
+  expense line and its invoice, say) cannot be created before the file
+  exists, so `create_upload_link` also takes `objectName` and `field` with no
+  `recordId`. That needs a user who may create records of the object and
+  write the field, and a field that is not `readonly`; an attachments link
+  still needs its record. The answer carries `fileIds`, the id the upload is
+  stored under. Once the user has uploaded (the page says the file was
+  received), the agent calls `create_record` with the field set to
+  `fileIds[0]`, or the array for a multi-file field; before the upload that
+  create is refused as an upload that never completed. The field's own
+  `accept` and `maxSize` are checked when the file arrives, before the link is
+  spent. Until a record holds the file, the id works only for that user's own
+  `create_record` or `update_record` into that field of that object, within
+  one hour of the upload: the uploader's write into another field or object,
+  or after the hour, is refused at the field with the reason, and another
+  user's or a system write is refused as a file they cannot open. Within the
+  hour, a second record naming it while the first holds it is refused too.
+  After that it is the record's file like any other, and a file the record
+  lets go is judged as any released file. Until a record has held the file,
+  only the user who uploaded it can download it.
 
 Reading a PDF or Word document's text runs on a pool of worker threads, so the
 server keeps answering other requests while it does. Two host settings bound it, so
@@ -383,8 +415,17 @@ can reach is the **default exposure policy (v1)**:
   same people the console's buttons admit: a current approver of the request,
   and, for approve, reject and reassign, the administrator who may override it.
   Anyone else, the submitter
-  included, is refused and the request stays pending. The submitter's own
-  levers (remind, recall, resubmit), request-info and comments are not exposed.
+  included, is refused and the request stays pending.
+- **A submitter's recall and resubmit are exposed to the submitter's agent.**
+  Recall (withdraw a pending request, or abandon one sent back for revision) and
+  resubmit (send a request that was sent back for revision into review again)
+  are exposed the same way, with `ai.requiresConfirmation: true`, and forward to
+  their approvals routes as the caller. The approval service admits the
+  submitter, and for recalling a pending request the administrator who may
+  override it; anyone else is refused (`FORBIDDEN`) and the request does not
+  move. A recalled request is closed: to send the record for approval again,
+  the agent uses the app's own submit action. Remind, request-info and comments
+  are not exposed.
 
 <Callout type="info">
 This is the default policy, not a ceiling. A finer, **metadata-declared** exposure

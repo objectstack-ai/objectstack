@@ -33,6 +33,30 @@
 //
 // Boots fixture stacks of its own (the install-local plugin mounted), so it
 // stays out of `SHARED_SHOWCASE`.
+//
+// ## Second describe: the flows, with the plugin order `objectstack dev` boots
+//
+// Measured on a real `objectstack dev` restart of the showcase over a file DB
+// before the fix: the package was listed and its objects served, but its flow
+// answered 404 on the trigger door and `registration.state: unregistered`.
+// The engine's `kernel:ready` bind sees a rehydrated package only when the
+// install-local plugin starts before the automation plugin, and the showcase
+// lists `MarketplaceInstallLocalPlugin` in its own `plugins` AFTER the
+// connector plugins, each of which declares a dependency on the automation
+// plugin, so the kernel starts the automation plugin first and the rehydrate
+// runs after the bind. The first describe mounts install-local through
+// `extraPlugins`, which `bootStack` mounts before the app's plugins, so it
+// never met that order. The second describe mounts it where the showcase
+// lists it, and pins:
+//
+//   1. (precondition) the boot's composition lists install-local after a
+//      plugin that depends on the automation plugin;
+//   2. (precondition) the install answers 200, hot-loaded, and the flow
+//      triggers by name before the restart;
+//   3. after the restart: the package is listed;
+//   4. after the restart: the flow triggers by name (200);
+//   5. after the restart: the flow's metadata reads `registration.state:
+//      registered`.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -41,6 +65,7 @@ import { join } from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
+import showcaseStack from '@objectstack/example-showcase';
 import { bootShowcase } from './showcase-boot.js';
 
 const ROUTE = '/marketplace/install-local';
@@ -181,5 +206,129 @@ describe('dogfood: an install-local package\'s connector is live again after a r
 
   it('after the restart, a connector the host declares is still listed (control)', () => {
     expect(listed(after, HOST_CONNECTOR), JSON.stringify(names(after))).toBeDefined();
+  });
+});
+
+const FLOW_PACKAGE_ID = 'com.dogfood.restartflow';
+const ORDER_FLOW = 'rstflow_manual_probe';
+const AUTOMATION_PLUGIN = 'com.objectstack.service-automation';
+
+const FLOW_INSTALL_BODY = {
+  manifest: {
+    id: FLOW_PACKAGE_ID,
+    namespace: 'rstflow',
+    name: 'Restart flow probe',
+    version: '0.1.0',
+    type: 'app',
+    flows: [
+      {
+        name: ORDER_FLOW,
+        label: 'Restart flow probe (run by name)',
+        type: 'autolaunched',
+        status: 'active',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+      },
+    ],
+  },
+};
+
+const dependsOnAutomation = (plugin: unknown): boolean =>
+  Array.isArray((plugin as { dependencies?: unknown })?.dependencies)
+  && ((plugin as { dependencies: unknown[] }).dependencies).includes(AUTOMATION_PLUGIN);
+
+/**
+ * The showcase with `MarketplaceInstallLocalPlugin` in its own `plugins`, after
+ * the plugins that depend on the automation plugin, where the showcase's
+ * configuration lists it whenever a control plane is configured (this suite
+ * runs with `OS_CLOUD_URL=off`, which leaves it out).
+ */
+function showcaseWithInstallLocal(storageDir: string): { plugins: unknown[] } {
+  const own = ((showcaseStack as { plugins?: unknown[] }).plugins ?? []);
+  let at = 0;
+  own.forEach((plugin, index) => {
+    if (dependsOnAutomation(plugin)) at = index + 1;
+  });
+  return {
+    ...(showcaseStack as object),
+    plugins: [...own.slice(0, at), new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir }), ...own.slice(at)],
+  };
+}
+
+describe('dogfood: an install-local package\'s flow is registered again after a restart, in the plugin order the showcase boots', () => {
+  let storageDir: string;
+  let composition: { plugins: unknown[] };
+  let install: Answer;
+  let triggerBefore: Answer;
+  let packages: Answer;
+  let triggerAfter: Answer;
+  let metaAfter: Answer;
+  let bootError: unknown;
+
+  beforeAll(async () => {
+    storageDir = mkdtempSync(join(tmpdir(), 'dogfood-install-local-restart-flow-'));
+    composition = showcaseWithInstallLocal(storageDir);
+    const first = await bootShowcase({}, composition);
+    try {
+      const token = await first.signIn();
+      install = await json(await first.apiAs(token, 'POST', ROUTE, FLOW_INSTALL_BODY));
+      triggerBefore = await json(await first.apiAs(token, 'POST', `/automation/${ORDER_FLOW}/trigger`, {}));
+    } finally {
+      await first.stop();
+    }
+
+    let second: VerifyStack | undefined;
+    try {
+      second = await bootShowcase({}, showcaseWithInstallLocal(storageDir));
+    } catch (err) {
+      bootError = err;
+      return;
+    }
+    try {
+      const token = await second.signIn();
+      packages = await json(await second.apiAs(token, 'GET', ROUTE));
+      triggerAfter = await json(await second.apiAs(token, 'POST', `/automation/${ORDER_FLOW}/trigger`, {}));
+      metaAfter = await json(await second.apiAs(token, 'GET', `/meta/flow/${ORDER_FLOW}`));
+    } finally {
+      await second.stop();
+    }
+  }, 300_000);
+
+  afterAll(() => {
+    if (storageDir) rmSync(storageDir, { recursive: true, force: true });
+  });
+
+  it('the composition lists install-local after a plugin that depends on the automation plugin (precondition)', () => {
+    const installLocalAt = composition.plugins.findIndex((p) => p instanceof MarketplaceInstallLocalPlugin);
+    const lastDependentAt = composition.plugins.reduce<number>((last, p, i) => (dependsOnAutomation(p) ? i : last), -1);
+    expect(lastDependentAt).toBeGreaterThanOrEqual(0);
+    expect(installLocalAt).toBeGreaterThan(lastDependentAt);
+  });
+
+  it('before the restart, the install is hot-loaded and the flow triggers by name (precondition)', () => {
+    expect(install.status, JSON.stringify(install.body)).toBe(200);
+    expect(install.body?.data?.hotLoaded).toBe(true);
+    expect(triggerBefore.status, JSON.stringify(triggerBefore.body)).toBe(200);
+  });
+
+  it('the second boot over the same ledger succeeds and lists the package', () => {
+    expect(bootError).toBeUndefined();
+    expect(packages.status, JSON.stringify(packages.body)).toBe(200);
+    const item = (packages.body?.data?.items ?? []).find((i: any) => i?.manifestId === FLOW_PACKAGE_ID);
+    expect(item, JSON.stringify(packages.body)).toBeDefined();
+    expect(item.notLoaded).toBeUndefined();
+  });
+
+  it('after the restart, the package\'s flow triggers by name', () => {
+    expect(triggerAfter.status, JSON.stringify(triggerAfter.body)).toBe(200);
+  });
+
+  it('after the restart, the package\'s flow reads registered', () => {
+    expect(metaAfter.status, JSON.stringify(metaAfter.body)).toBe(200);
+    const doc = metaAfter.body?.data ?? metaAfter.body;
+    expect(doc?.registration?.state, JSON.stringify(metaAfter.body)).toBe('registered');
   });
 });

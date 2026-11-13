@@ -1,5 +1,904 @@
 # @objectstack/plugin-mcp-server
 
+## 18.4.0
+
+### Minor Changes
+
+- 140d8ce: fix(spec,metadata-protocol,mcp)!: a field marked `sortable: false` is no longer offered or performed as a sort — the sortability projection reports it unsortable, and the Data API and the stdio MCP `query_records` refuse a sort on it with `400 INVALID_SORT` (#29896)
+  
+  Clause-②: yes (narrowing) — `GET /api/v1/data/:object` (and every request that reaches the same list door: `POST /api/v1/data/:object/query`, the export route, the RPC dispatcher, the record-page `related[].sort`) and the stdio MCP `query_records` refuse a sort on a field whose author declared `sortable: false`, which they used to answer sorted by the column; a stored list view `sort` or `record:related_list` `sort` naming such a field is now refused when it is read. The widening half: `@objectstack/spec/api` exports `FIELD_UNSORTABLE_AUTHOR_DECLARED`, and `FieldSortabilitySchema.reason` accepts `'author-declared'` beside `'virtual-type'`.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/**` names no `sortable` field key, and `content/docs/**` already teaches `sortable: false` as "do not allow sorting by this field" and `INVALID_SORT` as "the field must exist and have `sortable: true`", which is what the platform now does. The prescription ships in the refusal text and the upgrade-guide entry.
+  
+  <!-- adr-0087: registered field-sortable-false-sort-refused -->
+  
+  **BREAKING** accept-set narrowing at the Data API list door (`@objectstack/metadata-protocol`) and the stdio MCP `query_records` (`@objectstack/mcp`): a sort on a field marked `sortable: false` is refused.
+  
+  - **Before.** An author who marked a field `sortable: false` (a long text, an unindexed column on a large table) got nothing for it. The sortability projection served on `GET /api/v1/meta/object/NAME` reported the field `{ sortable: true }`, so the list header and the Sort picker offered it, `GET /api/v1/data/NAME?sort=FIELD` answered 200 sorted by it, and so did the stdio MCP `query_records` with that `orderBy`.
+  - **Now.** The projection reports `{ sortable: false, reason: 'author-declared' }` for that field, so the grid header and the Sort picker, which read the projection, stop offering it. The Data API judges the sort by the same projection and refuses it with `400 INVALID_SORT` before any read, the answer a sort on a `formula` field already gets; the stdio MCP `query_records` refuses it the same way before the engine runs. Only the literal `false` counts: a field with no `sortable` key, or with `sortable: true`, sorts as before. A `formula` field also marked `sortable: false` keeps its `reason: 'virtual-type'` answer.
+  - **Stored sorts.** A list view whose `sort` names such a field, or a page `record:related_list` block whose `sort` does, used to load sorted and is now refused when it is read. Lint does not yet judge these at authoring. The upgrade-guide entry `field-sortable-false-sort-refused` lists them.
+  - **Not changed.** In-process callers that reach `ObjectQL.find` directly (hooks, flows) keep sorting by the stored column: the engine door judges only whether a column is stored, and `sortable: false` governs what the platform offers callers, not what its storage can do.
+  
+  **The remedy.** Drop the sort on that field or sort by another one, in requests and in stored view and related-list sorts. An author who wants the field sortable removes `sortable: false` from it.
+- 4c2cd29: **Shipped in 18.3.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  fix(lint)!: publish refuses a validation rule (or another fail-closed predicate) that orders a text or boolean field against a number, instead of warning that it "evaluates to null" and then refusing every write (#29904)
+  
+  Clause-②: no (narrowing) — the author-time gate (`os build`, `os validate`, the object save door and the package publish) refuses a `type-mismatch` it used to pass with a warning, at the predicate sites that fail closed. Nothing is widened.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered validation-type-mismatch-refused -->
+  
+  **BREAKING** accept-set narrowing at the author-time expression gate, served by `os build`, `os validate`, the object save door and `POST /api/v1/packages/:id/publish-drafts`.
+  
+  - **Before.** `record.name > 5` on a text field, written as a validation rule's `condition`, published with one `expression-invalid` advisory at `severity: warning` saying the expression "silently evaluates to null". A validation rule fails closed, so from then on every create and update whose `name` was not numeric text was refused: `400 VALIDATION_FAILED` "Validation rule 'name_gt' could not be evaluated (runtime: no such overload: dyn<string> > int) — write rejected".
+  - **Now.** The same rule is refused at publish as `expression-invalid` at `severity: error`, at the rule's `condition` path, with a message that says the write would be refused and how to compare like with like. This is the severity the nullable-comparison verdict (`record.qty > 1000` on a nullable number) already had at the same slot.
+  - **Which sites.** Those whose runtime refuses the write (or aborts the operation) when the expression faults: a validation rule's `condition` and `when`, nested `then` / `otherwise` rules included; a field's `requiredWhen` and `readonlyWhen`; an option's `visibleWhen` (a write that picks the option); a hook's `condition`. The `validate_expression` MCP tool answers the same for `site: 'validation'`.
+  - **Unchanged.** A formula field's `expression` keeps the warning: there the fault reads null, which is what the warning says. So do flow conditions (the run fails, the write that fired it lands), a field's display `visibleWhen` / `settledWhen`, field group and action predicates, and `conditionalFormatting`. Sharing-rule conditions compile to a query filter and are not judged by this verdict.
+  - **`@objectstack/spec`.** The upgrade guide entry `validation-type-mismatch-refused` (a semantic migration: no automatic rewrite, because whether the author meant the length, a number stored as text or another field is a judgement about the rule).
+  - **`@objectstack/formula`.** `ExprSchemaHint` gains `faultOutcome?: 'fail-closed'`, which the caller sets for a fail-closed site; the `type-mismatch` refusal's `params` carry `outcome: 'fail-closed'` when it is graded an error there.
+  
+  **FROM → TO.** `condition: 'record.name > 5'` on a text field → `size(record.name) > 5` for its length, `record.score > 5` on a number field for a value, or `double(record.name) > 5` only when every value is numeric text (it faults, and refuses the write, on any other). A boolean: `record.active > 0` → `record.active == true`.
+- 9037b13: fix(lint)!: a text-vs-number comparison in a record-triggered flow condition is refused with what really happens (the run fails, the write lands), and in an advisory validation rule the refusal no longer says the write is refused (#29926)
+  
+  Clause-②: no (narrowing) — the author-time gate (`os build`, `os validate`, the package publish and the flow publish door) refuses a `type-mismatch` in a record-triggered flow's start or edge condition that it used to pass with a warning; and the fail-closed arm of the verdict is served under its own code `type-mismatch-fail-closed` instead of `type-mismatch` with `params.outcome`. Added beside them: the codes `type-mismatch-run-fails` and `type-mismatch-fail-open`, and the exported type `ExprFaultOutcome`.
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/data-modeling/formulas.mdx` (the type-soundness row names each outcome) and the MCP skill text in `packages/mcp/src/skill-md.ts` (`flow_condition` now errors too); `skills/**` teaches no text-vs-number comparison in a flow condition or an advisory rule, so no skill or eval moves.
+  
+  <!-- adr-0087: registered flow-condition-type-mismatch-refused -->
+  
+  **BREAKING** accept-set narrowing at the author-time expression gate, served by `os build`, `os validate` and `POST /api/v1/packages/:id/publish-drafts`.
+  
+  - **Record-triggered flow conditions — before.** `name > 5` on a text field, as the start node's `condition` or an edge `condition` of a flow whose start `triggerType` is `record-*`, published with an `expression-invalid` warning saying the expression "silently evaluates to null". It does not: the engine's `evaluateCondition` throws on the fault, so the run fails at that condition, and the record-change trigger isolates the write that fired it, so the write lands and the flow's work is not done.
+  - **Now.** The same condition is refused as `expression-invalid` at `severity: error`, code `type-mismatch-run-fails`, with a message saying the run fails at the condition and the triggering write still lands. This is the severity and outcome the nullable-comparison verdict already has on those conditions (#29026). A flow that is not record-triggered, and a node `condition` other than the start node's (inert), keep the warning. The `validate_expression` MCP tool answers the same for `site: 'flow_condition'`.
+  - **Advisory validation rules** (`severity: 'warning'` / `'info'`). Still refused at publish, as the nullable twin refuses them, but under `type-mismatch-fail-open` with a message that says what happens: the rule is skipped, the write proceeds, and the rule never gives its advisory. The nullable twin's message on the same rule now says the same instead of "the write is rejected fail-closed". A `severity: 'error'` rule keeps both refusals and their wording.
+  - **Refusal codes (`@objectstack/formula`).** A code names one message template, so each outcome has its own: `type-mismatch` (warning, reads null), `type-mismatch-fail-closed`, `type-mismatch-run-fails`, `type-mismatch-fail-open` (all errors). `ExprSchemaHint.faultOutcome` takes `'fail-closed' | 'run-fails' | 'fail-open'` (exported as `ExprFaultOutcome`); the `outcome` param on `type-mismatch` is gone.
+  - **`@objectstack/spec`.** Upgrade guide entry `flow-condition-type-mismatch-refused` (semantic: no mechanical rewrite). The `validation-type-mismatch-refused` entry's acceptance criteria now say a create answers 201, the data door's status.
+  
+  **FROM → TO.** Flow condition `name > 5` on a text field → `size(name) > 5` for its length, `score > 5` on a number field for a value, or `double(name) > 5` only when every value is numeric text. A boolean: `active > 0` → `active == true`. A consumer keyed to the code: `type-mismatch` with `params.outcome === 'fail-closed'` → `type-mismatch-fail-closed`.
+  
+  **The renamed code shipped in 18.3.0.** `@objectstack/formula@18.3.0` and `@objectstack/mcp@18.3.0` already serve #29904's fail-closed refusal as `type-mismatch` with `params.outcome: 'fail-closed'` (the `outcome` param is in the 18.3.0 `ExpressionRefusalParams` type), although 18.3.0's changelog has no line for it: its changeset (`29904-type-mismatch-fail-closed.md`) was not consumed by that release. This release renames that arm `type-mismatch-fail-closed` and removes the `outcome` param, so a consumer keyed to 18.3.0's `type-mismatch` + `outcome` moves to the new code (FROM → TO above). The same changeset also says flow conditions keep the warning; a record-triggered flow's start and edge conditions are now refused, as above.
+- e8afd1e: fix(lint)!: every flow condition's text-vs-number comparison gets a verdict that says what the run does — a record-triggered flow's `record.<field>` read and `decision` branch are refused like its bare name, a time-relative sweep of the flow's object is refused like a record-triggered flow, a bare name a flow variable holds is no longer typed as the field, and any other flow's warning says the run fails instead of "evaluates to null" (#29959)
+  
+  Clause-②: yes (narrowing) — the author-time gate (`os build`, `os validate`, the package publish and the flow publish door) refuses, on a record-triggered flow, a `type-mismatch` in a `decision` branch and in a `record.<field>` / `previous.<field>` read of a start or edge condition, which it passed with no verdict before; refuses the same on a time-relative flow sweeping the object its conditions are typed against, where 18.3.0 served a warning; and a flow condition's `type-mismatch` warning is served under its own code `type-mismatch-run-may-fail` instead of `type-mismatch`. Added beside them (the widening half): the optional `severity` and `triggerKind` inputs of the `validate_expression` MCP tool, the code `type-mismatch-run-may-fail` in `@objectstack/formula`'s `ExpressionRefusalCode`, the optional `flowVariables` key of `@objectstack/formula`'s `ExprSchemaHint`, and a bare flow-condition name that a declared flow variable or node id holds is no longer typed as the field it shadows (no verdict where 18.3.0 served a `type-mismatch` warning).
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/data-modeling/formulas.mdx` (the type-soundness row names the decision branch, the `record.<field>` read and the warning on other flows) and the MCP skill text in `packages/mcp/src/skill-md.ts` (the two new `validate_expression` inputs); `skills/**` teaches no text-vs-number comparison in a flow condition (grep for `type mismatch`, `evaluates to null`, `validate_expression` and the decision examples), so no skill or eval moves.
+  
+  <!-- adr-0087: registered flow-record-read-and-decision-type-mismatch-refused -->
+  
+  **BREAKING** accept-set narrowing at the author-time expression gate, served by `os build`, `os validate` and `POST /api/v1/packages/:id/publish-drafts`.
+  
+  - **Record-triggered flows — before.** The start and edge conditions refused `name > 5` on a text field (`type-mismatch-run-fails`), but `record.name > 5` in the same slot, and `name > 5` in a `decision` node's `config.conditions[].expression`, published with no verdict at all. Both fail the run the same way: the engine's `evaluateCondition` throws on the fault, the run binds the trigger record both as `record` and flattened to bare names, and a decision branch is evaluated over the same variables as an edge.
+  - **Now.** Both are refused as `expression-invalid` at `severity: error`, code `type-mismatch-run-fails`, with the message the bare name already gets: the run fails at the condition and the triggering write still lands. `previous.<field>` is judged the same way. The date verdicts stay on the bare name only, as before.
+  - **Time-relative flows.** A sweep launches each run with the swept row as its record, so on a flow whose `timeRelative.object` is the start node's `objectName` (or is omitted) the start, edge and `decision` conditions get the record-triggered verdict above, bare name included: `type-mismatch-run-fails`, where 18.3.0 served a `type-mismatch` warning. A sweep of another object keeps the warning below.
+  - **Any other flow** (no `triggerType`, a `schedule` flow, an `api` flow) and an inert node `condition` keep a warning. Its text said the expression "silently evaluates to null", which is false on every flow: a condition that faults fails the run. It is now `type-mismatch-run-may-fail`, worded for the failed run, and a warning because such a flow is handed whatever its entrance carries (an API request body, an action's partial record, a parent flow's record, or nothing), so the field's type is not proven to be what the name holds. A `record.<field>` read and a `decision` branch there get the same warning. The flow registration log line reads the same text.
+  - **A bare name a flow variable holds.** The run seeds a flow's declared variables (and each node's outputs, under its id) before it flattens the record, and the flattening skips a name already bound. So in a flow that declares `variables: [{ name: 'title', type: 'number' }]` over a text field `title`, a bare `title > 5` reads the number and runs; it was refused as `type-mismatch-run-fails` on the head that added that error, and warned on 18.3.0. It now gets no type verdict (the `flow-variable-shadows-field` warning still names the shadowing). `record.title > 5` reads the field and stays refused.
+  - **`validate_expression` (MCP).** Two optional inputs, so the tool answers what the gate will: `severity` (`error` | `warning` | `info`, site `validation`; default `error`) gives an advisory rule the gate's `type-mismatch-fail-open` instead of the fail-closed verdict, and `triggerKind` (`record_change` | `time_relative` | `schedule` | `api` | `none`, site `flow_condition`; default `record_change`) gives a `schedule`, `api` or `none` flow the gate's warning instead of the run-fails error (`time_relative` answers run-fails, its record being a row of `objectName`). Either input on a site it does not describe is refused as a tool error. A call that passes neither answers as before.
+  - **`@objectstack/spec`.** Upgrade guide entry `flow-record-read-and-decision-type-mismatch-refused` (semantic: no mechanical rewrite).
+  
+  **FROM → TO.** In a record-triggered flow, or a time-relative flow sweeping its own object: `record.name > 5` (or a decision branch `name > 5`) on a text field → `size(record.name) > 5` for its length, `record.score > 5` on a number field for a value, or `double(record.name) > 5` only when every value is numeric text. A boolean: `record.active > 0` → `record.active == true`. A consumer keyed to the code of a flow condition's warning: `type-mismatch` → `type-mismatch-run-may-fail` (`@objectstack/formula@18.3.0` and `@objectstack/mcp@18.3.0` serve `type-mismatch` there; the record-scoped `type-mismatch`, on a formula field or a display predicate, is unchanged).
+- cfb602c: fix(lint)!: a time-relative flow whose start node names no `objectName` has its conditions typed against the object it sweeps (`timeRelative.object`), so a text-vs-number comparison, a read of a field the swept object does not declare and date arithmetic there are refused like on a sweep of the start node's object; a sweep of another object is told why it only warns; and `validate_expression` takes the swept object (#30026)
+  
+  Clause-②: yes (narrowing) — the author-time gate (`os build`, `os validate`, the package publish and the flow publish door) refuses, in the start, edge and `decision` conditions of a time-relative flow whose start node names no `objectName`, a `type-mismatch` (`type-mismatch-run-fails`), a `record.FIELD` read of a field the swept object does not declare (`unknown field`), and date arithmetic (`date-arithmetic-run-fails` / `date-text-arithmetic-run-fails`), which it passed with no verdict at all before. Added beside it (the widening half): the optional `sweepObject` input of the `validate_expression` MCP tool.
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — the MCP skill text in `packages/mcp/src/skill-md.ts` (the new `sweepObject` input); `skills/**` teaches no time-relative flow condition with a text-vs-number comparison, so no skill or eval moves.
+  
+  <!-- adr-0087: not-required (already-registered flow-record-read-and-decision-type-mismatch-refused) the entry already prescribes this exact rewrite for a time-relative flow's conditions: the same refusal code, the same replacement and the same reason (each run's record is a row of the swept object); this change extends it to a sweep whose start names no objectName; the unknown-field and date-arithmetic arms are the verdicts every flow with a typed object already gets, served here for the same reason and with the rewrite in their own message, and the entry's surface text is widened to this shape in the spec lane -->
+  
+  **BREAKING** accept-set narrowing at the author-time expression gate, served by `os build`, `os validate` and `POST /api/v1/packages/:id/publish-drafts`.
+  
+  - **Before.** A time-relative flow was typed only against its start node's `objectName`. A start that named none, with the swept object in `timeRelative.object` (the key the descriptor requires), got no type verdict on its conditions at all: `title > 5` on a text field published clean, and every run the sweep launched failed at that condition.
+  - **Now.** The conditions of such a flow are typed against `timeRelative.object`: each run's record is a row of that object, so its start, edge and `decision` conditions get every verdict a sweep of the start node's object already gets. Three of them are new refusals there: a text-vs-number comparison (`type-mismatch-run-fails`), a `record.FIELD` read of a field the swept object does not declare (`unknown field FIELD on OBJECT`; the run fails on the missing key), and arithmetic on a date field (`date-arithmetic-run-fails`, or `date-text-arithmetic-run-fails` against text). The shadowing and near-miss warnings and the root check are judged against the same object.
+  - **A sweep of another object** (the start node's `objectName` is not `timeRelative.object`) keeps the `type-mismatch-run-may-fail` warning, and the flow now gets one more warning, at its start node's `config.objectName`, saying why: the conditions are checked against that object's fields while each run's record is a row of the swept one. It is served only on a flow that got a warning it explains.
+  - **`validate_expression` (MCP).** New optional input `sweepObject` (site `flow_condition` with `triggerKind: 'time_relative'` only; a tool error anywhere else): the flow's `timeRelative.object`. When it is another object than `objectName`, a type mismatch is the gate's warning instead of the run-fails error. A call that does not pass it answers as before.
+  - **Correction to the 18.x changeset of the flow-condition type check.** It described a time-relative flow whose `timeRelative.object` "is omitted" as sweeping the start node's object. That shape never binds: `TimeRelativeTriggerSchema` requires `object`, and the gate refuses its absence (`flow-time-relative-descriptor-invalid`). Such a flow now gets the warning, not the run-fails verdict, on its conditions, since no run of it binds a row.
+  
+  **FROM → TO.** In a time-relative flow whose start names no `objectName`, sweeping `crm_opportunity` with a text field `title` and a date field `close_date`: `title > 5` (or `record.title > 5`, or a decision branch `title * 2 > 10`) → `size(title) > 5` for its length, a number field for a value, or `double(title) > 5` only when every value is numeric text. `record.nope > 1`, where `crm_opportunity` declares no `nope` → the field's declared name, or the object that declares it as `timeRelative.object`. `close_date + 1 > …` → `addDays(close_date, 1) > …` to shift a date (`addMonths(d, n)` and `daysFromNow(n)` likewise), or `daysBetween(a, b)` for a span in whole days. A flow whose start names one object and sweeps another: set the start node's `objectName` to the swept object, or remove it.
+- b4f6971: fix(mcp)!: `registerSkillPrompts` offers a skill as a prompt only when the server it is installed on serves every tool the skill binds
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: `SkillSchema.tools` keeps its shape. Its meaning on the MCP prompt surface changes (it now decides whether a skill's instructions are offered on a connection), but nothing at rest records which prompts a connection was offered, so there is nothing for a migration to rewrite. -->
+  
+  A skill's `instructions` teach the model to call the tools the skill binds (`SkillSchema.tools`). `prompts/list` listed every skill that carries instructions, whatever the connection could call: on `MCPServerRuntime`'s Streamable HTTP door a `data:read` token was offered `metadata_authoring` and other authoring skills whose tools its own `tools/list` never lists, so the client's model was handed playbooks it could not run.
+  
+  Now the exported `registerSkillPrompts(server, bridge)` offers a skill on `prompts/list` and `prompts/get` only when the server it is installed on lists every tool in the skill's binding, read from that server's own tool registry when the prompt request is answered:
+  
+  - A plain name is served when the server lists a tool of that name. A trailing wildcard (`describe_*`) is served when any listed tool matches it.
+  - An `action_<name>` entry (and `action_*`) is also served when `run_action` is listed: the native MCP families serve AI-exposed actions through `list_actions` / `run_action`, never as `action_<name>` tools.
+  - A skill that binds no tool is offered as before.
+  - `prompts/get` answers a withheld skill exactly as it answers a name no skill derives (`-32602`, `Prompt "NAME" not found`).
+  
+  **BREAKING** narrowing of the prompt surface `registerSkillPrompts` installs (`@objectstack/mcp`). It applies to every server it is installed on: `MCPServerRuntime`'s HTTP door, and any host that drives its own `McpServer` and calls `registerSkillPrompts` (stdio included, as in the package README), each narrowed by that server's own tool registry. A connection whose server does not list a skill's bound tools no longer lists or gets that skill; a skill binding a tool no MCP family serves (for example a `stack.tools` name nothing registers) is offered on no connection unless a host registers that tool. `MCPServerRuntime.bridgePrompts`, which projects skills onto the long-lived server without `registerSkillPrompts`, is unchanged. The `SkillSchema.tools` prose that still calls the binding inert in the open framework is corrected by follow-up #32885.
+  
+  **The remedy.** Connect with a grant that registers the skill's tools, register the tools on your own server before it answers prompt requests, or bind the skill only to tools its intended connections serve. A host that filtered prompts in a proxy of its own can drop that proxy.
+
+### Patch Changes
+
+- 06cccd3: fix: the inbox's own notification list no longer shows the raw topic, and an MCP argument refusal ends at the fix
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-messaging`.** The `mine` list view of `sys_inbox_message` (a person's own notifications) showed a Topic column reading the producer's machine id, such as `notify` for a flow's notify node or `collab.mention` for a mention. Nothing labels those ids, so the column is gone from that view: it now shows the title, the severity and the time. The `topic` field itself is unchanged and still searchable, so a filter or another view can use it.
+  - **`@objectstack/mcp`.** When a tool call carries an argument the tool does not declare, the refusal names the argument and the spelling to send, and now stops there. It no longer ends with the sentence "This argument used to be dropped silently and the call still succeeded, …", which explained the history of the check to internal developers and gave the caller nothing to act on. Every tool still refuses an undeclared argument exactly as before; only the closing sentence is gone.
+- 67d5d53: fix(formula,lint,mcp): a fail-closed date verdict says the write is refused, and a time-relative sweep's run-fails verdict names no firing write
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/formula`: three codes join `ExpressionRefusalCode`** (`EXPRESSION_REFUSAL_CODES`), with the params of the code they split from:
+    - `date-arithmetic-fail-closed` and `date-text-arithmetic-fail-closed`. On a site that fails closed (`faultOutcome: 'fail-closed'`: an `error` validation rule, a field `requiredWhen` / `readonlyWhen`, an option `visibleWhen`, a hook `condition`), date arithmetic used to be told "this faults at runtime, so the field silently evaluates to null". There the fault refuses the write instead, and the verdict now says so. A formula field and an advisory (`warning` / `info`) validation rule keep `date-arithmetic` / `date-text-arithmetic` and their sentence. A consumer keyed to the old codes on a fail-closed site re-keys to the new ones.
+    - `type-mismatch-sweep-run-fails`. A time-relative sweep of the typed object is graded `run-fails` like a record-triggered flow, but no write fires its run: the sweep starts one run per row it finds. Its condition's text-vs-number verdict used to say "the write that fired it still lands". Served where the new optional `ExprSchemaHint.timeRelativeSweep` is set beside `faultOutcome: 'run-fails'`, it now says the run for that row fails and nothing else happens. A record-triggered flow keeps `type-mismatch-run-fails` and its sentence.
+  - The grade is unchanged at every site. What is refused, warned or passed is unchanged.
+  - **`@objectstack/lint`**: the flow walk passes `timeRelativeSweep` on a `time_relative` flow. The nullable-comparison verdict, which also says "still lands", runs on record-triggered flows only, so it is unchanged.
+  - **`@objectstack/mcp`**: `validate_expression` with `site: 'flow_condition'` and `triggerKind: 'time_relative'` passes the same key, so its answer stays the gate's.
+- 6c4c43a: fix(service-automation,mcp): a time-relative flow's conditions are typed against the object its sweep scans, at registration and in the `validate_expression` advice
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-automation`**: the registration pass's advisory schema check (the logged `unknown field` / typo / type-mismatch warnings) typed a time-relative flow's conditions against the start node's `config.objectName`, while the run binds a row of `config.timeRelative.object`. A flow stored with a start naming another object kept a warning on a field that is right for the scanned object and none on a field that fails at run time; a start naming no `objectName` got no schema check at all. The pass now reads the object off the flow's trigger binding, the same answer the run uses: `timeRelative.object` when it is a string, `config.objectName` only otherwise. Every other flow is typed as before. The warnings stay logged, never thrown.
+  - **`@objectstack/mcp`**: `validate_expression`'s description, its `sweepObject` input text and the SKILL.md line no longer advise passing a `sweepObject` other than `objectName` as a supported shape. They say to pass the scanned object as `objectName`, and that a start whose `objectName` names another object is refused at publish (`flow-time-relative-object-mismatch`). The tool's inputs and verdicts are unchanged.
+- 7569fb5: fix(platform-objects)!: the platform-admin actions declare their gate, so MCP `list_actions` no longer lists them to a caller who cannot run them, and both action doors refuse that caller themselves
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing an author wrote is retired or renamed: the change adds `requiredPermissions` to fifteen first-party action declarations, so stored metadata needs no rewrite, and the one thing an upgrader may act on (a legacy role-only admin needing the admin_full_access set or OS_PLATFORM_OWNER_EMAIL) is a grant, not a metadata edit -->
+  
+  **BREAKING.** The 15 first-party actions whose door runs the platform-admin gate (on `sys_user`: `ban_user`, `unban_user`, `unlock_user`, `create_user`, `set_user_password`, `impersonate_user`, `set_user_manager`, `list_platform_admins`; on `sys_member`: `add_member`; on `sys_oauth_application`: `disable_oauth_application`, `enable_oauth_application`; on `sys_sso_provider`: `register_sso_provider`, `register_saml_provider`, `request_domain_verification`, `verify_domain`) now declare `requiredPermissions`: `['manage_users']` for the account and membership doors, `['manage_platform_settings']` for the OAuth application and SSO doors. It is the existing ADR-0066 D4 key, read by one runtime check for MCP `list_actions`, MCP `run_action` and `POST /api/v1/actions/:object/:action`. A platform administrator holds both capabilities on either way of becoming one (the `admin_full_access` grant or `OS_PLATFORM_OWNER_EMAIL`), so nothing changes for them.
+  
+  What changes, before and now:
+  
+  - **MCP `list_actions`.** Before: every caller was listed all of these actions (a plain member saw `ban_user` and `set_user_manager`). Now: a caller without the capability is not listed them.
+  - **The refusal at `POST /actions/:object/:action` and MCP `run_action`.** Before: the door forwarded the call and the target answered 403 `PERMISSION_DENIED` "Admin role required". Now: nothing reaches the target. `POST /actions/...` answers 403 itself, with the capability sentence (`Action 'ban_user' on 'sys_user' requires capability [manage_users] — caller is missing [manage_users]`), and MCP `run_action` answers the same sentence as `PERMISSION_DENIED` with status 403, whether it is called by `actionName` alone or with `objectName`.
+  - **A caller whose only admin standing is the legacy better-auth `role === 'admin'` scalar** (no `admin_full_access` grant, not in `OS_PLATFORM_OWNER_EMAIL`). Before: the action doors forwarded the call and the target admitted it. Now: the action doors refuse it 403, because that caller holds no `manage_users` / `manage_platform_settings`. The target endpoints themselves (`/api/v1/auth/admin/*`) are unchanged and still admit it; give the account the `admin_full_access` permission set, or list its email in `OS_PLATFORM_OWNER_EMAIL`, to keep it on the action doors.
+  
+  **MCP `run_action` refusal codes (`@objectstack/runtime`, `@objectstack/mcp`).** The capability gate's refusal at MCP `run_action` used to be a plain message; it now carries `code: 'PERMISSION_DENIED'` and `status: 403`, the REST door's answer, for every action with `requiredPermissions`. With `objectName` on a `sys_*` object, the MCP tools admit an action only where `list_actions` lists it, and answered every action missing from the listing with the system-object sentence (`… is not exposed via MCP …`). An action that IS exposed but whose gate refuses the caller now gets the gate's refusal there too, through a new optional `McpActionBridge.capabilityRefusal(name, objectName)` the runtime bridge implements; an action not exposed to AI keeps the system-object sentence, and a bridge without the member behaves as before.
+  
+  What does not change: the target endpoints judge the platform-admin standing as before, the console shows and hides these buttons from their `visible` standing as before, and an action on another object is unaffected.
+- c77dd17: feat(mcp)!: the MCP `delete_record` tool refuses a call without `confirm: true`, with `run_action`'s confirmation refusal
+  
+  Clause-②: yes (narrowing) — the MCP `delete_record` tool refuses every call that does not carry `confirm: true`, where it deleted the record. The confirmation contract in `@objectstack/spec/contracts` (`AIActionConfirmation`, `ActionConfirmationRequiredDetails`) gains its second door in its docblock, and the error-code ledger lists `ACTION_CONFIRMATION_REQUIRED` under `@objectstack/mcp` as a second emitter; no shape changes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and nothing at rest records a tool call: what moves is the answer an MCP client gets for a delete_record call that does not carry the confirmation member. The fix is in the calling client, which adds one member to the call; there is nothing for a metadata migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the MCP `delete_record` tool (`@objectstack/mcp`), over both transports (Streamable HTTP `/api/v1/mcp` and stdio): every MCP client that deletes is refused until it sends the confirmation member.
+  
+  - **Before.** `delete_record({ objectName, recordId })` deleted the record. A delete is hard and permanent, and the tool's only safety signal was `annotations.destructiveHint`, a hint a client may ignore. A call carrying `confirm` was refused as an unknown key.
+  - **Now.** A call without `confirm`, or with `confirm: false`, is refused before the data bridge is reached, and nothing is read or deleted. A non-boolean `confirm` (the string `"true"`, `1`) is refused before that by the tool's closed input schema, with no code and no `details`, exactly as on `run_action`. The answer to an absent or `false` member is the refusal `run_action` gives an action whose author declared `ai.requiresConfirmation: true`: an `isError` result whose text is `{ "error": { "code": "ACTION_CONFIRMATION_REQUIRED", "message", "status": 428, "details": { "actionName": "delete_record", "objectName", "confirmationMember": "confirm" } } }`. `delete_record({ objectName, recordId, confirm: true })` deletes as before, under the same exposure, credential and permission checks. The tool schema advertises `confirm` as an optional boolean, and the tool description tells the agent to ask the human first, then retry.
+  - **Who moves.** An MCP client or agent that calls `delete_record`. A client that already handles `run_action`'s `ACTION_CONFIRMATION_REQUIRED` (read `details.confirmationMember`, ask the human, resend the same call with that member set to `true`) needs no change.
+  
+  **The remedy.** Ask the human in the loop, then send the same `delete_record` call with `confirm: true` added beside `objectName` and `recordId`. The flag asserts an approval; it does not obtain one, and the gate makes forgetting loud without proving a human.
+  
+  **The bounds, as decided.**
+  
+  - REST `DELETE /api/v1/data/:object/:id` (the human path) is outside the gate and unchanged.
+  - `update_record` is not gated.
+  - No object is exempt: every object a caller may delete through `delete_record` takes the gate.
+  - Any future bulk-delete tool takes the same gate.
+  
+  The member, the code, the status and the `details` shape are the contract `run_action` already serves (`AI_ACTION_CONFIRMATION_MEMBER` and `ActionConfirmationRequiredDetails` in `@objectstack/spec/contracts`), so an agent learns one retry for both tools. The MCP server's own skill (`GET /api/v1/mcp/skill`) teaches the member on `delete_record`.
+- 5cb7d7e: feat(mcp): `delete_records` deletes many records of one object in one confirmed call, by a filter or an id list (#30891)
+  
+  Clause-②: yes (widening) — the MCP surface (HTTP `/api/v1/mcp` and the stdio server) registers one more tool, `delete_records`, offered to an OAuth token that carries both `data:read` and `data:write`; no existing tool, input or answer changes.
+  Metadata-protocol: none
+  
+  An agent that had to clear a set of records called `delete_record` once per row, and confirmed each one. `delete_records` takes the selection as `where` (a filter, `{}` for every record) or `recordIds` (an id list), never both.
+  
+  - **The preview is the refusal.** A call without `confirm: true` deletes nothing. It answers `delete_record`'s refusal (`428` `ACTION_CONFIRMATION_REQUIRED`, the same `details` keys, `details.actionName` naming `delete_records`) with a `preview` member beside `error`: how many records the selection matches for this caller (`matched`), how many a confirmed call attempts (`wouldAttempt`), up to ten sample ids and, for an id list, the ids that name no readable record (`notFound`). The agent shows that to its human and retries with `confirm: true` once they approve.
+  - **A confirmed call deletes each record as `delete_record` does**, through the same bridge member, under the caller's permissions, row-level security and the object's delete rules (`beforeDelete` hooks, restricted relations). No caller bypasses a package's locking rule, an administrator included. Records a rule refuses stay, and the answer groups them by code, status and reason, with their ids: `{ matched, attempted, deleted, refused, refusals: [{ code, status, reason, count, recordIds }], remaining, cap }`. A refusal's `details` stays off the wire, as on every other tool.
+  - **A fault is not a refusal.** A rule's refusal and a fault are told apart the way the REST `/data` door tells them apart (its own classifier): a 4xx verdict (a coded rule refusal, a sandboxed hook body's `400 HOOK_ABORTED`) is grouped and the call goes on; a 5xx verdict (a code hook's bare `throw new Error`, a lost connection, a driver error, a driver's own string code) stops the call at that record. The tool error names the fault and the record, and carries the call's `progress` (`deleted`, `stoppedAt`, `notAttempted`): the records deleted before it stay deleted.
+  - **At most 200 records per call**, the bound REST `POST /data/:object/deleteMany` applies by default (`batch.maxBatchSize`). A filter is read in id order at the cap, and the count says whether more match; when more than 200 match, the answer says how many remain and the next call with the same selection continues. When the deployment has no aggregate support, the answer says `matchedMoreThan: 200` instead of guessing a count. On a deployment whose read page size or row budget (`OS_DATA_MAX_PAGE_SIZE`, `OS_DATA_QUERY_ROW_BUDGET`) is under 200, one call runs at that size, since the data door refuses a larger read, and the answer's `cap` names it; a longer id list is refused before anything is read.
+  - **Scopes.** Over OAuth the tool needs both `data:read` and `data:write`: its preview reads the selection's ids and count, a read a `data:write`-only token is not granted.
+  
+  What a preview cannot say: which records a delete rule will refuse. The engine has no delete dry run, so the rules are judged when the confirmed call runs, and the preview says so.
+  
+  `@object-ui/console`: the Integrations page's "Download skill" SKILL.md is a byte-for-byte mirror of the server's (#31015's drift pin), so it carries the same `delete_records` bullet.
+  
+  `@objectstack/spec` changes only doc comments: `AIActionConfirmation` names `delete_records` as the third door of the confirmation member, and the error-code ledger's `ACTION_CONFIRMATION_REQUIRED` rows name both delete tools.
+- 704efef: feat(mcp): an agent can read a record's files and attach a file to a record — `read_file` and `create_upload_link` over `/api/v1/mcp`, and the single-use upload link they hand out (#30892)
+  
+  Clause-②: yes (widening) — two MCP tools join the HTTP surface where the storage service is installed (`read_file` under `data:read`, `create_upload_link` under `data:write`), and two signed-in routes join the storage family: `GET` and `PUT /api/v1/storage/upload-links/:token`. Nothing that answered before answers differently.
+  Metadata-protocol: none
+  
+  - **`read_file`** takes `objectName`, `recordId` and a file field (with `fileId` when the field holds several files) or an `attachmentId`. With neither, it lists the record's files. It answers the file's facts (id, name, type, size, the read cap that applies), a short-lived download link, and the content: a PDF's or Word document's text (extracted on the server, capped in pages and characters), an image as an MCP image block, a text file as text. A file over the cap (10 MiB) answers its facts and the download link, without content. Access follows the record: a record the caller cannot read answers `404 RECORD_NOT_FOUND`, as `get_record` does, and a file the download door would refuse answers that door's `403`.
+  - **`create_upload_link`** takes a record the caller may edit plus a file field or `attachments: true`. It answers a link that accepts exactly one upload for ten minutes, bound to that record and that field (or the record's attachments), and usable only by the same user, signed in: a request without a session answers `401 AUTH_REQUIRED`, like every other storage door. The upload lands as the caller would land it: the file field is written through the record's own update door, so the field's `accept` and `maxSize`, the record's edit access and the upload size limit (`storage.max_upload_mb`, `413` before the link is spent) all apply. It writes the same `sys_file` row, size recorded, and the same `storage.upload` as any other upload, so whatever a host counts toward quota counts it. A used, expired or unknown link, or one made for another user, answers the same `404`.
+  - **`@objectstack/mcp`** loads `unpdf` (pinned 1.9.1) by dynamic import on the first PDF read, with pdf.js eval off; a Word document is read with `node:zlib` under a bounded inflate.
+- 78eb352: feat: put Connect an AI Assistant where each person looks, and call it that
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Connect an Agent page is now Connect an AI Assistant (连接 AI 助手, AI アシスタントを接続, Conectar un asistente de IA): the page title, its header and both of its navigation entries, in every shipped language. "Agent" already names the agents an author builds in Studio, and this page connects the AI assistant a person uses, such as Claude, Doubao or Cursor.
+  
+  Where to find it:
+  
+  - **Every signed-in person**: the avatar menu has a Connect an AI Assistant item, under Profile. In the Account app the entry has a group of its own, AI Assistant, open by default, instead of sitting inside the collapsed Developer group.
+  - **Platform administrators**: in Setup the entry is in the top group, Overview, under System Overview, instead of near the bottom of Integrations. Who sees it does not change: both groups need `manage_platform_settings`.
+  
+  All three doors appear only where the MCP server is enabled; with `OS_MCP_SERVER_ENABLED=false` the page, both menu entries and the avatar item are absent. The page address (`page/connect_agent`) and the nav item id (`nav_connect_agent`) are unchanged, so bookmarks and links keep working. The stdio start-up refusal and the API-key session refusal name the new page and paths.
+- 2ce2646: feat(console): Connect an AI Assistant names the connected assistant and its last call; plain-words page subtitle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: once the signed-in person has connected, the line under the example requests on Connect an AI Assistant names what is connected and when it last made a call, the most recent call first: an authorized assistant by its name, with its last call "in the hour from" the recorded hour, or an API key by its name, with its last call as a moment; "no call yet" when none is recorded, and a pointer to the list at the bottom when more than one is connected. With nothing connected (or when it cannot be read) the line stays the try-first hint. It reads the records the "What can act as you" list reads (`oauth.authorizedClients.list()` and the person's own `sys_api_key` rows; a revoked or expired key is not a connection) through one hook, `useConnectedAccess`, and follows a Revoke made on the page.
+  - **`@object-ui/i18n`**: `connectAgent.capabilities.connected`, `connectedKey`, `lastCallHour`, `lastCallAt`, `noCallYet` and `moreConnected` added in all eleven packs.
+  - **`@objectstack/mcp`**: the Connect an AI Assistant page header no longer speaks of MCP-capable clients or row-level security: "Work in this system from Claude, Doubao and other AI assistants. Each one acts as you: it sees and changes only what your own permissions allow."
+  - **`@objectstack/platform-objects`**: `pages.connect_agent.subtitle` follows in en, es-ES, ja-JP, zh-CN and zh-Hant, with the source digests re-recorded.
+- 1aa4dd1: fix(mcp): the record data tools answer a code-less throw as the `/api/v1/data` door does — an undeclared sandboxed hook abort is `HOOK_ABORTED` with the hook's own sentence
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record` and `delete_record` used to answer a thrown error that carried no `code` with its bare message. For a sandboxed hook body's `throw new Error('…')` that message is the sandbox's debug wrapper, `hook '<name>' threw: Error: …`, so an agent saw the hook's internal name and no code, while `/api/v1/data` answers the same abort `400 HOOK_ABORTED` with the body's sentence alone.
+  
+  These six tools now classify a code-less throw with the `/data` door's own classifier (`mapDataError`, `@objectstack/types`) and answer `{ "error": { "code", "message", "status" } }`:
+  
+  - an undeclared sandboxed hook abort: `HOOK_ABORTED`, status 400 (or the 4xx the body declared), the body's sentence;
+  - a code hook's bare `throw new Error(…)`, a crash, a driver error: `INTERNAL_ERROR`, status 500, message `Internal server error`. The thrown message no longer reaches the agent; it is logged once on the server as a `[5xx]` line, as the HTTP doors log a fault;
+  - a throw that declared a status and no code (for example the runtime's `503` when no data service is registered): that status, no code, and for a 5xx the message withheld.
+  
+  An agent that read the bare text of these errors reads `error.message` of the JSON envelope instead, and branches on `error.code`. A thrown error that carries a `code` is answered exactly as before. The other tools (`list_objects`, `describe_object`, `validate_expression`, `list_actions`, `delete_records`, `run_action`, `resume_run` and the file and datasource tools) are unchanged.
+- b3bd75d: fix(mcp): a coded refusal from a sandboxed hook or action body answers the body's own sentence, not the sandbox wrapper that names the hook
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A QuickJS hook or action body that throws with a declared `code` and `status` (for example `throw Object.assign(new Error('Locked.'), { code: 'RECORD_LOCKED', status: 409 })`) reached every MCP tool and the `objectstack://objects/{name}/records/{id}` resource with the sandbox's debug wrapper as its message, `hook '<name>' threw: Error: Locked.`, so an agent saw the hook's internal name. `/api/v1/data` answers the same throw with the body's sentence alone.
+  
+  The MCP tools and the record resource now read that sentence the way the `/data` door does (`sandboxBusinessMessage`, `@objectstack/types`): `{ "error": { "code": "RECORD_LOCKED", "message": "Locked.", "status": 409 } }`. The code and status are unchanged. A coded refusal that does not come from a sandbox keeps its own message byte for byte, and a sandboxed body that crashed keeps today's message.
+  
+  This supersedes one sentence of the `@objectstack/mcp` note for the record data tools' code-less throw ("A thrown error that carries a `code` is answered exactly as before"): a coded refusal from a sandboxed body now answers its inner sentence; its code and status are still answered as before.
+- 131f855: fix(mcp): a sandboxed hook body that crashes while declaring a code is a fault on MCP, not a refusal at its declared status
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A QuickJS hook body that crashed while declaring a code, for example `throw Object.assign(new TypeError('boom'), { code: 'RECORD_LOCKED', status: 409 })`, reached every MCP tool and the `objectstack://objects/{name}/records/{id}` resource as `{ code: 'RECORD_LOCKED', message: "hook '<name>' threw: TypeError: boom", status: 409 }`: the hook's internal name and the native error text, at a status that reads as a business refusal. `/api/v1/data`, `/meta` and `/actions` classify such a crash first and answer `500 INTERNAL_ERROR`.
+  
+  MCP now asks the doors' own crash predicate (`isSandboxCrash`, `@objectstack/types`) before it reads a thrown code, so a crash with a declared code is answered as the same crash with no code. The record data tools (`query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record`, `delete_record`) answer `{ "error": { "code": "INTERNAL_ERROR", "message": "Internal server error", "status": 500 } }` and log the crash once on the server, as `/api/v1/data` does. The other tools, `delete_records` and the record resource answer what they answer today for a crash with no code. A sandboxed body's coded refusal (no crash) is unchanged.
+- 95024e6: fix(mcp): the record resource answers a code-less throw as `/api/v1/data` does, so a sandboxed hook abort no longer shows the hook's name
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack://objects/{name}/records/{id}` answered a thrown error that carried no `code` with `{ "error": <thrown message> }`. For a sandboxed hook body's `throw new Error('…')` that message is the runner's debug wrapper, `hook '<name>' threw: Error: …`, so a client saw the hook's internal name, and a fault's own text (a driver error, a crash) reached it verbatim. `GET /api/v1/data/{name}/{id}` answers the same throws `400 HOOK_ABORTED` with the body's sentence, or `500 INTERNAL_ERROR` `Internal server error`.
+  
+  The resource now answers a code-less throw with the `/data` door's answer, read the way the record data tools read it since the code-less fix for those tools (`mapDataError`, `@objectstack/types`), in the members the resource already uses: `{ "error", "code", "status" }`. A resource reader should expect `code` and `status` on a code-less throw too now. `status` is always set, and `code` is set whenever the door names one:
+  
+  - an undeclared sandboxed hook abort: `{ "error": "<the body's sentence>", "code": "HOOK_ABORTED", "status": 400 }`;
+  - a bare `Error`, or a sandboxed body that crashed (with or without a declared code): `{ "error": "Internal server error", "code": "INTERNAL_ERROR", "status": 500 }`. The thrown text is logged once on the server as a `[5xx]` line instead of being sent.
+  
+  A coded refusal is answered as before.
+- f4b4c8a: fix(mcp): `run_action` and `resume_run` answer a thrown error the way `POST /api/v1/actions` does, through that door's one reader
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  MCP `run_action` and `resume_run` answered an error thrown while running an action differently from `POST /api/v1/actions/:object/:action`, which runs the same action:
+  
+  | The action threw | MCP answered | `/actions` answers, and MCP now answers |
+  | --- | --- | --- |
+  | A sandboxed body's own `throw new Error('Not enough leave')` | the runner's wrapper as bare text, naming the body: `action 'NAME' threw: Error: Not enough leave` | `400`, `HOOK_ABORTED`, `Not enough leave` |
+  | A plain `Error` | its bare text, no code | `400`, `VALIDATION_ERROR`, its own sentence |
+  | A driver error with a string code (`SQLITE_BUSY`) | `{ code: 'SQLITE_BUSY', message }`, no status | `400`, `VALIDATION_ERROR`, `declaredCode: 'SQLITE_BUSY'` |
+  | A sandboxed body that crashed (`TypeError`), with or without a declared code | the wrapper with the native error text | `500`, `INTERNAL_ERROR`, `Internal server error` |
+  
+  The tool error is `{ "error": { "code", "message", "status" } }` with `isError`, plus `declaredCode` and `userMessage` when the door serves them. The full wrapper and the fault line are logged on the server, as the door logs them. A refusal with a registered code (a body that throws `{ code: 'RECORD_LOCKED', status: 409 }`) keeps its code, its own sentence and its status. A refusal with an app's own unregistered code (`{ code: 'LEAVE_EXHAUSTED', status: 409 }`) now crosses as `/actions` serves it: the closed code its status derives (`RESOURCE_CONFLICT`), with `declaredCode: 'LEAVE_EXHAUSTED'` beside it; MCP used to answer `code: 'LEAVE_EXHAUSTED'`. A thrown `details` (the confirmation gate's) still rides on a refusal and is no longer served on a fault (status 500 and above), which answers only the door's sanitised envelope; the `PERMISSION_DENIED` withhold is unchanged. This supersedes the line in the `31218` changeset that says `run_action` and `resume_run` are unchanged.
+  
+  A driver string code answers what `/actions` answers. `/api/v1/data` answers the same throw `500 DATABASE_ERROR`; that difference between the two REST doors is not changed here.
+  
+  **New export (`@objectstack/types`): `actionsDoorAnswerOf(err, objectName?)` and its `ActionsDoorAnswer` type**, the `/api/v1/actions` door's answer to a thrown value, beside `mapDataError` (the `/api/v1/data` door's). The `/actions` door (`@objectstack/runtime`) now answers through it; its responses are unchanged byte for byte.
+- 8817483: fix(mcp): the metadata tools and `list_actions` answer a fault the way `/meta` does, never with the fault's raw text
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When the bridge member behind `list_objects`, `describe_object`, `validate_expression` or `list_actions` faulted, the tool handed the agent the fault's raw text (`socket hang up`), or, for a driver's own string code, `{ "error": { "code": "SQLITE_BUSY", "message": "SQLITE_BUSY: database is locked" } }` as if a rule had refused. The `/meta` read doors answer the same throws `500 INTERNAL_ERROR` `Internal server error` and `500 DATABASE_ERROR` `Internal data error`, and log the fault.
+  
+  These four tools now ask the reader the `/meta` doors answer a fault with (`mapDataError` and `isServerFault`, `@objectstack/types`). A throw that reader answers with a 5xx renders as `{ "error": { "code", "message", "status" } }` with the same code, sentence and status, and the thrown text is logged once on the server (`logServerFault`) instead of reaching the agent. A declared 5xx keeps its code and status and has its prose withheld, as `/meta` withholds it: the object-schema reads' `FIELD_VISIBILITY_UNRESOLVED` / 503 now answers `Internal server error` as its message, which is what the `/meta` object read answers. A refusal (a 4xx) is unchanged: a declared refusal keeps its code, sentence and status, and a code-less one keeps its bare message.
+- 45540d5: fix(mcp): the record data tools and the record resource answer a driver's own error code (`SQLITE_BUSY`) as `/api/v1/data` does, a sanitised server fault, never the driver's text
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A database driver's error carries its own code on `.code` (`SQLITE_BUSY`, `ECONNRESET`, Postgres `40P01`) and no HTTP status. `query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `delete_records`' selection read and the `objectstack://objects/{name}/records/{id}` resource read any thrown `code` as a coded refusal, so an agent got `{ "code": "SQLITE_BUSY", "message": "SQLITE_BUSY: database is locked" }` with no status. `/api/v1/data` answers the same throw `500 DATABASE_ERROR` `Internal data error` and logs the driver's text.
+  
+  These faces now answer such a throw with the `/data` door's answer, read through that door's own classifier (`mapDataError`, `@objectstack/types`):
+  
+  - `SQLITE_BUSY`: `{ "code": "DATABASE_ERROR", "message": "Internal data error", "status": 500 }` on the tools, `{ "error": "Internal data error", "code": "DATABASE_ERROR", "status": 500 }` on the resource;
+  - a driver code whose text names no store (`ECONNRESET`): `500 INTERNAL_ERROR` `Internal server error`.
+  
+  The driver's code and text are logged once on the server as a `[5xx]` line instead of being sent.
+  
+  The rule is the door's: a thrown code that declared no HTTP status, and that the door answers as a server fault, is a fault, not a refusal. So a code thrown with no status that the door does not recognise as a refusal (for example `RECORD_LOCKED` with no `status`) now answers the door's `500 INTERNAL_ERROR` here too; declare the status you mean to keep the code. A code thrown with its status (`RECORD_LOCKED` / 409, `SERVICE_UNAVAILABLE` / 503), a code the door answers as a refusal without one (`PERMISSION_DENIED`), and a sandboxed hook's coded refusal are answered as before. `run_action`, `resume_run` and the metadata tools are not changed.
+- 03533d2: Clause-②: no
+  Metadata-protocol: none
+  
+  The MCP record data tools (`query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `delete_records`' selection read) and the `objectstack://objects/{name}/records/{id}` resource now answer a coded throw that declares a 5xx the way `/api/v1/data` does. The code and status are kept and the producer's sentence is withheld (`Internal server error`), unless the throw marks itself `refusal: true`; the thrown text is logged once on the server. They used to hand the agent the producer's own sentence. An unregistered code with a declared 5xx answers the status's closed code, as at the door, which names the producer's spelling only in `declaredCode`, a member no MCP face serves. A declared refusal status (below 500) keeps its coded answer unchanged.
+- e6a0b72: Clause-②: no
+  Metadata-protocol: none
+  
+  The MCP record data tools (`query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `delete_records`' selection read) and the `objectstack://objects/{name}/records/{id}` resource now serve the `/api/v1/data` door's `declaredCode` and `userMessage` whenever they answer a throw with that door's answer. An app's own unregistered code with a declared 5xx, such as `{ code: 'VENDOR_DOWN', status: 503 }`, answers `SERVICE_UNAVAILABLE` / 503 with `declaredCode: 'VENDOR_DOWN'`, as `/data` does; since the previous release it answered the closed code alone. A producer's `userMessage` rides the answer after `status`, as `run_action` and `resume_run` render it. Each member is omitted when the door serves none. A coded throw with a declared status below 500, and the metadata tools and `list_actions`, answer as before.
+- be67d60: Clause-②: no
+  Metadata-protocol: none
+  
+  The MCP record data tools (`query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `delete_records`' selection read) and the `objectstack://objects/{name}/records/{id}` resource now answer a coded refusal with what `/api/v1/data` serves beside it. An app's own unregistered code with a declared 4xx, such as `{ code: 'LEAVE_EXHAUSTED', status: 409 }`, answers the status's closed code (`RESOURCE_CONFLICT`) with `declaredCode: 'LEAVE_EXHAUSTED'`, its sentence and its status, where it used to answer `code: 'LEAVE_EXHAUSTED'`. A producer's `userMessage` on a coded refusal (for example a status-less `PERMISSION_DENIED`) is now served after the other members instead of dropped. A registered code without a `userMessage`, a coded sandboxed refusal and the unique-violation answer are unchanged.
+- 467a01f: fix(mcp): `agent_prompt` reads an agent through the protocol read `GET /api/v1/meta/agent/NAME` serves, so an agent a package ships is advertised and served
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The stdio MCP server's `agent_prompt` read agents from the kernel `metadata` service, which holds no copy of an agent a package ships (it lives in the registry the protocol reads). So a boot whose only agent came from a package did not list `agent_prompt`, and a get could not serve that agent, while `GET /api/v1/meta/agent/NAME` served it. Now, where the host's read has both the protocol's reads (the `protocol` service does), `agent_prompt` resolves the agent through its by-name read (`getMetaItem`) and the roster that decides whether the prompt is advertised reads its merged listing (`getMetaItems`), with the metadata service's completeness verdict kept on top as for skill prompts. One reader per host, decided once for both the roster and the get: a host without both reads reads the metadata service exactly as before, for both. A miss still answers `Error: Agent "X" not found`, and a by-name read refused `SERVICE_UNAVAILABLE` still answers the outage text with no instructions.
+  
+  `McpMergedMetadataRead`, the type of `MCPServerRuntime.bridgePrompts`' second parameter, gains an optional `getMetaItem(request)` member; a host that passes an object without it is read as before, the roster included.
+- 34a30e8: feat(mcp): serve `list_datasets` and `query_dataset` over MCP under `data:read`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An MCP client can now answer business questions through the governed dataset layer (ADR-0149 D2). `McpDataBridge` gains three optional members, `listDatasets`, `queryDataset` and `datasetToolDefinitions`, and `wireBridgeTools` registers the two tools only when a bridge carries all three and the caller's grant admits `data:read` (an API key or a session keeps them, as every read tool). Both bridges carry the members where the `analytics` service serves its dataset executor (`datasetTools`) and none of them otherwise, so a deployment without the analytics service lists exactly the tools it listed before.
+  
+  The tools run the service-analytics executor as the caller, with no gate added or skipped: each tool's description is the executor's own definition, its input is the spec declaration (`ListDatasetsInputSchema` / `QueryDatasetInputSchema`), `query_dataset` is held to the same page cap as `query_records`, and a refusal answers in the coded envelope the other data tools use. The generated `SKILL.md` names both tools where they register and teaches the selection rule: an exact word match on a member's name, label or synonym is the only hit, one hit answers through `query_dataset`, several hits are a question for the user, and no hit falls back to the object tools with the answer marked as not a governed metric.
+- 698e8d4: feat(mcp): a host can observe and refuse every MCP tool call through one neutral interceptor on the `mcp` service
+  
+  Clause-②: yes (widening) — `MCPServerRuntime` gains `setToolInterceptor`, `clearToolInterceptor` and `hasToolInterceptor`, `handleHttpRequest` gains an optional `caller`, and `@objectstack/mcp` exports the types `McpToolInterceptor`, `McpToolCallContext`, `McpToolCallPrincipal`, `McpToolCallRefusal`, `McpToolCallResult`, `McpToolTransport`, `McpPrincipalKind`, `McpCallerExecutionContext` and `McpHttpCaller`. With no interceptor installed, every tool call answers exactly as before.
+  Metadata-protocol: none
+  
+  - **`@objectstack/mcp`:** `runtime.setToolInterceptor(fn)` installs one interceptor (a single slot, read at each call) around every tool call on both transports: the object, action, file and federation tools, the host-injected authoring family, the bridged AI tools, and any tool a plugin registers on the runtime's server. The interceptor receives a frozen context built on the server side — `door: 'mcp'`, `transport` (`http` or `stdio`), the tool name, a copy of the validated arguments, and the principal (`userId`, `principalKind`, `onBehalfOf`, `performedBy.clientId`, `organizationId`, `environmentId`, and `isSystem` for a system caller) projected from the host's resolved `ExecutionContext`, never from a request header. It allows by calling `next()` (and may return a replacement result), or denies by returning `{ outcome: 'deny', code, message, status }`, which the client receives in the coded-refusal envelope every MCP tool error uses. A throw from the interceptor refuses the call the same way; any other verdict is refused as `500 INTERNAL_ERROR`. The package holds no policy: audit, seat checks and kill switches belong to whichever host installs the interceptor.
+  - **`@objectstack/mcp`, stdio:** once the plugin has resolved `OS_MCP_STDIO_API_KEY`, the AI tools it bridges from the AI service's tool registry run with that key's user as their execution context (`actor`: id, positions, permissions), resolved per call, so a registry that needs an actor no longer refuses them as unauthenticated, and a key that stops resolving refuses the next call. A runtime with no stdio principal bound calls the registry exactly as before.
+  - **`@objectstack/runtime`:** the `/mcp` dispatcher passes the request's resolved `ExecutionContext` and the environment it dispatched for to `handleHttpRequest` as `caller`, the input an interceptor's principal is projected from.
+- a74856d: feat(mcp,runtime)!: MCP names a package's skill, agent and action by its address — prompts and `list_actions` carry the derived AI face, `run_action` takes an optional `namespace`, and a bare name two packages hold is refused instead of picked
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no stored row changes shape: what moves is the name the MCP surface serves a package-held skill prompt under and its answer to a bare name two packages hold. Nothing at rest records either, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for an MCP client that reads a package-held skill prompt by the name `prompts/list` used to serve, or that runs an object-less action, skill prompt or agent by a bare name two installed packages both declare. Measured first-party census: skills 0, agents 0, object-less action names held by two first-party packages 0 (36 `defineAction` names across the examples, each held by one package). An environment-authored item and a name only one package holds answer exactly as before.
+  
+  What changes, and what to write instead:
+  
+  - FROM a package-held skill prompt listed as its bare `NAME` TO the same prompt listed as its AI face, `NS-NAME` (`deriveAiFaceName`, `@objectstack/spec/ai`). `prompts/get` takes the face, and still takes the bare `NAME` while one package holds it.
+  - FROM `prompts/get NAME` answering the first of two packages' skills TO a `-32602` refusal (`RESOURCE_CONFLICT`, 409) naming both packages and both faces; get the one you mean by its face.
+  - FROM `agent_prompt { agentName: NAME }` answering for an agent name two packages hold TO a refusal naming both; pass the agent's face (`NS-NAME`) as `agentName`.
+  - FROM `run_action { actionName }` running one of two packages' object-less actions of that name TO a `RESOURCE_CONFLICT` (409) refusal naming both packages; pass the `namespace` `list_actions` shows on the row you mean.
+  
+  New, and additive: `list_actions` rows carry `namespace` (the holding package's manifest namespace) and `face` (`NS-NAME`, `OBJECT-ACTION` for an object-bound action, the bare name for an environment item); `run_action` takes an optional `namespace`, the exact qualifier: only that package's declaration answers, and a namespace no installed package has is refused by name. A face two items derive is never served as one of them: `list_actions` names it once under `refusedFaces` and leaves it off both rows, and a prompt face two skills or agents derive answers a refusal naming both, with a boot warning naming both.
+- 5a8dbc7: feat(security)!: an AI service account is the agent principal of its own requests, under the agent ceiling (ADR-0151 D3)
+  
+  Clause-②: no (narrowing) — every agent principal's permission sets are now read under the agent ceiling (no View All, no Modify All, no transfer, restore or purge, no system permission, no admin scope). The OAuth-connected assistant's first-party sets carry none of these bits, so only a deployment that edited its own agent set to carry one sees a narrower answer. No door, request or response shape, error code or status changes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export of a package root is removed or retyped. The narrowing reads only agent principals' permission sets at evaluation and refuses one class of assignment write; there is no stored shape for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an agent principal whose permission sets carry View All, Modify All, a destructive grant (transfer, restore, purge), a system permission or an admin scope. Measured first-party: 0 (none of the 3 OAuth agent ceiling sets carries any of these bits, and no AI service account row can exist until registration lands).
+  
+  - **Before.** An agent principal's sets were applied as written.
+  - **Now.** Those bits are cleared when the sets are read, and assigning such a set (or a position binding one) to an AI service account is refused by name.
+  - **The remedy.** Grant the agent the CRUD bits it needs on the objects it reads; a bypass bit or an administrative grant is a person's to hold.
+  
+  An AI service account (a `sys_user` row whose `principal_kind` is `agent`) now acts as itself. Its API key, on REST, on `/mcp` and over stdio, admits a context whose `userId` is the account, with `principalKind: 'agent'` and no `onBehalfOf`. Its own grants are its whole authority:
+  
+  - It does not receive the `everyone` anchor's permission sets or the member baseline. Its floor is the restricted agent set, so a new account can do nothing until it is granted something.
+  - It carries no system permission and is never a platform or organization administrator, whatever it holds: it never carries `admin_full_access` or an organization administrator set at all, so no reader that judges standing by a set's name (the approvals override and the `admin_rescue` slate among them) counts it.
+  - Every agent principal's permission sets are read under the agent ceiling: no View All, no Modify All, no transfer, restore or purge, no system permission and no admin scope. A set edited after it was assigned still grants nothing above the ceiling. The permission sets an OAuth-connected assistant receives carry none of these bits, so it is unchanged.
+  - Assigning an account a permission set, or a position whose sets, carry any of those bits is refused `400 VALIDATION_FAILED` (`invalid_value`), naming the set and what in it is above the ceiling.
+  
+  Flow runs, attachment and comment access checks, mention checks and the access explainer read the account as the agent it is. A person's sign-in, keys and grants are unchanged.
+  
+  Nothing registers an AI service account yet; the registration, key and lifecycle doors follow in a later change.
+- 26d30d7: feat(plugin-audit): the `credential_use` row records where the use came from, the client address and the user agent
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A `credential_use` row in `sys_audit_log` named which API key or OAuth access token acted as whom, but not from where: `ip_address` and `user_agent` were null, because neither credential's use stamp held the request's client facts. A leaked key used from a new address looked the same as normal use.
+  
+  - **`ip_address`** is the address the deployment establishes for the request under its one client-address trust rule: `X-Forwarded-For` / `X-Real-IP` only when `server.trustProxy` is declared, otherwise the transport's own peer address. No forwarded header is ever recorded as the address without `trustProxy`. **`user_agent`** is the request's `User-Agent`, as presented.
+  - **Why an address is missing** is written on the row as `metadata.ip_address_absent`: `stdio` (the stdio MCP transport has no network peer), `undetermined` (the trust rule established no address), `not_supplied` (the door that admitted the credential handed over no client facts yet), or `unrecordable` (the established value does not fit the address column, so it is not stored). An address is never guessed.
+  - **The facts are the first use's in the window.** The row is still written once per credential per use window, when the credential's own throttled stamp lands, so `ip_address` and `user_agent` are those of the use that opened the window. A second use inside the window, from any address, writes no row.
+  - **Doors:** REST, the runtime dispatcher (its `/mcp` face included) and the stdio MCP transport hand their client facts over. An API key admitted at any other door records its user agent and `not_supplied` for the address.
+  - **Contract (`@objectstack/spec`, widening):** `IAuthService` gains the optional `resolveClientAddress(transport)` (the address the deployment establishes for a request; `AuthManager` already implements it), and `recordMcpAccessTokenUse(principal, transport?)` takes the admitted request's headers and peer address as an optional second argument. The new `AuthRequestTransport` type names that argument.
+  - **`@objectstack/core`:** `resolveApiKeyAdmission` takes an optional trailing `client` argument, `resolveAuthzContext` an optional `client` input and `resolveRequestExecutionContext` an optional `transport` input. None is read for any admission verdict: which credentials are admitted does not change.
+  
+  The address and user agent are stored under the audit log's existing retention and access rules, and the row still never carries a key, a token, a key hash or a key prefix.
+- bd09b21: feat(mcp): `read_file` bounds PDF and Word text extraction with a per-file CPU-time budget and a process-wide concurrency cap, both set by the host (#31826)
+  
+  Clause-②: yes — `read_file` gains a new truncated answer (out of CPU budget) and a new retryable refusal (over the concurrency cap) on a door that used to answer every file within its caps in full. Not `(narrowing)`: no input it accepted is now refused for good; the refusal is transient and retryable, the truncated answer is the shape the door already serves at its length and page caps, and under the defaults every file within those caps reads as before.
+  Metadata-protocol: none
+  
+  PDF and Word extraction runs on the request thread, so while one runs every other request in the process waits: a 9 MiB, 200-page PDF dense in drawing operators measured about 300 to 650 ms of CPU, during which a 1 ms timer never fired once. Two host settings now bound it:
+  
+  - **`OS_MCP_READ_FILE_CPU_BUDGET_MS`** (default `2000`): the CPU time one extraction may use, read as process CPU time (`process.cpuUsage()` deltas, as ADR-0102 D1 meters sandboxed scripts). It is checked between PDF pages and between Word paragraphs (every 64), never mid-page; the Word body's one inflate stays bounded by its existing 32 MiB cap. Out of budget, the answer is the text read so far, `truncated: true`, and a `note` naming the budget and the page or paragraph it stopped after, pointing at the download link the answer already carries.
+  - **`OS_MCP_READ_FILE_MAX_CONCURRENT`** (default `4`): how many PDF and Word extractions may run at once in the process. One more is refused at once, never queued, as a coded tool error: `SERVICE_UNAVAILABLE` (503), "try again in about N seconds", with `details.retryAfterSeconds`. Text files and images are not counted.
+  
+  Both are read once when the MCP plugin initialises; a value that is not a positive integer fails the boot with a message naming the variable. Unset, the defaults apply. Moving extraction off the request thread is a separate change.
+- 996bc3b: feat(mcp): `read_file` extracts PDF and Word text on a bounded worker-thread pool, so the server keeps answering other requests while a file is read (#31828)
+  
+  Clause-②: no — every `read_file` answer keeps its shape byte for byte: the same text, the same truncated answer and note at the CPU budget, the same retryable over-cap refusal. No new refusal, key or setting.
+  Metadata-protocol: none
+  
+  PDF and Word extraction used to run on the request thread: while a 9 MiB, 200-page PDF was read (about 300 ms), a 1 ms timer in the same process fired 0 times. It now runs on a pool of `worker_threads` workers, and the same timer fires about 9 times in 10 (228 to 296 ticks over 248 to 332 ms, both builds).
+  
+  - **One knob.** The pool's size is `OS_MCP_READ_FILE_MAX_CONCURRENT` (default `4`). The over-cap refusal (`SERVICE_UNAVAILABLE`, 503, `details.retryAfterSeconds`) is decided on the request thread before any worker is touched, never queued, as before.
+  - **The CPU budget runs inside the worker** (`OS_MCP_READ_FILE_CPU_BUDGET_MS`, default `2000`), at the same checkpoints (between PDF pages, every 64 Word paragraphs), on the worker thread's own CPU time (`process.threadCpuUsage()`), so other requests' work no longer counts against a file.
+  - **A wall-clock backstop.** A worker that runs 5 budgets of wall time (10 s by default) without reaching a checkpoint is terminated and replaced. The answer is the pages it had already sent back, `truncated: true`, with the CPU-budget note. A worker that crashes is replaced and its call answers "The file's content could not be read".
+  - **Packaging.** `dist/` carries `file-extraction-worker.js` and `.cjs` beside `index`. A host that bundles `@objectstack/mcp` into one file, so the worker is not beside it, extracts in-process under the same budget and cap, and says so once at `warn` with the reason.
+- 137ddf3: fix(mcp): the stdio transport boots when the AI tool registry already carries a native data tool name
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `MCPServerPlugin` bridges the AI service's tool registry onto the long-lived (stdio) server and then registers its own native data tools there. On a host whose registry already carried `list_objects` or another data tool name, the second registration threw `Tool list_objects is already registered` and the plugin's whole boot rolled back. Now one name is one tool: where both sources offer a name, the native data tool is served (the one HTTP `/api/v1/mcp` serves under that name, carrying the MCP grant and scope checks) and the registry tool of that name is not bridged, with one `debug` line naming it. The rule holds whichever of `bridgeTools` and `bridgeDataTools` runs first. A registry tool with no native namesake is bridged as before.
+- 551b68e: fix(mcp): a tools/call for a name no tool is registered under reaches the tool-call interceptor, answered as before
+  
+  Clause-②: yes (widening) — the tool-call interceptor contract gains the unregistered case: `McpToolCallContext` gains an optional `registered?: false` member, and an installed interceptor is now also told, once, of a `tools/call` naming a tool the server holds none of. Nothing is narrowed: every answer a client gets is unchanged, and a call to a registered tool is told exactly as before.
+  Metadata-protocol: none
+  
+  Before, the MCP SDK answered a `tools/call` for an unregistered name by itself (`Tool NAME not found`) before the seam every MCP tool call passes through, so a host could not record it: a read-only (`data:read`) token calling `create_record` left no trace.
+  
+  - **What the interceptor is told.** The door, the transport, the requested name, the principal the host admitted the caller as, `registered: false`, and an empty frozen `arguments` (the client's arguments were validated against no schema, so none reach the host). `next()` resolves to a frozen copy of the SDK's own answer.
+  - **Observation only.** No tool handler runs. The client gets the SDK's own `not found` answer byte for byte, whatever the interceptor returns: a deny or a replacement is not served, and an interceptor that throws or rejects is logged once (the tool name and the failure's kind, never the call's arguments) and the call is answered as before.
+  - **Registered or not** is read from the SDK's registry at each call, so a tool removed after it registered is told as unregistered.
+  - **Nothing installed, nothing changed.** With no interceptor, the call goes to the SDK untouched and no principal is resolved.
+- 35929be: fix(mcp, runtime): `describe_object` serves what a write needs — a select field's options, the default, `readonly` / `system`, and the object's validation rule messages — under the caller's view
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The MCP `describe_object` tool answered each field as `{ name, type, label, required }` only, so an agent filling a select field guessed a value (often the label), was refused with `VALIDATION_FAILED`, and retried; audit columns such as `created_at` looked writable, and the object's validation rules were invisible until a write tripped one.
+  
+  Each field now also carries `readonly` and `system` (always, as booleans), `options` as `{ value, label }` on a field that declares options (a picklist-bound field included, with its list's resolved options), and `defaultValue` when the field declares one. The answer gains `validations`: each ACTIVE rule's `name`, `type`, `message`, `severity`, `events` and the `fields` it names, a `conditional` rule's `then` / `otherwise` described the same way. A rule's condition, pattern or transition table is never served.
+  
+  The stdio transport's `objectstack://objects/{objectName}` resource serves the same projection, so it widens the same way and stays equal to `describe_object`.
+  
+  Everything is read from the object as the caller is served it, on both transports (HTTP and stdio): a field the caller cannot read is still absent, and a rule that names such a field anywhere — its fields, its condition or its message — is not described to that caller. The answer only gains keys; every key it carried before is unchanged, so a client reading the old four keys reads them as before.
+- 1af8253: fix(mcp): a refused tool argument names the right key without pointing at the protocol upgrade guide, and every `recordId` argument says it takes the `id` that `create_record` answers
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A tool call with an undeclared argument (`update_record` sent `id`, `query_records` sent `filter`, `list_objects` sent `includeSystem`) was refused with the right suggestion (`id` → `recordId`, `filter` → `where`) followed by "Keys retired before the previous protocol major are no longer prescribed here — see the protocol upgrade guide". Those arguments are not protocol metadata and none was ever retired, so that sentence is gone from the refusal of every tool whose arguments `strictToolInput` closes (all but two); the refusal now ends at the key to send. `list_datasets` and `query_dataset` take the spec's own `ListDatasetsInputSchema` / `QueryDatasetInputSchema`, which can carry a retirement kit like any published spec schema, so they keep the spec refusal, sentence included.
+  
+  The record tools keep their spellings: `create_record` still answers `{ object, id, record }` (the data protocol's create answer) and `get_record`, `update_record`, `delete_record`, `run_action`, `read_file` and `create_upload_link` still take `recordId`. The `recordId` argument's description now says the value is the `id` that `create_record` answers and that each `query_records` row carries by default (a `fields` projection can leave it out), so an agent chaining create → update → get reads the hand-off off `tools/list` instead of learning it from a refusal. No argument is added, renamed or aliased.
+- 79aa1b4: fix(mcp): `run_action` takes the face `list_actions` lists, so an action bound to several objects can be run by its listed row
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `list_actions` lists one row per binding, so a name the platform binds to several objects, such as `invite_user` on `sys_user`, `sys_organization`, `sys_member` and `sys_invitation`, appeared four times. The bare name was refused as ambiguous, and the one identifier each row carried that names its binding, its ADR-0150 D6 `face` (`sys_member-invite_user`), answered `RESOURCE_NOT_FOUND` from `run_action`.
+  
+  `run_action` now takes a listed face as `actionName`. The face is read back against the caller's own `list_actions` rows, with the same visibility filter and the same refused-face rule, and that one binding runs by its name, `objectName` and `namespace`. A face the caller's listing does not carry answers `RESOURCE_NOT_FOUND` (404) and nothing runs. A face sent with an `objectName` or `namespace` that names another binding answers `VALIDATION_ERROR` (400). Both tool descriptions now say to pass the row's face when a name is listed on several rows.
+  
+  Unchanged: the listed rows, a call by name with `objectName` or `namespace`, a unique bare name, and the refusal of an ambiguous bare name. No action name can contain `-`, so a face never collides with a name.
+- 295d806: docs(mcp): the README says the `objectstack://` resources are served on the stdio transport only, and names the HTTP tools that read the same data
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Streamable HTTP endpoint at `/api/v1/mcp` registers no resource: `initialize` advertises no `resources` capability, and `resources/list`, `resources/templates/list` and `resources/read` answer `-32601 Method not found`. The README listed the four resources with no transport caveat. § Resources, the Features list and § Server capabilities now say that resources are stdio-only, and that over HTTP the same reads are the `list_objects`, `describe_object` and `get_record` tools, under the same caller's principal. No behaviour changes.
+- b9e808f: fix(mcp): `validate_expression` refuses a relationship read both through a reference and as a plain value, as the publish gate does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  At `site: 'validation'` and `site: 'formula'` the tool now runs the shared validator with the same relationship-traversal checks the save/publish gate runs at a validation rule's condition and a formula field's `expression`, the two places the engine loads one relationship hop. An expression such as `has(record.balance) && record.days > record.balance.remaining`, where `balance` is a lookup, used to answer `ok: true` and then be refused at publish (`expression-invalid`); the tool now refuses it with the gate's own sentence and code `traversal-bare-and-traversed`, and a read through more than one hop with `traversal-multi-hop`. `flow_condition` and `template` are unchanged: nothing loads a hop there, and the gate does not run these checks there either.
+- 9af0766: fix(storage): an upload link is not issued for a field a pending approval or a `readonly` declaration keeps the user from changing, and the upload page never says "attached" when the field did not take the file
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An agent's `create_upload_link` used to hand out a link to a file field the user could not change, and the upload through it then misreported what happened:
+  
+  - **A record locked by a pending approval.** The link was issued, and the upload answered `500` "Upload failed": the record-lock hook's `409 RECORD_LOCKED` declares its status as `statusCode`, and the upload-link doors read `status` only. `create_upload_link` now refuses a file field of a locked record with `409 RECORD_LOCKED` (the approvals service's own `getRecordLock` answer), and an upload through a link minted before the lock answers the hook's `409 RECORD_LOCKED`, with its reason. The doors read a declared status over both spellings.
+  - **A field read-only in the record's current state (`readonlyWhen`).** The upload answered "Done. The file was attached" while the engine ignored the change, leaving the record as it was and the stored file behind. The field write is now strict (`strictReadonlyWrites`): the upload is refused with `403 FIELD_NOT_ACCESSIBLE` and a reason that starts "Nothing was attached", and the stored file is removed. A link is still issued for such a field; refusing it when the link is minted needs a judgement the engine does not offer without writing.
+  - **A `readonly` field.** `create_upload_link` refuses it with `403 FIELD_NOT_ACCESSIBLE`.
+  
+  The upload page says the file was attached only on an answer naming the stored file; any other answer shows the refusal it carries. Links to the attachments list, and links to a field a draft record takes, work as before.
+  
+  `@objectstack/spec`: the error-code ledger lists `RECORD_LOCKED` under `@objectstack/service-storage` as well, its second emitter after `@objectstack/plugin-approvals`. `@objectstack/mcp`: `create_upload_link`'s description says which records and fields get no link.
+- 2dfb780: feat(mcp): a host that mounts a build door can tell a connection that cannot build how to get one that can — `dataOnlyInstructions` on the authoring injection and on `renderSkillMarkdown` (#32766)
+  
+  Clause-②: yes (widening) — one optional member joins two exported shapes: `McpAuthoringInjection.dataOnlyInstructions` (the `authoring` option of `MCPServerRuntime.handleHttpRequest`) and `RenderSkillOptions.dataOnlyInstructions`. A host that passes neither gets the same tools, the same `SKILL.md` bytes and the same instructions selection as before; only the built-in default sentence changes (below).
+  Metadata-protocol: none
+  
+  - **`initialize` instructions.** A request whose grant does not admit the authoring family (a `data:read`, `data:write` or `actions:execute` token, an empty grant, or the undefined grant of an API key or a session) is now answered with the injection's `dataOnlyInstructions` when the host supplies them. A request whose grant does admit the family still gets the injection's `instructions` and never sees the data-only text. Either one omitted or blank falls back to the runtime's configured `instructions`, then to the default. The text rides the authoring injection on purpose: only a host that injects an authoring registry, that is, one that mounts a build door, can serve it. To reach API-key and session requests, such a host passes the injection on every request it serves; for those grants the registry registers nothing and the injection's `principal` is not read.
+  - **`SKILL.md`.** `renderSkillMarkdown({ dataOnlyInstructions })` renders the host's text as its own block after the tool list, only when `authoringTools` names at least one tool and `grantedScopes` do not admit the family: the exact complement of the authoring section. Without authoring tools, which is how the public `GET /mcp/skill` route renders it, the skill is byte-identical to before.
+  - **Default instructions over HTTP.** With no host text and no configured text, `initialize` now answers "ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted." The old sentence said every connection could query and modify data, which a `data:read` token cannot modify and a `metadata:write`-only or `actions:execute`-only token cannot even query. The new one promises no building, so it stays true on a deployment without a build door. A host that pinned the old sentence should configure `instructions` explicitly.
+- 8e3d4a5: docs(mcp): the served `SKILL.md` and the `run_action` / `resume_run` tool descriptions stop teaching an AI service account a confirmation retry it can never pass (#32936)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  No runtime change: the refusal already exists (`actionConfirmationRefusal`, ADR-0151 D3 rule 3), and this changes only what the texts tell an agent.
+  
+  - **`renderSkillMarkdown`.** The `run_action` entry keeps `confirm: true` after the human approves, and adds: under an AI service account's own key (an agent acting for itself, for no person) the call is refused whatever it sends and nothing runs; hand the action to a person, or its author declares `ai.requiresConfirmation: false` when it is safe unattended. The `resume_run` entry names the same refusal. The Console's "Download skill" mirror carries the same bytes.
+  - **HTTP MCP tools.** The `run_action` and `resume_run` descriptions, and both tools' `confirm` member descriptions, say the same thing in the same terms.
+- 8004529: fix(approvals): a non-admin approver can open an approval request again — the request definitions are served to the callers the approvals door admits, declared by the object's owner as `schemaReadDelegate`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — `schemaReadDelegate` is a plugin-owned delegate key like `fileAccessDelegate`, which no published skill teaches; it names a kernel service, and only plugin code can provide one
+  
+  Since the metadata API began answering an object the caller may not read as absent (ADR-0106 as amended by ruling record 6787890900), a non-admin approver got `404` on `GET /api/v1/meta/object/sys_approval_request` and `…/sys_approval_action`. Both objects are closed on the data side on purpose, and their rows reach a member who may not read them only through `/api/v1/approvals/*`, so the console request page lost its definition: every inbox row, `?request=` link and record panel showed "Object Not Found" with no decision actions. The maintainer's decision (6840464379) keeps that rule and makes these two definitions visible to the callers the approvals door admits, declared by the owning plugin.
+  
+  - **`@objectstack/spec`: `ObjectSchema.schemaReadDelegate`.** An optional service name, beside `fileAccessDelegate`. The named kernel service implements `authorizeSchemaRead(objectName, context)` and is asked only after the object read check refused the caller; a `true` verdict serves the object's definition, and only the definition, exactly as to a reader of the object: in the object list and by name, projected by the caller's own field-level security. The data door's answer about the rows does not move. A declared service that is missing or does not implement the method leaves the object absent; one that throws is a 5xx fault, never a false absence.
+  - **`@objectstack/metadata-core`:** `resolveObjectSchemaMaskPosture` takes an optional `schemaReadDelegates` source and asks the object's declared delegate after `canReadObject` refused, never on an undetermined field posture (that would serve the schema unmasked). `objectSchemaReadDelegateSource` builds the source from a transport's engine and service lookups; `ObjectSchemaReadDelegate` is the method's shape. An outlet that hands no source applies no exception.
+  - **`@objectstack/rest`, `@objectstack/runtime` and `@objectstack/mcp`:** every object-schema masker hands the posture resolution a source over the request's environment, so every schema-serving outlet (item, layered, published, diff, object state, app bundle, list, the HTTP MCP object tools, and the stdio MCP object tools and resources) gives one answer. `RestServer` takes a by-name service lookup as a new last constructor argument, which `RestApiPlugin` wires; `createStdioDataBridge` and `callerObjectView` take an optional `schemaReadDelegates` source, which `MCPServerPlugin` wires.
+  - **`@objectstack/plugin-approvals`:** `sys_approval_request` and `sys_approval_action` declare `schemaReadDelegate: 'approvals'`, and `ApprovalService.authorizeSchemaRead` admits the callers its door serves at least one request to in their organization, by the rule its request read applies: a current approver, the submitter, a past actor or commenter, or the override holder. A member party to no request in their organization keeps the `404`, and every other object keeps its answer. The verdict is asked once per request.
+- 614e831: feat(app-shell): Connect an Agent adds connect cards for WorkBuddy, Doubao Work and QwenWork, and drops the VS Code card
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Connect an Agent page (Account → Developer, and Setup) now carries three more client cards, each filled in with the deployment's MCP URL, listed after the Claude, Codex and Cursor cards:
+  
+  - **WorkBuddy** — the `mcpServers` entry for Connectors → Custom connector → Configure MCP, with the `streamableHttp` transport spelling WorkBuddy reads, and the reminder that the connector stays inactive until it is trusted.
+  - **Doubao Work** — the name, transport and server URL to type into Skills · Connectors → New → New custom connector.
+  - **QwenWork** — the `mcpServers` JSON for Extensions → Connectors → Paste JSON config, with the `streamable-http` spelling QwenWork reads.
+  
+  Each of the three names the fallback for a client version without the browser sign-in: the request header `Authorization: Bearer <API key>`. A minted key is now revealed in that form as well as the existing `x-api-key` line.
+  
+  The claude.ai / Claude Desktop and Claude Code cards merge into one full-width Claude card with a half for each. The Codex CLI card becomes a Codex card for the Codex app: the name, transport and URL to enter under Settings → MCP servers → Add server, and where to sign in (new string `connectAgent.codex.hint`); it no longer shows a `config.toml` snippet. The VS Code / Copilot card is gone, with its string `connectAgent.vscode.body`; the generic `mcpServers` snippet on the Cursor card and the MCP URL at the top still serve any MCP client. The client cards and the API-key card form one list, the API-key card last. Long one-line snippets wrap instead of being clipped. The Doubao Work and QwenWork card titles are strings too (`connectAgent.doubao.title`, `connectAgent.qwenwork.title`), so the zh pack shows the products' own names, 豆包工作 and 千问办公. New strings live under `connectAgent.fields`, `connectAgent.workbuddy`, `connectAgent.doubao` and `connectAgent.qwenwork`, translated in all ten packs. Nothing on the server changes; `@objectstack/mcp` updates only its description of the page.
+- e1dac19: fix(mcp, runtime)!: MCP describe_object answers the same field-masked object schema the /meta door answers (ADR-0106)
+  
+  Clause-②: no (narrowing) — the MCP object-schema reads now serve a caller only the fields the `/meta` object door serves that caller, which ADR-0106 D1 ("a field the caller cannot read does not exist for that caller, on any plane") and the MCP security model ("field-level security applies to the agent exactly as it does to a person") already promise, so no stated contract is narrowed; what narrows is the answer to a caller with a `readable: false` field. Nothing is widened: no export, answer member, error code or status is added.
+  Metadata-protocol: none
+  Skills-docs: no move — `skills/**` teaches no field set for `describe_object`; `content/docs/ai/connect-mcp.mdx` states that schema discovery is covered by field-level security.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema, no export and no stored shape changes: the MCP tools answer a field-restricted caller the field set the metadata door already serves them, with a code and status already on the wire. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a field-restricted caller of the MCP object-schema reads, on both transports (`/api/v1/mcp` and the stdio server).
+  
+  - **Now.** `describe_object`, `list_objects`' `fieldCount`, the fields `validate_expression` puts in scope (and its `label()` option-field check) and, on the stdio server, the `objectstack://objects` resources serve each object through the ADR-0106 posture and projection the `/meta` doors run (`resolveObjectSchemaMaskPosture` → `relateObjectSchemaMaskPosture` → `applyObjectSchemaMask`, `@objectstack/metadata-core`), for the same caller: a field the caller cannot read is not listed, and the D4 exemptions, the D6 tiers and the D8 switch (`OS_ALLOW_UNMASKED_OBJECT_METADATA`) are the shared posture's. The HTTP bridge asks the `/meta` door's own masker (`resolveObjectMasker` / `maskObjectSchema`, `@objectstack/runtime`); the stdio bridge asks the host's `security` service about its API-key principal.
+  - **Refusal.** Where the caller's field visibility cannot be evaluated, or the projection would leave the object with no field, the read is refused as the `/meta` door refuses it: `FIELD_VISIBILITY_UNRESOLVED` / 503, rendered as the tools' coded error (`{ error: { code, message, status } }`) and, on a stdio object resource, as `{ error, code, status }`. One object that cannot be projected refuses `list_objects`, as the `/meta` object list does.
+  - **Unchanged.** A caller who may read every field, a D4-exempt caller and a deployment with no `security` service are answered byte for byte as before. The data verbs, their gates and `list_actions` / `run_action` are untouched. The stdio object reads now resolve the API-key principal on each call, as the data verbs already do, so a revoked key is refused there too.
+  - **`@objectstack/mcp`** now depends on `@objectstack/metadata-core` at runtime (it was a dev dependency).
+  - **`@objectstack/spec`**: the error-code ledger lists `FIELD_VISIBILITY_UNRESOLVED` under `@objectstack/runtime` and `@objectstack/mcp` as well, its two new emitters. The code itself was already registered.
+- 83ffaaa: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  MCP `run_action` and `resume_run`: a flow run that failed on a declared refusal now names the reason to tell the user. The tool error keeps its envelope in the first text block exactly as before (`FLOW_FAILED`, the flow and node message, `details`), and adds a second text block with the sentence the console's toast reads, chosen in the console's order: the flow's `errorMessage`, else `userMessage`, else `details.innerRefusal.message`. A failure that met none of these gets no second block. The two tool descriptions teach the same order, so an agent relays "Invoice is required" instead of "Flow 'F' failed: Node 'N' failed: update_record(…) failed: …".
+  
+  A client that joins every text block before parsing JSON must read the first block alone for the envelope.
+- 56baf78: feat(mcp): a host passes per-request server instructions on `McpAuthoringInjection`, answered at `initialize` only where the authoring family registers
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `McpAuthoringInjection` gains an optional `instructions` string. `MCPServerRuntime.handleHttpRequest` answers `initialize` with it when the request's grant registers the injected authoring family (a scope list naming `metadata:write`, the same predicate that admits the registry). Every other request — a `data:read`, `data:write` or `actions:execute` token, an API key or a session — is answered with the runtime's configured `instructions`, or the default sentence, and never sees the injected text; an authoring request whose injection carries no `instructions` gets the configured or default text too. A host that serves a build door can now tell the MCP client where its authoring rules live without widening what a read-only connection is told. Nothing existing changes: a host that passes no `instructions` answers exactly as before.
+- 7d13a33: fix(meta)!: every schema-serving outlet answers an object the caller may not read as an object that does not exist
+  
+  Clause-②: yes (narrowing) — the metadata plane's object schemas narrow to the objects the caller may read: an object the caller may not read is left out of every object list and is read as an unknown name.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and nothing an author writes changes meaning. The object-schema posture gains one member and the security surface it reads gains the existing object-level read admission, so there is no stored shape for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** — the metadata plane now applies object-level read access as well as field-level read access (ADR-0106, amended by ruling record 6787890900).
+  
+  After the upgrade, every outlet that serves object schemas — `GET /meta/object` and `GET /meta/object/:name` (cached, uncached, layered, published and diff reads), the object state-machine read `GET /meta/object/:name/state/:field`, the runtime `/metadata` catch-all, MCP `list_objects`, `describe_object` and `validate_expression`, and the stdio MCP bridge — treats an object the caller may not read (the security service's `canReadObject` does not admit them) as an object that does not exist:
+  
+  - an object list leaves it out;
+  - a read of it answers exactly as that outlet answers a name that names no object, so every outlet reaches the same answer. The metadata API's reads of one object by name — `GET /meta/object/:name` (cached, uncached, layered, published and diff reads), the state-machine read, and the runtime `/metadata` catch-all's read of one object — give that answer before the store or any validator is consulted, so no `304` and no store answer about that object is returned for it.
+  
+  A caller with no principal, or with no resolved permission set, is served no object. The D7 fallback permission set decides which fields are served, never which objects exist for the caller.
+  
+  What does not change:
+  
+  - callers exempt under ADR-0106 D4 (system context, `manage_metadata`, `studio.access`, `setup.access`) are served every object whole;
+  - the D8 switch (`OS_ALLOW_UNMASKED_OBJECT_METADATA`, or `metadata.maskObjectFields: false`) now also governs object visibility: with it set, every caller is served every object, as before;
+  - a security service that answers field visibility but offers no object-level read admission narrows no object; the runtime says so once, at warn;
+  - a readable object's reference field still names its target object;
+  - the action doors (`GET /meta/action`, MCP `list_actions`, and the run doors) judge an action on its object's field projection as before, whether or not the object itself is served to the caller;
+  - a deployment with no security service is served as before.
+  
+  What is enforced when a read cannot be evaluated: a fault in the field question answers `503 FIELD_VISIBILITY_UNRESOLVED`, as before, and is asked first; an object admission that throws answers the same `503`, never an empty list; a fault the security service's object admission folds into "not admitted" is answered as the object not existing, which fails closed.
+  
+  Known residuals, not narrowed by this change: outlets that carry only object names and labels (the API description document, label bundles), navigation entries that name an object, and the object state-machine read's field level — that read applies the object-level rule, not the field projection.
+  
+  To restore an object for a caller, grant them read access to it (`allowRead` in one of their permission sets); the data plane's read access and the metadata plane's visibility are the same grant.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [f6a429b]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [0f3ee58]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [29cbfcc]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [67d5d53]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [60fe44f]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [0e4747a]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [98583cd]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [e735425]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [f4b4c8a]
+- Updated dependencies [db50231]
+- Updated dependencies [0e1311d]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [b6e6545]
+- Updated dependencies [90457e7]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [59630d9]
+- Updated dependencies [fe88ecd]
+- Updated dependencies [5e85952]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [3487ccc]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [5b7269f]
+- Updated dependencies [6dd196d]
+- Updated dependencies [d834a36]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [b96b875]
+- Updated dependencies [c62e72a]
+- Updated dependencies [450bfb6]
+- Updated dependencies [5defbfe]
+- Updated dependencies [f56354c]
+- Updated dependencies [e55347d]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [36a8700]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [5a8dbc7]
+- Updated dependencies [fb94249]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [8fca8f7]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [d9f626b]
+- Updated dependencies [1a66fcf]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [f00fb1b]
+- Updated dependencies [c655af8]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [aad7d2f]
+- Updated dependencies [4f6fb53]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [9bff554]
+- Updated dependencies [1368536]
+- Updated dependencies [7aab601]
+- Updated dependencies [c419609]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [1e474e3]
+- Updated dependencies [7575116]
+- Updated dependencies [0763bf6]
+- Updated dependencies [de6d893]
+- Updated dependencies [5192297]
+- Updated dependencies [326453e]
+- Updated dependencies [6d6f86b]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [cac0f1a]
+- Updated dependencies [3c18783]
+- Updated dependencies [e336a33]
+- Updated dependencies [3452dec]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [070e879]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [28a1527]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [d4b14a8]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [e542831]
+- Updated dependencies [3299873]
+- Updated dependencies [7d13a33]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/metadata-core@18.4.0
+  - @objectstack/formula@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

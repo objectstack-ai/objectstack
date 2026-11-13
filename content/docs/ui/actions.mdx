@@ -700,7 +700,7 @@ const answer = await dispatchAction(kernel, {
   recordId,
   params: { owner: 'u_42' },
   posture: 'ai',               // your AI tool's door: see below
-  confirm: humanApproved,      // only read under `posture: 'ai'`
+  confirm: humanApproved,      // only read under `posture: 'ai'`, never for an AI service account
   credentialHeaders,           // optional: the caller's own credentials (e.g. `authorization`, `cookie`)
 });
 if (answer.status !== 200) throw answer.body.error; // the REST envelope's error
@@ -710,8 +710,8 @@ Pick the **posture** by who drives your door:
 
 | `posture` | Rules | Use it for |
 |:---|:---|:---|
-| `'rest'` (default) | Exactly the REST door's. It reads `ai.exposed` once: an AI service account starting a `runAs: 'system'` flow needs the action's opt-in (the `flow` row under [Call it over REST](#call-it-over-rest)). | A door a person drives, or your own server code. |
-| `'ai'` | The REST door's, plus the three the MCP `run_action` tool adds: a `sys_*` action needs its own `ai.exposed`, every action needs `ai.exposed: true`, and an action with `ai.requiresConfirmation` is refused **428** `ACTION_CONFIRMATION_REQUIRED` until the call carries `confirm: true`. A script action with no handler binding is also refused. A client-side or off-origin `api` action is refused **400** as under `'rest'`, with `run_action`'s sentence (`cannot be invoked via MCP`) instead of the REST prescription, so the agent is not handed the action's `target`. | **A host's in-product AI tool** — an agent picks the action, so it takes the AI door's rules. |
+| `'rest'` (default) | Exactly the REST door's. It reads `ai.exposed` once: an AI service account starting a `runAs: 'system'` flow needs the action's opt-in (the `flow` row under [Call it over REST](#call-it-over-rest)). It asks for a confirmation once: under an AI service account's own key (an agent acting for itself, for no person) an action declaring `ai.requiresConfirmation: true` is refused **428** `ACTION_CONFIRMATION_REQUIRED` whatever the call sends and nothing runs: hand the action to a person, or its author declares `ai.requiresConfirmation: false` when it is safe unattended. The same holds under `'ai'`. | A door a person drives, or your own server code. |
+| `'ai'` | The REST door's, plus the three the MCP `run_action` tool adds: a `sys_*` action needs its own `ai.exposed`, every action needs `ai.exposed: true`, and an action with `ai.requiresConfirmation` is refused **428** `ACTION_CONFIRMATION_REQUIRED` until the call carries `confirm: true` (an AI service account's call, whatever it carries: see `'rest'`). A script action with no handler binding is also refused. A client-side or off-origin `api` action is refused **400** as under `'rest'`, with `run_action`'s sentence (`cannot be invoked via MCP`) instead of the REST prescription, so the agent is not handed the action's `target`. | **A host's in-product AI tool** — an agent picks the action, so it takes the AI door's rules. |
 
 `posture` is `'rest'`, `'ai'` or absent (`'rest'`); any other value is
 refused **400** `VALIDATION_FAILED` before anything runs, so a misspelt

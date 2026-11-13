@@ -1,5 +1,321 @@
 # @object-ui/cli
 
+## 18.4.0
+
+### Patch Changes
+
+- b631573: feat(console): revoke an authorized AI assistant from Connect an Agent, and an administrator widget for a person's assistants
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: each row in Connect an Agent's "Authorized AI assistants" list now has a Revoke. It asks first, naming the assistant, then withdraws the grant through `oauth.authorizedClients.withdraw(id)`: the assistant's token is refused on its next call and it has to be authorized again to reconnect. The list is read again after every withdraw, so a grant already withdrawn elsewhere leaves it too, and the refusal is named. The line saying withdrawing was not available yet is gone. New SDUI widget `mcp:authorized-assistants` for a `sys_user` record page: it reads the person from the bound record (no props), lists their authorized assistants through `oauth.authorizedClients.listForUser(userId)` with the same rows and confirm-first Revoke, which calls `withdrawForUser(userId, id)`. Those doors are for platform administrators; anyone else sees the server's refusal as a failed read. Off a `sys_user` record it renders nothing, and it is drawn only where a page names it.
+  - **`@object-ui/i18n`**: `connectAgent.access.withdrawTitle`, `withdrawBody`, `managedBody`, `managedEmpty` and `managedTruncated` added in all eleven packs; `connectAgent.access.withdrawLater` removed (net +4 keys per pack).
+  - **`@object-ui/types`**: `McpAuthorizedAssistantsSchema` (zod arm) and its TypeScript twin, so a page placing `{ type: 'mcp:authorized-assistants' }` validates. The widget reads only `className`: `properties` may only be `{}`, and `body` / `children` are refused by name.
+  - **`@object-ui/cli`**: `objectui check` knows the `mcp:authorized-assistants` type (the generated known-types list).
+- 1f37085: feat(console): the user page's Permission Sets tab shows the person's effective permission sets and where each comes from
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: new SDUI widget `security:effective-access` for a `sys_user` record page. It reads the person from the bound record (no props) and lists every permission set in force for them in the caller's organization through `security.describeEffectiveAccess(userId)` of `@objectstack/client`. Each set appears once, by its catalog label with its name beside it, with every origin the server reports: a direct grant, a position by name, the default binding, or a derived standing (the configured platform administrator, AI access). A `403` (a person the viewer may not manage) and a `501` (a server that does not report effective access) each show one quiet line and no list; any other failure is named. The widget reads again when a grant or a position is written on the page. Off a `sys_user` record it renders nothing.
+  - **`@objectstack/platform-objects`**: the `sys_user` record page's Permission Sets tab opens with the `security:effective-access` widget, above the list of stored grants. A person who holds access only through the default binding or a position no longer reads as having no permission sets; direct grants keep their remove action in the list below.
+  - **`@object-ui/i18n`**: `effectiveAccess.*` (the widget's title, body, refused, unserved, failed and empty lines, and one label per origin kind) added in all eleven packs.
+  - **`@object-ui/types`**: `SecurityEffectiveAccessSchema` (zod arm) and its TypeScript twin, so a page placing `{ type: 'security:effective-access' }` validates. The widget reads only `className`: `properties` may only be `{}`, and `body` / `children` are refused by name.
+  - **`@object-ui/cli`**: `objectui check` knows the `security:effective-access` type (the generated known-types list).
+- 534a287: feat(console): the sharing-rule object picker lists only the objects a rule can take effect on, business objects first
+  
+  Clause-②: yes (widening) — `field:shareable-object-ref` joins `@object-ui/fields`' registered widget keys (`RegisteredFieldWidgetType`) and the console's known schema types; nothing is narrowed and no translation key is added.
+  Metadata-protocol: none
+  
+  The object field of a new sharing rule listed every registered object, most of them platform `sys_*` objects, including ones a save refuses with `SHARING_NOT_ENABLED` and the credential and session objects. It now lists only what `GET /api/v1/sharing/shareable-objects` answers: the objects a rule saved on would take effect on, business objects first and then platform objects, each group by label, in the order the server sends.
+  
+  - **The widget (`@object-ui/fields`).** `field:shareable-object-ref` reads the list through the host's authenticated fetch (`SchemaRendererContext.apiFetch`) and stores the object's name, as `object-ref` does, with the same `Label (name)` spelling. A stored name the list does not hold stays on screen as its own option, so editing a rule never drops it. The read-only face is `object-ref`'s.
+  - **When the list is not served.** A `403` (the caller is not a sharing-rule administrator), a `501` (sharing rules do not run on this deployment), any other failed or unreadable answer, and a host with no authenticated fetch all give the `object-ref` picker over every registered object, as before. The field is never an empty picker; the save doors still decide which object a rule may name.
+  - **The declaration (`@objectstack/plugin-sharing`).** `sys_sharing_rule.object_name` declares `widget: 'shareable-object-ref'` (was `object-ref`). A console without the widget draws the field as a text box, as with any unregistered widget.
+  - **The list cell, the record form and the grid.** The new key draws the same object label cell as `object-ref` (`@object-ui/app-shell`), the record form hands it the data source its fallback reads (`@object-ui/components`), and it is not edited inline in a grid cell, like the other widget-hint pickers.
+- f67f3b3: feat(fields): a notification preference's quiet hours are drawn as a time-zone picker and two times, not a JSON box
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `@object-ui/fields` registers `field:quiet-hours` for a field that declares `widget: 'quiet-hours'`: a daily window when notifications are held, stored as `{ tz?, start: 'HH:MM', end: 'HH:MM' }`. The stored shape does not change. The control appears in Setup once `sys_notification_preference.quiet_hours` declares the hint; until then the field keeps the JSON editor.
+  
+  - **Writes.** Exactly `{ tz?, start, end }` once both times are set, and `null` once both are cleared. One time without the other writes nothing and marks the missing time invalid, so the form does not submit. Choosing a zone alone writes nothing.
+  - **Reads.** A stored window is read back into the control with each part kept as stored, so a part nobody edits is written back unchanged. A window without `tz` reads as UTC and stays without `tz` until a zone is chosen. A window whose start is later than its end runs past midnight, and the control says so; a window whose start and end are the same minute holds nothing, and the control says that too.
+  - **Time zones.** UTC first, then every zone `Intl.supportedValuesOf('timeZone')` lists that the `iana_time_zone` value domain accepts. A stored zone outside the list stays on screen, marked "not in the list", and is written back as stored.
+  - **Unreadable values.** A stored value of any other shape is shown as stored with a note, and is replaced only when the person chooses to set a new range and fills both times.
+  - **Strings.** Ten new `fields.quietHours.*` keys in every built-in language pack (`zh-Hant` regenerated from `zh-Hans`).
+  - `@object-ui/cli`'s known component types gain `field:quiet-hours`.
+- ac8fede: feat(app-shell): a `row-table` page block lists the rows a page `api` binding answers, as a table
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`@object-ui/app-shell`: the `row-table` block**, the sixth product-page block beside `hero`, `stat`, `usage-bar`, `checklist` and `tile-grid`, registered under the `app-shell` namespace with the bare `row-table` as its authorable key. `rows` is a list, or one whole `${…}` hole naming a list in the bound `data` (`rows: '${data.actors}'`); every row is drawn, with no cap. `columns` declares, in order, `{ path, label, format?, enum? }`: `path` is a dotted path into one row, `label` a string or an inline locale map, and `format` is `text` (the default, drawn as written), `datetime` (an instant in the viewer's display locale and time zone, through the `datetime` field cell's `formatDateTime`) or `enum` (the label `enum: { value: label }` names; a value the map does not name is drawn as written). A field the row lacks, `null` or empty draws `—`. An empty list draws `emptyLabel`, else the bundle's "No rows to display". A `rows` hole that resolves to anything but a list, or a column the block cannot draw, draws the binding's error panel, never the empty state.
+  - **`@object-ui/types`: its arm**, `RowTableBlockSchema` with `RowTableColumnSchema` (and the TS twins `RowTableBlockSchema`, `RowTableBlockProps`, `RowTableColumn`), a member of `ProductBlockComponentSchema`, so `objectui validate` claims the type. The arm is strict: an unknown `format`, an `enum` column with no label map, a label map on a column that is not `enum`, a `path` that is not a dotted path, an undeclared key and an empty `columns` are refused. The `dataSource` is the spec's `ElementApiDataSourceSchema`, by reference.
+  - **`@object-ui/cli`:** `known-schema-types.ts` regenerated with `row-table` and `app-shell:row-table`.
+  
+  No `@objectstack/spec` change: the type parses through `PageComponentSchema.type`'s open string arm, and `component-type-unknown` claims only colon namespaces. The SDUI manifest does not move (`@object-ui/app-shell` is not one of its registry modules).
+- Updated dependencies [96b5dab]
+- Updated dependencies [7da99b7]
+- Updated dependencies [85d9264]
+- Updated dependencies [3214615]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [604a2b3]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [bb61872]
+- Updated dependencies [4211f50]
+- Updated dependencies [7d0b47c]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [56cac5e]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [a91409c]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [5bca14f]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [b631573]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [1f37085]
+- Updated dependencies [534a287]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [f56354c]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [ac8fede]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [52ffd5a]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [1368536]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [de6d893]
+- Updated dependencies [326453e]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [4820ea2]
+- Updated dependencies [e336a33]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [8a3eeef]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [5b1fe45]
+- Updated dependencies [c54a23d]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [8ce5827]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [6303e74]
+- Updated dependencies [e1dac19]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @object-ui/components@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @objectstack/spec@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes
