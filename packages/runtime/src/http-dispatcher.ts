@@ -482,14 +482,6 @@ export class HttpDispatcher {
      * `DispatcherConfig.enforceProjectMembership`).
      */
     private enforceMembership: boolean;
-    /**
-     * In-memory cache of positive membership checks, keyed by
-     * `${environmentId}:${userId}`. Entries expire 60 seconds after insertion
-     * — a short TTL is acceptable because a user whose access was just
-     * revoked sees stale access for at most one minute.
-     */
-    private membershipCache: Map<string, number> = new Map();
-    private static readonly MEMBERSHIP_CACHE_TTL_MS = 60_000;
     /** Well-known system project id — bypassed for any authenticated user. */
     private static readonly SYSTEM_ENVIRONMENT_ID = '00000000-0000-0000-0000-000000000001';
     /** Well-known platform org id — members bypass project membership. */
@@ -1513,10 +1505,11 @@ export class HttpDispatcher {
      *     authenticated user can read platform metadata).
      *   - The user's active organization is the platform org (staff).
      *
-     * Positive results are cached for 60 seconds to avoid hitting the
-     * control-plane on every request. A failed check returns a 403
-     * response object that callers should surface directly — no further
-     * dispatch happens.
+     * [#32230] Every request is judged against the membership store as it
+     * stands: no answer is carried from one request to the next, so a member
+     * removed from the environment is refused on their next request, on every
+     * replica. A failed check returns a 403 response object that callers
+     * should surface directly — no further dispatch happens.
      */
     /**
      * ADR-0069 — returns a 403 response when the resolved session is blocked by
@@ -1812,18 +1805,17 @@ export class HttpDispatcher {
         // Platform-org members bypass project membership.
         if (activeOrganizationId === HttpDispatcher.PLATFORM_ORG_ID) return null;
 
-        // Check cache.
-        const cacheKey = `${environmentId}:${userId}`;
-        const cached = this.membershipCache.get(cacheKey);
-        const now = Date.now();
-        if (cached && now - cached < HttpDispatcher.MEMBERSHIP_CACHE_TTL_MS) {
-            return null; // Recently verified as a member.
-        }
-        if (cached) {
-            this.membershipCache.delete(cacheKey); // expired
-        }
-
-        // Query sys_environment_member (control plane).
+        // Query sys_environment_member (control plane), on EVERY request.
+        //
+        // [#32230] A member's admission is never reused from an earlier
+        // request: a removal takes effect on the caller's next request, on
+        // every replica, and a store that cannot answer refuses that request
+        // (below) whoever was admitted a moment ago. A future cache here must
+        // first meet the authorization-cache rule in `resolve-authz-context.ts`
+        // (cache a success only behind seams that observe the writes it
+        // depends on, TTL as the residual bound) — and the writes that change
+        // this answer land in the control plane, which this request's engine
+        // need not observe.
         //
         // [#21941] The gate FAILS CLOSED when its read cannot answer. It used to
         // catch every fault here and return `null` — the caller admitted — so a
@@ -1883,10 +1875,7 @@ export class HttpDispatcher {
         if (rows && (rows as any).value) rows = (rows as any).value;
         const isMember = Array.isArray(rows) && rows.length > 0;
 
-        if (isMember) {
-            this.membershipCache.set(cacheKey, now);
-            return null;
-        }
+        if (isMember) return null;
 
         // [#3842] `PROJECT_MEMBERSHIP_REQUIRED` was parked in `details.type`
         // — the fourth site, and the only one to use that spelling — because

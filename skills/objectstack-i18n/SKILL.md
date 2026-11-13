@@ -46,15 +46,12 @@ export default defineStack({
 | `supportedLocales` | `string[]` | **required** | All supported locales |
 | `fallbackLocale` | `string` | optional | Fallback when translation missing |
 
-> **BCP-47 Locale Codes**: Use standard locale tags (e.g., `en-US`, `zh-CN`, `pt-BR`, `en-GB`).
-
 ---
 
 ## Authoring Translation Bundles (`objects.*`)
 
 The canonical authoring path: one `TranslationData` per locale, assembled with
-`defineTranslationBundle` and registered on the stack. This mirrors the shipped
-`examples/app-todo` (`src/translations/{en,zh-CN,ja-JP}.ts` + `index.ts`):
+`defineTranslationBundle` and registered on the stack:
 
 <!-- os:check -->
 ```typescript
@@ -211,8 +208,6 @@ For the exact Zod shape (and any field that may have been added since), read
 | Option values | lowercase | `options.status.in_progress` |
 | Message keys | dot-separated | `common.save`, `validation.required` |
 
-> **Critical:** Object names and field keys in translation bundles **must** match the `snake_case` names defined in your Object and Field schemas.
-
 Option sub-keys are the option's stored **`value`**, never its display label:
 for `options: [{ value: 'direct_mail', label: 'Direct Mail' }]` write
 `options: { direct_mail: '直邮' }` — both `'Direct Mail'` and `'direct-mail'`
@@ -281,19 +276,11 @@ what the runtime implements.)
 }
 ```
 
-Usage:
-```typescript
-i18n.t('messages.welcome', 'en', { userName: 'Alice' });
-// "Welcome, Alice!"
-```
-
 ### No ICU MessageFormat
 
 There is no ICU MessageFormat engine — interpolation is always simple
 `{{variable}}` substitution (the aspirational `messageFormat` config knob was
-removed). Author messages for simple substitution; ICU plural/select
-strings like `{count, plural, one {1 message} other {# messages}}` will not be
-evaluated. To pluralize, select the form in application code before calling `t()`.
+removed). To pluralize, select the form in application code before calling `t()`.
 
 ---
 
@@ -374,8 +361,7 @@ registers when no i18n plugin is present):
 - **`t(key, locale, params?)`** — dot-path resolution (e.g. `objects.account.label`)
   with `{{param}}` interpolation and fallback-locale lookup
 - **`getTranslations(locale)`** — full snapshot for a locale
-- **`loadTranslations(locale, data)`** — programmatic load; deep-merges, so multiple
-  plugins can each contribute their own `objects.*` slice
+- **`loadTranslations(locale, data)`** — programmatic load (deep-merge)
 - **`getLocales()`** / **`setSupportedLocales()`** / **`getDefaultLocale()`** / **`setDefaultLocale()`**
 
 The in-memory fallback additionally resolves locale codes through `resolveLocaleAmong`
@@ -394,6 +380,25 @@ You do not wire this plugin: `os serve` registers `I18nServicePlugin` itself whe
 stack config carries `translations` or `i18n` (kernel bootstrap is
 **objectstack-platform → Runtime Boot Sequence**). It self-registers
 `GET /api/v1/i18n/locales`, `/translations/:locale` and `/labels/:object/:locale`.
+
+---
+
+## Server-Composed User Text (`userMessage`)
+
+Text the server addresses to the end user — `userMessage` on an error envelope, a save /
+publish advisory or a 422 issue — comes back in the REQUEST's locale, composed where it is
+produced; a client renders it as received.
+
+- **Platform-composed** text follows one ladder over the platform locale table
+  (`PLATFORM_LOCALES`, `@objectstack/spec/system`): the locale the request names (its
+  `Accept-Language`, or `?locale` on the REST door), else the workspace default (the
+  `localization` settings' locale), else `en`. Each code is read whole and then one subtag
+  shorter at a time (`fr-FR` → `fr`, `zh-Hant-US` → `zh-Hant`), so a Traditional Chinese
+  code is never handed Simplified text.
+- **App-authored** refusal text is not on this ladder: a hook's catalogued refusal is served
+  through `hooks.<hook>.refusals.<CODE>.message` in the caller's locale, negotiated over
+  whatever locales the app's translations hold, and otherwise as declared, in the app's own
+  source language. No `en` floor is supplied for it.
 
 ---
 
@@ -417,8 +422,7 @@ the default locale is filled from schema labels, other locales follow `--fill`
 ⚠️ **`--objects-only` is on by DEFAULT**, so extract writes only the `objects` /
 `globalActions` subtree — while `os i18n check` also demands `app`, `navigation`,
 `dashboard`, `widget`, `dataset`, `report`, `picklist`, `page`, `flow`, `position` and
-`permission` keys. Run the workflow as written and coverage
-reports gaps the extract never scaffolded. Pass `--no-objects-only` to include those
+`permission` keys. Pass `--no-objects-only` to include those
 groups, or author them by hand.
 
 ### 2. Translate
@@ -427,11 +431,7 @@ Fill in the values manually.
 
 ### 3. Verify Coverage
 
-```bash
-os i18n check --locales=zh-CN
-```
-
-Add `--strict` / `--threshold=95` in CI to fail on locale gaps.
+Run `os i18n check` (**Translation Coverage** above).
 
 ### 4. Register
 
@@ -479,11 +479,10 @@ every plugin contributes its own `objects.*` slice.
 
 ### ❌ The Retired `o.*` Shape
 
-Everything reads `objects.*`. The `o.*` dialect was removed — not a "Studio
-format", not a secondary format, just gone. Both doors reject it, files included.
+Everything reads `objects.*`. The `o.*` dialect was removed. Both doors reject it, files included.
 
 ```typescript
-// WRONG — in a file bundle AND in a `translation` item
+// WRONG
 { o: { account: { label: '客户' } } }
 
 // CORRECT (TranslationData)
@@ -495,10 +494,6 @@ Same rule for its sibling keys: `app` → `apps`, `nav` →
 `_globalOptions` → `objects.<obj>.fields.<field>.options`, `_meta.locale` →
 top-level `locale`, and `_actions.confirmMessage` → `_actions.confirmText`.
 
-### ❌ Ignoring Coverage Reports
-
-Run `os i18n check` before releases; `extract --check` is what sees staleness.
-
 ---
 
 ## Verify your work
@@ -508,7 +503,7 @@ os i18n check   # coverage: which keys are missing, per locale
 os validate     # the bundle conforms to the protocol schema
 ```
 
-`os lint --i18n-strict` turns coverage gaps into hard errors. For the build and scaffold
+For the build and scaffold
 gates see objectstack-platform → **Verify your work**.
 
 ---

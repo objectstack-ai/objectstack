@@ -160,7 +160,12 @@ tests: every entry resolves at runtime, and this table documents them all.
 | `addDays(d, n)` | timestamp | Shift **any** date by `n` days (negative ok). `addDays(record.last_service, record.cycle_days)` = next due date |
 | `addMonths(d, n)` | timestamp | Shift **any** date by `n` months; clamps to month-end (`addMonths(date('2026-01-31'), 1)` → Feb 28) |
 | `date(s)` / `datetime(s)` | timestamp | Parse an ISO date / date-time string to a timestamp |
-| `isoDate(t)` / `isoDatetime(t)` | string | Timestamp to UTC ISO text, `2026-10-08` / `2026-10-08T17:55:06.123Z`. Text in? `isoDate(date(s))` |
+| `isoDate(t)` / `isoDatetime(t)` | string | Timestamp to UTC ISO text, `2026-10-08` / `2026-10-08T17:55:06.123Z` |
+
+> **A `date` / `datetime` field is its ISO text.** The build refuses it in a
+> timestamp-only call or method (`date-text-call`); wrap it in `date()` first:
+> `isoDate(date(record.start_at))`, `date(record.start_date).getFullYear()`.
+> `+` with text and ordering against a text literal take the text as is.
 
 > **No date arithmetic.** The build refuses `date + n` and `end - start`: a
 > date or date-time mixed with a number, or minus another, reads `null`, and
@@ -168,7 +173,6 @@ tests: every entry resolves at runtime, and this table documents them all.
 
 | Want | Write — never `end - start`, `date + n`, `today() + 30` |
 |:---|:---|
-| Span in days | `daysBetween(start, end)` |
 | Inclusive span | `daysBetween(record.start_date, record.end_date) + 1` |
 | Shift a date | `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` |
 | Tenure in years | `daysBetween(record.hire_date, today()) / 365` |
@@ -215,8 +219,7 @@ Plus CEL built-ins: `has(x)`, `size(x)`, `int(x)`, `string(x)`, `bool(x)`,
 If you need a helper that doesn't exist, prefer adding it to the stdlib
 (small, pure, dependency-free) over inlining a complex CEL expression.
 
-> **The list above is `CEL_STDLIB_FUNCTIONS` — the bare-callable public subset:**
-> the names you may write as `fn(x)`. Receiver methods (`s.split(',')`,
+> Receiver methods (`s.split(',')`,
 > `list.map(...)`) are called on a value, never bare, and are not in this table;
 > four bare primitives (`bytes`, `dyn`, `type`, `uint`) resolve but are withheld
 > from the catalogue by an authoring decision — don't reach for them. An UNKNOWN
@@ -304,8 +307,7 @@ const seed = { close_date: cel`daysFromNow(45)`, created_at: cel`now()` };
 This is the determinism gate: two consecutive `os build` runs produce
 byte-identical `dist/objectstack.json` only when every dynamic seed value is
 `` cel`...` `` — no `new Date()`, no `Date.now()`, no random or otherwise
-impure source. The stdlib helpers honour the pinned `now` from `EvalContext`,
-so they are safe inside one.
+impure source.
 
 ### 5. Update hook condition — `previous` vs `record`
 
@@ -349,8 +351,6 @@ whether the write carries an id or a predicate:
 <!-- os:check -->
 ```ts
 import { P } from '@objectstack/spec';
-// Fires once per row that ACTUALLY transitioned — on `update(id)` and on
-// `update({multi: true})` alike.
 P`previous.status != 'done' && record.status == 'done'`
 ```
 

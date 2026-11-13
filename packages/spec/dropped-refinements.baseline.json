@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 263,
-    "droppedRefinementSites": 1050,
+    "droppedRefinementSites": 1054,
     "refinementSitesThatDidProject": 728,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -22,6 +22,7 @@
     },
     "ai/BlueprintObject": {
       "sites": [
+        "",
         "fields.element",
         "fields.element.summaryOperations.filter.lazy"
       ]
@@ -33,6 +34,7 @@
     },
     "ai/BlueprintView": {
       "sites": [
+        "",
         "filters.element"
       ]
     },
@@ -68,8 +70,10 @@
     },
     "ai/SolutionBlueprint": {
       "sites": [
+        "objects.element",
         "objects.element.fields.element",
         "objects.element.fields.element.summaryOperations.filter.lazy",
+        "views.element",
         "views.element.filters.element"
       ]
     },

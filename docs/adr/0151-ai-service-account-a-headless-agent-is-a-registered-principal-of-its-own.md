@@ -147,6 +147,7 @@ Open code defines the identity and counts nothing: it caps nothing and refuses n
 - **No console** — inventory, kill switch, trace, usage and cost: cloud#3820's cards consume this identity.
 - **No MCP tool-call interceptor**: O2.
 - **No change to OAuth agents**, and nothing about cutting off live OAuth tokens or suspending a person's own key: O5.
+- **No elevated run on an account's own say**: an account's start of a flow that runs as the system (`runAs: 'system'`) is refused by default at every door that can start one and admitted only where the action that starts it carries its author's existing `ai.exposed: true` opt-in (`packages/runtime/src/flow-start-admission.ts#flowStartRefusal`; #31874, ruling record `6812617393`), the elevated run keeping `principalKind: 'agent'` on its run facts.
 - **Not decided here**: OAuth `client_credentials`; an account acting on behalf of a person (token exchange); a flow or job `runAs` naming an account (ADR-0073's automation principal stays the identity of user-less runs); the `service` kind; external or multi-organization accounts; a `/mcp` policy that refuses persons' keys.
 
 ---
