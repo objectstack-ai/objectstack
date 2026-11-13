@@ -872,6 +872,91 @@ describe('import route — named mapping artifact (#2611)', () => {
       // before the qualified spelling (measured on the base tree).
       expect(answers.map((a) => JSON.stringify(a))).toEqual(BARE_ONE_HOLDER_WIRE);
     });
+
+    // [#32501, ADR-0150 D5] A pair's namespace (`<ns>_custom`, the installed
+    // customization pair) qualifies the pair's exact address, so the import
+    // door's qualified `mappingName` and `GET /meta/mapping/NS/NAME` move with
+    // `?package=PAIR`: the App pair two of whose modules hold the mapping is
+    // refused naming both, and a disabled holder registered first no longer
+    // hides the named address's own enabled mapping.
+    //
+    // BASE (main 2f80f2897, measured on this harness): the two-module App pair
+    // imported through the first registered module's mapping (200) and
+    // `GET /meta` served it; with another package registered ahead of the
+    // modules both already answered 409. A disabled holder registered first:
+    // the import 404 `MAPPING_NOT_FOUND`, `GET /meta` 404. Two enabled holders,
+    // the other first: `GET /meta` at the base's pair served the base's mapping
+    // under the other holder's `_packageId`.
+    describe('#32501 — a pair namespace reads the package the pair names', () => {
+      const SUITE = 'com.acme.suite';
+      const ONE = 'com.acme.one';
+      const TWO = 'com.acme.two';
+      const pkg = (id: string, namespace: string, type: string, dependencies?: Record<string, string>, source = 'code') =>
+        engine.registry.installPackage({ id, name: id, version: '1.0.0', type, namespace, ...(dependencies ? { dependencies } : {}) } as any, source);
+      const pair = (base: string, namespace: string) => pkg(`${base}.custom`, namespace, 'module', { [base]: '^1' }, 'authored');
+      const mappingOf = (packageId: string, score: number) => engine.registry.registerItem('mapping', {
+        ...TASK_CSV_MAPPING, name: 'task_pkg_feed', label: `${packageId} feed`,
+        fieldMapping: [
+          { source: 'ID', target: 'id', transform: 'none' },
+          { source: 'Task Title', target: 'title', transform: 'none' },
+          { source: 'ignored_by_projection', target: 'score', transform: 'constant', params: { value: score } },
+        ],
+      } as any, 'name', packageId);
+      /** The App with its modules (each holding the mapping, in `order`) and the App's pair installed. */
+      const suite = (order: readonly string[]) => {
+        pkg(SUITE, 'suite', 'app');
+        for (const id of order) pkg(id, id.split('.').pop()!, 'module', { [SUITE]: '^1.0.0' });
+        pair(SUITE, 'suite_custom');
+        for (const id of order) mappingOf(id, id === ONE ? 1 : 2);
+      };
+      const importAt = async (mappingName: string, id: string) => {
+        const res = await call(route, { format: 'csv', csv: `ID,Task Title\n${id},t`, mappingName });
+        return { status: res._status ?? 200, code: res._json?.code, error: String(res._json?.error ?? ''), row: await engine.findOne('task', { where: { id } }) };
+      };
+      const metaItem = (res: any) => res._json?.item ?? res._json?.data?.item;
+
+      it.each([['one first', [ONE, TWO]], ['two first', [TWO, ONE]]] as const)('two enabled modules of the App the only holders (%s): the App pair namespace is refused naming both, nothing written (BASE: imported through the first registered module\'s mapping)', async (_order, order) => {
+        suite(order);
+        const answer = await importAt('suite_custom/task_pkg_feed', 's1');
+        expect([answer.status, answer.code, answer.row ?? null], answer.error).toEqual([409, 'RESOURCE_CONFLICT', null]);
+        for (const id of [ONE, TWO]) expect(answer.error).toContain(`package "${id}"`);
+        const meta = await metaQualifiedRead('suite_custom', 'task_pkg_feed');
+        expect([meta._status, meta._json?.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+        // CONTROL — a module's own namespace imports through its own mapping.
+        const own = await importAt('one/task_pkg_feed', 's2');
+        expect([own.status, own.row?.score]).toEqual([200, 1]);
+      });
+
+      it('CONTROL — another package registered ahead of the modules: the App pair namespace was already refused, and still is', async () => {
+        pkg(ALPHA, 'alpha', 'app');
+        mappingOf(ALPHA, 10);
+        suite([ONE, TWO]);
+        const answer = await importAt('suite_custom/task_pkg_feed', 's3');
+        expect([answer.status, answer.code, answer.row ?? null], answer.error).toEqual([409, 'RESOURCE_CONFLICT', null]);
+      });
+
+      it.each([['disabled first', [TWO, ONE]], ['disabled second (order control)', [ONE, TWO]]] as const)('one module of the App disabled (%s): the App pair namespace imports through the enabled module\'s mapping (BASE, disabled first: 404)', async (_order, order) => {
+        suite(order);
+        engine.registry.disablePackage(TWO);
+        const answer = await importAt('suite_custom/task_pkg_feed', 's4');
+        expect([answer.status, answer.row?.score], answer.error).toEqual([200, 1]);
+        const meta = await metaQualifiedRead('suite_custom', 'task_pkg_feed');
+        expect([meta._status ?? 200, metaItem(meta)?.label, metaItem(meta)?._packageId]).toEqual([200, `${ONE} feed`, ONE]);
+      });
+
+      it.each([['other first', [BETA, ALPHA]], ['base first (order control)', [ALPHA, BETA]]] as const)('two holders, the base\'s pair namespace (%s): the base\'s mapping under the base\'s envelope, and with the other holder disabled still imported (BASE, other first: the other\'s envelope, then 404)', async (_order, order) => {
+        for (const id of order) pkg(id, id.split('.').pop()!, 'app');
+        pair(ALPHA, 'alpha_custom');
+        for (const id of order) mappingOf(id, id === ALPHA ? 10 : 20);
+        const meta = await metaQualifiedRead('alpha_custom', 'task_pkg_feed');
+        expect([meta._status ?? 200, metaItem(meta)?.label, metaItem(meta)?._packageId]).toEqual([200, `${ALPHA} feed`, ALPHA]);
+        engine.registry.disablePackage(BETA);
+        const answer = await importAt('alpha_custom/task_pkg_feed', 's5');
+        expect([answer.status, answer.row?.score], answer.error).toEqual([200, 10]);
+        const metaDisabled = await metaQualifiedRead('alpha_custom', 'task_pkg_feed');
+        expect([metaDisabled._status ?? 200, metaItem(metaDisabled)?._packageId]).toEqual([200, ALPHA]);
+      });
+    });
   });
 });
 

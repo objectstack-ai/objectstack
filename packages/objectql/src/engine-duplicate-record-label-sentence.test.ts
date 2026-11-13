@@ -49,6 +49,27 @@ const namedColumn = () =>
 const indexOnly = () =>
   Object.assign(new Error("Duplicate entry 'Acme' for key 'idx_account_name'"), { code: 'ER_DUP_ENTRY', errno: 1062 });
 
+/**
+ * better-sqlite3 on a field declared `unique: 'organization'`: the index is the
+ * composite `(organization_id, name)`, and the organization part is the implied
+ * scope, so the column is still determinable.
+ */
+const organizationScoped = () =>
+  Object.assign(
+    new Error(
+      'insert into `crm_account` (`id`, `name`, `organization_id`) values (?, ?, ?) - ' +
+        'UNIQUE constraint failed: crm_account.organization_id, crm_account.name',
+    ),
+    { code: 'SQLITE_CONSTRAINT_UNIQUE' },
+  );
+
+/** …and a declared index over two AUTHORED columns beside it: still a composite. */
+const authoredComposite = () =>
+  Object.assign(
+    new Error('UNIQUE constraint failed: crm_account.organization_id, crm_account.region, crm_account.name'),
+    { code: 'SQLITE_CONSTRAINT_UNIQUE' },
+  );
+
 const LABELLED = {
   name: 'crm_account',
   label: 'Account',
@@ -251,5 +272,57 @@ describe('a unique refusal names the object and field by label (#24951)', () => 
     const failure = await refusalOf(() => engine.insert('crm_account', { name: 'Acme' }));
 
     expect(failure.developerMessage).toMatch(/^Duplicate record refused on object 'crm_account'\. /);
+  });
+});
+
+describe('an organization-scoped unique field names the field, by label', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe.each(DOORS)('on %s', (_door, write) => {
+    it('the implied organization part is set aside: `field`, `fieldLabel`, and the HTTP sentence name the field', async () => {
+      const engine = makeRig(LABELLED, organizationScoped);
+      await engine.init();
+
+      const failure = await refusalOf(() => write(engine));
+
+      expect(failure).toBeInstanceOf(DuplicateRecordError);
+      expect(failure.code).toBe('DUPLICATE_RECORD');
+      expect(failure.status).toBe(409);
+      expect(failure.field).toBe('name');
+      expect(failure.fieldLabel).toBe('Account Name');
+      const answer = mapDataError(failure, 'crm_account');
+      expect(answer.status).toBe(409);
+      expect(answer.body.code).toBe('UNIQUE_VIOLATION');
+      expect(answer.body.field).toBe('name');
+      expect(answer.body.error).toBe('A record with this Account Name already exists');
+    });
+
+    it('in the writer\'s locale: the translated label', async () => {
+      const engine = makeRig(LABELLED, organizationScoped);
+      engine.setI18nService(i18n as any);
+      await engine.init();
+
+      const failure = await refusalOf(() => write(engine, { context: { locale: 'zh-CN' } }));
+
+      expect(failure.fieldLabel).toBe('客户名称');
+      expect(mapDataError(failure, 'crm_account').body.error).toBe('A record with this 客户名称 already exists');
+    });
+
+    it('two authored columns beside the organization part: no field, the unnamed sentence', async () => {
+      const engine = makeRig(LABELLED, authoredComposite);
+      await engine.init();
+
+      const failure = await refusalOf(() => write(engine));
+
+      expect(failure.code).toBe('DUPLICATE_RECORD');
+      expect(failure.status).toBe(409);
+      expect(failure.field).toBeUndefined();
+      expect(failure).not.toHaveProperty('fieldLabel');
+      const answer = mapDataError(failure, 'crm_account');
+      expect(answer.body).not.toHaveProperty('field');
+      expect(answer.body.error).toBe('A record with this value already exists');
+    });
   });
 });
