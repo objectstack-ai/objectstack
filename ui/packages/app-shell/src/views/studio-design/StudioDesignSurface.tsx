@@ -5771,6 +5771,22 @@ export function DataPillar({
   // conflict's "reload" re-runs the load below for the open object.
   const [objReloadNonce, setObjReloadNonce] = React.useState(0);
   const reloadObjDraft = React.useCallback(() => setObjReloadNonce((n) => n + 1), []);
+  // objectstack#32610 — the copilot shares this document (ADR-0057 P3c): a
+  // draft its tool writes, and the discard its undo runs, are announced on the
+  // assistant bus, the pulse the rail above already re-reads on. The open
+  // object and its extension re-read on it too, so the field properties, the
+  // Form canvas and the header's own reading follow the server's draft. Held
+  // while either buffer carries work not yet sent (an edit, a save in flight):
+  // the pulse is released once that work is saved, never applied over it.
+  const objBuffersHeld = dirty || extDirty || saving !== false;
+  const objRefreshNonce = useMetadataRefreshNonce(objBuffersHeld);
+  const objBuffersHeldRef = React.useRef(objBuffersHeld);
+  React.useLayoutEffect(() => {
+    objBuffersHeldRef.current = objBuffersHeld;
+  });
+  // Set by a re-read on the pulse as it installs: the selection is judged
+  // once against what the re-read left (see the effect below the loads).
+  const refreshInstalledRef = React.useRef(false);
   const {
     save: saveObjDraft,
     recordRead: recordObjRead,
@@ -5969,15 +5985,20 @@ export function DataPillar({
     // clobber the in-progress form-layout draft the designer is editing.
     // Keyed by object + publishNonce: a package publish (nonce++) re-reads the
     // fresh published baseline; otherwise we never clobber an in-progress draft.
-    const loadKey = `${current.name}#${publishNonce}#${objReloadNonce}`;
+    const baseKey = `${current.name}#${publishNonce}#${objReloadNonce}`;
+    const loadKey = `${baseKey}#${objRefreshNonce}`;
     if (loadedNameRef.current === loadKey) return;
+    // objectstack#32610 — a re-read of the same object on the pulse alone
+    // keeps what the author has open (the selected field, the canvas): only
+    // what it shows is replaced. Any other load starts the object afresh.
+    const refreshOnly = loadedNameRef.current?.startsWith(`${baseKey}#`) === true;
     loadedNameRef.current = loadKey;
     let cancelled = false;
     // objectui#11331 — whether this run's load has settled (see the cleanup).
     let settled = false;
     setLoading(true);
     setError(null);
-    setFieldSel(null);
+    if (!refreshOnly) setFieldSel(null);
     // objectstack#27485 — kept CEL verdicts judged the buffer this load replaces.
     setCelVerdicts({});
     setPanelCelVerdicts({});
@@ -6026,6 +6047,10 @@ export function DataPillar({
           setError({ message: t('engine.studio.refusal.draftUnreadable', locale) });
           return;
         }
+        // objectstack#32610 — an edit begun while the re-read was in flight
+        // keeps its buffer; its save is pinned to the read it was made on.
+        if (refreshOnly && objBuffersHeldRef.current) return;
+        if (refreshOnly) refreshInstalledRef.current = true;
         setObjDraft(authored.body);
         setServedOnly(
           servedOnlyFields((draftBody ?? baseline).fields, [
@@ -6074,7 +6099,7 @@ export function DataPillar({
         loadedNameRef.current = null;
       }
     };
-  }, [client, current, packageId, publishNonce, objReloadNonce, recordObjRead]);
+  }, [client, current, packageId, publishNonce, objReloadNonce, objRefreshNonce, recordObjRead]);
 
   // objectstack#28575 — the pair's extension of the open base object: its
   // pending draft at the pair, else its published row there, else a new
@@ -6087,14 +6112,20 @@ export function DataPillar({
       return;
     }
     const name = current.name;
-    const loadKey = `${name}#${publishNonce}#${extReloadNonce}`;
+    const baseKey = `${name}#${publishNonce}#${extReloadNonce}`;
+    const loadKey = `${baseKey}#${objRefreshNonce}`;
     if (extLoadedRef.current === loadKey) return;
+    // objectstack#32610 — a re-read on the pulse alone keeps the extension
+    // shown until its answer replaces it (see the object load above).
+    const refreshOnly = extLoadedRef.current?.startsWith(`${baseKey}#`) === true;
     extLoadedRef.current = loadKey;
     let cancelled = false;
     let settled = false;
-    setExt(null);
-    setExtDirty(false);
-    setExtHasDraft(false);
+    if (!refreshOnly) {
+      setExt(null);
+      setExtDirty(false);
+      setExtHasDraft(false);
+    }
     const pair = extReadPairRef.current;
     (async () => {
       try {
@@ -6116,10 +6147,12 @@ export function DataPillar({
             });
             return;
           }
+          if (refreshOnly && objBuffersHeldRef.current) return;
           draft = objectExtensionBodyOf(extractDraftBody(draftRead.answer), name);
           published = objectExtensionBodyOf(publishedRow, name);
           recordExtRead(OBJECT_EXTENSION_TYPE, name, pair, draftRead.pin);
         }
+        if (refreshOnly) refreshInstalledRef.current = true;
         setExt({ for: name, body: draft ?? published ?? { extend: name }, published: new Set(extensionFieldNames(published)) });
         setExtHasDraft(draft !== null);
       } catch (e) {
@@ -6133,7 +6166,17 @@ export function DataPillar({
       // A load cancelled before it settled takes its claim back (see the object load above).
       if (!settled) extLoadedRef.current = null;
     };
-  }, [client, current, extendsBase, publishNonce, extReloadNonce, recordExtRead]);
+  }, [client, current, extendsBase, publishNonce, extReloadNonce, objRefreshNonce, recordExtRead]);
+
+  // objectstack#32610 — a field the pulse's re-read no longer has (a discard
+  // took it away) is not left selected; one it still has stays open.
+  React.useEffect(() => {
+    if (!refreshInstalledRef.current) return;
+    refreshInstalledRef.current = false;
+    const shown = extOpen ? foldObjectExtension(objDraft, extOpen.body, extOpen.published) : objDraft;
+    const kept = new Set(readFields(shown.fields).entries.map((e) => e.name));
+    setFieldSel((sel) => (sel?.kind === 'field' && !kept.has(String(sel.id)) ? null : sel));
+  }, [objDraft, extOpen]);
 
   // The header counts the fields the canvas shows, and names the platform's
   // own columns apart: "2 fields (+8 system)". objectstack#29793 — the

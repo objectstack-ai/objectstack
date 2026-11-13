@@ -1403,6 +1403,7 @@ const pt = {
     saving: "Salvando…",
     lockedByApproval: "Bloqueado para aprovação",
     lockedTooltip: "Este registro tem uma solicitação de aprovação pendente; a edição está bloqueada",
+    lockedByState: "Não editável no estado atual",
     writeStrippedTitle: "Salvo, mas alguns campos não foram aplicados",
     writeWarningsTitle: "Salvo, com avisos",
     writeStrippedReadonly: "Somente leitura, portanto não foi aplicado: {{fields}}",

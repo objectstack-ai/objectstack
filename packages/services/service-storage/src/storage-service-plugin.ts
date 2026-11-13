@@ -10,6 +10,7 @@ import {
   // differences as the function's named parameters and keeps only its own
   // facts (see `buildFileReadAuthorizer`).
   resolveRequestExecutionContext,
+  resolveLocalizationContext,
   type RequestAuthService,
   type TenancyServiceResolver,
   isAuthzStoreUnavailableError,
@@ -75,6 +76,7 @@ import type {
   StorageGatedSessionReader,
   StorageUploadAttacher,
   StorageUploadSession,
+  UploadLinkWorkspaceLocale,
 } from './storage-routes.js';
 import type { RecordFileAccessDeps, UploadLinkDoor } from './record-file-access.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
@@ -1347,6 +1349,8 @@ export function composeStorageRoutes(
     // [#30892] The upload-link doors, served by the `file-attachments`
     // service when the kernel has the storage plugin's.
     resolveUploadLinkDoor(registry),
+    // [#32712] The workspace default those doors' page falls back to.
+    buildUploadLinkWorkspaceLocale(registry, engine),
   );
 
   return {
@@ -1502,6 +1506,37 @@ function buildAuthSessionResolver(
     } catch {
       return null;
     }
+  };
+}
+
+/**
+ * [#32712] The workspace's default locale for an upload-link caller: the
+ * `localization` settings for the caller's organization and user, through the
+ * platform's one resolver (`resolveLocalizationContext`, the reference
+ * localization every authenticated door's execution context carries). The
+ * settings service is looked up per request, so a kernel that registers it
+ * later is still read. `undefined` for none: no settings service and no
+ * engine leaves the resolver's built-in `en-US`, which the page reads as
+ * English anyway.
+ */
+function buildUploadLinkWorkspaceLocale(
+  registry: StorageGateRegistry,
+  engine: IDataEngine | null,
+): UploadLinkWorkspaceLocale {
+  return async (caller: StorageUploadSession) => {
+    let settings: unknown;
+    try {
+      settings = registry.getService<unknown>('settings');
+    } catch {
+      settings = undefined;
+    }
+    const { locale } = await resolveLocalizationContext({
+      ql: engine,
+      settings,
+      organizationId: caller.organizationId,
+      userId: caller.userId,
+    });
+    return locale;
   };
 }
 

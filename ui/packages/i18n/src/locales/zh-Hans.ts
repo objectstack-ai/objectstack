@@ -1230,6 +1230,7 @@ const zh = {
     editInlineHint: '双击编辑',
     lockedByApproval: '审批中已锁定',
     lockedTooltip: '该记录有待审批的请求，编辑已被锁定',
+    lockedByState: '当前状态下不可编辑',
     writeStrippedTitle: '已保存，但部分字段未生效',
     writeWarningsTitle: '已保存，但有警告',
     writeStrippedReadonly: '以下字段为只读，未生效：{{fields}}',
