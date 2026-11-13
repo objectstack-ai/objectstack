@@ -2078,6 +2078,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         path: f.path,
         message: f.message,
         hint: f.hint,
+        // The user sentence's names ride through the re-map, so the save door
+        // can render this advisory in the request's language.
+        ...(f.userTextParams !== undefined ? { userTextParams: f.userTextParams } : {}),
       })),
   },
   // The spec-liveness loop on the author side: a property the ledger marks
@@ -2199,6 +2202,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         path: f.path,
         message: f.message,
         hint: f.hint,
+        // The user sentence's names ride through the re-map, so the save door
+        // can render this advisory in the request's language.
+        ...(f.userTextParams !== undefined ? { userTextParams: f.userTextParams } : {}),
       })),
   },
   // A format like `{plan_no}{000}` makes the referenced field part of the
