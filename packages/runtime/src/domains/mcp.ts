@@ -12,6 +12,8 @@ import { isMcpServerEnabled } from '@objectstack/types';
 import { MCP_OAUTH_SCOPES, deriveAiFaceName } from '@objectstack/spec/ai';
 import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
+// [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
+import { isAiReadExposed } from '@objectstack/spec/data';
 import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
 import {
     FEDERATION_READ_CAPABILITY,
@@ -752,6 +754,9 @@ export function buildMcpBridge(
      * judges against: from the listing {@link readMergedObjects} reads, or the
      * metadata service's by-name read on a host with none.
      */
+    /** {@link readMergedObjects}, read once per bridge for the `aiReadExposed` asks. */
+    let mergedForAiRead: Promise<any[] | undefined> | undefined;
+
     const readServedObject = async (name: string): Promise<any> => {
         const merged = await readMergedObjects();
         return merged !== undefined
@@ -929,6 +934,26 @@ export function buildMcpBridge(
         // can describe, and a name the listing omits (a disabled package's
         // object among them) is "not found" here too.
         // [ADR-0106 D1/D5] …as this caller is served it ({@link readObjectForCaller}).
+        /**
+         * [#32442, ruling A] The read opt-in of a system object, judged by
+         * `isAiReadExposed` over its WHOLE served definition (the read that
+         * judges a call, not the masked one this caller is served): the
+         * stored-metadata family is refused before the key is read, and only
+         * `enable.aiReadable: true` opens. The read tools then read the object
+         * through {@link callData} as the caller, under every gate they always
+         * ran (permissions, RLS, the object's own read middleware, field
+         * masking), so this admits the object and nothing else.
+         */
+        aiReadExposed: async (name: string): Promise<boolean> => {
+            // `list_objects` asks once per listed `sys_*` object: one merged
+            // read serves every ask this bridge (one request) makes.
+            mergedForAiRead ??= readMergedObjects();
+            const merged = await mergedForAiRead;
+            const def = merged !== undefined
+                ? merged.find((o: any) => o?.name === name)
+                : await ((await getMeta()) as any)?.getObject?.(name);
+            return isAiReadExposed(def);
+        },
         describeObject: async (name: string) => {
             const def: any = await readObjectForCaller(name);
             if (!def) return null;

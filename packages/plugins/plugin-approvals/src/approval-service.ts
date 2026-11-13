@@ -2059,6 +2059,16 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         }
         return this.visibleRequestIds(context, tenantOrg, anchor);
       },
+      // [#32442] "Waiting on me" for the read gate: the pending-approver index
+      // over the caller's acting addresses — the fold `visibleRequestIds`'
+      // current-approver probe and `listRequests`' approver filter read. The
+      // index holds rows only while a request is pending.
+      waitingOnCallerIds: async (context) => {
+        const tenantOrg = (context as any)?.organizationId ?? context?.tenantId ?? null;
+        const who = await this.actingCaller(context);
+        if (!who) return [];
+        return (await this.approverRequestIds(actingAddresses(who), tenantOrg)) ?? [];
+      },
     });
   }
 
