@@ -24,6 +24,7 @@
 import { describe, it, expect } from 'vitest';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { runAuthoringRules } from './authoring-rules.js';
+import { buildRuntimeWriteSnapshots, runRuntimeAuthoringRules } from './runtime-gate.js';
 import { validateWidgetBindings, WIDGET_DATASET_UNKNOWN, WIDGET_MEASURE_UNKNOWN } from './validate-widget-bindings.js';
 
 const APP = 'app.objectstack.hotcrm';
@@ -179,6 +180,17 @@ describe('widget-dataset-unknown — a sibling package’s dataset resolves thro
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe('error');
     expect(findings[0].message).toContain('in the declared dependency closure');
+  });
+
+  it('neither arm reaches the publish door: its write snapshot carries no `packages[]` (S1, review 6860238813)', () => {
+    // The door resolves `datasets` from the live context, never narrowed (runtime-gate.ts); the
+    // package's own read is judged at the dataset door (409), not here.
+    const item = appBody('product_metrics', ['product_count'], { dependencies: { 'com.example.elsewhere': '^1.0.0' } }).dashboards[0];
+    const context = { objects: revenueBody.objects as unknown[], datasets: revenueBody.datasets };
+    const snapshot = buildRuntimeWriteSnapshots({ type: 'dashboard', item, context, packageScope: { packageId: APP, dependencies: [] } });
+    expect(snapshot && Object.keys(snapshot.candidate).filter((k) => k === 'packages' || k === 'manifest')).toEqual([]);
+    const gate = runRuntimeAuthoringRules({ type: 'dashboard', item, context, packageScope: { packageId: APP, dependencies: [] } });
+    expect([...gate.errors, ...gate.advisories].filter((f) => f.rule === WIDGET_DATASET_UNKNOWN)).toEqual([]);
   });
 
   it('still REFUSES a dataset NO package of the artifact declares, as before', () => {

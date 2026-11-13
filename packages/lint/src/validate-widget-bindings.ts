@@ -1279,7 +1279,10 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       if (dsName && refusal?.reason === 'outside-closure' && resolution.outsideDependencies.length > 0) {
         // [#32967 S1] A dependency this artifact does not carry may hold the
         // name, and the installed read then resolves there: reported, never
-        // refused, as `picklist-references.ts` reports its twin.
+        // refused, as `picklist-references.ts` reports its twin. No user
+        // sentence (`validate-widget-bindings.user-text.ts`): the publish
+        // door's write snapshot carries no `packages[]`, so this arm runs
+        // only at `os validate` / `os build` / `os lint`.
         push({ severity: 'warning', rule: WIDGET_DATASET_UNKNOWN, ...datasetUnverifiedWording(resolution, dsName, 'dashboard') });
       } else if (dsName && refusal) {
         // [#32929] Declared in the artifact, but the runtime refuses this
