@@ -1364,6 +1364,7 @@ const de = {
     saving: "Speichern…",
     lockedByApproval: "Zur Genehmigung gesperrt",
     lockedTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage; die Bearbeitung ist gesperrt",
+    lockedByState: "Im aktuellen Status nicht bearbeitbar",
     writeStrippedTitle: "Gespeichert — einige Felder wurden jedoch nicht übernommen",
     writeWarningsTitle: "Gespeichert — mit Warnungen",
     writeStrippedReadonly: "Schreibgeschützt und daher nicht übernommen: {{fields}}",
