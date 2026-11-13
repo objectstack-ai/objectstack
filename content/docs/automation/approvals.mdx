@@ -590,16 +590,22 @@ The same rule governs a decision's files: an attachment is exactly as readable
 as the decision it hangs off, never more (`sys_approval_action` delegates that
 question back to this service via `fileAccessDelegate`).
 
-So do the two objects' definitions. The metadata API answers an object the
-caller may not read as absent, and `sys_approval_request` and
-`sys_approval_action` are closed to ordinary members on the data side, yet the
-request page renders from both definitions. Both declare
-`schemaReadDelegate: 'approvals'`, so `GET /api/v1/meta/object/sys_approval_request`
-(and `…/sys_approval_action`, and the object list) serves them to a caller who
-can see at least one request by the rule above, projected by that caller's
-field-level security. A member who can see none is answered `404`, and a
-member the data door refuses still reaches the rows only through
-`/api/v1/approvals/*`.
+Every signed-in member holds a read on `sys_approval_request` through the
+member baseline (`member_default`), and the data door serves them exactly the
+requests the rule above lets them see, with the same snapshot redaction. So
+`GET /api/v1/data/sys_approval_request` (and an MCP agent's `query_records`)
+lists a member's own requests, and a `pending_approvers` filter on
+`{current_user_id}` finds the requests waiting on them, including a step
+addressed to their email or position. No write opens on it.
+
+The two objects' definitions follow. The metadata API answers an object the
+caller may not read as absent; with the baseline read, every member is served
+the `sys_approval_request` definition, projected by their field-level
+security. `sys_approval_action` stays closed to ordinary members on the data
+side, and both objects declare `schemaReadDelegate: 'approvals'`, so
+`GET /api/v1/meta/object/sys_approval_action` (and the object list) serves it
+to a caller who can see at least one request by the rule above. A member who
+can see none is answered `404` for it.
 </Callout>
 
 <Callout type="info">
@@ -857,8 +863,8 @@ progress, the approvers it is waiting on, the merged decision timeline and a rem
 button for the submitter. Every viewer who can read the record sees it, not only
 approvers. A request opens on its record page through the approvals routes rather
 than the data API, so an approver who is not an administrator sees the whole page,
-decision actions included, although the data API stays closed to them on the
-approval objects.
+decision actions included, even where the data API does not serve them the
+request row.
 
 Each action's visibility is gated by a **server-computed per-viewer block** the
 service attaches to every request it returns:

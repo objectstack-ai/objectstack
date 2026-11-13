@@ -342,11 +342,13 @@ export interface SortableFieldFinding {
   /** How to fix it. */
   hint: string;
   /**
-   * The names this finding's user sentence interpolates
-   * (`validate-sortable-fields.user-text.ts`): set on `sort-field-unprovisioned`,
-   * the list-view advisory the publish door returns. The errors carry none, and
-   * so does the page-sort `page-field-unprovisioned` warning: that id's
-   * sentences belong to `validate-page-field-bindings.ts`, its owner.
+   * The names this finding's user sentence interpolates: set on
+   * `sort-field-unprovisioned`, the list-view advisory the publish door returns
+   * (its sentences are `validate-sortable-fields.user-text.ts`), and on the
+   * page-sort `page-field-unprovisioned` warning, the advisory the page publish
+   * door returns (its sentences belong to `validate-page-field-bindings.ts`, the
+   * id's owner, in `validate-page-field-bindings.user-text.ts`). The errors
+   * carry none.
    */
   userTextParams?: UserTextParams;
 }
@@ -704,6 +706,7 @@ function checkPageSortDeclaration(
   where: string,
   path: string,
   subject: string,
+  pageName: string,
 ): SortableFieldFinding[] {
   if (declared === undefined || declared === null || !objectName) return [];
   const projection = sortability.get(objectName);
@@ -726,6 +729,7 @@ function checkPageSortDeclaration(
             `${subject}: ${unprovisionedAnchorVerdict(objectName, name)}, so its ORDER BY is ` +
             'dropped and every fetch returns rows in an arbitrary order',
           hint: unprovisionedAnchorFix(objectName, name),
+          userTextParams: { page: pageName, object: objectName, field: name },
         });
       }
       // An author-DECLARED field of a system name is the author's own column,
@@ -782,10 +786,12 @@ function validatePageSorts(
   unprovisionedAnchors: ReadonlyMap<string, ReadonlySet<string>>,
 ): SortableFieldFinding[] {
   const findings: SortableFieldFinding[] = [];
-  const check = (declared: unknown, objectName: string | undefined, where: string, path: string, subject: string) => {
+  const check = (
+    declared: unknown, objectName: string | undefined, where: string, path: string, subject: string, pageName: string,
+  ) => {
     findings.push(
       ...checkPageSortDeclaration(
-        declared, objectName, fieldsByObject, sortability, unprovisionedAnchors, where, path, subject,
+        declared, objectName, fieldsByObject, sortability, unprovisionedAnchors, where, path, subject, pageName,
       ),
     );
   };
@@ -802,7 +808,7 @@ function validatePageSorts(
       const dataSource = isRec(component.dataSource) ? component.dataSource : undefined;
 
       if (dataSource) {
-        check(dataSource.sort, strName(dataSource.object), where, `${path}.dataSource.sort`, `${type} dataSource sort`);
+        check(dataSource.sort, strName(dataSource.object), where, `${path}.dataSource.sort`, `${type} dataSource sort`, pageName);
       }
       if (!props) continue;
       const objectProp = PAGE_BLOCK_SORT_OBJECT_PROP[type];
@@ -813,6 +819,7 @@ function validatePageSorts(
           where,
           `${path}.properties.sort`,
           `${type} sort`,
+          pageName,
         );
       }
       // The PARENT binding is declared on `record:related_list` alone.
@@ -825,6 +832,7 @@ function validatePageSorts(
           where,
           `${path}.properties.parentDataSource.sort`,
           `${type} parentDataSource sort`,
+          pageName,
         );
       }
     }
@@ -837,6 +845,7 @@ function validatePageSorts(
         `page "${pageName}" · interfaceConfig`,
         `pages[${pi}].interfaceConfig.sort`,
         'list-page sort',
+        pageName,
       );
     }
 
@@ -848,6 +857,7 @@ function validatePageSorts(
         `page "${pageName}" · record`,
         `pages[${pi}].record.sort`,
         'page record sort',
+        pageName,
       );
     }
   }

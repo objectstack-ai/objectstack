@@ -77,6 +77,24 @@
  * `visible` predicate fails closed on this door, and a record reader admitted
  * by the tier is served the row read-only on both doors.
  *
+ * ## "Waiting on me" (#32442, ruling 1B + 2B, record 6849636735)
+ *
+ * The console's My Pending list view, and an agent over MCP, ask for the
+ * requests waiting on the caller as `status = pending` AND `pending_approvers`
+ * contains `{current_user_id}` (the engine resolves the placeholder before this
+ * gate runs, so the gate sees the caller's own id). Read literally, that misses
+ * every slot the caller acts under without its user id: a `user` approver
+ * authored as an email stores the email, a position nobody held at open time
+ * stores `position:<p>` (`approver-address.ts`). So the gate answers that one
+ * conjunct, where it pins the CALLER'S OWN id, with the approvals service's own
+ * fold ({@link RequestVisibilitySource.waitingOnCallerIds}: the pending-approver
+ * index over the caller's acting addresses, the set `listRequests` and the
+ * decision methods read). ⛔ Still no rule here, and no second fold: the
+ * conjunct becomes a constraint on `id` built from the ids the service
+ * returned. Any other `pending_approvers` predicate (another user's id, a
+ * substring) is left exactly as written. The participant narrowing below is
+ * ANDed after it, as for every read.
+ *
  * ## The child tables (#22589)
  *
  * A request's two child tables declare the same `get` / `list` shape:
@@ -153,6 +171,58 @@ export interface RequestVisibilitySource {
       row?: { object: string; id: string } | null;
     },
   ): Promise<Set<string> | null>;
+  /**
+   * [#32442] The ids of the pending requests holding a slot the caller acts
+   * under — the approvals door's "waiting on me", its own fold
+   * (`approverRequestIds` over `actingAddresses`). Empty for a caller who acts
+   * under nothing.
+   */
+  waitingOnCallerIds(context: ExecutionContext): Promise<readonly string[]>;
+}
+
+/** The column whose `$contains` of the caller's own id asks "waiting on me". */
+export const WAITING_ON_CALLER_COLUMN = 'pending_approvers';
+
+const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * [#32442] `where` with each conjunct that asks for the requests waiting on
+ * `userId` taken out: `pending_approvers: { $contains: userId }`, at the root or
+ * inside a root `$and` (a conjunctive position, read as `pinnedEquality` reads
+ * one). `matched` is false, and `where` comes back as it was, when there is
+ * none. A predicate under `$or` / `$not`, or naming another id, is not one.
+ */
+export function splitWaitingOnCaller(where: unknown, userId: string): { where: unknown; matched: boolean } {
+  let matched = false;
+  const asks = (value: unknown): boolean =>
+    isPlainRecord(value)
+    && Object.keys(value).length === 1
+    && typeof value.$contains === 'string'
+    && value.$contains.trim() === userId;
+  const walk = (condition: unknown): unknown => {
+    if (!isPlainRecord(condition)) return condition;
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(condition)) {
+      if (key === WAITING_ON_CALLER_COLUMN && asks(value)) {
+        matched = true;
+        continue;
+      }
+      out[key] = key === '$and' && Array.isArray(value)
+        ? value.map(walk).filter((sub) => !(isPlainRecord(sub) && Object.keys(sub).length === 0))
+        : value;
+    }
+    return out;
+  };
+  if (!userId) return { where, matched: false };
+  const rest = walk(where);
+  return matched ? { where: rest, matched } : { where, matched: false };
+}
+
+/** `where` AND `filter`, an empty `where` dropped. */
+function andWhere(where: unknown, filter: Readonly<Record<string, unknown>>): unknown {
+  const empty = !where || (isPlainRecord(where) && Object.keys(where).length === 0);
+  return empty ? filter : { $and: [where, filter] };
 }
 
 /**
@@ -220,6 +290,16 @@ function bindVisibilityGate(
     if (!REQUEST_READ_OPS.has(opCtx?.operation) || !ast || !context) return next();
     let filter: Readonly<Record<string, unknown>> | null;
     try {
+      // [#32442] "Waiting on me", answered with the service's own fold, before
+      // the participant narrowing (which is ANDed below as for every read).
+      const userId = context?.userId != null ? String(context.userId) : '';
+      if (column === 'id' && userId) {
+        const split = splitWaitingOnCaller(ast.where, userId);
+        if (split.matched) {
+          const waiting = await source.waitingOnCallerIds(context);
+          ast.where = andWhere(split.where, requestVisibilityFilter(new Set(waiting), null, 'id') ?? REQUEST_READ_DENY_ALL);
+        }
+      }
       const visible = await source.visibleRequestIdsFor(context, targetOf(ast.where));
       filter = requestVisibilityFilter(visible, pinnedEquality(ast.where, column), column);
     } catch (err: any) {

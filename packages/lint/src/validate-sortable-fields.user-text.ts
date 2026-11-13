@@ -19,8 +19,8 @@
  * other id this file emits is an `error`, except the page-sort warning
  * `page-field-unprovisioned`: that id's constant, its other push site and its
  * sentences belong to `validate-page-field-bindings.ts`, so its catalog is that
- * file's (a rule id has one owner), and the page-sort push site here carries
- * no params until that catalog sets them.
+ * file's (a rule id has one owner): `validate-page-field-bindings.user-text.ts`,
+ * which the page-sort push site here (`checkPageSortDeclaration`) feeds.
  *
  * The entry reads the `userTextParams` its finding carries, set at the push
  * site in `checkSortDeclaration`:

@@ -101,3 +101,31 @@ describe('buildMcpBridge.optionFieldsOf reads the served object describeObject r
     });
   }
 });
+
+// [#32872] `servedObjectDefinitionOf(name)`: the object `describeObject`
+// projects, whole — what `validate_expression` hands the publish gate's own
+// passes at a validation rule or a formula field (a field's `required`, a
+// reference's target, the object's rules), rendered to nobody. Its masking
+// for each ADR-0106 tier is pinned in `mcp-object-schema-mask.test.ts`.
+describe('buildMcpBridge.servedObjectDefinitionOf reads the object describeObject reads (#32872)', () => {
+  const prev = process.env.OS_MCP_SERVER_ENABLED;
+  beforeEach(() => {
+    process.env.OS_MCP_SERVER_ENABLED = 'true';
+  });
+  afterEach(() => {
+    if (prev === undefined) delete process.env.OS_MCP_SERVER_ENABLED;
+    else process.env.OS_MCP_SERVER_ENABLED = prev;
+  });
+
+  for (const withProtocol of [true, false]) {
+    const read = withProtocol ? 'the merged listing' : 'the metadata service (no merged read)';
+    it(`answers the served definition whole from ${read}, and null for a name nothing serves`, async () => {
+      const bridge = await bridgeFor(makeKernel({ withProtocol }));
+      const def = await bridge.servedObjectDefinitionOf('qaformula_p4');
+      expect(def).toEqual(SERVED);
+      const described = await bridge.describeObject('qaformula_p4');
+      expect(Object.keys(def.fields)).toEqual(described.fields.map((f: any) => f.name));
+      expect(await bridge.servedObjectDefinitionOf('qa_absent')).toBeNull();
+    });
+  }
+});

@@ -853,6 +853,23 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // the same two gates.
       sys_comment: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
       sys_activity: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // [#32442 — maintainer ruling 6849636735, 1B] The approval requests a
+      // member takes part in, on the data door and the MCP read tools, as the
+      // approvals inbox already serves them. Before this line a member held no
+      // data-door read on the object, so an approver's agent was refused (`403`)
+      // the requests waiting on them.
+      //
+      // Same shape as the two lines above: this opens the OBJECT, and ⛔ no row
+      // policy is added. WHICH ROWS is plugin-approvals' request read gate
+      // (`request-read-gate.ts`), the approvals door's own answer: the submitter,
+      // a current approver, a past actor (plus the default-OFF record-reader
+      // tier); a member on no request reads none, by list, by id, by count. The
+      // payload snapshot stays narrowed to the subject fields the reader may
+      // read (`payload-redaction-middleware.ts`). READ only: the object serves
+      // `get` / `list` alone, and decisions go through its decide actions.
+      // `sys_approval_action` and `sys_approval_approver` are not named. An
+      // external member resolves `external_default` and gets no such line.
+      sys_approval_request: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
     },
     // [#21237] The identity object's `Admin` group is admin-review data, not a
     // staff directory: `sys_user_org_members` below opens every org peer's row,

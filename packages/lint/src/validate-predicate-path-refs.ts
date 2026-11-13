@@ -250,6 +250,7 @@ import {
   schemaIdOf,
 } from './predicate-rhs-position.js';
 import { formViewSites } from './view-walk.js';
+import type { UserTextParams } from './finding-user-text.js';
 
 export const PREDICATE_PATH_UNRESOLVED = 'predicate-path-unresolved';
 export const PREDICATE_PATH_UNROOTED = 'predicate-path-unrooted';
@@ -279,6 +280,14 @@ export interface PredicatePathFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's user sentence interpolates
+   * (`validate-predicate-path-refs.user-text.ts`): the view, the unquoted word
+   * and the operator. Set on the advisory bare-word arm of
+   * {@link PREDICATE_RHS_PATH_SHAPED} only, the one finding of this rule the
+   * publish door returns as advice; see `AuthoringFinding.userTextParams`.
+   */
+  userTextParams?: UserTextParams;
 }
 
 /** Options for {@link validatePredicatePathRefs}. */
@@ -628,6 +637,7 @@ function checkPredicate(
   where: string,
   path: string,
   findings: PredicatePathFinding[],
+  view: string,
 ): void {
   const ast = parseCelToAst(source);
   // Not parseable through the canonical front end — `visibility-predicate-syntax`
@@ -743,6 +753,8 @@ function checkPredicate(
           + `LEFT with a literal on the right (two paths cannot be compared here)`
         : `If you meant the text, quote it: \`${op} '${text}'\` (what it does today); if you meant the `
           + `field, write \`${ROOT}.${text} == 'yes'\` with the path on the LEFT. Do NOT simply add the root in place`,
+      // The advisory arm's user sentence; the dotted arm refuses the write.
+      ...(dotted ? {} : { userTextParams: { view, word: text, op } }),
     });
   }
 }
@@ -754,6 +766,7 @@ function walkFields(
   base: string,
   findings: PredicatePathFinding[],
   depth: number,
+  view: string,
 ): void {
   if (!Array.isArray(entries) || depth > 12) return;
   for (let i = 0; i < entries.length; i++) {
@@ -763,7 +776,7 @@ function walkFields(
     for (const key of PREDICATE_KEYS) {
       const source = predicateSource(entry[key]);
       if (source !== undefined && source.trim()) {
-        checkPredicate(source, scope, where, `${path}.${key}`, findings);
+        checkPredicate(source, scope, where, `${path}.${key}`, findings, view);
         break; // canonical-first: `visibleWhen` wins when both are present
       }
     }
@@ -772,7 +785,7 @@ function walkFields(
     // than judged against the parent scope, which would report every sub-field.
     if (Array.isArray(entry.fields) && entry.fields.length > 0 && typeof entry.field === 'string') {
       const row = scope === undefined ? undefined : rowScopeOf(scope, entry.field);
-      walkFields(entry.fields, row, where, `${path}.fields`, findings, depth + 1);
+      walkFields(entry.fields, row, where, `${path}.fields`, findings, depth + 1, view);
     }
   }
 }
@@ -848,11 +861,11 @@ export function validatePredicatePathRefs(
           for (const key of PREDICATE_KEYS) {
             const source = predicateSource(section[key]);
             if (source !== undefined && source.trim()) {
-              checkPredicate(source, root, where, `${sectionPath}.${key}`, findings);
+              checkPredicate(source, root, where, `${sectionPath}.${key}`, findings, viewName);
               break;
             }
           }
-          walkFields(section.fields, root, where, `${sectionPath}.fields`, findings, 0);
+          walkFields(section.fields, root, where, `${sectionPath}.fields`, findings, 0, viewName);
         }
       }
     }

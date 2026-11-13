@@ -153,9 +153,14 @@ const RECIPES: Record<string, Recipe> = {
   // share is what keeps a stored field off this response in the first place.
   listObjectsDiagnosed: { invoke: (b) => b.listObjectsDiagnosed(), writesRecords: false },
   describeObject: { invoke: (b) => b.describeObject('vault'), writesRecords: false },
+  // [#32442] A boolean off the object definition: no record body.
+  aiReadExposed: { invoke: (b) => b.aiReadExposed('vault'), writesRecords: false },
   // [#28715] Field NAMES off the object definition `describeObject` reads: no
   // engine read, no record, so nothing stored can ride this answer.
   optionFieldsOf: { invoke: (b) => b.optionFieldsOf('vault'), writesRecords: false },
+  // [#32872] The object definition `describeObject` reads, handed to the
+  // publish gate's passes and rendered to nobody: no engine read, no record.
+  servedObjectDefinitionOf: { invoke: (b) => b.servedObjectDefinitionOf('vault'), writesRecords: false },
   query: { invoke: (b) => b.query('vault', {}), writesRecords: false },
   get: { invoke: (b) => b.get('vault', 'row-1'), writesRecords: false },
   aggregate: { invoke: (b) => b.aggregate('vault', {}), writesRecords: false },

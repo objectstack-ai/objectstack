@@ -63,6 +63,17 @@ import { matchDatasetTerms } from './dataset-term-matcher.js';
 /** `query_dataset`'s row cap when the host sets none — `query_records`' default. */
 export const DATASET_TOOL_DEFAULT_MAX_ROWS = 50;
 
+/**
+ * The members of an `AnalyticsResult` aligned to `rows` by index (entry i
+ * describes row i, per their contract in `spec/contracts`). `query_dataset`
+ * serves them to the length it serves `rows`, so a truncated answer holds no
+ * drill bucket for the probe row it asked for past the cap. The others are not
+ * row-indexed and are served as answered: `fields` (columns), `totals` and
+ * `drillRawTotals` (aligned to `totals`), `dimensionFields` and `drillScopes`
+ * (keyed by member name), `object`.
+ */
+const ROW_ALIGNED_ANSWER_MEMBERS = ['drillRawRows', 'drillRanges'] as const satisfies readonly (keyof AnalyticsResult)[];
+
 const LIST_DATASETS_DESCRIPTION =
   'List the governed business datasets this caller may query: each dataset\'s dimensions (what an answer can be '
   + 'grouped by) and measures (the numbers it can answer), with their business definitions and synonyms. Pass '
@@ -506,6 +517,12 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     const truncated = rows.length > cap;
     const served = truncated ? rows.slice(0, cap) : rows;
     const { sql: _sql, ...rest } = answer as AnalyticsResult & { sql?: unknown };
+    if (truncated) {
+      for (const member of ROW_ALIGNED_ANSWER_MEMBERS) {
+        const aligned = rest[member];
+        if (Array.isArray(aligned)) (rest as Record<string, unknown>)[member] = aligned.slice(0, cap);
+      }
+    }
 
     let narrowing: { narrowed: boolean; statement?: string } | undefined;
     if (deps.diagnoseDelegation) {

@@ -109,7 +109,7 @@ apply):
 
 ```typescript
 // Object data
-'list_objects'         // List objects (system sys_* objects hidden by default)
+'list_objects'         // List objects (sys_* hidden unless declared enable.aiReadable)
 'describe_object'      // Object schema: fields + features
 'validate_expression'  // Check a CEL expression against a schema before authoring it
 'query_records'        // Filter / sort / paginate
