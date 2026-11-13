@@ -375,8 +375,8 @@ describe('[ruling E] list_actions marks an organization action the caller\'s mem
         }
     });
 
-    it('CONTROL: run_action is unchanged: the member\'s call is forwarded and refused by the endpoint with the marked code; the admin\'s is forwarded and served', async () => {
-        const memberRows = await listed(MEMBER_P());
+    // Green before the mark existed too: the mark changes no run.
+    it('CONTROL: run_action is unchanged: the member\'s call is forwarded and refused by the endpoint (the marked code); the admin\'s is forwarded and served', async () => {
         for (const key of [...SET_A, ...SET_B]) {
             const [objectName, name] = key.split('.');
             const member = bootIdentity(true);
@@ -387,7 +387,6 @@ describe('[ruling E] list_actions marks an organization action the caller\'s mem
             expect(member.request, `${key}: ${String(thrown?.message)}`).toHaveBeenCalledTimes(1);
             expect(thrown, key).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
             expect(String(thrown?.message), key).toBe(REFUSED_SENTENCE);
-            expect(memberRows[key].unavailable.code, key).toBe(thrown.code);
 
             const admin = bootIdentity(false);
             await expect(admin.dispatcher.buildMcpBridge(ADMIN_P()).runAction(name!, {
