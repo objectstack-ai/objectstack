@@ -438,6 +438,12 @@ function isCurrentUserSeedField(
  * that column only when the user changed it, so a seeded package would be shown
  * as a pick the save does not write. The object is read off the definition's
  * `name`.
+ *
+ * A form opens with this result AND judges its create save against the same
+ * result (`FormWriteSources.createBaseline`): a definition with no `name` keeps
+ * a seeded package, and it stays off the wire only because the values and the
+ * baseline both hold it. ⛔ Never hand a save a baseline seeded apart from the
+ * values the form opened with.
  */
 export function seedCreateValues(
   objectSchema: SeedSchemaLike | null | undefined,
