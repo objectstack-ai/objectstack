@@ -1,0 +1,30 @@
+{
+  "number": 33091,
+  "kind": "issue",
+  "title": "Re-point platform-core.bare-name-one-holder-refusal acceptance[0] and [3] from `webhook` to `tool`: webhooks are held per namespace since #32577",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T10:39:27Z",
+  "updated_at": "2026-11-13T10:55:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33091",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nQA-source: #33089 · platform-core.bare-name-one-holder-refusal · acceptance[0], acceptance[3]\n\nKind: checklist re-point (stale spec), no product change.\n\n## Observed at 8e3d4a54\nTwo scratch packages in two namespaces, com.qa.addr-a (qa_a) and com.qa.addr-b (qa_b), each declaring webhook `qa_hook` (isActive false; `requires: ['webhooks','realtime']`):\n- `os package install` of both → both exit 0, both listed by `GET /api/v1/packages`; registry logs \"Registered webhook: com.qa.addr-a:qa_hook\" and \"…com.qa.addr-b:qa_hook\". The package-less `GET /api/v1/meta/webhook/qa_hook` → 409 RESOURCE_CONFLICT naming both holders. Re-checked with a third namespace.\n- Cold boot of a `defineStack` with `packages[]` = the two bodies → boot completes (health 200), no \"Bare-name conflict at boot\" warning for the webhook.\nRev 3 expects the second install refused 422 naming both packages, and exactly one boot warning.\n\n## Why the product is right\n#32577 (e55347d2, 2026-11-13 05:13Z, \"declared webhooks are held per namespace, each holder dispatched and switched as its own\", ADR-0150 child B) added `webhook` to objectql's `NAMESPACE_SCOPED_BARE_NAME_TYPES`. That landed about an hour after #32965 (cf1b55c0, 04:04Z) re-pointed this item from `flow` (narrowed by #31696) to `webhook` as a type still held once per deployment. Control: the same legs with a `tool` give the expected shape — second install 422 PLUGIN_REGISTER_FAILED (\"…declares the tool \\\"qa_tool\\\", already held by package \\\"com.qa.addr-c\\\" — rename it to \\\"qa_d_qa_tool\\\"…\"), and the cold boot logs exactly one \"Bare-name conflict at boot\" warning, for the tool.\n\n## Proposed change\nRe-point acceptance[0] and [3] (and acceptance[1]'s trailing \"webhook, connector and tool are still one holder per deployment\", the title and the fixtures) to `tool` (or `connector`) — the only declared types left with one holder per deployment. Add the fixture note that a webhook-declaring package needs `requires: ['webhooks','realtime']`. Since this item has now gone stale twice (flow, then webhook) as ADR-0150 child B narrows family by family, consider deriving the type from `NAMESPACE_SCOPED_BARE_NAME_TYPES`'s complement in the item text rather than naming one. Bump the revision and add a history row."
+}

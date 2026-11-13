@@ -1,0 +1,30 @@
+{
+  "number": 33083,
+  "kind": "issue",
+  "title": "On a private plain-HTTP deployment the OAuth authorization-server metadata advertises an https issuer that matches neither the protected-resource metadata nor the token iss",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T10:17:22Z",
+  "updated_at": "2026-11-13T10:56:47Z",
+  "closed_at": "2026-11-13T10:56:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33083",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\n## Reproduction (8e3d4a54, showcase boot with `OS_AUTH_URL=http://10.0.0.5:PORT`; the link-local `http://169.254.10.20:PORT` behaves the same; loopback is http throughout)\n\n1. `GET /.well-known/oauth-protected-resource` → `authorization_servers: [\"http://10.0.0.5:PORT/api/v1/auth\"]`.\n2. `GET /.well-known/oauth-authorization-server/api/v1/auth` → `issuer: \"https://10.0.0.5:PORT/api/v1/auth\"`, while the authorization, token and registration endpoints are `http://…`.\n3. Run a native-client authorization-code flow with `resource=http://10.0.0.5:PORT/api/v1/mcp` → the callback carries `iss=https://10.0.0.5:PORT/api/v1/auth`; the access-token JWT carries `iss: \"http://10.0.0.5:PORT/api/v1/auth\"`. The token still serves `tools/list`.\n\n## Expected vs actual\n\n- Expected: one issuer identifier everywhere. RFC 8414 §3.3 requires the metadata `issuer` to equal the identifier it was fetched for, and RFC 9207 / the JWT `iss` must equal it.\n- Actual: the AS metadata and the authorize `iss` say https; the PRM and the token say http. A strict MCP client refuses discovery on exactly the private-host deployments `ai.mcp-oauth-private-host-transport` enables. (No real client was run; the client-side effect is inferred from the specs.)\n\n## Mechanism\n\n`@better-auth/oauth-provider` 1.7.12 `validateIssuerUrl` rewrites a non-loopback http issuer to https; plugin-auth's own issuer (`getAuthIssuer`) keeps http.\n\nQA-source: #33081 · ai.mcp-oauth-private-host-transport · observed beside the clauses"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 33077,
+  "kind": "issue",
+  "title": "plugin-form: two weak pins on the grant create form's package pick (modal/drawer item 6 list order, one-call baseline)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T08:39:52Z",
+  "updated_at": "2026-11-13T08:45:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33077",
+  "body": "domain:ui#4 · os-tesla · session_01L9qibvZYR36KAJUv44oXZw\n\nFiling gate: ① the epic seat's red-line read of PR #32931 (card #32833) routed two test-strength nits to \"a follow-up card under #32833; no extra round\" (comment 6840905752, section \"Nits\"; standing in 6846224492). ⛔ Not a claim; triage sets the grade and the lane.\n\nPart of #32833's follow-ups. Epic: #31527 (ADR-0150).\n\n## Why it matters\n\nA permission-set grant names a package holder when two packages provide one name; a wrong holder is a grant to a package the admin did not pick. The pins below are the guard against that regressing on the modal and drawer create forms, and today two of them cannot see the regression they are named for.\n\n## The two gaps (measured by the epic seat at `131de9d7`)\n\n1. **Item 6 pins cannot tell the clicked package from one chosen by list order.** In `ui/packages/plugin-form/src/__tests__/objectFormPermissionRefEdges-32795.test.tsx`, the item 6 holder list has one package beside the environment. An ablation \"a package pick writes the first package holder\" leaves all eight item 6 pins green (the 2 red are in the widget file); \"writes the last package holder\" leaves both touched files green (1 red of 70 across the six permission-ref test files, in the #32770 widget file). Fix: give the item 6 list two packages (both orders), so the form-level pins fail on a list-order pick.\n2. **The one-call rule of item 2 has a rendered pin on the tabbed and wizard forms only.** The modal and drawer now judge the package against their opening values too, but an ablation \"the baseline is an empty second seed\" leaves both touched files green on those two forms (across the 53 importing files: 1 red each, the owner pin, never the package). Fix: add the rendered item 2 pin for `ModalForm` and `DrawerForm`.\n\n## Expected\n\nTest-only change in `plugin-form` tests: both ablations above turn at least one pin red on the modal and on the drawer. No source change, no changeset beyond what the repo's test-only rule asks.\n\n## Duplicate check\n\n`is:issue is:open objectFormPermissionRefEdges` and `is:issue is:open item 6 list order package pick`: none."
+}

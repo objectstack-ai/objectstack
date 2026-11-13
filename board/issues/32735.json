@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T12:54:06Z",
-  "updated_at": "2026-11-12T22:35:57Z",
+  "updated_at": "2026-11-13T08:26:55Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32735",
   "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32451 (branch `claude/project-thread-twntru` @ `a35c1dc6`, no PR yet), from the epic red-line read 6824137090 (NO PASS on B1 only; B1 is fixed on #32451 itself). The three items below do not block that card's merge (maintainer rule: only correctness, red-line or security items block; the rest becomes a follow-up card).\n\n## What is owed\n\n1. **N1 — cache retire on the logged stop.** The Q2-A logged stop for an unstamped signal on a name with two or more bindings returns before `bumpWriteEpoch` / `notifyMutationListenersLocal` (`packages/metadata-protocol` `protocol-class-head.ts`, the stop vs the converge tail), so the overlay-row cache is not retired on that stop where the base retired it. Measure on `main` after #32451 lands; retire the cache on the stop, or pin why not.\n2. **N2 — member coverage.** Ruling 6819919065 item 1 asks for the six steps \"for `email_template` with a member\"; the member pin covers one save only. Extend the two-replica pin (`packages/objectql/src/protocol-cluster-signal-package.test.ts`) to the other steps with a member.\n3. **N3 — draft discard with a null stamp.** A draft discard's `deleted` is stamped with the draft row's package; with a `null` stamp and no active row the peer now runs the package-less heal where it answered `HEAL_BINDING_UNKNOWN` (reasoned by the reviewer, not measured). Measure and pin the answer, or declare it.\n\n## Acceptance\n\nEach item measured on `main` after #32451's merge, with a pin (red before, green after, ablated) or a reasoned declaration in the PR body."

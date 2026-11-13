@@ -1,0 +1,30 @@
+{
+  "number": 33084,
+  "kind": "issue",
+  "title": "Package registry: after a restart the server serves an older manifest than the last overwrite re-install (rollback, or several writes within one second)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T10:18:02Z",
+  "updated_at": "2026-11-13T10:52:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33084",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\n## Reproduction (fresh file DB, admin session; reproduced twice at 8e3d4a54 on a scratch app copy and once at 18.3.0 on the stock showcase)\n\n1. `POST /api/v1/packages?overwrite=false` body `{manifest:{id:\"com.example.qa-rollback\", name:\"QA rollback\", version:\"1.0.0\", scope:\"project\", type:\"app\"}}` → 201.\n2. At least 1 s later, `POST /api/v1/packages?overwrite=true`, same id, `version:\"2.0.0\"` → 201.\n3. At least 1 s later, `POST /api/v1/packages?overwrite=true`, same id, `version:\"1.0.0\"` (rollback) → 201. `GET /api/v1/packages/com.example.qa-rollback` → version **1.0.0**; the list shows one row, 1.0.0.\n4. Restart the server on the same DB. `GET /api/v1/packages/com.example.qa-rollback` → version **2.0.0**.\n\nSame-second variant: three installs/overwrites 1.0.0 → 2.0.0 → 3.0.0 within one second serve 3.0.0 live and **1.0.0** after the restart.\n\n## Expected vs actual\n\nThe manifest served after a restart equals the last one written and served. Actually the restart silently reverts it.\n\n## Mechanism (read, not changed)\n\n`sys_packages` is keyed `(id, version)`, and get/list pick \"latest\" by `ORDER BY created_at DESC` / `MAX(created_at)` (`packages/services/service-package/src/index.ts`). `created_at` has whole-second precision, and the upsert keeps an existing `(id, version)` row's `created_at` (`package-table.ts`). So re-installing a version the package already had never becomes latest, and same-second rows tie.\n\n## Not a regression\n\n18.3.0 (83d7e4ae) gives the same answer to steps 1–4 (1.0.0 live, 2.0.0 after the restart).\n\nQA-source: #33081 · api-backend.package-rest-lifecycle · observed beside the clauses"
+}

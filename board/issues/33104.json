@@ -1,0 +1,30 @@
+{
+  "number": 33104,
+  "kind": "issue",
+  "title": "Studio All-metadata form: the object-reference picker (for example Page → Object) lists bare machine names instead of labels",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T12:14:38Z",
+  "updated_at": "2026-11-13T12:29:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33104",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nQA-source: #33096 · ux-conventions.labels-over-machine-names · observed beside the clauses\n\n**Found:** QA run of `touched:ee9ad834` at objectstack main `8e3d4a54` (18.4.0 round 2, part B, browser slice), during the off-clause probe. Seen on two fresh loads.\n\n## Repro\n1. Create a writable package with an object whose label differs from its name, for example `r5lbl_item` labelled \"R5 Label Item\".\n2. Studio → All metadata → Page → Create new.\n3. The Object select lists 127 bare names (`r5lbl_item`, `showcase_account`, …).\n\nIn the same build, the flow trigger Object picker and the Lookup Related-object picker both show \"R5 Label Item\" with a small mono `r5lbl_item` under it.\n\n**Expected (ux-conventions.labels-over-machine-names):** the label as the primary text, with the machine name secondary.\n\n## Mechanism\n`RefObjectWidget` (`ui/packages/app-shell/src/views/metadata-admin/widgets.tsx`, around L507–580) renders `<SelectItem>{n}</SelectItem>` from the names only, with no label."
+}

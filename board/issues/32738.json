@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T12:57:57Z",
-  "updated_at": "2026-11-12T22:36:34Z",
+  "updated_at": "2026-11-13T08:25:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32738",
   "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32560 (PR #32719), from contract review r1 6824229959 on head `a309114bf`. Not merge blockers (maintainer rule: only correctness, red-line or security items block; the rest becomes a follow-up card). The review's must-fix F1 and the Clause-② line (F6) are fixed on PR #32719 itself.\n\n## What is owed\n\n1. **F2 — same candidates on read and delete.** With A, B and a platform item in the registry, the bare read refuses naming `[A, B, platform]`, while the bare delete refuses naming `[A, B, environment]` plus the \"environment item\" sentence: `removalOf`'s first `storeRemovalKeys` call omits the platform keys, so two packages throw first. Nothing is deleted, but seat ruling 6817582700 asks both doors to name the same candidates. Align and pin.\n2. **F3 — execution face (read from code, not measured).** With A and a register-only package-less item in the service, the service now refuses, that refusal is dropped, and only the served face is judged; the execution read falls to the registry step where it used to take the service's package-less item. An undeclared moved answer: measure, then pin and declare (FROM → TO) or restore.\n3. **F4 — diagnosed completeness.** When a loader throws on the new path, `getDiagnosed` answers `degraded: false` with non-empty `errors` (measured): the judgement did not finish but reports complete (ADR-0110 D3). Answer `degraded: true` there, with a pin.\n4. **F5 — nits.** `judgeDroppedServiceRefusal` lists every action to find one name; `servedFromDisabledHolder` compares with `JSON.stringify`. Both on rare paths.\n\n## Acceptance\n\nEach item measured on `main` after PR #32719's merge, with a pin (red before, green after, ablated) or a declaration in the PR body."

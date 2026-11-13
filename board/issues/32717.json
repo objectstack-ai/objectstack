@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T11:38:46Z",
-  "updated_at": "2026-11-12T13:16:24Z",
+  "updated_at": "2026-11-13T08:28:18Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32717",
   "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：#32351（PR #32569）契约审查 r4/r5 的非阻塞项。按 Bill「简单的问题后续单独立卡」从 PR 中拆出。Part of #31527 (ADR-0150)。Blocked-by #32351. History eviction across packages is #32636, not here.\n\n## What\n\nPR #32569 attributes history rows by package and refuses ambiguous rollbacks. Loose ends left for a separate PR:\n\n1. **Changeset wording (fix before the release reads it):** the Clause-② \"at this release\" type list omits `flow` (joined `PACKAGE_SLOTTED_STORE_TYPES` via #32507); the adr-0087 reason still says \"a row written before it reads exactly as it did\" and \"the two refusals\"; an addressed `diff` of an unattributed version on a multi-slot name answers \"not found\" (consistent with \"left out of addressed reads\"), unstated.\n2. **Door disagreements (one slot):** an addressed rollback to an unattributed version answers \"not found\" at the manager door and lands at the loader door; likewise an environment version addressed `{ packageId: A }`: `registerRollback` lands, `MetadataManager.rollback` answers \"not found\". Rule one answer for both doors and pin it.\n3. **Stamp fallback:** `database-loader.ts` ~:1770 — when the history row exists but is unattributed, the caller's `restoredData` stamp attributes it (a loader-door rollback of legacy v1 with a body stamped B lands in B's row). The fallback should serve only an absent row.\n4. **Docs/nits:** `packages/metadata-core/src/objects/sys-metadata-history.object.ts` :35 and :105-108 still describe NULL as \"package-less\" and a legacy row's package as its body's; the comment at `database-loader.ts` ~:1775-1778 is inexact; no separate ablation of `refuseUnattributedVersion`; one over-long line near `database-loader.ts:249`.\n\n## Acceptance\n\n- Items 2–3: one ruled answer per case, pinned at both doors, red first; declared FROM → TO if an answer moves.\n- Items 1 and 4: wording and doc only.\n\n## 业务理由\n\n谁受益：用历史回滚的管理员与维护者。场景：同一回滚请求在两个门上一个落地一个说找不到；发布说明漏了 flow。不做：门的答案不一致，发布说明不准确。\n\n## 读者\n\nserver 车道，PR #32569 合并后；起点 `packages/metadata/src/loaders/database-loader.ts`、`.changeset/32351-history-rollback-by-package.md`。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue refuseUnattributedVersion rollback unattributed` → #32351 only; #32636 is eviction. No duplicate.\n\n<!-- signed: domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G -->"

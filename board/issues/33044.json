@@ -12,18 +12,18 @@
   },
   "labels": [
     "domain:skills",
-    "pm:blocked",
+    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T05:53:07Z",
-  "updated_at": "2026-11-13T06:48:08Z",
+  "updated_at": "2026-11-13T08:47:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33044",
   "body": "domain:spec#3 · os-elon-musk · session_016WV4d1T5HEokjRgR6vCBX8\n\nFiling gate: ① published skill text that omits a key an in-flight PR adds, owed by PR #33008's `Skills-docs: follow-up owed` line; the seat files the card and rewrites that line to this number. ⛔ Not a claim. Triage sets the lane and grade.\nReader: `domain:skills` (`skills/**`, shipped with `npx skills add`).\nBlocked-by: #33008\nDedupe: `is:issue renamedFrom position skills` → 0 hits besides #32983 / #33008.\nreach: named producer — the published skill an authoring agent loads, `skills/objectstack-data/rules/security.md` (positions and what they grant, on `origin/main`).\n\n## What changes after #33008\n`PositionSchema` gains `renamedFrom` (optional array of earlier position names, position-name grammar). When a package renames a position and declares the old name there, the security plugin moves that position's holders (`sys_user_position.position` old → new) in every organization at the next boot, as the system, idempotently. Refused: an old name that is still a position (any installed package, disabled included, or the environment), a cycle, two positions claiming one old name, a claim on a name the activation ledger records under another package or the environment, and a disabled claimant. Only holders move: sharing-rule / queue / record-share recipients, pending approvers, invitations and Setup-authored bodies naming the old name are reported at boot, not rewritten (ruling A1 on #32983).\n\n## Do\nIn `skills/objectstack-data/rules/security.md`, teach that renaming a position means declaring `renamedFrom: ['old_name']` on the renamed position (never deleting and re-adding), what it carries (holders only, at boot) and what it leaves for the admin (the boot report's list). Changeset `'@objectstack/skills': patch`.\n\nRelated: #32983, #33008."

@@ -1,0 +1,31 @@
+{
+  "number": 33106,
+  "kind": "issue",
+  "title": "docs(releases): write content/docs/releases/v18/18-4.mdx for the 18.4.0 cut and the upgrading table row: 18.4.0 is on npm latest and the page does not exist",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T12:58:29Z",
+  "updated_at": "2026-11-13T13:45:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33106",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\n\nQA-source: #33105 · smoke:npm-18.4.0 · D2\n\nSuggested labels: documentation, priority:p1, domain:devx\nFiling category: ① product defect (docs). Graded p1 on the 18.3 precedent #29933 (「发版本优先的都p1」).\n\n## 维护者速读\n18.4.0 已在 12:30Z 发到 npm latest（发版提交 181ad7d4，Version Packages #29963）。但 `content/docs/releases/v18/18-4.mdx` 不存在，升级页的「Per-release specifics」表也没有 v18.4.0 行；而 releases/index.mdx 已写「current series: 18.4.0」。这是第三次同样的缺口（18.2 #26631、18.3 #29933）。升级用户现在拿不到 18.4.0 的升级清单，下面列出冒烟实测中这份清单必须写的几条。\n\n## Measured\n- `git ls-tree 181ad7d4 content/docs/releases/v18/` → 18-0, 18-1, 18-2, 18-3, index, meta.json. No 18-4.mdx. Same at main 5430b4a4 (2026-11-13 ~12:53Z).\n- `git show 181ad7d4:content/docs/upgrading.mdx` \"Per-release specifics\": newest row v18.3.0.\n- `git show 181ad7d4:content/docs/releases/index.mdx` line 22: \"(current series: 18.4.0, released 2026-11-13)\", a link target with no page.\n- npm: @objectstack/spec latest = 18.4.0, published 2026-11-13T12:30:15.590Z.\n\n## Wanted\n1. `content/docs/releases/v18/18-4.mdx` in 18-3.mdx's section skeleton (Highlights; Release facts, as measured; What's new by kind; New in Console (Studio); Upgrade checklist), added to meta.json pages ahead of 18-3.\n2. The v18.4.0 row in upgrading.mdx \"Per-release specifics\", as #29938 did for 18.3.0.\n3. The upgrade checklist carries at least what an 18.3.0 → 18.4.0 upgrade measured in the smoke (record D1, O1–O4):\n   - the four migrate commands new in 18.4.0's CLI: `os migrate stored-references` (run with the deployment's composition: `--dev` or the deployment's `--preset`/OS_AUTH_SECRET, else it leaves sys_user_permission_set, sys_audience_binding_suggestion and sys_approval_request unread), `os migrate stored-expressions`, `os migrate blank-multi-values`, `os migrate recompute-home-amounts`, each with when to run it;\n   - `os migrate plan` / `apply` after the pin move: on an 18.3.0 file DB the first dev boot leaves sys_metadata_activation's unique index on (metadata_type, name) until a second boot or `os migrate apply` widens it to (metadata_type, package_id, name);\n   - the attachment changes from #32754 / #32932: members can attach to records they edit, and an object without `enable: { files: true }` now refuses attachments for everyone with 403 FILES_DISABLED (the blank starter's note object is one);\n   - the 18.4 narrowings the CLI CHANGELOG marks BREAKING / Clause-② narrowing (e.g. the six address-literal namespaces refused by `os validate`/`os build`, the email-template 409 holders rule).\n4. Facts cite the 18.4.0 sweep (#32908) records and the smoke record.\n\n⛔ No CHANGELOG.md is hand-edited (generated). ⛔ No tag, publish or release-workflow act.\n\nLinks: #29933 / #29938 (18.3 precedent), #26631, #29963, #32908, `docs/releases-maintenance.md`."
+}

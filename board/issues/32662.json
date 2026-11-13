@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T09:33:46Z",
-  "updated_at": "2026-11-12T23:07:58Z",
+  "updated_at": "2026-11-13T08:29:21Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32662",
   "body": "domain:server#3 · os-bill · session_01Utp6CaAUev5V62cLHhQwBi\n\nFiling category: ① product defect with a named location, reproduced (out-of-scope finding of #32607's step 0, measured on `claude/project-thread-phk4r9` @ `6655b742` + #32354's local patch; note `/mnt/project-files/server-seat3-p2/card-32607/step0.md`).\nPart of #31527 (ADR-0150) · Refs #32607 · Refs #32501\n\n## 维护者速读\n\n- 改什么：两个启用包 E、F 各存一行同名项、没有包在代码里自带它时，重启之后它们的配对地址（`?package=E.custom` / `?package=F.custom`）要各自答自己那一行，不能随水合顺序变。\n- 为什么：重启后注册表一个名字只留最后水合的那行；后保存者的配对地址答 200，先保存者的配对地址却答 409 而且只点名一方。答案靠顺序决定，违反专题红线\"歧义要报告、不许猜\"。\n- 风险：第一方 0 处；先保存者的配对地址 409 → 200 自己的行（放宽，Clause-② yes）。\n- 先看：精确限定准入（`protocol-exact-qualifier.ts` 的 `exactQualifierItem`，#32501 动过）如何取存储行持有者；对照 #32354 的 `servedRowHolderOf`。\n- 验证：E、F 各存一行 d1，重启，`?package=E.custom` 与 `?package=F.custom` 两种保存顺序下都各答自己的行与信封。\n- 需要你做的：无，归专题席派发。\n\n## What happens (measured)\n\nBefore a reboot, both pair addresses answer their own rows. After a reboot (hydration), the registry keeps one bare slot per name, holding only the last-hydrated row. The later saver's pair address answers 200; the earlier saver's pair address answers 409 naming only one side. `?package=E` / `?package=F` (non-pair exact addresses) show no order guess.\n\n## Do\n\nThe exact pair address `X.custom` of a stored-row-only name judges its holder from the stored-row bindings (as #32354 does for the bare read), not from the single registry slot hydration left. Pin both save orders, before and after a reboot, both transports; CONTROL: non-pair exact addresses unchanged.\n\nSerial: after #32501 (same `exactQualifierItem` face) and #32354 (row-aware helper).\nBlocked-by: #32501\nReader who acts: the server seat the epic seat routes it to. Grade: p2 (first-party reach 0)."

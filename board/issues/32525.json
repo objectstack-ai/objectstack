@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T03:17:55Z",
-  "updated_at": "2026-11-12T03:17:55Z",
+  "updated_at": "2026-11-13T08:49:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32525",
   "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：PR #32515（#32161）的 `Skills-docs: follow-up owed`。Blocked-by #32515（等它合并后再改）。\n\n## What\n\nPR #32515 refuses, at engine registration, the metadata save door and `os validate`, a flow triggered after a record change (`record-after-create|insert|update|delete|write`) that holds an inline outbound node a retry can reach: an `http` node without `durable: true`, or a `connector_action`, inside a `try_catch` whose `retry.maxRetries` ≥ 1 or under flow-level `errorHandling.strategy: 'retry'`. The docs teach it (`content/docs/automation/flows.mdx`); the shipped skill does not.\n\n`skills/objectstack-automation/SKILL.md`, two rows on `main`, true but silent on the new rule:\n- the `try_catch` row (\"`config.retry` re-runs `try` with backoff first\");\n- the `http` row (and the `connector_action` row next to it).\n\n## Acceptance\n\n- Each row gains one clause: in a flow that runs after a record change, a retry may not reach an inline `http` or a `connector_action`; the fix is `durable: true` for an unauthenticated http call, otherwise drop the retry or run the flow on demand / on a schedule. Credentials still never go in an http node's `url` / `headers`.\n- Wording follows the PR's final changeset and `flows.mdx` (including the no-outbox fallback sentence the contract review asked for). No example in the skill combines an after-trigger, a retry and an outbound node today; keep it that way.\n\n## 业务理由\n\n谁受益：用技能写流程的 AI 作者。场景：作者按技能写了「保存后触发 + try_catch 重试 + 内联 http」，保存时被 422 拒收。不做：每个照技能写的作者都先被拒一次再改，技能与平台规则不一致。\n\n## 读者\n\n`domain:skills` 席位，#32515 合并后动手，一个 PR 改两到三行。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue objectstack-automation skill durable after record retry` → 40 hits, none on this rule (the open ones, #6015 #12708 #6017 #6367 #6023, are older umbrella cards). No duplicate.\n"

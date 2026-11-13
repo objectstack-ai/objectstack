@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T16:26:21Z",
-  "updated_at": "2026-11-12T22:34:28Z",
+  "updated_at": "2026-11-13T08:23:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32773",
   "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nFollow-up of #32568 (PR #32741), from the epic red-line delta read (PR #32741 comment 6829339652, nit 4). Filed under the maintainer's rule of 2026-11-12 09:41Z: review findings get their own card, not another PR round. Parked with the epic's release-line ruling.\n\nBlocked-by: #32568\nRestart-when: the release that carries the epic #31527 release line is published (ruling on #31527, comment 6824949405)\n\n## 维护者速读\n\n- 改什么：ADR-0150 D4 只写了「两个包同名时无包行在精确地址 409」，没写专题裁定 6817768147 的按类型类别读法：可覆盖类型（email_template、dashboard、report、view、translation）409 列出全部持有者；封闭类型按 ADR-0126 Regime C 不采用无包行、返回持有包自己的条目。\n- 为什么：#32568 的 action 两持有者 409 → 200 是凭裁定评论落的，ADR 正文没有这句；以后的声明与评审应能直接引 ADR。\n- 风险：只改 ADR 文字（`docs/adr/**` 是 governed 面，Tier H，需人批）。\n- 先看：`docs/adr/0150-*.md` 的 D4，裁定 6817768147（#32568 上）。\n- 验证：D4 写明两类各自的答案并引裁定；与 #32566、#32568 的 pin 一致。\n- 需要你做的：PR 开出后审批（ADR 改动）。\n\n## Do\n\n1. Add the type-class reading to ADR-0150 D4 as an amendment that cites ruling 6817768147 and ADR-0126 Regime C: overlay types refuse naming every holder; sealed managed types decline the package-less row at a holder's exact address and serve the holder's own item; the bare read of a two-holder name keeps its 409.\n2. Note the declared widening this reading carries (#32568, `action` with two holders, 409 → 200 the holder's own item).\n\n**Clause-②:** none (ADR prose). **Metadata-protocol:** none."

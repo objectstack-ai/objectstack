@@ -1,0 +1,30 @@
+{
+  "number": 33086,
+  "kind": "issue",
+  "title": "checklist: re-point three api clauses that lag the product at 8e3d4a54 (QA 18.4.0 R2 part B, B-api slice)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T10:19:38Z",
+  "updated_at": "2026-11-13T10:54:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33086",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nThree B-api clauses failed at 8e3d4a54. In each, the product behaves as its current contract says and the item text lags. Each fix is a checklist edit: revise the item, bump its `revision`, add a `history` row, keep `node scripts/check-platform-checklist.mjs` green.\n\n1. **api-backend.rest-metadata-config-contract · acceptance[2]** (stale spec). steps[6]/[7] and A2 say `metadata.endpoints.maintenance` removes 3 routes and `item` removes 13. The mount-table pin (`packages/rest/src/rest-config-mount-table.pin.test.ts`, green, its own header already says FOUR and FOURTEEN) measures 4 and 14: maintenance adds `POST {prefix}/_migrate-record-currency-codes` (ADR-0144 ruling item B), item adds `GET {prefix}/:type/:ns/:name` (ADR-0150 D5, #31691). Re-spell steps[6]/[7] and A2. (The spec describe() lag is card-B-api-5.)\n2. **api-backend.second-object-exposure-and-internal-fields · acceptance[0]** (stale ref). `automated.ref` names `packages/metadata-protocol/src/protocol.data-door-internal-field-positions.test.ts`, which no longer exists; bca2a515 (#32128) moved it to `packages/objectql/src/protocol-data-door-internal-field-positions.test.ts` (green). A0's own verify says a missing file is not a pass. Re-point the ref, and add the delegation twin `packages/metadata-protocol/src/protocol.data-door-internal-field-delegation.test.ts`.\n3. **cli.validate-v18-authoring-verdicts · acceptance[1], the controlled_by_parent arm** (stale spec). The arm plants a `controlled_by_parent` object whose only master_detail omits `required` (or sets `required:false`) and expects `os validate` / `os build` to refuse. Both exit 0, reproduced twice: ruling A of #30905 admits that shape as an optional master (`packages/spec/src/data/object.zod.ts`, refuseControlledByParentWithoutOneMaster). The shapes the parse refuses do fail as expected: no master_detail at all (STACK_SCHEMA_INVALID at objects.N.sharingModel) and two required masters, including through objectExtensions. The item's pin `data-model-rules.master-detail-required` is an `os lint` rule, which validate and build do not run. Re-word steps[0]'s arm and the title to \"a cbp object with no master_detail, or two required master_details (also through objectExtensions)\", and move the lint-only shape to an `os lint` clause.\n\nAlso still open from the prior round, not re-drafted: **api-backend.error-sentences-and-unique-violation-wire-code · acceptance[2]** still expects 409 details `{developerMessage, object}` with no `field`; since #32935 they carry `{developerMessage, field, object}` (pin `error-sentences-live.dogfood.test.ts` green). It is item 2 of the prior round's card-api-R1, still rev 8 at 8e3d4a54.\n\nQA-source: #33081 · api-backend.rest-metadata-config-contract · acceptance[2]\nQA-source: #33081 · api-backend.second-object-exposure-and-internal-fields · acceptance[0]\nQA-source: #33081 · cli.validate-v18-authoring-verdicts · acceptance[1]"
+}

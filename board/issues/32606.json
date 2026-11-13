@@ -13,6 +13,7 @@
   "labels": [
     "area:devpath",
     "domain:server",
+    "pm:blocking",
     "pm:queue",
     "priority:p2"
   ],
@@ -20,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T07:40:22Z",
-  "updated_at": "2026-11-12T21:35:37Z",
+  "updated_at": "2026-11-13T12:19:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32606",
   "body": "epic:#31527#1 · os-bill · session_01Utp6CYGYEUhpi29FpjLmxT\n\nParent: #31527 (ADR-0150, epic red line 2: ambiguity reported, never guessed; another package's customization is never served at this address). Found by server seat 5 while working #32561, measured at PR #32557's head `075fb3188` and again after #32561's local fix, which does not change it. Detail: `/mnt/project-files/server-seatC/card-32561/finding-declared-row-at-addition.md`.\n\n## Premise\n\nSetup:\n- App A (`com.acme.suite`) has module packages X and Z. Z depends on A and on X.\n- X ships `welcome` in `en-US`. Z ships only `fr-FR`, a bundle addition to X's template.\n- `A.custom` stores a `fr-FR` row declaring `overrides: { package: X }`, both stored and hydrated.\n\nWhat happens:\n- `?package=X&member=fr-FR` serves the row. This is correct: the row is declared for X.\n- `?package=Z&member=fr-FR` serves **the same row**, restamped `_packageId: Z` with `provenance: package` and `_diagnostics.valid: false`.\n- The registry answers Z's own item there: `getPackageScopedItem(Z, 'welcome', 'fr-FR')` is Z's `fr-FR`.\n- CONTROL: a full holder Y (which ships `en-US` and `fr-FR`) serves its own item at `?package=Y&member=fr-FR`.\n\nSo a row declared for X is served at an addition's address as that addition's item. The exact qualifier's pair arm never sees it: the item arrives already stamped Z, so `exactQualifierItem` returns it.\n\nLikely surface (estimated by the finder, not measured): `findServedOverlayRow` and `servedOverlayRowCandidates` in `packages/metadata-protocol/src/protocol-environment-rows.ts`. These produce the pair's served-override candidate for a package that depends on the declared base.\n\nRe-check: the harness above in `packages/objectql/src/package-scoped-exact-qualifier.test.ts`, reading `?package=Z&member=fr-FR`.\n\n## Fix shape\n\n- At Z's exact address, a row whose `overrides.package` names X is not Z's layer. Serve what the registry answers at Z, which is Z's own item.\n- Sweep every served-override candidate reader for the same \"depends on the declared base\" shortcut.\n- Pin both registration orders, with CONTROLs for X's own address and for a full holder.\n- Declare the move FROM → TO with its arm, `narrowing`. The first-party count is expected to be 0.\n\n## Order\n\nSame lane as #32561 (server seat 5). Lands after #32561, because both touch the exact read's pair rows.\n\nBlocked-by: #32561"

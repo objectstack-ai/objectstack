@@ -2,8 +2,8 @@
   "number": 33029,
   "kind": "issue",
   "title": "MCP list_actions lists a deployment-authored action on a packaged object twice, attributing one row to the package's namespace, and refuses its AI face as ambiguous",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T05:06:32Z",
-  "updated_at": "2026-11-13T07:02:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T11:38:33Z",
+  "closed_at": "2026-11-13T11:37:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33029",
   "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\n## Reproduction (fresh stock showcase at ee9ad834, admin; reproduced on two fresh boots)\n\n1. `PUT /api/v1/meta/action/qa_ai_gated` with no `?package=`, body `{name:'qa_ai_gated', label:'QA AI gated', objectName:'showcase_task', operation:'update', patch:{progress:50}, execution:'perRecord', ai:{exposed:true, description:'a description of 40+ chars'}}` → 200.\n2. `GET /api/v1/meta/action` lists qa_ai_gated once, with `_packageId` null.\n3. MCP `tools/call list_actions {}` with an admin osk_ key returns:\n   - **two** qa_ai_gated rows on showcase_task, one with `namespace:\"showcase\"` and one without;\n   - `refusedFaces[0].face` = `showcase_task-qa_ai_gated`, \"derived for 2 actions: … of namespace \"showcase\"; … authored in this environment\".\n4. `run_action {actionName:'showcase_task-qa_ai_gated'}` → 404 \"Action face … names no one action\". The bare name and `namespace:'showcase'` both run it.\n\nExpected: one row with no namespace (the action is environment-authored), and its face resolves. The action was never shipped by com.example.showcase.\n\n## Mechanism (read from source, not proven)\n\nThe authored action is merged into showcase_task's embedded `actions`; `GET /meta/object/showcase_task` lists qa_ai_gated among them. `collectActionDeclarations` (`packages/runtime/src/action-execution.ts:5160-5189`) files that embedded copy under `declaringPackageOf(action) ?? declaringPackageOf(obj)`, which is com.example.showcase. The standalone copy's holder is ''. The ADR-0150 D4 dedupe keys on the holder package, so the two copies are not collapsed.\n\nRelated, closed: #32437 (list_actions listed one action once per bound object).\n\nQA-source: #33025 · ai.mcp-run-action-exposure-gate · observed beside the clauses"

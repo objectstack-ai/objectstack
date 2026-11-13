@@ -1,0 +1,30 @@
+{
+  "number": 33085,
+  "kind": "issue",
+  "title": "metadata.endpoints.item's describe() omits the qualified read GET /meta/:type/:ns/:name that the switch also removes (low)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T10:18:55Z",
+  "updated_at": "2026-11-13T10:53:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33085",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\n`RestServerConfig.metadata.endpoints.item` (packages/spec/src/api/rest-server.zod.ts) describes itself as \"the whole per-item face — …\" and names 13 routes. The mount-table pin `packages/rest/src/rest-config-mount-table.pin.test.ts` (green at 8e3d4a54) shows the switch removes 14: the 13 plus `GET {prefix}/:type/:ns/:name`, the ADR-0150 D5 qualified by-name read (#31691). `metadata.endpoints.maintenance`'s describe() already names all four of its routes.\n\nFix: add the qualified read to the `item` describe() string and regenerate anything derived from it.\n\nQA-source: #33081 · api-backend.rest-metadata-config-contract · acceptance[2]"
+}

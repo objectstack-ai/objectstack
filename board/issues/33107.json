@@ -1,0 +1,26 @@
+{
+  "number": 33107,
+  "kind": "issue",
+  "title": "analytics: the dimension-label pass returns raw ids for a relationship-path lookup dimension, and ignores the target object's nameField",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T13:48:47Z",
+  "updated_at": "2026-11-13T13:48:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33107",
+  "body": "Found while building a metadata app on the published packages (downstream card: steedos-labs/os-project-blackcat-crm#47, which is held `pm:blocked` on this one). Reproduced on `@objectstack/*` 18.3.0; both producers are unchanged on `main` at `64551047`.\n\n## What a dashboard shows\n\nA dataset dimension that is a lookup renders the referenced record's **id** instead of its display name in two shapes:\n\n| Shape | Dataset dimension | Rendered | Expected |\n|---|---|---|---|\n| A — relationship-path lookup | `field: 'crm_account.owner_id', type: 'lookup'` on base object `crm_cb_order` | `2U7Cm35fLdREuo8pXHKHOOsl3vlogK8M` | the user's name |\n| B — base-field lookup to an object whose title is its `nameField` | `cb_order` → `crm_cb_order` (`nameField: 'order_number'`, an autonumber; the object has no `name`/`title`/`label` field) | `vML9bIeq1IvEjAjw` | `SO-2026-0002` |\n\nControl on the same door, same request: base-field lookups to objects that have a `name` field resolve (`customer` → `crm_account` gives company names, `grade` → `crm_carbon_grade` gives `N330`), so the label pass is live; the two failures are its path gap and its nameField gap.\n\n## Producers\n\n- **A** — `packages/services/service-analytics/src/dimension-labels.ts:435` `const meta = fields[dim.field];` looks the dimension up on the **base** object's field map only. A dotted relationship path finds no field meta, the loop `continue`s, and the raw FK id is served. The sort-key pass has the same base-only lookup (`metaFor`, same file ~line 210).\n- **B** — `pickDisplayField` (`dimension-labels.ts:513-524`, used by `plugin.ts:1100` `fetchRecordLabels`) picks `name`/`title`/`label`, else the **first text field**. It never reads the target object's declared `nameField` (`packages/spec/src/data/object.zod.ts` — \"the stored field used as the record display name\"). On `crm_cb_order` the first text field is the platform-injected `queue` (null on every row), so no label is found and the id is served.\n\nSpec side: `DatasetDimension.field` is documented as a field **or a relationship path** and `type` admits `'lookup'` (`packages/spec/src/ui/dataset.zod.ts:294-307`); there is no display-field key on a dimension. So an app author has no declared way around this, and must not invent one (a denormalized copy field or a path-to-text dimension would hide the gap in every app that copies it).\n\n## Repro (18.3.0)\n\n```\nPOST /api/v1/analytics/dataset/query\n{ \"datasetName\": \"cb_order_metrics\",\n  \"selection\": { \"dimensions\": [\"rep\"], \"measures\": [\"order_tonnes\", \"order_count\"] } }\n→ rows: rep = \"2U7Cm35fLdREuo8pXHKHOOsl3vlogK8M\" …   (dimensionFields.rep = \"crm_account.owner_id\")\n\nPOST /api/v1/analytics/dataset/query\n{ \"datasetName\": \"cb_plan_metrics\",\n  \"selection\": { \"dimensions\": [\"order\", \"plan_name\", \"approval_status\"], \"measures\": [\"plan_margin\"],\n                 \"runtimeFilter\": { \"verdict\": \"below_floor\" } } }\n→ rows: order = \"vML9bIeq1IvEjAjw\"   (= SO-2026-0002 via GET /api/v1/data/crm_cb_order)\n```\n\nSame in the Console dashboards (table tiles render the ids).\n\n## Every position in the family (one fix should close all)\n\n- A: `crm_account.owner_id` as \"By Sales Rep\" (orders dataset) and as \"Grades by Sales Rep\" (customer-grade dataset); `cb_order.carbon_grade` as \"Margin by Grade\" (plan dataset) — a dotted path again, renders grade ids.\n- B: `cb_order` → `crm_cb_order` as the \"Order\" column of \"Plans Needing Special Approval\".\n\n## Suggested fix shape (for the lane to judge)\n\n- A: resolve a dotted reference dimension by walking the path to the hop object's field meta (the compiler already resolves the hop for SQL), in both the label pass and the sort-key pass.\n- B: `pickDisplayField` prefers the target object's declared `nameField` before the `name`/`title`/`label`/first-text heuristic.\n- Both keep grouping by id, so two people with the same display name stay separate, and keep the existing target-scope (exposure) check on the label read.\n\nDedupe words: dimension label relationship path · pickDisplayField nameField · resolveDimensionLabels dotted field · lookup dimension raw id dashboard."
+}

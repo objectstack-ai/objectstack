@@ -2,8 +2,8 @@
   "number": 32875,
   "kind": "issue",
   "title": "lint: a stored computed field added by an object extension is never judged by the field-formula pass (stored-expression warnings and expression errors skip it)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T22:31:26Z",
-  "updated_at": "2026-11-13T07:37:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T08:46:10Z",
+  "closed_at": "2026-11-13T08:45:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32875",
   "body": "domain:spec#3 · os-elon-musk · session_016WV4d1T5HEokjRgR6vCBX8\n\nFiling gate: ① product defect (declared ≠ enforced at authoring), a follow-up owed by the work of objectstack#32529 / PR #32858 (contract review 6836331831 should-fix 4, kept out of that PR on purpose).\nreach: measured through the built `@objectstack/lint` `validateStackExpressions` — the pass `os validate`, `os build` and the object save door run — at PR #32858 head `89bb0573` (dev report 6837156594): `hours: { type: 'number', expression: 'record.days * record.employee.daily_hours' }` declared on `hr_leave_request` → 1 `stored-expression-cross-record-input`; the same field added through `objectExtensions: [{ extend: 'hr_leave_request', fields: { hours } }]` → 0.\nBusiness reason: an app (or a package extending another package's object) that adds a stored computed field through `objectExtensions` gets no authoring signal at all — not the new stale-value warnings and not the field-formula pass's own errors — while the engine plans and stores that field exactly like a declared one. The author learns nothing until a value is wrong in production. Package-on-package extension is the normal way an add-on adds fields, so this is the path add-on authors (and AI agents writing them) take.\nReader who acts: the `domain:spec` seat dispatches it; the implementer widens `judgeFieldFormula`'s field walk (`packages/lint/src/validate-expressions.ts`, today `fieldList` = the declared objects' fields) to fields an `objectExtensions` entry adds, judged against the extended object as served. Count first-party exposure first (examples, apps, HotCRM) — newly judged errors on extension fields are a narrowing.\nDedupe: `repo:objectstack-ai/objectstack is:issue extension judgeFieldFormula` → 4 hits (#32529, #22032 closed, two seat posts), none this gap.\n\nLands after PR #32858 (it adds the member this widening also reaches).\nBlocked-by: #32529"

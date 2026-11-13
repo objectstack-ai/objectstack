@@ -1,0 +1,33 @@
+{
+  "number": 33110,
+  "kind": "pull_request",
+  "title": "docs(spec): a hook's published body description says a hook body cannot send mail",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T13:57:56Z",
+  "updated_at": "2026-11-13T14:02:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33110",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoWhF8u3tX38fmxGxpWHddUe)_\n\nRefs #32004\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：hook 的 `body` 键在发布的 schema 描述里写明已生效的规则：hook 体不能发邮件（授予 `email.send` 的 js hook 体在解析时被拒），记录变更时的邮件走 action、job 或 flow；hook 体可以追加时间线条目（`activity.append`），它随写入一起提交或回滚。生成的 hook 参考页随之更新。CLI 能力推断的注释改为说明 `email.send` 是例外：hook 处理器里只要写出 `ctx.email.send`（字符串里或不会执行的分支里），就会推断出该能力，构建因此失败，这正是规则在起作用。\n- **为什么改**：规则早已在解析时生效，但发布的描述没有写，作者只能从报错里得知；推断注释原先说\"多推断的能力无害\"，这对 hook 上的 `email.send` 不成立。\n- **风险与回滚**：只改描述文字和代码注释，没有键、取值或检查变化，hook 接受的内容不变。回滚即撤销本 PR。\n- **先看**：`packages/spec/src/data/hook.zod.ts` 中 `body` 的描述和其上方的 TSDoc，`packages/cli/src/utils/extract-hook-body.ts` 能力模式列表顶部和 `email.send` 模式上方的注释。\n- **两分钟验证**：`pnpm --filter @objectstack/spec exec vitest run src/data/hook.test.ts src/data/hook-body-mail-grant.test.ts`，再跑 `pnpm --filter @objectstack/spec run check:generated`，都应为 0。\n- **需要你做的**：无，由席位复审并落地。\n\n## What changes\n\n- `packages/spec/src/data/hook.zod.ts`: the `body` key's published description now states the rule its parse already holds. A `js` hook body granted `email.send` is refused, because a message cannot be taken back if the write that runs the hook rolls back; mail on a record change goes through an action, a job or a flow. A hook body may add a timeline entry (`activity.append`), which commits or rolls back with the write. The TSDoc above the key says the same and names the parse check.\n- `packages/cli/src/utils/extract-hook-body.ts`: the comment over the capability patterns no longer calls every over-inferred grant harmless. `email.send` is the exception on a hook: a handler whose source spells `ctx.email.send` in a string or in a branch that never runs is inferred the grant, and the hook's parse refuses it, so the build fails. The comment says that failure is the rule working, and that the remedy is to take the spelling out of the hook handler. An action or a job body is granted the token as before.\n- `content/docs/references/data/hook.mdx`: regenerated from the schema (`check:generated --fix`); only the `body` row changes.\n- `.changeset/hook-body-mail-rule-description.md`: `@objectstack/spec` patch.\n\n## Why\n\nThe rule is enforced at parse, but the published schema face said nothing about it, so an author learned it from the refusal. The inference comment stated the opposite of what happens for `email.send` on a hook.\n\n## Verification\n\n- Derived gate list (`scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran`): 108 derived, 108 run, 0 NOT-MEASURED, every one exit 0, at 8042c8cf. After merging `main` (2554ae34) the derivation is still 108, all accounted; `check:api-surface` (after a spec rebuild), `check:authorable-surface`, `check:changeset-gate-self-tests` and `check:generated` were run again and exit 0.\n- Owner tests: spec `hook.test.ts`, `hook-body-mail-grant.test.ts`, `hook-body-doors.test.ts`, `hook-body.test.ts`, `hook-refusals.test.ts` 188/188; cli `extract-hook-body.test.ts`, `hook-body-refusal-kind.test.ts`, `published-subpath-hook-body.pin.test.ts`, `hook-body-parameter-rebind.test.ts`, `hook-body-lowering.test.ts` 142/142; spec `tsc --noEmit` exit 0; ESLint over both source files exit 0.\n- The comment's claim, measured against the inference: a handler that names `ctx.email.send` only in a comment is inferred no grant (the lowered source carries no comment); one that names it in a string, or in a branch that never runs, is inferred `email.send`.\n\n## Acceptance notes\n\n- `content/docs/references/data/hook.mdx` is outside the claimed file surface: it is the generated reference page for the edited description, and `check:generated` requires it.\n- No runtime, key or check changes; what a hook accepts is unchanged.\n- The paired change, first-party app actions handing mail and timeline entries to the platform's doors, is in hotcrm and is opened there after that repository's 18.4.0 upgrade lands.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind. (No names added.)\n- [x] 3. No formatter ran; ESLint over the changed sources passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [ ] 8. Title, body and comments are in English, apart from the maintainer brief above, which the maintainer reads in Chinese.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibwzNRpkoiCFn1kQpUh\n\n<!-- signed: security#2 · os-tesla · session_01L9qibwzNRpkoiCFn1kQpUh -->\n"
+}

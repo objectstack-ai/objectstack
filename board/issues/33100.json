@@ -1,0 +1,32 @@
+{
+  "number": 33100,
+  "kind": "issue",
+  "title": "validate_expression and the object publish gate accept a formula that reads another formula field, and that formula reads null on every row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T12:12:37Z",
+  "updated_at": "2026-11-13T12:51:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33100",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nQA-source: #33096 · studio-authoring.expression-editors · observed beside the clauses\n\n**Found:** QA run of `touched:ee9ad834` at objectstack main `8e3d4a54` (18.4.0 round 2, part B, browser slice), during the off-clause probe.\n\n## Repro (fresh `os dev` boot, admin)\n1. `POST /api/v1/packages {id:'com.qa.x', name:'X', version:'0.1.0', type:'app'}`.\n2. `PUT /api/v1/meta/object/x_job?mode=draft&package=com.qa.x` with\n   `{name:'x_job', sharingModel:'public_read_write', fields:{quantity:{type:'number'}, unit_price:{type:'number'}, f_sibling:{type:'formula', expression:'record.quantity * record.unit_price', returnType:'number'}, f_total:{type:'formula', expression:'record.f_sibling * 2', returnType:'number'}}}` → 200.\n   Reading `?state=draft` back gives `_diagnostics {valid:true}`.\n3. `POST …/x_job/publish` → 200.\n4. `POST /api/v1/data/x_job {quantity:2, unit_price:5}`. Reading the row back gives `f_sibling` 10 and `f_total` **null**. The server logs `WARN formula field 'f_total' on 'x_job' could not be evaluated, so it reads null … (runtime: No such key: f_sibling). If the expression itself is at fault … os validate, or a re-save of the object, refuses it with a located message`. That promise does not hold here.\n5. MCP `tools/call validate_expression {objectName:'x_job', expression:'record.f_sibling * 2', site:'formula'}` → `ok:true`, inferredType number. Its inScope.fields lists the formula fields.\n6. The self-reference `f_total = 'record.f_total * 2'` behaves the same at publish and runtime.\n\nThe Studio formula editor accepts the sibling form (\"Valid CEL · Result type: Number\"). It flags only the self-reference, so on that form the editor and `validate_expression` disagree.\n\n**Expected:** refused at authoring time, or evaluated in dependency order so that it reads 20.\n\n## Mechanism (read from source, not confirmed)\n- The runtime formula scope (`packages/objectql/src/engine-readable-ids-permission-formula.ts`, `applyFormulaPlan`) does not carry formula values.\n- `validate_expression`'s scope and the publish gate include formula fields."
+}

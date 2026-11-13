@@ -2,8 +2,8 @@
   "number": 32833,
   "kind": "issue",
   "title": "ui(fields, plugin-form): after the permission-ref edges, pin the create form's seed rules end to end, and check the picker in the modal and drawer record forms",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:access",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T21:40:39Z",
-  "updated_at": "2026-11-13T04:38:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T09:23:09Z",
+  "closed_at": "2026-11-13T09:22:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 7,
   "locked": false,

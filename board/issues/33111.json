@@ -1,0 +1,26 @@
+{
+  "number": 33111,
+  "kind": "issue",
+  "title": "console: Edit in a record-drawer level opens the host route's object form (\"Edit Sales Order\" → \"Record not found\") — the header Edit passes no objectName and handleEdit drops formObject",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T14:02:22Z",
+  "updated_at": "2026-11-13T14:02:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33111",
+  "body": "Found while building a metadata app on the published packages (downstream card: steedos-labs/os-project-blackcat-crm#42, held `pm:blocked` on this one). Reproduced on `@objectstack/console` 18.3.0; the same code is on `main` at `64551047`. Sibling defect in the same drawer-stack family, separate seam: the related-tab scope card filed alongside this one.\n\n## Symptom\n\nOpen a parent record (`crm_cb_order`), open a child record (`crm_allocation_plan`) from its related list into a drawer level, click the level's header **Edit**. The form that opens is the **parent route's** object form with the **child's** id: title \"Edit Sales Order\", body \"Record not found\". The child's full page Edit works (control).\n\nReproduces from both hosts: the list drawer (`/crm_cb_order?recordId=…`) and the parent's full page (`/crm_cb_order/record/:id`, `RecordPageDrawerHost`).\n\n## Producer (main)\n\n- `ui/packages/app-shell/src/views/RecordDetailView.tsx:4681` — header `sys_edit`: `onClick: () => onEdit({ id: pureRecordId })`, no object name.\n- Every drawer level receives the host's `onEdit` unchanged: `views/objectViewRecordOverlay.tsx:80-81` (list host, beside `objectNameOverride={level.objectName}`) and `views/RecordDetailView.tsx:5655-5656` (record-page host).\n- `ui/packages/app-shell/src/console/AppContent.tsx:1099-1120` `handleEdit` resolves the target from `currentObjectDef` (the URL path segment's object, line 958), sets `form=ID` and **deletes `formObject`** (line 1120, \"Top-level task on the route's own object\"); `formObjectDef` then falls back to `currentObjectDef` (lines 963-966).\n- The URL contract already carries the child object for this case: `views/RelatedRecordActionsBridge.tsx:465-466` sets both `form` and `formObject = opts.objectName` for a child task. The header Edit path does not.\n\n## Repro (18.3.0)\n\n1. `/crm_cb_order` → open an order (URL gains `?recordId=…`) → related tab of the child object → open a child row → **Edit**. URL becomes `…?recordId=PARENT&related=crm_allocation_plan.cb_order&form=CHILD_ID` with no `formObject`; dialog \"Edit Sales Order / Record not found\".\n2. Same from the parent's full page `/crm_cb_order/record/PARENT` → child drawer → Edit: `form=CHILD_ID`, same dialog.\n3. Control: child full page `/crm_allocation_plan/record/CHILD_ID` → Edit → correct \"Edit Allocation Plan\" form.\n\n## Suggested fix shape (for the lane to judge)\n\nThe header Edit of a drawer level carries the level's object (`onEdit({ id, objectName })`), and `handleEdit` writes `formObject` when that object differs from the route's — the same contract `RelatedRecordActionsBridge` already uses — instead of deleting it.\n\nDedupe words: record drawer edit formObject · drawer stack onEdit route object · Edit opens parent object form."
+}

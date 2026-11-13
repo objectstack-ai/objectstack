@@ -2,8 +2,8 @@
   "number": 32386,
   "kind": "issue",
   "title": "deps: the daily OSV scan is red on one new public advisory (fast-xml-parser 5.10.1, GHSA-474x-hrwr-fgx4, Low)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "dependencies",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T03:53:38Z",
-  "updated_at": "2026-11-13T07:57:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T08:30:13Z",
+  "closed_at": "2026-11-13T08:29:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

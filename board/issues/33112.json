@@ -1,0 +1,26 @@
+{
+  "number": 33112,
+  "kind": "issue",
+  "title": "console: a record-drawer level over a record page loses the child's own related tabs — the record route's object scope never loads the grandchild objects, and the registry joins only for ?recordId=",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T14:02:38Z",
+  "updated_at": "2026-11-13T14:02:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33112",
+  "body": "Found while building a metadata app on the published packages (downstream card: steedos-labs/os-project-blackcat-crm#45, held `pm:blocked` on this one). Reproduced on `@objectstack/console` 18.3.0; the same code is on `main` at `64551047`. Sibling defect in the same drawer-stack family, separate seam: objectstack-ai/objectstack#33111 (header Edit opens the route object's form).\n\n## Symptom\n\nOn a parent's **full page** (`/crm_cb_order/record/:id`), open a child (`crm_allocation_plan`) from the related list into a drawer level. The level shows only Overview / Activity and an overflow with the back-reference (`Sales Orders (0)`); the child's own related lists — `crm_allocation_line` and `crm_plan_expense`, both `masterDetail` to `crm_allocation_plan` — are missing, plain and maximized. The child's full page shows them, and so does the **list drawer** host (`/crm_cb_order?recordId=…`), from the same metadata (control legs). No page is authored for either object, so this is not a layout difference — the same synthesized page sees a smaller objects list.\n\n## Producer (main)\n\n- `ui/packages/app-shell/src/views/RecordDetailView.tsx:2342-2343` — a level derives its tabs as `deriveRelatedLists(objectDef, objects, …)`, where `objects` is the host route's `allObjects`.\n- `ui/packages/app-shell/src/console/appObjectScope.ts:568` — a record route without a declared page scopes to the app package plus `readObjectsReferencing(route.objectName)`: the objects pointing at the **route's** object only, so the child is loaded but its own children are not.\n- `ui/packages/app-shell/src/console/AppContent.tsx:545` — `drawerReadsRegistry = !!objectScope && searchParamsHasRecordDrawer(location.search)`: the whole registry is joined only when `?recordId=` is in the URL (lines 553-555). `RecordPageDrawerHost` levels live in component state, not the URL (`views/recordDrawerStack.tsx` header lines 23-27, host at ~854), so the record-page drawer never triggers the join.\n\nObserved reads on the parent full page: `object?package=…` (the app package's objects) plus `sys_*` by name, no whole-registry `meta/object` read; on the list drawer host, adding `?recordId=` triggers the `meta/object` read and the tabs appear.\n\n## Repro (18.3.0)\n\n1. `/crm_cb_order/record/PARENT` → related tab \"Allocation Plans\" → open a plan into the drawer → tabs: Overview / Activity, overflow `Sales Orders (0)`; maximize: identical.\n2. Control A: `/crm_allocation_plan/record/PLAN` → Overview / Activity / Allocation Lines (2).\n3. Control B: `/crm_cb_order` → open the order (list drawer, `?recordId=`) → plan level → Overview / Activity / Allocation Lines (3), overflow Plan Expenses (0), Sales Orders (0).\n\n## Suggested fix shape (for the lane to judge)\n\nMake a drawer level's object scope follow the level's own object: either `RecordPageDrawerHost` levels trigger the same registry join `?recordId=` does, or opening a level reads `readObjectsReferencing(level.objectName)` into the scope the level derives its related lists from.\n\nDedupe words: record route object scope related lists drawer · deriveRelatedLists drawer missing grandchild · RecordPageDrawerHost registry."
+}

@@ -2,8 +2,8 @@
   "number": 32936,
   "kind": "issue",
   "title": "docs(skills, mcp): teach that an AI service account is refused a confirmation-gated action whatever it sends",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T23:56:57Z",
-  "updated_at": "2026-11-13T07:11:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T08:59:37Z",
+  "closed_at": "2026-11-13T08:58:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32936",
   "body": "security#1 · os-elon-musk · session_016WV4cx5nHfga3Hm9BzikGw\n\nFiled by the security lane as the `Skills-docs:` follow-up owed by PR #32926 (supersedes #32691). Priority and lane are triage's.\n\nBlocked-by: #32926\n\n## Why\n\nThe runtime rule (ADR-0151 D3 rule 3): an AI service account (an agent principal acting for itself,\nno `onBehalfOf`) does not confirm an action for itself. An action declaring\n`ai.requiresConfirmation: true` is refused `428 ACTION_CONFIRMATION_REQUIRED` for such an account at every\naction door (MCP `run_action`, `resume_run`, REST `/actions`, a host's `dispatchAction`), whatever the request\ncarries; a person runs that action instead.\n\nTwo published teaching texts still prescribe `confirm: true` as the retry for every caller, so an AI client\nrunning under a service-account key is taught a retry that can never succeed:\n\n- `skills/objectstack-ai/SKILL.md`, the `list_actions`, `run_action`, `resume_run` row of the MCP tool table\n  (\"refused with the same 428 unless the call sends `confirm: true` ... ask the human first, then retry\").\n- `packages/mcp/src/skill-md.ts`, the `run_action` and `resume_run` entries\n  (\"Pass `confirm: true` on an action `list_actions` reports as `requiresConfirmation` ...\";\n  \"including `confirm: true` for an action flagged `requiresConfirmation`\").\n\n## Acceptance\n\n- Both texts keep the existing teaching for a person and a delegated agent (`confirm: true` after the human\n  approves), and add one sentence: under an AI service account's own key the call is refused whatever it\n  sends, and nothing runs; hand the action to a person (or the action's author declares\n  `ai.requiresConfirmation: false` when it is safe unattended).\n- The two texts say the same thing in the same terms.\n- `skills/**` line ratchet: net growth paid by deleting content in the same file, no re-wrap counted as\n  room (`check:skill-line-ratchet`); `'@objectstack/skills': patch` changeset; `@objectstack/mcp` patch\n  changeset for `skill-md.ts`.\n- `check:skill-docs` / `check:skill-refs` current; any `packages/mcp` test pinning the rendered text updated.\n- No runtime change; no change to `delete_record` / `delete_records` teaching (a different gate).\n\nDedupe words: service account confirm, requiresConfirmation skill text, run_action confirm retry, ACTION_CONFIRMATION_REQUIRED agent."

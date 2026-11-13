@@ -2,9 +2,9 @@
   "number": 33057,
   "kind": "pull_request",
   "title": "docs(skills, mcp): teach that an AI service account is refused a confirmation-gated action whatever it sends",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/s",
     "tests",
     "tooling"
@@ -23,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T06:44:45Z",
-  "updated_at": "2026-11-13T07:11:06Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-13T09:00:08Z",
+  "closed_at": "2026-11-13T08:58:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-13T08:58:42Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/33057",

@@ -1,0 +1,30 @@
+{
+  "number": 33103,
+  "kind": "issue",
+  "title": "Setup → Apps: the Set-default star on the current default app is disabled with no reason (nothing on hover, on focus or in the accessible description)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T12:14:05Z",
+  "updated_at": "2026-11-13T12:29:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33103",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nQA-source: #33096 · ux-conventions.disabled-control-reason · observed beside the clauses\n\n**Found:** QA run of `touched:ee9ad834` at objectstack main `8e3d4a54` (18.4.0 round 2, part B, browser slice), during the off-clause probe. Seen on two fresh loads.\n\n## Repro\n1. Fresh showcase boot, admin.\n2. `POST /api/v1/packages {manifest:{id:'com.qa.x', …}}`.\n3. `PUT /api/v1/meta/app/x_app?package=com.qa.x` with `{name, label:'X App', active:true, isDefault:true, navigation:[…]}`.\n4. Open `/_console/apps/setup/system/apps`.\n5. The X App card's star button (aria-label \"Set X App as default\") is `disabled`:\n   - its title is only \"Set as default\", which is its name and not the reason;\n   - it has no aria-describedby;\n   - it is not in the tab order;\n   - no tooltip shows on hover or focus.\n\n**Expected (ux-conventions.disabled-control-reason):** a reason such as \"Already the default app\", shown on hover and focus and given as the accessible description. Elsewhere the console uses a focusable wrapper with aria-describedby for this.\n\n## Mechanism\n`ui/apps/console/src/pages/system/AppManagementPage.tsx`, the Star Button (around L630–640): `disabled={processing || isDefault}`, with no reason wrapper."
+}

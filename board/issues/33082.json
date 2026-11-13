@@ -1,0 +1,30 @@
+{
+  "number": 33082,
+  "kind": "issue",
+  "title": "Switching admin_full_access off through POST /security/_activation is accepted for the last platform admin, and nothing in the product can switch it back on",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T10:16:38Z",
+  "updated_at": "2026-11-13T10:51:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33082",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\n## Reproduction (stock showcase, single posture, `OS_PLATFORM_OWNER_EMAIL` unset, fresh file DB; reproduced 3 times at 8e3d4a54 and once at 18.3.0)\n\n1. Boot `objectstack dev --seed-admin`. The seeded admin `admin@objectos.ai` is the only holder of `admin_full_access` (one `sys_user_permission_set` row); `GET /api/v1/auth/me/permissions` lists positions `platform_admin, org_owner, …` and the set `admin_full_access`.\n2. As that admin: `POST /api/v1/security/_activation/permission/admin_full_access` body `{\"enabled\":false}` → **200** `{type:\"permission\", name:\"admin_full_access\", enabled:false}`.\n3. `GET /api/v1/auth/me/permissions` → `platform_admin` and `admin_full_access` are gone, and with them `manage_metadata` (left: the showcase sets, `organization_admin_no_bypass`, `member_default`, …). A fresh sign-in reads the same.\n4. `POST /api/v1/security/_activation/permission/admin_full_access` body `{\"enabled\":true}` → **403** PERMISSION_DENIED \"Enabling or disabling a permission set requires the `manage_metadata` capability …\".\n5. Other doors are closed too: `PATCH /api/v1/data/sys_metadata_activation/:id {active:true}` → 405 OBJECT_API_METHOD_NOT_ALLOWED; `PUT /api/v1/meta/object/…` → 403.\n\n## Expected vs actual\n\n- Expected: step 2 is refused. `packages/runtime/src/domains/catalog-activation.ts` says \"the last-admin guard refuses switching `admin_full_access` off (ADR-0135 D5.2)\", and the last-admin guard's shape (4) refuses the change \"wherever the grant remains the load-bearing anchor\".\n- Actual: the switch-off lands, and the deployment has no in-product way back (database surgery or a re-seed).\n\n## Mechanism (read, not proven)\n\n`resolveAdminUserIds` appears to count the organization owner (`sys_member` role `owner`) as a remaining administrator, so the guard sees one admin left. Under `single` posture that owner's `organization_admin_no_bypass` carries no `manage_metadata`, the only capability that can switch the set back on.\n\n## Not a regression\n\n18.3.0 (83d7e4ae, stock showcase, fresh DB) answers steps 2–4 identically. Only an entitled admin can do this, and only to themselves; no privilege is gained.\n\nQA-source: #33081 · access-security.security-catalog-activation-and-clone-doors · observed beside the clauses"
+}

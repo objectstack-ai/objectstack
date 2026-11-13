@@ -1,0 +1,30 @@
+{
+  "number": 33102,
+  "kind": "issue",
+  "title": "Studio's Home currency amount editor autosaves each pointer on its own, so a correct three-step edit shows \"Changes not saved\" twice",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T12:13:41Z",
+  "updated_at": "2026-11-13T12:28:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33102",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nQA-source: #33096 · studio-authoring.currency-home-amount-editor · observed beside the clauses\n\n**Found:** QA run of `touched:ee9ad834` at objectstack main `8e3d4a54` (18.4.0 round 2, part B, browser slice), during the off-clause probe. Minor UX.\n\n## Repro\n1. Use a writable package with an object whose `amount` is a record-mode currency, with a readonly dynamic `amount_home`, a date `order_date` and a readonly number `amount_rate` (scale 12).\n2. Studio → Data → the object → Form → field Amount → Home currency amount.\n3. Pick Home amount field = `amount_home` → `PUT /api/v1/meta/object/OBJ?mode=draft&package=PKG&surface=studio` 422 INVALID_METADATA \"`homeAmount` needs `rateDate` …\", and a red \"Changes not saved\" banner appears.\n4. Pick Document date → 422 \"needs `rateField`\".\n5. Pick Rate field → 200.\n6. Clearing the three pointers gives the mirror image: two 422s.\n\n**Expected:** the editor holds the autosave until all three pointers are set or all are empty, as the hooks panel holds a CEL error, or it sends the three together.\n\n## Mechanism\n- `setHomeAmountPointer` (`ui/packages/app-shell/src/views/metadata-admin/inspectors/CurrencyConfigField.tsx`) writes one pointer per pick.\n- The shared autosave sends every intermediate config.\n- `CurrencyConfigSchema.homeAmount` requires all three pointers."
+}
