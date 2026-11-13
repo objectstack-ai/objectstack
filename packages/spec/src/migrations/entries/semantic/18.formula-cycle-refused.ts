@@ -22,11 +22,15 @@ export const entry: SemanticMigration = {
   reason:
     'The engine computed formulas in declaration order, so a formula reading another formula read null whenever '
     + 'it came first. It now computes each formula after the formulas it reads. A formula on a cycle has no such '
-    + 'order: it was never computable and read null on every row, while `os build`, `os validate` and the object '
-    + 'door accepted it. They now refuse each declared formula on a cycle, located on its `expression` '
+    + 'order, and `os build`, `os validate` and the object door accepted it. An unguarded member read null on every '
+    + 'row; a member whose read of the cycle is guarded (`has(record.f_self) ? record.f_self : 1`, or an optional '
+    + 'spelling) could read a value that depended on the order its formulas were computed in, and now reads null '
+    + 'with the cycle fault. The doors now refuse each declared formula on a cycle, located on its `expression` '
     + '(`object \'OBJECT\' · field \'FIELD\' expression`), with the sentence the engine reports for it at read time.',
   acceptanceCriteria:
     'Run `os validate` (or `os build`) on the stack: no `expression-invalid` error says a formula "reads its own '
     + 'value through the formulas it reads". Then read a record of each object that has formulas reading formulas '
-    + 'and confirm each of those formulas holds a value.',
+    + 'and confirm each of those formulas holds a value. An object already published with a cycle still loads, and '
+    + 'its cycle members read null with the cycle fault in the log; its next save is refused until the cycle is '
+    + 'broken.',
 };
