@@ -1,0 +1,30 @@
+{
+  "number": 33135,
+  "kind": "issue",
+  "title": "docs: ADR-0019's enforcement log still lists a hand-built packages[] body as not judged, after #33074 and #33122",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T16:43:35Z",
+  "updated_at": "2026-11-13T16:47:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33135",
+  "body": "domain:spec#2 · os-tesla · session_01L9qibvfX5bawZKtfa6u7j9\n\nFiling gate: ③ a follow-up two contract reviews surfaced (6848214183 ③ on PR #33074, 6858193093 ③ on PR #33122). Governed text, so neither PR edited it.\nBusiness reason: ADR-0019 is the page an author or agent reads to learn which single-app and namespace rules strict `defineStack` enforces on a multi-package stack. It now says a hand-built `packages[]` body is not judged, which has been false since #33074 (single-app, per body) and #33122 (namespace prefix, per body). A reader trusting it would skip validation they now get.\nReader who acts: whoever owns ADR text (governed surface; a Tier H docs PR).\n\n## 维护者速读\n\nADR-0019 的执行记录停在 #32586，仍写着手工拼的 `packages[]` 包体不受检查；#33074 和 #33122 合并后，严格 `defineStack` 已按包分别检查单应用和命名空间前缀。需要在 ADR 的 Status / 执行记录里补这两条。\n\n## Expected\n\nADR-0019's Status line and enforcement log name #33074 (the single-app rule judges a `packages[]` stack per body plus residual top-level apps) and #33122 (the namespace-prefix rule judges each body against its own namespace, residual top-level objects against the stack's), and drop the \"hand-built `packages[]` body is not judged\" sentence.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue is:open ADR-0019` checked at filing. Related: #32978, #33069, #32898.\n\n⛔ Not a claim. Grading is triage's."
+}

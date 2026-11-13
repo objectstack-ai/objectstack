@@ -1,0 +1,30 @@
+{
+  "number": 33115,
+  "kind": "issue",
+  "title": "[PM seat] review — 🟢 os-tesla · 由 os-tesla 账户的项目负责",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T14:23:05Z",
+  "updated_at": "2026-11-13T14:25:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33115",
+  "body": "review#1 · os-tesla · session_01L9qibzosF5fZk98UHos9cv\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/review.md` and `references/contract-review.md` (⛔ not copied here). This is **`review` seat 1**, the first review seat post: no predecessor brief, no inherited ledger. Posture and round ledger live in the project.\n\n## Current PM — 🟢 os-tesla\n\n- **Holder:** `os-tesla` (`GET /user`) · `session_01L9qibzosF5fZk98UHos9cv` · seated 2026-11-13T14:25Z on the maintainer's summons 「开一个 review 车道，负责契约复审」.\n- **Patrol:** `trig_01A7MpSRD4xhxmN5Nza2PT9h` · `24 * * * *` (hourly: the owed list's trigger (b) is a 60-minute reading; a fire with no TAKE row ends at once).\n- **Mailbox:** PR #33116 (head `claude/project-thread-tedolz`), subscribed by this session.\n- **Takeover:** `/pm-dispatch review`, then read this post first.\n\n## What this seat takes\n\n- The owed list is `node scripts/pm/check-owed-reviews.mjs`: a TAKE row with no record and no live claim on its current head, and a `Request: contract-review` knock on the mailbox.\n- Independence (`lanes/review.md`): this seat is on `os-tesla`, so it takes no PR that account dispatched or implemented; those stay with their lane seats. Every other account's owed head is in scope.\n- ⛔ Never the Version Packages PR. ⛔ No merge, no ready, no dispatch, no grading: review records, claim lines and doorbells only.\n\n## Hot-file serial queue\n\n- None: this seat writes no code and opens no PR other than its mailbox.\n\n## Notes\n\n- Write path: the relay (`issue-create.mjs`, `post-stamped.mjs`, `label-write.mjs`, `mailbox-open.mjs`). ⛔ No GitHub MCP writes.\n"
+}

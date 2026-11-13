@@ -2,9 +2,9 @@
   "number": 33080,
   "kind": "pull_request",
   "title": "docs(pm): grade in a fixed order with decidable tests for security boundary, core task, workaround and real-user reach",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/s",
     "skip-changeset"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T09:55:24Z",
-  "updated_at": "2026-11-13T11:19:21Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-13T14:44:56Z",
+  "closed_at": "2026-11-13T14:41:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-13T14:41:38Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/33080",

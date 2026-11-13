@@ -1,0 +1,30 @@
+{
+  "number": 33147,
+  "kind": "issue",
+  "title": "mcp: validate_expression answers ok at site flow_condition (and for a stored field's expression at site formula) where the publish gate refuses or warns",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T19:39:50Z",
+  "updated_at": "2026-11-13T19:45:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33147",
+  "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\nFiling gate: ① a named-site behaviour gap, class a, carried out of #32872 (PR #33134). It comes from the seat's contract review 6859189545, findings F2 and F6, and from the dev's round-2 report 6863007477 (`out_of_scope_findings`). PR #33134 fixes the `validation` and `formula` sites only and says so. ⛔ Not a claim; triage sets the lane and grade.\nreach: public door and wrong answer. MCP `validate_expression` (`/api/v1/mcp` `tools/call` and stdio) at `site: 'flow_condition'`, and at `site: 'formula'` for a stored, non-formula field's expression. Read at the PR #33134 head; not measured on a running deployment.\n\n## Business reason\n\nAn agent authoring a flow condition asks `validate_expression`, gets `ok: true`, and then the publish gate refuses or warns. Example: a record-triggered flow with the condition `days > 3`, where `days` is nullable. The agent learns about the refusal only at publish, which is the guess–refuse–retry loop #32872 removed for validations and formulas.\n\n## What is true after PR #33134\n\n- **flow_condition: the null-guard gate.** The gate's `checkFlowNullGuards` (error) judges a record-triggered flow's start, decision and edge conditions. The tool does not run it at `flow_condition`.\n- **flow_condition: the unprovisioned-anchor warning.** The gate's `warnUnprovisionedAnchors` (in `check`) warns on an object-bound flow predicate. The tool does not run it either.\n- **formula site: stored-field warnings.** A stored, non-formula field's expression authored through site `formula` gets the gate's `storedExpressionInputIssues` warnings from the gate and none from the tool (review F6).\n- **formula site: cycles.** The tool cannot give the #33108 formula-cycle verdict for the formula being authored, because it is not handed that field's own name. The classification pin in `authored-site-expression.test.ts` records this. Fixing it may need an optional `field` input.\n\n## Expected\n\n`validate_expression` at `flow_condition` refuses and warns verdict for verdict with the publish gate for the same flow context. It should be built the same way as the PR #33134 parity (shared lint entry, no copied rules). A stored field's expression at site `formula` gets the gate's warnings. Whether to add a `field` input for the cycle verdict is the implementer's to propose.\n\nDedupe: `validate_expression flow_condition gate parity null guard unprovisioned anchor` → #32872 (validation/formula, PR #33134), #32640 and #33100 (closed, other sites/classes); none open for flow_condition."
+}

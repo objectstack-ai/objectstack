@@ -1,0 +1,30 @@
+{
+  "number": 33138,
+  "kind": "issue",
+  "title": "analytics: a dataset whose include names a relationship field called `order` answers 500 DATABASE_ERROR (unquoted SQL alias)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T16:46:58Z",
+  "updated_at": "2026-11-13T17:46:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33138",
+  "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\nFiling gate: ① a product defect on a public entry, class a, carried out of #33107 (os-dev report 6859182798 on PR #33136). ⛔ Not a claim; triage sets the lane and grade.\nreach: `POST /api/v1/analytics/dataset/query` on a saved dataset whose `include` names a relationship field spelled `order` (dimension field `order`), measured by the #33107 dev with the integration fixture of PR #33136 (real ObjectQL + SQLite), at `origin/main` `7c36f524` and on head `99fa452b`.\n\n## Business reason\n\n`order` is a natural name for a relationship field in a sales app (an order line's order, a shipment's order). A dashboard over such a dataset fails with a 500 and a raw database message instead of rows, and the author is not told the name is the cause. Nothing at authoring refuses the name, so the first person to meet it is the dashboard viewer.\n\n## What happens\n\n- The query answers `500 DATABASE_ERROR`; the SQLite driver logs `near \"order\": syntax error`. The relationship's alias reaches the SQL unquoted.\n- The same fixture with the field spelled `cb_order` answers 200.\n- Other SQL reserved words (`group`, `select`, `user`, ...) are likely the same; not measured.\n\n## Expected\n\nA relationship field's name is quoted wherever it becomes a SQL identifier in the dataset/cube compile, on every SQL driver, so `order` behaves like any other name; or, if a name truly cannot be supported, it is refused at authoring with a message naming it. Never a 500.\n\nDedupe: `dataset include reserved word`, `relationship alias unquoted`, `near \"order\" syntax error` → none open (#28558 and #31881 closed, different dotted-path causes)."
+}

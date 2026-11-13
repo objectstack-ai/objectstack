@@ -1,0 +1,31 @@
+{
+  "number": 33127,
+  "kind": "issue",
+  "title": "metadata-protocol: after a restart, two stored rows of one name that each name a different holder leave only the last one loaded, for every package-slotted type (tool, webhook, …)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T15:54:00Z",
+  "updated_at": "2026-11-13T15:54:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33127",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ① a product defect with a named location, measured on `main`. It is filed on the ADR-0150 epic seat's ruling 5 (red-line read 6840825374): #32692 keeps its webhook-only scope, and this widening goes to a card of its own, as asked in 6838938411. The epic seat carried it to triage (6857956853), and PR #33124's body names it as carried.\n\n## What happens\n\nTwo packages hold one name of a package-slotted type, for example a `tool` that each ships. The environment has saved one stored row per holder, each row naming its own holder. After the server restarts, the boot hydration (`loadMetaFromDb`) keeps **only the last row loaded**. The other holder's stored customization is no longer served: that package runs its shipped item, with no error or warning. The row is still in the database.\n\nMeasured on `main` by the epic red-line read and by os-dev report 6857853868 (PR #33124, scratch merges with `a888c5c9ef` and `2c98485db`): two stored rows, each naming a holder, leave only the last loaded after hydration. This holds for `tool` as well as `webhook`, and by the same code for every `PACKAGE_SLOTTED_STORE_TYPES` type. Since #32741, a *package-less* row is no longer grafted onto a holder; that half is fixed. This card is the remaining case.\n\n## Why it matters\n\nWhoever customised the losing holder's item (an admin, or an agent through MCP: a tool's runtime create is open, so the row need not come from an older release) sees the customization silently revert after every restart. This is the \"silently wrong\" class #32997 grades as p1. It needs two installed packages holding the same name, both with a stored row.\n\n## Do\n\n- Key the hydration's artifact and slot lookup by `(package, name)` for every `PACKAGE_SLOTTED_STORE_TYPES` type, so each stored row lands in its own holder's slot (ADR-0150 D3/D4).\n- Add a pin over at least `tool` and `webhook`: two holders, one stored row each, both load orders, then a restart. Each exact address serves its own row, and the bare read refuses 409 naming both.\n- Coordinate with #32692 (webhook, in flight). If its fix is the same lookup, land it there once and use this card for the remaining types and the pin.\n\n## Reader\n\n`domain:server`. ADR-0150's red lines apply: resolution is never loosened, ambiguity is reported and never guessed, and the change is independently releasable.\n\n## Dedupe\n\n`boot hydration two stored rows holder`: only #32692 (webhook scope, by ruling). `PACKAGE_SLOTTED_STORE_TYPES hydration`: 0 open. `loadMetaFromDb last loaded`: 0 open."
+}

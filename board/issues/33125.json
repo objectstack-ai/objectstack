@@ -1,0 +1,30 @@
+{
+  "number": 33125,
+  "kind": "issue",
+  "title": "storage: a committed upload that no record ever names is never reclaimed (new path: MCP pre-record upload links)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T15:53:03Z",
+  "updated_at": "2026-11-13T16:45:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33125",
+  "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\nFiling gate: ① a named-site behaviour gap, class b, carried out of #32686 (PR #33123's Acceptance notes and the seat's contract review 6857928485, finding F2). ⛔ Not a claim; triage sets the lane and grade.\nreach: `PUT /api/v1/storage/upload-links/:token` for a link minted by MCP `create_upload_link` with no `recordId` (PR #33123), and the console's upload-then-abandon path, measured by reading the lifecycle at `origin/main` `2c98485d`; not measured on a running deployment.\n\n## Business reason\n\nWith #32686 an agent can mint a link for a record that does not exist yet; the user uploads, and the agent is meant to create the record. When the agent or the user stops after the upload, the file stays in storage forever and nobody is told. The same is already true for a console upload whose form is never saved. Storage grows with every abandoned upload, and an operator has only the read-only `os storage orphans` inventory to see it.\n\n## What is true on `main`\n\n- `sys_file` lifecycle reaps only rows with `deleted_at` set (TTL 30d) and `status: 'pending'` rows (retention 7d). A `committed` row that no `ref_*` column or attachment row names satisfies neither filter (`packages/services/service-storage/src/stranded-orphan-inventory.ts` header).\n- `verify-file-references` reports it only as the `unreferenced_file` advisory.\n- A link that is minted and never used stays `pending` and is reaped; only an uploaded, never-claimed file is immortal.\n- #10950 (closed not planned, ruling 「10950 不考虑存量」) declined reconciling the LEGACY stranded stock and kept the forward fix; this card is the forward source the ruling did not cover: new files stranded from today on.\n- ADR-0057 §3.3 forbids a bespoke sweeper; the reclaim has to ride the existing tombstone → TTL → reap path.\n\n## Expected\n\nA committed file that no record names within a bounded window is tombstoned (`deleted_at`), so the existing TTL → reap → reclaim path removes it. The window must be longer than the pre-record claim window (1 hour in PR #33123), and a file a record names inside it is never touched.\n\nDedupe: `committed unclaimed sys_file reclaim`, `unreferenced_file advisory`, `abandoned field upload`, `stranded orphan inventory` → #10950 (legacy stock, ruled not wanted), #22466 / #26533 (closed, refused-attach and pending-reap cases), none open for the forward case."
+}

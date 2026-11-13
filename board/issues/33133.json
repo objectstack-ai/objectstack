@@ -1,0 +1,31 @@
+{
+  "number": 33133,
+  "kind": "issue",
+  "title": "objectstack-ai/gallery: the Gallery check runs the published @objectstack/scenarios@18.4.0 (npx) instead of building objectstack from source",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T16:27:42Z",
+  "updated_at": "2026-11-13T16:46:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33133",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① the follow-up owed by landed work. objectstack-ai/objectstack#31122's landing note 6755616258 item 2, carried into its close: \"a follow-up card once a release publishes the package\". `reach:` measured below. Epic context: objectstack-ai/cloud#3600; gallery umbrella #30349.\n\n## Why\n\nobjectstack-ai/gallery's required check (`.github/workflows/gallery-check.yml`, `Gallery check`) still builds the checker from objectstack **source**. It checks out objectstack at the pinned SHA `c2bb879f`, installs and builds. Its own header says that step is temporary:\n\n> Once a release carries it, replace the checkout, install and build steps with one step, `npx --yes @objectstack/scenarios@VERSION export-gallery --check .`, pinned to that exact version, and drop OBJECTSTACK_SHA.\n\n18.4.0 now carries it. Measured 2026-11-13:\n- npm `@objectstack/scenarios` `latest` = 18.4.0;\n- its `bin.js` routes `export-gallery --check DIR` to `export-check.js`;\n- `npx --yes @objectstack/scenarios@18.4.0 export-gallery --check <fresh clone of objectstack-ai/gallery>` printed `gallery check: clean` with exit 0.\n\nThe source build makes every gallery PR's required check slow. It also ties the check to an objectstack commit rather than to the release the gallery's apps are built on.\n\n## Ask (lands in objectstack-ai/gallery)\n\n1. Replace the workflow's objectstack checkout, install and build steps with one step: `npx --yes @objectstack/scenarios@18.4.0 export-gallery --check .`, pinned to the exact version, never `latest`. Drop `OBJECTSTACK_SHA`. Keep the job name `Gallery check`: ruleset 27091720 requires that context. Keep `permissions: contents: read`.\n2. Update the workflow header to name the version-pin rule: the pin moves when a release changes the checker or the index schema. Name the step that bumps it (the gallery refresh PR, or a separate PR).\n3. Proof: the PR's own `Gallery check` is green. Also give one negative reading, for example a scratch tree with a stray `.env` or an unlisted `apps/x/`, refused with the same lines as the source-built checker.\n\n## Reader and dedupe\n\n- Reader: the `domain:devx` lane seat (the seat that landed objectstack-ai/gallery#1), from `pm:queue`. Merging in the gallery is a PR through its ruleset.\n- Dedupe: `\"gallery check\" npx` issues created since 2026-11-13, 0 hits. #31122 is closed and named this card as its follow-up.\n- Priority p3: QA tooling, no user-visible cost, the current check works."
+}

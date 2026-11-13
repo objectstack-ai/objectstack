@@ -1,0 +1,31 @@
+{
+  "number": 33132,
+  "kind": "issue",
+  "title": "Security baseline: a host can decline one platform baseline contribution (e.g. storage's sys_attachment create) instead of wrapping contributePlatformBaselineSet",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T16:19:12Z",
+  "updated_at": "2026-11-13T16:46:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33132",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ② a contract seam, surfaced by the 18.4 pin round in objectstack-ai/cloud PR #4415 (cloud#4384; dev report on cloud#4384 comment 6858526160). The consumer is cloud's control plane.\n\n## 维护者速读\n\n框架 18.4 把「上传附件」加进了每个成员的默认权限。cloud 的控制面是跨租户的，一直刻意不让组织管理员在控制面上创建附件。框架没有提供「宿主拒绝某一项默认权限」的开关，cloud 只好包装框架内部的一个函数来挡住它。框架以后改这个函数名，这层保护就会失效。这张卡请框架给宿主一个正式的开关。\n\n## What happens\n\nobjectstack `fd6374713a` (#32932) puts storage's attachment set on every member's platform baseline. On cloud's control plane, the org-admin subject could then create `sys_attachment` rows on an object the control plane does not tenant-scope. Cloud now wraps the security service's `contributePlatformBaselineSet` seam, on the control plane only, and admits a create-bearing grant on its read-only objects as read only. The framework offers no host option for this. If the seam is renamed, the wrapper warns and stops withholding; cloud's tenant-wall test then goes red.\n\n## Expected\n\nA declared host option, for example a posture or config entry on the security service, by which a host declines, or downgrades to read, a named platform-baseline contribution for named objects. It must be evaluated where the baseline is assembled.\n\n## Acceptance\n\nA test host declines the attachment create through the option: the baseline grants read only, and a create is refused. Without the option, behaviour is unchanged.\n\nDedupe: `contributePlatformBaselineSet host opt-out`, `decline platform baseline`: no open issue."
+}

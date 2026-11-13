@@ -1,7 +1,7 @@
 {
   "number": 32231,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 7 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 7 — 🟢 os-tesla · 由 os-tesla 账户的项目负责 · p1 only",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,16 +14,18 @@
     "domain:server",
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T13:40:26Z",
-  "updated_at": "2026-11-13T06:36:19Z",
+  "updated_at": "2026-11-13T18:56:45Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32231",
-  "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 7**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677, seat 6 is #29908. Posture and ledger live in the project; this stub keeps only what other accounts need to read.\n\n<sub>Refreshed 2026-11-13T06:35Z at clock-out.</sub>\n\n## Current PM\n\n⏳ vacant. `os-sales` · `session_01L6bhgVSjQBHNkZd6Eqx2XX` clocked out at 2026-11-13T06:35Z on the maintainer's word that the seat stops once its card lands (2026-11-13T04:01Z). The clock-out brief is the comment beside this edit.\n\n- **Patrol:** none (`trig_01TURdD3iHpGrTEje5zXnksp` deleted at clock-out).\n- **Mailbox:** none (PR #32726 closed at clock-out).\n- **In flight:** none. The last card, #32812, landed as PR #33006 (`64c426ab`).\n- **Paused, back in `pm:queue` with `Resume-from:` on the card:** #32354 (draft PR #32811) and #32607. A sibling seat claims them from the card.\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Security:** findings go only to `security#1` by private advisory, never on a public card.\n\n\n"
+  "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 7**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677, seat 6 is #29908, seat 8 is #32831. Posture and ledger live in the project; this stub keeps only what other accounts need to read.\n\n<sub>Refreshed 2026-11-13T18:56Z (scope: p1, blocking a p1, or MCP p2).</sub>\n\n## Current PM — 🟢 os-tesla\n\n- **Holder:** `os-tesla` · `session_01L9qibzuZJBQY4wUQFJbkfx` (a Claude Code project thread, \"server 座位 · 车道调度\"), seated on the maintainer's 「还一个 server 车道，只派 p1 卡」. 由 os-tesla 账户的项目负责. Seat-taken audit 6855600145. Previous PM: `os-sales`, clock-out brief 6846075019.\n- **Mailbox:** PR #33114. **Patrol:** `trig_015FC9BT2NVyrbvQEcFXLoXa` · `20 * * * *` (self-bound). Hourly while a card is in flight; `20 */5 * * *` fallback when idle.\n- **Pointer:** lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#7` + `head:claude/` PRs.\n\n## Split\n\n- Seat 7 takes only unclaimed `pm:queue` `domain:server` cards labelled `priority:p1`, or cards of any grade that block an open p1 (a p1 card names them on a line-leading `Blocked-by:`), on the maintainer's 「server 座位只处理 p1 卡或是阻塞 p1 的卡」 (2026-11-13T15:36:31Z), plus MCP-related `priority:p2` cards on 「mcp 相关 p2 任务也可以派发处理」 (2026-11-13T15:50:52Z) (⛔ no other p2/p3, no other lanes, no `pm:epic` subtree), under the claim race with seats 1–6 and 8: re-read assignee and newest comments before every claim; the earlier claim wins. Up to 5 card threads at once.\n\n## In flight\n\n- #32872 (claim 6855829217, PR #33134 in rework), #31699 (maintainer-ordered takeover 6857670747), #32783 (claim 6860179214, PR #33142 in queue), #33067 (claim 6860809053, PR #33144), #32944 (thread opening): 5 of 5 card threads. Landed today: #32686 (PR #33123), #33107 (PR #33136), #33028 (PR #33141).\n\n## Hot-file serial queue\n\n- None held. `packages/mcp/src/mcp-http-tools.ts` is shared by #32872, #32783, #33067 (JSDoc) and #31699 here and #32442 (seat 5): written in parallel, landed serially. ⛔ Re-derive from the live `Claim:` comments of every `domain:server` seat and each open PR's file list before any dispatch.\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Security:** findings go only to the security seat by private advisory, never on a public card.\n- **Landing:** pm-dispatch-reviewed PRs are landed by the seat; Tier H and >3000-line PRs wait for `os-zhuang`.\n"
 }

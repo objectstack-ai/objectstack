@@ -2,7 +2,7 @@
   "number": 33078,
   "kind": "pull_request",
   "title": "docs(skills): name the ctx.email.send and ctx.activity.append body doors in the data-hooks reference",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/s",
     "tooling"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T09:34:54Z",
-  "updated_at": "2026-11-13T10:14:18Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-13T14:43:31Z",
+  "closed_at": "2026-11-13T14:41:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-13T14:41:38Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/33078",
