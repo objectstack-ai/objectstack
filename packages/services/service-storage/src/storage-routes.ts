@@ -2359,10 +2359,19 @@ function isUnusableUploadLink(err: unknown): boolean {
  * so a fault's own text never reaches the link's holder — every other throw
  * is the route's `500`.
  *
- * [#32734] The declared status is read over both spellings producers use
- * (`resolveThrownHttpError`'s `declaredStatus`: `status`, then `statusCode`):
- * a lifecycle hook's refusal declares `statusCode` — the record lock's
- * `409 RECORD_LOCKED` — and reading `status` alone answered it `500`.
+ * [#32734] The declared status is `resolveThrownHttpError`'s
+ * `declaredStatus`, which reads three limbs in order: `status`; then
+ * `statusCode`, the spelling a lifecycle hook's refusal declares (the record
+ * lock's `409 RECORD_LOCKED`, which reading `status` alone answered `500`);
+ * then the validation shape (`code: 'VALIDATION_FAILED'` or a
+ * `ValidationError`), which declares `400`. A throw carrying no string `code`
+ * is not relayed, whatever it declares.
+ *
+ * [#32783] The code is the resolver's closed `code` (ADR-0112, the #9106
+ * ruling: `error.code` is a closed vocabulary at every door), as
+ * {@link relayAttachFailure} answers it: a registered spelling verbatim, and
+ * an unregistered one as the code its status derives, with the producer's
+ * spelling beside it as `declaredCode` ({@link demotedDeclaredCode}).
  *
  * [#32712] The page shows the refusal as `userMessage`, composed in the
  * request's language (`copy`): the producer's own user-facing text when it
@@ -2380,9 +2389,12 @@ function relayUploadLinkRefusal(res: IHttpResponse, err: unknown, copy: UploadLi
   }
   const e = err as { code?: unknown; message?: unknown } | null;
   if (!e || typeof e.code !== 'string') return false;
-  const status = resolveThrownHttpError(err).declaredStatus;
+  const thrown = resolveThrownHttpError(err);
+  const status = thrown.declaredStatus;
   if (status === undefined) return false;
-  const relayable = (status >= 400 && status < 500) || (status === 503 && e.code === 'SERVICE_UNAVAILABLE');
+  // The outage arm names its code as spelled: a 503 whose spelling is not
+  // `SERVICE_UNAVAILABLE` stays a fault, though its status derives that code.
+  const relayable = (status >= 400 && status < 500) || (status === 503 && thrown.declaredCode === 'SERVICE_UNAVAILABLE');
   if (!relayable) return false;
   // [#32712] The producer's own code prefix (`RECORD_LOCKED: …`) is off the
   // text, as the `/api/v1/data` door strips it: `code` carries the token.
@@ -2390,8 +2402,13 @@ function relayUploadLinkRefusal(res: IHttpResponse, err: unknown, copy: UploadLi
   const message = stripped.length > 0 ? stripped : 'Upload refused';
   // [#32712] What the page shows: a text the producer marked for the user,
   // verbatim; else the page's own sentence for the code, in its language.
-  const userMessage = declaredUserMessage(err) ?? uploadLinkRefusalText(copy, status, e.code, message);
-  sendError(res, status, e.code as ErrorCode, message, { userMessage });
+  const userMessage = declaredUserMessage(err) ?? uploadLinkRefusalText(copy, status, thrown.code, message);
+  // [#32783] The closed code, and an unregistered spelling beside it.
+  const declaredCode = demotedDeclaredCode(thrown);
+  sendError(res, status, thrown.code, message, {
+    userMessage,
+    ...(declaredCode !== undefined ? { declaredCode } : {}),
+  });
   return true;
 }
 
