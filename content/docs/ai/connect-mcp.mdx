@@ -330,7 +330,14 @@ usable on an app with hundreds of objects. Which objects and actions that spine
 can reach is the **default exposure policy (v1)**:
 
 - **Objects are exposed automatically** — except `sys_*` system objects, which
-  are blocked fail-closed.
+  are blocked fail-closed. A system object whose author declared
+  `enable.aiReadable: true` is open to the read tools only (`list_objects`,
+  `describe_object`, `query_records`, `get_record`, `aggregate_records`), read
+  as you under every gate a read already runs (your permissions, row-level
+  security, the object's own read rules, field masking); no write tool opens
+  it, and the stored-metadata tables stay refused. `sys_approval_request`
+  declares it, so an agent can list the approvals waiting on you where your
+  permissions let you read that object.
 - **Actions require the author's opt-in**: `ai: { exposed: true }` plus an
   `ai.description` of at least 40 characters, and the action must be callable
   without a UI. In the open framework that means three types — `script`
