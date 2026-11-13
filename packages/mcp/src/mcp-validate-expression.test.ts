@@ -452,6 +452,7 @@ describe("validate_expression answers the gate's own passes at validation and fo
         meta: { type: 'lookup', label: 'Meta', reference: 'sys_metadata' },
         header: { type: 'master_detail', label: 'Header', reference: 'gp_bal' },
         approver: { type: 'lookup', label: 'Approver', reference: 'sys_user' },
+        gated: { type: 'lookup', label: 'Gated', reference: 'gp_gated' },
       },
       // The object's own rule is the gate's business at its own door, never this call's.
       validations: [{ name: 'own', type: 'script', condition: 'record.days > 3', message: 'm' }],
@@ -460,6 +461,13 @@ describe("validate_expression answers the gate's own passes at validation and fo
     // A system object the bridge serves, which the tool's object-name guard
     // does not expose unless the server sets `allowSystemObjects`.
     sys_user: { name: 'sys_user', fields: { email: { type: 'text', label: 'Email', required: true } } },
+    // An object the data API does not serve (`enable.apiEnabled: false`):
+    // `describe_object` still describes it, as every MCP transport does.
+    gp_gated: {
+      name: 'gp_gated',
+      enable: { apiEnabled: false },
+      fields: { code: { type: 'text', label: 'Code', required: true } },
+    },
     gp_ext: {
       name: 'gp_ext',
       external: { remoteName: 'customers' },
@@ -469,8 +477,18 @@ describe("validate_expression answers the gate's own passes at validation and fo
   /** As the registry serves it: the injected system columns are declared fields; `describeObject` projects them. */
   const served = (name: string) => (OBJECTS[name] ? applyInjectedSystemColumns(OBJECTS[name]) : null);
   const reads: string[] = [];
+  /** Every record read or write the tool asks the bridge for: none, on every call below. */
+  const recordCalls: string[] = [];
   const gateBridge = (withDefinitions = true): McpDataBridge => ({
     ...makeBridge(),
+    async query(object: string) {
+      recordCalls.push(`query ${object}`);
+      return { records: [] };
+    },
+    async get(object: string) {
+      recordCalls.push(`get ${object}`);
+      return null;
+    },
     async listObjects() {
       return Object.keys(OBJECTS).map((name) => ({ name }));
     },
@@ -510,6 +528,7 @@ describe("validate_expression answers the gate's own passes at validation and fo
   beforeEach(() => {
     runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
     reads.length = 0;
+    recordCalls.length = 0;
   });
 
   // [member, site, object, expression, severity, the subject the finding names]
@@ -579,6 +598,26 @@ describe("validate_expression answers the gate's own passes at validation and fo
     expect(reads).toEqual(['gp_req']);
     expect(fenced).toEqual(await validate(runtime, gateBridge(false), args));
     expect(verdicts(fenced).some(([, message]) => message!.includes('nope'))).toBe(false);
+  });
+
+  // [#22661] The hop target's DEFINITION is read, never a record of it: the
+  // target's declared fields, which `describe_object` serves for the same
+  // object whatever its `enable` block says. So a target the data API does
+  // not serve is judged on the schema the caller can already describe, and
+  // no row of it is read or served.
+  it('judges a hop target the data API does not serve on its described schema, reading no record', async () => {
+    const args = { objectName: 'gp_req', expression: 'record.gated.nope > 1', site: 'validation' };
+    expect(gateOn('validation', 'gp_req', args.expression).map(([level]) => level)).toEqual(['error']);
+    const r = await validate(runtime, gateBridge(), args);
+    expect(r.ok).toBe(false);
+    expect(verdicts(r).some(([, message]) => message!.includes('nope'))).toBe(true);
+    expect(reads).toEqual(['gp_req', 'gp_gated']);
+    // …a schema `describe_object` serves to the same caller…
+    const { json } = await call(runtime, toolsCall(2, 'describe_object', { objectName: 'gp_gated' }), gateBridge());
+    const described = JSON.parse((json as { result: { content: Array<{ text: string }> } }).result.content[0]!.text);
+    expect(described.fields.map((f: { name: string }) => f.name)).toContain('code');
+    // …and nothing of any record, of the target or of the subject.
+    expect(recordCalls).toEqual([]);
   });
 
   it('does not judge a flow condition or a template: no definition is read there', async () => {
