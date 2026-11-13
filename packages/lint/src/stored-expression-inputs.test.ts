@@ -21,7 +21,7 @@
 import { describe, expect, it } from 'vitest';
 import { ObjectStackSchema } from '@objectstack/spec';
 
-import { validateStackExpressions } from './validate-expressions.js';
+import { runStackExpressionPasses, validateStackExpressions } from './validate-expressions.js';
 import { STORED_EXPRESSION_CROSS_RECORD_INPUT, STORED_EXPRESSION_VOLATILE_INPUT } from './stored-expression-inputs.js';
 
 const MANIFEST = { id: 'com.example.stored-inputs', name: 'stored_inputs', version: '1.0.0', type: 'app' } as const;
@@ -179,5 +179,76 @@ describe('a stored expression reading a volatile input is warned (#32554)', () =
   it('does not judge a `formula` field reading the clock or the user', () => {
     expect(neither({ type: 'formula', expression: 'daysBetween(record.starts_on, today())' })).toEqual([]);
     expect(neither({ type: 'formula', expression: 'current_user.id' })).toEqual([]);
+  });
+});
+
+/**
+ * [#32875] A computed field an `objectExtensions` entry adds is planned and
+ * stored by the engine exactly as a declared one, so the field-formula pass
+ * judges its `expression` too, against the extended object as served, and
+ * locates the finding at the entry. A field the object declares is judged
+ * exactly as before.
+ */
+describe('a computed field an object extension adds is judged as a declared one is (#32875)', () => {
+  /** The leave request with no computed field of its own. */
+  const plainLeave = () => {
+    const { probe: _probe, ...fields } = leave({ type: 'number' }).fields;
+    return { ...leave({ type: 'number' }), fields };
+  };
+  const EXT_WHERE = (field: string, target = 'hr_leave_request') =>
+    `object '${target}' · objectExtensions[0] · field '${field}' expression`;
+  const extending = (fields: Record<string, unknown>, extend = 'hr_leave_request') =>
+    specValid({ objects: [employee, plainLeave()], objectExtensions: [{ extend, fields }] });
+
+  it('⭐ the card\'s reproduction: `hours` added through an extension reads `record.employee.daily_hours` → one warning, at the entry', () => {
+    const expression = 'record.days * record.employee.daily_hours';
+    const found = validateStackExpressions(extending({ hours: { type: 'number', label: 'Hours', expression } }));
+    const warned = found.filter((i) => i.rule === STORED_EXPRESSION_CROSS_RECORD_INPUT);
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toMatchObject({ severity: 'warning', where: EXT_WHERE('hours'), source: expression });
+    expect(found.filter((i) => (i.severity ?? 'error') === 'error')).toEqual([]);
+  });
+
+  it('⭐ a field-formula error on an extension field is refused, judged against the object as served', () => {
+    // A field neither the object nor any extension declares is unknown…
+    const unknown = validateStackExpressions(extending({ score: { type: 'formula', label: 'Score', expression: 'record.dais * 2' } }))
+      .filter((i) => i.where === EXT_WHERE('score'));
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0]).toMatchObject({ severity: 'error', source: 'record.dais * 2' });
+    expect(unknown[0]!.message).toContain('dais');
+    // …while a field the same extension adds is served on the object, so it is known.
+    const served = validateStackExpressions(extending({
+      bonus_days: { type: 'number', label: 'Bonus Days' },
+      total_days: { type: 'formula', label: 'Total Days', expression: 'record.days + record.bonus_days' },
+    }));
+    expect(served).toEqual([]);
+  });
+
+  it('judges an extension of an object the stack does not declare on what does not depend on its fields', () => {
+    // An unregistered function is refused whatever the target declares…
+    const fn = validateStackExpressions(extending({ score: { type: 'formula', label: 'Score', expression: 'sqrt(record.amount)' } }, 'crm_account'));
+    expect(fn.filter((i) => i.where === EXT_WHERE('score', 'crm_account') && i.severity === 'error')).toHaveLength(1);
+    // …and a field read is not refused as unknown: the target's fields are not in the stack.
+    const read = validateStackExpressions(extending({ score: { type: 'formula', label: 'Score', expression: 'record.amount * 2' } }, 'crm_account'));
+    expect(read).toEqual([]);
+  });
+
+  it('CONTROL — a declared computed field is judged exactly as before, and not a second time beside an extension', () => {
+    const expression = 'record.days * record.employee.daily_hours';
+    const declaredOnly = specValid({ objects: [employee, leave({ type: 'number', expression })] });
+    const withExtension = specValid({
+      objects: [employee, leave({ type: 'number', expression })],
+      objectExtensions: [{ extend: 'hr_leave_request', fields: { note: { type: 'text', label: 'Note' } } }],
+    });
+    const before = validateStackExpressions(declaredOnly);
+    expect(before.filter((i) => i.rule === STORED_EXPRESSION_CROSS_RECORD_INPUT).map((i) => i.where)).toEqual([WHERE]);
+    // An extension that adds no computed field adds no finding, and moves none.
+    expect(validateStackExpressions(withExtension)).toEqual(before);
+  });
+
+  it('the object save door judges no extension field: an extension is not the written object\'s body', () => {
+    const stack = extending({ hours: { type: 'number', label: 'Hours', expression: 'record.days * record.employee.daily_hours' } });
+    expect(runStackExpressionPasses(stack, { runtimeWriteType: 'object' })
+      .filter((i) => i.where.includes('objectExtensions'))).toEqual([]);
   });
 });
