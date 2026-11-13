@@ -2470,8 +2470,9 @@ function isRecognizedDropReason(reason: unknown): reason is DroppedFieldsEvent['
  * Exported with {@link asDroppedFieldsNotice} (objectstack#33009): a flow
  * run's answer carries the same `droppedFields` wire (`AutomationResult`,
  * objectstack#32861) but reaches the console outside this adapter, so its
- * reader (`app-shell`'s `utils/flowDroppedFields`) parses it with these two —
- * one parser for every `droppedFields` the console reads, never a second copy.
+ * reader (`app-shell`'s `announceFlowDroppedFields` in `utils/flowLaunch`)
+ * parses it with these two — one parser for every `droppedFields` the
+ * console reads, never a second copy.
  */
 export function isWireDroppedFieldsEntry(e: unknown): e is WireDroppedFieldsEntry {
   return (

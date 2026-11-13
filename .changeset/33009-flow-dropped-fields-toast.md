@@ -1,5 +1,5 @@
 ---
-'@object-ui/data-objectstack': minor
+'@object-ui/data-objectstack': patch
 '@object-ui/app-shell': patch
 ---
 
