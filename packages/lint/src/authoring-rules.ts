@@ -821,8 +821,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // shipped corpus at `6021b5e837`: 0 findings across examples/**,
     // platform-objects and plugin-approvals, against one for a planted unbound
     // hole; #25709 re-measured 0 sentences of the holeless `${…}` shape there.
+    //
+    // [#33072] `object_extension` joins, for ONE pass: the field-formula pass
+    // over each field the written extension adds — the extension walk #32875
+    // gave `os build` / `os validate`, which refuses a computed field there
+    // that this door published with a 200 (Studio's add-field on a `.custom`
+    // pair and the `/meta` doors write the item). On an extension write
+    // `runStackExpressionPasses` runs that walk alone, by construction, over
+    // the written entry (the sole member of `objectExtensions`) against the
+    // door's live objects as served, so a refusal carries the build's rule id
+    // and location (`object 'TARGET' · objectExtensions[0] · field 'F'
+    // expression`). MEASURED first: 0 first-party `objectExtensions` entries
+    // carry a computed field (examples/**, packages/**, HotCRM), so the
+    // crossing refuses nothing the repository ships.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page'],
+    runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page', 'object_extension'],
     run: (stack, ctx) =>
       runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
         severity: i.severity ?? 'error',

@@ -353,6 +353,48 @@ describe('[#28574] refused at the door, leaving no row', () => {
     }, 60_000);
 });
 
+describe('[#33072] the publish door judges an extension field\'s formula as `os build` does', () => {
+    /** Studio's add-field body for a computed field on the account. */
+    const scoreBody = (expression: string) => ({
+        extend: TARGET,
+        fields: { score__c: { type: 'formula', label: 'Score', expression } },
+    });
+    const WHERE = "object 'crm_account' · objectExtensions[0] · field 'score__c' expression";
+
+    it('⭐ LIT — a formula calling an unregistered function is refused with the build\'s rule id and location; the field is not served', async () => {
+        const rig = await boot();
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: scoreBody('sqrt(record.name)'), mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+
+        expect(err, 'the publish was admitted').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
+        expect(issue, JSON.stringify(err.issues)).toBeDefined();
+        expect({ where: issue.where, path: issue.path }).toEqual({ where: WHERE, path: WHERE });
+        expect((await rig.fieldsOn()).registry).not.toContain('score__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
+    }, 60_000);
+
+    it('⭐ LIT — a formula reading a field the account does not serve is refused, judged against the extended object', async () => {
+        const rig = await boot();
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: scoreBody("record.nmae + '!'"), mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
+        expect(issue?.where, JSON.stringify(err.issues)).toBe(WHERE);
+        expect(issue.message).toContain('nmae');
+    }, 60_000);
+
+    it('⭐ CONTROL — a valid formula over the account\'s own field publishes and is served', async () => {
+        const rig = await boot();
+        await rig.saveAndPublish(PAIR, scoreBody("record.name + '!'"));
+
+        expect((await rig.fieldsOn()).registry).toContain('score__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+    }, 60_000);
+});
+
 describe('[ADR-0146 D10] a module\'s extension that re-declares the base\'s field beyond its display properties', () => {
     /** A writable module package that depends on the base: the account is inside its closure. */
     const MODULE = 'com.acme.module';

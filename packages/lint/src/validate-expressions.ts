@@ -2261,6 +2261,15 @@ export interface StackExpressionOptions {
    * write. None of them is the object's own body, the object write's snapshot
    * does not carry them, and each is judged at its own type's door; the claim
    * holds by construction rather than by the snapshot's shape.
+   *
+   * [#33072] On an `object_extension` write exactly ONE pass judges: the
+   * field-formula pass over each field the written entry adds (#32875's
+   * extension walk, `judgeFieldFormula`), against the extended object as
+   * served — the door's live objects with the entry folded in by
+   * `objectsAsServed`, the build's own fold — and located at the entry, as the
+   * build locates it. The object walk reads an empty list (the carried
+   * objects are the universe the field resolves in, not the subject) and so
+   * does every other pass; the function returns after the extension walk.
    */
   runtimeWriteType?: string;
 }
@@ -2299,6 +2308,13 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // an empty list under it, so the claim holds by construction rather than by
   // the shape of the snapshot the gate happens to build today.
   const objectWrite = options.runtimeWriteType === 'object';
+  // [#33072] On an `object_extension` write exactly ONE pass judges: the
+  // extension-field walk below (#32875), over the written entry, against the
+  // extended object as served. Every other loop reads an empty list under it
+  // (the object walk and the flows included), and the function returns right
+  // after that walk, so the claim holds by construction. See
+  // {@link StackExpressionOptions.runtimeWriteType}.
+  const extensionWrite = options.runtimeWriteType === 'object_extension';
   // [#24798] On a `view` write exactly ONE pass judges — the bulk `confirmText`
   // pass over the written view's own list containers ({@link bulkConfirmTextIssues});
   // every other pass reads a collection a view write does not carry, so it
@@ -2803,7 +2819,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const runtimeGateWrite = options.runtimeWriteType !== undefined;
   const flowEntrances: ReadonlyMap<string, FlowCelEntrance> =
     objectWrite || runtimeGateWrite ? new Map() : flowCelEntrances(stack, fieldIndex);
-  for (const flow of objectWrite ? [] : recordsOf(stack.flows)) {
+  for (const flow of objectWrite || extensionWrite ? [] : recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
     // [#26858] The flow's index in the authored list, for a finding's key path
     // (`recordsOf` hands an array's own members back). A map-form `flows` has
@@ -3503,7 +3519,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // [#32529] The object's position in `objects`, which is its position in
   // `typedObjects` too (the served body the stored-expression member reads).
   let objectPosition = -1;
-  for (const obj of objects) {
+  // [#33072] Fenced on an extension write: the objects the door carries are
+  // the universe the extension field is judged against, not its subject.
+  for (const obj of extensionWrite ? [] : objects) {
     objectPosition += 1;
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
     // [#27643] The object's index in the authored list, for a validation-rule
@@ -3974,6 +3992,12 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   //
   // Fenced on an object write: an extension is not the written object's
   // body, and an object write's snapshot carries none.
+  //
+  // [#33072] The `object_extension` publish door runs this walk and nothing
+  // else: its snapshot carries the written entry as the sole member of
+  // `objectExtensions` and the door's live objects as `objects`, so the field
+  // is judged against its target as served and located where the build
+  // locates it (`objectExtensions[0]` for a one-entry stack).
   for (const [target, entries] of objectWrite ? [] : objectExtensionsByTarget(stack)) {
     // The target's position in `objects`, which is its position in
     // `typedObjects` too (see `objectPosition` above); -1 when undeclared.
@@ -4014,6 +4038,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       }
     }
   }
+
+  // [#33072] An extension write's one pass ends here.
+  if (extensionWrite) return issues;
 
   // ── Action `visible` / `disabled` / `pressed` predicates ────────────
   // Record-scoped, same as validation rules: a record-header / row action's
