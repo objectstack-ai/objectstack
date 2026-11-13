@@ -54,6 +54,8 @@
 
 import { platformLocaleTagOf, type PlatformLocaleTag } from '@objectstack/spec/system';
 import { SECURITY_POSTURE_USER_TEXT } from './validate-security-posture.user-text.js';
+import { WIDGET_BINDINGS_USER_TEXT } from './validate-widget-bindings.user-text.js';
+import { CHART_BINDINGS_USER_TEXT } from './validate-chart-bindings.user-text.js';
 
 /**
  * The names a finding's user sentence interpolates — object, field and
@@ -153,7 +155,11 @@ export function mergeUserTextCatalogs(...catalogs: readonly UserTextCatalog[]): 
  * Every rule's user sentences, merged from the producers' own catalogs. A
  * producer that starts authoring user sentences adds its catalog here.
  */
-export const FINDING_USER_TEXT_CATALOG: UserTextCatalog = mergeUserTextCatalogs(SECURITY_POSTURE_USER_TEXT);
+export const FINDING_USER_TEXT_CATALOG: UserTextCatalog = mergeUserTextCatalogs(
+  SECURITY_POSTURE_USER_TEXT,
+  WIDGET_BINDINGS_USER_TEXT,
+  CHART_BINDINGS_USER_TEXT,
+);
 
 /**
  * A finding's user-facing sentence in the first of `locales` its rule has a
