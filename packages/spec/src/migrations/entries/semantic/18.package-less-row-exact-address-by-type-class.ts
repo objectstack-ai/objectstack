@@ -22,9 +22,16 @@ export const entry: SemanticMigration = {
     + 'assignment_rule and the like): any package-less row of a name a package ships. Whether the change moves to a '
     + 'declared override turns on the type: only flow, action, page, app, dataset, doc, book and mapping have one',
   replacement:
-    'Delete the package-less row FIRST (DELETE /api/v1/meta/TYPE/NAME naming no package; ?state=draft for a '
-    + 'draft), then save the change where it belongs: a package-less delete addresses the one package the name\'s '
-    + 'rows are bound to, so run after the save it removes the change just saved and leaves the package-less row. '
+    'First read and keep the package-less row\'s stored body. No metadata read serves it, but its sys_metadata '
+    + 'record does: GET /api/v1/data/sys_metadata filtered by type, name and state with package_id empty, the body '
+    + 'being its metadata field. The delete below hard-deletes the row and a draft leaves no history copy, so the '
+    + 'kept body is the only copy a refused save can be retried from. Then check the same list for a row of the name '
+    + 'bound to a package at that state (an existing declared override in ID.custom, or the holder\'s own draft): a '
+    + 'delete naming no package addresses the one package the name\'s rows are bound to (409 when two), so it would '
+    + 'remove that row and leave the package-less one. Where one exists, keep its body too and delete it at its own '
+    + 'address (?package=ITS_PACKAGE) first, then fold it into the change you save. Then delete the package-less row '
+    + '(DELETE /api/v1/meta/TYPE/NAME naming no package; ?state=draft for a draft; its receipt names no package), and '
+    + 'only then save the change where it belongs: run after the save, the same delete removes the change just saved. '
     + 'For (1), save the draft under the package it customizes: ?package=ID when the holder is a writable '
     + '(authored) package; for a code package, whose own address refuses the save 403 NOT_OVERRIDABLE naming its '
     + 'pair, in the holder\'s paired .custom package (?package=ID.custom with overrides: { package: ID, basedOn: '
@@ -34,8 +41,14 @@ export const entry: SemanticMigration = {
     + 'package-less row. (2b) every other sealed type (hook, job, queue, sharing_rule, assignment_rule, agent, '
     + 'skill, api and the like) has no override channel: delete the package-less row, and ship the change as a new '
     + 'version of the holding package\'s source, or keep it as an item of its own under a name no package ships (an '
-    + 'environment action bound to an object neither holder binds included). A package-less overlay row of a name '
-    + 'one package holds is that holder\'s customization and is served as before',
+    + 'environment action bound to an object neither holder binds included). When a code package ships the name, '
+    + 'the package-less delete answers 403 NOT_OVERRIDABLE (sealed against removal) for every sealed type whose '
+    + 'overlay does not merge at read: flow, action, doc, mapping, and every type of (2b) but skill; only page, app, '
+    + 'dataset, book and skill take it. There no metadata door removes the row (a delete naming ID or ID.custom '
+    + 'removes nothing either): it stays stored and served by no '
+    + 'read, and no order loses a change, since that delete reaches no row. Skip the delete: for flow, action, doc '
+    + 'and mapping save the declared override; for the (2b) types ship the change as above. A package-less overlay '
+    + 'row of a name one package holds is that holder\'s customization and is served as before',
   reason:
     'A package-less row of an overlay type is a holder\'s customization that cannot say which holder when two '
     + 'packages hold the name (ADR-0150 D4), so each holder\'s exact read refuses it 409 RESOURCE_CONFLICT naming '
@@ -49,10 +62,13 @@ export const entry: SemanticMigration = {
     + 'the change landed: no first-party composition has two packages holding one name with a package-less row.',
   acceptanceCriteria:
     'For every package-less draft of an email_template, dashboard or report whose name two installed packages '
-    + 'hold, the package-less draft is deleted and the draft re-saved under the package it customizes: '
+    + 'hold, the package-less draft\'s body is kept, the package-less draft deleted and the draft re-saved under '
+    + 'the package it customizes: '
     + '?package=ID&state=draft answers it for a writable holder, ?package=ID.custom&state=draft for a code package '
     + '(whose own ?package=ID&state=draft answers no draft), and no holder\'s draft read answers 409 naming both. For every package-less stored row '
-    + 'of a sealed type whose name a package ships, no package-less row of the name remains, and: for a type of '
+    + 'of a sealed type whose name a package ships, no package-less row of the name remains (except where the '
+    + 'package-less delete answers 403 sealed against removal: there the row stays stored and no read serves it), '
+    + 'no package-bound row of the name was removed in its place, and: for a type of '
     + '(2a), the change lives in a declared override of the holder\'s .custom package and ?package=ID answers the '
     + 'override, before and after a reload; for a type of (2b), ?package=ID answers the holder\'s own shipped item '
     + 'at the version that carries the change, or the change answers under its own name, which no package ships.',
