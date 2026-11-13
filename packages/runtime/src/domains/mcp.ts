@@ -1392,7 +1392,7 @@ export interface McpRecordFileService {
      */
     createUploadLinkForNewRecordAs?(
         object: string,
-        target: { field: string },
+        target: { field: string; count?: number },
         context: unknown,
     ): Promise<{ path: string; expiresAt: string; fileIds: string[] }>;
 }
@@ -1509,7 +1509,8 @@ function recordFileMembers(
         // object's create verdict and the field's writability for the caller.
         ...(newRecordLinkAs
             ? {
-                createUploadLinkForNewRecord: async (object: string, target: { field: string }) => {
+                // [#32747] `count`: how many files the user will upload, each id answered now.
+                createUploadLinkForNewRecord: async (object: string, target: { field: string; count?: number }) => {
                     const grant = await newRecordLinkAs(object, target, ec);
                     return {
                         url: absoluteUrl(grant.path, await publicOrigin(deps, context)),

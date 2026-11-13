@@ -221,11 +221,13 @@ const READ_FILE_TOOL_LINES = `- **read_file({ objectName, recordId, field?, file
 
 /** [#30892] `create_upload_link`'s entry, rendered where `registerFileTools` registers it (`data:write`). */
 const UPLOAD_LINK_TOOL_LINES = `- **create_upload_link({ objectName, recordId, field? | attachments: true })** —
-  a link through which the user uploads one file onto a record: into a file
-  field, or as an attachment. Give the link to the user to open where they
-  are signed in to this deployment; it works only for them, once, for that
-  record and field only, and expires at \`expiresAt\`. The upload is stored
-  as the user, so they must be able to edit the record.
+  a link through which the user uploads a file onto a record: into a file
+  field, or as an attachment. A multi-file field's link takes up to 10 files,
+  picked and sent together; one the field does not take refuses them all.
+  Give the link to the user to open where they are signed in to this
+  deployment; it works only for them, once, for that record and field only,
+  and expires at \`expiresAt\`. The upload is stored as the user, so they
+  must be able to edit the record.
 `;
 
 /**
@@ -235,12 +237,14 @@ const UPLOAD_LINK_TOOL_LINES = `- **create_upload_link({ objectName, recordId, f
  */
 const NEW_RECORD_UPLOAD_LINK_LINES = `  For a record you have not created yet (a required file field, such as an
   expense line's invoice), omit \`recordId\` and name \`field\`: the answer
-  carries \`fileIds\`. Once the user has uploaded, call \`create_record\` with
-  the field set to \`fileIds[0]\` (the array, for a multi-file field); before
-  the upload, that create is refused as an upload that never completed. The
-  id goes only into that field of that object, in one record, by this
-  user's own write, within an hour of the upload. The user must be able to
-  create such records.
+  carries \`fileIds\`. For several files into a multi-file field, send
+  \`count\` (up to 10): \`fileIds\` holds that many, and the user picks exactly
+  that many. Once the user has uploaded, call \`create_record\` with the field
+  set to \`fileIds[0]\` (the array, for a multi-file field); before the
+  upload, that create is refused as an upload that never completed. Each id
+  goes only into that field of that object, in one record, by this user's
+  own write, within an hour of the upload. The user must be able to create
+  such records.
 `;
 
 /**

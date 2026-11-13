@@ -570,6 +570,70 @@ describe('[#32686] create_upload_link for a record not yet created', () => {
   });
 });
 
+describe('[#32747] create_upload_link: one link, several files', () => {
+  let runtime: MCPServerRuntime;
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 'file-tools', version: '0.0.0' });
+  });
+
+  /** A new-record bridge answering as many ids as `count` asks for. */
+  function countingBridge() {
+    const bridge = newRecordBridge();
+    Object.assign(bridge, {
+      async createUploadLinkForNewRecord(object: string, target: { field: string; count?: number }) {
+        bridge.calls.push(['createUploadLinkForNewRecord', object, target]);
+        return {
+          url: 'https://acme.test/api/v1/storage/upload-links/f1.sec',
+          expiresAt: '2026-11-13T12:10:00.000Z',
+          fileIds: Array.from({ length: target.count ?? 1 }, (_, i) => `f${i + 1}`),
+        };
+      },
+    } satisfies McpFileBridge);
+    return bridge;
+  }
+
+  it('count passes through to the bridge and the answer carries every id, with instructions to pick them all', async () => {
+    const bridge = countingBridge();
+    const result = await callTool(runtime, bridge, 'create_upload_link', { objectName: 'claim', field: 'scans', count: 3 });
+    expect(result.isError).toBeFalsy();
+    expect(bridge.calls).toEqual([['createUploadLinkForNewRecord', 'claim', { field: 'scans', count: 3 }]]);
+    const facts = factsOf(result);
+    expect(facts.fileIds).toEqual(['f1', 'f2', 'f3']);
+    expect(facts.instructions).toContain('pick all 3 files');
+    expect(facts.instructions).toContain('set to fileIds (all 3)');
+  });
+
+  it('no count asks the bridge as before', async () => {
+    const bridge = countingBridge();
+    await callTool(runtime, bridge, 'create_upload_link', { objectName: 'claim', field: 'scans' });
+    expect(bridge.calls).toEqual([['createUploadLinkForNewRecord', 'claim', { field: 'scans' }]]);
+  });
+
+  it('count with a recordId is refused before the bridge is asked', async () => {
+    const bridge = countingBridge();
+    const result = await callTool(runtime, bridge, 'create_upload_link', { objectName: 'claim', recordId: 'c1', field: 'scans', count: 2 });
+    expect(result.isError).toBe(true);
+    expect(textOf(result.content[0])).toContain('count is for a record not yet created');
+    expect(bridge.calls).toEqual([]);
+  });
+
+  it('count is listed only where a link can name no record, and the description says a multi-file link takes several', async () => {
+    const served = await uploadLinkSchema(runtime, countingBridge());
+    expect(Object.keys(served.inputSchema.properties)).toContain('count');
+    expect(served.description).toContain('takes several files, up to 10');
+    const notServed = await uploadLinkSchema(runtime, fullBridge());
+    expect(Object.keys(notServed.inputSchema.properties)).not.toContain('count');
+    expect(notServed.description).not.toContain('uploads one file');
+  });
+
+  it('the skill teaches several files and count', () => {
+    const skill = renderSkillMarkdown({ fileTools: true, newRecordUploadLinks: true });
+    expect(skill).toContain('takes up to 10 files');
+    expect(skill).toContain('send\n  `count` (up to 10)');
+    expect(renderSkillMarkdown({ fileTools: true })).not.toContain('`count`');
+  });
+});
+
 describe('the skill teaches the file tools exactly where they register', () => {
   it('names both for a host that carries them, and each only for the scope that registers it', () => {
     const all = renderSkillMarkdown({ fileTools: true });
