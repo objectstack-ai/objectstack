@@ -87,6 +87,9 @@ import {
   type ExprFaultOutcome,
   type FieldRole,
 } from '@objectstack/formula';
+// [#32872] The publish gate's own passes at a validation rule and a formula
+// field, run over the served definitions (see `VALIDATE_SITE_MAP.gatePasses`).
+import { authoredExpressionHopTargets, judgeAuthoredSiteExpression, type AuthoredExpressionSite } from '@objectstack/lint';
 // [#16913] The unknown-key error map every `strictToolInput` shape below is
 // built with. Imported, never re-implemented: #4001 is this repo's ruling on
 // silent key stripping and its explicit instruction is that the parts already
@@ -159,6 +162,22 @@ export interface McpDataBridge {
    * no `label()` target check, exactly as before (the validator's opt-in).
    */
   optionFieldsOf?(name: string): Promise<readonly string[] | null>;
+  /**
+   * [#32872] The object definition of `name` whole, as this caller is served
+   * it — the same read {@link describeObject} projects — or `null` when no
+   * such object is served. `validate_expression` hands it, with the
+   * definitions of the objects the expression reads through, to
+   * `@objectstack/lint`'s `judgeAuthoredSiteExpression`, so the tool gives
+   * the publish gate's verdict at a `validation` / `formula` site: the passes
+   * that judge what a field declares (`required`, `defaultValue`, a
+   * `reference`'s target, an external binding) read the definition, which
+   * `describeObject`'s projection does not carry. Never rendered to the
+   * caller: only the gate's findings are.
+   *
+   * OPTIONAL, like {@link optionFieldsOf}: a bridge that omits it gets the
+   * shared validator's verdict alone, exactly as before.
+   */
+  servedObjectDefinitionOf?(name: string): Promise<Record<string, unknown> | null>;
   query(
     object: string,
     opts: {
@@ -1689,6 +1708,16 @@ function jsonText(value: unknown): string {
  * through the relationship and as a plain value, and a second hop, in the
  * gate's words; nothing hydrates a flow condition or a template, so the gate
  * does not ask there and neither does the tool.
+ *
+ * [#32872] `gatePasses`: the sites where the gate judges with passes of its
+ * own beyond the shared validator — the null-guard gate, the hop to a field
+ * the target does not declare, the hop into a stored-metadata table, a rule
+ * reading `parent`, the unprovisioned-anchor warning — each private to
+ * `@objectstack/lint`'s walk. There the tool asks the gate itself
+ * (`judgeAuthoredSiteExpression`) over the served definitions
+ * (`McpDataBridge.servedObjectDefinitionOf`) and adds its findings to the
+ * validator's; a flow condition and a template are judged by the validator
+ * alone at the gate too.
  */
 const VALIDATE_SITE_MAP: Record<
   string,
@@ -1698,6 +1727,7 @@ const VALIDATE_SITE_MAP: Record<
     slot: z.ZodType;
     optionLabels?: true;
     traversalHydration?: true;
+    gatePasses?: AuthoredExpressionSite;
     /**
      * [#29904, #29926, #29959] What the gate's runtime does on a fault at this
      * site, from the caller's optional `severity` / `triggerKind` — the two
@@ -1715,6 +1745,7 @@ const VALIDATE_SITE_MAP: Record<
 > = {
   formula: {
     role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true, traversalHydration: true,
+    gatePasses: 'formula',
   },
   // [#29904, #29926] A `severity: 'error'` rule (the default) fails closed: a
   // fault refuses the write. An advisory rule (`warning` / `info`) fails open:
@@ -1723,6 +1754,7 @@ const VALIDATE_SITE_MAP: Record<
   // the gate will for the severity it is told.
   validation: {
     role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema, traversalHydration: true,
+    gatePasses: 'validation',
     faultOutcome: ({ severity }) => (severity === 'warning' || severity === 'info' ? 'fail-open' : 'fail-closed'),
   },
   // [#29926, #29959] A record-triggered flow's start, edge or `decision`
@@ -1741,6 +1773,53 @@ const VALIDATE_SITE_MAP: Record<
   },
   template: { role: 'template', scope: 'record', slot: TemplateExpressionInputSchema },
 };
+
+/** [#32872] A gate pass's finding, as the tool answers it: the source it reads and the gate's sentence. */
+interface GatePassFinding {
+  source: string;
+  message: string;
+}
+
+const NO_GATE_PASS_FINDINGS: { errors: GatePassFinding[]; warnings: GatePassFinding[] } = { errors: [], warnings: [] };
+
+/**
+ * [#32872] The publish gate's findings at a `validation` / `formula` site
+ * beyond the shared validator's, judged by `@objectstack/lint`'s
+ * `judgeAuthoredSiteExpression` over the definitions the caller is served:
+ * the subject's, and each object the expression reads through. A bridge
+ * without `servedObjectDefinitionOf`, or an object it does not serve, adds
+ * none; a target it does not serve is not judged, as at the gate.
+ */
+async function gatePassFindings(
+  bridge: McpDataBridge,
+  site: AuthoredExpressionSite,
+  objectName: string,
+  expression: string,
+  severity: ValidationSeverity | undefined,
+): Promise<{ errors: GatePassFinding[]; warnings: GatePassFinding[] }> {
+  if (!bridge.servedObjectDefinitionOf) return NO_GATE_PASS_FINDINGS;
+  const subject = await bridge.servedObjectDefinitionOf(objectName);
+  if (!subject) return NO_GATE_PASS_FINDINGS;
+  const targets: Array<Record<string, unknown>> = [];
+  for (const target of authoredExpressionHopTargets(subject, expression)) {
+    if (target === objectName) continue;
+    const def = await bridge.servedObjectDefinitionOf(target);
+    if (def) targets.push(def);
+  }
+  const findings = judgeAuthoredSiteExpression({
+    site,
+    objectName,
+    expression,
+    ...(severity ? { severity } : {}),
+    objects: [subject, ...targets],
+  });
+  const errors: GatePassFinding[] = [];
+  const warnings: GatePassFinding[] = [];
+  for (const { severity: level, source, message } of findings) {
+    (level === 'warning' ? warnings : errors).push({ source, message });
+  }
+  return { errors, warnings };
+}
 
 /** [#29959] A validation rule's `severity`, as `ValidationRuleSchema` spells it. */
 type ValidationSeverity = 'error' | 'warning' | 'info';
@@ -2373,7 +2452,7 @@ export function registerObjectTools(
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
-          const { role, scope, slot, optionLabels, traversalHydration, faultOutcome: outcomeOf } =
+          const { role, scope, slot, optionLabels, traversalHydration, gatePasses, faultOutcome: outcomeOf } =
             VALIDATE_SITE_MAP[site ?? 'formula'];
           const faultOutcome = outcomeOf?.({
             severity: severity ?? 'error',
@@ -2415,13 +2494,18 @@ export function registerObjectTools(
                 })),
                 warnings: [],
               };
+          // [#32872] …and, at a validation rule or a formula field, every other
+          // pass the gate runs there, in the gate's own words.
+          const gate = slotParse.success && gatePasses
+            ? await gatePassFindings(bridge, gatePasses, objectName, expression, severity)
+            : NO_GATE_PASS_FINDINGS;
           const inScope = introspectScope(role, hint);
           const inferredType =
             slotParse.success && role === 'value' ? inferExpressionType(expression, hint) : undefined;
           return textResult({
-            ok: result.ok,
-            errors: result.errors,
-            warnings: result.warnings,
+            ok: result.ok && gate.errors.length === 0,
+            errors: [...result.errors, ...gate.errors],
+            warnings: [...result.warnings, ...gate.warnings],
             ...(inferredType ? { inferredType } : {}),
             inScope: {
               dialect: inScope.dialect,

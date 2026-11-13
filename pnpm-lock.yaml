@@ -1421,6 +1421,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
+      '@objectstack/lint':
+        specifier: workspace:*
+        version: link:../lint
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../metadata-core
@@ -1437,9 +1440,6 @@ importers:
         specifier: ^4.6.6
         version: 4.6.7
     devDependencies:
-      '@objectstack/lint':
-        specifier: workspace:*
-        version: link:../lint
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

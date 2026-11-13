@@ -943,6 +943,15 @@ export function buildMcpBridge(
                 .filter(([, f]) => declaresOptions(f))
                 .map(([k]) => k);
         },
+        // [#32872] The object `describeObject` reads, whole: what
+        // `validate_expression` hands the publish gate's own passes at a
+        // validation rule or a formula field. Rendered to nobody; the tool
+        // answers the gate's findings only.
+        // [ADR-0106 D1] …the same caller's object, so no field it cannot read is judged.
+        servedObjectDefinitionOf: async (name: string): Promise<Record<string, unknown> | null> => {
+            const def: any = await readObjectForCaller(name);
+            return def ?? null;
+        },
         query: async (object: string, o: any) => {
             const query: any = {};
             if (o?.where) query.where = o.where;

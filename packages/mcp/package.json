@@ -30,6 +30,7 @@
     "@modelcontextprotocol/sdk": "^1.30.1",
     "@objectstack/core": "workspace:*",
     "@objectstack/formula": "workspace:*",
+    "@objectstack/lint": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
@@ -37,7 +38,6 @@
     "zod": "^4.6.6"
   },
   "devDependencies": {
-    "@objectstack/lint": "workspace:*",
     "@types/node": "^26.6.5",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

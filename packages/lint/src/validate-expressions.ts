@@ -2263,7 +2263,28 @@ export interface StackExpressionOptions {
    * holds by construction rather than by the snapshot's shape.
    */
   runtimeWriteType?: string;
+  /**
+   * [#32872] Set only by `judgeAuthoredSiteExpression`
+   * (`authored-site-expression.ts`), the entry the MCP `validate_expression`
+   * tool asks for the gate's verdict on one validation rule or formula field.
+   * That caller has already run the shared validator (`validateExpression`)
+   * on the same source and answers its findings, codes included, so this walk
+   * leaves out that one call at {@link check} and at the field-formula pass
+   * and reports every OTHER pass the gate runs there, each its own judge.
+   * Absent on every gate run: the walk is byte for byte what it was.
+   */
+  sharedValidatorRunByCaller?: boolean;
 }
+
+/**
+ * [#32872] What {@link StackExpressionOptions.sharedValidatorRunByCaller}
+ * puts in place of the shared validator's answer: no finding, so the walk's
+ * own passes are all that is reported.
+ */
+const VALIDATOR_RUN_BY_CALLER: Pick<ReturnType<typeof validateExpression>, 'errors' | 'warnings'> = {
+  errors: [],
+  warnings: [],
+};
 
 /**
  * Validate every predicate in the stack. Returns the list of issues (empty =
@@ -2299,6 +2320,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // an empty list under it, so the claim holds by construction rather than by
   // the shape of the snapshot the gate happens to build today.
   const objectWrite = options.runtimeWriteType === 'object';
+  // [#32872] See {@link StackExpressionOptions.sharedValidatorRunByCaller}.
+  const validatorRunByCaller = options.sharedValidatorRunByCaller === true;
   // [#24798] On a `view` write exactly ONE pass judges — the bulk `confirmText`
   // pass over the written view's own list containers ({@link bulkConfirmTextIssues});
   // every other pass reads a collection a view write does not carry, so it
@@ -2620,7 +2643,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
     // Spread only when given, so every other site's hint is unchanged.
     const roots = extraRoots ? { roots: extraRoots } : {};
-    const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
+    const res = validatorRunByCaller ? VALIDATOR_RUN_BY_CALLER : validateExpression('predicate', raw as string | { dialect?: string; source?: string },
       objectName
         ? {
           objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration, ...roots,
@@ -3465,7 +3488,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // `optionFieldNames` in the object walk below). A `label(record.<field>)` naming any other
       // declared field faults on every row and reads null, so it is refused
       // here, in the evaluator's own words.
-      const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
+      const res = validatorRunByCaller ? VALIDATOR_RUN_BY_CALLER : validateExpression('value', f.expression as string | { dialect?: string; source?: string },
         objectName
           ? {
               objectName,
