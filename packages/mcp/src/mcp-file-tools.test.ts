@@ -620,6 +620,8 @@ describe('[#32747] create_upload_link: one link, several files', () => {
   it('count is listed only where a link can name no record, and the description says a multi-file link takes several', async () => {
     const served = await uploadLinkSchema(runtime, countingBridge());
     expect(Object.keys(served.inputSchema.properties)).toContain('count');
+    // The storage door's cap (UPLOAD_LINK_MAX_FILES), declared where the agent reads it.
+    expect(served.inputSchema.properties.count).toMatchObject({ type: 'integer', minimum: 1, maximum: 10 });
     expect(served.description).toContain('takes several files, up to 10');
     const notServed = await uploadLinkSchema(runtime, fullBridge());
     expect(Object.keys(notServed.inputSchema.properties)).not.toContain('count');

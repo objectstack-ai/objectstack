@@ -55,6 +55,7 @@ import {
   type RecordFileTarget,
   type UploadLinkDoor,
   type UploadLinkFilesOutcome,
+  type UploadLinkSubmitOptions,
   type UploadLinkGrant,
   type UploadLinkOutcome,
   type UploadLinkTarget,
@@ -385,8 +386,9 @@ export class FileAttachmentService
     token: string,
     uploads: UploadLinkUpload[],
     callerUserId: string,
+    options?: UploadLinkSubmitOptions,
   ): Promise<UploadLinkFilesOutcome> {
-    return this.recordFilesOrRefuse().consumeUploadLinkFiles(token, uploads, callerUserId);
+    return this.recordFilesOrRefuse().consumeUploadLinkFiles(token, uploads, callerUserId, options);
   }
 
   async attachFile(input: AttachFileInput): Promise<AttachedFile> {

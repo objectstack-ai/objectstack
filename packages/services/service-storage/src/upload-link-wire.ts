@@ -40,6 +40,29 @@ export const UPLOAD_LINK_FILE_COUNT_STATUS = 400;
 export const UPLOAD_LINK_FILE_COUNT_CODE: StandardErrorCode = 'VALIDATION_ERROR';
 
 /**
+ * [#32747] That refusal's words, for a link that takes from `range.min` to
+ * `range.max` files and a submit carrying `sent`. One spelling for the door
+ * that reads the form and the service that spends the link.
+ */
+export function uploadLinkFileCountMessage(range: { min: number; max: number }, sent: number): string {
+  const taken =
+    range.max === 1
+      ? 'takes one file'
+      : range.min === range.max
+        ? `takes exactly ${range.min} files, sent together`
+        : `takes up to ${range.max} files, sent together`;
+  return `Nothing was stored: this upload link ${taken}, and ${sent} ${sent === 1 ? 'was' : 'were'} sent.`;
+}
+
+/**
+ * [#32747] The refusal of a several-file form sent to a link that takes one
+ * file (a single-file field's, or an attachments link): that link takes its
+ * file as the request body. Same code and status as a wrong count.
+ */
+export const UPLOAD_LINK_ONE_FILE_FORM_MESSAGE =
+  'Nothing was stored: this upload link takes one file, sent as the request body, not as a several-file form.';
+
+/**
  * [#32747] The multipart form a several-file submit is sent as: one part per
  * file named `file0` … `fileN-1`, in the order picked, and a `count` field
  * naming N. Indexed names, because a form parser that keeps one value per

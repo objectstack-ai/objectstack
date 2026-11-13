@@ -72,7 +72,7 @@ import { installDefaultOrganization, DEFAULT_ORGANIZATION_ID } from './default-o
 import { UPLOAD_LINK_TTL_SECONDS } from './record-file-access.js';
 import { PRE_RECORD_CLAIM_WINDOW_SECONDS } from './pre-record-upload.js';
 import { resolveThrownHttpError } from '@objectstack/types';
-import { UPLOAD_LINK_MAX_FILES, UPLOAD_LINK_UNUSABLE_MESSAGE } from './upload-link-wire.js';
+import { UPLOAD_LINK_MAX_FILES, UPLOAD_LINK_ONE_FILE_FORM_MESSAGE, UPLOAD_LINK_UNUSABLE_MESSAGE } from './upload-link-wire.js';
 import { UPLOAD_LINK_COPY } from './upload-link-copy.js';
 
 const BASE = '/api/v1/storage';
@@ -1208,6 +1208,30 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       });
     };
     const failureOf = (write: Promise<unknown>) => write.then(() => null, (e: unknown) => resolveThrownHttpError(e));
+    /** A form body sent exactly as given (parts, `count`), with extra headers. */
+    const putForm = (token: string, body: Record<string, unknown>, headers: Record<string, string> = {}) =>
+      call('PUT', `${BASE}/upload-links/:token`, {
+        params: { token },
+        headers: { 'content-type': 'multipart/form-data; boundary=----os', ...headers, ...sessionOf(OWNER.userId) },
+        body,
+      });
+    /** File parts `file0` … that count how often their bytes are read. */
+    const countedParts = (n: number) => {
+      const reads = { count: 0 };
+      const parts: Record<string, unknown> = {};
+      for (let i = 0; i < n; i++) {
+        const file = new File([new Uint8Array(Buffer.from(`%PDF-1.4 cp-${i}`))], `cp-${i}.pdf`, { type: 'application/pdf' });
+        parts[`file${i}`] = {
+          name: file.name,
+          type: file.type,
+          arrayBuffer: () => {
+            reads.count += 1;
+            return file.arrayBuffer();
+          },
+        };
+      }
+      return { reads, parts };
+    };
     /** The `sys_file` rows named one of `names`: a submit's files, by the unique names a case picks. */
     const rowsNamed = async (names: string[]) =>
       ((await engine.find('sys_file', { where: { name: { $in: names } }, context: SYS } as never)) as Array<Record<string, any>>);
@@ -1373,13 +1397,16 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       const grant = await files.createUploadLinkAs('claim', id, { field: 'scans' }, OWNER as never);
       const upload = storage.upload.bind(storage);
       const keys: string[] = [];
+      const tried: string[] = [];
       let calls = 0;
       vi.spyOn(storage, 'upload').mockImplementation(async (key, data, opts) => {
         calls += 1;
+        tried.push(key);
         if (calls === 2) throw new Error('disk full');
         keys.push(key);
         return upload(key, data, opts);
       });
+      const deleted = vi.spyOn(storage, 'delete');
       const picks = [pdf('sf-1.pdf'), pdf('sf-2.pdf'), pdf('sf-3.pdf')];
       const res = await useLinkForm(tokenOf(grant.path), picks);
       expect(res._status).toBe(500);
@@ -1387,21 +1414,29 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect(await rowsNamed(picks.map((p) => p.name))).toEqual([]);
       expect(keys).toHaveLength(1);
       expect(await storage.exists(keys[0])).toBe(false);
+      // The upload that threw may have written part of its bytes: its key is deleted too.
+      expect(tried).toHaveLength(2);
+      expect(deleted.mock.calls.map(([key]) => key)).toEqual(tried);
       vi.restoreAllMocks();
       // A link naming no record: every id of the submit is gone, the reserved ones not reached included.
       const pre = await files.createUploadLinkForNewRecordAs('claim', { field: 'scans', count: 3 }, OWNER as never);
       calls = 0;
       keys.length = 0;
+      tried.length = 0;
       vi.spyOn(storage, 'upload').mockImplementation(async (key, data, opts) => {
         calls += 1;
+        tried.push(key);
         if (calls === 2) throw new Error('disk full');
         keys.push(key);
         return upload(key, data, opts);
       });
+      const preDeleted = vi.spyOn(storage, 'delete');
       const preRes = await useLinkForm(tokenOf(pre.path), [pdf('spf-1.pdf'), pdf('spf-2.pdf'), pdf('spf-3.pdf')]);
       expect(preRes._status).toBe(500);
       for (const fileId of pre.fileIds) expect(await fileRow(fileId)).toBeUndefined();
       expect(await storage.exists(keys[0])).toBe(false);
+      expect(tried).toHaveLength(2);
+      expect(preDeleted.mock.calls.map(([key]) => key)).toEqual(tried);
     });
 
     it('the record\'s write refusing after the spend (a lock): 409, the record unchanged, none of the files kept', async () => {
@@ -1428,6 +1463,77 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect(lost._json.error.code).toBe('INVALID_REQUEST');
       const ok = await useLinkForm(tokenOf(grant.path), [pdf('lp-1.pdf'), pdf('lp-2.pdf')]);
       expect(ok._status, JSON.stringify(ok._json)).toBe(200);
+    });
+
+    it('a multi-file field\'s record link judges the field\'s accept before the spend for one file too: refused, nothing stored, the link unspent', async () => {
+      const id = await newClaim('one-png');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'scans' }, OWNER as never);
+      const png = { name: 'one.png', bytes: Buffer.from('png'), type: 'image/png' };
+      for (const refused of [
+        await useLinkForm(tokenOf(grant.path), [png]),
+        await useLink(tokenOf(grant.path), Buffer.from('png'), { 'content-type': 'image/png', 'x-file-name': 'one.png' }),
+      ]) {
+        expect(refused._status, JSON.stringify(refused._json)).toBe(400);
+        expect(refused._json.error.code).toBe('ERR_FILE_CONSTRAINT');
+      }
+      expect((await claim(id)).scans ?? null).toBeNull();
+      expect(await rowsNamed(['one.png'])).toEqual([]);
+      const ok = await useLinkForm(tokenOf(grant.path), [pdf('one-ok.pdf')]);
+      expect(ok._status, JSON.stringify(ok._json)).toBe(200);
+    });
+
+    it('a link that takes one file refuses a form even of one file, 400 VALIDATION_ERROR before the spend, and then takes the body', async () => {
+      for (const target of [{ field: 'policy' }, { attachments: true as const }]) {
+        const grant = await files.createUploadLinkAs('claim', ids.claimB, target, OWNER as never);
+        const form = await useLinkForm(tokenOf(grant.path), [pdf('form-one.pdf')]);
+        expect(form._status, JSON.stringify(form._json)).toBe(400);
+        expect(form._json.error.code).toBe('VALIDATION_ERROR');
+        expect(form._json.error.message).toBe(UPLOAD_LINK_ONE_FILE_FORM_MESSAGE);
+        expect(await rowsNamed(['form-one.pdf'])).toEqual([]);
+        const body = await useLink(tokenOf(grant.path), Buffer.from('%PDF-1.4 body'));
+        expect(body._status, JSON.stringify(body._json)).toBe(200);
+      }
+    });
+
+    it('a form declares at most this link\'s files: one file\'s allowance on a one-file link, the cap\'s on a multi-file link', async () => {
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 1, authored: true } } as never);
+      try {
+        const declared = { 'content-length': String(2 * MIB) };
+        const single = await files.createUploadLinkAs('claim', ids.claimB, { field: 'policy' }, OWNER as never);
+        const one = await putForm(tokenOf(single.path), { count: '1', ...countedParts(1).parts }, declared);
+        expect(one._status, JSON.stringify(one._json)).toBe(413);
+        const several = await files.createUploadLinkAs('claim', await newClaim('declared'), { field: 'scans' }, OWNER as never);
+        const two = await putForm(tokenOf(several.path), { count: '2', ...countedParts(2).parts }, declared);
+        expect(two._status, JSON.stringify(two._json)).toBe(200);
+      } finally {
+        storage.setLimitsSnapshot({} as never);
+      }
+    });
+
+    it('a form is refused before any part is read: a count over the link\'s cap, parts that disagree with count, a part missing', async () => {
+      const grant = await files.createUploadLinkAs('claim', await newClaim('unread'), { field: 'scans' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const over = countedParts(UPLOAD_LINK_MAX_FILES + 1);
+      const tooMany = await putForm(token, { count: String(UPLOAD_LINK_MAX_FILES + 1), ...over.parts });
+      expect(tooMany._status, JSON.stringify(tooMany._json)).toBe(400);
+      expect(tooMany._json.error.code).toBe('VALIDATION_ERROR');
+      expect(tooMany._json.error.message).toContain(`takes up to ${UPLOAD_LINK_MAX_FILES} files`);
+      expect(over.reads.count).toBe(0);
+      const huge = countedParts(2);
+      const hugeCount = await putForm(token, { count: '999', ...huge.parts });
+      expect(hugeCount._json.error.code).toBe('VALIDATION_ERROR');
+      expect(huge.reads.count).toBe(0);
+      const lost = countedParts(2);
+      const lostRes = await putForm(token, { count: '3', ...lost.parts });
+      expect(lostRes._json.error.code).toBe('INVALID_REQUEST');
+      expect(lost.reads.count).toBe(0);
+      const gap = countedParts(3);
+      const gapRes = await putForm(token, { count: '2', file0: gap.parts.file0, file2: gap.parts.file2 });
+      expect(gapRes._json.error.code).toBe('INVALID_REQUEST');
+      expect(gap.reads.count).toBe(0);
+      const ok = countedParts(2);
+      expect((await putForm(token, { count: '2', ...ok.parts }))._status).toBe(200);
+      expect(ok.reads.count).toBe(2);
     });
 
     it('the page: a multi-file field link picks several, a link naming no record asks for its count, a single-file link picks one', async () => {

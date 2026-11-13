@@ -43,6 +43,8 @@ import { buildKey, mintDownloadUrl } from './storage-routes.js';
 import {
   UPLOAD_LINK_FILE_COUNT_CODE,
   UPLOAD_LINK_FILE_COUNT_STATUS,
+  UPLOAD_LINK_ONE_FILE_FORM_MESSAGE,
+  uploadLinkFileCountMessage,
   UPLOAD_LINK_KIND,
   UPLOAD_LINK_MAX_FILES,
   UPLOAD_LINK_SEGMENT,
@@ -158,15 +160,20 @@ import { assertFileConstraints } from './file-reference-lifecycle.js';
  * A single-file field link and an attachments link take one, as before.
  *
  *  - **One submit spends the link once.** Every file in it is judged before
- *    the spend: the doors' size verdict for each, and, for a submit carrying
- *    more than one file, the field's own `accept` / `maxSize` for each. One
- *    refusal refuses the whole submit, nothing is stored, and the link stays
- *    usable. A submit carrying one file is judged exactly as it was before
- *    this rule (the record's write judges the field's constraints).
+ *    the spend: the doors' size verdict for each, and, on a link that takes
+ *    several, the field's own `accept` / `maxSize` for each, however many the
+ *    submit carries. One refusal refuses the whole submit, nothing is stored,
+ *    and the link stays usable. A link that takes one file is judged exactly
+ *    as it was before this rule (to a record, the record's write judges the
+ *    field's constraints), and takes its file as the request body: a form is
+ *    refused before the spend.
+ *  - **The several-file form** names `count`, at most the link's cap, and the
+ *    door refuses a form whose `count` is over the link's cap or whose parts
+ *    disagree with it before it reads any part's bytes.
  *  - **All or nothing after the spend.** A link naming a record stores every
  *    file, then writes the field once, appending all of them. When any store
- *    or the write fails, every file the submit stored is discarded, bytes and
- *    row, so the record holds what it held before and no row of the submit is
+ *    or the write fails, every file of the submit is discarded, bytes and
+ *    row (a key whose upload was tried is deleted even when the upload threw), so the record holds what it held before and no row of the submit is
  *    left.
  *  - **A link naming no record answers every id when it is minted**: the
  *    agent asks for `count` files, the link row is the first id and `count - 1`
@@ -372,6 +379,11 @@ export interface ICallerRecordFileService {
  * minted for, signed in, so the token alone opens nothing. Another user gets
  * the one unusable-link refusal, and the link is not spent.
  */
+/** [#32747] How a submit was sent: as the request body (one file) or as a several-file form. */
+export interface UploadLinkSubmitOptions {
+  sentAs?: 'body' | 'form';
+}
+
 export interface UploadLinkDoor {
   /** The link's view, or the one unusable-link refusal. Writes nothing. */
   inspectUploadLink(token: string, callerUserId: string): Promise<UploadLinkView>;
@@ -380,8 +392,14 @@ export interface UploadLinkDoor {
   /**
    * [#32747] Spend the link on one submit carrying `uploads` (in the order
    * picked), landing all of them where the link is bound, or none.
+   * `sentAs: 'form'` is a several-file form, which a one-file link refuses.
    */
-  consumeUploadLinkFiles(token: string, uploads: UploadLinkUpload[], callerUserId: string): Promise<UploadLinkFilesOutcome>;
+  consumeUploadLinkFiles(
+    token: string,
+    uploads: UploadLinkUpload[],
+    callerUserId: string,
+    options?: UploadLinkSubmitOptions,
+  ): Promise<UploadLinkFilesOutcome>;
 }
 
 /** The data-engine surface these verbs use: the reads and writes every engine has, plus its schema read. */
@@ -598,17 +616,7 @@ function isOpenReservation(row: FileRecord | null, linkId: string, userId: strin
  * not take, before the link is spent.
  */
 function refuseFileCount(range: { min: number; max: number }, sent: number): never {
-  const taken =
-    range.max === 1
-      ? 'takes one file'
-      : range.min === range.max
-        ? `takes exactly ${range.min} files, sent together`
-        : `takes up to ${range.max} files, sent together`;
-  refuse(
-    UPLOAD_LINK_FILE_COUNT_CODE,
-    UPLOAD_LINK_FILE_COUNT_STATUS,
-    `Nothing was stored: this upload link ${taken}, and ${sent} ${sent === 1 ? 'was' : 'were'} sent.`,
-  );
+  refuse(UPLOAD_LINK_FILE_COUNT_CODE, UPLOAD_LINK_FILE_COUNT_STATUS, uploadLinkFileCountMessage(range, sent));
 }
 
 /** `sys_file.metadata` for a link's binding. */
@@ -1144,6 +1152,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     token: string,
     uploads: UploadLinkUpload[],
     callerUserId: string,
+    options: UploadLinkSubmitOptions = {},
   ): Promise<UploadLinkFilesOutcome> {
     const engine = this.engineOrRefuse();
     const storage = this.storageOrRefuse();
@@ -1154,6 +1163,11 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     // [#32747] As many files as the link takes, before anything else is judged.
     const range = this.fileRangeOf(engine, state);
     if (uploads.length < range.min || uploads.length > range.max) refuseFileCount(range, uploads.length);
+    // A link that takes one file takes it as the request body, as it did
+    // before links took several: a form, even of one file, is refused.
+    if (options.sentAs === 'form' && range.max === 1) {
+      refuse(UPLOAD_LINK_FILE_COUNT_CODE, UPLOAD_LINK_FILE_COUNT_STATUS, UPLOAD_LINK_ONE_FILE_FORM_MESSAGE);
+    }
     const maxUploadBytes = resolveStorageLimits(this.deps.getLimitsSnapshot()).maxUploadBytes;
     for (const upload of uploads) {
       if (!nonEmptyString(upload?.filename)) refuse('VALIDATION_ERROR', 400, 'The upload names no file.');
@@ -1183,11 +1197,13 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     // judges the field's own `accept` / `maxSize` until the create does: they
     // are judged here, before the link is spent, as the record's write would
     // judge them, and a file the field cannot take is refused with nothing
-    // stored. [#32747] So are they for each file of a submit carrying several:
+    // stored. [#32747] So are they for each file sent through a link that
+    // takes several (a multi-file field's), however many the submit carries:
     // one file the field cannot take refuses them all with the link unspent.
-    // A one-file submit to a record is judged by the record's write, as before.
+    // A link that takes one file to a record is judged by the record's write,
+    // as before.
     const newRecord = state.record_id === undefined;
-    if (newRecord || typed.length > 1) {
+    if (newRecord || range.max > 1) {
       const def = requireFileField(engine, state.object, state.field as string);
       for (const upload of typed) {
         assertFileConstraints(def, state.field as string, {
@@ -1266,12 +1282,12 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     const field = state.field as string;
     const claimUntil = new Date(this.now() + PRE_RECORD_CLAIM_WINDOW_SECONDS * 1000).toISOString();
     const keys = fileIds.map((fileId, i) => buildKey(FIELD_UPLOAD_SCOPE, fileId, uploads[i].filename));
-    let stored = 0;
+    let attempted = 0;
     try {
       for (let i = 0; i < fileIds.length; i++) {
         const upload = uploads[i];
+        attempted = i + 1;
         await storage.upload(keys[i], upload.data, { contentType: upload.mimeType });
-        stored = i + 1;
         await store.updateFile(
           fileIds[i],
           {
@@ -1294,7 +1310,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       }
     } catch (err) {
       for (let i = 0; i < fileIds.length; i++) {
-        await this.discard(storage, store, fileIds[i], keys[i], writeContext, i < stored);
+        await this.discard(storage, store, fileIds[i], keys[i], writeContext, i < attempted);
       }
       throw err;
     }
@@ -1358,7 +1374,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     const def = requireFileField(engine, state.object, field);
     const files = uploads.map((upload) => {
       const fileId = randomUUID();
-      return { fileId, key: buildKey(FIELD_UPLOAD_SCOPE, fileId, upload.filename), upload, created: false, stored: false };
+      return { fileId, key: buildKey(FIELD_UPLOAD_SCOPE, fileId, upload.filename), upload, created: false, attempted: false };
     });
     try {
       for (const file of files) {
@@ -1378,8 +1394,8 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
           writeContext,
         );
         file.created = true;
+        file.attempted = true;
         await storage.upload(file.key, upload.data, { contentType: upload.mimeType });
-        file.stored = true;
         // A record write takes only a completed upload.
         await store.updateFile(file.fileId, { status: 'committed' }, writeContext);
       }
@@ -1405,7 +1421,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       }
     } catch (err) {
       for (const file of files) {
-        if (file.created) await this.discard(storage, store, file.fileId, file.key, writeContext, file.stored);
+        if (file.created) await this.discard(storage, store, file.fileId, file.key, writeContext, file.attempted);
       }
       readonlyRefusalOf(err, state.object, field);
       throw err;
@@ -1420,8 +1436,10 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
 
   /**
    * Undo a refused field upload: the bytes, then the row. Best-effort; the
-   * refusal is what is thrown. [#32747] `bytesStored` false: the row is all
-   * there is to take back (its bytes never landed).
+   * refusal is what is thrown. [#32747] `uploadAttempted` false: the row is
+   * all there is to take back (no upload of its bytes was tried). A tried
+   * upload's key is deleted even when the upload threw, as it may have
+   * written part of the bytes.
    */
   private async discard(
     storage: IStorageService,
@@ -1429,10 +1447,10 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     fileId: string,
     key: string,
     writeContext: StorageWriteContext,
-    bytesStored = true,
+    uploadAttempted = true,
   ): Promise<void> {
     try {
-      if (bytesStored) await storage.delete(key);
+      if (uploadAttempted) await storage.delete(key);
     } catch (err) {
       this.deps.logger.warn(
         `[storage] upload link: a refused upload could not delete its stored bytes (${(err as Error)?.message ?? err}). ` +

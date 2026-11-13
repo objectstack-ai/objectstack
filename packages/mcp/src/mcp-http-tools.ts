@@ -3423,10 +3423,12 @@ export function registerFileTools(
               .describe('true to attach the upload to the record instead of filling a field'),
             ...(newRecordLinkFn
               ? {
+                  // 10 is the storage door's UPLOAD_LINK_MAX_FILES; the mint refuses more.
                   count: z
                     .number()
                     .int()
                     .min(1)
+                    .max(10)
                     .optional()
                     .describe(
                       'For a record not yet created (no recordId), with a multi-file field: how many files the user ' +
