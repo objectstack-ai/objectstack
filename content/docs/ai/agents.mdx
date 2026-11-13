@@ -132,6 +132,10 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
   - **`set-owner`** (an administrator) names another member as the
     accountable owner. When the owner leaves the organization, the account is
     suspended, and it is not resumed until an administrator names a new owner.
+    When the organization's directory (SCIM) deactivates or deletes the owner,
+    the account is suspended too, a re-activation of the owner does not resume
+    it, and `resume` refuses until the owner is re-activated or a new owner is
+    named.
   - **`retire`** (an administrator) ends its membership and revokes every key
     for good; the account's record stays, so what it wrote still names it.
 
