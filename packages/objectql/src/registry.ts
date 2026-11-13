@@ -5441,6 +5441,46 @@ export class SchemaRegistry {
   }
 
   /**
+   * [ADR-0150 D4, #32534] Release `owner`'s claim, recorded by
+   * {@link claimBareNameFunctions}, on each function name its package claims
+   * and no longer holds: `stillHolds(name)` answers whether the engine still
+   * holds `name` for that package, and every name it answers `false` for is
+   * released. The runtime's app-artifact binder (`bindAppArtifactHandlers`)
+   * calls it right after a re-bind removes functions from the engine: when a
+   * function its previous bind gave `owner` goes to another owner, and when
+   * `owner`'s package body is dropped. A claim is the only record of a
+   * function's holder this rule reads, and the engine's
+   * `unregisterFunctionsByPackage` does not reach it, so without the release
+   * the old owner goes on holding a name it no longer registers: once sealed,
+   * a bind of that name by a package that meets it is refused naming it (a
+   * gaining owner's whole group left unbound), and an unsealed boot's seal
+   * reports a clash that is not there.
+   *
+   * The engine is asked, not the binder's record of its last bind: the
+   * engine's removal is by the exact owner string (`app:<id>`), so a function
+   * the package holds under another owner spelling (its bare id) stays held,
+   * and keeps its claim; and a function an earlier bind gave the owner that
+   * the last bind no longer named leaves with the removal, and is released
+   * with it.
+   *
+   * Only that package's claims are released: every other holder's claim
+   * stays, and so does each name it still holds. It judges nothing and
+   * records nothing else, sealed or not; an owner-less call releases nothing,
+   * as an owner-less bind claims nothing.
+   */
+  releaseBareNameFunctions(owner: string | undefined, stillHolds: (name: string) => boolean): void {
+    if (!owner) return;
+    const byName = this.bareNameClaims.get('function');
+    if (!byName) return;
+    const packageId = handlerOwnerPackageId(owner);
+    for (const [name, claimants] of [...byName]) {
+      if (!claimants.has(packageId) || stillHolds(name)) continue;
+      claimants.delete(packageId);
+      if (claimants.size === 0) byName.delete(name);
+    }
+  }
+
+  /**
    * The cold boot's seal (`bare-name-one-holder.ts`, "The cold boot"): from
    * this call on, both doors and the hook binder's function bind refuse a new
    * holder of a covered name. Answers every name the boot left held twice, as
