@@ -1887,16 +1887,18 @@ export function registerStorageFamily(
       // The declared length first: this door refuses a body that declares more
       // than it takes before this door reads it. The service judges the bytes
       // read again, before the link is spent, so an oversized upload never uses
-      // it up. [#32747] A several-file submit (a form) declares up to as many
-      // files as THIS link takes, each within the limit, plus the form's
-      // framing: the link is read first (a read that writes nothing), so a
-      // link that takes one file gets a one-file allowance here, and the
-      // service refuses it the form.
+      // it up. [#32747] Which submit a link takes is the link's: only a link
+      // that takes several files reads a form (`multipart/form-data`), which
+      // may declare up to as many files as that link takes, each within the
+      // limit, plus the form's framing. A link that takes one file takes its
+      // body as the file, whatever its content type, under the one-file limit,
+      // exactly as before links took several.
       const token = String(req.params.token ?? '');
       const { maxUploadBytes } = currentLimits();
       const declaredBody = declaredContentLength(req);
-      const several = isUploadLinkForm(req.headers?.['content-type']);
-      const linkFiles = several ? (await door.inspectUploadLink(token, caller.userId as string)).files : undefined;
+      const linkFiles = isUploadLinkForm(req.headers?.['content-type'])
+        ? await severalFilesOf(door, token, caller.userId as string)
+        : undefined;
       const formLimit =
         linkFiles !== undefined && maxUploadBytes !== undefined
           ? maxUploadBytes * linkFiles.max + UPLOAD_LINK_FORM_OVERHEAD_BYTES
@@ -1907,7 +1909,7 @@ export function registerStorageFamily(
           : formLimit !== undefined
             ? declaredBody > formLimit
               ? `The upload body is ${declaredBody} bytes, over the ${formLimit} bytes this link's upload can carry ` +
-                `(${linkFiles!.max} ${linkFiles!.max === 1 ? 'file' : 'files'}, each within the "Max upload size (MB)" storage setting).`
+                `(${linkFiles!.max} files, each within the "Max upload size (MB)" storage setting).`
               : null
             : uploadSizeRefusal(declaredBody, maxUploadBytes, (n) => `The upload body is ${n} bytes`);
       if (tooLarge !== null) {
@@ -1920,7 +1922,7 @@ export function registerStorageFamily(
           sendError(res, uploads.status, uploads.code, uploads.message, { userMessage: copy.refused(uploads.message) });
           return;
         }
-        const outcome = await door.consumeUploadLinkFiles(token, uploads, caller.userId as string, { sentAs: 'form' });
+        const outcome = await door.consumeUploadLinkFiles(token, uploads, caller.userId as string);
         const fileIds = outcome.files.map((file) => file.fileId);
         sendOk(res, {
           fileId: fileIds[0],
@@ -2459,6 +2461,27 @@ function relayUploadLinkRefusal(res: IHttpResponse, err: unknown, copy: UploadLi
  * body cap.
  */
 const UPLOAD_LINK_FORM_OVERHEAD_BYTES = 64 * 1024;
+
+/**
+ * [#32747] How many files a link that takes several takes, read before a
+ * multipart body is judged (a read that writes nothing), or `undefined` for a
+ * link that takes one file. A link that cannot be read is `undefined` too: it
+ * takes the one-file path, whose spend answers the refusal it answered before
+ * links took several, in the order it did.
+ */
+async function severalFilesOf(
+  door: UploadLinkDoor,
+  token: string,
+  callerUserId: string,
+): Promise<{ min: number; max: number } | undefined> {
+  let files: { min: number; max: number };
+  try {
+    files = (await door.inspectUploadLink(token, callerUserId)).files;
+  } catch {
+    return undefined;
+  }
+  return files.max > 1 ? files : undefined;
+}
 
 /** [#32747] Is the submit a several-file form (`multipart/form-data`)? */
 function isUploadLinkForm(raw: string | string[] | undefined): boolean {

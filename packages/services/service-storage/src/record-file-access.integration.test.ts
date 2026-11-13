@@ -72,7 +72,8 @@ import { installDefaultOrganization, DEFAULT_ORGANIZATION_ID } from './default-o
 import { UPLOAD_LINK_TTL_SECONDS } from './record-file-access.js';
 import { PRE_RECORD_CLAIM_WINDOW_SECONDS } from './pre-record-upload.js';
 import { resolveThrownHttpError } from '@objectstack/types';
-import { UPLOAD_LINK_MAX_FILES, UPLOAD_LINK_ONE_FILE_FORM_MESSAGE, UPLOAD_LINK_UNUSABLE_MESSAGE } from './upload-link-wire.js';
+import { UPLOAD_LINK_MAX_FILES, UPLOAD_LINK_UNUSABLE_MESSAGE } from './upload-link-wire.js';
+import { uploadSizeRefusal } from './storage-limits.js';
 import { UPLOAD_LINK_COPY } from './upload-link-copy.js';
 
 const BASE = '/api/v1/storage';
@@ -1205,6 +1206,8 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
         params: { token },
         headers: { 'content-type': 'multipart/form-data; boundary=----os', ...sessionOf(user) },
         body,
+        // A transport hands the body's bytes too; a link that reads no form takes them.
+        rawBody: async () => Buffer.from('------os--\r\n'),
       });
     };
     const failureOf = (write: Promise<unknown>) => write.then(() => null, (e: unknown) => resolveThrownHttpError(e));
@@ -1214,6 +1217,7 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
         params: { token },
         headers: { 'content-type': 'multipart/form-data; boundary=----os', ...headers, ...sessionOf(OWNER.userId) },
         body,
+        rawBody: async () => Buffer.from('------os--\r\n'),
       });
     /** File parts `file0` … that count how often their bytes are read. */
     const countedParts = (n: number) => {
@@ -1346,10 +1350,11 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
     it('control: a single-file field link and an attachments link still take one file; a second is refused, and the one lands', async () => {
       for (const target of [{ field: 'policy' }, { attachments: true as const }]) {
         const grant = await files.createUploadLinkAs('claim', ids.claimB, target, OWNER as never);
-        const two = await useLinkForm(tokenOf(grant.path), [pdf('one-a.pdf'), pdf('one-b.pdf')]);
-        expect(two._status, JSON.stringify(two._json)).toBe(400);
-        expect(two._json.error.code).toBe('VALIDATION_ERROR');
-        expect(two._json.error.message).toContain('takes one file');
+        // The door never reads a form for such a link (below); the service it
+        // spends through refuses two files before the spend all the same.
+        const two = [pdf('one-a.pdf'), pdf('one-b.pdf')].map((p) => ({ filename: p.name, mimeType: 'application/pdf', data: p.bytes }));
+        expect(await refusalOf(files.consumeUploadLinkFiles(tokenOf(grant.path), two, OWNER.userId)))
+          .toMatchObject({ code: 'VALIDATION_ERROR', status: 400, message: expect.stringContaining('takes one file') });
         expect(await rowsNamed(['one-a.pdf', 'one-b.pdf'])).toEqual([]);
         const one = await useLink(tokenOf(grant.path), Buffer.from('%PDF-1.4 one'));
         expect(one._status, JSON.stringify(one._json)).toBe(200);
@@ -1482,34 +1487,41 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect(ok._status, JSON.stringify(ok._json)).toBe(200);
     });
 
-    it('a link that takes one file refuses a form even of one file, 400 VALIDATION_ERROR before the spend, and then takes the body', async () => {
-      for (const target of [{ field: 'policy' }, { attachments: true as const }]) {
-        const grant = await files.createUploadLinkAs('claim', ids.claimB, target, OWNER as never);
-        const form = await useLinkForm(tokenOf(grant.path), [pdf('form-one.pdf')]);
-        expect(form._status, JSON.stringify(form._json)).toBe(400);
-        expect(form._json.error.code).toBe('VALIDATION_ERROR');
-        expect(form._json.error.message).toBe(UPLOAD_LINK_ONE_FILE_FORM_MESSAGE);
-        expect(await rowsNamed(['form-one.pdf'])).toEqual([]);
-        const body = await useLink(tokenOf(grant.path), Buffer.from('%PDF-1.4 body'));
-        expect(body._status, JSON.stringify(body._json)).toBe(200);
-      }
-    });
-
-    it('a form declares at most this link\'s files: one file\'s allowance on a one-file link, the cap\'s on a multi-file link', async () => {
+    it('a link that takes one file takes its body as the file whatever its content type, a multipart body included, under the one-file limit, as before', async () => {
+      const multipart = 'multipart/form-data; boundary=----os';
+      const raw = Buffer.from('------os\r\nContent-Disposition: form-data; name="count"\r\n\r\n1\r\n------os--\r\n');
       storage.setLimitsSnapshot({ maxUploadMb: { value: 1, authored: true } } as never);
       try {
-        const declared = { 'content-length': String(2 * MIB) };
-        const single = await files.createUploadLinkAs('claim', ids.claimB, { field: 'policy' }, OWNER as never);
-        const one = await putForm(tokenOf(single.path), { count: '1', ...countedParts(1).parts }, declared);
-        expect(one._status, JSON.stringify(one._json)).toBe(413);
-        const several = await files.createUploadLinkAs('claim', await newClaim('declared'), { field: 'scans' }, OWNER as never);
-        const two = await putForm(tokenOf(several.path), { count: '2', ...countedParts(2).parts }, declared);
-        expect(two._status, JSON.stringify(two._json)).toBe(200);
+        for (const target of [{ field: 'policy' }, { attachments: true as const }]) {
+          const grant = await files.createUploadLinkAs('claim', ids.claimB, target, OWNER as never);
+          const token = tokenOf(grant.path);
+          // Declared over the one-file limit but within a form's allowance for
+          // one file: refused, with the one-file words, before anything is read.
+          const over = await useLink(token, raw, { 'content-type': multipart, 'content-length': String(MIB + 1) });
+          expect(over._status, JSON.stringify(over._json)).toBe(413);
+          expect(over._json.error.message).toBe(uploadSizeRefusal(MIB + 1, MIB, (n) => `The upload body is ${n} bytes`));
+          // The body is the file: stored as sent, its size the body's length.
+          const res = await useLink(token, raw, { 'content-type': multipart });
+          expect(res._status, JSON.stringify(res._json)).toBe(200);
+          expect(res._json.data.size).toBe(raw.length);
+          expect(res._json.data.fileIds).toEqual([res._json.data.fileId]);
+          expect((await useLink(token, raw, { 'content-type': multipart }))._status).toBe(404);
+        }
       } finally {
         storage.setLimitsSnapshot({} as never);
       }
     });
 
+    it('a form on a multi-file field\'s link declares up to that link\'s files, each within the limit', async () => {
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 1, authored: true } } as never);
+      try {
+        const several = await files.createUploadLinkAs('claim', await newClaim('declared'), { field: 'scans' }, OWNER as never);
+        const two = await putForm(tokenOf(several.path), { count: '2', ...countedParts(2).parts }, { 'content-length': String(2 * MIB) });
+        expect(two._status, JSON.stringify(two._json)).toBe(200);
+      } finally {
+        storage.setLimitsSnapshot({} as never);
+      }
+    });
     it('a form is refused before any part is read: a count over the link\'s cap, parts that disagree with count, a part missing', async () => {
       const grant = await files.createUploadLinkAs('claim', await newClaim('unread'), { field: 'scans' }, OWNER as never);
       const token = tokenOf(grant.path);

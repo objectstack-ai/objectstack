@@ -55,19 +55,13 @@ export function uploadLinkFileCountMessage(range: { min: number; max: number }, 
 }
 
 /**
- * [#32747] The refusal of a several-file form sent to a link that takes one
- * file (a single-file field's, or an attachments link): that link takes its
- * file as the request body. Same code and status as a wrong count.
- */
-export const UPLOAD_LINK_ONE_FILE_FORM_MESSAGE =
-  'Nothing was stored: this upload link takes one file, sent as the request body, not as a several-file form.';
-
-/**
  * [#32747] The multipart form a several-file submit is sent as: one part per
  * file named `file0` … `fileN-1`, in the order picked, and a `count` field
  * naming N. Indexed names, because a form parser that keeps one value per
- * name keeps only the last of a repeated one; `count` lets the door refuse a body that lost a part rather
- * than store fewer files than were sent. Each part's file name is
+ * name keeps only the last of a repeated one; `count` lets the door refuse a
+ * body that lost a part rather than store fewer files than were sent. Only a
+ * link that takes several files reads the form; a link that takes one takes
+ * its body as the file, whatever its content type. Each part's file name is
  * URI-encoded, as the single-file submit's `x-file-name` header is.
  */
 export const UPLOAD_LINK_FORM_COUNT_FIELD = 'count';

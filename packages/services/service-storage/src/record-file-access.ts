@@ -43,7 +43,6 @@ import { buildKey, mintDownloadUrl } from './storage-routes.js';
 import {
   UPLOAD_LINK_FILE_COUNT_CODE,
   UPLOAD_LINK_FILE_COUNT_STATUS,
-  UPLOAD_LINK_ONE_FILE_FORM_MESSAGE,
   uploadLinkFileCountMessage,
   UPLOAD_LINK_KIND,
   UPLOAD_LINK_MAX_FILES,
@@ -165,8 +164,8 @@ import { assertFileConstraints } from './file-reference-lifecycle.js';
  *    submit carries. One refusal refuses the whole submit, nothing is stored,
  *    and the link stays usable. A link that takes one file is judged exactly
  *    as it was before this rule (to a record, the record's write judges the
- *    field's constraints), and takes its file as the request body: a form is
- *    refused before the spend.
+ *    field's constraints), and takes its body as the file, whatever its
+ *    content type, as it did before links took several.
  *  - **The several-file form** names `count`, at most the link's cap, and the
  *    door refuses a form whose `count` is over the link's cap or whose parts
  *    disagree with it before it reads any part's bytes.
@@ -379,11 +378,6 @@ export interface ICallerRecordFileService {
  * minted for, signed in, so the token alone opens nothing. Another user gets
  * the one unusable-link refusal, and the link is not spent.
  */
-/** [#32747] How a submit was sent: as the request body (one file) or as a several-file form. */
-export interface UploadLinkSubmitOptions {
-  sentAs?: 'body' | 'form';
-}
-
 export interface UploadLinkDoor {
   /** The link's view, or the one unusable-link refusal. Writes nothing. */
   inspectUploadLink(token: string, callerUserId: string): Promise<UploadLinkView>;
@@ -392,13 +386,11 @@ export interface UploadLinkDoor {
   /**
    * [#32747] Spend the link on one submit carrying `uploads` (in the order
    * picked), landing all of them where the link is bound, or none.
-   * `sentAs: 'form'` is a several-file form, which a one-file link refuses.
    */
   consumeUploadLinkFiles(
     token: string,
     uploads: UploadLinkUpload[],
     callerUserId: string,
-    options?: UploadLinkSubmitOptions,
   ): Promise<UploadLinkFilesOutcome>;
 }
 
@@ -1152,7 +1144,6 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     token: string,
     uploads: UploadLinkUpload[],
     callerUserId: string,
-    options: UploadLinkSubmitOptions = {},
   ): Promise<UploadLinkFilesOutcome> {
     const engine = this.engineOrRefuse();
     const storage = this.storageOrRefuse();
@@ -1163,11 +1154,6 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     // [#32747] As many files as the link takes, before anything else is judged.
     const range = this.fileRangeOf(engine, state);
     if (uploads.length < range.min || uploads.length > range.max) refuseFileCount(range, uploads.length);
-    // A link that takes one file takes it as the request body, as it did
-    // before links took several: a form, even of one file, is refused.
-    if (options.sentAs === 'form' && range.max === 1) {
-      refuse(UPLOAD_LINK_FILE_COUNT_CODE, UPLOAD_LINK_FILE_COUNT_STATUS, UPLOAD_LINK_ONE_FILE_FORM_MESSAGE);
-    }
     const maxUploadBytes = resolveStorageLimits(this.deps.getLimitsSnapshot()).maxUploadBytes;
     for (const upload of uploads) {
       if (!nonEmptyString(upload?.filename)) refuse('VALIDATION_ERROR', 400, 'The upload names no file.');
