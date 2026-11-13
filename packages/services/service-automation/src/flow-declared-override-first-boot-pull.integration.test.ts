@@ -108,10 +108,20 @@ const otherStack = () =>
  */
 type Second = 'none' | 'before' | 'after' | 'installed-after' | 'installed-both' | 'installed-both-reversed';
 
-type Row = 'override' | 'legacy';
+type Row = 'override' | 'legacy' | 'other-override';
 
 const storedRow = (row: Row) =>
-    row === 'override'
+    // [#32613] OTHER's declared override, in OTHER's own pair.
+    row === 'other-override'
+        ? {
+            id: 'meta_other_override',
+            name: FLOW,
+            type: 'flow',
+            state: 'active',
+            package_id: `${OTHER}.custom`,
+            metadata: JSON.stringify(ticketFlow('OTHER-OVERRIDE', { overrides: { package: OTHER, basedOn: '1.0.0' } })),
+        }
+        : row === 'override'
         ? {
             id: 'meta_override',
             name: FLOW,
@@ -417,6 +427,36 @@ describe('[#31696] a name a second package also ships: each package\'s flow is a
         expect(String(overlay[0][0])).toContain('customizes neither and is not armed');
         expect(overlay[0][1]).toMatchObject({ flow: FLOW, holders: [BASE, OTHER].sort() });
     });
+
+    /**
+     * [#32613] Each package's declared override, in its own pair, beside a
+     * package-less row read after it: the boot pull arms each holder's
+     * override in that holder's slot, whichever package registers first (and
+     * so owns the bare name). Before, an override was judged against the
+     * bare-name owner alone, so the other holder's override read as a plain
+     * stored row: the package-less row read after it took the bare slot and
+     * dropped it, and the pull armed that holder's shipped body until
+     * `kernel:ready` re-armed from the protocol's view.
+     */
+    const OVERRIDES: ReadonlyArray<readonly [readonly Row[], Second, string, string]> = [
+        [['other-override', 'legacy'], 'after', 'BASE', 'OTHER-OVERRIDE'],
+        [['override', 'legacy'], 'before', 'OVERRIDE', 'OTHER'],
+        [['override', 'other-override'], 'before', 'OVERRIDE', 'OTHER-OVERRIDE'],
+        [['other-override', 'override'], 'after', 'OVERRIDE', 'OTHER-OVERRIDE'],
+        [['override', 'other-override', 'legacy'], 'before', 'OVERRIDE', 'OTHER-OVERRIDE'],
+        [['other-override', 'override', 'legacy'], 'after', 'OVERRIDE', 'OTHER-OVERRIDE'],
+    ];
+    for (const [rows, second, baseLabel, otherLabel] of OVERRIDES) {
+        it(`[#32613] rows ${rows.join(' then ')}, the second package registered ${second}: each holder's own body at the pull`, async () => {
+            let armedAtPull: unknown = 'unread';
+            const { automation, refusals } = await measuredBoot(rows, async (_ql, engine) => {
+                armedAtPull = labels(engine);
+            }, second);
+            expect(armedAtPull).toEqual({ [BASE]: baseLabel, [OTHER]: otherLabel });
+            expect(labels(automation)).toEqual({ [BASE]: baseLabel, [OTHER]: otherLabel });
+            expect(refusals).toEqual([]);
+        });
+    }
 
     /**
      * [M2] A package-less disable row read by a boot that reassembles the clash (pull, ledger read, then the

@@ -184,6 +184,17 @@ describe('extractHookBody', () => {
     expect(extractHookBody(fn, 'hook uuid').capabilities).toContain('crypto.uuid');
   });
 
+  it('infers email.send and activity.append from the platform door calls', () => {
+    const fn = async (ctx: any) => {
+      await ctx.email.send({ to: 'pat@example.test', subject: 'Hi', text: 'x' });
+      await ctx.activity.append({ object: 'crm_contact', recordId: 'c1', type: 'completed', summary: 'x' });
+    };
+    const caps = extractHookBody(fn, 'hook doors').capabilities;
+    expect(caps).toContain('email.send');
+    expect(caps).toContain('activity.append');
+    expect(caps).not.toContain('api.write');
+  });
+
   // #1876 — a handler that references a module-scope helper is not self-
   // contained; extraction must throw so lowerCallables falls back to bundling
   // (which carries the closure) instead of shipping a body that ReferenceErrors.

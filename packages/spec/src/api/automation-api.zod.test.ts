@@ -444,6 +444,22 @@ describe('TriggerFlowResponseSchema', () => {
     expect(result.data.summary?.acted).toBe(1);
   });
 
+  // #32861 — `AutomationResult.droppedFields`: the schema strips undeclared
+  // keys, so this holds the member's SURVIVAL on the relayed answer, and that
+  // its element is the data engine's own drop event (no second vocabulary).
+  it('keeps droppedFields on a finished run, element for element, and refuses an off-vocabulary reason', () => {
+    const dropped = [{ object: 'expense_report', fields: ['status'], reason: 'readonly' as const }];
+    const result = TriggerFlowResponseSchema.parse({
+      success: true,
+      data: { success: true, status: 'completed', droppedFields: dropped },
+    });
+    expect(result.data.droppedFields).toEqual(dropped);
+    expect(TriggerFlowResponseSchema.safeParse({
+      success: true,
+      data: { success: true, droppedFields: [{ object: 'expense_report', fields: ['status'], reason: 'locked' }] },
+    }).success).toBe(false);
+  });
+
   // `AutomationResult.flowLabel` — the flow's authored label, which a runner
   // shows (and translates) in its header and completion toast. The compile-
   // time `TriggerFlowDataMatchesContract` guard above holds the member's

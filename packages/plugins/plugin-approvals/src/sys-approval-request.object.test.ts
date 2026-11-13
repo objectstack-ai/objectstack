@@ -169,15 +169,16 @@ describe('sys_approval_request declared actions', () => {
     // `ActionAiSchema.description` is the LLM-facing contract (min 40 chars,
     // required when `ai.exposed`) — the same name one level down. Putting the
     // question there would arm a tool description while the dialog fell back to
-    // its generic line. `approval_reject` is exposed to AI since #32442, so its
-    // tool description exists — and must be its own text, never the question.
+    // its generic line. `approval_reject` is exposed to AI since #32442 and
+    // `approval_recall` since #32993, so each has a tool description — and it
+    // must be its own text, never the question.
     for (const name of ['approval_reject', 'approval_recall']) {
       const a = byName(name);
       const question = templateSlotSource(a.description);
       expect(question, `${name}.description`).toMatch(/\?/);
-      expect(a.ai?.description ?? '', `${name}.ai.description`).not.toContain(question);
+      expect(a.ai?.description, `${name}.ai.description`).toEqual(expect.any(String));
+      expect(a.ai.description, `${name}.ai.description`).not.toContain(question);
     }
-    expect(byName('approval_recall').ai?.description).toBeUndefined();
   });
 
   it('reassign collects the new approver via a field-backed sys_user picker keyed as `to`', () => {
@@ -252,10 +253,15 @@ describe('sys_approval_request AI exposure (#32442)', () => {
     approval_reassign: 'reassign',
     approval_send_back: 'revise',
   };
+  // [#32993] The submitter's side of the same process.
+  const SUBMITTER_LEVERS: Record<string, string> = {
+    approval_recall: 'recall',
+    approval_resubmit: 'resubmit',
+  };
 
-  it('exposes exactly the four approver decisions to AI', () => {
+  it('exposes exactly the four approver decisions and the submitter\'s recall and resubmit to AI', () => {
     const exposed = actions.filter((a) => a.ai?.exposed === true).map((a) => a.name).sort();
-    expect(exposed).toEqual(Object.keys(DECISIONS).sort());
+    expect(exposed).toEqual([...Object.keys(DECISIONS), ...Object.keys(SUBMITTER_LEVERS)].sort());
   });
 
   it('every exposed decision asks for the human\'s confirmation and carries its own tool description', () => {
@@ -272,6 +278,19 @@ describe('sys_approval_request AI exposure (#32442)', () => {
   it('every exposed decision forwards to its own same-origin decision route, so the service decides who may act', () => {
     for (const [name, verb] of Object.entries(DECISIONS)) {
       const a = byName(name);
+      expect(a.type).toBe('api');
+      expect(a.method).toBe('POST');
+      expect(a.target).toBe(`/api/v1/approvals/requests/{id}/${verb}`);
+    }
+  });
+
+  it('[#32993] recall and resubmit ask for the human\'s confirmation, name the submitter, and forward to their own routes', () => {
+    for (const [name, verb] of Object.entries(SUBMITTER_LEVERS)) {
+      const a = byName(name);
+      expect(a.ai.requiresConfirmation, `${name}.ai.requiresConfirmation`).toBe(true);
+      expect(a.ai.description.length, `${name}.ai.description length`).toBeGreaterThanOrEqual(40);
+      expect(a.ai.description).toMatch(/submitter/);
+      expect(a.ai.description).toMatch(/confirm/);
       expect(a.type).toBe('api');
       expect(a.method).toBe('POST');
       expect(a.target).toBe(`/api/v1/approvals/requests/{id}/${verb}`);

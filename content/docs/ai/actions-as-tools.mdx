@@ -126,6 +126,9 @@ through the API. Destructive actions (`confirmText`, `mode: 'delete'`,
 `requiresConfirmation: true` so the client can ask the human before calling. To
 assert that a destructive-looking action is safe for autonomous execution, set
 `ai.requiresConfirmation: false`.
+An AI service account does not confirm an action for itself: an action declaring
+`ai.requiresConfirmation: true` refuses it at every door, REST `/actions` included,
+whatever the request carries, and a person runs that action.
 
 ## Wiring it up
 

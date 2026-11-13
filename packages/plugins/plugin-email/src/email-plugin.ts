@@ -52,6 +52,7 @@ import {
   emailLogObjectOfJob,
   isEmailLogObject,
 } from './email-log-objects.js';
+import { installOutboxSenderBound } from './outbox-sender-bound.js';
 import {
   EMAIL_ATTACHMENT_RECLAIM_QUEUE,
   EMAIL_ATTACHMENT_RECLAIM_GRACE_MS,
@@ -1154,7 +1155,10 @@ export class EmailServicePlugin implements Plugin {
                     const fresh = Array.isArray(rows) ? rows[0] : (rows as any)?.data?.[0];
                     const target = fresh ?? row;
                     if (target.status !== 'queued' || target.message_id) return;
-                    await svc.deliverPersistedRow(target, undefined, object);
+                    // Sent from the configured sender, as the insert-time bound
+                    // recorded it (`outbox-sender-bound.ts`), whatever the row
+                    // says by the time it is read here.
+                    await svc.deliverPersistedRow(target, { asConfiguredSender: true }, object);
                   } catch (err: any) {
                     // `error`, not `warn` (#5161): the insert returned, the row
                     // is there, everything looks normal — and the mail was NOT
@@ -1183,6 +1187,9 @@ export class EmailServicePlugin implements Plugin {
           },
           { packageId: DRAIN_PKG },
         );
+        // An outbox row the service did not write is sent as the configured
+        // sender, whatever its `from_address` says (`outbox-sender-bound.ts`).
+        installOutboxSenderBound(engine as any, svc, DRAIN_PKG);
         ctx.logger.info('EmailServicePlugin: sys_email / sys_identity_email outbox drain hook installed');
       }
 

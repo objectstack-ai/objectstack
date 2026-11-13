@@ -20,7 +20,11 @@ import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formul
 // (audit stamping, this approval-row writer, the automation-run recorder). A
 // writer-local re-derivation here was rejected by name (Option B): it would be
 // a third answer to a question the codebase already answered two ways.
-import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
+import {
+  createRecordOrganizationResolver,
+  type ObjectSchemaReadDelegate,
+  type RecordOrganizationResolver,
+} from '@objectstack/metadata-core';
 import { isObjectAbsentError, keysetWalk, strandedDecisionFailure } from '@objectstack/types';
 // [#15981 / #16166] Every built-in identity NAME is deliberately absent here:
 // both arms of `isOverrideActor` read an ADR-0095 capability rung, never a name.
@@ -1115,6 +1119,14 @@ export type ActionTokenOutcome =
 const SYSTEM_CTX: ExecutionContext = { isSystem: true, positions: [], permissions: [] };
 
 /**
+ * [decision 6840464379] The objects whose definition this service serves, as
+ * their `schemaReadDelegate`, to the callers its door admits
+ * ({@link ApprovalService.authorizeSchemaRead}). Both declare
+ * `schemaReadDelegate: 'approvals'`; the service refuses every other name.
+ */
+const SCHEMA_READ_DELEGATED_OBJECTS: ReadonlySet<string> = new Set(['sys_approval_request', 'sys_approval_action']);
+
+/**
  * [#13568] Bound on the pending requests one deleted record can carry into
  * {@link ApprovalService.cancelForDeletedRecord}.
  *
@@ -1937,7 +1949,7 @@ export function requestVisibilitySourceOf(service: ApprovalService): RequestVisi
   return source;
 }
 
-export class ApprovalService implements IApprovalService {
+export class ApprovalService implements IApprovalService, ObjectSchemaReadDelegate {
   private readonly engine: ApprovalEngine;
   private readonly clock: ApprovalClock;
   private readonly logger?: ApprovalServiceOptions['logger'];
@@ -1950,6 +1962,8 @@ export class ApprovalService implements IApprovalService {
   private objectReadAdmission?: ObjectReadAdmissionSource;
   /** [#11993] Lazily-resolved deployment i18n lookup for refusal copy. */
   private messageTranslator?: () => ValidationMessageTranslator | undefined;
+  /** [decision 6840464379] {@link authorizeSchemaRead}'s verdict, kept per request context. */
+  private readonly schemaReadVerdicts = new WeakMap<object, Promise<boolean>>();
   /** [#24863] Lazily-resolved `i18n` service for the reader-locale display labels. */
   private i18nServiceSource?: () => ReaderLabelI18n | undefined;
   /** [ADR-0142 D6] Lazily-resolved `ownership-queue` service a `queue` approver expands through. */
@@ -5349,6 +5363,9 @@ export class ApprovalService implements IApprovalService {
       await this.assertDecisionOutputsMatchDeclarations(acceptedOutputs, declaredDefs, org);
     }
 
+    // A decision attaches only files its caller uploaded, refused before any write.
+    await this.assertAttachmentsUploadedByCaller(input.attachments, org, context);
+
     // The run behind this request must still be resumable before ANY of it is
     // written down (#4420). Last of the refusals, first before the writes: a
     // decision recorded against a dead run is a zombie nothing later can undo,
@@ -5538,6 +5555,61 @@ export class ApprovalService implements IApprovalService {
    */
   private static resumeStatusOf(err: unknown): string | undefined {
     return (err as { resumeStatus?: string } | undefined)?.resumeStatus;
+  }
+
+  /**
+   * A decision or a comment attaches only files its caller uploaded.
+   *
+   * Every id in `attachments` must name a `sys_file` of the request's
+   * organization whose uploader is the caller (`owner_id === userId`) — the
+   * download door's own first rule ("the uploader may always download"), so
+   * no file is attached that its caller could not already open. Anything else
+   * is refused before any write, with one answer for every refused id: a file
+   * the caller did not upload, an id that names no file the request's
+   * organization reaches, a value that is not a list of ids, and a read of the
+   * file store that fails. Nothing tells those apart.
+   *
+   * Not judged: a system caller (its inputs are server-minted, as the
+   * file-reference rule treats every system write), and a kernel with no file
+   * store (`sys_file` not registered, so no file is served from it).
+   */
+  private async assertAttachmentsUploadedByCaller(
+    attachments: unknown,
+    organizationId: string | null,
+    context: ExecutionContext,
+  ): Promise<void> {
+    if (attachments === undefined || attachments === null) return;
+    if (Array.isArray(attachments) && attachments.length === 0) return;
+    if (context?.isSystem) return;
+    if (!this.engine.getSchema?.('sys_file')) return;
+
+    const refuse = (): never => {
+      throw new Error(
+        'VALIDATION_FAILED: attachments can only be files you uploaded yourself. '
+        + 'Upload the file, then attach it again.',
+      );
+    };
+    const userId = actingUserId(context);
+    if (!userId) refuse();
+    const ids = Array.isArray(attachments) ? attachments : [attachments];
+    if (!ids.every((id): id is string => typeof id === 'string' && id.length > 0)) refuse();
+    const wanted = [...new Set(ids as string[])];
+
+    let rows: any[] = [];
+    try {
+      rows = (await this.engine.find('sys_file', {
+        where: { id: { $in: wanted } },
+        fields: ['id', 'owner_id'],
+        limit: wanted.length,
+        context: organizationId ? { ...SYSTEM_CTX, tenantId: organizationId } : SYSTEM_CTX,
+      })) ?? [];
+    } catch {
+      refuse();
+    }
+    const uploadedByCaller = new Set(
+      rows.filter((r) => r?.owner_id != null && String(r.owner_id) === userId).map((r) => String(r.id)),
+    );
+    if (!wanted.every((id) => uploadedByCaller.has(id))) refuse();
   }
 
   /**
@@ -7347,6 +7419,8 @@ export class ApprovalService implements IApprovalService {
     if (!context.isSystem && !isSubmitter && slot === undefined) {
       throw new Error(`FORBIDDEN: actor '${actorId}' is not on this request`);
     }
+    // A comment attaches only files its caller uploaded, refused before any write.
+    await this.assertAttachmentsUploadedByCaller(input.attachments, raw.organization_id ?? null, context);
 
     const now = this.clock.now().toISOString();
     await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
@@ -10380,5 +10454,65 @@ export class ApprovalService implements IApprovalService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * `ObjectSchemaReadDelegate` — may this caller, whom the object read check
+   * refuses, be served the DEFINITION of `sys_approval_request` or
+   * `sys_approval_action`? (ADR-0106 as amended by ruling record 6787890900;
+   * exception by maintainer decision 6840464379; declared by both objects'
+   * `schemaReadDelegate`.)
+   *
+   * Both objects are closed on the data side on purpose, and their rows reach
+   * a member only through this service's door. The request page that door
+   * links to needs both definitions to render, so the callers the door serves
+   * a request to are the callers who need them: this answers by the door's
+   * own rule, asked without a named request: does the door serve the caller
+   * at least one request? {@link visibleRequestIds} (the participant rule
+   * `getRequest` and `listActions` apply), then the door's own row read
+   * inside the caller's organization ({@link findRequestRow}'s scope): the
+   * already-acted probe is not organization-scoped, so an id it collects in
+   * another organization is one the door would not serve here, and must not
+   * count. That admits a current approver, the submitter, a past actor, and
+   * the override holder; a member party to no request in their organization
+   * is refused and keeps the absent answer.
+   *
+   * The record-reader tier is not asked: it is evaluated only against a named
+   * record, and a definition read names none.
+   *
+   * Any other object name is refused: any object may name this service, and
+   * the service speaks only for its own two. Seeing a definition confers
+   * nothing: the rows stay behind this service's door and the data door's
+   * read check. Errors propagate (the outlet answers them as its 5xx fault);
+   * a failed visibility probe already reads as "nothing collected".
+   *
+   * One answer per request: both objects ask the same question of the same
+   * caller, and an object list asks it for both, so the verdict is kept for
+   * the life of the context object the outlet resolved for this request.
+   */
+  async authorizeSchemaRead(objectName: string, context: ExecutionContext): Promise<boolean> {
+    if (!SCHEMA_READ_DELEGATED_OBJECTS.has(objectName)) return false;
+    if (context === null || typeof context !== 'object') return this.servesAnyRequest(context);
+    let verdict = this.schemaReadVerdicts.get(context);
+    if (!verdict) {
+      verdict = this.servesAnyRequest(context);
+      this.schemaReadVerdicts.set(context, verdict);
+    }
+    return verdict;
+  }
+
+  /** {@link authorizeSchemaRead}'s question, asked once: does the door serve this caller any request? */
+  private async servesAnyRequest(context: ExecutionContext): Promise<boolean> {
+    // `organizationId` is not on the envelope — see isOverrideActor().
+    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId ?? null;
+    const visible = await this.visibleRequestIds(context, tenantOrg);
+    if (visible === null) return true;
+    if (visible.size === 0) return false;
+    const where: any = { id: { $in: [...visible] } };
+    if (tenantOrg) where.organization_id = tenantOrg;
+    const rows = await this.engine.find('sys_approval_request', {
+      where, fields: ['id'], limit: 1, context: SYSTEM_CTX,
+    });
+    return Array.isArray(rows) && rows.length > 0;
   }
 }

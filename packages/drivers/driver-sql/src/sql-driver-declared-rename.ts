@@ -67,6 +67,7 @@ const TYPE_DRIFT_OPS: ReadonlySet<DriftOp['type']> = new Set([
   'widen_varchar',
   'manual_column_type_change',
   'manual_widen_varchar_to_text',
+  'widen_date_to_datetime',
 ]);
 
 /** The object shape these bodies read: its fields, and its declared indexes for keyedness. */

@@ -191,6 +191,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "メタデータ",
         help: "JSON シリアライズされた追加コンテキスト"
       },
+      origin: {
+        label: "Origin",
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry not written through the activity door."
+      },
       changed_fields: {
         label: "変更フィールド",
         help: "記録された変更のキー集合:更新の場合は、記録された旧値/新値が含むすべてのフィールド。その他の行では空。書き込み時にプラットフォームが付与し、閲覧者に提供されるフィールドに絞り込んで返されます。NULL はその行がまだ付与されていないことを示します(`os migrate activity-changed-fields` を実行してください)。"

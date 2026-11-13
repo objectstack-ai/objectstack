@@ -94,6 +94,28 @@ describe('#30892 — the MCP bridge\'s file members', () => {
         expect(link).toEqual({ url: 'https://acme.test/api/v1/storage/upload-links/id.secret', expiresAt: '2026-11-06T12:10:00.000Z' });
     });
 
+    it('[#32686] answers a link for a record not yet created as an absolute URL with its file ids, reading no record', async () => {
+        const { service, ctx, deps, protocol } = harness();
+        const withNew = {
+            ...service,
+            createUploadLinkForNewRecordAs: vi.fn(async () => ({
+                path: '/api/v1/storage/upload-links/f9.secret',
+                expiresAt: '2026-11-13T12:10:00.000Z',
+                fileIds: ['f9'],
+            })),
+        } satisfies McpRecordFileService;
+        const bridge = buildMcpBridge(deps, ctx, { recordFiles: withNew });
+        const link = await bridge.createUploadLinkForNewRecord!('expense_line', { field: 'invoice' });
+        expect(withNew.createUploadLinkForNewRecordAs).toHaveBeenCalledWith('expense_line', { field: 'invoice' }, EC);
+        expect(link).toEqual({ url: 'https://acme.test/api/v1/storage/upload-links/f9.secret', expiresAt: '2026-11-13T12:10:00.000Z', fileIds: ['f9'] });
+        expect(protocol.getData).not.toHaveBeenCalled();
+    });
+
+    it('[#32686] a storage service without it gives the bridge no such member', () => {
+        const { service, ctx, deps } = harness();
+        expect(buildMcpBridge(deps, ctx, { recordFiles: service }).createUploadLinkForNewRecord).toBeUndefined();
+    });
+
     it('a bridge built without the seam carries no file member, so neither tool is listed', () => {
         const { ctx, deps } = harness();
         const bridge = buildMcpBridge(deps, ctx);

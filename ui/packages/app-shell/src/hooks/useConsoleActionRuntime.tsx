@@ -53,6 +53,7 @@ import { EnvironmentEntitlementDialog, type EntitlementDialogState } from '../en
 import { entitlementDialogFromError, type EntitlementDialogSpec } from '../environment/entitlements.js';
 import { resolvePageVarTokens } from '../utils/resolvePageVarTokens.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
+import type { TranslateFn } from '@object-ui/i18n';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import {
   findDeclaredApiAction,
@@ -787,6 +788,9 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         triggerParams: params,
         objects: withKnownObjects(objects, metadata.objects),
         language,
+        // The run's `droppedFields` warning (objectstack#33009): labels read
+        // through this host's data source, the console's adapter.
+        droppedFields: { t: t as TranslateFn, fieldLabel, dataSource },
       });
       const judged = launch.judged;
       // Paused at a `screen` node: FlowRunner renders the form + resumes, and
@@ -812,7 +816,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [authFetch, objApiName, objects, metadata, refresh, language, t]);
+  }, [authFetch, objApiName, objects, metadata, refresh, language, t, fieldLabel, dataSource]);
 
   // Server-side action handler — POST /api/v1/actions/{object}/{action}, built
   // from @object-ui/core's `createServerActionHandler` via the shared console

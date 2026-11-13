@@ -1,0 +1,110 @@
+---
+title: Hook Body Doors — Data Protocol reference
+navTitle: Hook Body Doors
+description: "The two platform doors a sandboxed script body (a hook, action or job body) reaches for records it may not write itself: mail goes through the mail service."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+The two platform doors a sandboxed script body (a hook, action or job body)
+reaches for records it may not write itself: mail goes through the mail
+service, and a timeline entry goes through the activity door. A body asks for
+each with its own capability token (`email.send`, `activity.append`,
+`HookBodyCapability`), and calls it as `ctx.email.send(input)` /
+`ctx.activity.append(input)`.
+
+Each input below is what the BODY may say. What the platform says about the
+message or the entry is stamped by the door and is not an input: the sender,
+the user the mail is sent by, the organization it belongs to, the actor of a
+timeline entry and the origin naming the body that wrote it. A key outside
+the shape is refused, never dropped, so a body that names one of those is
+told at the call.
+
+A message cannot be taken back, so mail is sent from an action or a job
+body, never from a hook body; mail on a record change goes through an
+action, a job or a flow. A timeline entry is written with the write that
+runs the body, and commits or rolls back with it.
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/hook-body-doors.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { BodyActivityAppendInputSchema, BodyDoorRecordRefSchema, BodyMailSendInputSchema } from '@objectstack/spec/data';
+import type { BodyActivityAppendInput, BodyDoorRecordRef, BodyMailSendInput } from '@objectstack/spec/data';
+
+// Validate data
+const result = BodyActivityAppendInputSchema.parse(data);
+```
+
+---
+
+## BodyActivityAppendInput
+
+ctx.activity.append input: one entry a script body adds to a record timeline; it commits or rolls back with the write that runs the body. metadata is at most 8000 characters as JSON.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object name of the record the entry is about |
+| **recordId** | `string` | ✅ | Id of the record the entry is about |
+| **type** | `string` | ✅ | Activity kind, from the open vocabulary less the platform-only values |
+| **summary** | `string` | ✅ | One-line summary |
+| **recordLabel** | `string` | optional | Display label of the record, as of the entry |
+| **source** | `{ object: string; id: string }` | optional | The record the entry points at for its detail |
+| **metadata** | `Record<string, any>` | optional | Display hints stored beside the entry, at most 8000 characters as JSON |
+
+### Nested Shape: `BodyActivityAppendInput.source`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object name of the record |
+| **id** | `string` | ✅ | Record id |
+
+
+---
+
+## BodyDoorRecordRef
+
+A record the door reads in the caller's scope before it acts
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object name of the record |
+| **id** | `string` | ✅ | Record id |
+
+
+---
+
+## BodyMailSendInput
+
+ctx.email.send input: a message an action or a job body hands to the mail service; a hook body cannot send mail. At most 50 recipients across to, cc and bcc together; each of to, cc and bcc at most 4000 characters as recorded ("Name" `<address>`, joined by ", "); a replyTo at most 320 characters as recorded.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **to** | `string \| { name?: string; address: string } \| (string \| { name?: string; address: string })[]` | ✅ | Recipient address, or a list of them |
+| **cc** | `string \| { name?: string; address: string } \| (string \| { name?: string; address: string })[]` | optional | Carbon-copy recipients |
+| **bcc** | `string \| { name?: string; address: string } \| (string \| { name?: string; address: string })[]` | optional | Blind carbon-copy recipients |
+| **replyTo** | `string \| { name?: string; address: string }` | optional | Reply-To address; the sender itself is the configured one |
+| **subject** | `string` | ✅ | Subject line |
+| **text** | `string` | optional | Plain-text body |
+| **html** | `string` | optional | HTML body |
+| **related** | `{ object: string; id: string }` | optional | The record the message is about |
+
+### Nested Shape: `BodyMailSendInput.related`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object name of the record |
+| **id** | `string` | ✅ | Record id |
+
+
+---
+

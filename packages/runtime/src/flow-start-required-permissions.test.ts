@@ -18,6 +18,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The dispatcher's reach loads `@objectstack/metadata` inside a function body
+// (`standalone-stack.ts`); paid here, during collection, so no case's clocked
+// window pays that first load (`check:test-source-alias`).
+import '@objectstack/metadata';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ApiEndpointSchema } from '@objectstack/spec/api';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
@@ -25,7 +29,7 @@ import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { callData, invokeBusinessAction } from './action-execution.js';
 import { buildEndpointExecutionContext, executeEndpointTarget } from './endpoint-executor.js';
-import { ELEVATED_START_REFUSAL } from './flow-start-admission.js';
+import { AI_ACCOUNT_ELEVATED_START_REFUSAL, ELEVATED_START_REFUSAL } from './flow-start-admission.js';
 
 const OBJECT = 'frp_vendor';
 const FLOW = 'frp_bank_verify';
@@ -47,8 +51,12 @@ interface Declared {
 
 interface Answer { status: number; code?: string; message?: string }
 
-/** One automation service serving `flow` under {@link FLOW}, and every door over it. */
-function makeDoors(flow: Declared, opts: { actionRequiredPermissions?: string[] } = {}) {
+/**
+ * One automation service serving `flow` under {@link FLOW}, and every door over it.
+ * The action that starts the flow carries its author's AI opt-in unless
+ * `actionAiExposed: false` asks for one that does not.
+ */
+function makeDoors(flow: Declared, opts: { actionRequiredPermissions?: string[]; actionAiExposed?: boolean } = {}) {
     const execute = vi.fn(async (_name: string, _context?: unknown) => ({ success: true, output: {} }));
     const getFlow = vi.fn(async (name: string) => (name === FLOW ? { name, ...flow } : null));
     const automation: Record<string, unknown> = { execute, getFlow };
@@ -59,7 +67,9 @@ function makeDoors(flow: Declared, opts: { actionRequiredPermissions?: string[] 
         objectName: OBJECT,
         type: 'flow',
         target: FLOW,
-        ai: { exposed: true, description: 'Starts the bank-account verification flow for this test.' },
+        ...(opts.actionAiExposed === false
+            ? {}
+            : { ai: { exposed: true, description: 'Starts the bank-account verification flow for this test.' } }),
         ...(opts.actionRequiredPermissions ? { requiredPermissions: opts.actionRequiredPermissions } : {}),
     };
     const objectDef = { name: OBJECT, actions: [action] };
@@ -288,4 +298,174 @@ describe("the action door inherits the flow's declaration", () => {
             });
         });
     }
+});
+
+/**
+ * [ADR-0151 Non-goals; ruling record 6812617393, letter C] Rule 2 of the flow
+ * start admission, pinned at every door that starts a flow by name: an AI
+ * service account starts a flow declared `runAs: 'system'` only through an
+ * action whose author opted it into AI (`ai.exposed: true`), the opt-in the
+ * MCP `run_action` door asks of every action. The trigger route and a declared
+ * endpoint start a flow by name with no action in hand, so nothing there
+ * carries the opt-in and the account is refused.
+ */
+describe('an AI service account starts an elevated flow only through an action its author opted into AI', () => {
+    /** ADR-0151 D3: the agent principal that is its own subject. */
+    const ACCOUNT_EC = { userId: 'acct_1', principalKind: 'agent', systemPermissions: [] as string[] };
+    const ACCOUNT_HOLDER_EC = { ...ACCOUNT_EC, systemPermissions: [CAP] };
+    /** An OAuth-delegated agent names the person it acts for: not an account. */
+    const DELEGATED_EC = {
+        userId: 'user_1', principalKind: 'agent', systemPermissions: [] as string[],
+        onBehalfOf: { userId: 'user_1', principalKind: 'human' },
+    };
+    const PERSON_EC = { ...MEMBER_EC, principalKind: 'human' };
+    const BY_NAME_DOORS = ['trigger', 'endpoint'] as const;
+    const UNEXPOSED = { actionAiExposed: false } as const;
+
+    const expectAccountRefusal = (answer: Answer) => {
+        expect(answer).toMatchObject({
+            status: AI_ACCOUNT_ELEVATED_START_REFUSAL.status,
+            code: AI_ACCOUNT_ELEVATED_START_REFUSAL.code,
+        });
+        expect(answer.status).toBe(403);
+        expect(answer.code).toBe('PERMISSION_DENIED');
+        expect(answer.message).toBe(AI_ACCOUNT_ELEVATED_START_REFUSAL.message);
+    };
+
+    for (const type of ENTRY_TYPES) {
+        for (const door of BY_NAME_DOORS) {
+            it(`${door}: an elevated '${type}' flow — the account is refused 403 PERMISSION_DENIED, never dispatched`, async () => {
+                // The action that targets the flow IS exposed: a by-name door
+                // has no action in hand, so that opt-in does not stand here.
+                const { doors, execute } = makeDoors({ type, runAs: 'system' });
+
+                expectAccountRefusal(await doors[door](ACCOUNT_EC));
+                expect(execute).not.toHaveBeenCalled();
+            });
+        }
+
+        it(`REST /actions: an elevated '${type}' flow behind an action WITHOUT the opt-in — the account is refused, never dispatched`, async () => {
+            const { doors, execute } = makeDoors({ type, runAs: 'system' }, UNEXPOSED);
+
+            expectAccountRefusal(await doors['REST /actions'](ACCOUNT_EC));
+            expect(execute).not.toHaveBeenCalled();
+        });
+
+        for (const entrance of ACTION_ENTRANCES) {
+            it(`${entrance}: an elevated '${type}' flow behind an action WITH the opt-in — the account starts it, and the run carries its kind`, async () => {
+                const { doors, execute } = makeDoors({ type, runAs: 'system' });
+
+                expect((await doors[entrance](ACCOUNT_EC)).status).toBe(200);
+                expect(execute).toHaveBeenCalledTimes(1);
+                expect(execute.mock.calls[0]?.[0]).toBe(FLOW);
+                expect(execute.mock.calls[0]?.[1]).toMatchObject({ userId: 'acct_1', principalKind: 'agent' });
+            });
+        }
+    }
+
+    it('the refusal names the opt-in the author adds, and nothing of the flow', async () => {
+        const { doors } = makeDoors({ type: 'screen', runAs: 'system' }, UNEXPOSED);
+
+        const answer = await doors['REST /actions'](ACCOUNT_EC);
+
+        expect(answer.message).toContain('ai: { exposed: true');
+        expect(answer.message).toContain('run_action');
+        expect(answer.message).not.toContain(FLOW);
+        expect(answer.message).not.toContain(ACTION);
+    });
+
+    it('one refusal at every door that can answer it: the same status, code and words', async () => {
+        const answers: Answer[] = [];
+        for (const door of ['trigger', 'REST /actions', 'endpoint'] as const) {
+            const { doors } = makeDoors({ type: 'screen', runAs: 'system' }, UNEXPOSED);
+            answers.push(await doors[door](ACCOUNT_EC));
+        }
+        expectAccountRefusal(answers[0]!);
+        for (const answer of answers.slice(1)) expect(answer).toEqual(answers[0]);
+    });
+
+    it('MCP run_action asks the opt-in of every action, upstream of this rule: unexposed, nobody starts the flow there', async () => {
+        for (const ec of [ACCOUNT_EC, PERSON_EC]) {
+            const { doors, execute, getFlow } = makeDoors({ type: 'screen', runAs: 'system' }, UNEXPOSED);
+
+            const answer = await doors['MCP run_action'](ec);
+
+            expect(answer.status).not.toBe(200);
+            expect(answer.message).toContain('is not exposed to AI');
+            // The exposure gate answered: the flow's declaration was never read.
+            expect(getFlow).not.toHaveBeenCalled();
+            expect(execute).not.toHaveBeenCalled();
+        }
+    });
+
+    describe('the order of the rules', () => {
+        for (const door of ['trigger', 'REST /actions', 'endpoint'] as const) {
+            it(`${door}: an elevated self-triggered flow — rule 1 answers the account first`, async () => {
+                const { doors, execute } = makeDoors({ type: 'autolaunched', runAs: 'system' }, UNEXPOSED);
+
+                const answer = await doors[door](ACCOUNT_EC);
+
+                expect(answer.message).toBe(ELEVATED_START_REFUSAL.message);
+                expect(execute).not.toHaveBeenCalled();
+            });
+
+            it(`${door}: holding the flow's capability does not open it — the account rule answers before requiredPermissions`, async () => {
+                const { doors, execute } = makeDoors({ type: 'screen', runAs: 'system', requiredPermissions: [CAP] }, UNEXPOSED);
+
+                expectAccountRefusal(await doors[door](ACCOUNT_HOLDER_EC));
+                expectAccountRefusal(await doors[door](ACCOUNT_EC));
+                expect(execute).not.toHaveBeenCalled();
+            });
+        }
+
+        for (const entrance of ACTION_ENTRANCES) {
+            it(`${entrance}: the opt-in admits the account to the flow's own requiredPermissions, which still answers`, async () => {
+                const { doors, execute } = makeDoors({ type: 'screen', runAs: 'system', requiredPermissions: [CAP] });
+
+                const refused = await doors[entrance](ACCOUNT_EC);
+                expect(refused).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+                expect(refused.message).toContain(CAP);
+                expect(execute).not.toHaveBeenCalled();
+
+                expect((await doors[entrance](ACCOUNT_HOLDER_EC)).status).toBe(200);
+                expect(execute).toHaveBeenCalledTimes(1);
+            });
+        }
+    });
+
+    describe('CONTROLS — who and what the rule does not judge', () => {
+        for (const door of ['trigger', 'REST /actions', 'endpoint'] as const) {
+            it(`${door}: a person starts the elevated flow with no opt-in anywhere, as before`, async () => {
+                const { doors, execute } = makeDoors({ type: 'screen', runAs: 'system' }, UNEXPOSED);
+
+                expect((await doors[door](PERSON_EC)).status).toBe(200);
+                expect((await doors[door](MEMBER_EC)).status).toBe(200);
+                expect(execute).toHaveBeenCalledTimes(2);
+            });
+
+            it(`${door}: an OAuth-delegated agent is not an account — not judged by this rule`, async () => {
+                const { doors, execute } = makeDoors({ type: 'screen', runAs: 'system' }, UNEXPOSED);
+
+                expect((await doors[door](DELEGATED_EC)).status).toBe(200);
+                expect(execute).toHaveBeenCalledTimes(1);
+            });
+
+            it(`${door}: the system principal starts it`, async () => {
+                const { doors, execute } = makeDoors({ type: 'screen', runAs: 'system' }, UNEXPOSED);
+
+                expect((await doors[door](SYSTEM_EC)).status).toBe(200);
+                expect(execute).toHaveBeenCalledTimes(1);
+            });
+
+            for (const runAs of ['user', undefined] as const) {
+                it(`${door}: a flow that runs as the user (runAs ${runAs ?? 'undeclared'}) — the account starts it with no opt-in, as before`, async () => {
+                    const { doors, execute } = makeDoors({ type: 'screen', ...(runAs ? { runAs } : {}) }, UNEXPOSED);
+
+                    expect((await doors[door](ACCOUNT_EC)).status).toBe(200);
+                    expect(execute).toHaveBeenCalledTimes(1);
+                    expect(execute.mock.calls[0]?.[1]).toMatchObject({ userId: 'acct_1', principalKind: 'agent' });
+                });
+            }
+        }
+    });
 });

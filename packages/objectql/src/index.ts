@@ -303,6 +303,9 @@ export type { SummaryRecomputeFailure } from './summary-errors.js';
 // holding the other realm's copy of the class gets `instanceof` === false,
 // silently.
 export { ReadonlyFieldRejectedError, READONLY_FIELD_REJECTED_CODE } from './readonly-strict-errors.js';
+// [#32768] What `ObjectQL#judgeFieldWriteLock` answers for a field its
+// `readonlyWhen` locks now: the drop reason and the strict refusal's phrase.
+export type { FieldWriteLock } from './engine-field-write-lock.js';
 // [#14095] Thrown by `engine.insert` when a driver refuses a row as a unique
 // violation. Exported so an application implementing the platform's own
 // "declare a unique index, attempt the insert, swallow the violation" idiom can
@@ -373,7 +376,16 @@ export {
   UnscopedHookApi,
   hookRunAs,
   deriveHookApi,
+  // The second step of a `runAs: 'user'` derivation, and its fail-safe: the
+  // runtime's body doors read a record in the hook's calling user's scope
+  // through the same two steps the hook wrapper takes.
+  seedHookUserGrants,
+  seedHookUnreadMembership,
 } from './hook-run-as.js';
+// Whether a write runs inside a transaction a write beside it joins, or one it
+// cannot reach: read by the runtime's script-body doors.
+export { openTransactionKind } from './open-transaction.js';
+export type { OpenTransactionKind } from './open-transaction.js';
 export type { HookRunAs, HookRunAsRef, RunAsDerivableApi } from './hook-run-as.js';
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to

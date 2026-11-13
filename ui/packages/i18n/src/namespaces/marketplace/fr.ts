@@ -11,6 +11,23 @@
  */
 const fr = {
   marketplace: {
+    objectExtensions: {
+      title: "Modifie des objets existants",
+      intro: "L’installation modifie ces objets qui existent déjà dans cet environnement :",
+      platformBadge: "Objet de la plateforme",
+      platformWarning: "Les objets de la plateforme sont partagés par toutes les applications de cet environnement. Les modifier peut affecter la connexion, les profils utilisateur et d’autres applications.",
+      fields: "Ajoute ou remplace des champs",
+      fieldPatches: "Modifie l’affichage de champs",
+      validations: "Ajoute ou remplace des règles de validation",
+      indexes: "Ajoute {{count}} index",
+      indexes_one: "Ajoute {{count}} index",
+      indexes_many: "Ajoute {{count}} d’index",
+      indexes_other: "Ajoute {{count}} index",
+      relabels: "Modifie son libellé ou sa description",
+      reading: "Lecture des objets existants que ce paquet modifie…",
+      unknown: "Impossible de lire les objets existants que ce paquet modifie. Il peut en modifier certains, y compris des objets de la plateforme.",
+      acknowledge: "Je comprends que ce paquet modifie des objets de la plateforme.",
+    },
     suggestedBindings: {
       promptEveryone: "Cette application suggère d'accorder « {{set}} » à tous les utilisateurs connectés (position Everyone).",
       promptGuest: "Cette application suggère d'accorder « {{set}} » aux visiteurs non authentifiés (position Guest).",

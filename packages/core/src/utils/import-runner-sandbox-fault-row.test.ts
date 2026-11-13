@@ -103,6 +103,9 @@ const SAMPLES: Readonly<Record<string, string>> = {
   method: 'find',
   required: 'api.read',
   fieldName: 'owner',
+  token: 'email.send',
+  member: 'email',
+  fnName: 'send',
 };
 
 /** The helper every capability gate throws through, read below from the producer. */

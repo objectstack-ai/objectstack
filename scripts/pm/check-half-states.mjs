@@ -1586,6 +1586,18 @@ export function markerMatches(marker, text) {
  * one file over instead. And a heading AND a sigil (`## 🚨 Release:`) is named
  * by no form — no live line has shown it; add it WITH its fixture when one does.
  *
+ * ⛔ The sigil run is spelled UNROLLED — one sigil, its marks, then any further
+ * `blanks + sigil + marks` groups — and never as a repeated group that both
+ * starts with a sigil and may swallow the next one, `(?:S[S…]*[ \t]*)+` (#32991).
+ * That nested spelling reads the same lines, but a line that is a long symbol
+ * run with no word after it has 2^n ways to split, and V8 tries every one before
+ * it says no. Measured on the live board 2026-11-13: one comment on #32929
+ * carries four rules drawn as 40 `─` each, the census pinned a CPU on the first
+ * of them, and the live sweep was cancelled at the job's 15-minute cap on three
+ * runs in a row with nothing printed. The self-test times a 28-sigil run, which
+ * the nested spelling refuses in about 3 s, so a regression goes red by name
+ * instead of hanging the gate.
+ *
  * Ordered MOST SPECIFIC FIRST: the form a line is named by is the first that
  * matches it, so `## __Release:__` is a heading rather than an emphasis, and
  * `## Claim + dispatch` is `heading-bare` rather than `heading` only because
@@ -1633,7 +1645,7 @@ export const OWNERSHIP_MARKER_NEAR_MISS_FORMS = Object.freeze([
     id: 'leading-sigil',
     what: 'the directive led by a SIGIL — an emoji or symbol run before the word, which the shared stripper does not remove (it strips decoration, ⛔ never a sigil)',
     example: '🚨 **Release:** session `session_01JbZnqu8bt6YqfJsr9vaFb3` · 因:本卡已由 `os-litant` 在先认领,本席晚了 13 分钟 · 去向:让先到者',
-    re: /^[ \t]*>?[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(?:[\p{So}\p{Sm}\p{Sk}\p{Sc}][\p{So}\p{Sm}\p{Sk}\p{Sc}\p{Mn}\p{Me}\p{Cf}]*[ \t]*)+[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[:：]/iu,
+    re: /^[ \t]*>?[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?[\p{So}\p{Sm}\p{Sk}\p{Sc}][\p{So}\p{Sm}\p{Sk}\p{Sc}\p{Mn}\p{Me}\p{Cf}]*(?:[ \t]+[\p{So}\p{Sm}\p{Sk}\p{Sc}][\p{So}\p{Sm}\p{Sk}\p{Sc}\p{Mn}\p{Me}\p{Cf}]*)*[ \t]*[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[:：]/iu,
   }),
   Object.freeze({
     id: 'heading-bare',
@@ -15499,7 +15511,7 @@ export function h68ClassBWithoutSeamLine(issue) {
 }
 
 // ---------------------------------------------------------------------------
-// H70 + H71 (#28642) — a project seat's hourly patrol, and the card its absence
+// H70 + H71 (#28642) — a project seat's patrol routine, and the card its absence
 // leaves waiting.
 //
 // The seating rule (seat-lifecycle.md 〈座位贴协议〉) makes taking a project
@@ -15531,7 +15543,12 @@ export function h68ClassBWithoutSeamLine(issue) {
 // readings the patrols act on, never a merge gate (the card's triage ruling).
 // ---------------------------------------------------------------------------
 
-/** H71's clock — the card's own figure: an on-duty lane should claim within the hour its patrol fires, so two hours is one missed fire plus slack. */
+/**
+ * H71's clock — the in-flight figure: a seat with cards in flight patrols every 45 minutes or less
+ * (execution-duties.md 〈收集〉 ②), so two hours is two missed patrols plus slack. A seat on standby
+ * wakes on mailbox and PR events plus a 4–6 h fallback patrol, and no seat post states standby
+ * machine-readably — so the clock stays at the in-flight figure and the row names the standby reading.
+ */
 export const QUEUE_ON_DUTY_UNCLAIMED_HOURS = 2;
 
 /**
@@ -15564,7 +15581,8 @@ export function h70HeldSeatWithoutPatrol(issue) {
   if (hasPatrolLine(issue.body)) return null;
   return (
     '`pm:seat` HELD by a login with no `Patrol:` line in its body — taking a project seat creates ONE ' +
-    'self-bound hourly patrol routine in the same act and records it on the stub as `Patrol: TRIGGER_ID · ' +
+    'self-bound patrol routine in the same act (every 45 minutes or less while cards are in flight, a 4–6 h ' +
+    'fallback patrol on standby) and records it on the stub as `Patrol: TRIGGER_ID · ' +
     'CRON` (seat-lifecycle.md 〈座位贴协议〉, seat-post-protocol.md 〈座位 Routine 创建〉). Without the line ' +
     'nobody can see whether this seat has a patrol at all: a seat with none wakes only on PR subscriptions and ' +
     'relays, and stops looking once its queue empties — the measured shape a p1 card waited 4.5 h behind. ' +
@@ -15604,8 +15622,10 @@ export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
       : `no activity for ~${Math.round(ageHours)}h (threshold ${QUEUE_ON_DUTY_UNCLAIMED_HOURS}h; a lower bound on its time in the queue)`;
   return (
     `\`pm:queue\`, open and unassigned, with ${reading}, on a lane a 🟢 seat holds: ${seats}. A seat on duty ` +
-    'runs an hourly patrol whose first act is to claim up to its `batch` limit, so a card this old on its lane ' +
-    'usually means the patrol is not running (H70 names a held post with no `Patrol:` line) or the seat is full. ' +
+    'with cards in flight patrols every 45 minutes or less, and a patrol\'s first act is to claim up to its ' +
+    '`batch` limit, so a card this old on its lane usually means the patrol is not running (H70 names a held ' +
+    'post with no `Patrol:` line) or the seat is full. ⚠️ A seat on STANDBY wakes on mailbox and PR events plus ' +
+    'a 4–6 h fallback patrol: on such a lane a card under ~6 h old may only be waiting for that patrol. ' +
     'Remedy — WHO and HOW: that seat claims it, or says on its post why not (in hand at its limit, or the card ' +
     'is not ready). ⚠️ Spare concurrency is NOT judged: no seat post states it machine-readably, so a full seat ' +
     'reads the same as an idle one here. ⛔ Report-only: no label or assignee is written from this script. Out ' +
@@ -36465,6 +36485,24 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY68, '#18829 ordering: the form sits between `separator` and the two #18831 additions', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).slice(4, 7).join(','), 'separator,leading-sigil,heading-bare');
   b(BATTERY68, '#18829 ordering: …and steals no older form\'s fixture — every earlier member is still named by ITSELF', OWNERSHIP_MARKER_NEAR_MISS_FORMS.slice(0, 5).every((f) => miss68(f.example).form === f.id), true);
   b(BATTERY68, '#18829 boundary: a heading AND a sigil is named by no form — unseen on any thread read, left unnamed rather than guessed', ownershipMarkerNearMisses(rows68('## 🚨 Release: x')).length, 0);
+  // #32991 — a symbol run with no word after it must not cost exponential
+  // time. The nested spelling has 2^(n-1) ways to cut a run of n sigils, so
+  // the PIN is a run it still finishes: 28 `─` took about 3 s under it
+  // (24 took 37 ms), and the unrolled spelling takes well under 1 ms. The
+  // long shapes (the 40-`─` rule measured on #32929, comment 6840027098, and
+  // three longer runs) are evaluated ONLY after that pin passed, because under
+  // the nested spelling they never return and the gate would hang with no
+  // case printed, which is this card's own symptom.
+  const timed32991 = (body) => { const t = Date.now(); const n = ownershipMarkerNearMisses(rows68(body)).length; return { n, ms: Date.now() - t }; };
+  const pin32991 = timed32991(`${'─'.repeat(28)}!`);
+  const pinPassed32991 = pin32991.n === 0 && pin32991.ms < 250;
+  b(BATTERY68, '#32991 ⭐ a 28-sigil run with no word after it is refused in under 250 ms — the nested spelling took about 3 s on it', [pin32991.n, pin32991.ms < 250].join(','), '0,true');
+  const RULE_32929 = '─'.repeat(40);
+  const long32991 = pinPassed32991
+    ? timed32991([RULE_32929, `> ${'`'.repeat(40)}`, `- ${'⚠️ '.repeat(40)}`, `${'═'.repeat(4000)}`].join('\n'))
+    : null;
+  b(BATTERY68, '#32991 …and the long shapes (the 40-`─` rule on #32929, 40 backticks, 40 sigils under a bullet, 4,000 `═`) are not exponential either — nothing named, under a second', long32991 ? [long32991.n, long32991.ms < 1000].join(',') : 'NOT RUN: the 28-sigil pin above failed', '0,true');
+  b(BATTERY68, '#32991 control: …and a sigil run of the same length IN FRONT of the word is still named `leading-sigil`', miss68(`${'⚠️ '.repeat(40)}Release: x`).form, 'leading-sigil');
 
   // SILENCE CONTROLS — a census that names prose is a census nobody reads, and
   // every one of these is a line MEASURED on the open board.

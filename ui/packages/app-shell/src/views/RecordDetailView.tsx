@@ -64,6 +64,7 @@ import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
+import type { TranslateFn } from '@object-ui/i18n';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import { findDeclaredApiAction, isSameOriginApiTarget, readApiActionDoorSuccess, sendApiActionThroughDoor } from '../utils/apiActionDoor.js';
 import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/NavigationContext.js';
@@ -110,7 +111,12 @@ import { useObjectPresence } from '../hooks/useObjectPresence.js';
 interface RecordDetailViewProps {
   dataSource: any;
   objects: any[];
-  onEdit: (record: any) => void;
+  /**
+   * Opens the record form for `record`. `objectName` names the object the
+   * record belongs to, which inside a drawer level is the level's and not
+   * always the route's (objectstack#33111).
+   */
+  onEdit: (record: any, objectName?: string) => void;
   /**
    * When provided, this object name overrides the value derived from the
    * current URL (`useParams()`). Used when rendering the detail inside a
@@ -2050,6 +2056,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         triggerParams: flowParams,
         objects,
         language,
+        // The run's `droppedFields` warning (objectstack#33009): labels read
+        // through this page's data source, the console's adapter.
+        droppedFields: { t: t as TranslateFn, fieldLabel, dataSource },
       });
       const judged = launch.judged;
       // Paused at a `screen` node: FlowRunner renders the form + resumes, and
@@ -2075,7 +2084,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [authFetch, pureRecordId, objectName, objects, language]);
+  }, [authFetch, pureRecordId, objectName, objects, language, t, fieldLabel, dataSource]);
 
   // Server-side action handler — POST /api/v1/actions/{object}/{action},
   // built from @object-ui/core's `createServerActionHandler` via the shared
@@ -4674,7 +4683,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // header by the `editLockedByState` badge, as the lock band explains
         // the approval lock.
         disabled: approvalLocked || editDisabledByPredicate || editLockedByState,
-        onClick: () => onEdit({ id: pureRecordId }),
+        onClick: () => onEdit({ id: pureRecordId }, objectName),
       } as any);
     }
     // The record's favorites entry (objectui#12427), in the `⋯` overflow ahead

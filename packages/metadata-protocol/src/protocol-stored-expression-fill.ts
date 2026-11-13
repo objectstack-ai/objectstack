@@ -21,16 +21,20 @@
  *   which registers the batch's objects before its per-item side effects, so
  *   it captures before that registration.
  *
+ * [#32700] …and the history doors that make a restored definition live
+ * (`protocol-package-commits.ts`) fill it the same way, after the storage
+ * sync they now run as the save door does:
+ *
+ * - `rollbackMetaItem` (`POST /api/v1/meta/:type/:name/rollback`);
+ * - `revertCommit` (`POST /api/v1/packages/:id/commits/:commitId/revert`),
+ *   which captures each object before its first restore and fills it once
+ *   after the loop; and `rollbackToPackageCommit`
+ *   (`POST /api/v1/packages/:id/rollback`), a loop of `revertCommit`, whose
+ *   answer carries every step's notices.
+ *
  * A draft save makes nothing live and fills nothing. A peer applying another
  * node's mutation (`applyRemoteMetadataMutation`) fills nothing either: the
  * node whose door took the change filled the shared rows once.
- *
- * ⚠️ Two doors make a changed definition live WITHOUT a fill: `rollbackMetaItem`
- * and `revertCommit` (`protocol-package-commits.ts`) write the restored body
- * through to the registry and run no storage sync and no fill, so a rollback
- * or revert that changes a stored computed field leaves the rows on what the
- * definition it moved away from computed. Not covered here; the command
- * (`os migrate stored-expressions --changed --apply`) fills them.
  *
  * ## The fill and its report
  *
@@ -40,8 +44,8 @@
  * writes are the engine's (`@objectstack/objectql`'s
  * `captureStoredExpressions`, the walk `os migrate stored-expressions` runs):
  * every row, every organization, under `preserveAudit`. Each changed field is
- * reported on the door's existing `advisories` — the key a refused storage
- * sync rides (`object-storage-sync-refused`), with the same element shape:
+ * reported on the door's `advisories` (declared on each of these doors'
+ * answers) — the key a refused storage sync rides (`object-storage-sync-refused`), with the same element shape:
  *
  * - `stored-expression-filled` (`info`): the rows written for that field, and
  *   how many the object holds;
@@ -49,8 +53,8 @@
  *   write, an object it could not read, or a storage sync that was refused,
  *   with what is left and how to fill it.
  *
- * The save or publish itself is never failed by its fill: the definition is
- * live and stays live, and the answer says what the rows hold.
+ * The save, publish, rollback or revert itself is never failed by its fill:
+ * the definition is live and stays live, and the answer says what the rows hold.
  */
 
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
@@ -147,7 +151,7 @@ export async function fillStoredExpressionChange(
             where: where(object, field),
             path: path(object, field),
             message: `'${object}.${field}' computes a new value at this change, and the object's existing rows were NOT `
-                + 'filled with it: the storage sync this change needed was refused (the notice before this one). Until '
+                + `filled with it: the storage sync this change needed was refused (this answer's \`object-storage-sync-refused\` notice for '${object}'). Until `
                 + 'they are written, those rows hold NULL or the old value, and every reader of the column reads it.',
             hint: `Resolve the storage refusal first. ${fillRemedy(object, field)}`,
         }));

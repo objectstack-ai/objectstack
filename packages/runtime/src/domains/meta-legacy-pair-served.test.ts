@@ -203,3 +203,188 @@ for (const environmentId of [undefined, 'env_hotcrm'] as const) {
         }, 60_000);
     });
 }
+
+/**
+ * [#32501, ADR-0150 D5, epic red line 2] A stored row read at an exact address
+ * wears the envelope of the package that address reads, and `/layers` reads
+ * that package's code layer: never the package that registered the name first.
+ * The real engine and SQL store. The rows are inserted straight into
+ * `sys_metadata`, not hydrated through `loadMetaFromDb`; the hydrated rows
+ * answer the same (measured by the contract review of #32808).
+ *
+ * BASE (main 874166b6, measured on this fixture):
+ *  - alpha's pair override row, beta registered first: `?package=alpha.custom`
+ *    served it under beta's `_packageId`, `_packageVersion` and `_provenance`,
+ *    and `/layers` reported beta's shipped body as its code layer;
+ *  - a row bound only to gamma (which ships nothing), `?package=gamma`: under
+ *    the first registered shipper's envelope, and `/layers` that shipper's body;
+ *  - the App pair's row, two modules of the App holding the name: under alpha's
+ *    envelope (the first package that registered the name, not a module of the
+ *    App), and `/layers` 200 with alpha's body as its code layer.
+ *
+ * Re-measured on main 2f80f2897 (#32497 landed): every plain-read envelope
+ * above stands, and the gamma row beside a disabled only shipper is 404 on
+ * both doors. `/layers` already answers alpha's code layer for alpha's pair
+ * row, `code: null` for the gamma row, and 409 for the App pair's row when
+ * alpha registered ahead of the modules (the code layer's lookup lands on
+ * alpha, which #32497's `exactQualifierItem` refuses); with a module of the
+ * App registered first and no other shipper, `/layers` there answered 200
+ * with that module's body as its code layer, the move the App pair row pin's
+ * module-first cases hold.
+ *
+ * Re-measured again for the contract review of #32808: with NO stored row
+ * and the App's two modules the only shippers of the name, `?package=` the
+ * App pair and its `/layers` answered 200 with the first registered
+ * module's item on `main`, on this real engine as on the bare
+ * `SchemaRegistry` composition; with another package registered ahead of
+ * the modules, both doors already answered 409. The registration shape
+ * decides the FROM, not the composition (the last pin).
+ */
+describe('#32501 — a stored row at an exact address wears the envelope of the package the address reads', () => {
+    const ALPHA = 'com.acme.alpha';
+    const BETA = 'com.acme.beta';
+    const GAMMA = 'com.acme.gamma';
+    const SUITE = 'com.acme.suite';
+    const ONE = 'com.acme.one';
+    const TWO = 'com.acme.two';
+    const dash = (label: string) => ({ name: 'd', label, columns: 12, widgets: [] });
+
+    async function bootShippers(order: readonly string[]) {
+        const engine = new ObjectQL();
+        liveEngines.push(engine);
+        engine.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }), true);
+        await engine.init();
+        engine.registry.registerObject(SysMetadata as any, TEST_PACKAGE_ID);
+        engine.registry.registerObject(SysMetadataHistoryObject as any, TEST_PACKAGE_ID);
+        engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
+        (engine.registry as unknown as { logLevel: string }).logLevel = 'silent';
+        const ns = (id: string) => id.split('.').pop()!;
+        const registered = new Set<string>();
+        for (const id of order) {
+            const module = id === ONE || id === TWO;
+            // The App registers before its first module, after the packages that ship the name ahead of it.
+            if (module && !registered.has(SUITE)) {
+                engine.registerApp({ id: SUITE, name: 'suite', version: '1.0.0', type: 'app', namespace: 'suite' } as any);
+                registered.add(SUITE);
+            }
+            engine.registerApp({
+                id, name: ns(id), version: '1.0.0', type: module ? 'module' : 'app', namespace: ns(id),
+                ...(module ? { dependencies: { [SUITE]: '^1.0.0' } } : {}),
+                dashboards: [dash(`${ns(id)} shipped`)],
+            } as any);
+        }
+        engine.registerApp({ id: GAMMA, name: 'gamma', version: '1.0.0', type: 'app', namespace: 'gamma' } as any);
+        await engine.syncSchemas();
+        const protocol: any = new ObjectStackProtocolImplementation(engine as any, () => new Map(), undefined);
+        const get = (n: string) => (n === 'protocol' ? protocol : n === 'objectql' ? engine : null);
+        const kernel: any = { context: { getService: get }, getService: get, getServiceAsync: async (n: string) => get(n) };
+        const dispatcher = new HttpDispatcher(kernel);
+        (dispatcher as any).timedResolveExecutionContext = async () => clone(AUTHOR);
+        const read = async (path: string, query: Record<string, string> = {}) => {
+            const res = await dispatcher.dispatch('GET', path, undefined, query, { request: new Request(`http://localhost${PREFIX}${path}`) }, PREFIX);
+            return { status: res.response?.status ?? 0, body: res.response?.body };
+        };
+        const seed = (packageId: string, label: string, overrides?: string) => engine.insert('sys_metadata', {
+            name: 'd', type: 'dashboard', namespace: 'default', package_id: packageId, scope: 'platform', strategy: 'merge',
+            state: 'active', version: 1,
+            metadata: JSON.stringify({ ...dash(label), ...(overrides ? { overrides: { package: overrides, basedOn: '1.0.0' } } : {}) }),
+        }, { context: { isSystem: true } } as any);
+        return { engine, read, seed };
+    }
+    const envelope = (body: any) => {
+        const item = body?.data?.item ?? body?.item;
+        return [item?.label, item?._packageId, item?._provenance];
+    };
+    const layered = (body: any) => {
+        const l = body?.data ?? body;
+        return [l?.code?.label ?? null, l?.effective?.label, l?.packageId];
+    };
+
+    for (const [order, shippers] of [['alpha first', [ALPHA, BETA]], ['beta first', [BETA, ALPHA]]] as const) {
+        it(`alpha's pair override row (${order}): alpha's envelope, alpha's code layer`, async () => {
+            const { read, seed } = await bootShippers(shippers);
+            await seed(`${ALPHA}.custom`, 'alpha customized', ALPHA);
+            const plain = await read('/meta/dashboard/d', { package: `${ALPHA}.custom` });
+            expect([plain.status, ...envelope(plain.body)], JSON.stringify(plain.body).slice(0, 400))
+                .toEqual([200, 'alpha customized', ALPHA, 'package']);
+            const layers = await read('/meta/dashboard/d/layers', { package: `${ALPHA}.custom` });
+            expect([layers.status, ...layered(layers.body)], JSON.stringify(layers.body).slice(0, 400))
+                .toEqual([200, 'alpha shipped', 'alpha customized', ALPHA]);
+        }, 60_000);
+
+        it(`a row bound only to a package that ships nothing (${order}): its own stamp, no shipper's envelope, no code layer`, async () => {
+            const { read, seed } = await bootShippers(shippers);
+            await seed(GAMMA, 'gamma authored');
+            const plain = await read('/meta/dashboard/d', { package: GAMMA });
+            expect([plain.status, ...envelope(plain.body)], JSON.stringify(plain.body).slice(0, 400))
+                .toEqual([200, 'gamma authored', GAMMA, undefined]);
+            const layers = await read('/meta/dashboard/d/layers', { package: GAMMA });
+            expect([layers.status, ...layered(layers.body)], JSON.stringify(layers.body).slice(0, 400))
+                .toEqual([200, null, 'gamma authored', undefined]);
+        }, 60_000);
+    }
+
+    it('a row bound only to a package that ships nothing, the only shipper disabled: its own stamp, served, never withheld by the shipper\'s stamp (BASE: 404)', async () => {
+        const { engine, read, seed } = await bootShippers([ALPHA]);
+        await seed(GAMMA, 'gamma authored');
+        engine.registry.disablePackage(ALPHA);
+        const plain = await read('/meta/dashboard/d', { package: GAMMA });
+        expect([plain.status, ...envelope(plain.body)], JSON.stringify(plain.body).slice(0, 400))
+            .toEqual([200, 'gamma authored', GAMMA, undefined]);
+        expect(JSON.stringify(plain.body)).not.toContain(ALPHA);
+        // …and `/layers` at the same address: the row, no code layer (BASE: 404).
+        const layers = await read('/meta/dashboard/d/layers', { package: GAMMA });
+        expect([layers.status, ...layered(layers.body)], JSON.stringify(layers.body).slice(0, 400))
+            .toEqual([200, null, 'gamma authored', undefined]);
+    }, 60_000);
+
+    // Both shapes of the code layer's lookup: another package (alpha) registered
+    // ahead of the modules, where it lands on alpha, and a module first with no
+    // other shipper, where it landed on that module and `/layers` served it.
+    it.each([
+        ['alpha, then one', [ALPHA, ONE, TWO]], ['alpha, then two', [ALPHA, TWO, ONE]],
+        ['one first, no other shipper', [ONE, TWO]], ['two first, no other shipper', [TWO, ONE]],
+    ] as const)('the App pair\'s row, two modules holding the name (%s): its own stamp; `/layers` refuses the ambiguous code layer naming both', async (_order, shippers) => {
+        const { read, seed } = await bootShippers(shippers);
+        await seed(`${SUITE}.custom`, 'suite pair row', ONE);
+        const plain = await read('/meta/dashboard/d', { package: `${SUITE}.custom` });
+        expect([plain.status, ...envelope(plain.body)], JSON.stringify(plain.body).slice(0, 400))
+            .toEqual([200, 'suite pair row', `${SUITE}.custom`, undefined]);
+        const layers = await read('/meta/dashboard/d/layers', { package: `${SUITE}.custom` });
+        expect([layers.status, layers.body?.error?.code], JSON.stringify(layers.body).slice(0, 400)).toEqual([409, 'RESOURCE_CONFLICT']);
+        for (const id of [ONE, TWO]) expect(String(layers.body?.error?.message)).toContain(`package "${id}"`);
+    }, 60_000);
+
+    // [#32808 review S1] No stored row: the App pair's own address is refused on the
+    // real engine too, at `?package=` and at the installed pair's namespace on the
+    // qualified path. BASE (main 2f80f2897): the module-first cases answered 200
+    // with the first registered module's item on all three doors; with alpha
+    // registered ahead of the modules all three already answered 409 (the order
+    // controls).
+    it.each([
+        ['one first, no other shipper', [ONE, TWO]], ['two first, no other shipper', [TWO, ONE]],
+        ['alpha, then one', [ALPHA, ONE, TWO]], ['alpha, then two', [ALPHA, TWO, ONE]],
+    ] as const)('no stored row, two modules of the App holding the name (%s): the App pair is refused naming both, on the plain read, `/layers` and the qualified path', async (_order, shippers) => {
+        const { engine, read } = await bootShippers(shippers);
+        // The installed pair's namespace qualifies the same address on the qualified path.
+        engine.registry.installPackage({
+            id: `${SUITE}.custom`, name: 'suite custom', version: '0.1.0', type: 'module', namespace: 'suite_custom', dependencies: { [SUITE]: '^1' },
+        } as any, 'authored');
+        for (const [path, query] of [
+            ['/meta/dashboard/d', { package: `${SUITE}.custom` }],
+            ['/meta/dashboard/d/layers', { package: `${SUITE}.custom` }],
+            ['/meta/dashboard/suite_custom/d', {}],
+        ] as const) {
+            const answer = await read(path, query);
+            expect([answer.status, answer.body?.error?.code], `${path} ${JSON.stringify(answer.body).slice(0, 400)}`)
+                .toEqual([409, 'RESOURCE_CONFLICT']);
+            for (const id of [ONE, TWO]) expect(String(answer.body?.error?.message)).toContain(`package "${id}"`);
+        }
+        // CONTROL — each module's own address serves its own shipped item.
+        for (const id of [ONE, TWO]) {
+            const own = await read('/meta/dashboard/d', { package: id });
+            expect([own.status, ...envelope(own.body)], JSON.stringify(own.body).slice(0, 400))
+                .toEqual([200, `${id.split('.').pop()} shipped`, id, 'package']);
+        }
+    }, 60_000);
+});

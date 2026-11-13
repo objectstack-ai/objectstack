@@ -50,7 +50,7 @@
 - 取卡前置 = `docs/NORTH-STAR.md`「Priority」第 3 条:本车道队列开放 P0/P1 每次取卡现读。
 - 开放 = 未派发(无 `pm:dispatched`、无 assignee);在飞的 P0/P1 不挡任何候选,只余取卡全序。
 - 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序。
-- 标签序:`priority:p0` > `pm:blocking` > 功能点位次 > `target:` 板上项 > p1 > p2 > p3 > 无级。
+- 标签序:`priority:p0` > `pm:blocking` > 功能点位次 > p1 > p2 > p3 > 无级。
 - 云车道企业版卡:取卡序 = `cloud/ROADMAP.md` 的档位与行序,⛔ 席位不在单卡上另调顺序。
 - 改序即改该表,由维护者或代其改并链裁决;改法见其「Maintaining this file」,⛔ 不抄表行。
 - `pm:blocking` 级内先按解锁扇出(从 `Blocked-by:` 反向索引现算,⛔ 扇出数不落标签)。

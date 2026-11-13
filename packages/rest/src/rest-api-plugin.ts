@@ -558,6 +558,16 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // kernel still reads its own.
             const authServiceProvider = environmentScopedProvider<IAuthService>('auth');
 
+            // [decision 6840464379] Any service, by name — for the one lookup
+            // whose slot is DECLARED by metadata rather than known here: the
+            // `schemaReadDelegate` an object's definition names, which the
+            // object-schema masker asks after the object read check refused a
+            // caller. Environment-scoped like the seams above: the delegate
+            // answers from the kernel whose rows it guards. `unknown`,
+            // deliberately: the masker reads the one member it asks structurally.
+            const kernelServiceProvider = (name: string, environmentId?: string): Promise<unknown> =>
+                environmentScopedProvider<unknown>(name)(environmentId);
+
             if (!server) {
                 ctx.logger.warn(`RestApiPlugin: HTTP Server service '${serverService}' not found. REST routes skipped.`);
                 return;
@@ -588,7 +598,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // `RouteManager` in the first place.
             let restServer: RestServer | undefined;
             try {
-                restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, /* retired saved-report slot (#20102) */ undefined, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider, tenancyServiceProvider, auditServiceProvider);
+                restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, /* retired saved-report slot (#20102) */ undefined, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider, tenancyServiceProvider, auditServiceProvider, kernelServiceProvider);
                 restServer.registerRoutes();
 
                 ctx.logger.info('REST API successfully registered');

@@ -144,13 +144,13 @@ A minimal but complete project from scratch:
     "validate": "objectstack validate"
   },
   "dependencies": {
-    "@objectstack/spec": "18.3.0",
-    "@objectstack/runtime": "18.3.0",
-    "@objectstack/driver-memory": "18.3.0",
-    "@objectstack/plugin-hono-server": "18.3.0"
+    "@objectstack/spec": "18.4.0",
+    "@objectstack/runtime": "18.4.0",
+    "@objectstack/driver-memory": "18.4.0",
+    "@objectstack/plugin-hono-server": "18.4.0"
   },
   "devDependencies": {
-    "@objectstack/cli": "18.3.0",
+    "@objectstack/cli": "18.4.0",
     "typescript": "^5.3.0"
   }
 }

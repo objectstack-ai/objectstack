@@ -322,8 +322,9 @@ export async function admitExactQualifier(
 
 /**
  * [#32183, ruling (c)] The disabled package an exact address reads, when every
- * package it reads is disabled: the package `packageId` names when it holds the
- * name, else the bases it is a pair of when none of them is enabled (the
+ * package it reads is disabled: the package `packageId` names when it is
+ * disabled ([#32354] whether it holds the name in the registry or only as a
+ * stored row), else the bases it is a pair of when none of them is enabled (the
  * bases {@link admitExactQualifier} admits it at). `undefined` when the
  * address reads an enabled package, reads no holder, or the type is not
  * package-scoped. The item face answers such an address as that package's
@@ -339,8 +340,14 @@ export function disabledExactAddressHolder(
     const registry = registryOf(host) as (Partial<ExactQualifierRegistry> & { isPackageDisabled?(id: string): boolean }) | undefined;
     if (typeof registry?.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
     const disabled = (id: string) => registry.isPackageDisabled!(id) === true;
+    // [#32354] A disabled package named is its own withheld item whether it
+    // holds the name in the registry or only as a stored row, which the
+    // registry need not know (one bare slot per name): the read reached its
+    // row, and served its body under the envelope of the package that ships
+    // the name.
+    if (disabled(request.packageId)) return request.packageId;
     const every = registry.packageScopedHoldersOf(request.type, request.name, request.packageId, { includeDisabledPackages: true }) ?? [];
-    if (every.includes(request.packageId)) return disabled(request.packageId) ? request.packageId : undefined;
+    if (every.includes(request.packageId)) return undefined;
     const installed = installedManifestsOfEngine(host.engine);
     const bases = every.filter((holder) => pairsOf(holder, installed).includes(request.packageId));
     return bases.length > 0 && bases.every(disabled) ? bases[0] : undefined;
@@ -405,7 +412,10 @@ export function exactQualifierItem(
         }
         return item;
     }
-    if (served === address.packageId || address.registryHolders.includes(served)) return item;
+    // [#32501] An item of one of TWO admitted bases (two modules of one App
+    // sharing its pair) is no more the address's than the other's: it falls
+    // through to the refusal naming both below, never the first registered.
+    if (served === address.packageId || (address.registryHolders.length === 1 && address.registryHolders[0] === served)) return item;
     // [#32076] A pair of the package the address names, or of a base it admitted, serves on that base's address
     // when the row is that base's (epic ruling on #31699 F2; {@link pairRowOnAddress}, the one owner check).
     const installed = installedManifestsOfEngine(host.engine);

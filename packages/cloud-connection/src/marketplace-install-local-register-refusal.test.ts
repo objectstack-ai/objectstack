@@ -39,6 +39,11 @@
  *     and on the inline branch: neither member registered (#31564);
  *   - an upgrade refused by a registry refusal and by a sealed-vocabulary one:
  *     the same `422`, the installed version still registered and ledgered;
+ *   - (ADR-0144 D2 and D6, amended) a package whose record-mode amount follows
+ *     a parent field that holds no currency code: the same `422` on both
+ *     branches, the engine's sentence in the report, nothing registered or
+ *     ledgered; a pair one member of the artifact completes for another
+ *     installs;
  *   - the remedy a sealed-vocabulary refusal names: once the package that
  *     brings the object is installed, the same install succeeds at once, with
  *     no restart;
@@ -718,4 +723,56 @@ describe('install-local refuses a package change under declared replicas on the 
             expect(ql.registry.getPackage(HOLDER_ID)).toBeUndefined();
         });
     }
+});
+
+describe('install-local refuses a package with a bad record-currency follow pair, in the install report (ADR-0144 D2 and D6, amended)', () => {
+    const CODE = { name: 'currency_code', label: 'Currency', type: 'text', valueDomain: 'iso_4217_currency' };
+    const invoice = () => obj('routing_invoice', { title: { name: 'title', type: 'text', label: 'Title' }, currency_code: CODE });
+    /** The child, whose amount follows `pointer` through its `invoice`. */
+    const lineFollowing = (pointer: string) => obj('routing_line', {
+        title: { name: 'title', type: 'text', label: 'Title' },
+        invoice: { name: 'invoice', label: 'Invoice', type: 'master_detail', reference: 'routing_invoice' },
+        amount: { name: 'amount', label: 'Amount', type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: pointer } },
+    });
+    /** `title` holds no ISO 4217 code: the pair `defineStack` refuses where a stack holds both objects. */
+    const BAD = incoming('1.0.0', { objects: [invoice(), lineFollowing('invoice.title')] });
+    const SAYS = "'routing_invoice.title'";
+
+    it('the cloud-fetched branch: 422 PLUGIN_REGISTER_FAILED with the engine\'s sentence, nothing registered or ledgered', async () => {
+        serveVersions({ 'v1-bad-follow': BAD });
+        const { ql, installFromCloud } = await bootPlugin();
+
+        const res = await installFromCloud('v1-bad-follow');
+
+        expectRefusal(res, INCOMING_ID, SAYS);
+        expect(ql.registry.getPackage(INCOMING_ID)).toBeUndefined();
+        expect(ql.registry.getObjectOwner('routing_line')).toBeUndefined();
+        expect(ql.registry.getObjectOwner('routing_invoice')).toBeUndefined();
+        expect(ledger()).toEqual([]);
+    });
+
+    it('the inline branch: the same 422, and nothing of the package', async () => {
+        const { ql, install } = await bootPlugin();
+
+        const res = await install({ manifest: BAD });
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(envelopeViolations(res.payload)).toEqual([]);
+        expect(res.payload.error.code).toBe('PLUGIN_REGISTER_FAILED');
+        expect(res.payload.error.message).toContain(SAYS);
+        expect(ql.registry.getPackage(INCOMING_ID)).toBeUndefined();
+        expect(ql.registry.getObjectOwner('routing_line')).toBeUndefined();
+        expect(ledger()).toEqual([]);
+    });
+
+    it('CONTROL — the same package following the parent\'s code field installs, hot-loaded and ledgered', async () => {
+        const { ql, install } = await bootPlugin();
+
+        const res = await install({ manifest: incoming('1.0.0', { objects: [invoice(), lineFollowing('invoice.currency_code')] }) });
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.hotLoaded).toBe(true);
+        expect(ql.registry.getObjectOwner('routing_line')?.packageId).toBe(INCOMING_ID);
+        expect(ledger()).toEqual([`${INCOMING_ID}@1.0.0`]);
+    });
 });

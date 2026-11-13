@@ -643,6 +643,103 @@ describe('function — the engine function registry, through the hook binder\'s 
     expect(await caught(() => bindFunctions(ql, 'com.acme.beta', ['shared_fn']))).toBeUndefined();
   });
 
+  // [#32534] The release the runtime's re-bind makes when a function leaves its
+  // owner (moved to another owner, or with a dropped package body): after the
+  // engine's removal, on every name the owner's package no longer holds there.
+  /** Whether the engine still holds `name` for `packageId`: the question the runtime's release asks. */
+  const heldBy = (ql: ObjectQL, packageId: string) => (name: string) => ql.functionHoldersOf(name).packageItem(packageId) !== undefined;
+
+  it('[#32534] after the seal, releasing a package\'s claims on the names it no longer holds lets a package of its namespace bind them; a name it still holds and the other holders\' claims stay (base: no release, the bind refused naming the old owner)', async () => {
+    const { ql, registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await register(rival('function', 'com.acme.beta'))).toBeUndefined();
+    expect(await register(rival('function', 'com.acme.gamma'))).toBeUndefined();
+    bindFunctions(ql, 'com.acme.alpha', ['moving_fn', 'kept_fn']);
+    bindFunctions(ql, 'com.acme.gamma', ['gamma_fn']);
+    // The re-bind's removal, then what alpha keeps registered again (`releaseMovedFunctions`).
+    ql.unregisterFunctionsByPackage('app:com.acme.alpha');
+    ql.registerFunction('kept_fn', fn('alpha'), { packageId: 'app:com.acme.alpha' });
+
+    registry.releaseBareNameFunctions('app:com.acme.alpha', heldBy(ql, 'com.acme.alpha'));
+
+    expect(await caught(() => bindFunctions(ql, 'com.acme.beta', ['moving_fn']))).toBeUndefined();
+    expect(ql.functionHoldersOf('moving_fn').packageHolders).toEqual(['com.acme.beta']);
+    // CONTROLs — the name alpha still holds, and another package's claim, still refuse.
+    expectRefusal(await caught(() => bindFunctions(ql, 'com.acme.beta', ['kept_fn'])), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' });
+    expectRefusal(await caught(() => bindFunctions(ql, 'com.acme.beta', ['gamma_fn'])), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.gamma' });
+    // CONTROL — an owner-less release, or one whose package still holds every name, releases nothing.
+    registry.releaseBareNameFunctions(undefined, () => false);
+    registry.releaseBareNameFunctions('app:com.acme.alpha', () => true);
+    expectRefusal(await caught(() => bindFunctions(ql, 'com.acme.beta', ['kept_fn'])), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' });
+  });
+
+  it('[#32534] CONTROL — a name the package still holds under another owner spelling (its bare id) keeps its claim after the removal of its `app:` registrations, so its co-owner is still refused naming it, as on main', async () => {
+    const { ql, registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await register(rival('function', 'com.acme.beta'))).toBeUndefined();
+    bindFunctions(ql, 'com.acme.alpha', ['moving_fn']);
+    // A host's own registration of the function for alpha, under the package's bare id.
+    ql.registerFunction('moving_fn', fn('host'), { packageId: 'com.acme.alpha' });
+    ql.unregisterFunctionsByPackage('app:com.acme.alpha');
+    expect(ql.functionHoldersOf('moving_fn').packageHolders, 'precondition: the removal by owner string left it').toEqual(['com.acme.alpha']);
+
+    registry.releaseBareNameFunctions('app:com.acme.alpha', heldBy(ql, 'com.acme.alpha'));
+
+    expectRefusal(await caught(() => bindFunctions(ql, 'com.acme.beta', ['moving_fn'])), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' });
+    expect(ql.functionHoldersOf('moving_fn').packageHolders).toEqual(['com.acme.alpha']);
+  });
+
+  it('[#32534] a name an earlier bind claimed, removed with the owner\'s registrations, is released with the rest, not only the last bind\'s names', async () => {
+    const { ql, registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await register(rival('function', 'com.acme.beta'))).toBeUndefined();
+    bindFunctions(ql, 'com.acme.alpha', ['old_fn']);
+    bindFunctions(ql, 'com.acme.alpha', ['new_fn']);
+    ql.unregisterFunctionsByPackage('app:com.acme.alpha');
+
+    registry.releaseBareNameFunctions('app:com.acme.alpha', heldBy(ql, 'com.acme.alpha'));
+
+    expect(await caught(() => bindFunctions(ql, 'com.acme.beta', ['old_fn', 'new_fn']))).toBeUndefined();
+    expect(ql.functionHoldersOf('old_fn').packageHolders).toEqual(['com.acme.beta']);
+  });
+
+  it('[#32534] CONTROL — two namespaces\' packages claim one name after the seal; releasing one owner\'s claim leaves the other\'s, so a package of the remaining holder\'s namespace is still refused naming it (ABLATION: a release that drops the name\'s whole claimant set admits it)', async () => {
+    const { ql, registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta'))).toBeUndefined();
+    expect(await register(coOwner('com.acme.alpha', 'com.acme.alpha2'))).toBeUndefined();
+    expect(await register(coOwner('com.acme.beta', 'com.acme.beta2'))).toBeUndefined();
+    // Two namespaces: the function's rule meets neither, so both claim the one name.
+    bindFunctions(ql, 'com.acme.alpha', ['shared_fn']);
+    bindFunctions(ql, 'com.acme.beta', ['shared_fn']);
+    ql.unregisterFunctionsByPackage('app:com.acme.alpha');
+
+    registry.releaseBareNameFunctions('app:com.acme.alpha', heldBy(ql, 'com.acme.alpha'));
+
+    // beta's claim on the same name stays: beta's co-owner is refused naming beta.
+    expectRefusal(await caught(() => bindFunctions(ql, 'com.acme.beta2', ['shared_fn'])), 'com.acme.beta2', { kind: 'package', packageId: 'com.acme.beta' });
+    expect(ql.functionHoldersOf('shared_fn').packageHolders).toEqual(['com.acme.beta']);
+    // alpha's claim is gone: alpha's co-owner binds the name.
+    expect(await caught(() => bindFunctions(ql, 'com.acme.alpha2', ['shared_fn']))).toBeUndefined();
+  });
+
+  it('[#32534] a claim released before the seal is no clash for the cold boot to report (CONTROL: the ABLATION above, with no release, reports it)', async () => {
+    const registry = new SchemaRegistry();
+    registry.logLevel = 'silent';
+    registry.claimBareNameFunctions('app:com.acme.alpha', ['shared_fn', 'alpha_fn']);
+    // alpha no longer holds `shared_fn`; it still holds `alpha_fn`.
+    registry.releaseBareNameFunctions('app:com.acme.alpha', (name) => name !== 'shared_fn');
+    registry.claimBareNameFunctions('app:com.acme.beta', ['shared_fn']);
+    expect(registry.sealBareNameHolders()).toEqual([]);
+    // CONTROL — after the seal, each name refuses its one remaining holder's rival: alpha keeps `alpha_fn`.
+    const err = await caught(() => registry.claimBareNameFunctions('app:com.acme.gamma', ['shared_fn', 'alpha_fn']));
+    expect(err?.code).toBe(NAMESPACE_CONFLICT_CODE);
+    expect(err!.conflicts!.map((c) => `${c.name}: ${(c.existingHolder as Holder).packageId}`)).toEqual([
+      'shared_fn: com.acme.beta',
+      'alpha_fn: com.acme.alpha',
+    ]);
+  });
+
   describe('the cold boot of a deployment whose packages already bind one function name', () => {
     // [#31700] Two packages of one namespace: the function has narrowed to it.
     const atBoot = () => [pkg('com.acme.alpha'), rival('function', 'com.acme.beta')];
@@ -703,5 +800,100 @@ describe('the refusal\'s reason names the consumers of the types it lists', () =
     } finally {
       builtIns.delete('platform_api');
     }
+  });
+});
+
+// [#32534, ADR-0150 D4] The engine keeps two function maps: the bare map (one
+// entry per name, the last registration) and the holder set
+// (`functionHoldersOf`). When the last registration leaves and ONE holder of
+// the name remains, the bare read answers that holder; two remaining holders
+// get no pick.
+describe('[#32534] the bare engine function read after a holder leaves', () => {
+  /** Two namespaces' packages each bind `shared_fn`, alpha first, after the seal. */
+  const twoNamespaces = async (extra: string[] = []) => {
+    const booted = await boot();
+    expect(await booted.register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await booted.register(pkg('com.acme.beta'))).toBeUndefined();
+    for (const id of extra) expect(await booted.register(pkg(id))).toBeUndefined();
+    bindFunctions(booted.ql, 'com.acme.alpha', ['shared_fn']);
+    bindFunctions(booted.ql, 'com.acme.beta', ['shared_fn']);
+    return booted;
+  };
+
+  it('two package holders, the last-registered leaves: the remaining holder answers (FROM nothing TO its entry)', async () => {
+    const { ql } = await twoNamespaces();
+    const alphas = ql.functionHoldersOf('shared_fn').packageItem('com.acme.alpha');
+    expect((await caught(() => ql.resolveFunctionEntry('shared_fn')))?.status, 'precondition: two holders, refused').toBe(409);
+
+    expect(ql.unregisterFunctionsByPackage('app:com.acme.beta')).toBe(1);
+
+    expect(ql.functionHoldersOf('shared_fn').packageHolders).toEqual(['com.acme.alpha']);
+    expect(ql.resolveFunctionEntry('shared_fn')).toBe(alphas);
+    expect(ql.resolveFunction('shared_fn')).toBe(alphas!.handler);
+    // …and when it leaves too, nothing (CONTROL: no stale entry stays behind).
+    expect(ql.unregisterFunctionsByPackage('app:com.acme.alpha')).toBe(1);
+    expect(ql.resolveFunctionEntry('shared_fn')).toBeUndefined();
+  });
+
+  it('CONTROL — the first-registered leaves: the last-registered answers, unchanged', async () => {
+    const { ql } = await twoNamespaces();
+    expect(ql.unregisterFunctionsByPackage('app:com.acme.alpha')).toBe(0);
+    expect(ql.resolveFunctionEntry('shared_fn')?.packageId).toBe('app:com.acme.beta');
+  });
+
+  it('CONTROL — two package holders remain: the bare read stays refused, naming both, unchanged', async () => {
+    const { ql } = await twoNamespaces(['com.acme.gamma']);
+    bindFunctions(ql, 'com.acme.gamma', ['shared_fn']);
+    ql.unregisterFunctionsByPackage('app:com.acme.gamma');
+    const err = await caught(() => ql.resolveFunctionEntry('shared_fn'));
+    expect(err?.name).toBe('PackageScopedNameRefusedError');
+    expect(err?.status).toBe(409);
+    expect(err!.message).toContain('package "com.acme.alpha"');
+    expect(err!.message).toContain('package "com.acme.beta"');
+  });
+
+  it('CONTROL — the one holder of a name leaves: nothing answers, unchanged', async () => {
+    const { ql, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    bindFunctions(ql, 'com.acme.alpha', ['alpha_fn']);
+    expect(ql.unregisterFunctionsByPackage('app:com.acme.alpha')).toBe(1);
+    expect(ql.resolveFunctionEntry('alpha_fn')).toBeUndefined();
+    expect(ql.functionHoldersOf('alpha_fn').packageHolders).toEqual([]);
+  });
+
+  it('the platform\'s (owner-less) registration under a package\'s, the package leaves: the platform, the one holder left, answers (FROM nothing TO its entry)', async () => {
+    const { ql } = await boot();
+    const platform = fn('platform');
+    ql.registerFunction('platform_fn', platform);
+    ql.registerFunction('platform_fn', fn('beta'), { packageId: 'app:com.acme.beta' });
+    ql.unregisterFunctionsByPackage('app:com.acme.beta');
+    expect(ql.resolveFunction('platform_fn')).toBe(platform);
+    expect(ql.resolveFunctionEntry('platform_fn')?.packageId).toBeUndefined();
+  });
+
+  it('CONTROL — an owner-less registration over a package\'s never leaves with the package and still answers, unchanged', async () => {
+    const { ql } = await boot();
+    const platform = fn('platform');
+    ql.registerFunction('platform_fn', fn('alpha'), { packageId: 'app:com.acme.alpha' });
+    ql.registerFunction('platform_fn', platform);
+    expect(ql.unregisterFunctionsByPackage('app:com.acme.alpha')).toBe(0);
+    expect(ql.resolveFunction('platform_fn')).toBe(platform);
+  });
+
+  // CURRENT BEHAVIOUR, see #32907 — not the rule. ADR-0150 D4 refuses a caller
+  // with no package `ambiguous-in-environment` when the platform and a package
+  // both hold a name (a 409 naming each); the bare read counts package holders
+  // only (epic seat ruling R2-C), so this pair answers nothing here. #32907
+  // aligns the bare read with D4 and flips this pin on purpose. What it pins
+  // for #32534: the restore picks no holder of two.
+  it('CONTROL (current behaviour, see #32907) — the platform and one package remain after the last-registered package leaves: two holders, so the restore picks nothing', async () => {
+    const { ql } = await boot();
+    ql.registerFunction('platform_fn', fn('platform'));
+    ql.registerFunction('platform_fn', fn('alpha'), { packageId: 'app:com.acme.alpha' });
+    ql.registerFunction('platform_fn', fn('beta'), { packageId: 'app:com.acme.beta' });
+    ql.unregisterFunctionsByPackage('app:com.acme.beta');
+    expect(ql.functionHoldersOf('platform_fn').packageHolders).toEqual(['com.acme.alpha']);
+    expect(ql.functionHoldersOf('platform_fn').platformItem?.()).toBeDefined();
+    expect(ql.resolveFunctionEntry('platform_fn')).toBeUndefined();
   });
 });

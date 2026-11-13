@@ -16,6 +16,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import { HookSchema, HookBodyCapability } from '@objectstack/spec/data';
+// The inspector's condition field loads these on first use; paid here, at collection, not inside a case.
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 // The object picker fetches on mount; every fixture uses `object: '*'`, so
 // stub the shared client and keep that fetch off the network.
@@ -79,13 +82,15 @@ function savedHook(draft: Record<string, unknown>, body: Record<string, unknown>
 const box = (name: string) => screen.getByRole('checkbox', { name }) as HTMLInputElement;
 
 describe('HookDefaultInspector — body capabilities (objectstack#26726)', () => {
-  it('offers one checkbox per spec token on a js body, read from the enum', () => {
+  it('offers one checkbox per spec token on a js body, read from the enum, less the one a hook body cannot be granted', () => {
     renderInspector(hookDraft(JS_BODY));
     const control = screen.getByTestId('hook-body-capabilities');
     const names = within(control)
       .getAllByRole('checkbox')
       .map((el) => el.closest('label')!.textContent);
-    expect(names).toEqual([...HookBodyCapability.options]);
+    // objectstack#32004 — a hook body sends no mail; the hook parse refuses the grant.
+    expect(names).toEqual(HookBodyCapability.options.filter((c) => c !== 'email.send'));
+    expect(screen.queryByRole('checkbox', { name: 'email.send' })).toBeNull();
     // Each token names the ctx call it unlocks.
     expect(within(control).getByText('ctx.api.object(…).find / findOne / count / aggregate')).toBeInTheDocument();
     expect(within(control).getByText('ctx.log.debug / info / warn / error')).toBeInTheDocument();
@@ -187,6 +192,25 @@ describe('HookDefaultInspector — body capabilities (objectstack#26726)', () =>
 
     fireEvent.click(flagged);
     expect(writtenBody(onPatch).capabilities).toEqual(['api.read']);
+  });
+
+  it('a stored email.send grant stays visible, flagged as one a hook body cannot be granted, and unticking removes it', () => {
+    // Not parsed: the hook parse refuses this grant (objectstack#32004), which is why it must not vanish unseen.
+    const draft = {
+      name: 'reads_accounts',
+      object: '*',
+      events: ['beforeInsert'],
+      body: { ...JS_BODY, capabilities: ['api.read', 'email.send'] },
+    };
+    const onPatch = renderInspector(draft);
+
+    const flagged = box(`email.send ${t('engine.inspector.hook.capabilityNotForHook', 'en-US')}`);
+    expect(flagged.checked).toBe(true);
+
+    fireEvent.click(flagged);
+    const body = writtenBody(onPatch);
+    expect(body.capabilities).toEqual(['api.read']);
+    expect(savedHook(draft, body).body).toMatchObject({ capabilities: ['api.read'] });
   });
 
   it('"More fields" does not draw the key a second time', () => {

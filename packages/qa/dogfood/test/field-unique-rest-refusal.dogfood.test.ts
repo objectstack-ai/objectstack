@@ -9,9 +9,10 @@
 //
 //   acceptance[0], negative[0], negative[1] — a colliding create is 409
 //     UNIQUE_VIOLATION; the developerMessage names the object by its declared
-//     label and says no record was written; on the tenant-scoped (composite)
-//     index the user-facing `error` is the generic sentence, and on the
-//     single-column global index it names the field by its label (#26867),
+//     label and says no record was written; on the tenant-scoped composite
+//     `(organization_id, sku)` index (the organization part is the implied
+//     scope) and on the single-column global index alike the user-facing
+//     `error` names the field by its label (#26867),
 //     while `field` keeps the API key; neither carries a driver
 //     prefix, the driver's statement or the bound value; the row count is
 //     unchanged.
@@ -93,15 +94,16 @@ describe('records-forms.field-unique-enforcement — the unique refusal at the R
   });
 
   // The measured bodies. Bare `unique: true` is tenant-scoped, so its SQLite
-  // index is composite and no single column is named; the global index is
-  // single-column, so the field is named — by its label in `error` and
-  // `developerMessage` (one resolution, the engine's), by its API key on
-  // `field` (#26867).
+  // index is the composite `(organization_id, sku)`; the organization part is
+  // the implied scope, so the field is named, as on the global index, which is
+  // single-column — by its label in `error` and `developerMessage` (one
+  // resolution, the engine's), by its API key on `field` (#26867).
   it.each([
     ['sku', 'FUE-SKU-0001', {
-      error: 'A record with this value already exists',
+      error: 'A record with this SKU already exists',
       code: 'UNIQUE_VIOLATION',
-      developerMessage: `Duplicate record refused on '${LABEL}': a unique constraint already holds these values. No record was written.`,
+      developerMessage: `Duplicate record refused on '${LABEL}': a unique constraint on 'SKU' already holds this value. No record was written.`,
+      field: 'sku',
       object: OBJ,
     }],
     ['gsku', 'FUE-GSKU-0001', {

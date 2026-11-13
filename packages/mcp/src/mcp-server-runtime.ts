@@ -2512,7 +2512,9 @@ export class MCPServerRuntime {
    * **Prompts (#3905).** When the bridge can also read this environment's
    * `skill` metadata (`listSkills`), the server additionally serves the MCP
    * `prompts` primitive: every authored skill that carries `instructions`
-   * becomes a prompt the client can `prompts/list` and `prompts/get`. The
+   * becomes a prompt the client can `prompts/list` and `prompts/get`, unless
+   * it binds a tool this request's server does not serve (#32767: a `data:read`
+   * token is not offered a playbook for tools it cannot call). The
    * projection is read from the SAME per-request, environment-scoped bridge the
    * tools use — never from server-held state — so a multi-tenant host cannot
    * serve one environment's skills to another. A bridge without `listSkills`

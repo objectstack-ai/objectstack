@@ -73,6 +73,8 @@ import { isPlaceholderEmail } from './placeholder-email.js';
 import { logAfterResponseSendFailure, sendAfterResponseOnPublicDoor } from './run-after-response.js';
 import { isVisitorResendInEndpointContext } from './visitor-verification-resend.js';
 import { createBetterAuthLogSink } from './sso-oidc-refusal-cause.js';
+import { withSystemReadContext } from './objectql-adapter.js';
+import { refuseSsoAccountOutsideProvenDomain } from './sso-account-at-proven-domain.js';
 
 /** The path better-auth declares for the email sign-up endpoint. */
 const SIGN_UP_EMAIL_PATH = '/sign-up/email';
@@ -157,6 +159,7 @@ export interface AuthInstanceHost {
   isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   isOperatorProvisioning: AuthManager['isOperatorProvisioning'];
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
+  isSsoDomainVerificationEnabled: AuthManager['isSsoDomainVerificationEnabled'];
   isSsoWired: AuthManager['isSsoWired'];
   linkingContext: AuthManager['linkingContext'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
@@ -340,8 +343,20 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       // It is also where better-auth hands over the IdP's raw profile, so
       // the profile's `locale` claim is STAGED here, refusing nothing; the
       // session the sign-in mints settles it (`idp-locale-claim.ts`).
+      //
+      // With SSO domain verification on, a provider creates an account only
+      // for an email address at a domain it has proven
+      // (`sso-account-at-proven-domain.ts`). Judged first, on its own: no
+      // posture, invitation or JIT toggle relaxes it, and the audience gate
+      // must admit as well.
       validateUserInfo: async (data: any, ctx: any) => {
         this.idpLocale.stage(data, ctx);
+        const outsideProvenDomain = await refuseSsoAccountOutsideProvenDomain(data, {
+          verificationEnabled: () => this.isSsoDomainVerificationEnabled(),
+          reader: this.config.dataEngine ? (withSystemReadContext(this.config.dataEngine) as never) : undefined,
+          logger: this.config.logger,
+        });
+        if (outsideProvenDomain) return outsideProvenDomain;
         return (await refuseImplicitAccountLink(data, ctx, {
           requireLocalEmailVerified: this.implicitLinkRequiresLocalEmailVerified(),
           resolveContext: () => this.linkingContext(),

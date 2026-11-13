@@ -41,7 +41,8 @@ import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // core path depend on this plugin being installed. `sys_attachment` moved to
 // @objectstack/service-storage for the same ownership reason (ADR-0052 §3: a
 // file↔record link belongs with storage, not the compliance ledger).
-import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
+import { installAuditWriters, type AuditActorSnapshot, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
+import { createAppActivityWriter } from './app-activity-door.js';
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { createActionInvocationAuditWriter } from './action-invocation-audit.js';
@@ -319,6 +320,11 @@ export class AuditPlugin implements Plugin {
    * and the hook write through one writer.
    */
   private credentialUseWriter: CredentialUseAuditWriter | null = null;
+  /**
+   * The platform's display snapshot of a user, once the writers are installed
+   * at `kernel:ready`; the activity door's writer reads it at each call.
+   */
+  private actorSnapshotOf: ((api: unknown, userId: string) => Promise<AuditActorSnapshot>) | undefined;
 
   constructor(private readonly options: AuditPluginOptions = {}) {}
 
@@ -428,6 +434,9 @@ export class AuditPlugin implements Plugin {
       ...createPackageLifecycleAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...this.credentialUseWriter,
       ...createScimRefusalAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
+      // The activity door's writer: one timeline entry an app adds through
+      // `ctx.activity.append` (`app-activity-door.ts`).
+      ...createAppActivityWriter({ getEngine: getLedgerEngine, getActorSnapshot: () => this.actorSnapshotOf }),
     });
 
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n
@@ -544,6 +553,7 @@ export class AuditPlugin implements Plugin {
         admitMentionRecipients: (input) =>
           admitMentionRecipients({ engine: engine as any, getTenancyPosture, logger: ctx.logger as any }, input),
       });
+      this.actorSnapshotOf = auditWriters?.resolveActorSnapshot;
       ctx.logger.info('AuditPlugin: audit + activity writers installed');
 
       // [#31796] The `credential_use` row: recognised on each credential's own

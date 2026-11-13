@@ -45,6 +45,11 @@
  *  - a row whose parent object the caller cannot read, or that the registry
  *    does not hold, is excluded: the engine answers that leaf `$in: []`, or no
  *    leaf is written;
+ *  - a row whose parent object the data door does not serve (its `enable`
+ *    block refuses `get`) is excluded for every reader, administrators
+ *    included: a reader is served a row about a record only when it can open
+ *    that record through the data door, so no leaf is written for it
+ *    (`parent-record-read-gate.ts`, "A parent the data door does not serve");
  *  - a row naming `sys_activity` itself is excluded: no leaf is written for the
  *    gated object.
  * A platform object is a parent like any other: its rows are kept exactly when

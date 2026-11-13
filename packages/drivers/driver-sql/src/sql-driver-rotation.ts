@@ -43,6 +43,7 @@ import {
   isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
+import { isPostgresInstantColumnType } from './date-on-instant-column.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link RotationFacet} read — every one of
@@ -64,6 +65,7 @@ export interface RotationHost {
   createAuditTimestampColumn: SqlDriver['createAuditTimestampColumn'];
   createColumn: SqlDriver['createColumn'];
   readonly dateFields: SqlDriver['dateFields'];
+  readonly dateFieldsOnInstantColumn: SqlDriver['dateFieldsOnInstantColumn'];
   readonly datetimeFields: SqlDriver['datetimeFields'];
   readonly deferredDdl: SqlDriver['deferredDdl'];
   readonly deferredSchemaObjects: SqlDriver['deferredSchemaObjects'];
@@ -297,6 +299,16 @@ export class RotationFacet {
     const numericCols: string[] = [];
     const numericValueCols: string[] = [];
     const fractionalCols: string[] = [];
+    // [#32590] The three temporal registries are REBUILT from this declaration,
+    // like every list beside them, never added to. They used to be grown with
+    // `(set ??= new Set()).add(name)`, so a re-registration that retyped a field
+    // left it in its old set: a `date` field published as `datetime` sat in
+    // BOTH, and `formatInput` — which collapses every `dateFields` member to
+    // `YYYY-MM-DD` after the datetime pass — dropped the time of day from every
+    // write until the process restarted. A publish re-registers through here.
+    const dateCols: string[] = [];
+    const datetimeCols: string[] = [];
+    const timeCols: string[] = [];
     const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
     // Tenant-isolation column: explicit tenancy opt-out → declared field →
     // implicit `organization_id`. See {@link computeAndRecordTenantField}
@@ -339,15 +351,9 @@ export class RotationFacet {
         if (aggregandColumnClass({ type, multiple: field?.multiple }) === 'fractional') {
           fractionalCols.push(name);
         }
-        if (type === 'date') {
-          (this.dateFields[tableName] ??= new Set()).add(name);
-        }
-        if (type === 'datetime') {
-          (this.datetimeFields[tableName] ??= new Set()).add(name);
-        }
-        if (type === 'time') {
-          (this.timeFields[tableName] ??= new Set()).add(name);
-        }
+        if (type === 'date') dateCols.push(name);
+        if (type === 'datetime') datetimeCols.push(name);
+        if (type === 'time') timeCols.push(name);
         if (type === 'auto_number' || type === 'autonumber') {
           const fmt = resolveAutonumberFormat(field);
           // Tokenize once: the renderer resolves date tokens (`{YYYYMMDD}`),
@@ -366,6 +372,9 @@ export class RotationFacet {
     this.numericFields[tableName] = numericCols;
     this.numericValueFields[tableName] = numericValueCols;
     this.fractionalNumericFields[tableName] = fractionalCols;
+    this.dateFields[tableName] = new Set(dateCols);
+    this.datetimeFields[tableName] = new Set(datetimeCols);
+    this.timeFields[tableName] = new Set(timeCols);
     this.autoNumberFields[tableName] = autoNumberCols;
     this.tenantFieldByTable[tableName] = tenantField;
     // [commit 479fba50d] The declared shape's answer to "does this table carry
@@ -390,7 +399,7 @@ export class RotationFacet {
   }
 
   /** The body of `SqlDriver#initObjects`; the method's docblock there is its contract. */
-  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'carryDeclaredRenames' | 'createAuditTimestampColumn' | 'createColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'retireIndexesNamedForOldKeys' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
+  static async initObjects(this: Pick<RotationHost, 'assertSchemaMutable' | 'autoNumberFields' | 'backfillCanonicalDatetimes' | 'backfillCanonicalJsonEncoding' | 'backfillCanonicalTimes' | 'carryDeclaredRenames' | 'createAuditTimestampColumn' | 'createColumn' | 'dateFields' | 'dateFieldsOnInstantColumn' | 'deferredDdl' | 'deferredSchemaObjects' | 'dialectName' | 'ensureDatabaseExists' | 'ensureRotation' | 'ensureSequencesTable' | 'knex' | 'migrateMysqlDatetimeColumns' | 'migrateMysqlTimeColumns' | 'reconcileAndWarnDrift' | 'registerObjectMetadata' | 'resolveFileColumnsMoved' | 'rethrowWithRowSizeExplanation' | 'retireIndexesNamedForOldKeys' | 'supportsRotation' | 'syncTableIndexes' | 'tablesCreatedHere' | 'tablesFoundExisting' | 'tablesWithTimestamps' | 'tenantFieldByTable' | 'warnBuiltinColumnCollisions'>, objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>): Promise<void> {
     // The ADR-0104 media arm, resolved BEFORE registration because
     // `registerObjectMetadata` below freezes `isJsonField`'s answer into
     // `jsonFields` for every media column it sees. Memoized, and every failure
@@ -490,6 +499,11 @@ export class RotationFacet {
         }
       }
 
+      // [#32851] Which declared `Field.date` columns are still `timestamptz`
+      // (a field published `datetime` → `date`): unknown until the existing
+      // table's catalog is read below, and none for a table created here.
+      this.dateFieldsOnInstantColumn[tableName] = new Set();
+
       // Columns created unconditionally by initObjects — skip them when
       // iterating obj.fields to avoid duplicate-column errors (e.g. SQLite
       // rejects CREATE TABLE with two columns of the same name).
@@ -546,6 +560,16 @@ export class RotationFacet {
 
         const columnInfo = await this.knex(tableName).columnInfo();
         const existingColumns = Object.keys(columnInfo);
+
+        // [#32851] Read from the catalog just fetched, before any column below
+        // is added: an added `date` column is built `date`, never an instant.
+        if (this.dialectName === 'postgres') {
+          for (const field of this.dateFields[tableName] ?? []) {
+            if (isPostgresInstantColumnType((columnInfo as Record<string, { type?: unknown }>)[field]?.type)) {
+              this.dateFieldsOnInstantColumn[tableName].add(field);
+            }
+          }
+        }
 
         if (existingColumns.includes('updated_at')) {
           this.tablesWithTimestamps.add(tableName);
