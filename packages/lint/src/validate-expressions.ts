@@ -158,7 +158,7 @@ import type { FlowCelEntrance } from './flow-cel-root-scope.js';
 import { injectedColumnDefsFor, injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage, provenNonNullKeys } from './validate-null-guards.js';
 import type { NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
-import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
+import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
 export interface ExprIssue {
   where: string;
@@ -2166,6 +2166,20 @@ function evaluatedSourceRefusal(raw: unknown): { message: string; source: string
   return { message: verdict.error.issues[0]?.message ?? EVALUATED_EXPRESSION_SOURCE_REQUIRED, source };
 }
 
+/**
+ * [#32875] The object a computed field is judged on, as the field-formula pass
+ * (`judgeFieldFormula` in {@link runStackExpressionPasses}) reads it: the
+ * object's name, the fields of it a `label()` can answer on, its fields by
+ * name as the registry serves them, and, for a field an `objectExtensions`
+ * entry adds, the locator that names the entry.
+ */
+interface FormulaFieldSite {
+  objectName: string | undefined;
+  optionFields: string[];
+  fieldDefs: Map<string, AnyRec>;
+  where?: string;
+}
+
 /** Options for {@link runStackExpressionPasses}. */
 export interface StackExpressionOptions {
   /**
@@ -3389,6 +3403,102 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     }
   }
 
+  /**
+   * The field-formula pass — one computed field's `expression`. A closure
+   * since #22019, whose object door ran this pass and no other slot of the
+   * field walk; since #22032's pass 2 the door runs the field-rule slots as
+   * well. Called at two points: a declared field at the same point of the
+   * object walk it always ran at, so the build's findings for a declared field
+   * and their order are unchanged, and (#32875) a field an `objectExtensions`
+   * entry adds, in the walk after the object walk.
+   *
+   * [#32875] What the call names, since the pass runs outside one object's
+   * walk: the object the field is served on (`objectName`), the fields of it
+   * a `label()` can answer on (`optionFields`), its fields by name as the
+   * registry serves them (`fieldDefs`, the stored-expression member's input)
+   * and, for an extension field, the locator that names the entry (`where`).
+   */
+  const judgeFieldFormula = (
+    fname: string,
+    f: AnyRec,
+    { objectName, optionFields, fieldDefs, where }: FormulaFieldSite,
+  ): void => {
+    if (f.expression) {
+      // `expression` is the key `FieldSchema` declares for a computed field —
+      // what `Field.formula({ expression: … })` writes. This read was spelled
+      // `formula` until #5026, one of the names `field.zod.ts:333` REJECTS by
+      // aliasing it back to `expression`, so the whole pass had never run
+      // against a stack that parses. Converging it ACTIVATED a check rather
+      // than deleting a dead branch — the real-metadata sweep that had to
+      // accompany that is in #5026's PR body.
+      //
+      // formulas are `value` role (any return type), still CEL. They are
+      // `record`-scoped — `record.<field>`, never bare — so flag bare refs (#1928).
+      //
+      // No `checkNullGuards` here, and unlike the action surface (and a flow
+      // with no record trigger) this is NOT a totality verdict (#4811). A
+      // formula is `value`-role and natively nullable, and
+      // `guard ? value : null` is the blessed shape
+      // (#3306 rewrites it through `dyn(...)`). Whether unguarded arithmetic
+      // such as `record.budget - record.spent` should be *forbidden* here is a
+      // question about what authors are allowed to write — a product decision
+      // for the maintainer, not a wiring gap for a lint PR to close on its own.
+      // The convention already leans guarded (`showcase_project.budget_remaining`
+      // writes `(record.budget == null ? 0 : record.budget) - …`), so the cost of
+      // deciding later is low. Raise it as its own issue rather than widening
+      // this call. Ledger: `validate-null-guards.ts`.
+      //
+      // The object's columns alone, never its read attachments: a formula is
+      // computed on the stored row, which carries no block (see
+      // {@link SERVED_ROW_SITES}).
+      //
+      // [#24197] `traversalHydration`: a formula `expression` is a site where
+      // a relationship traversal is SERVED — ObjectQL's formula read path
+      // preloads ONE hop through a reference field (`record.book.title`)
+      // before computing the field, page-batched, under the reader's own
+      // read. So one hop passes here, and the two shapes that path cannot
+      // serve — a second hop, and a reference read both through and as a
+      // value — are refused with the formula-worded prescription.
+      //
+      // [#28659] `optionFields`: the object's fields that declare options
+      // once served (inline `options` or a `picklist` name, see
+      // `optionFieldNames` in the object walk below). A `label(record.<field>)` naming any other
+      // declared field faults on every row and reads null, so it is refused
+      // here, in the evaluator's own words.
+      const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
+        objectName
+          ? {
+              objectName,
+              fields: fieldIndex.get(objectName),
+              fieldTypes: fieldTypeIndex.get(objectName),
+              scope: 'record',
+              traversalHydration: true,
+              optionFields,
+            }
+          : { scope: 'record' });
+      // Names the KEY the author edits, not the field type. Saying "formula"
+      // here is how the wrong spelling propagates: the next author reads the
+      // diagnostic and writes `formula:`, which the schema then rejects.
+      const fieldWhere = where ?? `object '${objectName}' · field '${fname}' expression`;
+      for (const e of res.errors) issues.push({ where: fieldWhere, message: e.message, source: e.source, severity: 'error' });
+      for (const w of res.warnings) issues.push({ where: fieldWhere, message: w.message, source: w.source, severity: 'warning' });
+      if (objectName) refuseStoredMetadataBodyHop(fieldWhere, f.expression, objectName, 'formula');
+      // [#24410] And a hop to a field the target does not declare.
+      if (objectName) refuseUndeclaredHopField(fieldWhere, f.expression, objectName, 'formula');
+      // [#8116] Formulas read the same record binding the predicates do, so
+      // a `record.<anchor>` read inside one degrades identically.
+      warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
+      // [#32529, #32554] A STORED field's `expression` (any field but a
+      // `formula`) is computed at the write and kept: a read of another
+      // record, of the clock, of the acting user or of a permission is
+      // warned. A `formula` answers nothing here.
+      const storedSource = celSourceOf(f.expression);
+      for (const finding of storedExpressionInputIssues(fname, f, storedSource, (name) => fieldDefs.get(name), objectName)) {
+        issues.push({ where: fieldWhere, message: finding.message, source: storedSource ?? '', severity: finding.severity, rule: finding.rule });
+      }
+    }
+  };
+
   // ── Object validation-rule + formula predicates ────────────────────
   // [#32529] The object's position in `objects`, which is its position in
   // `typedObjects` too (the served body the stored-expression member reads).
@@ -3595,91 +3705,6 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const fieldDefs = new Map<string, AnyRec>(servedSelf ? fieldEntries(servedSelf) : []);
     for (const [n, def] of fieldList) if (!fieldDefs.has(n)) fieldDefs.set(n, def);
     for (const [n, def] of injectedColumnDefsFor(obj)) if (!fieldDefs.has(n)) fieldDefs.set(n, def as AnyRec);
-    /**
-     * The field-formula pass — one computed field's `expression`. A closure
-     * since #22019, whose object door ran this pass and no other slot of the
-     * field walk; since #22032's pass 2 the door runs the field-rule slots as
-     * well, and this is called at one point only — the same point of the field
-     * walk it always ran at — so the build's findings and their order are
-     * unchanged.
-     */
-    const judgeFieldFormula = (fname: string, f: AnyRec): void => {
-      if (f.expression) {
-        // `expression` is the key `FieldSchema` declares for a computed field —
-        // what `Field.formula({ expression: … })` writes. This read was spelled
-        // `formula` until #5026, one of the names `field.zod.ts:333` REJECTS by
-        // aliasing it back to `expression`, so the whole pass had never run
-        // against a stack that parses. Converging it ACTIVATED a check rather
-        // than deleting a dead branch — the real-metadata sweep that had to
-        // accompany that is in #5026's PR body.
-        //
-        // formulas are `value` role (any return type), still CEL. They are
-        // `record`-scoped — `record.<field>`, never bare — so flag bare refs (#1928).
-        //
-        // No `checkNullGuards` here, and unlike the action surface (and a flow
-        // with no record trigger) this is NOT a totality verdict (#4811). A
-        // formula is `value`-role and natively nullable, and
-        // `guard ? value : null` is the blessed shape
-        // (#3306 rewrites it through `dyn(...)`). Whether unguarded arithmetic
-        // such as `record.budget - record.spent` should be *forbidden* here is a
-        // question about what authors are allowed to write — a product decision
-        // for the maintainer, not a wiring gap for a lint PR to close on its own.
-        // The convention already leans guarded (`showcase_project.budget_remaining`
-        // writes `(record.budget == null ? 0 : record.budget) - …`), so the cost of
-        // deciding later is low. Raise it as its own issue rather than widening
-        // this call. Ledger: `validate-null-guards.ts`.
-        //
-        // The object's columns alone, never its read attachments: a formula is
-        // computed on the stored row, which carries no block (see
-        // {@link SERVED_ROW_SITES}).
-        //
-        // [#24197] `traversalHydration`: a formula `expression` is a site where
-        // a relationship traversal is SERVED — ObjectQL's formula read path
-        // preloads ONE hop through a reference field (`record.book.title`)
-        // before computing the field, page-batched, under the reader's own
-        // read. So one hop passes here, and the two shapes that path cannot
-        // serve — a second hop, and a reference read both through and as a
-        // value — are refused with the formula-worded prescription.
-        //
-        // [#28659] `optionFields`: the object's fields that declare options
-        // once served (inline `options` or a `picklist` name, see
-        // `optionFieldNames` above). A `label(record.<field>)` naming any other
-        // declared field faults on every row and reads null, so it is refused
-        // here, in the evaluator's own words.
-        const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
-          objectName
-            ? {
-                objectName,
-                fields: fieldIndex.get(objectName),
-                fieldTypes: fieldTypeIndex.get(objectName),
-                scope: 'record',
-                traversalHydration: true,
-                optionFields: optionFieldNames,
-              }
-            : { scope: 'record' });
-        // Names the KEY the author edits, not the field type. Saying "formula"
-        // here is how the wrong spelling propagates: the next author reads the
-        // diagnostic and writes `formula:`, which the schema then rejects.
-        const fieldWhere = `object '${objectName}' · field '${fname}' expression`;
-        for (const e of res.errors) issues.push({ where: fieldWhere, message: e.message, source: e.source, severity: 'error' });
-        for (const w of res.warnings) issues.push({ where: fieldWhere, message: w.message, source: w.source, severity: 'warning' });
-        if (objectName) refuseStoredMetadataBodyHop(fieldWhere, f.expression, objectName, 'formula');
-        // [#24410] And a hop to a field the target does not declare.
-        if (objectName) refuseUndeclaredHopField(fieldWhere, f.expression, objectName, 'formula');
-        // [#8116] Formulas read the same record binding the predicates do, so
-        // a `record.<anchor>` read inside one degrades identically.
-        warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
-        // [#32529, #32554] A STORED field's `expression` (any field but a
-        // `formula`) is computed at the write and kept: a read of another
-        // record, of the clock, of the acting user or of a permission is
-        // warned. A `formula` answers nothing here.
-        const storedSource = celSourceOf(f.expression);
-        for (const finding of storedExpressionInputIssues(fname, f, storedSource, (name) => fieldDefs.get(name), objectName)) {
-          issues.push({ where: fieldWhere, message: finding.message, source: storedSource ?? '', severity: finding.severity, rule: finding.rule });
-        }
-      }
-    };
-
     for (const [fname, f] of fieldList) {
       // [#22032, pass 2] NOT fenced on an object write: the field-rule slots
       // below — the four slots' root verdict, the `parent` gate, the
@@ -3896,7 +3921,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       ] as const) {
         refuseFieldTraversal(`object '${objectName}' · field '${fname}' ${slot}`, slot, raw, fieldRuleHolders);
       }
-      judgeFieldFormula(fname, f);
+      judgeFieldFormula(fname, f, { objectName, optionFields: optionFieldNames, fieldDefs });
     }
 
     // [#26646] A field group's section predicate — `fieldGroups[].visibleWhen`
@@ -3925,6 +3950,55 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       check(where, raw, objectName, 'record', verdict !== null);
       if (verdict) {
         issues.push({ where, message: verdict.message, source: celSourceOf(raw) ?? verdict.source, severity: 'error' });
+      }
+    }
+  }
+
+  // ── [#32875] Computed fields an `objectExtensions` entry adds ──────
+  // The engine plans and stores a field an extension adds exactly as a
+  // declared one (the registry folds it into the target's field map), so the
+  // field-formula pass judges its `expression` too: each field of each entry
+  // the shared fold keeps (`objectExtensionsByTarget`, one entry per package
+  // per target, the fold `objectsAsServed` reads), located at the entry.
+  //
+  // Judged against the extended object AS SERVED. A target the stack declares
+  // is read through the indexes above, which are built over the served objects
+  // (`objectsAsServed`), and through its served body, `typedObjects` at the
+  // target's position, with its declared fields and injected columns behind
+  // it, as the object walk builds `fieldDefs`. A target the stack does not
+  // declare (another package's object, a platform `sys_*` object) has no
+  // served body here: no field list is passed, so no field is refused as
+  // unknown, and every verdict that does not depend on the target's fields
+  // (the expression's grammar, its functions, a bare or unbound reference)
+  // is given; the stored-expression member reads the entries' own fields.
+  //
+  // Fenced on an object write: an extension is not the written object's
+  // body, and an object write's snapshot carries none.
+  for (const [target, entries] of objectWrite ? [] : objectExtensionsByTarget(stack)) {
+    const position = objects.findIndex((obj) => obj.name === target);
+    const base = position >= 0 ? objects[position] : undefined;
+    const servedTarget = position >= 0 ? typedObjects[position] : undefined;
+    const extensionFieldDefs = new Map<string, AnyRec>(servedTarget ? fieldEntries(servedTarget) : []);
+    if (base) {
+      for (const [n, def] of fieldEntries(base)) if (!extensionFieldDefs.has(n)) extensionFieldDefs.set(n, def);
+      for (const [n, def] of injectedColumnDefsFor(base)) if (!extensionFieldDefs.has(n)) extensionFieldDefs.set(n, def as AnyRec);
+    } else {
+      for (const { fields: added } of entries) {
+        for (const [n, def] of fieldEntries({ fields: added })) extensionFieldDefs.set(n, def);
+      }
+    }
+    const extensionOptionFields = [...extensionFieldDefs]
+      .filter(([, def]) => declaresOptionsOnceServed(def))
+      .map(([n]) => n);
+    for (const { path: entryPath, fields: added } of entries) {
+      for (const f of added) {
+        const fname = typeof f.name === 'string' ? f.name : '?';
+        judgeFieldFormula(fname, f, {
+          objectName: target,
+          optionFields: extensionOptionFields,
+          fieldDefs: extensionFieldDefs,
+          where: `object '${target}' · ${entryPath} · field '${fname}' expression`,
+        });
       }
     }
   }
