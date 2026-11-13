@@ -1975,11 +1975,31 @@ export async function resolveInProcessRequest(
     return null;
 }
 
-/** The 503 for a kernel that cannot forward (no raw app to inject into). */
-export function apiActionForwardUnavailableError(action: any): string {
-    return (
+/**
+ * The 503 for a kernel that cannot forward (no raw app to inject into).
+ *
+ * [#32658] At the host door (`dispatchAction`) the kernel is the one the host
+ * handed in, so the sentence names the call's remedy as well as the
+ * operator's: an environment's own kernel on a multi-kernel host owns no
+ * socket, and the host's kernel, which registers `kernel-resolver`, is the one
+ * whose door forwards for it.
+ */
+export function apiActionForwardUnavailableError(action: any, door?: 'rest' | 'mcp' | 'host'): string {
+    const opening =
         `Action '${action?.name ?? 'unknown'}' is a same-origin \`type: 'api'\` action whose \`target\` ` +
-        `(${typeof action?.target === 'string' ? `'${action.target}'` : 'endpoint'}) this door forwards to in-process, ` +
+        `(${typeof action?.target === 'string' ? `'${action.target}'` : 'endpoint'}) this door forwards to in-process, `;
+    if (door === 'host') {
+        return (
+            opening +
+            `but the kernel dispatchAction was handed exposes no in-process request path (IHttpServer.getRawApp). ` +
+            `Pass dispatchAction the kernel your HTTP door is served from: on a multi-kernel host, the kernel that ` +
+            `registers \`kernel-resolver\`, with the call's \`environmentId\` (an environment's own kernel owns no ` +
+            `socket). On a single kernel, run an HTTP server plugin that implements getRawApp. The action is not ` +
+            `dispatched around the door.`
+        );
+    }
+    return (
+        opening +
         `but this deployment's HTTP server exposes no in-process request path (IHttpServer.getRawApp). ` +
         `Operator: run an HTTP server plugin that implements getRawApp; the action is not dispatched around the door.`
     );

@@ -62,7 +62,7 @@
 - 创建后先手动 fire 一轮烟测,判据取 GitHub 上的产出:标签写入、审计评论、座位贴编辑。
 - 回滚 = `delete_trigger` + 清空座位登记 + 失败注记。
 - 档位按职责挑,⛔ 不按重要性挑;Routine 席的档位与 cron 是维护者在 UI 上的可调项。
-- 项目席巡查默认每小时(总监席无);存根记 `Patrol: TRIGGER_ID · CRON`、`Mailbox: PR #n`,放宽注由。
+- 项目席巡查照收集节②(总监席无);存根记 `Patrol: TRIGGER_ID · CRON`、`Mailbox: PR #n`,放宽注由。
 
 ## Epic 收尾与集中例外
 
