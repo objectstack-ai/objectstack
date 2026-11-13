@@ -1222,7 +1222,7 @@
       "title": "read_file answers the text of a PDF and a Word document with its facts, stops a long extraction at the CPU-time budget with a note, refuses past the concurrent-reading cap with a retryable 503, and a malformed budget variable fails the boot naming it",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1234,14 +1234,14 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
           "MCP HTTP reachable with an osk_ key minted via POST /api/v1/keys (see ai.mcp-http-surface): initialize, then tools/call",
-          "three files uploaded into the Receipt file field (`receipt`) of three seeded showcase invoices, through the record form or create_upload_link: a two-page PDF with a text layer, a .docx with a few paragraphs, and a PDF of 150+ text pages for the budget leg. Record each invoice id",
-          "a second boot of the same app with OS_MCP_READ_FILE_CPU_BUDGET_MS=1, and a third attempt with OS_MCP_READ_FILE_CPU_BUDGET_MS=abc"
+          "three files uploaded into the Receipt file field (`receipt`) of three seeded showcase invoice lines (showcase_invoice_line carries the field; showcase_invoice has none), through the invoice form's line grid or create_upload_link: a two-page PDF with a text layer, a .docx with a few paragraphs, and a PDF of 150+ text pages for the budget leg. Record each invoice line id",
+          "a second boot of the same app with OS_MCP_READ_FILE_CPU_BUDGET_MS=60, a budget that reads some pages of the long PDF and not all of them on a normal host (1 ms is below one page), and a third attempt with OS_MCP_READ_FILE_CPU_BUDGET_MS=abc"
         ]
       },
       "steps": [
-        "call read_file { objectName: 'showcase_invoice', recordId: PDF_INVOICE, field: 'receipt' }; then the same for the .docx invoice",
+        "call read_file { objectName: 'showcase_invoice_line', recordId: PDF_LINE, field: 'receipt' }; then the same for the .docx line",
         "call read_file with both field and attachmentId; then with fileId and no field",
-        "on the boot with the 1 ms budget, read the long PDF",
+        "on the boot with the 60 ms budget, read the long PDF. If the answer is the zero-page shape (acceptance[3]), raise the budget and read again; if it is the whole text, lower it. Record the budget that answered",
         "boot with OS_MCP_READ_FILE_CPU_BUDGET_MS=abc; record the exit and the log"
       ],
       "acceptance": [
@@ -1266,7 +1266,7 @@
         {
           "clause": "an extraction over the CPU-time budget answers the text read so far, truncated, with the budget note",
           "oracle": "network",
-          "verify": "facts carry truncated true and a note opening 'Reading stopped at the CPU-time budget for one file (1 ms) after' (packages/mcp/src/file-content.ts#stoppedExtractionAnswer, #READ_FILE_CPU_BUDGET_MS_ENV)",
+          "verify": "facts carry content 'text', truncated true and a note opening 'Reading stopped at the CPU-time budget for one file (60 ms) after page', the budget the boot carries (packages/mcp/src/file-content.ts#pdfAnswer, #stoppedExtractionAnswer, #READ_FILE_CPU_BUDGET_MS_ENV). A budget spent before the first page's text answers the zero-page shape instead: content 'none', no truncated, and the budget sentence as the note (pdfAnswer's empty arm hands the budget note over as its reason). That shape is a fixture budget too low for the host, not this clause's verdict: record it and read again at a higher budget. Whether a stopped read must always carry truncated true is open for the maintainer (#32945); until it is ruled, the zero-page shape is no FAIL",
           "evidence": "the facts block"
         },
         {
@@ -1307,6 +1307,12 @@
           "date": "2026-11-10",
           "change": "initial — read_file text extraction for PDF and Word, its CPU-time budget and concurrency cap. Scoped sweep #32269 (epic #32022 M3, theme 7: AI data tools and MCP), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-13",
+          "change": "assertion-defect correction of acceptance[3] (with fixtures.requires[2] and [3], steps[0] and steps[2]). At OS_MCP_READ_FILE_CPU_BUDGET_MS=1 the budget is spent before the first page, so pdfAnswer's empty arm answers content 'none' with the budget note and no truncated (packages/mcp/src/file-content.ts#pdfAnswer); at 60 the clause's shape appears. The fixture budget is raised to 60, the clause names the zero-page shape as a fixture signal to re-read at a higher budget, and leaves open whether a stopped read must always carry truncated true (if ruled so, that is a product defect in pdfAnswer's empty arm, not this item's). The receipt field is on showcase_invoice_line, not showcase_invoice (examples/app-showcase/src/data/objects/invoice.object.ts), so the fixture and steps name the invoice line. Found by the 18.4.0 acceptance run #32940 (F-4 to F-8 and its R4/R5 comments; wave anchor #32908). Re-read at main cf1b55c0. Card #32945",
+          "ref": "#32945"
         }
       ]
     },
