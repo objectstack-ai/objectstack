@@ -4,7 +4,9 @@
  * MetadataResourceHistoryPage — durable change log for one item
  * (Phase 3c).
  *
- * Calls `client.history(type, name)`. The framework returns
+ * Calls `client.history(type, name)`, naming the item page's `?package=`
+ * when it has one (objectstack#32905: a by-package name's versions are its
+ * holders' interleaved, and a bare read of a name two hold is refused). The framework returns
  * `{ events: MetadataEvent[] }` where each event records who saved
  * what, with a monotonic `seq`. We render a vertical timeline; clicking
  * an event expands its payload diff.
@@ -104,6 +106,11 @@ export function MetadataResourceHistoryPage({
     areaHost
       ? navigate(`${areaHost.basePath}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${search}`)
       : navigate({ pathname: pathname.replace(/\/[^/]+\/?$/, ''), search });
+  // objectstack#32905 — the item page's `?package=` names whose versions of a
+  // by-package name (ADR-0150 D3) the timeline reads and a rollback restores:
+  // the same holder the item page reads (`layered()`'s `packageId`). `all`
+  // and the empty spelling name no package, as on the server's doors.
+  const packageId = historyPackageOf(search);
 
   return (
     <PageShell
@@ -140,11 +147,22 @@ export function MetadataResourceHistoryPage({
           onCount={setEventCount}
           client={client}
           locale={locale}
+          packageId={packageId}
           onRollback={areaHost?.readOnly ? undefined : () => setRefreshKey((k) => k + 1)}
         />
       </div>
     </PageShell>
   );
+}
+
+/**
+ * The package a history URL's `?package=` names, or `undefined` for none:
+ * absent, empty or `all` — the spellings the server's history and rollback
+ * doors fold to "no package".
+ */
+export function historyPackageOf(search: string): string | undefined {
+  const value = new URLSearchParams(search).get('package');
+  return value && value !== 'all' ? value : undefined;
 }
 
 /**
@@ -166,9 +184,17 @@ export function HistoryPanel({
   rollbackConfirm,
   rollbackLabel,
   locale,
+  packageId,
 }: {
   type: string;
   name: string;
+  /**
+   * objectstack#32905 — the holder of a by-package name (ADR-0150 D3) whose
+   * versions to list and restore into, sent as `?package=` on both doors.
+   * Omitted, a name two holders hold is refused 409 naming both, and the
+   * refusal shows as the timeline's error; one holder reads as before.
+   */
+  packageId?: string;
   refreshKey?: number;
   onCount?: (n: number) => void;
   client: ReturnType<typeof useMetadataClient>;
@@ -207,7 +233,10 @@ export function HistoryPanel({
     setError(null);
     (async () => {
       try {
-        const result = await client.history<any>(type, name, { limit: 100 });
+        const result = await client.history<any>(type, name, {
+          limit: 100,
+          ...(packageId ? { packageId } : {}),
+        });
         if (cancelled) return;
         const list = Array.isArray(result)
           ? result
@@ -229,7 +258,7 @@ export function HistoryPanel({
     return () => {
       cancelled = true;
     };
-  }, [client, type, name, refreshKey, localRefresh]);
+  }, [client, type, name, packageId, refreshKey, localRefresh]);
 
   function rollbackMessage(version: number): string {
     return rollbackConfirm
@@ -241,7 +270,9 @@ export function HistoryPanel({
     setRollingBack(version);
     setError(null);
     try {
-      await (client as any).rollback(type, name, version);
+      await (packageId
+        ? (client as any).rollback(type, name, version, { packageId })
+        : (client as any).rollback(type, name, version));
       onRollback?.(version);
       // Refetch so the new revert event shows up at the top.
       setLocalRefresh((k) => k + 1);

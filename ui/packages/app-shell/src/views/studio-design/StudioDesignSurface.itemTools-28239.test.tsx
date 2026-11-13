@@ -214,7 +214,8 @@ describe('Studio item toolbar — every pillar opens the five tools (objectstack
 
     const history = await openTool('history');
     expect(await within(history).findAllByTitle(ROLLBACK)).toHaveLength(2);
-    expect(mockClient.history).toHaveBeenCalledWith(type, name, { limit: 100 });
+    // The holder the layers read names (objectstack#32905).
+    expect(mockClient.history).toHaveBeenCalledWith(type, name, { limit: 100, packageId: PKG });
 
     await openTool('audit');
     await waitFor(() => expect(mockClient.audit).toHaveBeenCalledWith(type, name, { limit: 100 }));
@@ -240,7 +241,7 @@ describe('Studio item toolbar — rollback (objectstack#28239)', () => {
     expect(mockClient.rollback).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByTestId('history-rollback-confirm-action'));
 
-    await waitFor(() => expect(mockClient.rollback).toHaveBeenCalledWith('object', 'showcase_account', 1));
+    await waitFor(() => expect(mockClient.rollback).toHaveBeenCalledWith('object', 'showcase_account', 1, { packageId: PKG }));
     expect(mockClient.rollback).toHaveBeenCalledTimes(1);
     await waitFor(() =>
       expect(mockClient.layered.mock.calls.filter(([type]) => type === 'object').length).toBeGreaterThan(reads),
