@@ -137,8 +137,9 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * `(package, name)`, and its doors, flow actions and flow endpoints resolve a
  * name by package), then the picklist family (#31700): `picklist`,
  * `mapping` and `dataset`, the `api` and the engine's `function` registry,
- * then `webhook` (#31699 PR 2). A type not listed here keeps one package
- * holder per deployment.
+ * then `webhook` (#31699 PR 2), and `tool` beside the AI family (#31985),
+ * whose one by-name reader (`/meta/tool/NAME`) resolves by package. A type
+ * not listed here keeps one package holder per deployment.
  *
  * Every member but {@link ENGINE_FUNCTION_TYPE} is a metadata type ADR-0150
  * addresses by package ({@link PACKAGE_SCOPED_TYPES}). The function registry
@@ -155,6 +156,8 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
 export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
   'agent',
   'skill',
+  // the AI family's third type, in its own change (#31985)
+  'tool',
   'action',
   'email_template',
   'flow',

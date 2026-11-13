@@ -87,3 +87,46 @@ describe('[#28717] the declared override keeps the bare slot of its shipped flow
         expect(shadowedStoredRowsOf({ ...held })).toEqual([]);
     });
 });
+
+/**
+ * [#32613, ADR-0150 D4] A name two packages ship, each with its declared
+ * override in its own pair: an override is judged against every shipper, so
+ * neither holder's override is ever read as a plain stored row.
+ */
+describe('[#32613] two packages ship the name: each holder\'s declared override is an override', () => {
+    const OTHER = 'com.acme.other';
+    const SHIPPERS = [BASE, OTHER];
+    const otherOverride = () =>
+        bindStoredRow(body('OTHER OVERRIDE', { overrides: { package: OTHER, basedOn: '1.0.0' } }), `${OTHER}.custom`);
+
+    it('the second holder\'s override keeps the slot over a package-less row read after it, and carries it', () => {
+        const held = otherOverride();
+        expect(incomingTakesStoredFlowSlot(held, legacy(), SHIPPERS, NOTHING_INSTALLED)).toBe(false);
+        expect(labels(shadowedStoredRowsOf(held))).toEqual(['LEGACY']);
+    });
+
+    it('FROM: judged against the first holder alone, the package-less row took the slot and dropped it', () => {
+        const held = otherOverride();
+        const incoming = legacy();
+        expect(incomingTakesStoredFlowSlot(held, incoming, BASE, NOTHING_INSTALLED)).toBe(true);
+        expect(shadowedStoredRowsOf(incoming)).toEqual([]);
+    });
+
+    it('two holders\' overrides: whichever is read last takes the slot and carries the other, in either order', () => {
+        for (const [first, second] of [[override, otherOverride], [otherOverride, override]] as const) {
+            const held = first();
+            const incoming = second();
+            expect(incomingTakesStoredFlowSlot(held, incoming, SHIPPERS, NOTHING_INSTALLED)).toBe(true);
+            expect(labels(shadowedStoredRowsOf(incoming))).toEqual([(held as { label: string }).label]);
+            // …and a package-less row read after both keeps neither from the slot's body.
+            expect(incomingTakesStoredFlowSlot(incoming, legacy(), SHIPPERS, NOTHING_INSTALLED)).toBe(false);
+            expect(labels([incoming, ...shadowedStoredRowsOf(incoming)]).sort())
+                .toEqual([(incoming as { label: string }).label, (held as { label: string }).label, 'LEGACY'].sort());
+        }
+    });
+
+    it('CONTROL: a pair row declaring a package that does not ship the name is no override', () => {
+        const stranger = bindStoredRow(body('STRANGER', { overrides: { package: 'com.acme.none', basedOn: '1.0.0' } }), 'com.acme.none.custom');
+        expect(incomingTakesStoredFlowSlot(stranger, legacy(), SHIPPERS, NOTHING_INSTALLED)).toBe(true);
+    });
+});
