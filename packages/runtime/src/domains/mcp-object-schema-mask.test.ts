@@ -1549,6 +1549,8 @@ describe('[#32530] describe_object serves readonly where a write never stands â€
                     ticket_no: { name: 'ticket_no', type: 'autonumber', label: 'Ticket No', autonumberFormat: 'T-{0000}' },
                     // Computed on read, no column.
                     total: { name: 'total', type: 'formula', label: 'Total', expression: 'record.qty * 2' },
+                    // The write path strips a formula by its TYPE, an expression or not.
+                    bare_formula: { name: 'bare_formula', type: 'formula', label: 'Bare formula' },
                     // A stored field the engine computes on every write.
                     doubled: { name: 'doubled', type: 'number', label: 'Doubled', expression: 'record.qty * 2' },
                     // Readable, not editable, for the member: the schema says writable.
@@ -1618,6 +1620,7 @@ describe('[#32530] describe_object serves readonly where a write never stands â€
             frozen_note: true,
             ticket_no: true,
             total: true,
+            bare_formula: true,
             doubled: true,
         });
     });

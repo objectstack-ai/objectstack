@@ -556,11 +556,13 @@ describe('[#32530] stdio describe_object and the objects resource serve readonly
       ticket_no: { type: 'autonumber', label: 'Ticket No' },
       // Computed on read, no column.
       total: { type: 'formula', label: 'Total', expression: 'record.qty * 2' },
+      // The write path strips a formula by its TYPE, an expression or not.
+      bare_formula: { type: 'formula', label: 'Bare formula' },
       // A stored field the engine computes on every write.
       doubled: { type: 'number', label: 'Doubled', expression: 'record.qty * 2' },
     },
   };
-  const EXPECTED = { title: false, frozen_note: true, ticket_no: true, total: true, doubled: true };
+  const EXPECTED = { title: false, frozen_note: true, ticket_no: true, total: true, bare_formula: true, doubled: true };
   const readonlyOf = (described: any) => Object.fromEntries(described.fields.map((f: any) => [f.name, f.readonly]));
   const metadataService = () => {
     const object = () => JSON.parse(JSON.stringify(TICKET));
