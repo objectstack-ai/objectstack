@@ -24,9 +24,9 @@ export const entry: SemanticMigration = {
     + 'reload or late item registration): a package whose only members of a template name are locales the App ships '
     + 'none of, while the App\'s customization pair (APP.custom) stores a row of that locale declaring another '
     + 'package of the App as the base it customizes (overrides.package); and a package of another namespace whose '
-    + 'dependencies reach a package X that holds the template alone, whose only members of it are a locale X ships '
-    + 'none of, while a package-less row of that locale (a legacy overlay in the environment\'s slot) customizes '
-    + 'X\'s template',
+    + 'dependencies reach a package X that holds the template alone (or that X\'s dependencies reach), whose only '
+    + 'members of it are a locale X ships none of, while a package-less row of that locale (a legacy overlay in the '
+    + 'environment\'s slot) customizes X\'s template',
   replacement:
     'Ship a locale of the template that the holder ships too (the App, or X for the package-less row), so the '
     + 'package holds the name beside that holder instead of adding to its template: declared in the manifest, or, '
