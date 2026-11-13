@@ -50,6 +50,9 @@ import { MemoryRouter, Routes, Route, useParams } from 'react-router-dom';
 import { AuthProvider, ActiveOrganizationStorage } from '@object-ui/auth';
 import type { AuthClient, AuthOrganization } from '@object-ui/auth';
 import { deriveRelatedLists } from '../../utils/deriveRelatedLists';
+// The console's draft bar loads the linter lazily: pay that load while the file
+// is collected, never inside a case's timeout (`check:test-source-alias`).
+import '@objectstack/lint';
 
 vi.mock('@object-ui/plugin-designer', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-designer')>()),
