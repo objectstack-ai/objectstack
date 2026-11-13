@@ -485,6 +485,41 @@ describe('[#32613] two packages ship one name, each with its declared override: 
             }
         });
 
+        // Mixed (review n1): two holders, only one with a declared override.
+        // Flow: the overridden holder's override and the other holder's
+        // shipped body, each once, in its own slot, whichever holder is
+        // overridden. Action: the overridden holder's override is listed in
+        // its own slot and served at its own address. The other holder's list
+        // slot is NOT pinned here: when the second holder to register is the
+        // overridden one, the first holder's slot lists that override too, on
+        // `main` as on this change (the registry face: the hydrator registers
+        // the override row under the bare name wearing the first shipper's
+        // envelope), carried to #33131.
+        it(`flow and action, ${first} registered first, one holder overridden: its override in its own slot`, async () => {
+            for (const [overridden, other] of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+                const protocol = await bootHolders(order);
+                const p: any = protocol;
+                const label = overridden === ALPHA ? 'OVR-A' : 'OVR-B';
+                const shipped = `SHIPPED-${other === ALPHA ? 'alpha' : 'beta'}`;
+                for (const type of ['flow', 'action'] as const) {
+                    await overrideEach(protocol, type, [overridden]);
+                    const name = type === 'flow' ? FLOW : SHARED_ACTION;
+                    for (const face of ['served', 'execution'] as const) {
+                        const listed = await entries(protocol, type, face);
+                        if (type === 'flow') {
+                            expect(listed, `${type} ${face}, ${overridden} overridden`).toEqual([`${overridden}:${label}`, `${other}:${shipped}`].sort());
+                        } else {
+                            expect(listed.filter((e) => e.startsWith(`${overridden}:`)), `${type} ${face}, ${overridden} overridden`).toEqual([`${overridden}:${label}`]);
+                        }
+                    }
+                    expect((await p.getMetaItem({ type, name, packageId: overridden })).item.label, `${type} at ${overridden}`).toBe(label);
+                    if (type === 'flow') {
+                        expect((await p.getMetaItem({ type, name, packageId: other })).item.label, `${type} at ${other}`).toBe(shipped);
+                    }
+                }
+            }
+        });
+
         // The served holder set (#32497): with one holder disabled, the
         // enabled holder's override is the one listed and served at its
         // address, whichever holder is disabled (the first to register, which

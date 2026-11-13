@@ -158,6 +158,8 @@ export function declinesStoredRow(
     // never only the override of whichever shipper the by-name lookup happens
     // to find first (the first holder to register), which made the answer
     // depend on registration order (red line 2).
+    // Used for a flow and an action only (the six sealed types below keep the
+    // single-owner judgment).
     // No row, no override: the shippers are not read for a name-only question.
     const servedOverrideOfAShipper = (shippedType: string, shippedName: string): boolean => row !== undefined && row !== null
         && (isServedOverrideRowOf(row, this.packagedArtifactOwner({ type: shippedType, name: shippedName }), installed)
@@ -182,13 +184,19 @@ export function declinesStoredRow(
     // way: its declared override is served over the base's name from its
     // row, so the layered read's `effective` and a by-name read answered by
     // the metadata service see it as the registry's readers do.
-    // [#32613] …against every package that ships the name, as the flow's
-    // above: with two holders of an action name, the second holder's declared
-    // override was judged against the first's package and declined at its own
-    // address, in the served list and in the execution view, so which
-    // holder's override ran depended on which package registered first.
-    return !((servesSealedOverrideRow(type) || canonicalMetaType(type) === 'action')
-        && servedOverrideOfAShipper(type, name));
+    // [#32613] …for an `action`, against every package that ships the name,
+    // as the flow's above: with two holders of an action name, the second
+    // holder's declared override was judged against the first's package and
+    // declined at its own address, in the served list and in the execution
+    // view, so which holder's override ran depended on which package
+    // registered first.
+    if (canonicalMetaType(type) === 'action') return !servedOverrideOfAShipper(type, name);
+    // The six sealed types keep the single-owner judgment (the name's first
+    // registered shipper) here: moving them to every shipper changes what a
+    // read naming no package answers for each of them, which is measured and
+    // pinned on its own follow-up card (#33131), not by this change.
+    return !(servesSealedOverrideRow(type)
+        && isServedOverrideRowOf(row, this.packagedArtifactOwner({ type, name }), installed));
 }
 
 /** The body of `ObjectStackProtocolImplementation#isUnservedSealedOverlay`; the method's docblock there is its contract. */
