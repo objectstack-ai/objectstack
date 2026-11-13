@@ -935,6 +935,7 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
       expect(labelOf(await read(Z, 'fr-FR')), '`?package=Z`: Z\'s own fr-FR').toBe('zeta fr-FR');
       expect(labelOf(await read(PAIR, 'fr-FR')), '`?package=A.custom` still serves the row').toBe('pair fr-FR');
       expect(await listed(X), 'X\'s list leaves it out').not.toContain('pair fr-FR');
+      expect(await forSend(X), 'X\'s execution list leaves it out').not.toContain('pair fr-FR');
       // CONTROL: X's own member is still its own.
       expect(labelOf(await read(X, 'en-US'))).toBe('suitex en-US');
     };
@@ -1026,6 +1027,35 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
       expect(labelOf(await read(X, 'de-DE'))).toBe('pair de-DE');
       expect(await listed(X)).toContain('pair de-DE');
       expect(await forSend(X)).toContain('pair de-DE');
+      registry.enablePackage(Y);
+      const err = await refusalOf(() => read(X, 'de-DE'));
+      expect([err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()]).toEqual([409, [X, Y]]);
+      expect(await listed(X)).not.toContain('pair de-DE');
+    });
+
+    // [#32561 contract review M1] The adoption settles the bundle-addition
+    // rule over every holder and leaves the disabled ones out afterwards, the
+    // order `packageScopedHoldersOf` counts the exact read's owner in: a
+    // disable never promotes a dependent's addition to an owner. Z (on the
+    // App and on Y) ships only fr-FR, an addition to Y; with Y disabled the
+    // exact read counts X alone, and the adoption binds the undeclared de-DE
+    // row to X too, so X keeps it. Z ships no de-DE, so this is not residual
+    // 1. Settling the rule over the served holders only (Y gone, Z an
+    // addition to nothing) makes X and Z two owners: X would lose the row.
+    it.each([['enabled holder first', [X, Y]], ['disabled holder first', [Y, X]]] as const)('CONTROL — one of the two holders disabled is the base of a bundle addition (%s): the addition stays one, so the enabled holder\'s address and lists keep the undeclared row; re-enabled, refused naming both', async (_order, order) => {
+      registry.installPackage({ ...(memberOf(Z) as object), dependencies: { [APP]: '^1.0.0', [Y]: '^1.0.0' } } as never, 'code');
+      for (const id of order) tpl('en-US', id);
+      tpl('fr-FR', Z);
+      const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
+      rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+      registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+      registry.disablePackage(Y);
+      expect(registry.packageScopedHoldersOf('email_template', 'welcome'), 'the exact read\'s owner count: Z stays an addition to Y').toEqual([X]);
+      expect(registry.overlayRowBinding('email_template', 'welcome', { ...pairDe, _packageId: PAIR }), 'the adoption counts as the exact read does').toBe(X);
+      expect(labelOf(await read(X, 'de-DE'))).toBe('pair de-DE');
+      expect(await listed(X)).toContain('pair de-DE');
+      expect(await forSend(X)).toContain('pair de-DE');
+      expect(labelOf(await read(Z, 'fr-FR')), 'CONTROL: Z\'s own fr-FR').toBe('zeta fr-FR');
       registry.enablePackage(Y);
       const err = await refusalOf(() => read(X, 'de-DE'));
       expect([err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()]).toEqual([409, [X, Y]]);

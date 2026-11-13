@@ -9132,13 +9132,28 @@ export class SchemaRegistry {
    * {@link packageScopedHoldersOf} counts by default), so it is left out of
    * this count, as the exact read leaves it out of its own: with one of two
    * holders disabled, the enabled one's address keeps the row (#32183, epic
-   * ruling R4-A). {@link overlaySlotBinding} itself counts every holder, so
-   * a disable never moves the binding the registry's own readers answer.
+   * ruling R4-A). It is left out in the order {@link packageScopedHoldersOf}
+   * uses: the pair's owners are the served holders it customizes, but the
+   * bundle-addition rule ({@link ownersHoldingAName}) is settled over EVERY
+   * holder, so a disable never promotes a dependent's addition to an owner
+   * (a package that adds only to a disabled holder's bundle stays an
+   * addition, as the exact read counts it). {@link overlaySlotBinding}
+   * itself counts every holder, so a disable never moves the binding the
+   * registry's own readers answer.
    */
   overlayRowBinding(type: string, name: string, item: unknown): string | null | undefined {
     const collection = this.metadata.get(type);
     if (!collection) return undefined;
-    const served = new Set(this.compositeHoldersOf(collection, name).filter((id) => !this.isPackageDisabled(id)));
+    const composite = new Set(this.compositeHoldersOf(collection, name));
+    const served = new Set([...composite].filter((id) => !this.isPackageDisabled(id)));
+    const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (typeof stamped === 'string' && stamped !== '' && stamped !== 'sys_metadata' && !served.has(stamped)) {
+      const settled = this.settledPairRowBinding(stamped, item, served);
+      if (Array.isArray(settled)) {
+        const named = this.ownersHoldingAName(type, name, collection, settled as readonly string[], item, composite, stamped);
+        return named.length === 1 ? named[0] : undefined;
+      }
+    }
     return this.overlaySlotBinding(type, item, name, collection, served);
   }
 
