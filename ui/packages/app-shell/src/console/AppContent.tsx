@@ -72,7 +72,7 @@ import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, 
 import { enterAppBundle, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import { packagedAutomationStudioPath, setupMetadataRest, setupMetadataStudioPath } from '../views/studio-design/setupMetadataRedirect.js';
-import { NO_RECORD_DRAWERS_OPENING, RecordDrawerOpeningProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening } from '../views/recordDrawerStack.js';
+import { NO_RECORD_DRAWERS_OPENING, NO_RECORD_PAGE_DRAWERS_OPEN, RecordDrawerOpeningProvider, RecordPageDrawerOpenProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening, type RecordPageDrawersOpen } from '../views/recordDrawerStack.js';
 import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
 
 // Route-based code splitting — lazy-load less-frequently-used routes.
@@ -542,7 +542,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // reads the same object definition before, during and after it, so opening
   // or closing a record re-reads none of its rows (the skeleton this used to
   // show remounted the list on every first open).
-  const drawerReadsRegistry = !!objectScope && searchParamsHasRecordDrawer(location.search);
+  // objectstack#33112 — and so does a drawer open over a record page, whose
+  // levels live in its component state rather than the URL: they report here.
+  const [recordPageDrawersOpen, setRecordPageDrawersOpen] = useState<RecordPageDrawersOpen>(NO_RECORD_PAGE_DRAWERS_OPEN);
+  const drawerReadsRegistry =
+    !!objectScope && (searchParamsHasRecordDrawer(location.search) || recordPageDrawersOpen.size > 0);
   const drawerRegistrySettled = useLazyMetadataSettled(drawerReadsRegistry ? 'object' : '', ensureType, getTypeStatus);
   const scopeObjects: any[] | undefined = objectScope?.objects;
   const registryObjects: any[] | undefined = drawerReadsRegistry && drawerRegistrySettled ? metadata.objects : undefined;
@@ -1545,6 +1549,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         currentOrgId={activeOrganization?.id ?? null}
       >
       <RecordDrawerOpeningProvider value={setRecordDrawersOpening}>
+      <RecordPageDrawerOpenProvider value={setRecordPageDrawersOpen}>
       <ConsoleLayout
         activeAppName={activeApp.name}
         activeApp={activeApp}
@@ -1787,6 +1792,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
             />
           )}
       </ConsoleLayout>
+      </RecordPageDrawerOpenProvider>
       </RecordDrawerOpeningProvider>
       </FilterScopeProvider>
     </ExpressionProvider>

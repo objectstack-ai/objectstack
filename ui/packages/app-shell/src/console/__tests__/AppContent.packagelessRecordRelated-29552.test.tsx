@@ -45,7 +45,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useParams } from 'react-router-dom';
 import { AuthProvider, ActiveOrganizationStorage } from '@object-ui/auth';
 import type { AuthClient, AuthOrganization } from '@object-ui/auth';
@@ -70,17 +70,54 @@ vi.mock('../../views/ObjectView', () => ({
 }));
 /** objectstack#29878 — the object names each render of the record view was handed, in order. */
 const recordViewRenders = vi.hoisted(() => [] as string[][]);
+/** objectstack#33112 — the page mounts the real drawer host over it, as `RecordDetailView` does. */
+const pageDrawer = vi.hoisted(() => ({ on: false }));
 vi.mock('../../views/RecordDetailView', async () => {
   const { deriveRelatedLists: derive } = await import('../../utils/deriveRelatedLists');
-  return {
-    RecordDetailView: ({ objects }: { objects: Array<{ name: string }> }) => {
-      recordViewRenders.push(objects.map((o) => o.name));
-      const { objectName } = useParams();
-      const def = objects.find((o) => o.name === objectName);
-      const related = def ? derive(def as never, objects as never[]).map((r) => `${r.childObject}.${r.referenceField}`) : [];
-      return <div data-testid="record-view" data-related={related.join(',')}>{objects.map((o) => o.name).join(',')}</div>;
-    },
+  const { RecordPageDrawerHost } = await import('../../views/recordDrawerStack');
+  const { useRecordDrawer } = await import('../../views/recordDrawerContext');
+  const relatedOf = (objectName: string | undefined, objects: Array<{ name: string }>) => {
+    const def = objects.find((o) => o.name === objectName);
+    return def ? derive(def as never, objects as never[]).map((r) => `${r.childObject}.${r.referenceField}`) : [];
   };
+  /** A related row on the page, opening its record in the page's drawer. */
+  const OpenRow = ({ objectName, recordId }: { objectName: string; recordId: string }) => {
+    const drawer = useRecordDrawer();
+    return <button type="button" data-testid={`open-${objectName}`} onClick={() => drawer?.open(objectName, recordId)} />;
+  };
+  type Props = { objects: Array<{ name: string }>; objectNameOverride?: string; recordIdOverride?: string; embedded?: boolean };
+  function RecordDetailView({ objects, objectNameOverride, recordIdOverride, embedded }: Props) {
+    const params = useParams();
+    if (embedded) {
+      // The drawer's level: the related lists of ITS object, from the objects the page hands it.
+      return (
+        <div data-testid="record-level" data-level={`${objectNameOverride}/${recordIdOverride}`} data-related={relatedOf(objectNameOverride, objects).join(',')} />
+      );
+    }
+    recordViewRenders.push(objects.map((o) => o.name));
+    const page = (
+      <div data-testid="record-view" data-related={relatedOf(params.objectName, objects).join(',')}>
+        {objects.map((o) => o.name).join(',')}
+      </div>
+    );
+    if (!pageDrawer.on) return page;
+    return (
+      <RecordPageDrawerHost
+        appName={params.appName}
+        objects={objects}
+        pageObjectName={params.objectName}
+        pageRecordId={params.recordId}
+        pageTitle={undefined}
+        renderRecord={(level) => (
+          <RecordDetailView objects={objects} objectNameOverride={level.objectName} recordIdOverride={level.recordId} embedded />
+        )}
+      >
+        {page}
+        <OpenRow objectName="crm_contact" recordId="c1" />
+      </RecordPageDrawerHost>
+    );
+  }
+  return { RecordDetailView };
 });
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -260,6 +297,7 @@ beforeEach(() => {
   server.pages = [];
   server.refuse = {};
   recordViewRenders.length = 0;
+  pageDrawer.on = false;
   server.peek = { status: 'ready', items: serverBundle(OPS_APP) };
   localStorage.clear();
   sessionStorage.clear();
@@ -568,5 +606,69 @@ describe('a tracked object’s record route asks sys_audit_log by name (objectst
     server.peek = { status: 'ready', items: serverBundle(CRM_APP) };
     boot('/apps/crm/crm_account/record/r1?recordId=r2');
     await waitFor(() => expect(objectCalls()).toContain('object'));
+  });
+});
+
+/**
+ * objectstack#33112 — a drawer open over a record PAGE draws its level's own
+ * related lists. The page's scope holds the objects that point at the page's
+ * object (#29552, #29681): the child the drawer opens, never the objects that
+ * point at the child. The list's drawer (`?recordId=`) joins the whole
+ * registry to the scope for its levels (#27626); the page's drawer keeps its
+ * levels in component state, so it joined nothing, and a level lost the
+ * child's own related tabs. The page's drawer now reports itself open, and
+ * the registry joins the scope the same way, once: no read for a page with no
+ * drawer, one for every level the drawer then opens, closed and reopened.
+ *
+ * Here the page is the account; its drawer opens the contact (a child of the
+ * account, in the scope), whose own child `crm_case` is of another package and
+ * points at the contact only: outside the account's scope.
+ * CONTROLs: the list's drawer draws it, and so does the contact's own page.
+ */
+describe('a drawer over a record page draws its level’s own related lists (objectstack#33112)', () => {
+  beforeEach(() => {
+    server.peek = { status: 'ready', items: serverBundle(CRM_APP) };
+    pageDrawer.on = true;
+  });
+  const registryReads = () => server.calls.filter((c) => c === 'object').length;
+  const levelRelated = () => (screen.getByTestId('record-level').getAttribute('data-related') ?? '').split(',').filter(Boolean);
+
+  it('a child level shows the child’s own related lists, the registry read once across opens', async () => {
+    boot('/apps/crm/crm_account/record/r1');
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('sys_user'));
+    await settle();
+    // The page alone reads its scope, never the registry.
+    expect(objectCalls()).not.toContain('object');
+    expect(screen.getByTestId('record-view')).not.toHaveTextContent('crm_case');
+
+    fireEvent.click(screen.getByTestId('open-crm_contact'));
+    await waitFor(() => expect(screen.getByTestId('record-level')).toHaveAttribute('data-level', 'crm_contact/c1'));
+    await waitFor(() => expect(levelRelated()).toEqual(registryRelated('crm_contact')));
+    expect(registryRelated('crm_contact')).toEqual(['crm_case.contact']);
+    expect(registryReads()).toBe(1);
+
+    // Closed and opened again: the registry is in hand, and asked no more.
+    act(() => fireEvent.click(screen.getByTitle('Close')));
+    await waitFor(() => expect(screen.queryByTestId('record-level')).toBeNull());
+    fireEvent.click(screen.getByTestId('open-crm_contact'));
+    await waitFor(() => expect(levelRelated()).toEqual(['crm_case.contact']));
+    await settle();
+    expect(registryReads()).toBe(1);
+    // The page's own related lists are the registry's, as before.
+    expect(drawnRelated()).toEqual(registryRelated('crm_account'));
+  });
+
+  it('CONTROL: the list’s drawer joins the registry for its levels, as before (objectstack#27626)', async () => {
+    boot('/apps/crm/crm_account?recordId=r1');
+    await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('crm_case'));
+    expect(registryReads()).toBe(1);
+  });
+
+  it('CONTROL: the child’s own page draws the same related lists, from its scope', async () => {
+    boot('/apps/crm/crm_contact/record/c1');
+    await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('crm_case'));
+    await settle();
+    expect(objectCalls()).not.toContain('object');
+    expect(drawnRelated()).toEqual(['crm_case.contact']);
   });
 });

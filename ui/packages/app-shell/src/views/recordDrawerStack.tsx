@@ -218,24 +218,51 @@ export function useRecordFormOpensOverDrawers(requested: boolean, opening: Recor
 }
 
 /**
- * Reports a drawer that names a record and is not drawn yet, from the commit
- * that mounts it, until the commit that draws it.
+ * The record drawers open over a record PAGE (objectstack#33112), one token
+ * per {@link RecordPageDrawerHost} with a record open. Its levels live in
+ * component state, not in the URL, so the console cannot read them there as
+ * it reads the list's `?recordId=`. A level derives its related lists from
+ * the objects that point at ITS object, which the record route's scope (the
+ * objects pointing at the page's object) does not hold for a grandchild; the
+ * host of the route joins the whole registry to the scope while this set is
+ * not empty, as it does for `?recordId=`.
  */
-function useReportDrawerOpening(opening: boolean) {
-  const setOpening = useContext(RecordDrawerOpeningContext);
+export type RecordPageDrawersOpen = ReadonlySet<symbol>;
+
+const RecordPageDrawerOpenContext = createContext<Dispatch<SetStateAction<RecordPageDrawersOpen>> | null>(null);
+
+/** Publishes the setter of a {@link RecordPageDrawersOpen} set to the record pages below. */
+export const RecordPageDrawerOpenProvider = RecordPageDrawerOpenContext.Provider;
+
+/** No record page holds a drawer open. */
+export const NO_RECORD_PAGE_DRAWERS_OPEN: RecordPageDrawersOpen = new Set<symbol>();
+
+/** Holds a token in the context's set while `active`, from the commit that sets it. */
+function useReportToken(
+  setTokens: Dispatch<SetStateAction<ReadonlySet<symbol>>> | null,
+  active: boolean,
+) {
   const [token] = useState(() => Symbol('record-drawer'));
   useLayoutEffect(() => {
-    if (!setOpening || !opening) return undefined;
-    setOpening((prev) => new Set(prev).add(token));
+    if (!setTokens || !active) return undefined;
+    setTokens((prev) => new Set(prev).add(token));
     return () => {
-      setOpening((prev) => {
+      setTokens((prev) => {
         if (!prev.has(token)) return prev;
         const next = new Set(prev);
         next.delete(token);
         return next;
       });
     };
-  }, [setOpening, token, opening]);
+  }, [setTokens, token, active]);
+}
+
+/**
+ * Reports a drawer that names a record and is not drawn yet, from the commit
+ * that mounts it, until the commit that draws it.
+ */
+function useReportDrawerOpening(opening: boolean) {
+  useReportToken(useContext(RecordDrawerOpeningContext), opening);
 }
 
 /**
@@ -885,6 +912,7 @@ export function RecordPageDrawerHost({
   );
   const stack = useRecordDrawerStack({ root, restoredPath: restored, onRootStep });
   const { push, tabParam } = stack;
+  useReportToken(useContext(RecordPageDrawerOpenContext), !!root);
 
   const openFromPage = useCallback<RecordDrawerApi['open']>(
     (objectName, recordId, options) => {
