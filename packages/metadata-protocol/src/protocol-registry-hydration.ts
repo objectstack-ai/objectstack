@@ -31,7 +31,7 @@
 
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import { storedRowDocument } from './item-lock.js';
-import { installedManifestsOf, isTenantAuthored, itemDiscriminator } from '@objectstack/metadata-core';
+import { installedManifestsOf, isPairOf, isTenantAuthored, itemDiscriminator } from '@objectstack/metadata-core';
 import { isPackageScopedType } from '@objectstack/core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
@@ -167,6 +167,35 @@ function soleHolderOf(registry: { packageScopedHoldersOf?(type: string, name: st
     const holders = typeof registry.packageScopedHoldersOf === 'function' ? registry.packageScopedHoldersOf(type, name) ?? [] : [];
     if (holders.length > 1) return null;
     return holders[0];
+}
+
+/**
+ * [#32692, ADR-0150 D4] Whether a stored row of the package-scoped `type`,
+ * bound to `packageId`, names a package that holds no item of `name` while
+ * two or more OTHER packages do. Such a row is no holder's item: the artifact
+ * lookup scoped to its package falls back to the package registered first,
+ * so registered it wore that package's envelope and took that package's slot,
+ * a different slot in each registration order. It is declined and reported,
+ * never grafted onto a holder picked for it (red line 2).
+ *
+ * Every holder counts, a disabled one included, since a binding must not move
+ * with a reversible disable (ADR-0150 D3). A customization pair of a holder
+ * (ADR-0146) is not such a package: its row is that holder's declared
+ * override, read by `overlaySlotBinding`. With one holder the row keeps its
+ * reading as before: one holder is the only package it can mean.
+ */
+function namesNoHolderAmongMany(
+    registry: { packageScopedHoldersOf?(type: string, name: string, callerPackageId?: string | null, options?: { includeDisabledPackages?: boolean }): readonly string[] | undefined },
+    type: string,
+    packageId: string | null | undefined,
+    name: string,
+): boolean {
+    const bound = boundPackageOf(packageId);
+    if (bound === undefined || typeof registry.packageScopedHoldersOf !== 'function') return false;
+    const holders = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+    if (holders.length < 2 || holders.includes(bound)) return false;
+    const installed = installedManifestsOf(registry);
+    return !holders.some((holder) => isPairOf(bound, holder, installed));
 }
 
 export class ProtocolRegistryHydrationFacet {
@@ -615,6 +644,21 @@ export class ProtocolRegistryHydrationFacet {
         // one holder's, and with two or more holders none, registering as the
         // environment's tenant row that each holder's exact read judges
         // (ADR-0150 D4). ⛔ Never a pick between two.
+        // [#32692, ADR-0150 D4] …and a row naming a package that holds no
+        // item of the name, while two or more other packages hold it, borrows
+        // no holder's envelope either: it is declined and reported, as the
+        // package-less row is ({@link namesNoHolderAmongMany}). ⛔ Not a flow
+        // (above).
+        if (scoped && canonicalType !== 'flow' && namesNoHolderAmongMany(registry, canonicalType, options.packageId, rowName)) {
+            console.warn(
+                `[Protocol] [metadata_stored_row_names_no_holder] the stored ${canonicalType} row '${rowName}' is bound to `
+                + `package '${boundPackageOf(options.packageId)}', which holds no ${canonicalType} of that name, while `
+                + `${registry.packageScopedHoldersOf(canonicalType, rowName, null, { includeDisabledPackages: true }).map((h: string) => `'${h}'`).join(' and ')} `
+                + `each hold one. It is not registered and no holder serves it: a stored row is never grafted onto a holder `
+                + `picked for it. Delete the row, or re-save it under the package whose item it customizes.`,
+            );
+            return false;
+        }
         const envelopePackage = options.packageId ?? (scoped ? soleHolderOf(registry, canonicalType, rowName) : undefined);
         const artifact = envelopePackage === null ? undefined : host.lookupArtifactItem(
             type, (data as any).name, envelopePackage ?? undefined, bundleMemberOf(type, data),
