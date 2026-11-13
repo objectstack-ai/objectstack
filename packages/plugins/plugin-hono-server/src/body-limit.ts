@@ -196,7 +196,7 @@ export function requestBodyGuardOf(c: Context): RequestBodyGuard | undefined {
 
 function guardRequest(original: Request, limit: number): { guard: RequestBodyGuard; guarded: Request | undefined } {
     const declared = declaredLength(original);
-    const declaredOverLimit = original.body !== null && declared !== undefined && declared > limit;
+    const declaredOverLimit = original.body !== null && !original.bodyUsed && declared !== undefined && declared > limit;
     let tripped = false;
     let pulled = false;
     let held: Promise<HeldRequestBody> | undefined;
@@ -250,7 +250,10 @@ function guardRequest(original: Request, limit: number): { guard: RequestBodyGua
         },
     };
 
-    if (!original.body) return { guard, guarded: undefined };
+    // No body, or one something upstream of this app already consumed (a host
+    // that mounts this app under its own and read the body first): there is
+    // nothing left here to bound, and Hono's body cache holds the only copy.
+    if (!original.body || original.bodyUsed || original.body.locked) return { guard, guarded: undefined };
 
     const refusal = () => {
         tripped = true;
