@@ -644,27 +644,63 @@ describe('function — the engine function registry, through the hook binder\'s 
   });
 
   // [#32534] The release the runtime's re-bind makes when a function leaves its
-  // owner (moved to another owner, or with a dropped package body).
-  it('[#32534] after the seal, releasing a package\'s claim on one name lets a package of its namespace bind it; its other names and the other holders\' claims stay (base: no release, the bind refused naming the old owner)', async () => {
+  // owner (moved to another owner, or with a dropped package body): after the
+  // engine's removal, on every name the owner's package no longer holds there.
+  /** Whether the engine still holds `name` for `packageId`: the question the runtime's release asks. */
+  const heldBy = (ql: ObjectQL, packageId: string) => (name: string) => ql.functionHoldersOf(name).packageItem(packageId) !== undefined;
+
+  it('[#32534] after the seal, releasing a package\'s claims on the names it no longer holds lets a package of its namespace bind them; a name it still holds and the other holders\' claims stay (base: no release, the bind refused naming the old owner)', async () => {
     const { ql, registry, register } = await boot();
     expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
     expect(await register(rival('function', 'com.acme.beta'))).toBeUndefined();
     expect(await register(rival('function', 'com.acme.gamma'))).toBeUndefined();
     bindFunctions(ql, 'com.acme.alpha', ['moving_fn', 'kept_fn']);
     bindFunctions(ql, 'com.acme.gamma', ['gamma_fn']);
+    // The re-bind's removal, then what alpha keeps registered again (`releaseMovedFunctions`).
     ql.unregisterFunctionsByPackage('app:com.acme.alpha');
+    ql.registerFunction('kept_fn', fn('alpha'), { packageId: 'app:com.acme.alpha' });
 
-    registry.releaseBareNameFunctions('app:com.acme.alpha', ['moving_fn']);
+    registry.releaseBareNameFunctions('app:com.acme.alpha', heldBy(ql, 'com.acme.alpha'));
 
     expect(await caught(() => bindFunctions(ql, 'com.acme.beta', ['moving_fn']))).toBeUndefined();
     expect(ql.functionHoldersOf('moving_fn').packageHolders).toEqual(['com.acme.beta']);
-    // CONTROLs — alpha's other claim, and another package's claim, still refuse.
+    // CONTROLs — the name alpha still holds, and another package's claim, still refuse.
     expectRefusal(await caught(() => bindFunctions(ql, 'com.acme.beta', ['kept_fn'])), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' });
     expectRefusal(await caught(() => bindFunctions(ql, 'com.acme.beta', ['gamma_fn'])), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.gamma' });
-    // CONTROL — an owner-less release, or an empty one, releases nothing.
-    registry.releaseBareNameFunctions(undefined, ['kept_fn']);
-    registry.releaseBareNameFunctions('app:com.acme.alpha', []);
+    // CONTROL — an owner-less release, or one whose package still holds every name, releases nothing.
+    registry.releaseBareNameFunctions(undefined, () => false);
+    registry.releaseBareNameFunctions('app:com.acme.alpha', () => true);
     expectRefusal(await caught(() => bindFunctions(ql, 'com.acme.beta', ['kept_fn'])), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' });
+  });
+
+  it('[#32534] CONTROL — a name the package still holds under another owner spelling (its bare id) keeps its claim after the removal of its `app:` registrations, so its co-owner is still refused naming it, as on main', async () => {
+    const { ql, registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await register(rival('function', 'com.acme.beta'))).toBeUndefined();
+    bindFunctions(ql, 'com.acme.alpha', ['moving_fn']);
+    // A host's own registration of the function for alpha, under the package's bare id.
+    ql.registerFunction('moving_fn', fn('host'), { packageId: 'com.acme.alpha' });
+    ql.unregisterFunctionsByPackage('app:com.acme.alpha');
+    expect(ql.functionHoldersOf('moving_fn').packageHolders, 'precondition: the removal by owner string left it').toEqual(['com.acme.alpha']);
+
+    registry.releaseBareNameFunctions('app:com.acme.alpha', heldBy(ql, 'com.acme.alpha'));
+
+    expectRefusal(await caught(() => bindFunctions(ql, 'com.acme.beta', ['moving_fn'])), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' });
+    expect(ql.functionHoldersOf('moving_fn').packageHolders).toEqual(['com.acme.alpha']);
+  });
+
+  it('[#32534] a name an earlier bind claimed, removed with the owner\'s registrations, is released with the rest, not only the last bind\'s names', async () => {
+    const { ql, registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await register(rival('function', 'com.acme.beta'))).toBeUndefined();
+    bindFunctions(ql, 'com.acme.alpha', ['old_fn']);
+    bindFunctions(ql, 'com.acme.alpha', ['new_fn']);
+    ql.unregisterFunctionsByPackage('app:com.acme.alpha');
+
+    registry.releaseBareNameFunctions('app:com.acme.alpha', heldBy(ql, 'com.acme.alpha'));
+
+    expect(await caught(() => bindFunctions(ql, 'com.acme.beta', ['old_fn', 'new_fn']))).toBeUndefined();
+    expect(ql.functionHoldersOf('old_fn').packageHolders).toEqual(['com.acme.beta']);
   });
 
   it('[#32534] CONTROL — two namespaces\' packages claim one name after the seal; releasing one owner\'s claim leaves the other\'s, so a package of the remaining holder\'s namespace is still refused naming it (ABLATION: a release that drops the name\'s whole claimant set admits it)', async () => {
@@ -678,7 +714,7 @@ describe('function — the engine function registry, through the hook binder\'s 
     bindFunctions(ql, 'com.acme.beta', ['shared_fn']);
     ql.unregisterFunctionsByPackage('app:com.acme.alpha');
 
-    registry.releaseBareNameFunctions('app:com.acme.alpha', ['shared_fn']);
+    registry.releaseBareNameFunctions('app:com.acme.alpha', heldBy(ql, 'com.acme.alpha'));
 
     // beta's claim on the same name stays: beta's co-owner is refused naming beta.
     expectRefusal(await caught(() => bindFunctions(ql, 'com.acme.beta2', ['shared_fn'])), 'com.acme.beta2', { kind: 'package', packageId: 'com.acme.beta' });
@@ -691,7 +727,8 @@ describe('function — the engine function registry, through the hook binder\'s 
     const registry = new SchemaRegistry();
     registry.logLevel = 'silent';
     registry.claimBareNameFunctions('app:com.acme.alpha', ['shared_fn', 'alpha_fn']);
-    registry.releaseBareNameFunctions('app:com.acme.alpha', ['shared_fn']);
+    // alpha no longer holds `shared_fn`; it still holds `alpha_fn`.
+    registry.releaseBareNameFunctions('app:com.acme.alpha', (name) => name !== 'shared_fn');
     registry.claimBareNameFunctions('app:com.acme.beta', ['shared_fn']);
     expect(registry.sealBareNameHolders()).toEqual([]);
     // CONTROL — after the seal, each name refuses its one remaining holder's rival: alpha keeps `alpha_fn`.
