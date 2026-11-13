@@ -181,6 +181,8 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
   useMetadataClient: () => client,
 }));
 
+// Paid at collection, not in a case's clock: the view inspector's CEL authoring loads it on demand.
+import '@objectstack/lint';
 import { ObjectView, type ConsoleObjectViewProps } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { UserStateAdaptersProvider, useAttachListStateFamily } from '../context/UserStateAdapters';
@@ -1041,5 +1043,57 @@ describe('CONTROL — no provider: this browser\'s state, as before (objectui#12
     expect(JSON.parse(localStorage.getItem(localListStateKey('u1', OBJECT_NAME)) ?? '{}')).toEqual({
       viewOrder: [SAVED_ID, SYSTEM_ID],
     });
+  });
+});
+
+describe('a list change writes the user\'s row only when it changes a preference (objectstack#32627)', () => {
+  const STORED_SORT = [{ field: 'amount', order: 'desc' }];
+  const STORED = { [LIST_KEY]: { perView: { [SYSTEM_ID]: { sort: STORED_SORT, columnState: { widths: { name: 280 } } } } } };
+
+  it('re-stating the stored sort and column layout, and clearing filters nobody set, sends no write', async () => {
+    const ds = makeDataSource();
+    const { family } = makeFamily(structuredClone(STORED));
+    mountWithFamily(ds, family);
+    await listReady();
+
+    act(() => {
+      listProps.onSortChange([{ id: 'row-1', field: 'amount', order: 'desc' }]);
+      listProps.onColumnStateChange({ widths: { name: 280 } });
+      listProps.onFilterChange({ id: 'root', logic: 'and', conditions: [] });
+    });
+    await wait(700);
+
+    expect(family.save).not.toHaveBeenCalled();
+  });
+
+  it('a change undone before the write leaves sends no write', async () => {
+    const ds = makeDataSource();
+    const { family } = makeFamily(structuredClone(STORED));
+    mountWithFamily(ds, family);
+    await listReady();
+
+    act(() => listProps.onSortChange([{ field: 'amount', order: 'asc' }]));
+    act(() => listProps.onSortChange([{ field: 'amount', order: 'desc' }]));
+    await wait(700);
+
+    expect(family.save).not.toHaveBeenCalled();
+    expect(listProps.schema.sort).toEqual(STORED_SORT);
+  });
+
+  it('CONTROL: a sort that differs from the stored one is one write, and undoing it after it landed is another', async () => {
+    const ds = makeDataSource();
+    const { family } = makeFamily(structuredClone(STORED));
+    mountWithFamily(ds, family);
+    await listReady();
+
+    act(() => listProps.onSortChange([{ field: 'amount', order: 'asc' }]));
+    await wait(700);
+    expect(family.save).toHaveBeenCalledTimes(1);
+    expect((family.save.mock.calls[0][1] as any).perView[SYSTEM_ID].sort).toEqual([{ field: 'amount', order: 'asc' }]);
+
+    act(() => listProps.onSortChange([{ field: 'amount', order: 'desc' }]));
+    await wait(700);
+    expect(family.save).toHaveBeenCalledTimes(2);
+    expect((family.save.mock.calls[1][1] as any).perView[SYSTEM_ID].sort).toEqual(STORED_SORT);
   });
 });

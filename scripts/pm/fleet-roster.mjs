@@ -109,8 +109,8 @@
  * overwrite a card. Then ONE relay stroke, `issue_patch` of the body, through
  * `fleet-write/dispatch.mjs` as `objectstack-fleet[bot]`. The roster issue is
  * created once by a seat through the relay and pinned by the maintainer; this
- * script never creates, pins or comments. It has no schedule: the director
- * seat's digest and any seat/takeover/handover call it.
+ * script never creates, pins or comments. It has no schedule: any
+ * seat/takeover/handover calls it.
  *
  * ## Exit codes
  *

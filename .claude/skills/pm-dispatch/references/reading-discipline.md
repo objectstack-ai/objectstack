@@ -3,9 +3,8 @@
 任一座位在取读数、引读数或核验 main 的那一刻读本文,所有 fire、所有阶段。
 
 - 判据取命令输出,⛔ 不取 API 字段字面值、不取本地工作树、不取看着相邻的日志。
-- GitHub API 与工具行为的实测事实表在 `references/platform-readings.md`,做对应操作的那一刻查阅。
+- GitHub/工具实测事实表 `references/platform-readings.md`:操作时 grep 小节只读命中段,⛔ 不整读。
 - 核验 main 用 `origin/main`:先 fetch,再 `git grep PAT origin/main -- PATHS` 或 `git show origin/main:PATH`。
-- ⛔ 不用共享检出的工作树核验 main,它的 HEAD 由别的 agent 摆布。
 - 零命中须配同主体必中词,否则该零作废;同主体 = 同语料/路径形/包界/引法/失效形态。
 - 同仪器的控制词双零是仪器坏,⛔ 不读作缺席:换法重画再报;哑火仪器与干净结果同值。
 - 控制通过 ≠ 问题问对:零命中须写仪器可达半径与一个必在半径外的已知目标。
@@ -21,7 +20,6 @@
 - 只有护产品落地或用户可见契约的门禁才立修复卡;门禁上「稳定 > 功能」= 更少零件。
 - 自设定时器的文本以先重读状态开头,只写关键判据(若 X 则 Y),其余指针化。
 - 定时器文本 ⛔ 不写结论、不含未经重读即可执行的祈使句,⛔ 不带判决与落地类写动词。
-- 放行认门禁 job 的结论(`completed: success`),⛔ 不认聚合读数。
 - advisory 门禁红着进 main 是共享损伤,任何车道发现都立即止血并立单,见 landing-operations B。
 - 仪器纪律(硬门禁面、只报告面、新增授权、工具位)见 `references/instrument-discipline.md`。
 - dev 自己死了不等于维护者中止:子代理消失是正常死法,走接管(见 execution-duties.md 认领)。
@@ -33,5 +31,7 @@
 - 对向事实下 ⛔ 同 PR 不做任何 promote/回退;pin 是反转不是删除。
 - 冲突立成 `needs-user-decision` 卡,该 PR 不挂 auto-merge 留异议窗口。
 - 读序 git、payload、REST、MCP;REST 可达性逐会话探一次;通道对照见 `references/rest-channel.md`。
+- 巡查与探针读 GitHub 点名字段(`gh api --jq`),⛔ 不把整份 issue/PR JSON 与评论全文拉进上下文。
+- CI 日志落盘后 grep,⛔ 不只读尾;认领与契约复审仍整读卡/PR 线程,长线程照 runbook 外包。
 - 派发前读一次 `rate_limit`,余量装不下整批就减批,⛔ 不靠撞墙发现。
 - 写少而大:同卡同轮结论合成一条评论,⛔ 不放慢单笔、不攒着一次性发;写量按身份计。
