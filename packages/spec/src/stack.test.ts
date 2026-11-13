@@ -1864,7 +1864,7 @@ describe('defineStack — a packages[] stack\'s namespace prefixes are judged pe
   it('refuses a body object its own body\'s namespace does not prefix, located at the body, though another body\'s namespace or the manifest\'s would', () => {
     const artifact = suite();
     const packages = artifact.packages!.map((entry, j) =>
-      (j === 0 ? { ...entry, manifest: { ...entry.manifest, objects: [...(entry.manifest.objects ?? []), objectOf('svc_stray')] } } : entry));
+      (j === 0 ? { ...entry, manifest: { ...entry.manifest, objects: [...((entry.manifest.objects ?? []) as unknown[]), objectOf('svc_stray')] } } : entry));
     const r = refusalOf({ ...artifact, packages });
     expect(r?.code).toBe('STACK_NAMESPACE_PREFIX_INVALID');
     expect(r?.status).toBe(422);
