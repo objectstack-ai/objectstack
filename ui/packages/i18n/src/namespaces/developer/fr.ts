@@ -222,21 +222,21 @@ const fr = {
     },
     codex: {
       body: 'Dans l’application Codex : Réglages → Serveurs MCP → Ajouter un serveur, puis renseignez :',
-      hint: 'Enregistrez, redémarrez si c’est demandé, puis cliquez sur Authenticate à côté de objectstack et connectez-vous dans le navigateur. Tapez /mcp dans la zone de saisie pour vérifier la connexion. Si votre version ne propose pas de connexion par navigateur, ajoutez l’en-tête Authorization: Bearer <clé API> (créez-en une sous « Avancé : scripts et CI », ci-dessous).',
+      hint: 'Enregistrez, redémarrez si c’est demandé, puis cliquez sur Authenticate à côté de objectstack et connectez-vous dans le navigateur. Tapez /mcp dans la zone de saisie pour vérifier la connexion. Si votre version ne propose pas de connexion par navigateur, ajoutez l’en-tête Authorization: Bearer <clé API> (créez-en une sous « Avancé : scripts et CI », ci-dessous). Avec une clé, votre assistant ne travaille que sur les enregistrements et les actions et ne peut pas créer d’applications.',
     },
     workbuddy: {
       body: 'Connecteurs → Connecteur personnalisé → Configurer MCP, puis fusionnez cette entrée dans mcpServers (enregistrée dans ~/.workbuddy/mcp.json) :',
-      hint: 'Enregistrez, puis cliquez sur Faire confiance sur le connecteur objectstack — il reste inactif tant qu’il n’est pas approuvé. Si aucune connexion n’est proposée, ajoutez l’en-tête Authorization: Bearer <clé API> (créez-en une sous « Avancé : scripts et CI », ci-dessous).',
+      hint: 'Enregistrez, puis cliquez sur Faire confiance sur le connecteur objectstack — il reste inactif tant qu’il n’est pas approuvé. Si aucune connexion n’est proposée, ajoutez l’en-tête Authorization: Bearer <clé API> (créez-en une sous « Avancé : scripts et CI », ci-dessous). Avec une clé, votre assistant ne travaille que sur les enregistrements et les actions et ne peut pas créer d’applications.',
     },
     doubao: {
       title: 'Doubao Work',
       body: 'Compétences · Connecteurs → Nouveau → Nouveau connecteur personnalisé, puis renseignez :',
-      hint: 'Connectez-vous dans le navigateur lorsque c’est demandé. Si aucune connexion n’apparaît, ajoutez l’en-tête personnalisé Authorization: Bearer <clé API> (créez-en une sous « Avancé : scripts et CI », ci-dessous). Les tâches exécutées dans le cloud exigent un déploiement joignable en HTTPS public.',
+      hint: 'Connectez-vous dans le navigateur lorsque c’est demandé. Si aucune connexion n’apparaît, ajoutez l’en-tête personnalisé Authorization: Bearer <clé API> (créez-en une sous « Avancé : scripts et CI », ci-dessous). Avec une clé, votre assistant ne travaille que sur les enregistrements et les actions et ne peut pas créer d’applications. Les tâches exécutées dans le cloud exigent un déploiement joignable en HTTPS public.',
     },
     qwenwork: {
       title: 'QwenWork',
       body: 'Extensions → Connecteurs → + Ajouter → Coller la configuration JSON :',
-      hint: 'Ou ajoutez-le à la main en Streamable HTTP avec cette URL. Si votre version ne propose pas de connexion par navigateur, ajoutez l’en-tête Authorization: Bearer <clé API> (créez-en une sous « Avancé : scripts et CI », ci-dessous).',
+      hint: 'Ou ajoutez-le à la main en Streamable HTTP avec cette URL. Si votre version ne propose pas de connexion par navigateur, ajoutez l’en-tête Authorization: Bearer <clé API> (créez-en une sous « Avancé : scripts et CI », ci-dessous). Avec une clé, votre assistant ne travaille que sur les enregistrements et les actions et ne peut pas créer d’applications.',
     },
     client: {
       title: 'Quel assistant IA utilisez-vous ?',
@@ -255,7 +255,7 @@ const fr = {
     apiKey: {
       title: 'Clés API',
       badge: 'headless',
-      body: 'Pour la CI, les scripts et les agents sans navigateur. La clé agit en votre nom — traitez-la comme un mot de passe. Elle n’est affichée qu’UNE fois.',
+      body: 'Pour la CI, les scripts et les agents sans navigateur. La clé agit en votre nom — traitez-la comme un mot de passe. Un assistant IA connecté avec une clé ne travaille que sur les enregistrements et les actions : il ne peut pas créer d’applications. La clé n’est affichée qu’UNE fois.',
       namePlaceholder: 'Nom de la clé (ex. ci-agent)',
       mint: 'Créer la clé',
       confirmTitle: 'Créer la clé API « {{name}} » ?',
