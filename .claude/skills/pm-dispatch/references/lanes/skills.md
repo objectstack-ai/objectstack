@@ -1,12 +1,11 @@
 # 车道岗位说明:domain:skills
 
-见 seat-lifecycle.md;本文是本车道岗位说明,现值状态恒在座位贴,⛔ 不迁入本文。
+见 seat-lifecycle.md 与 SKILL.md 域车道表;本文是岗位说明,现值状态恒在座位贴,⛔ 不迁入。
 
 ## 范围
 
 - 两个技能根:`.claude/skills/**`(含 pm-dispatch 本体)与 `skills/**`(发布目录,恒英文)。
 - 受管面治理执行文件:`.github/CODEOWNERS` 路由半边 + SUBJECT 是受管面本身的门禁/审计脚本。
-- 全量判据在 SKILL.md 域车道表;受管面定义与两层分档见 SKILL.md 〈路径分叉〉,⛔ 不另抄。
 - 契约复核归派发席席内、决裁勤务归总监席(`director.md`);本席保留 skill 与治理文本。
 - 发布技能 `skills/**` 走子卡:修复改了作者或 agent 被教的内容 ⇒ 分诊首触即立本域子卡。
 - 子卡带 `Blocked-by:` 产品卡,技能只记已落地的行为;产品 PR 正文点名该子卡。
@@ -14,6 +13,7 @@
 - 产品车道 PR ⛔ 不改 `skills/**`;触了即把该 hunk 移入子卡,同 `spec.md` 的 `protocol:*` 兜底。
 - 例外仅新增:新增可编写顶层键或 liveness Leg 2 所绑符号活成员的 PR 同笔只加枚举行。
 - 枚举行 = `check:skill-top-level-keys` 锚段键名或所绑段成员项;讲解、示例、eval 仍归子卡。
+- 枚举行撞 token 上限:同 PR 按该行实测增量抬上限,⛔ 不削他文、不夹带;正文引两条裁决。
 - 内部规则(`.claude/skills/**`、`AGENTS.md`、`CLAUDE.md`、`scripts/pm/**`)⛔ 永不搭产品 PR。
 - 改规则(归属、门禁、上限、车道边界)先立决策卡,裁后本域写;新增门禁默认否照旧。
 - 不改规则的修复(错字、陈旧路径、坏链)直交本域,不立决策卡。
