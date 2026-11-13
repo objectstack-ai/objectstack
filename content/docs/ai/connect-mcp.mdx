@@ -373,8 +373,17 @@ can reach is the **default exposure policy (v1)**:
   same people the console's buttons admit: a current approver of the request,
   and, for approve, reject and reassign, the administrator who may override it.
   Anyone else, the submitter
-  included, is refused and the request stays pending. The submitter's own
-  levers (remind, recall, resubmit), request-info and comments are not exposed.
+  included, is refused and the request stays pending.
+- **A submitter's recall and resubmit are exposed to the submitter's agent.**
+  Recall (withdraw a pending request, or abandon one sent back for revision) and
+  resubmit (send a request that was sent back for revision into review again)
+  are exposed the same way, with `ai.requiresConfirmation: true`, and forward to
+  their approvals routes as the caller. The approval service admits the
+  submitter, and for recalling a pending request the administrator who may
+  override it; anyone else is refused (`FORBIDDEN`) and the request does not
+  move. A recalled request is closed: to send the record for approval again,
+  the agent uses the app's own submit action. Remind, request-info and comments
+  are not exposed.
 
 <Callout type="info">
 This is the default policy, not a ceiling. A finer, **metadata-declared** exposure
