@@ -1282,6 +1282,16 @@ export const ERROR_CODE_LEDGER = {
   '@objectstack/hono': [
     'AUTH_CONFIG_ERROR',             // auth service threw while the adapter mounted it
   ],
+  '@objectstack/plugin-hono-server': [
+    // 413 from the transport's request-body limit (`src/body-limit.ts`): a body
+    // over the limit (10 MiB by default, `maxRequestBodyBytes` /
+    // `OS_HTTP_MAX_BODY_BYTES`) is not read past it, on the self-hosted server
+    // and on `@objectstack/hono`'s `createHonoApp`, which imports the
+    // constant. Third EMITTER of the code `@objectstack/rest` registers; one
+    // condition, the request carries more than the door accepts. Provenance,
+    // not identity (see above).
+    'PAYLOAD_TOO_LARGE',
+  ],
   '@objectstack/service-messaging': [
     'DELIVERY_NEVER_SENT',           // [#8069] terminal delivery row with 0 attempts — a PARKED record of a delivery that could never be prepared, not one that failed. Redelivering it would be a FIRST send, and the row carries no HMAC signature because the secret that would have produced one is exactly what went missing, so it would go out unsigned (#7799). Distinct from DELIVERY_NOT_ELIGIBLE: that one says "wrong state, try when it settles"; this one says "never, fix the configuration instead"
     // "this delivery row's state does not permit the requested operation" —
