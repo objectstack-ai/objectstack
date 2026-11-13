@@ -128,6 +128,8 @@ interface Wire {
   namespace?: { status: number; body: unknown };
   /** Holds the namespace answer until it settles, so the loading state is a reading, not a race. */
   namespaceGate?: Promise<void>;
+  /** Merged into the catalog's `latest_version` (objectstack#31542 serves `object_extensions` there). */
+  catalogVersion?: Record<string, unknown>;
 }
 let wire: Wire;
 let answered: string[] = [];
@@ -185,7 +187,8 @@ async function boot(installLocal = true, cloudUrl = '') {
           return answer(200, { success: true, data: { installed: false } });
         }
         if (path === '/api/v1/marketplace/packages/pkg_crm' && method === 'GET') {
-          return answer(200, { success: true, data: CATALOG_PACKAGE });
+          const latest = { ...CATALOG_PACKAGE.package.latest_version, ...wire.catalogVersion };
+          return answer(200, { success: true, data: { ...CATALOG_PACKAGE, package: { ...CATALOG_PACKAGE.package, latest_version: latest } } });
         }
         return answer(404, { success: false, error: { code: 'NOT_FOUND', message: `no route ${method} ${path}` } });
       })();
@@ -795,5 +798,84 @@ describe('`installPackage()` and `getInstallNamespace()` on the hosted route (ob
 
     expect(await getInstallNamespace('pkg/1')).toBe(expected);
     expect(urls).toEqual(['/api/v1/cloud-connection/install-namespace?package_id=pkg%2F1']);
+  });
+});
+
+describe('the hosted install dialog says which existing objects the install changes (objectstack#31542)', () => {
+  // A metadata package (no `contains_code`): before this, the dialog drew no
+  // disclosure for it at all.
+  const installToCloud = () => screen.getByRole('button', { name: '«marketplace.action.installToCloud»' });
+  const dialogInstall = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: '«marketplace.action.install»' });
+  const EXTENSIONS = [
+    { object: 'sys_user', platform: true, fields: ['name'], field_patches: [], validations: ['name_required'], indexes: 0, relabels: false },
+    { object: 'crm_account', platform: false, fields: ['ticket_count'], field_patches: [], validations: [], indexes: 0, relabels: false },
+  ];
+
+  async function openHostedDialog(catalogVersion: Record<string, unknown>) {
+    wire.catalogVersion = catalogVersion;
+    await boot(false, HOSTED_CLOUD);
+    render(<MarketplacePackagePage />);
+    await screen.findByRole('button', { name: '«marketplace.action.installToCloud»' });
+    await waitFor(() => expect(answered).toContain(`GET ${MANIFEST_PATH}`));
+    await act(async () => {});
+    fireEvent.click(installToCloud());
+    return screen.findByRole('dialog');
+  }
+
+  it('a business and a platform object: both listed, the platform one first and flagged, and Install waits for the acknowledgment', async () => {
+    const dialog = await openHostedDialog({ object_extensions: EXTENSIONS });
+
+    expect(within(dialog).getAllByTestId('object-extension').map((el) => `${el.getAttribute('data-object')}:${el.getAttribute('data-platform')}`))
+      .toEqual(['sys_user:true', 'crm_account:false']);
+    expect(within(dialog).getByTestId('object-extensions-platform-warning')).toBeInTheDocument();
+    expect(dialogInstall(dialog)).toBeDisabled();
+
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: '«marketplace.objectExtensions.acknowledge»' }));
+    await waitFor(() => expect(dialogInstall(dialog)).toBeEnabled());
+    fireEvent.click(dialogInstall(dialog));
+    await waitFor(() => expect(cloudPosts).toHaveLength(1));
+  });
+
+  it('closing the dialog drops the acknowledgment', async () => {
+    const dialog = await openHostedDialog({ object_extensions: EXTENSIONS });
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: '«marketplace.objectExtensions.acknowledge»' }));
+    await waitFor(() => expect(dialogInstall(dialog)).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole('button', { name: '«marketplace.action.close»' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    fireEvent.click(installToCloud());
+    const reopened = await screen.findByRole('dialog');
+    expect(dialogInstall(reopened)).toBeDisabled();
+  });
+
+  it('a business object only: listed, no platform flag, and Install is not held', async () => {
+    const dialog = await openHostedDialog({ object_extensions: [EXTENSIONS[1]] });
+
+    expect(within(dialog).getAllByTestId('object-extension')).toHaveLength(1);
+    expect(within(dialog).queryByTestId('object-extensions-platform-warning')).not.toBeInTheDocument();
+    expect(dialogInstall(dialog)).toBeEnabled();
+  });
+
+  it('`[]`: no extension section', async () => {
+    const dialog = await openHostedDialog({ object_extensions: [] });
+
+    expect(within(dialog).queryByTestId('object-extensions')).not.toBeInTheDocument();
+    expect(within(dialog).queryByTestId('object-extensions-unknown')).not.toBeInTheDocument();
+    expect(dialogInstall(dialog)).toBeEnabled();
+  });
+
+  it('`null`: "could not read", never "changes nothing"', async () => {
+    const dialog = await openHostedDialog({ object_extensions: null });
+
+    expect(within(dialog).getByTestId('object-extensions-unknown')).toHaveTextContent('«marketplace.objectExtensions.unknown»');
+    expect(dialogInstall(dialog)).toBeEnabled();
+  });
+
+  it('CONTROL: a catalog without the key reads the served manifest', async () => {
+    serveManifest(flatBody({ objectExtensions: [{ extend: 'sys_user', fields: { name: {} } }] }));
+    const dialog = await openHostedDialog({});
+
+    expect(within(dialog).getAllByTestId('object-extension').map((el) => el.getAttribute('data-object'))).toEqual(['sys_user']);
+    expect(dialogInstall(dialog)).toBeDisabled();
   });
 });
