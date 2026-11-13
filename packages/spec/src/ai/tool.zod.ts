@@ -74,6 +74,15 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   // docblock declares and nothing wider. `ai/tool-confirmation-prescription-tense.pin.test.ts`
   // ties this text to that function, so neither half can move alone again.
   //
+  // [ADR-0151 D3 rule 3] The first bound carries the account rule: an AI
+  // service account never confirms for itself, so the gate refuses it at every
+  // door, REST included; the REST carve-out holds for every other caller (a
+  // person, or an agent with `onBehalfOf`). The one place REST reads the
+  // `ai.exposed` opt-in (ADR-0151 Non-goals, `flowStartRefusal` rule 2 in
+  // `packages/runtime/src/flow-start-admission.ts`) asks for the opt-in alone,
+  // never a confirmation, so the bound names that pair and keeps REST outside
+  // this gate for every other caller.
+  //
   // The ids stay in this comment and out of the string: `check:doc-authoring`
   // reds on an internal tracker id inside a customer-facing prescription.
   requiresConfirmation:
@@ -93,10 +102,17 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     'action and the exact member to set so the caller confirms and retries. A GATE, not ' +
     'a queue: nothing is parked, nothing is held for an operator to find later, and a ' +
     'refused call did not run — no record was read and none was written. Two BOUNDS to ' +
-    'read before you rely on it. (1) The enforced set is the doors that enforce the ' +
-    'author\'s `ai.exposed` opt-in — today the action door reached from the MCP ' +
-    '`run_action` tool. REST `/actions` is NOT `ai.exposed`-gated and sits OUTSIDE this ' +
-    'gate, so a human in front of that route is still yours to arrange. (2) Only the ' +
+    'read before you rely on it. (1) The enforced set is the doors that ask every action ' +
+    'for the author\'s `ai.exposed` opt-in — today the action door reached from the MCP ' +
+    '`run_action` tool. REST `/actions` reads `ai.exposed` in one case only (an AI ' +
+    'service account starting a `type: \'flow\'` action whose flow declares ' +
+    '`runAs: \'system\'` needs the opt-in there), and that check asks for the opt-in ' +
+    'alone, not a confirmation; for a person\'s call REST `/actions` sits OUTSIDE this ' +
+    'gate, so a human in front of that route is still yours to ' +
+    'arrange. An AI service account (an agent acting for itself, not on a person\'s ' +
+    'behalf) does not confirm an action for itself: it is refused at every action door, ' +
+    'REST `/actions` included, whatever its request carries, and a person runs the ' +
+    'action. (2) Only the ' +
     'author\'s declared `ai.requiresConfirmation: true` refuses, and only the boolean ' +
     '`true` confirms: the wider listing heuristic that reports `requiresConfirmation` ' +
     'for a destructive-looking action ADVISES a client to ask and never refuses, and an ' +

@@ -1,5 +1,527 @@
 # @object-ui/plugin-grid
 
+## 18.4.0
+
+### Minor Changes
+
+- f273c9f: fix(plugin-grid)!: a list's selection bar and row menu draw only actions the object declares; an undeclared bare `bulkActions` / `rowActions` name draws nothing and warns once in development (#30169)
+  
+  Clause-②: no (narrowing) — the grid stops drawing a bare `bulkActions` or legacy `rowActions` name that matches no action the object declares, which it drew before by humanized name. `packages/spec/src/ui/bulk-action.zod.ts` already says the member "names an action the object declares", and lint `action-name-undefined` (ADR-0049) refuses any other at authoring. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: no move — `skills/**` teaches no handler-only bulk or row action name (searched for `bulkActions` / `rowActions` examples and runner-handler text); `content/docs/ui/**` already names only declared actions in its `bulkActions` / `rowActions` examples.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema, export or stored row changes shape: `bulkActions` and `rowActions` keep their `string[]` form and meaning. What narrows is the renderer's draw set, back to the spec's own sentence. Whether an undeclared name was a misspelling, an action still to declare or a handler the host meant to keep is a judgement about the view, so no rewrite derives the fix; the development warning names each name. -->
+  
+  **BREAKING** for a host that registered a runner handler under a bare name the object does not declare (`ActionProvider handlers` / `runner.registerHandler('NAME', …)`) and listed that name in a view's `bulkActions` or `rowActions`.
+  
+  - **Before.** `resolveBulkActions` and `resolveLegacyRowActions` kept a name that matched no declared action, and `ObjectGrid` drew it by humanized name and dispatched it to the runner by name. A name nothing handled toasted "not executable" on click. This is how a list whose app had a package disabled kept a ghost button: the server withholds that package's actions from the served object, so their names matched nothing.
+  - **Now.** Such a name gets no selection-bar button and no row-menu entry, and in development the console logs one warning per list naming the key, the block and each name. The resolvers return those names as `undeclared` (renamed from `unresolved`), used only for that warning. The canonical `'delete'` (and the row menu's `'edit'` / `'delete'`) keep their own paths, unchanged.
+  - **Unchanged.** A name that matches a declared action is promoted to that action's def exactly as before, under the action's own label, icon, params, `visible` and `requiredPermissions`.
+  
+  **Remedy.** No rewrite is derived, because which fix an undeclared name needs is a judgement about the view: declare the named action on the object, or remove the name from `bulkActions` / `rowActions`. The development warning names each one. An action withheld by a disabled package needs nothing: it draws again when the package is enabled.
+- d3b2aaf: fix(plugin-list)!: a list's selection bar over a non-grid view (kanban, calendar, gallery, …) draws only actions the object declares, by the grid's own rule; an undeclared bare `bulkActions` name draws nothing and warns once in development (#30394)
+  
+  Clause-②: yes (narrowing) — `@object-ui/plugin-grid` exports `resolveBulkActions` and `useUndeclaredActionNamesWarning` (with the `ActionLabelResolver`, `NamedActionDef`, `UndeclaredActionNameKey`, `UndeclaredActionNamesAddress` and `UndeclaredActionNamesBasis` types) so `@object-ui/plugin-list` reuses the grid's fold and warning instead of a second copy; the warning's address gains an optional `component`, defaulting to `ObjectGrid`, so the grid's message is byte-identical.
+  Metadata-protocol: narrowed
+  Skills-docs: no move — `skills/**` teaches no handler-only bulk action name (searched for `bulkActions` examples); `content/docs/ui/**` already names only declared actions.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema, export or stored row changes shape: `bulkActions` keeps its `string[]` form and meaning, and plugin-grid's new exports add, never retire. What narrows is the non-grid bar's draw set, back to the spec's own sentence (a bare name names an action the object declares). Whether an undeclared name was a misspelling or an action still to declare is a judgement about the view, so no rewrite derives the fix; the development warning names each name. -->
+  
+  - **Before.** The bar ListView draws itself for every view but the grid mapped each `bulkActions` member straight to a button, labelled by the humanized name, whether or not the object declared it. A name the object does not declare (a misspelling, or an action a disabled package withholds from the served object) showed a button that toasted "not executable" on click. The grid stopped drawing such names in #30169.
+  - **Now.** The bar folds the names through the grid's `resolveBulkActions`: a name the object declares draws under that action's label (through the app's i18n bundle), the built-in `delete` keeps its own path and gate, and any other name draws nothing. In development the console logs one warning per list naming the key, the view and each name (`[ObjectUI] ListView bulkActions: kanban (objectName: …) — …`), the grid's own message. A bar with nothing left to draw is not shown.
+  - **Remedy.** Declare the named action on the object, or remove the name from `bulkActions`. An action withheld by a disabled package needs nothing: it draws again when the package is enabled.
+
+### Patch Changes
+
+- 8c1bf5b: fix(plugin-list): a stored view sort the platform refuses is no longer sent, so the list loads instead of failing; a column on a `sortable: false` field offers no sort when the grid sorts in the browser
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Visible behaviour change on a released page.** A list view whose stored `sort` (or a restored user sort) names a field the platform will not order by used to send that sort with its data request. The Data API answers such a sort `400 INVALID_SORT`, so the list showed its load error instead of its rows. Fields the platform refuses are the ones its sortability projection, served with the object's metadata, marks unsortable: a `formula` field today, and a field marked `sortable: false` once the platform honours that flag.
+  
+  - **`@object-ui/plugin-list`:** the list's data request, its server export and the kanban, calendar, timeline and gantt views (which fetch their own rows) now send the sort without the refused entries. The entries left keep their original order, and a sort with nothing refused in it is sent unchanged. The refused entry is still listed in the sort picker as removable only, as before, and the next sort the list saves leaves it out. With no projection served (an older platform, inline rows), the sort is sent as before.
+  - **`@object-ui/plugin-grid`:** a column listed in a view's `columns` now reads its field's `sortable: false`, as columns derived from the object's fields already did. Where the grid sorts the rows it holds (inline rows), such a column no longer offers a sort click. A `formula` column keeps its sort click there, since the browser orders by the value the cell shows; where the sort is sent to the server, the platform's projection still decides, as before.
+- 5f80129: fix(plugin-detail): a record page's related table offers Export only to a reader the list page offers it to, and an export refusal reads in the Console's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/plugin-detail`: the related table asks the list page's question.** The enlarged related list (the record page's active tab) drew Export whenever its data source could export. It now also reads the child object's effective API operation set (`/me/permissions` `apiOperations`) through `usePermissions()`, the source the list page's `exportPermitted` reads, and draws no Export when that set leaves `export` out. A missing set keeps the button, as on the list page. A reader who may export still exports this relation's rows alone.
+  - **Export refusals read in the Console's language.** When the export route still refuses (a 403, such as `EXPORT_NOT_PERMITTED`), the related table, the list page and the grid show the new `view.exportNotPermitted` sentence in the reader's language instead of the route's English text. Other export failures keep the server's sentence.
+  - **`@object-ui/i18n`: `view.exportNotPermitted`** in all ten locale packs.
+- 5174603: fix(ui): Setup record pages name a sharing rule's recipient and read its condition in words, and the audit list names a sign-in row's session by its user
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/plugin-detail`.** The record page's highlights strip and details body hand each read face the record as `dependentValues`, as a list grid hands its row. A `recipient-picker` value is an id that means something only beside its `recipient_type`, so a sharing rule's page read the stored user id under 接收方 where its list read the user's name; it now reads the name.
+  - **`@object-ui/fields`.** `widget: 'filter-condition'` has a read face of its own: a list or detail cell draws the criteria through the widget's read-only display, which says it in the object's field and option labels ("Priority equals Urgent"; an OR group joined by its word, a boolean as a word). A criteria the builder cannot represent still reads as the stored JSON, and an empty one is the empty cell. A read-only widget no longer waits for its `object_name` to say anything: without it, the fields keep their api names.
+  - **`@object-ui/plugin-grid`.** A pointer cell (`referenceVia`) reads the target record with its name field expanded when that field is a reference the viewer may read, so a record named by a lookup reads as the referenced record's name: the audit list's sign-in rows name the session by its user instead of printing the user id. Any other name field is read as before, with no `$expand`.
+- 8b0fbb8: fix(app-shell,fields,plugin-form,plugin-gantt,plugin-grid,components,console): record pages, forms, drawers and preview cards draw a served object label as served
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Now.** The record page (its title, breadcrumbs, related-list titles, delete and access-denied copy), the record form page and the console's create/edit dialog (title, save toast, way back to the list), the record drawer, the record preview card, the hover card over a lookup, a record-pointer cell, an object-ref cell, the closed-form notice, the gantt name column, the page header's record chrome, a form view's heading, the AI dock's surface chip, the Activity row and the report index name an object by the label the server served, as given. The server has already translated it, by its label order for an overridden item, so a `.custom` object extension's rename is kept over the base package's translation. Before, the served label reached the client's catalog lookup only as its fallback, so the base package's translation of the old name won on these surfaces after the list and header were fixed.
+  - **Unchanged.** When no label is served, the catalog key is asked first and the machine name (or its humanized form) stays the last resort, as before. An unedited object shows the same text as before, because the server serves the catalog's translation for it. Related lists and reference rails that only know an object's name, and the packaged-actions table (its object list is read without the session's language), still look the name up in the catalog. English is unchanged.
+- 6c30357: fix(plugin-list): a list's selection bar over a non-grid view (kanban, calendar, gallery, …) draws a declared bulk action only for a user who holds its `requiredPermissions` and only when its `visible` admits a selected record, through the grid bar's own gate (#30535)
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-grid` exports `useBulkActionItems` (with the `BulkActionItems` and `LegacyBulkActionItem` types), the grid selection bar's gate, so `@object-ui/plugin-list` reuses it instead of a second copy.
+  Metadata-protocol: none
+  
+  - **Before.** The bar ListView draws itself for every view but the grid folded `bulkActions` through the grid's `resolveBulkActions` and kept only each action's label. An action declaring `requiredPermissions` drew for every user, and one declaring `visible` drew for every selection, while the grid's bar hid both. A name repeated in `bulkActions` drew two buttons under one React key.
+  - **Now.** The bar passes the resolved actions through `useBulkActionItems`, the hook the grid's bar and its right-click menu read: an action whose `requiredPermissions` the user does not hold is not drawn (unknown capabilities fail open, as on the grid), an action switched off is not drawn, and `visible` is evaluated once per selected record, drawing the action when at least one selected record passes. A repeated name draws one button. The development warning for an object whose schema could not be read now names the component it came from (`ListView` or `ObjectGrid`) instead of "the grid".
+  - **Remedy.** Nothing to change in metadata. A user who should see a gated action needs the capability it declares.
+- 2c6b936: fix(plugin-grid): the import wizard's "Save current" template button says why it is disabled
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On the mapping step, while no column is mapped, "Save current" in the mapping-template bar was natively disabled with no reason: no tooltip on hover, no accessible description, and Tab skipped it. It now sits in a focusable wrapper, the same pattern as the step's Next button, whose tooltip and accessible description read "Map at least one column to save a template." Once a column is mapped it is a plain enabled button, as before. The sentence is a new `grid.import.saveCurrentNeedsMapping` key in every `@object-ui/i18n` locale pack.
+- 6be71ab: fix(ui): a stored field carrying an `expression` is read-only on every write surface, as a formula is
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Before.** A non-`formula` field with an `expression` (for example a `currency` amount computed from quantity times unit price) is computed by the engine on every write, so a client-sent value never stands. The record form still drew it as an editable input, a list grid offered an editable cell, the record page offered inline edit, and the import wizard offered it as a column to write. The save then replaced what the user typed, with no message.
+  - **Now.** Such a field is computed exactly as a `formula` is. The auto-layout create form leaves it out. The auto-layout edit form, and an authored form section on create or edit, draw its type's read face (the formatted value, no input), and the edit save does not send it. A list grid cell, the record page's details body, its highlight strip and its path stage offer no editor. The import wizard offers it only as a match key, as it does a `readonly` field, and the spreadsheet import bar does not offer it. The value itself is unchanged: the engine computed it before and still does.
+  - **The widening.** `@object-ui/core` exports `isExpressionComputedField(def)`. It answers whether an object field carries a non-empty `expression`, either a bare CEL string or the `source` of the `{ dialect, source }` envelope, which is the spec's own reading. Every gate above asks it alongside its type list. Nothing is removed or renamed.
+- 9003954: fix(plugin-grid): a `min` / `max` over a date or datetime field reads as the field's cell in a grouped grid's header and in the column footer, never `NaN`
+  
+  Clause-②: yes (widening) — the exported `AggregationResult` gains an optional `display` string; `value` keeps its `number | null` type, and for a date-family `min` / `max` it is now the extreme's instant in epoch milliseconds instead of `NaN` (server-grouped) or `0` (grouped in hand). `ColumnSummaryResult` keeps its shape: `label` carries the formatted time and `value` the same instant, where it carried the parsed year.
+  Metadata-protocol: none
+  
+  - **Group header.** `aggregations: [{ field: 'created_at', type: 'max' }]` on a grouped grid now draws the latest time in each group exactly as the `created_at` cell draws it (the field's `format`, the display locale), on both the server-grouped and the in-hand path. It drew `max: NaN` when the header query answered the stored text.
+  - **Column footer.** A `min` / `max` summary on a date or datetime column draws the time as its cell does. It drew the year (`Max: 2,026`).
+  - **`sum` / `avg` over a date or datetime field** is no figure: the grid drops it before it computes or asks for it, so the header and the footer draw nothing for it. A numeric aggregate whose answer is not a number is left out, and a group header draws a dash for a value that is not a finite number.
+  - **`useGroupedData` without a grid.** The published hook knows no field types, so a server aggregate answered as something other than a number (a `min` / `max` over a date field answers its stored text) is left out rather than drawn as `NaN`. Rows grouped in hand compute as before.
+- c6230f4: fix(plugin-grid): a column summary over a `record`-mode amount no longer costs the other footer columns their whole-set totals
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a list or grid view shows one page of more rows, its footer asks the server for the whole matched set's figures in one query. A column summary of `sum`, `avg`, `min` or `max` over an amount in `currencyMode: 'record'` (its `currencyField` a sibling code field or a parent path such as `invoice.currency_code`) was asked in that query. The platform refuses a raw aggregate across currencies (ADR-0144 D6), so the whole query was refused. Every other summarised column then showed only the current page's figure, and each page load sent one refused request.
+  
+  The query now leaves out a money aggregate over a `record`-mode amount, so the other columns keep their whole-set figures and no refused request is sent. The record-mode column itself still draws no figure, as before. While the grid is still reading the object's fields, a `sum`, `avg`, `min` or `max` column waits for them before the query is sent, and the footer shows the page's figures, labelled as the page's, until then. Counts over the amount are still asked. A per-currency total is not part of this change.
+- 75102c8: fix(console, grid): fewer requests per list navigation: a grouped grid asks the row write verdict once per operation, a list writes the user's preference row only when a preference changed, the inbox and approvals polls back off while nothing changes, and the command palette keeps the keys typed while it opens
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `@object-ui/plugin-grid`: a server-grouped grid hands its rows to the record-grained write verdict (`POST /api/v1/security/explain`) once every open group's page has answered, instead of once per group. A list grouped into seven groups asked fourteen times; it now asks once per operation (`update`, `delete`), each request carrying every row on screen. The rows of each group still draw as soon as that group answers.
+  - Console: a sort, column layout, density, hidden-field or filter change that re-states what the user already stored, or that is undone before its write leaves, sends no `sys_user_preference` write. Each change is compared with the value the store holds.
+  - Console: the inbox and approvals feeds double the delay before the next poll each time a poll answers what is already on screen, up to 3 minutes, and return to the 60 s cadence on the first changed answer, on returning to the tab, and when a push channel opens or closes. Every poll still reads the whole window, so no arrival is dropped: it shows up at the next poll.
+  - Console: the keys typed between ⌘K (or the header search button) and the palette's input taking focus are the start of the query, instead of going to the page.
+- 767f110: fix(ui): a child amount that follows its parent's currency draws in the parent's currency
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `record`-mode amount on a master-detail child may name its parent's code field, `currencyField: 'invoice.currency_code'` (ADR-0144 D2 as amended). The console now draws such an amount in the parent's currency, symbol and fraction digits, on every surface that shows it: the object grid and list view (the read expands the `master_detail` even when no column shows it), the record form and detail view, a related list on the parent's page (cells and the totals line), and the line grid of the master-detail form and the record page's line-items panel (and the master-detail totals). Two lines under one parent read its currency; lines under two parents read each their own. A parent with no code yet shows no symbol, never the tenant's.
+  
+  A sibling-pointer amount (`currencyField: 'currency_code'`) keeps reading the row's own code, and now also does so in a grid or list that does not show the code column (the read carries the code field) and in a related list (the cell receives its row).
+  
+  A roll-up `summary` that declares its currency (ADR-0144 D6 as amended) draws as money in the parent record's currency, in the table cell and on the form.
+  
+  `@object-ui/i18n` reads the parent path in `resolveFieldCurrency` and exports `recordCurrencyPath`, `recordCurrencyReadField`, `withFollowedParent` and the `RecordCurrencyPath` type. `@object-ui/fields` exports `withFollowedParentObject`, `FOLLOWED_PARENT_OBJECT_KEY` and the `ColumnCurrencies` type, and `GridField` takes `columnCurrencies`.
+  
+  The Studio currency picker offers the parent code fields reached through the object's `master_detail` fields, as `relation.field`, and a stored path reads as the pick; its hint says so.
+- Updated dependencies [96b5dab]
+- Updated dependencies [7da99b7]
+- Updated dependencies [85d9264]
+- Updated dependencies [3214615]
+- Updated dependencies [d0512c2]
+- Updated dependencies [4261169]
+- Updated dependencies [8b90442]
+- Updated dependencies [8fefefd]
+- Updated dependencies [ffeda13]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [604a2b3]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [2e33533]
+- Updated dependencies [2a32bd4]
+- Updated dependencies [ba875d2]
+- Updated dependencies [bb61872]
+- Updated dependencies [4211f50]
+- Updated dependencies [a1d243e]
+- Updated dependencies [7d0b47c]
+- Updated dependencies [9728ab1]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [a4c3e73]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [1e6f542]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [b379262]
+- Updated dependencies [7945a3b]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [c2be734]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [6e68d8f]
+- Updated dependencies [3461420]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [df4c06e]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [f68b47c]
+- Updated dependencies [f0ad1f7]
+- Updated dependencies [03be565]
+- Updated dependencies [7e9fa4b]
+- Updated dependencies [bc8945f]
+- Updated dependencies [42afac7]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [a9fb14b]
+- Updated dependencies [6f095b9]
+- Updated dependencies [ac890f5]
+- Updated dependencies [5f80129]
+- Updated dependencies [0c7e95a]
+- Updated dependencies [c1240a3]
+- Updated dependencies [5fa9375]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [c8e6d38]
+- Updated dependencies [d99cd3b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [b6caa14]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [ff3f83b]
+- Updated dependencies [25fea77]
+- Updated dependencies [ea5807e]
+- Updated dependencies [4128213]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [6c48d48]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [31260ca]
+- Updated dependencies [ef2ad31]
+- Updated dependencies [2046d21]
+- Updated dependencies [18870c9]
+- Updated dependencies [243eba1]
+- Updated dependencies [fa9c0aa]
+- Updated dependencies [5174603]
+- Updated dependencies [f6faf75]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [6a8f415]
+- Updated dependencies [56cac5e]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [648089d]
+- Updated dependencies [10ecafd]
+- Updated dependencies [b6f4c0e]
+- Updated dependencies [b4f4781]
+- Updated dependencies [042efb7]
+- Updated dependencies [48231b0]
+- Updated dependencies [0d54279]
+- Updated dependencies [8e5fabe]
+- Updated dependencies [ac56acf]
+- Updated dependencies [a91409c]
+- Updated dependencies [ab12a3b]
+- Updated dependencies [2b35374]
+- Updated dependencies [29702d5]
+- Updated dependencies [cd7f785]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [7b10a30]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [a058413]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [062236c]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [d996c38]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [47c457b]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [115a43a]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [c1da957]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [b631573]
+- Updated dependencies [78d4fe9]
+- Updated dependencies [78eb352]
+- Updated dependencies [a0b40f2]
+- Updated dependencies [6ddf827]
+- Updated dependencies [d9d3eb7]
+- Updated dependencies [2ce2646]
+- Updated dependencies [bd1b768]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [1c66988]
+- Updated dependencies [584f7b8]
+- Updated dependencies [065bba7]
+- Updated dependencies [d8d0791]
+- Updated dependencies [66b17a3]
+- Updated dependencies [f5e23e2]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [3f61e4f]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [51992df]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [1f37085]
+- Updated dependencies [534a287]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [9a63ecb]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [eff90af]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [ce965cf]
+- Updated dependencies [f88ca70]
+- Updated dependencies [f67f3b3]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [1ff1d45]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2c6b936]
+- Updated dependencies [46ec2ec]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [e728d7a]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [f56354c]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [e627eaa]
+- Updated dependencies [6be71ab]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [3684d18]
+- Updated dependencies [ac8fede]
+- Updated dependencies [60996d4]
+- Updated dependencies [2715a09]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [52ffd5a]
+- Updated dependencies [f6b8985]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [94019a6]
+- Updated dependencies [60f8149]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [f75466c]
+- Updated dependencies [a127a45]
+- Updated dependencies [49bc3be]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [0a81d2a]
+- Updated dependencies [1368536]
+- Updated dependencies [cc8c4b0]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [de6d893]
+- Updated dependencies [33c3b5e]
+- Updated dependencies [326453e]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [4820ea2]
+- Updated dependencies [e336a33]
+- Updated dependencies [4d9ac62]
+- Updated dependencies [e47da23]
+- Updated dependencies [c04aa29]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [c4b6160]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [8a3eeef]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [ee230a2]
+- Updated dependencies [a888c5c]
+- Updated dependencies [967822a]
+- Updated dependencies [9ae8291]
+- Updated dependencies [fa1134c]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [d094752]
+- Updated dependencies [6aa95dc]
+- Updated dependencies [6cde924]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [5fb79bc]
+- Updated dependencies [5b1fe45]
+- Updated dependencies [c54a23d]
+- Updated dependencies [9af0766]
+- Updated dependencies [28af544]
+- Updated dependencies [fd63747]
+- Updated dependencies [1a6c330]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [8ce5827]
+- Updated dependencies [5c0f113]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [b232220]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [f84205b]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [767f110]
+- Updated dependencies [767f110]
+- Updated dependencies [341448e]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [6303e74]
+- Updated dependencies [e1dac19]
+- Updated dependencies [136eba4]
+- Updated dependencies [8a0516c]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+- Updated dependencies [b463ec6]
+  - @object-ui/components@18.4.0
+  - @object-ui/core@18.4.0
+  - @object-ui/fields@18.4.0
+  - @object-ui/plugin-detail@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @object-ui/i18n@18.4.0
+  - @objectstack/spec@18.4.0
+  - @object-ui/mobile@18.4.0
+  - @object-ui/permissions@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

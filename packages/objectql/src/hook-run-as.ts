@@ -212,8 +212,11 @@ export function deriveHookApi(api: unknown, runAs: HookRunAs, ref: HookRunAsRef)
  * list and email (#24639) onto the api `withRunAs('user')` derived.
  *
  * A symbol, and ⛔ deliberately NOT re-exported from the package entry, so the
- * method is no NAMEABLE member of `ScopedContext`'s published face: only the
- * hook wrapper reaches it, through {@link seedHookUserGrants}. A public named
+ * method is no NAMEABLE member of `ScopedContext`'s published face: it is
+ * reached only through {@link seedHookUserGrants}, which the entry does export,
+ * by the hook wrapper and by the runtime's script-body doors (`body-runner.ts`
+ * `hookDoorCaller`, which reads one record's existence in the hook's calling
+ * user's scope). A public named
  * method would widen the published surface, and it would also be a derivation
  * the runtime's stored-metadata seams (`deriveThroughSeam`) do not know, so a
  * seam-served host api calling it would get back an unserved context.

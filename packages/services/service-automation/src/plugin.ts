@@ -1122,6 +1122,16 @@ function connectorInstanceSignature(entry: {
 }
 
 /**
+ * [#33049] The protocol's flow view as one comparable string: each flow's
+ * whole definition, order-free. Two reads of an unchanged view give the same
+ * string, so the `kernel:bootstrapped` pass binds again only when a plugin
+ * registered or changed a flow after the `kernel:ready` bind read the view.
+ */
+function flowViewFingerprint(defs: readonly unknown[]): string {
+    return stableStringify(defs.map((def) => stableStringify(def)).sort());
+}
+
+/**
  * [#28591] The provider-bound instances a declaration asks the reconcile for,
  * as one comparable string: the name and {@link connectorInstanceSignature} of
  * every named, provider-bound entry not `enabled: false`, sorted. Two reads
@@ -1507,6 +1517,12 @@ export class AutomationServicePlugin implements Plugin {
      * unregisters them.
      */
     private syncedFlowNames = new Set<string>();
+    /**
+     * [#33049] The flow view the boot's last protocol bind read
+     * ({@link flowViewFingerprint}); `undefined` until a bind has read one.
+     * The `kernel:bootstrapped` pass compares against it.
+     */
+    private bootFlowViewFingerprint: string | undefined;
     /**
      * Provider-bound declarative connectors this plugin has materialized
      * (ADR-0097), keyed by connector name. `signature` is a stable hash of the
@@ -2623,11 +2639,12 @@ export class AutomationServicePlugin implements Plugin {
         // package a plugin registers in its own `kernel:ready` handler arrives
         // after it — the install-local rehydrate re-registers every installed
         // package there — and announces no reload, so its connectors were never
-        // materialized until some unrelated reload. Its flows already bind: the
-        // `kernel:ready` flow sync below reads the protocol's view after the
-        // rehydrate. Connectors are read again at `kernel:bootstrapped`, which
-        // fires once every `kernel:ready` handler has settled, whatever the
-        // plugin order. See {@link reconcileConnectorsRegisteredDuringBoot}.
+        // materialized until some unrelated reload. Connectors are read again at
+        // `kernel:bootstrapped`, which fires once every `kernel:ready` handler
+        // has settled, whatever the plugin order. See
+        // {@link reconcileConnectorsRegisteredDuringBoot}. [#33049] Its flows
+        // need the same second read: see the `kernel:bootstrapped` flow pass
+        // below the `kernel:ready` bind.
         ctx.hook('kernel:bootstrapped', async () => {
             await this.reconcileConnectorsRegisteredDuringBoot(ctx);
         });
@@ -2723,6 +2740,22 @@ export class AutomationServicePlugin implements Plugin {
                     if (this.degradedInstances.size > 0) void this.materializeDeclaredConnectors(ctx, { fatal: false });
                 });
             }
+        });
+
+        // ── [#33049] Flows a plugin registered after the bind above ──────────
+        // The bind above sees a package registered in another plugin's own
+        // `kernel:ready` handler only when that handler ran first, and handlers
+        // run in plugin start order: a plugin that declares a dependency on
+        // this one (every connector plugin does) starts this one earlier, so
+        // the install-local rehydrate, which re-registers every installed
+        // package there and announces no reload, then runs after the bind. Its
+        // flows were served and never registered, until some unrelated hot
+        // install re-synced. `kernel:bootstrapped` fires once every
+        // `kernel:ready` handler has settled, whatever the plugin order, and
+        // before this plugin seals its flow holders below: the view is read
+        // again there, and bound again only when it changed.
+        ctx.hook('kernel:bootstrapped', async () => {
+            await this.enqueueFlowSync(() => this.bindFlowsRegisteredDuringBoot(ctx));
         });
 
         // [#27238] Setup → Integrations → Connector Credentials — the door's
@@ -5775,10 +5808,16 @@ export class AutomationServicePlugin implements Plugin {
      * flow in the view at `kernel:ready` — a record made there could be
      * contradicted by this same boot (AGENTS.md "Startup registry reads").
      */
-    private async syncFlowsFromProtocol(ctx: PluginContext): Promise<void> {
+    private async syncFlowsFromProtocol(
+        ctx: PluginContext,
+        phase: 'kernel:ready' | 'kernel:bootstrapped' = 'kernel:ready',
+        read?: Array<{ name?: string }>,
+    ): Promise<void> {
         if (!this.engine) return;
-        const defs = await this.readFlowDefsFromProtocol(ctx);
+        const defs = read ?? await this.readFlowDefsFromProtocol(ctx);
         if (!defs) return;
+        // [#33049] What this bind read, for the `kernel:bootstrapped` pass.
+        this.bootFlowViewFingerprint = flowViewFingerprint(defs);
         let bound = 0;
         // [#20913] Through the boot pull's own precedence decision — see
         // {@link resolveFlowContenders}. registerFlow is idempotent, so
@@ -5811,8 +5850,27 @@ export class AutomationServicePlugin implements Plugin {
             }
         }
         if (bound > 0) {
-            ctx.logger.info(`[Automation] Bound ${bound} flow(s) from the protocol at kernel:ready`);
+            ctx.logger.info(`[Automation] Bound ${bound} flow(s) from the protocol at ${phase}`);
         }
+    }
+
+    /**
+     * [#33049] The `kernel:bootstrapped` pass: bind again, through the same
+     * additive {@link syncFlowsFromProtocol}, when the protocol's flow view
+     * differs from the one the `kernel:ready` bind read, so a package a plugin
+     * registered after that bind (the install-local rehydrate) has its flows
+     * registered whatever the plugin order. An unchanged view binds nothing;
+     * a bind that never read a view (no protocol) leaves this pass nothing to
+     * compare, and it does nothing. Runs on the flow sync queue, before the
+     * flow holders seal.
+     */
+    private async bindFlowsRegisteredDuringBoot(ctx: PluginContext): Promise<void> {
+        if (!this.engine || this.destroyed) return;
+        if (this.bootFlowViewFingerprint === undefined) return;
+        const defs = await this.readFlowDefsFromProtocol(ctx);
+        if (!defs) return;
+        if (flowViewFingerprint(defs) === this.bootFlowViewFingerprint) return;
+        await this.syncFlowsFromProtocol(ctx, 'kernel:bootstrapped', defs);
     }
 
     /**

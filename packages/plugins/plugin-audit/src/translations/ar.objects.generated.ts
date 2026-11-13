@@ -191,6 +191,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "البيانات الوصفية",
         help: "سياق إضافي مُسلسَل بصيغة JSON"
       },
+      origin: {
+        label: "Origin",
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry not written through the activity door."
+      },
       changed_fields: {
         label: "الحقول المتغيّرة",
         help: "مجموعة مفاتيح التغيير المسجَّل: في التحديث، كل حقل تذكره القيم القديمة/الجديدة المسجَّلة؛ وفارغة لكل صف آخر. تختمها المنصّة وقت الكتابة؛ وتُقدَّم مقصورة على الحقول المتاحة للقارئ. تعني NULL أن الصف لم يُختم بعد (شغّل `os migrate activity-changed-fields`)."

@@ -243,7 +243,15 @@ jobs:
   patrol:
     name: Live half-state sweep
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25, measured (#32991). Green runs of this job took 9m21s to 14m02s
+    # between 2026-10-30 and 2026-11-09 (the slowest is run 41076277250, 58s
+    # under the old cap), and 13m21s to 13m27s on the fix's own PR
+    # (43383893029, 43379300629). So 15 never had real headroom. 25 is about
+    # 1.78x the slowest run. ⛔ Don't raise this cap to make a run that HANGS
+    # go green. On a runner a hang shows as the sweep step running past twice
+    # its usual time with no `check-half-states exited` line in its log. That
+    # is a defect to fix (#32991 was one regex on one comment line).
+    timeout-minutes: 25
     steps:
       # The patrol reads the SWEPT repo's own checkout for the passes that
       # classify its workflows and its tracked files, so the checkout is the

@@ -1,5 +1,665 @@
 # @object-ui/components
 
+## 18.4.0
+
+### Minor Changes
+
+- aa57c76: feat(spec): three forward date-range presets: `next_month`, `next_quarter` and `next_30_days`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The relative dates a dashboard date filter and the filter builder offer looked only backward. A forecast asks forward: what closes next month, next quarter, in the next 30 days. Those questions had to use a custom range, whose fixed dates go stale.
+  
+  `DATE_RANGE_PRESETS` now also declares `next_month` (the whole of next month), `next_quarter` (the whole of next quarter) and `next_30_days` (today and the 30 days after it, the mirror of `last_30_days`). Every place that accepts a preset accepts them: `dashboard.dateRange.defaultRange`, a date global filter's `defaultValue`, the filter builder's `between` row and `AnalyticsQuery.timeDimensions[].dateRange`. They sit beside the family they extend in the filter bar: `next_month` after `last_month`, `next_quarter` after `last_quarter`, `next_30_days` after `last_90_days`. Their `DATE_RANGE_PRESET_MACRO_WINDOWS` rows follow the inclusive last-day convention: `['{next_month_start}', '{next_month_end}']`, `['{next_quarter_start}', '{next_quarter_end}']` and `['{today}', '{30_days_from_now}']`. A preset name written as a bare filter comparand is refused with that window as the prescription, as for the other presets.
+  
+  `@objectstack/core`'s `resolveAnalyticsDateRangePreset` resolves the three in its half-open form. `next_30_days` stops before `{31_days_from_now}`. `next_month` and `next_quarter` stop before the month and the quarter after next, which no macro token names: the resolver reads `next_month_start` (or `next_quarter_start`) again from the start of the day it named, so the end is still a day the one token resolver computed. No macro token is added.
+  
+  In the console, the three presets have labels in all ten locale packs, and the client date-macro resolver now answers `{next_month_end}` and `{next_quarter_end}`, two spec tokens it did not resolve before. `@objectstack/verify`'s dashboard-window proof also writes fixture rows on a forward preset's future edges, so it judges the three new windows; the days it writes for the other presets are unchanged. `@objectstack/lint` changes documentation only.
+
+### Patch Changes
+
+- 96b5dab: refactor(collaboration, components)!: retire two zero-consumer type exports from the package entries (`CollaborationTranslate`, `MobileDialogContentProps`)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/collaboration#CollaborationTranslate, @object-ui/components#MobileDialogContentProps) the retired operands are two TypeScript type aliases, the translate-function type of the collaboration package's i18n hook and the props type of the components package's mobile dialog content; nothing in the workspace or in hotcrm imports or names either outside its package, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports `CollaborationTranslate` from `@object-ui/collaboration` or `MobileDialogContentProps` from `@object-ui/components`. Neither had an importer or a mention anywhere outside its package, in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected. Nothing renders differently.
+  
+  Both stay in their modules, which their package's own code still reads; only the entries stop publishing them:
+  
+  - `CollaborationTranslate` types the `t` that `CommentThread` and `PresenceAvatars` pass to their timestamp and status helpers.
+  - `MobileDialogContentProps` is the props type of `MobileDialogContent`, and the props stay recoverable as `React.ComponentPropsWithoutRef<typeof MobileDialogContent>`.
+  
+  Every other name the two entries exported stays exported unchanged, among them `useCollaborationTranslation`, `COLLAB_DEFAULT_TRANSLATIONS`, `CommentThread`, `PresenceAvatars` and `MobileDialogContent`.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `CollaborationTranslate` TO `ReturnType<typeof useCollaborationTranslation>['t']`, the expression the type was defined as.
+  - FROM `MobileDialogContentProps` TO `React.ComponentPropsWithoutRef<typeof MobileDialogContent>`.
+- 7da99b7: refactor(components)!: retire forty-four more zero-consumer exports — menubar, navigation-menu, input-otp and carousel parts, filter and notification helpers — and delete the item parts, `NativeSelect`, `ResizableHandleProps` and `useRelatedCount` nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/components#MenubarMenu, @object-ui/components#MenubarItem, @object-ui/components#NavigationMenuItem, @object-ui/components#InputOTPGroup, @object-ui/components#InputOTPSeparator, @object-ui/components#CarouselItem, @object-ui/components#ItemMedia, @object-ui/components#ItemContent, @object-ui/components#ItemActions, @object-ui/components#ItemGroup, @object-ui/components#ItemSeparator, @object-ui/components#ItemTitle, @object-ui/components#ItemDescription, @object-ui/components#ItemHeader, @object-ui/components#ItemFooter, @object-ui/components#NativeSelect, @object-ui/components#NativeSelectProps, @object-ui/components#ResizableHandleProps, @object-ui/components#useRelatedCount, @object-ui/components#mountedOperatorValue, @object-ui/components#retypeFilterValue, @object-ui/components#narrowFilterValueToOptions, @object-ui/components#CURRENCY_COMPANION_SUFFIX, @object-ui/components#currencyCompanionId, @object-ui/components#currencyCompanionOf, @object-ui/components#pairedCurrencyField, @object-ui/components#KbdGroup, @object-ui/components#isInsidePopperLayer, @object-ui/components#usePopperAwareInteractOutside, @object-ui/components#SIDEBAR_WIDTH_FALLBACK, @object-ui/components#SIDEBAR_WIDTH_ICON_FALLBACK, @object-ui/components#useIsActiveListRecord, @object-ui/components#useScrollActiveListRecordIntoView, @object-ui/components#ActiveListRow, @object-ui/components#listRecordIdOf, @object-ui/components#DataLoadingState, @object-ui/components#DataLoadingStateProps, @object-ui/components#NOTIFICATION_ACTION_BUTTON_VARIANTS, @object-ui/components#NOTIFICATION_POSITION_CLASSES, @object-ui/components#NOTIFICATION_SEVERITY_STYLES, @object-ui/components#notificationActionVariant, @object-ui/components#notificationIcon, @object-ui/components#notificationSeverityStyle, @object-ui/components#NotificationSeverityStyle) the retired operands are React components, hooks, helpers, constants and their types on the components package entry; nothing in the workspace or in hotcrm imports any of them from the package entry, and no packages/spec schema, registered node type, conversion surface or stored shape names them (the schema renderers, the filter builder and the notification surfaces keep reading them inside the package), so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these forty-four names from `@object-ui/components`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected, and every schema node type (`menubar`, `navigation-menu`, `input-otp`, `carousel` and the rest), the filter builder and the five notification surfaces render exactly as before.
+  
+  The six shadcn parts below (`MenubarMenu`, `MenubarItem`, `NavigationMenuItem`, `InputOTPGroup`, `InputOTPSeparator`, `CarouselItem`) were named as staying on the entry by the previous `@object-ui/components` retirement in this series; they leave now. Every reference to them outside the package was a same-named declaration of another package (the `@object-ui/types` interfaces `MenubarMenu`, `NavigationMenuItem`, `CarouselItem`), an example title or test prose, never an import of these components.
+  
+  Thirteen of them are **gone from the package, not only from the entry**, because nothing inside the package read them either:
+  
+  - `src/custom/item.tsx` keeps only `Item`; `ItemMedia`, `ItemContent`, `ItemActions`, `ItemGroup`, `ItemSeparator`, `ItemTitle`, `ItemDescription`, `ItemHeader` and `ItemFooter` are deleted.
+  - `src/custom/native-select.tsx` is deleted with `NativeSelect` and `NativeSelectProps`.
+  - The type alias `ResizableHandleProps` is deleted.
+  - The hook `useRelatedCount` is deleted; `useRelatedCountVersion` and `RelatedCountStore` stay.
+  
+  The other thirty-one stay in their modules, which this package's own renderers, components and tests read, and only leave the entry (the shadcn registry files under `src/ui/` are untouched, so `pnpm shadcn:update` stays a clean re-fetch):
+  
+  - `menubar`: `MenubarMenu`, `MenubarItem`
+  - `navigation-menu`: `NavigationMenuItem`
+  - `input-otp`: `InputOTPGroup`, `InputOTPSeparator`
+  - `carousel`: `CarouselItem`
+  - `filter-builder`: `mountedOperatorValue`, `retypeFilterValue`, `narrowFilterValueToOptions`
+  - `filterRecordCurrency`: `CURRENCY_COMPANION_SUFFIX`, `currencyCompanionId`, `currencyCompanionOf`, `pairedCurrencyField`
+  - `kbd`: `KbdGroup`
+  - `mobile-dialog-content`: `isInsidePopperLayer`, `usePopperAwareInteractOutside`
+  - `navigation-overlay`: `SIDEBAR_WIDTH_FALLBACK`, `SIDEBAR_WIDTH_ICON_FALLBACK`
+  - `record-list-face`: `useIsActiveListRecord`, `useScrollActiveListRecordIntoView`, `ActiveListRow`, `listRecordIdOf`
+  - `view-states`: `DataLoadingState`, `DataLoadingStateProps`
+  - `notifications/severity`: `NOTIFICATION_ACTION_BUTTON_VARIANTS`, `NOTIFICATION_POSITION_CLASSES`, `NOTIFICATION_SEVERITY_STYLES`, `notificationActionVariant`, `notificationIcon`, `notificationSeverityStyle`, `NotificationSeverityStyle`
+  
+  Every other name the entry exported stays exported unchanged, among them `Menubar`, `Carousel` with the type `CarouselApi`, `Item`, `Kbd`, `Pagination`, `FilterBuilder` with `filterValueArity`, `reshapeFilterValue`, `operatorsForFieldType` and the type `FilterValueArity`, `isCurrencyCompanion`, `syncRecordCurrencyRows` and the type `RecordCurrencyFilterField`, `MobileDialogContent`, `NavigationOverlay`, `ActiveListRecordProvider`, `DataEmptyState`, `EmptyState`, `DataErrorState`, the four notification surfaces with their props types, `ResizableHandle`, `ResizablePanel`, `ResizablePanelGroup`, and `GridSkeleton`, `KanbanSkeleton`, `FormSkeleton`, `ListSkeleton`, `ChartSkeleton` with their props types.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `MenubarMenu`, `MenubarItem` TO the same parts in the host's own tree (`npx shadcn@latest add menubar`), or a `menubar` schema node.
+  - FROM `NavigationMenuItem` TO the same part in the host's own tree (`npx shadcn@latest add navigation-menu`), or a `navigation-menu` schema node.
+  - FROM `InputOTPGroup`, `InputOTPSeparator` TO the same parts in the host's own tree (`npx shadcn@latest add input-otp`), or an `input-otp` schema node.
+  - FROM `CarouselItem` TO the same parts in the host's own tree (`npx shadcn@latest add carousel`), or a `carousel` schema node.
+  - FROM `ItemMedia`, `ItemContent`, `ItemActions`, `ItemGroup`, `ItemSeparator`, `ItemTitle`, `ItemDescription`, `ItemHeader`, `ItemFooter` TO plain `div` / `p` elements with the classes you want inside `Item`, or the same parts in the host's own tree (`npx shadcn@latest add item`).
+  - FROM `NativeSelect` TO a plain `select` element, or `Select`.
+  - FROM `NativeSelectProps` TO `React.SelectHTMLAttributes<HTMLSelectElement>`, which it extended without adding a key.
+  - FROM `ResizableHandleProps` TO `React.ComponentProps<typeof ResizableHandle>`, which it aliased.
+  - FROM `useRelatedCount` TO `RelatedCountStore.get` with the same four arguments (object, relationship field, parent id, filter), guarding an absent object name yourself as the hook did (`objectName ? RelatedCountStore.get(objectName, relField, parentId, filter) : undefined`, since `get` takes `objectName: string`), read in a component that calls `useRelatedCountVersion()`, which re-renders it when the store changes.
+  - FROM `mountedOperatorValue`, `retypeFilterValue`, `narrowFilterValueToOptions` TO `FilterBuilder`, which applies them to its rows, or `reshapeFilterValue` for the operator half.
+  - FROM `CURRENCY_COMPANION_SUFFIX`, `currencyCompanionId`, `currencyCompanionOf`, `pairedCurrencyField` TO `isCurrencyCompanion` and `syncRecordCurrencyRows`, which pair and keep the currency rows.
+  - FROM `KbdGroup` TO a `kbd` element with the classes `inline-flex items-center gap-1` around the `Kbd` elements.
+  - FROM `isInsidePopperLayer`, `usePopperAwareInteractOutside` TO `MobileDialogContent`, which already keeps a dialog open when a click lands in a popover, menu or select layer.
+  - FROM `SIDEBAR_WIDTH_FALLBACK`, `SIDEBAR_WIDTH_ICON_FALLBACK` TO the values they held, `16rem` and `3rem` (the fallbacks of the `--sidebar-width` and `--sidebar-width-icon` CSS variables).
+  - FROM `useIsActiveListRecord`, `useScrollActiveListRecordIntoView`, `ActiveListRow`, `listRecordIdOf` TO `ActiveListRecordProvider` around a list this package draws: its data table marks and scrolls the active row itself.
+  - FROM `DataLoadingState` TO `Spinner` or `Skeleton`, or `GridSkeleton` / `ListSkeleton` for a view.
+  - FROM `DataLoadingStateProps` TO `React.ComponentProps<"div">` plus your own `message` prop.
+  - FROM `NOTIFICATION_ACTION_BUTTON_VARIANTS`, `NOTIFICATION_POSITION_CLASSES`, `NOTIFICATION_SEVERITY_STYLES`, `notificationActionVariant`, `notificationIcon`, `notificationSeverityStyle`, `NotificationSeverityStyle` TO `NotificationBanners`, `NotificationSnackbar`, `NotificationAlerts` or `NotificationInline`, which style a notification by its severity and action variant themselves.
+- 85d9264: refactor(components)!: retire ten zero-consumer shadcn sub-part exports (dialog, dropdown-menu, sheet and sidebar parts)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/components#DialogPortal, @object-ui/components#DialogOverlay, @object-ui/components#DialogClose, @object-ui/components#DropdownMenuPortal, @object-ui/components#SheetPortal, @object-ui/components#SheetClose, @object-ui/components#SidebarSeparator, @object-ui/components#SidebarGroupAction, @object-ui/components#SidebarMenuBadge, @object-ui/components#SidebarMenuSkeleton) the retired operands are React UI primitives of the components package; nothing in the workspace or in hotcrm imports any of them from the package entry (the only other spellings are the upstream shadcn registry snapshots under `ui/scripts/__tests__/fixtures/shadcn-registry/`, which declare their own copies, and a comment naming Radix's own portal part), and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these ten names from `@object-ui/components`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected, and every schema node type (`dialog`, `sheet`, `dropdown-menu`, `sidebar` and the rest) renders exactly as before.
+  
+  All ten stay in their shadcn modules, which `pnpm shadcn:update` keeps in step with the registry and which this package's own code still reads (`MobileDialogContent` mounts `DialogPortal` and `DialogOverlay`); only the entry stops publishing them:
+  
+  - `dialog`: `DialogPortal`, `DialogOverlay`, `DialogClose`
+  - `dropdown-menu`: `DropdownMenuPortal`
+  - `sheet`: `SheetPortal`, `SheetClose`
+  - `sidebar`: `SidebarSeparator`, `SidebarGroupAction`, `SidebarMenuBadge`, `SidebarMenuSkeleton`
+  
+  Every other name the entry exported stays exported unchanged, among them `Dialog`, `DialogTrigger`, `DialogContent` and its header, footer, title and description parts, `DropdownMenu` with its trigger, content, item, group, label, separator, shortcut, radio, checkbox and sub-menu parts, `Sheet` with `SheetOverlay`, `SheetTrigger`, `SheetContent` and its header, footer, title and description parts, and `Sidebar`, `SidebarProvider`, `useSidebar`, `useOptionalSidebar` with every other sidebar part.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `DialogPortal`, `DialogOverlay` TO `DialogContent`, which already mounts the portal and the overlay.
+  - FROM `DialogClose` TO the close button `DialogContent` already draws, or the `Close` part of `@radix-ui/react-dialog` for a custom one.
+  - FROM `DropdownMenuPortal` TO `DropdownMenuContent`, which already mounts its own portal; for a sub-menu, the `Portal` part of `@radix-ui/react-dropdown-menu` around `DropdownMenuSubContent`.
+  - FROM `SheetPortal` TO `SheetContent`, which already mounts the portal and the overlay.
+  - FROM `SheetClose` TO the close button `SheetContent` already draws, or the `Close` part of `@radix-ui/react-dialog` for a custom one.
+  - FROM `SidebarSeparator`, `SidebarGroupAction`, `SidebarMenuBadge`, `SidebarMenuSkeleton` TO the same parts in the host's own tree (`npx shadcn@latest add sidebar`), or `Separator`, `SidebarMenuAction` and `Skeleton`, which stay exported.
+- 3214615: refactor(components)!: retire sixty-three zero-consumer shadcn sub-part exports, and delete the typography primitives nothing reads
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/components#TypographyH1, @object-ui/components#TypographyH2, @object-ui/components#TypographyH3, @object-ui/components#TypographyH4, @object-ui/components#TypographyP, @object-ui/components#TypographyBlockquote, @object-ui/components#TypographyList, @object-ui/components#TypographyInlineCode, @object-ui/components#TypographyLead, @object-ui/components#TypographyLarge, @object-ui/components#TypographySmall, @object-ui/components#TypographyMuted, @object-ui/components#AlertDialogOverlay, @object-ui/components#AlertDialogPortal, @object-ui/components#BreadcrumbEllipsis, @object-ui/components#BreadcrumbSeparator, @object-ui/components#CarouselContent, @object-ui/components#CarouselNext, @object-ui/components#CarouselPrevious, @object-ui/components#CommandShortcut, @object-ui/components#ContextMenuCheckboxItem, @object-ui/components#ContextMenuGroup, @object-ui/components#ContextMenuLabel, @object-ui/components#ContextMenuPortal, @object-ui/components#ContextMenuRadioGroup, @object-ui/components#ContextMenuRadioItem, @object-ui/components#ContextMenuShortcut, @object-ui/components#DrawerOverlay, @object-ui/components#DrawerPortal, @object-ui/components#useFormField, @object-ui/components#InputOTP, @object-ui/components#InputOTPSlot, @object-ui/components#MenubarCheckboxItem, @object-ui/components#MenubarContent, @object-ui/components#MenubarGroup, @object-ui/components#MenubarLabel, @object-ui/components#MenubarPortal, @object-ui/components#MenubarRadioGroup, @object-ui/components#MenubarRadioItem, @object-ui/components#MenubarSeparator, @object-ui/components#MenubarShortcut, @object-ui/components#MenubarSub, @object-ui/components#MenubarSubContent, @object-ui/components#MenubarSubTrigger, @object-ui/components#MenubarTrigger, @object-ui/components#NavigationMenu, @object-ui/components#NavigationMenuContent, @object-ui/components#NavigationMenuIndicator, @object-ui/components#NavigationMenuLink, @object-ui/components#NavigationMenuList, @object-ui/components#NavigationMenuTrigger, @object-ui/components#NavigationMenuViewport, @object-ui/components#navigationMenuTriggerStyle, @object-ui/components#PaginationContent, @object-ui/components#PaginationEllipsis, @object-ui/components#PaginationItem, @object-ui/components#PaginationLink, @object-ui/components#PaginationNext, @object-ui/components#PaginationPrevious, @object-ui/components#SelectScrollDownButton, @object-ui/components#SelectScrollUpButton, @object-ui/components#SelectSeparator, @object-ui/components#TableCaption) the retired operands are React UI primitives of the components package; nothing in the workspace or in hotcrm imports any of them from the package entry, and no packages/spec schema, registered node type, conversion surface or stored shape names them (the schema renderers that draw menubars, carousels, breadcrumbs and the rest keep reading them inside the package), so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these sixty-three names from `@object-ui/components`. None had an importer anywhere in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected, and every schema node type (`menubar`, `navigation-menu`, `pagination`, `carousel`, `breadcrumb`, `context-menu`, `input-otp`, `table` and the rest) renders exactly as before.
+  
+  Twelve of them are **gone from the package, not only from the entry**, because nothing inside the package read them either: `src/ui/typography.tsx` is deleted with `TypographyH1`, `TypographyH2`, `TypographyH3`, `TypographyH4`, `TypographyP`, `TypographyBlockquote`, `TypographyList`, `TypographyInlineCode`, `TypographyLead`, `TypographyLarge`, `TypographySmall` and `TypographyMuted`. It was not a shadcn registry component (`shadcn-components.json` does not list it).
+  
+  The other fifty-one stay in their shadcn modules, which this package's own renderers read and which `pnpm shadcn:update` keeps in step with the registry, and only leave the entry:
+  
+  - `alert-dialog`: `AlertDialogOverlay`, `AlertDialogPortal`
+  - `breadcrumb`: `BreadcrumbEllipsis`, `BreadcrumbSeparator`
+  - `carousel`: `CarouselContent`, `CarouselNext`, `CarouselPrevious`
+  - `command`: `CommandShortcut`
+  - `context-menu`: `ContextMenuCheckboxItem`, `ContextMenuGroup`, `ContextMenuLabel`, `ContextMenuPortal`, `ContextMenuRadioGroup`, `ContextMenuRadioItem`, `ContextMenuShortcut`
+  - `drawer`: `DrawerOverlay`, `DrawerPortal`
+  - `form`: `useFormField`
+  - `input-otp`: `InputOTP`, `InputOTPSlot`
+  - `menubar`: `MenubarCheckboxItem`, `MenubarContent`, `MenubarGroup`, `MenubarLabel`, `MenubarPortal`, `MenubarRadioGroup`, `MenubarRadioItem`, `MenubarSeparator`, `MenubarShortcut`, `MenubarSub`, `MenubarSubContent`, `MenubarSubTrigger`, `MenubarTrigger`
+  - `navigation-menu`: `NavigationMenu`, `NavigationMenuContent`, `NavigationMenuIndicator`, `NavigationMenuLink`, `NavigationMenuList`, `NavigationMenuTrigger`, `NavigationMenuViewport`, `navigationMenuTriggerStyle`
+  - `pagination`: `PaginationContent`, `PaginationEllipsis`, `PaginationItem`, `PaginationLink`, `PaginationNext`, `PaginationPrevious`
+  - `select`: `SelectScrollDownButton`, `SelectScrollUpButton`, `SelectSeparator`
+  - `table`: `TableCaption`
+  
+  Every other name the entry exported stays exported unchanged, among them `AlertDialog` and its content parts, `Breadcrumb`, `BreadcrumbList`, `BreadcrumbItem`, `BreadcrumbLink`, `BreadcrumbPage`, `Carousel`, `CarouselItem`, the type `CarouselApi` (the `setApi` prop of `Carousel` names it), `Command` and its parts, `ContextMenu` with its content, item, separator and sub-menu parts, `Drawer` and its parts, `Form` and its field parts, `InputOTPGroup`, `InputOTPSeparator`, `Menubar`, `MenubarMenu`, `MenubarItem`, `NavigationMenuItem`, `Pagination`, `Select` and its parts, `Table` and its parts, and `toggleVariants` (the props of `Toggle` and `ToggleGroup` are typed by it).
+  
+  What leaves, and what to write instead:
+  
+  - FROM `TypographyH1`, `TypographyH2`, `TypographyH3`, `TypographyH4`, `TypographyP`, `TypographyBlockquote`, `TypographyList`, `TypographyInlineCode`, `TypographyLead`, `TypographyLarge`, `TypographySmall`, `TypographyMuted` TO the plain element with the Tailwind classes you want (`h1`, `p`, `blockquote`, `code` and so on), or an `element:text` node with a heading `variant` such as `h2`.
+  - FROM `AlertDialogOverlay`, `AlertDialogPortal` TO `AlertDialogContent`, which already mounts the portal and the overlay.
+  - FROM `BreadcrumbEllipsis`, `BreadcrumbSeparator` TO the same parts in the host's own tree (`npx shadcn@latest add breadcrumb`), or a `breadcrumb` schema node, which draws the separators and the collapsed-crumb ellipsis itself.
+  - FROM `CarouselContent`, `CarouselNext`, `CarouselPrevious` TO the same parts in the host's own tree (`npx shadcn@latest add carousel`), or a `carousel` schema node.
+  - FROM `CommandShortcut` TO a `kbd` element (or `Kbd`) inside `CommandItem`.
+  - FROM `ContextMenuCheckboxItem`, `ContextMenuGroup`, `ContextMenuLabel`, `ContextMenuPortal`, `ContextMenuRadioGroup`, `ContextMenuRadioItem`, `ContextMenuShortcut` TO the same parts in the host's own tree (`npx shadcn@latest add context-menu`), or the `@radix-ui/react-context-menu` primitive they wrap.
+  - FROM `DrawerOverlay`, `DrawerPortal` TO `DrawerContent`, which already mounts the portal and the overlay.
+  - FROM `useFormField` TO `FormLabel`, `FormControl`, `FormDescription` and `FormMessage`, which read the same field state.
+  - FROM `InputOTP`, `InputOTPSlot` TO the same parts in the host's own tree (`npx shadcn@latest add input-otp`), or an `input-otp` schema node.
+  - FROM `MenubarCheckboxItem`, `MenubarContent`, `MenubarGroup`, `MenubarLabel`, `MenubarPortal`, `MenubarRadioGroup`, `MenubarRadioItem`, `MenubarSeparator`, `MenubarShortcut`, `MenubarSub`, `MenubarSubContent`, `MenubarSubTrigger`, `MenubarTrigger` TO the same parts in the host's own tree (`npx shadcn@latest add menubar`), or a `menubar` schema node.
+  - FROM `NavigationMenu`, `NavigationMenuContent`, `NavigationMenuIndicator`, `NavigationMenuLink`, `NavigationMenuList`, `NavigationMenuTrigger`, `NavigationMenuViewport`, `navigationMenuTriggerStyle` TO the same parts in the host's own tree (`npx shadcn@latest add navigation-menu`), or a `navigation-menu` schema node.
+  - FROM `PaginationContent`, `PaginationEllipsis`, `PaginationItem`, `PaginationLink`, `PaginationNext`, `PaginationPrevious` TO the same parts in the host's own tree (`npx shadcn@latest add pagination`), or a `pagination` schema node.
+  - FROM `SelectScrollDownButton`, `SelectScrollUpButton`, `SelectSeparator` TO `SelectContent`, which already draws the scroll buttons, and `Separator` between groups.
+  - FROM `TableCaption` TO a `caption` element inside `Table`.
+- bb61872: feat(app-shell,components): "Open the full form" on an AI chat record card opens the New form with the values in router state, marked 「AI 建议」 until edited
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`:** on a create card from the AI chat (cloud#3565), "Open the full form" used to put every card value in the New page's query string, so a lead's name, phone number and e-mail address sat in the address bar, the browser history and any link copied from it. The values now travel in the router state of that one navigation (`utils/recordFormAiDraft.ts`), with their types kept, and the URL is the bare `/new` path. `RecordFormPage` reads them as create values in create mode only, under any query-string prefill, which still wins per field (a related-list "+ New" names its parent on purpose), and over the form view's `defaults`. When the page opens on such a draft it shows one notice above the form saying the record is not saved until the person checks it and saves. Nothing submits on its own. Router state belongs to the tab's history entry: reloading or going Back to that entry reopens the draft, while a copied link, a new tab or another device opens an empty form. The query-string helper `recordFormPrefill.ts`, which only this button used, is removed.
+  - **`@object-ui/components`:** new host slot `SuggestedFieldsContext` (a set of field names, default `undefined`). A `form` renderer under it marks each named field "AI suggestion" inside the field's description, so the control's `aria-describedby` announces it, while the field still holds its opening value. The person's first edit takes the mark away. It is not metadata: no form or field key sets it, and with no provider nothing changes.
+  - **`@object-ui/i18n`:** `form.aiSuggested` and `form.aiDraftNotice` in all eleven locale packs.
+- 4211f50: feat(app-shell,components): "Open the full form" on an AI chat update card opens the edit form with the proposed changes applied, before → after, marked 「AI 建议」 with a per-field revert; a record open in a list's drawer is sent to the chat as the record in view
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`:** on an update card from the AI chat (cloud#3565), "Open the full form" used to open the record's edit page on the stored record alone, so every change the card proposed had to be typed again. The card's proposed values now travel in the router state of that navigation, through the same carrier the create card uses (`utils/recordFormAiDraft.ts`), bound to the record they were proposed for, and nothing is added to the URL. `RecordFormPage` reads them in edit mode only, for that record only, hands them to the form, and shows the same one-line notice above it that nothing is saved until the person checks and saves. Nothing submits on its own. The console dock now also reads a list's record drawer (`?recordId=`): while a record is open in the drawer, the chat's `context.surface` names the object and that record, as it already did on the record page, so "change its phone to …" asked beside the drawer reaches the agent about that record.
+  - **`@object-ui/components`:** new host slot `SuggestedFieldChangesContext` (field name → proposed value, default `undefined`), the edit-form sibling of `SuggestedFieldsContext`. A `form` renderer under it applies each proposed value once, over the record it opens on, as an unsaved change: the form reads dirty, the discard guard hears it and Save writes it. While a field still holds the proposed value it shows the same "AI suggestion" mark, a "Was: …" line with the stored value it replaces, and a Revert button that puts the stored value back. A proposal for a field the form does not draw, or one that is read-only (by its config or by a `readonlyWhen` rule on the stored record) or disabled, is not applied. Each proposal is tried once per field, when the form first draws it, so on an edit wizard a later step's proposal lands on that step and a field the person reverted stays reverted across Next and Back. It is not metadata: no form or field key sets it, and with no provider nothing changes.
+  - **`@object-ui/i18n`:** `form.aiBefore`, `form.aiBeforeEmpty` and `form.aiRevert` in all eleven locale packs.
+- 9049be2: fix(plugin-detail): a record page's body table that is wider than the details column says so — its first column stays pinned and ⤢ is offered as 「All columns」
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A body table of the default record page (a related list drawn in the details column) keeps its place in that column, as ADR-0085's role-based layout puts it. When its columns are wider than the column, it now makes the overflow obvious:
+  
+  - **The first column stays pinned** while the table scrolls sideways, so a scrolled row is still identifiable (the table's existing `frozenColumns: 1`, set only while the table overflows).
+  - **⤢ is offered in words.** The enlarge control in the card header, icon-only before, shows a visible 「All columns」 label (`detail.relatedCardAllColumns`, all ten locales) while the table overflows. It opens the same enlarged tab as before, where every column fits.
+  - **The right-edge shadow** while columns remain to the right is the table's own and unchanged; it clears when the table is scrolled to its end.
+  
+  A body table that fits shows none of these: no pinned column and the icon-only ⤢.
+  
+  `@object-ui/components`: a `data-table` header label carries its full text as a `title`, so a header the ellipsis cuts can be read on hover, and the table's scroll box carries a `data-table-scroll-box` marker a host can read the overflow from.
+- a52761f: fix(console): an action another package places on `sys_user` at `record_header` / `record_more` draws again on the user's record page, in the drawer and on the full page (#29951)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The header reads `placedActions: true`.** `page:header`'s `placedActions` (#30018) is now drawn by the console's header renderer (`PageHeaderActions` in `@object-ui/components`): `true` draws every action of the page's object whose `locations` include `record_header` or `record_more`, in declaration order, read from the object's metadata at render time, so an action an installed package adds to the object is drawn without editing the page. Omitted or `false`, an authored `actions` list is still the whole set (#11592). A `true` beside an authored list, which the spec refuses, draws none of the object's actions and is reported once in the console.
+  - **One placed-header reader.** `placedHeaderActions` (`@object-ui/types`) is the rule both headers read: the synthesized default record page's header in `RecordDetailView` and a `placedActions: true` header. The `page:header` registration publishes the `placedActions` input.
+  - **The platform record pages opt in.** `sys_user_detail` and `sys_organization_detail` (`@objectstack/platform-objects`) and `sys_approval_request_detail` (`@objectstack/plugin-approvals`) set `placedActions: true` in place of the id lists #27219 froze, which dropped every header action another package places on those objects. The tab strips are unchanged, and every action the lists named is placed at `record_header` / `record_more`, so each still draws.
+  - `@objectstack/spec`: the `placedActions` describe no longer opens with `[PLANNED — not yet rendered]`, and the `page` liveness record names the reader.
+- 6db9198: fix(ui): a greyed action's `disabledReason` tooltip wraps inside a phone-width viewport instead of running off-screen (#29954)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record action bar, the `record:quick_actions` button and the schema-driven `action:*` controls (button, icon, group, menu, through the shared disabled-reason trigger) rendered the authored `disabledReason` in a tooltip with no width bound, so a long reason sat on one line and was cut at the right edge of a 390px viewport. All three tooltips now carry the same `max-w-xs` bound the home page's disabled-reason tooltip uses, so the reason wraps.
+- bff5ba2: fix(ui): the record Edit form judges a field's `requiredWhen` as the engine does, a transition gate against the stored record, so a record already inside the gate without the value saves an unrelated edit
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  This widens the public surface of `@object-ui/core`: the new export `requiredWhenRestsOnStoredRecord` and the new `requiredWhenAtRest` field in the return type of `resolveFieldRuleState`.
+  
+  - **`@object-ui/components` form renderer:** on an Edit form (`previousValues` set), a field's `requiredWhen` is required only when the stored record complied with it. A stored record that already violates it (the predicate holds over the stored record and its value is missing, as with a contract activated before its signed-copy rule existed) is not blocked any more: it saves an edit that leaves the field empty, as the engine and REST `PATCH` already accept. This follows `Field.requiredWhen`: the write is refused only when the merged record violates the requirement AND the pre-write record complied. Still refused: the edit that moves a record into the gate without the value, and clearing the value of a record that held it. A Create form enforces as before. The "Required to run" note under an empty field (the update-action heads-up) is no longer shown for such a stored record, because the engine judges the action's write against the same stored record.
+  - **`@object-ui/core`:** `resolveFieldRuleState` takes `statics.name` (the field's name) and returns `requiredWhenAtRest`. With `previous` and `statics.name` given, a stored record already violating `requiredWhen` resolves `required: false` and `requiredWhenAtRest: true`. A caller that passes no `name` keeps the plain verdict. New export `requiredWhenRestsOnStoredRecord(pred, name, stored, scope?)`, the stored-record check alone. A predicate that cannot be evaluated over the stored record counts it as compliant, as on the server.
+- a91409c: fix(core,react,i18n,components,app-shell,console): a write refused because the object's external datasource does not accept writes says the table is read-only, not "you don't have permission"
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/core`: `isExternalWriteRefusal(err)`**, re-exported from `@object-ui/react` beside the other write-refusal readers. True when the server refused a write with `EXTERNAL_WRITE_FORBIDDEN`, the ADR-0015 write gate's code for an object bound to an external datasource that does not admit writes (`datasource.external.allowWrites` and `object.external.writable` must both be true). Read from `code`, then `details.code`, like `isPermissionError`. The refusal is a 403, so `isPermissionError` answers true for it too: a caller asks this first.
+  - **`@object-ui/i18n`: `form.readOnlyExternalSource`**, in all ten packs: "This table is read-only. Its records come from an external data source that does not accept changes."
+  - **Every surface that met this refusal now says the table is read-only:** the console record form page and the record dialog (`@object-ui/components` form), which said "you don't have permission to save this record"; the record page delete, the list row delete and the record page inline edit, which showed the gate's raw diagnostic; and the calendar's drag-to-reschedule and the record path's stage change. A permission line sent an administrator through permission sets for a grant that cannot exist.
+- 8b0fbb8: fix(app-shell,fields,plugin-form,plugin-gantt,plugin-grid,components,console): record pages, forms, drawers and preview cards draw a served object label as served
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Now.** The record page (its title, breadcrumbs, related-list titles, delete and access-denied copy), the record form page and the console's create/edit dialog (title, save toast, way back to the list), the record drawer, the record preview card, the hover card over a lookup, a record-pointer cell, an object-ref cell, the closed-form notice, the gantt name column, the page header's record chrome, a form view's heading, the AI dock's surface chip, the Activity row and the report index name an object by the label the server served, as given. The server has already translated it, by its label order for an overridden item, so a `.custom` object extension's rename is kept over the base package's translation. Before, the served label reached the client's catalog lookup only as its fallback, so the base package's translation of the old name won on these surfaces after the list and header were fixed.
+  - **Unchanged.** When no label is served, the catalog key is asked first and the machine name (or its humanized form) stays the last resort, as before. An unedited object shows the same text as before, because the server serves the catalog's translation for it. Related lists and reference rails that only know an object's name, and the packaged-actions table (its object list is read without the session's language), still look the name up in the catalog. English is unchanged.
+- 5bca14f: feat(i18n)!: the Console's language packs are the platform locale table's, keyed by its tags, and Traditional Chinese (`zh-Hant`) ships, generated from Simplified (#30511)
+  
+  Clause-②: yes (narrowing) — widens: a `zh-Hant` pack (the `zhHant` export of `@object-ui/i18n/locales`, the `@object-ui/i18n/locales/zh-Hant` module), the `resolveBuiltInLanguage` export of `@object-ui/i18n`, and every stored or browser code the platform locale table reads as one of its tags (`zh-TW`, `zh-HK`, `zh-MO` → `zh-Hant`; `zh`, `zh-CN`, `zh-SG` → `zh-Hans`; `pt` → `pt-BR`). Narrows: the Simplified Chinese and Portuguese packs are keyed `zh-Hans` and `pt-BR`, no longer `zh` and `pt`, in `builtInLocales`, `BUILT_IN_LANGUAGE_CODES`, `getLoadedBuiltInLocales()` and `getAvailableLanguages()`, and their modules `@object-ui/i18n/locales/zh` and `@object-ui/i18n/locales/pt` are `@object-ui/i18n/locales/zh-Hans` and `@object-ui/i18n/locales/pt-BR`.
+  Metadata-protocol: none
+  Skills-docs: follow-up owed — `skills/objectui/guides/i18n.md` (its "Built-in locales" list names ten packs, with `zh` and `pt`)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata changes shape: no spec key, object definition, stored row or authorable spelling is added, removed or renamed, so `objectstack migrate meta` has nothing to rewrite and no ledger entry could project. The FROM/TO lines below are source rewrites for TypeScript and JavaScript consumers of `@object-ui/i18n`'s `./locales` subpath (two members of `builtInLocales`, two modules). That is the class `runtime-export-retired` exists for, but it reads a package's root entry only and refuses a subpath operand, and the root entry retires nothing here; so this category is held, and the gap is named here rather than left to the detector. -->
+  
+  **BREAKING** for code that reads a built-in pack by its old key or module path.
+  
+  - **Why.** The Console's packs follow the platform locale table (`PLATFORM_LOCALES` in `@objectstack/spec/system`, ruling F of #29349) instead of a list of their own: one pack per table tag, keyed by the tag, in the table's order. A language the table gains is a pack the parity and drift suites demand on the run that first sees it.
+  - **Traditional Chinese.** `src/locales/zh-Hant.ts` is generated from `zh-Hans.ts` by `pnpm --filter @object-ui/i18n gen:zh-hant` (OpenCC `s2twp`, pinned, with the phrase rules of the www.objectos.ai converter) and is never edited by hand; a package test fails when it is not what the generator writes. It carries no `console.ai.*` gate-only outbound keys, exactly as the other non-gate packs.
+  - **The marketplace namespace follows.** The lazy `marketplace` namespace keys its catalogues by the same tags (`@object-ui/i18n/namespaces/marketplace`'s `MARKETPLACE_LANGUAGE_CODES` and `resolveMarketplaceLanguage` answer `zh-Hans`, `zh-Hant`, `pt-BR`), ships a `zh-Hant` catalogue generated by the same command, and resolves a stored code through the table as the packs do, so a `zh-TW` reader's marketplace pages are Traditional too.
+  - **One locale ladder.** The Console picks which offered language renders a user's stored `sys_user.locale` with `resolveLocaleAmong` from `@objectstack/spec/system`, the order the server's `resolveLocale` uses, instead of a copy of it: a deployment offering both scripts renders a `zh-TW` row in its Traditional spelling, and a variant the table reads as the language itself (`es-ES` for `es`) is taken ahead of the first offered variant, as the server takes it.
+  - **Stored codes keep working.** A `sys_user.locale` value, a saved device language or an `Accept-Language` tag written before the table is read through the table's aliases: `zh-CN` still renders Simplified Chinese, `pt` Portuguese (Brazil), and `zh-TW` / `zh-HK` / `zh-MO` now render Traditional Chinese instead of Simplified. `loadBuiltInLocale`, `isBuiltInLanguage` and i18next's fallback chain accept every alias.
+  - **Studio.** The Studio namespace still ships `en` and `zh` only; a `zh-Hant` reader sees its Simplified catalogue there.
+  
+  The fix, for code that names a pack:
+  
+  - FROM `builtInLocales.zh` TO `builtInLocales['zh-Hans']`
+  - FROM `builtInLocales.pt` TO `builtInLocales['pt-BR']`
+  - FROM `import zh from '@object-ui/i18n/locales/zh'` TO `import zh from '@object-ui/i18n/locales/zh-Hans'`
+  - FROM `import pt from '@object-ui/i18n/locales/pt'` TO `import pt from '@object-ui/i18n/locales/pt-BR'`
+  - FROM comparing a code from `BUILT_IN_LANGUAGE_CODES`, `getAvailableLanguages()` or the keys of `getLoadedBuiltInLocales()` with `'zh'` or `'pt'` TO comparing `resolveBuiltInLanguage(code)` with `'zh-Hans'` or `'pt-BR'`
+- 534a287: feat(console): the sharing-rule object picker lists only the objects a rule can take effect on, business objects first
+  
+  Clause-②: yes (widening) — `field:shareable-object-ref` joins `@object-ui/fields`' registered widget keys (`RegisteredFieldWidgetType`) and the console's known schema types; nothing is narrowed and no translation key is added.
+  Metadata-protocol: none
+  
+  The object field of a new sharing rule listed every registered object, most of them platform `sys_*` objects, including ones a save refuses with `SHARING_NOT_ENABLED` and the credential and session objects. It now lists only what `GET /api/v1/sharing/shareable-objects` answers: the objects a rule saved on would take effect on, business objects first and then platform objects, each group by label, in the order the server sends.
+  
+  - **The widget (`@object-ui/fields`).** `field:shareable-object-ref` reads the list through the host's authenticated fetch (`SchemaRendererContext.apiFetch`) and stores the object's name, as `object-ref` does, with the same `Label (name)` spelling. A stored name the list does not hold stays on screen as its own option, so editing a rule never drops it. The read-only face is `object-ref`'s.
+  - **When the list is not served.** A `403` (the caller is not a sharing-rule administrator), a `501` (sharing rules do not run on this deployment), any other failed or unreadable answer, and a host with no authenticated fetch all give the `object-ref` picker over every registered object, as before. The field is never an empty picker; the save doors still decide which object a rule may name.
+  - **The declaration (`@objectstack/plugin-sharing`).** `sys_sharing_rule.object_name` declares `widget: 'shareable-object-ref'` (was `object-ref`). A console without the widget draws the field as a text box, as with any unregistered widget.
+  - **The list cell, the record form and the grid.** The new key draws the same object label cell as `object-ref` (`@object-ui/app-shell`), the record form hands it the data source its fallback reads (`@object-ui/components`), and it is not edited inline in a grid cell, like the other widget-hint pickers.
+- 3224545: feat(app-shell): an action's `preflight` read draws a panel in the param dialog and seeds the params it names
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`: the param dialog reads `ActionSchema.preflight`.** When an action declares `preflight`, the dialog re-judges the block with the spec's `ActionSchema`, fills `preflight.read.url` from the dialog's current values and the record, checks the filled URL is a same-origin API path, and sends the read once every hole has a value (again whenever a param a hole reads changes). The answer is drawn as a panel above the form (`preflight.fields`, through the result dialog's field cells), and each `preflight.seed` entry fills its param from the answer, drawn read-only. Seeds are cleared on every URL change and applied only from the current URL's answer, so a late answer to an earlier URL never overwrites the current one. A read that fails, a seed path the answer lacks, a hole with no value and a refused block each draw the panel's error state, and the seeded param's `required` mark keeps Confirm disabled. An action with no `preflight` draws exactly as before (the `ban_user` work panel included).
+  - **`@object-ui/core`: `ActionDef.preflight`** and a fifth `ParamCollectionHandler` argument, `interpolateRead`, which fills a read URL: `${param.NAME}` from the dialog's current values, `${ctx.record.FIELD}` / `${ctx.recordId}` from the dispatched row or, on a record page's header, the record the page shows; each value is percent-encoded, and a hole with no value answers `null` so nothing is sent. `ACTION_DEF_KEYS` lists `preflight`.
+  - **`@object-ui/types`:** `ActionSchema.preflight` mirrors the spec's block.
+  - **`@object-ui/components`:** the action button, icon, group and menu renderers forward `preflight` to the runner.
+  - **`@object-ui/i18n`:** the `actionDialog.preflight` strings in every locale pack.
+  - **`@objectstack/spec`:** the `preflight` liveness rows move from `planned` to `live`. `preflight.fields[].label` still draws as authored: no bundle walker or overlay translates it yet (objectstack#31885).
+- 8ce5827: fix(fields, plugin-form): the permission-set picker lists one option per package that provides a set's name, and a grant's New form saves the package picked
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A permission set is identified by its package and its name, and the registry serves one item per package that provides a name. The `permission-ref` picker listed them by name alone, so two packages' sets of one name were two identical options, and a grant could not say which one it meant.
+  
+  - **Now.** Where more than one package provides a permission set's name, the picker lists one option per provider, each naming it: "Sales User (sales_user) · package com.acme.crm", or "… · defined in this environment" for the environment's own set. On a permission-set grant's New form, picking a package's set saves its package in the grant's package column beside the name. Picking the environment's set, or a name only one package provides, saves the name alone, as before.
+  - **Where a form cannot name the package** (editing a grant, whose package the server re-stamps by its own rule, and an action input that takes a set's name only), a package's option is listed but cannot be picked, and a note under the picker says why. The environment's own set can still be picked. The picker never chooses between packages by their order.
+  - **Shown values.** A stored name more than one package provides is shown as the set its grant's package column names. Without one it is shown as the environment's own set, or, where two packages provide it and none is named, as naming none.
+  - **Unchanged.** A name one provider serves is listed, saved and shown exactly as before, with no note, on every form. The relationship pickers keep their autofill on every form, and every other widget gets no new prop. Every other read-only column, every other object's, and every edit are still stripped from the save. The server still judges the package: an insert naming a package that does not provide the set is refused.
+  - **The widening.** `DataSource.listMetadataItems` (`@object-ui/types`) may answer an optional `packageId` on each item: the package it was served under, verbatim. `ObjectStackAdapter` (`@object-ui/data-objectstack`) answers it from the item's `_packageId`, and an item served without one reads as before. `@object-ui/fields` exports `PERMISSION_SET_GRANT_COLUMNS`, the grant's name and package columns, and `@object-ui/plugin-form` exports nothing new. `@object-ui/i18n` adds four `fields.registryRef.*` strings in every locale.
+- 6303e74: fix(fields): a refused location draft now blocks the record form's save
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Text in a `location` box that is not a coordinate pair (`Shenzhen 深圳`) was refused by the widget but never reached the form, so the form value stayed what it was and Update saved it with a success message. When the person had emptied the box first, the stored location was overwritten with `null`. `LocationField` now reports the refusal through `onInvalidInputChange`, and the form renderer turns it into the field's validation error, which blocks submit and is drawn by `<FormMessage/>` in the reader's language. Clearing the box on purpose still writes `null`, and a valid pair still saves. Hosts that do not pass `onInvalidInputChange` (inline edit) keep the widget's own refusal line, as before.
+- Updated dependencies [d0512c2]
+- Updated dependencies [4261169]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [604a2b3]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [2e33533]
+- Updated dependencies [2a32bd4]
+- Updated dependencies [ba875d2]
+- Updated dependencies [bb61872]
+- Updated dependencies [4211f50]
+- Updated dependencies [a1d243e]
+- Updated dependencies [7d0b47c]
+- Updated dependencies [9728ab1]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [1e6f542]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [b379262]
+- Updated dependencies [7945a3b]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [c2be734]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [f0ad1f7]
+- Updated dependencies [03be565]
+- Updated dependencies [7e9fa4b]
+- Updated dependencies [bc8945f]
+- Updated dependencies [42afac7]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [a9fb14b]
+- Updated dependencies [6f095b9]
+- Updated dependencies [ac890f5]
+- Updated dependencies [5f80129]
+- Updated dependencies [0c7e95a]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [c8e6d38]
+- Updated dependencies [d99cd3b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [b6caa14]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [25fea77]
+- Updated dependencies [ea5807e]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [6c48d48]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [31260ca]
+- Updated dependencies [ef2ad31]
+- Updated dependencies [2046d21]
+- Updated dependencies [18870c9]
+- Updated dependencies [243eba1]
+- Updated dependencies [fa9c0aa]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [6a8f415]
+- Updated dependencies [56cac5e]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [648089d]
+- Updated dependencies [10ecafd]
+- Updated dependencies [b6f4c0e]
+- Updated dependencies [b4f4781]
+- Updated dependencies [042efb7]
+- Updated dependencies [48231b0]
+- Updated dependencies [0d54279]
+- Updated dependencies [8e5fabe]
+- Updated dependencies [ac56acf]
+- Updated dependencies [a91409c]
+- Updated dependencies [ab12a3b]
+- Updated dependencies [2b35374]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [7b10a30]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [a058413]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [062236c]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [d996c38]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [47c457b]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [115a43a]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [c1da957]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [b631573]
+- Updated dependencies [78d4fe9]
+- Updated dependencies [78eb352]
+- Updated dependencies [a0b40f2]
+- Updated dependencies [6ddf827]
+- Updated dependencies [d9d3eb7]
+- Updated dependencies [2ce2646]
+- Updated dependencies [bd1b768]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [1c66988]
+- Updated dependencies [584f7b8]
+- Updated dependencies [065bba7]
+- Updated dependencies [d8d0791]
+- Updated dependencies [66b17a3]
+- Updated dependencies [f5e23e2]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [3f61e4f]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [51992df]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [1f37085]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [9a63ecb]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [eff90af]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [ce965cf]
+- Updated dependencies [f88ca70]
+- Updated dependencies [f67f3b3]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [1ff1d45]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2c6b936]
+- Updated dependencies [46ec2ec]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [e728d7a]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [f56354c]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [e627eaa]
+- Updated dependencies [6be71ab]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [3684d18]
+- Updated dependencies [ac8fede]
+- Updated dependencies [60996d4]
+- Updated dependencies [2715a09]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [52ffd5a]
+- Updated dependencies [f6b8985]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [94019a6]
+- Updated dependencies [60f8149]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [f75466c]
+- Updated dependencies [a127a45]
+- Updated dependencies [49bc3be]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [0a81d2a]
+- Updated dependencies [1368536]
+- Updated dependencies [cc8c4b0]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [de6d893]
+- Updated dependencies [33c3b5e]
+- Updated dependencies [326453e]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [4820ea2]
+- Updated dependencies [e336a33]
+- Updated dependencies [4d9ac62]
+- Updated dependencies [e47da23]
+- Updated dependencies [c04aa29]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [c4b6160]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [8a3eeef]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [ee230a2]
+- Updated dependencies [a888c5c]
+- Updated dependencies [967822a]
+- Updated dependencies [9ae8291]
+- Updated dependencies [fa1134c]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [d094752]
+- Updated dependencies [6aa95dc]
+- Updated dependencies [6cde924]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [5b1fe45]
+- Updated dependencies [c54a23d]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1a6c330]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [8ce5827]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [f84205b]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [767f110]
+- Updated dependencies [767f110]
+- Updated dependencies [341448e]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [136eba4]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+- Updated dependencies [b463ec6]
+  - @object-ui/core@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @object-ui/i18n@18.4.0
+  - @objectstack/spec@18.4.0
+  - @objectstack/sdui-parser@18.4.0
+  - @object-ui/react-runtime@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

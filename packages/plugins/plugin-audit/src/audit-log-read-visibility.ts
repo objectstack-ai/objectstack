@@ -74,6 +74,14 @@
  *  - A row naming a record under an object the engine does not know, under a
  *    name that is not a machine name, or under `sys_audit_log` itself is
  *    excluded, as in every parent-record gate.
+ *  - A row naming a record under an object the data door does not serve (its
+ *    `enable` block refuses `get`) is excluded for every reader this gate
+ *    narrows: a reader is served a row about a record only when it can open
+ *    that record through the data door (`parent-record-read-gate.ts`, "A
+ *    parent the data door does not serve"). A parent the data door serves to
+ *    no one counts as a record the reader cannot open, whatever its read
+ *    grant on that object. A holder of the audit capability below is not
+ *    narrowed, so it is still served those rows.
  *
  * The field-level redaction composes with this gate unchanged: of the rows
  * this gate keeps, a snapshot still serves a parent field only to a reader the

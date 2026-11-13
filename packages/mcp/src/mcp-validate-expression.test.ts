@@ -291,3 +291,130 @@ describe('validate_expression MCP tool (#1928)', () => {
     expect(json.result.content[0].text).toMatch(/system object/i);
   });
 });
+
+// [#32640] A relationship read BOTH through a reference field
+// (`record.balance.remaining`) and as a plain value (`record.balance`) cannot
+// be served: the save/publish gate refuses it (`expression-invalid`) at a
+// validation rule's condition and at a formula field's `expression`, the two
+// sites where the engine hydrates one hop. The tool runs the gate's own judge
+// there, so its verdict at those sites is the gate's, read off
+// `validateStackExpressions` on the same rule or field.
+describe('validate_expression answers the gate on relationship traversal (#32640)', () => {
+  const REQ = 'rtbw_leave_req';
+  const BAL = 'rtbw_leave_bal';
+  // Required, so the gate's null-guard pass (which the tool does not run)
+  // has nothing to say and the two verdicts compare whole.
+  const reqFields = {
+    leave_type: { type: 'text', label: 'Leave type', required: true },
+    days: { type: 'number', label: 'Days', required: true },
+    balance: { type: 'lookup', label: 'Balance', reference: BAL },
+  };
+  const balFields = {
+    remaining: { type: 'number', label: 'Remaining' },
+    owner: { type: 'lookup', label: 'Owner', reference: REQ },
+  };
+  const leaveBridge = (): McpDataBridge => ({
+    ...makeBridge(),
+    async listObjects() {
+      return [{ name: REQ }, { name: BAL }];
+    },
+    async describeObject(name: string) {
+      const fields = name === REQ ? reqFields : name === BAL ? balFields : null;
+      if (!fields) return null;
+      return { name, fields: Object.entries(fields).map(([n, f]) => ({ name: n, ...f })) };
+    },
+  });
+  const verdicts = (r: { errors: { message: string }[]; warnings: { message: string }[] }) => [
+    ...r.errors.map((e) => ['error', e.message]),
+    ...r.warnings.map((w) => ['warning', w.message]),
+  ];
+  const gateVerdicts = (issues: ReturnType<typeof validateStackExpressions>) =>
+    issues.map((i) => [i.severity ?? 'error', i.message]);
+  const ruleGate = (expression: string) => gateVerdicts(validateStackExpressions({
+    objects: [
+      { name: REQ, fields: reqFields, validations: [{ name: 'r', type: 'script', condition: expression, message: 'm' }] },
+      { name: BAL, fields: balFields },
+    ],
+  }));
+  const formulaGate = (expression: string) => gateVerdicts(validateStackExpressions({
+    objects: [
+      { name: REQ, fields: { ...reqFields, after: { type: 'formula', label: 'After', expression } } },
+      { name: BAL, fields: balFields },
+    ],
+  }));
+
+  let runtime: MCPServerRuntime;
+  let bridge: McpDataBridge;
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
+    bridge = leaveBridge();
+  });
+
+  const READ_TWICE = [
+    'has(record.balance) && record.leave_type == "annual" && record.days > record.balance.remaining',
+    'record.balance != null && record.days > record.balance.remaining',
+  ];
+
+  for (const expression of READ_TWICE) {
+    it(`site validation refuses what the gate refuses: ${expression}`, async () => {
+      const gate = ruleGate(expression);
+      expect(gate).toHaveLength(1);
+      expect(gate[0]![0]).toBe('error');
+      const r = await validate(runtime, bridge, { objectName: REQ, expression, site: 'validation' });
+      expect(r.ok).toBe(false);
+      expect(r.errors.map((e: { code: string }) => e.code)).toEqual(['traversal-bare-and-traversed']);
+      expect(verdicts(r)).toEqual(gate);
+    });
+
+    it(`site formula refuses what the gate refuses: ${expression}`, async () => {
+      const value = `${expression} ? 1 : 0`;
+      const gate = formulaGate(value);
+      expect(gate).toHaveLength(1);
+      expect(gate[0]![0]).toBe('error');
+      const r = await validate(runtime, bridge, { objectName: REQ, expression: value, site: 'formula' });
+      expect(r.ok).toBe(false);
+      expect(r.errors.map((e: { code: string }) => e.code)).toEqual(['traversal-bare-and-traversed']);
+      expect(verdicts(r)).toEqual(gate);
+    });
+  }
+
+  it('site validation refuses a second hop as the gate does', async () => {
+    const expression = 'record.balance.owner.days > 1';
+    const r = await validate(runtime, bridge, { objectName: REQ, expression, site: 'validation' });
+    expect(r.errors.map((e: { code: string }) => e.code)).toContain('traversal-multi-hop');
+    const gate = ruleGate(expression);
+    for (const v of verdicts(r)) expect(gate).toContainEqual(v);
+  });
+
+  it('keeps one hop clean where the gate passes it', async () => {
+    const expression = "record.leave_type == 'annual' && record.days > record.balance.remaining";
+    expect(ruleGate(expression)).toEqual([]);
+    const r = await validate(runtime, bridge, { objectName: REQ, expression, site: 'validation' });
+    expect([r.errors, r.warnings]).toEqual([[], []]);
+    expect(formulaGate(`${expression} ? 1 : 0`)).toEqual([]);
+    const f = await validate(runtime, bridge, { objectName: REQ, expression: `${expression} ? 1 : 0`, site: 'formula' });
+    expect([f.errors, f.warnings]).toEqual([[], []]);
+  });
+
+  // Nothing hydrates a flow condition: the gate does not run the traversal
+  // checks there, and neither does the tool.
+  it('leaves a flow condition to the gate verdict there (no traversal check)', async () => {
+    const expression = READ_TWICE[1]!;
+    const r = await validate(runtime, bridge, { objectName: REQ, expression, site: 'flow_condition' });
+    expect(r.errors.map((e: { code: string }) => e.code)).not.toContain('traversal-bare-and-traversed');
+    const gate = gateVerdicts(validateStackExpressions({
+      objects: [{ name: REQ, fields: reqFields }, { name: BAL, fields: balFields }],
+      flows: [{
+        name: 'f',
+        type: 'autolaunched',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: REQ, triggerType: 'record-after-update', condition: expression } },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+      }],
+    }));
+    expect(gate.filter(([, m]) => /read BOTH through the relationship/.test(m!))).toEqual([]);
+    expect(verdicts(r).filter(([, m]) => /read BOTH through the relationship/.test(m!))).toEqual([]);
+  });
+});

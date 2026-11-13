@@ -475,13 +475,28 @@ describe('composeStacks + defineStack integration', () => {
     const todo = defineStack({
       manifest: manifest2,
       objects: { task: { fields: { title: { type: 'text' } } } },
-      apps: { todo_app: { label: 'Todo', objects: ['task'] } },
     }, { strict: false });
 
     const combined = composeStacks([crm, todo]);
     expect(combined.objects).toHaveLength(2);
-    expect(combined.apps).toHaveLength(2);
+    expect(combined.apps).toHaveLength(1);
     expect(combined.manifest?.name).toBe('todo'); // last-wins default
+
+    // Each with an app of its own, the flat composition would put both apps
+    // under the one manifest it keeps — refused (ADR-0019 D3 as amended: at
+    // most one app per package); `manifest: 'preserve'` keeps each package's id.
+    const todoWithApp = defineStack({
+      manifest: manifest2,
+      objects: { task: { fields: { title: { type: 'text' } } } },
+      apps: { todo_app: { label: 'Todo', objects: ['task'] } },
+    }, { strict: false });
+    let refused: { code?: string; status?: number } | undefined;
+    try {
+      composeStacks([crm, todoWithApp]);
+    } catch (e) {
+      refused = e as { code?: string; status?: number };
+    }
+    expect([refused?.code, refused?.status]).toEqual(['STACK_SINGLE_APP_VIOLATION', 422]);
   });
 
   it('composed result should be valid for defineStack re-validation', () => {

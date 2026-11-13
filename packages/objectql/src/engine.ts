@@ -96,7 +96,7 @@ import {
 import { enforceTransactionOrigin, execute, warnTransactionUnsupported } from './engine-execute-transactions.js';
 // [#25522 cut 8] The compatibility-API bodies; the methods of the same names
 // below hand each body the members it reads (`CompatibilityApiHost`).
-import { getConfigs, introspectDatasource, registerObject, removePackage, syncObjectSchema, syncSchemas } from './engine-compatibility-api.js';
+import { applyPublishedColumnChanges, getConfigs, introspectDatasource, registerObject, removePackage, syncObjectSchema, syncSchemas, type PublishedColumnChangeReport } from './engine-compatibility-api.js';
 // [#25522 cut 9] The hook-context caller-envelope builders; the methods of the
 // same names below call them, and none of the bodies reads a member.
 import { buildEvalUser, buildProvenance, buildSession, buildUser } from './engine-execution-plumbing.js';
@@ -276,6 +276,9 @@ import { collectCascadeDeleteSet, deleteRestrictedError, recordReferenceCheckEle
 // members it reads (`ValidateHost`). Imported after every module that body
 // imports, so the engine's module evaluation order is what it was.
 import { validate } from './engine-validate.js';
+// [#32768] The write-free `readonlyWhen` judgement's body; `judgeFieldWriteLock`
+// below hands it the members it reads (`FieldWriteLockHost`).
+import { judgeFieldWriteLock, type FieldWriteLock } from './engine-field-write-lock.js';
 // [#25522 cut 20] The `where`-lowering bodies (`QueryLoweringHost`), imported
 // after every module they import, so module evaluation order is unchanged.
 import { lowerRelationConditions, resolveSearchQueryableFields, resolveWhereTokens } from './engine-query-lowering.js';
@@ -803,7 +806,12 @@ export class ObjectQL implements IObjectQLEngine {
     return HooksAndFunctionsFacet.functionHoldersOf.call(hooksAndFunctionsHost.of(this), name);
   }
 
-  /** Remove all functions registered under a given `packageId`. */
+  /**
+   * Remove all functions registered under a given `packageId`, from the bare
+   * map and the holder set ({@link functionHoldersOf}); answers how many bare
+   * entries left. [#32534] When the last registration of a name leaves and
+   * exactly one holder of it remains, the bare read answers that holder.
+   */
   unregisterFunctionsByPackage(packageId: string): number {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
     return HooksAndFunctionsFacet.unregisterFunctionsByPackage.call(hooksAndFunctionsHost.of(this), packageId);
@@ -4579,6 +4587,46 @@ export class ObjectQL implements IObjectQLEngine {
     return validate.call(host, object, data, options);
   }
 
+  /**
+   * [#32768] Is `field` writable on the record `id` names NOW, as far as its
+   * `readonlyWhen` lock goes — judged without writing anything.
+   *
+   * Answers `null` when an update by this caller would keep the field, and a
+   * {@link FieldWriteLock} when the update's conditional strip would take it
+   * back out: `reason` is the `DroppedFieldsEvent['reason']` the update
+   * reports it under (`'readonly_when'`), `phrase` the words its strict
+   * refusal (`ReadonlyFieldRejectedError`) names that reason with.
+   *
+   * The verdict is the update's own: the same strip, over the same stored row
+   * (the update's prior-row read), master-detail header and gate, with the
+   * field carrying the value it holds now. A predicate that faults refuses as
+   * the write refuses it; an unbound root holds the lock. A row the caller
+   * cannot read through the read door answers as not found, as the by-id
+   * update answers it. A field with no `readonlyWhen` reads nothing.
+   *
+   * Named limits: `beforeUpdate` hooks are not run, so a hook that rewrites a
+   * field a predicate reads moves the write's verdict and not this one; static
+   * `readonly`, permissions and validation rules are not judged here. See
+   * `engine-field-write-lock.ts`.
+   */
+  async judgeFieldWriteLock(
+    object: string,
+    id: unknown,
+    field: string,
+    options?: { context?: ExecutionContext },
+  ): Promise<FieldWriteLock | null> {
+    // [#32768] The body lives in `engine-field-write-lock.ts` (see `FieldWriteLockHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof judgeFieldWriteLock> = {
+      resolveObjectName: (...a) => this.resolveObjectName(...a),
+      get _registry() { return readRegistry(); },
+      findOne: (...a) => this.findOne(...a),
+      readUpdatePriorRow: (...a) => this.readUpdatePriorRow(...a),
+      resolveMasterDetailParent: (...a) => this.resolveMasterDetailParent(...a),
+    };
+    return judgeFieldWriteLock.call(host, object, id, field, options);
+  }
+
   private updateByIdExpecting(
     driver: IDataDriver,
     object: string,
@@ -5492,6 +5540,31 @@ export class ObjectQL implements IObjectQLEngine {
       get _registry() { return readRegistry(); },
     };
     return syncObjectSchema.call(host, objectName);
+  }
+
+  /**
+   * [#32590] Bring an existing object's table to its PUBLISHED declaration for
+   * the column changes the driver can make without losing data or failing on
+   * existing rows — a `date` column under a field now declared `datetime`, a
+   * NOT NULL column under `storage: { notNull: false }` — and answer what it
+   * applied and what it could not (`SqlDriver.applyPublishedColumnChanges`
+   * names the set). The metadata publish calls it right after
+   * {@link syncObjectSchema}, which stays additive for every caller, the
+   * boot's sync among them.
+   *
+   * `undefined` when there is nothing to ask: no such object, no driver for
+   * it, a federated (external) object whose remote owns its schema, or a
+   * driver without the door (memory, Mongo — no column type or constraint to
+   * bring to a declaration).
+   */
+  async applyPublishedColumnChanges(objectName: string): Promise<PublishedColumnChangeReport | undefined> {
+    // [#32590] The body is in `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof applyPublishedColumnChanges> = {
+      getDriverForObject: (...a) => this.getDriverForObject(...a),
+      get _registry() { return readRegistry(); },
+    };
+    return applyPublishedColumnChanges.call(host, objectName);
   }
 
   /**

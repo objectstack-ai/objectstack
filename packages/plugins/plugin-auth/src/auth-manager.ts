@@ -251,6 +251,10 @@ import {
 import { McpClientLastUseStamper, mcpClientLastUseStoreFor, issuedAtOf } from './mcp-client-last-use.js';
 import { runAfterResponse } from './run-after-response.js';
 import { markDirectoryProvisionedUsers } from './scim-identity-source.js';
+import {
+  revokeDirectoryDeactivatedApiKeys,
+  scimDeactivationKeyRevocationIncompleteMessage,
+} from './scim-deactivation-key-revocation.js';
 // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
 // token: the answer `handleRequest` gives after the provider's, through
 // `answerOAuthTokenRevocation` below.
@@ -2089,6 +2093,7 @@ export class AuthManager {
       isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
       isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
+      isSsoDomainVerificationEnabled: (...a) => this.isSsoDomainVerificationEnabled(...a),
       isSsoWired: (...a) => this.isSsoWired(...a),
       linkingContext: (...a) => this.linkingContext(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
@@ -4617,6 +4622,18 @@ export class AuthManager {
    * resolved outside it, so the ban commits or rolls back with the SCIM
    * mutation it belongs to.
    *
+   * An inactive state also revokes every API key the user owns, stamped
+   * `scim_deactivated`, which no one restores from a user context
+   * (`scim-deactivation-key-revocation.ts`, the ruling of record 6787890900 on
+   * #32004, item "Directory deactivation"): the ban is the directory's to
+   * lift, and a key does not ride it, so a re-activation re-arms no key. It
+   * runs on every inactive call, a DELETE's and an already-banned user's
+   * included, after the ban write and before the mark, and is idempotent: a key
+   * that already carries a reason no one restores is not written again. A
+   * revocation that does not finish never fails the deprovision (the ban
+   * already landed); it is reported once at `error`. The `active: true` branch
+   * and an administrator's ban leave keys alone.
+   *
    * [ADR-0135 D4] This callback also writes the directory-managed mark
    * (`sys_user.source = 'idp_provisioned'`, `scim-identity-source.ts`) on every
    * call — fail-closed and first on an active state, best-effort and after the
@@ -4690,6 +4707,11 @@ export class AuthManager {
           banExpires: null,
         });
       }
+      // The directory's deactivation revokes the user's keys; a later
+      // re-activation lifts the ban and re-arms none of them. After the ban, so
+      // a revocation that cannot land never leaves the account enabled.
+      const revocation = await revokeDirectoryDeactivatedApiKeys(engine as never, state.userId);
+      if (!revocation.complete) this.logScimKeyRevocationIncomplete(state.userId, revocation);
       try {
         await markDirectoryProvisionedUsers(engine as never, [state.userId]);
       } catch (e) {
@@ -4702,6 +4724,23 @@ export class AuthManager {
     // An administrator's ban is not the IdP's to lift.
     if (user.banReason !== SCIM_DEACTIVATION_BAN_REASON) return;
     await applyUserUnban(writer, state.userId);
+  }
+
+  /**
+   * The one notice for a SCIM deprovision whose API key revocation did not
+   * finish (`scim-deactivation-key-revocation.ts`). Logged at `error`: the
+   * account is disabled, so nothing looks wrong, but a key left unrevoked works
+   * again if the directory re-activates the user.
+   */
+  private logScimKeyRevocationIncomplete(
+    userId: string,
+    outcome: Parameters<typeof scimDeactivationKeyRevocationIncompleteMessage>[1],
+  ): void {
+    const message = scimDeactivationKeyRevocationIncompleteMessage(userId, outcome);
+    const meta = { object: 'sys_api_key', revoked: outcome.apiKeys, failed: outcome.failed };
+    const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
+    if (typeof sink?.error === 'function') sink.error(message, meta);
+    else console.error(message, meta);
   }
 
   /**
@@ -5603,7 +5642,9 @@ export class AuthManager {
   /**
    * Whether opt-in DNS domain-verification (ADR-0135 D6) is wired — i.e. the
    * `/sso/request-domain-verification` + `/sso/verify-domain` endpoints are
-   * mounted (and the hard "domain must be verified to log in" gate is active).
+   * mounted, a provider signs nobody in until its listed domains are verified,
+   * and a provider creates an account only for an email address at a domain it
+   * has proven (`sso-account-at-proven-domain.ts`, which asks this method).
    * Resolved with the EXACT logic `buildPluginList` uses for the `sso()`
    * `domainVerification.enabled` option, so the bridge can return a clear
    * "not enabled for this environment" instead of a bare 404 when off.

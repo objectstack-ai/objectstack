@@ -778,7 +778,11 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                             ...(droppedFields.length > 0 ? { droppedFields } : {}),
                         },
                         ...(dropped.length > 0
-                            ? { warnings: dropped.map((e) => droppedFieldsWarning('create_record', e)) }
+                            ? {
+                                warnings: dropped.map((e) => droppedFieldsWarning('create_record', e)),
+                                // #32861 — the events themselves, for the run's answer.
+                                droppedFields: dropped,
+                            }
                             : {}),
                         metrics: { acted: 1 },
                     };
@@ -926,7 +930,11 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                             ...(droppedFields.length > 0 ? { droppedFields } : {}),
                         },
                         ...(dropped.length > 0
-                            ? { warnings: dropped.map((e) => droppedFieldsWarning('update_record', e)) }
+                            ? {
+                                warnings: dropped.map((e) => droppedFieldsWarning('update_record', e)),
+                                // #32861 — the events themselves, for the run's answer.
+                                droppedFields: dropped,
+                            }
                             : {}),
                         metrics: { acted: writtenRowCount(result) },
                     };
