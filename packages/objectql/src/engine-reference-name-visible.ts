@@ -276,6 +276,9 @@ export const formulaReadsReference: ReferenceNameVisibleHost['formulaReadsRefere
     // [#33100] A gate that admits a formula to a read judges the whole plan
     // that read will run, the formulas it reads included.
     const { plan } = planFormulaProjection({ fields: { ...(fields as object), [name]: def } }, [name]);
+    // A formula the planner plans nothing for (no expression) is not served by
+    // name, as a formula it cannot compile is not.
+    if (plan.length === 0) return true;
     return plan.some((entry) => entry.hops !== undefined || entry.hopConflict !== undefined);
   } catch {
     // An expression the planner cannot compile is not served by name.

@@ -55,6 +55,7 @@ const MEMBER_SET = PermissionSetSchema.parse({
     rnv_badge: { allowRead: false },
     rnv_branch: { allowRead: false },
     rnv_outpost: { allowRead: false },
+    rnv_kiosk: { allowRead: false },
   },
   // Field-level security keeps the ledger's name field from the reader.
   fields: { 'rnv_ledger.label': { readable: false, editable: false } },
@@ -141,6 +142,14 @@ const OBJECTS = [
     },
   },
   {
+    // [#33100] A formula title that declares no expression.
+    name: 'rnv_kiosk', label: 'Kiosk', sharingModel: 'public_read_write', nameField: 'heading',
+    fields: {
+      city: { name: 'city', type: 'text' },
+      heading: { name: 'heading', type: 'formula', returnType: 'text' },
+    },
+  },
+  {
     name: 'rnv_case', label: 'Case', sharingModel: 'public_read_write',
     fields: {
       subject: { name: 'subject', type: 'text' },
@@ -155,6 +164,7 @@ const OBJECTS = [
       badge: { name: 'badge', type: 'lookup', reference: 'rnv_badge', referenceNameVisible: true },
       branch: { name: 'branch', type: 'lookup', reference: 'rnv_branch', referenceNameVisible: true },
       outpost: { name: 'outpost', type: 'lookup', reference: 'rnv_outpost', referenceNameVisible: true },
+      kiosk: { name: 'kiosk', type: 'lookup', reference: 'rnv_kiosk', referenceNameVisible: true },
       assignee: { name: 'assignee', type: 'user', referenceNameVisible: true },
       assignee_plain: { name: 'assignee_plain', type: 'user' },
       approver: { name: 'approver', type: 'lookup', reference: 'sys_user', referenceNameVisible: true },
@@ -162,7 +172,7 @@ const OBJECTS = [
   },
 ];
 
-const ALL_REFERENCES = 'account,account_plain,accounts,vault,vault_plain,contact,ledger,badge,branch,outpost,assignee,assignee_plain,approver';
+const ALL_REFERENCES = 'account,account_plain,accounts,vault,vault_plain,contact,ledger,badge,branch,outpost,kiosk,assignee,assignee_plain,approver';
 
 /** The value a refused target is served as. */
 const refused = (id: string, name: string) => ({ id, name, readRefused: true });
@@ -247,10 +257,11 @@ async function boot(opts: { posture?: string } = {}): Promise<{ engine: ObjectQL
   await engine.insert('rnv_badge', [{ id: 'b1', holder: 'Grace Hopper' }], { context: SYS_CTX } as never);
   await engine.insert('rnv_branch', [{ id: 'br1', city: 'Oslo', account: 'a2' }], { context: SYS_CTX } as never);
   await engine.insert('rnv_outpost', [{ id: 'o1', city: 'Bergen', account: 'a2' }], { context: SYS_CTX } as never);
+  await engine.insert('rnv_kiosk', [{ id: 'q1', city: 'Tromso' }], { context: SYS_CTX } as never);
   await engine.insert('rnv_case', [
     {
       id: 'c1', subject: 'readable targets', account: 'a1', account_plain: 'a1', accounts: ['a1', 'a2', 'a_none'],
-      vault: 'v1', vault_plain: 'v1', contact: 'k1', ledger: 'l1', badge: 'b1', branch: 'br1', outpost: 'o1',
+      vault: 'v1', vault_plain: 'v1', contact: 'k1', ledger: 'l1', badge: 'b1', branch: 'br1', outpost: 'o1', kiosk: 'q1',
       assignee: 'usr_peer', assignee_plain: 'usr_peer', approver: 'usr_stranger',
     },
     {
@@ -403,6 +414,10 @@ describe('[#29460] referenceNameVisible — a refused target is served by name a
       expect(c1.outpost).toEqual(refused('o1', 'Record #o1'));
       expect(JSON.stringify(c1)).not.toContain('Bergen');
       expect(JSON.stringify(c1)).not.toContain('hidden-secret');
+    });
+
+    it('[#33100] a formula name field the planner plans nothing for is not served by name', () => {
+      expect(c1.kiosk).toEqual(refused('q1', 'Record #q1'));
     });
   });
 
