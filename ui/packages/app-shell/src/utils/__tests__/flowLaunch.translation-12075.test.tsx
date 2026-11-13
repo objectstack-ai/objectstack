@@ -42,6 +42,7 @@ function launch(fetch: ReturnType<typeof answering>, language = 'zh-CN') {
         triggerParams: {},
         objects: [],
         language,
+        droppedFields: { t: ((key: string) => key) as never, fieldLabel: (_o, _f, fallback) => fallback, dataSource: null },
     });
 }
 
