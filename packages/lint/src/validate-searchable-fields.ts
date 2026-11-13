@@ -159,6 +159,7 @@ import {
   type SearchFieldMeta,
 } from '@objectstack/spec/data';
 import { objectsAsServed, recordsOf, suggestName } from './object-graph.js';
+import type { UserTextParams } from './finding-user-text.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
@@ -185,6 +186,13 @@ export interface SearchableFieldFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's user sentence interpolates
+   * (`validate-searchable-fields.user-text.ts`): set on
+   * `searchable-field-unprovisioned`, the advisory the publish door returns.
+   * The errors carry none.
+   */
+  userTextParams?: UserTextParams;
 }
 
 /**
@@ -484,6 +492,7 @@ export function checkSearchableFieldList(
         rule: SEARCHABLE_FIELD_UNPROVISIONED,
         where,
         path: `${path}[${i}]`,
+        userTextParams: { object: objectName, field: name, role },
         // [#22161] One verdict sentence: the shared short anchor clause and
         // the role's consequence. Why a narrowing reaches the runtime at all
         // (the `$searchFields` echo) is the id's `os explain` entry.

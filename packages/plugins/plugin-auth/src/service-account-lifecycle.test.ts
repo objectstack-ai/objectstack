@@ -40,9 +40,11 @@ import {
   type ServiceAccountLifecycleDeps,
 } from './service-account-lifecycle.js';
 import {
-  registerServiceAccountOwnerLeavesTrigger, SERVICE_ACCOUNT_OWNER_LEFT_REASON,
-  type ServiceAccountOwnerLeavesEngine,
+  directoryDeactivatedOwnerSuspensionIncompleteMessage, isOwnedAccountSuspensionComplete,
+  registerServiceAccountOwnerLeavesTrigger, SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON, SERVICE_ACCOUNT_OWNER_LEFT_REASON,
+  suspendAccountsOfDirectoryDeactivatedOwner, type ServiceAccountOwnerLeavesEngine,
 } from './service-account-owner-leaves.js';
+import { SCIM_DEACTIVATION_BAN_REASON } from './user-ban-write.js';
 import { registerServiceAccountRowGuard } from './service-account-identity.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
@@ -470,5 +472,85 @@ describe('[ADR-0151 D6] the owner leaves: the account is suspended', () => {
     await suspend(ADMIN, { userId: id, reason: 'Runaway loop' });
     await engine.delete('sys_member', { where: { user_id: 'usr_owner', organization_id: ORG }, multi: true, ...SYSTEM });
     expect((await userRow(id)).ban_reason).toBe(`${SERVICE_ACCOUNT_SUSPENDED_REASON}: Runaway loop`);
+  });
+});
+
+describe('a directory deactivation of the owner suspends the accounts, and resume waits for the owner', () => {
+  const directoryDeactivate = (userId: string) =>
+    engine.update('sys_user', { id: userId, banned: true, ban_reason: SCIM_DEACTIVATION_BAN_REASON, ban_expires: null }, SYSTEM);
+  const directoryReactivate = (userId: string) =>
+    engine.update('sys_user', { id: userId, banned: false, ban_reason: null, ban_expires: null }, SYSTEM);
+  const SUSPENDED_BY_DIRECTORY = { banned: true, ban_reason: SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON };
+
+  it('every account the owner is accountable for is suspended with its own reason, in every organization; another owner\'s is not', async () => {
+    const here = await account();
+    const r = await runRegisterServiceAccount(deps(), OTHER_ADMIN, post({ name: 'Elsewhere bot', ownerId: 'usr_owner' }));
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    const elsewhere = String(r.body.data!.userId);
+    const other = await runRegisterServiceAccount(deps(), ADMIN, post({ name: 'Member bot', ownerId: 'usr_member' }));
+    const others = String(other.body.data!.userId);
+
+    const outcome = await suspendAccountsOfDirectoryDeactivatedOwner(dataEngine() as unknown as ServiceAccountOwnerLeavesEngine, 'usr_owner');
+    expect(isOwnedAccountSuspensionComplete(outcome)).toBe(true);
+    expect([...outcome.suspended].sort()).toEqual([here, elsewhere].sort());
+    expect(await userRow(here)).toMatchObject(SUSPENDED_BY_DIRECTORY);
+    expect(await userRow(elsewhere)).toMatchObject(SUSPENDED_BY_DIRECTORY);
+    expect((await userRow(others)).banned).not.toBe(true);
+  });
+
+  it('an account already suspended keeps its own reason, and a second pass writes nothing', async () => {
+    const id = await account();
+    await suspend(ADMIN, { userId: id, reason: 'Runaway loop' });
+    const outcome = await suspendAccountsOfDirectoryDeactivatedOwner(dataEngine() as unknown as ServiceAccountOwnerLeavesEngine, 'usr_owner');
+    expect(outcome.suspended).toEqual([]);
+    expect((await userRow(id)).ban_reason).toBe(`${SERVICE_ACCOUNT_SUSPENDED_REASON}: Runaway loop`);
+  });
+
+  it('resume is refused while the owner is deactivated, by an organization administrator and a platform administrator alike', async () => {
+    const id = await account();
+    await directoryDeactivate('usr_owner');
+    await suspendAccountsOfDirectoryDeactivatedOwner(dataEngine() as unknown as ServiceAccountOwnerLeavesEngine, 'usr_owner');
+    for (const by of [ADMIN, PLATFORM]) {
+      const refused = await resume(by, id);
+      expect(refused).toMatchObject(CONFLICT);
+      expect(JSON.stringify(refused.body)).toMatch(/deactivated by the organization's directory/);
+    }
+    expect(await userRow(id)).toMatchObject(SUSPENDED_BY_DIRECTORY);
+  });
+
+  it('after the re-activation an organization administrator resumes it, keeping the owner', async () => {
+    const id = await account();
+    const k = await keyOf(id);
+    await directoryDeactivate('usr_owner');
+    await suspendAccountsOfDirectoryDeactivatedOwner(dataEngine() as unknown as ServiceAccountOwnerLeavesEngine, 'usr_owner');
+    await directoryReactivate('usr_owner');
+    expect(await userRow(id), 'a re-activation of the owner resumes nothing').toMatchObject(SUSPENDED_BY_DIRECTORY);
+    expect(await resume(ADMIN, id)).toMatchObject({ status: 200, body: { data: { suspended: false } } });
+    expect(await userRow(id)).toMatchObject({ banned: false, ban_reason: null });
+    expect((await keyRow(k)).revoked, 'nothing was revoked: the same key works again').toBe(false);
+  });
+
+  it('or a new owner is named while the old one stays deactivated, and then it resumes', async () => {
+    const id = await account();
+    await directoryDeactivate('usr_owner');
+    await suspendAccountsOfDirectoryDeactivatedOwner(dataEngine() as unknown as ServiceAccountOwnerLeavesEngine, 'usr_owner');
+    expect((await setOwner(ADMIN, id, 'usr_member')).status).toBe(200);
+    expect((await resume(ADMIN, id)).status).toBe(200);
+  });
+
+  it('a suspension write that is refused is counted, and the outcome names it', async () => {
+    const id = await account();
+    const refusing = {
+      ...dataEngine(),
+      update: (...args: Parameters<ObjectQL['update']>) => {
+        if (args[0] === 'sys_user' && (args[1] as { id?: unknown }).id === id) return Promise.reject(new Error('write refused (test)'));
+        return engine.update(...args);
+      },
+    };
+    const outcome = await suspendAccountsOfDirectoryDeactivatedOwner(refusing as unknown as ServiceAccountOwnerLeavesEngine, 'usr_owner');
+    expect(isOwnedAccountSuspensionComplete(outcome)).toBe(false);
+    expect(outcome.failed.map((f) => f.accountId)).toEqual([id]);
+    expect(directoryDeactivatedOwnerSuspensionIncompleteMessage('usr_owner', outcome)).toMatch(/INCOMPLETE .* 1 AI service account\(s\) .* could not be suspended/);
+    expect((await userRow(id)).banned).not.toBe(true);
   });
 });

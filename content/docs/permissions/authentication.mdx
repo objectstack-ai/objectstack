@@ -1251,6 +1251,12 @@ like any banned account's, with one field added:
   administrator's are both refused `403 PERMISSION_DENIED`. The person creates
   a new key under **Account → Developer → API Keys** and replaces the old one
   wherever it is configured.
+- It also suspends every AI service account the user is accountable for, with
+  the reason that the directory deactivated its owner. Nothing is revoked: the
+  account's keys are refused while it is suspended. A re-activation does not
+  resume it, and `resume` refuses while the owner is still deactivated; once the
+  owner is re-activated, or a new owner is named, an administrator resumes it
+  (see [AI service account](/docs/ai/agents#connect-your-ai-byo-ai-over-mcp)).
 - The cause is told only after the password verified: a wrong password is the
   ordinary `401 INVALID_EMAIL_OR_PASSWORD`, whatever the account's state. It
   names no connection, provider or other account.

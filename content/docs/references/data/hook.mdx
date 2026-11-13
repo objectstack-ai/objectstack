@@ -33,7 +33,7 @@ const result = HookSchema.parse(data);
 | **object** | `string \| string[]` | ✅ | Target object(s) |
 | **events** | `Enum<'beforeFind' \| 'afterFind' \| 'beforeInsert' \| 'afterInsert' \| 'beforeUpdate' \| 'afterUpdate' \| 'beforeDelete' \| 'afterDelete'>[]` | ✅ | Lifecycle events |
 | **handler** | `string` | optional | Handler function name (string, post-build) or inline function (pre-build) — DEPRECATED, prefer `body` |
-| **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log' \| …>[]; timeoutMs?: integer; … }` | optional | Hook body — expression (L1) or sandboxed JS (L2) |
+| **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log' \| …>[]; timeoutMs?: integer; … }` | optional | Hook body — expression (L1) or sandboxed JS (L2). A hook body cannot send mail: a js body granted email.send is refused, because a message cannot be taken back if the write that runs the hook rolls back; send mail on a record change from an action, a job or a flow. A hook body may add a timeline entry (activity.append), which commits or rolls back with the write. |
 | **priority** | `number` | optional (default: `100`) | Execution priority |
 | **async** | `boolean` | optional (default: `false`) | Run specifically as fire-and-forget |
 | **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL); hook runs only when TRUE. e.g. P`record.status == "closed" && record.amount != null && record.amount > 1000` |

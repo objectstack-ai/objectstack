@@ -37,13 +37,16 @@
  * (lifting the ban) lets the same keys work again. The owner cannot resume, so
  * an owner cannot undo an administrator's stop; and an account whose owner has
  * left its organization (`service-account-owner-leaves.ts` suspends it) is not
- * resumed until an administrator names a new owner.
+ * resumed until an administrator names a new owner. An account whose owner the
+ * organization's directory deactivated or deleted is suspended the same way
+ * (the same module, its own reason); a re-activation of the owner does not
+ * resume it, and resume refuses while the owner is still deactivated.
  *
  * The ban state is shared with the platform administrator's `/admin/ban-user`,
  * so this family marks its own: a suspension's `ban_reason` is
  * {@link SERVICE_ACCOUNT_SUSPENDED_REASON} (or it, `: ` and the caller's words),
- * the owner's leaving records its own reason, and a ban already in force is
- * never rewritten. An administrator of the account's organization lifts only
+ * the owner's leaving and the directory's deactivation of the owner each record
+ * their own reason, and a ban already in force is never rewritten. An administrator of the account's organization lifts only
  * those; any other ban only a platform administrator lifts, as the restore
  * guard keeps a platform administrator's stop of a key.
  *
@@ -77,7 +80,8 @@ import { authSystemWriteContext } from './auth-actor-attribution.js';
 import { FORCED_RESET_REVOKE_REASON } from './forced-reset-revocation.js';
 import { MEMBERSHIP_ENDED_REVOKE_REASON } from './membership-ended-session.js';
 import { SCIM_DEACTIVATION_REVOKE_REASON } from './scim-deactivation-key-revocation.js';
-import { SERVICE_ACCOUNT_OWNER_LEFT_REASON } from './service-account-owner-leaves.js';
+import { SCIM_DEACTIVATION_BAN_REASON } from './user-ban-write.js';
+import { SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON, SERVICE_ACCOUNT_OWNER_LEFT_REASON } from './service-account-owner-leaves.js';
 import { isAgentAccountRow } from './service-account-identity.js';
 import {
   API_KEY_OBJECT,
@@ -116,12 +120,16 @@ export interface ServiceAccountLifecycleDeps {
  */
 export const SERVICE_ACCOUNT_SUSPENDED_REASON = 'AI service account suspended';
 
-/** Is this ban reason one this family wrote (a suspension, or the owner's leaving)? */
+/**
+ * Is this ban reason one this family wrote (a suspension, the owner's leaving,
+ * or the directory's deactivation of the owner)?
+ */
 export function isServiceAccountSuspensionReason(reason: unknown): boolean {
   const r = typeof reason === 'string' ? reason : '';
   return r === SERVICE_ACCOUNT_SUSPENDED_REASON
     || r.startsWith(`${SERVICE_ACCOUNT_SUSPENDED_REASON}: `)
-    || r === SERVICE_ACCOUNT_OWNER_LEFT_REASON;
+    || r === SERVICE_ACCOUNT_OWNER_LEFT_REASON
+    || r === SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON;
 }
 
 /** The longest ban reason a suspension records. */
@@ -279,6 +287,17 @@ export async function runResumeServiceAccount(
       'RESOURCE_CONFLICT',
       `The AI service account '${read.id}' has no accountable owner in its organization. Name a new owner `
         + '(set-owner) before resuming it.',
+    );
+  }
+  // ...and an owner the organization's directory deactivated is not
+  // accountable either, until the directory re-activates them.
+  const [owner] = await readRows(found.engine, USER_OBJECT, { id: ownerId }, ['id', 'banned', 'ban_reason', 'ban_expires']);
+  if (owner && isUserBanInForce(owner as never, found.nowMs) && owner.ban_reason === SCIM_DEACTIVATION_BAN_REASON) {
+    return fail(
+      409,
+      'RESOURCE_CONFLICT',
+      `The accountable owner of the AI service account '${read.id}' was deactivated by the organization's `
+        + 'directory. Name a new owner (set-owner), or have the directory re-activate the owner, before resuming it.',
     );
   }
 

@@ -3363,6 +3363,16 @@ export function registerFileTools(
 
   if (canWrite && typeof bridge.createUploadLink === 'function') {
     const linkFn = bridge.createUploadLink.bind(bridge);
+    // [#32686] Ruling A: a link for a file field of a record not yet created,
+    // where the bridge serves it.
+    const newRecordLinkFn =
+      typeof bridge.createUploadLinkForNewRecord === 'function' ? bridge.createUploadLinkForNewRecord.bind(bridge) : undefined;
+    // `recordId` is optional exactly where a link can name no record, so the
+    // listed schema says what the handler takes; the handler reads it as
+    // possibly absent either way.
+    const uploadLinkRecordId: z.ZodType<string | undefined> = newRecordLinkFn
+      ? z.string().optional().describe(`${RECORD_ID_DESCRIPTION} Omit it for a record not yet created (with field).`)
+      : z.string().describe(RECORD_ID_DESCRIPTION);
     server.registerTool(
       note('create_upload_link'),
       {
@@ -3373,7 +3383,14 @@ export function registerFileTools(
           'only, and expires (see expiresAt). The upload is stored as the user, so they must be able to edit the ' +
           'record (and the field): a record a pending approval locks, a read-only field, or a field read-only on ' +
           'this record in its current state (readonlyWhen), gets no link, and an ' +
-          'upload the field cannot take when it arrives is refused with the reason, attaching nothing.',
+          'upload the field cannot take when it arrives is refused with the reason, attaching nothing.' +
+          (newRecordLinkFn
+            ? ' For a record you have not created yet (a required file field), omit recordId and name the field: ' +
+              'the user must be able to create such records, and the answer carries fileIds, the id(s) the upload ' +
+              'is stored under. Once the user has uploaded, create the record with the field set to fileIds[0] ' +
+              '(the array, for a multi-file field). The id works only for this user\'s own write into that field ' +
+              'of that object, in one record, within an hour of the upload.'
+            : ''),
         inputSchema: strictToolInput(
           {
             surface: 'this create_upload_link call',
@@ -3387,7 +3404,7 @@ export function registerFileTools(
           },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
+            recordId: uploadLinkRecordId,
             field: z.string().optional().describe('A file or image field of the record the upload fills'),
             attachments: z
               .literal(true)
@@ -3402,6 +3419,34 @@ export function registerFileTools(
         if (bad) return errorResult(bad);
         if ((field === undefined) === (attachments === undefined)) {
           return errorResult('Say where the upload lands: either field (a file field of the record) or attachments: true.');
+        }
+        if (recordId === undefined) {
+          // [#32686] No record yet: a file field only, where the bridge serves it.
+          if (field === undefined) {
+            return errorResult(
+              'An attachment needs its record: create the record first, then ask for a link with its recordId. ' +
+                'For a file field of a record not yet created, name the field instead.',
+            );
+          }
+          if (!newRecordLinkFn) return errorResult('recordId is required: name the record the upload lands on.');
+          try {
+            const link = await newRecordLinkFn(objectName, { field });
+            return textResult({
+              url: link.url,
+              expiresAt: link.expiresAt,
+              singleUse: true,
+              objectName,
+              field,
+              fileIds: link.fileIds,
+              instructions:
+                'Give this link to the user to open in a browser where they are signed in to this deployment, and ' +
+                'pick the file. It works only for them, once, until expiresAt. Once they have uploaded, create the ' +
+                `record with ${field} set to fileIds[0] (the array, for a multi-file field). Before the upload, ` +
+                'that create is refused as an upload that never completed.',
+            });
+          } catch (err) {
+            return errorResultWithCode(err);
+          }
         }
         try {
           const target = field !== undefined ? { field } : { attachments: true as const };
