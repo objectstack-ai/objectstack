@@ -67,6 +67,13 @@ export default defineConfig({
             // checkout, not `driver-sql/dist`. Same reason and anchoring as the
             // `core` entry above.
             { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
+            // [#31699] `auto-enqueuer.ts` takes a VALUE import on
+            // `@objectstack/service-messaging` (the delivery table's declared
+            // `dedup_key` bound), and the real-driver suite stores rows under
+            // its `sys_http_delivery`, so both verdicts are about the source
+            // in the checkout, not `service-messaging/dist`. Same reason and
+            // anchoring as the `core` entry above.
+            { find: /^@objectstack\/service-messaging$/, replacement: path.resolve(__dirname, '../../services/service-messaging/src/index.ts') },
         ],
     },
 });

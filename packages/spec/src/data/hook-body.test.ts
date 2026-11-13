@@ -69,6 +69,8 @@ describe('HookBody', () => {
         'api.transaction',
         'crypto.uuid',
         'log',
+        'email.send',
+        'activity.append',
       ]);
       expect(HookBodyCapability.options).not.toContain('crypto.hash');
     });

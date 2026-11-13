@@ -76,7 +76,7 @@
  *     ({@link SENDER_HEADER_NAMES}), and the door accepts them in one shape
  *     only: the contract's `Record<string, string>`, a plain object whose
  *     every key is a header field name and whose every value is a single-line
- *     string ({@link headersRefusal}). Any other shape is refused, so the
+ *     string (`boundCallerMail`, `@objectstack/core`). Any other shape is refused, so the
  *     reserved-name check reads each header exactly as a transport will.
  *  4. TENANT — the message's mail-log row belongs to the caller's active
  *     organization: the `tenantId` the identity resolver vetted onto the
@@ -101,7 +101,7 @@
  * claim of it, so no configured value exists to bound it to.
  */
 
-import type { EmailAddress } from '@objectstack/spec/contracts';
+import { boundCallerMail, isPlainMailObject as isPlainObject } from '@objectstack/core';
 import { logError } from './log.js';
 import { seamOrUndefined, type RestServer } from './rest-server.js';
 
@@ -112,67 +112,10 @@ import { seamOrUndefined, type RestServer } from './rest-server.js';
 export const EMAIL_SEND_CAPABILITY = 'manage_platform_settings';
 
 /**
- * Custom header names (compared case-insensitively) a caller of the send door
- * may not set: each one states who the message is from, which bound 3 of the
- * module header reserves to the configured sender.
+ * Custom header names a caller of the send door may not set. Re-exported from
+ * the shared mail bounds (`@objectstack/core`), which both mail doors apply.
  */
-export const SENDER_HEADER_NAMES: ReadonlySet<string> = new Set(['from', 'sender', 'return-path']);
-
-/**
- * A header field name: one or more printable US-ASCII characters other than
- * the colon (RFC 5322 §2.2). Whitespace, control characters and non-ASCII
- * characters are not part of any field name.
- */
-const HEADER_FIELD_NAME = /^[\x21-\x39\x3b-\x7e]+$/;
-
-/** A plain object — an object literal or a JSON-parsed object, never an array or a class instance. */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-    const proto = Object.getPrototypeOf(value);
-    return proto === Object.prototype || proto === null;
-}
-
-/**
- * Why a caller's `headers` cannot be forwarded, or `undefined` when it can
- * (module header, bound 3). Absent is fine. Otherwise it must be the
- * contract's `Record<string, string>` exactly: a plain object, each key a
- * header field name, each value a string with no line break, and no key one
- * of {@link SENDER_HEADER_NAMES}.
- */
-function headersRefusal(headers: unknown): string | undefined {
-    if (headers === undefined) return undefined;
-    if (!isPlainObject(headers)) {
-        return 'Custom `headers` must be an object mapping each header name to a string value.';
-    }
-    for (const [name, value] of Object.entries(headers)) {
-        if (!HEADER_FIELD_NAME.test(name)) {
-            return 'Custom `headers` must be keyed by header field names: printable ASCII with no space, control character or colon.';
-        }
-        if (typeof value !== 'string' || /[\r\n]/.test(value)) {
-            return `Custom \`headers\` value for \`${name}\` must be a single-line string.`;
-        }
-        if (SENDER_HEADER_NAMES.has(name.toLowerCase())) {
-            return `Custom header \`${name}\` cannot be set: the sender is the deployment's configured sender.`;
-        }
-    }
-    return undefined;
-}
-
-/**
- * The bare address an {@link EmailAddress} names, lower-cased for comparison —
- * or `undefined` when it names none. For the string form a trailing
- * `<address>` wins over the display name before it. This only DECIDES whether
- * a caller's `from` restates the configured sender: the value forwarded to
- * the transport is always the configured one, never the caller's text.
- */
-function addressOf(value: unknown): string | undefined {
-    let raw: unknown = value;
-    if (value && typeof value === 'object') raw = (value as { address?: unknown }).address;
-    if (typeof raw !== 'string') return undefined;
-    const angled = /<([^<>]*)>\s*$/.exec(raw);
-    const address = (angled ? angled[1] : raw).trim().toLowerCase();
-    return address.length > 0 ? address : undefined;
-}
+export { SENDER_HEADER_NAMES } from '@objectstack/core';
 
 /** The nested ADR-0112 refusal every bound of this door answers with. */
 function refuse(res: any, message: string): void {
@@ -274,65 +217,24 @@ export function registerEmailEndpoints(this: EmailRouteHost, basePath: string): 
                     res.status(400).json({ code: 'INVALID_REQUEST', error: 'JSON body required' });
                     return;
                 }
-                // Bound 2 (module header): `sentBy` is the authenticated caller.
-                // `enforceAuth` above has already proved `userId` present.
-                const userId = String((context as any).userId);
-                if (body.sentBy !== undefined && body.sentBy !== userId) {
-                    refuse(res, '`sentBy` is the authenticated caller; a send cannot be attributed to another user.');
-                    return;
-                }
-
-                // Bound 3 (module header): the sender is the configured one.
-                const headersRefused = headersRefusal(body.headers);
-                if (headersRefused !== undefined) {
-                    refuse(res, headersRefused);
-                    return;
-                }
-                let from: EmailAddress | undefined;
-                if (body.from !== undefined) {
-                    const configured = typeof emailService.getDefaultFrom === 'function'
-                        ? emailService.getDefaultFrom()
-                        : undefined;
-                    const configuredAddress = addressOf(configured);
-                    if (!configuredAddress || addressOf(body.from) !== configuredAddress) {
-                        refuse(
-                            res,
-                            configuredAddress
-                                ? `\`from\` must be the deployment's configured sender (${configuredAddress}); omit it to send as that sender.`
-                                : '`from` cannot be chosen by the caller: this deployment reports no configured sender. Configure one in Settings → Mail → From address and omit `from`.',
-                        );
-                        return;
-                    }
-                    from = configured;
-                }
-
-                // Bound 4 (module header): the row belongs to the caller's
-                // active organization, and identity mail is the server's.
+                // Bounds 2-4 (module header): one implementation, shared with
+                // the script-body mail door (`@objectstack/core`
+                // `boundCallerMail`). `enforceAuth` above has already proved
+                // `userId` present.
                 const tenantId: unknown = (context as any).tenantId;
-                const organizationId = typeof tenantId === 'string' && tenantId.length > 0 ? tenantId : undefined;
-                if (body.organizationId !== undefined && body.organizationId !== organizationId) {
-                    refuse(
-                        res,
-                        organizationId
-                            ? '`organizationId` is the caller\'s active organization; a send cannot be recorded under another organization.'
-                            : '`organizationId` cannot be set: the caller has no active organization. Omit it.',
-                    );
+                const bounded = boundCallerMail(
+                    body,
+                    {
+                        userId: String((context as any).userId),
+                        organizationId: typeof tenantId === 'string' && tenantId.length > 0 ? tenantId : undefined,
+                    },
+                    emailService,
+                );
+                if (!bounded.ok) {
+                    refuse(res, bounded.reason);
                     return;
                 }
-                if (body.identityMail !== undefined && body.identityMail !== false) {
-                    refuse(res, '`identityMail` cannot be set through this door: identity mail is sent by the server itself. Omit it.');
-                    return;
-                }
-
-                const message = { ...body };
-                delete message.organizationId;
-                delete message.identityMail;
-                const input = {
-                    ...message,
-                    sentBy: userId,
-                    ...(organizationId !== undefined ? { organizationId } : {}),
-                    ...(from !== undefined ? { from } : {}),
-                };
+                const input = bounded.input as any;
 
                 try {
                     const result = await emailService.send(input);

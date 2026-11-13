@@ -5,8 +5,11 @@ import { AuthPlugin } from './auth-plugin';
 import type { AuthPluginOptions } from './auth-plugin';
 import { AuthManager } from './auth-manager';
 import { invitationAcceptPath } from './invitation-link-action';
-import type { PluginContext } from '@objectstack/core';
-import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { ObjectKernel } from '@objectstack/core';
+import type { Plugin, PluginContext } from '@objectstack/core';
+import { ObjectQLPlugin, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 import { SettingsService, brandingSettingsManifest } from '@objectstack/service-settings';
 
@@ -410,12 +413,13 @@ describe('AuthPlugin', () => {
 
       // Host-defaulted base URL on port 3000, but server will be on 3002
       const registeredAuthManager = (mockContext.registerService as any).mock.calls[0][1];
-      const setRuntimeSpy = vi.spyOn(registeredAuthManager, 'setRuntimeBaseUrl');
+      const baseUrlPatchSpy = vi.spyOn(registeredAuthManager, 'applyConfigPatch');
 
       await localPlugin.start(mockContext);
       await localHookCapture.trigger('kernel:ready');
+      await localHookCapture.trigger('kernel:listening');
 
-      expect(setRuntimeSpy).toHaveBeenCalledWith('http://localhost:3002');
+      expect(baseUrlPatchSpy).toHaveBeenCalledWith({ baseUrl: 'http://localhost:3002' });
       expect(mockContext.logger.info).toHaveBeenCalledWith(
         expect.stringContaining('Auth baseUrl auto-updated to http://localhost:3002'),
       );
@@ -445,12 +449,13 @@ describe('AuthPlugin', () => {
       });
 
       const registeredAuthManager = (mockContext.registerService as any).mock.calls[0][1];
-      const setRuntimeSpy = vi.spyOn(registeredAuthManager, 'setRuntimeBaseUrl');
+      const baseUrlPatchSpy = vi.spyOn(registeredAuthManager, 'applyConfigPatch');
 
       await localPlugin.start(mockContext);
       await localHookCapture.trigger('kernel:ready');
+      await localHookCapture.trigger('kernel:listening');
 
-      expect(setRuntimeSpy).not.toHaveBeenCalled();
+      expect(baseUrlPatchSpy).not.toHaveBeenCalled();
     });
 
     it('should auto-detect baseUrl when no baseUrl configured (uses default fallback)', async () => {
@@ -477,12 +482,13 @@ describe('AuthPlugin', () => {
       });
 
       const registeredAuthManager = (mockContext.registerService as any).mock.calls[0][1];
-      const setRuntimeSpy = vi.spyOn(registeredAuthManager, 'setRuntimeBaseUrl');
+      const baseUrlPatchSpy = vi.spyOn(registeredAuthManager, 'applyConfigPatch');
 
       await localPlugin.start(mockContext);
       await localHookCapture.trigger('kernel:ready');
+      await localHookCapture.trigger('kernel:listening');
 
-      expect(setRuntimeSpy).toHaveBeenCalledWith('http://localhost:3002');
+      expect(baseUrlPatchSpy).toHaveBeenCalledWith({ baseUrl: 'http://localhost:3002' });
     });
 
     it('should throw error if auth not initialized', async () => {
@@ -2231,14 +2237,14 @@ describe('AuthPlugin', () => {
  * A configured base URL is the deployment's public origin and is kept as
  * written. Only a base URL nobody configured (no `baseUrl` option, or one the
  * host filled from its own loopback fallback and marked `baseUrlDefaulted`)
- * has its port corrected to the one the HTTP server bound on `kernel:ready`.
+ * has its port corrected to the one the HTTP server bound, on `kernel:listening`.
  * Behind a proxy (`OS_AUTH_URL=http://localhost`, app on :3000) a corrected
  * origin would send invite links and auth mail to the unpublished port.
  */
 describe('AuthPlugin base URL port correction honours a configured origin', () => {
   const SECRET = 'test-secret-at-least-32-chars-long';
 
-  /** Boots the plugin through `kernel:ready` against a server bound to `boundPort`. */
+  /** Boots the plugin through `kernel:listening` against a server bound to `boundPort`. */
   async function bootAgainstPort(options: AuthPluginOptions, boundPort: number) {
     const handlers = new Map<string, Array<() => Promise<void>>>();
     const registered = new Map<string, any>();
@@ -2268,42 +2274,164 @@ describe('AuthPlugin base URL port correction honours a configured origin', () =
     const plugin = new AuthPlugin({ secret: SECRET, ...options });
     await plugin.init(ctx);
     const authManager = registered.get('auth') as AuthManager;
-    const setRuntimeBaseUrl = vi.spyOn(authManager, 'setRuntimeBaseUrl');
+    const baseUrlPatch = vi.spyOn(authManager, 'applyConfigPatch');
     await plugin.start(ctx);
     for (const h of handlers.get('kernel:ready') ?? []) await h();
-    return { authManager, setRuntimeBaseUrl };
+    // The correction is registered FROM `kernel:ready`, so it is read after.
+    for (const h of handlers.get('kernel:listening') ?? []) await h();
+    return { authManager, baseUrlPatch };
   }
 
   it('keeps a configured http://localhost as written: the invite link carries no bound port', async () => {
-    const { authManager, setRuntimeBaseUrl } = await bootAgainstPort({ baseUrl: 'http://localhost' }, 3000);
+    const { authManager, baseUrlPatch } = await bootAgainstPort({ baseUrl: 'http://localhost' }, 3000);
 
-    expect(setRuntimeBaseUrl).not.toHaveBeenCalled();
+    expect(baseUrlPatch).not.toHaveBeenCalled();
     expect(authManager.getConsoleUrl(invitationAcceptPath('inv_1')))
       .toBe(`http://localhost/_console${invitationAcceptPath('inv_1')}`);
     expect(authManager.getConsoleUrl('/login')).toBe('http://localhost/_console/login');
   });
 
   it('keeps a configured http://localhost:4000 on a server bound to 3000', async () => {
-    const { authManager, setRuntimeBaseUrl } = await bootAgainstPort({ baseUrl: 'http://localhost:4000' }, 3000);
+    const { authManager, baseUrlPatch } = await bootAgainstPort({ baseUrl: 'http://localhost:4000' }, 3000);
 
-    expect(setRuntimeBaseUrl).not.toHaveBeenCalled();
+    expect(baseUrlPatch).not.toHaveBeenCalled();
     expect(authManager.getConsoleUrl('/login')).toBe('http://localhost:4000/_console/login');
   });
 
   it('CONTROL: a host-defaulted base URL is still corrected to the bound port', async () => {
-    const { authManager, setRuntimeBaseUrl } = await bootAgainstPort(
+    const { authManager, baseUrlPatch } = await bootAgainstPort(
       { baseUrl: 'http://localhost:0', baseUrlDefaulted: true },
       41303,
     );
 
-    expect(setRuntimeBaseUrl).toHaveBeenCalledWith('http://localhost:41303');
+    expect(baseUrlPatch).toHaveBeenCalledWith({ baseUrl: 'http://localhost:41303' });
     expect(authManager.getConsoleUrl('/login')).toBe('http://localhost:41303/_console/login');
   });
 
   it('CONTROL: no base URL at all is still corrected to the bound port', async () => {
-    const { authManager, setRuntimeBaseUrl } = await bootAgainstPort({}, 3002);
+    const { authManager, baseUrlPatch } = await bootAgainstPort({}, 3002);
 
-    expect(setRuntimeBaseUrl).toHaveBeenCalledWith('http://localhost:3002');
+    expect(baseUrlPatch).toHaveBeenCalledWith({ baseUrl: 'http://localhost:3002' });
     expect(authManager.getConsoleUrl('/login')).toBe('http://localhost:3002/_console/login');
   });
+});
+
+/**
+ * The port correction above, on a REAL boot: a real kernel, the real
+ * `HonoServerPlugin` on `port: 0`, and the real `AuthPlugin`.
+ *
+ * The transport opens its socket on `kernel:listening`, which fires after every
+ * `kernel:ready` handler. Read on `kernel:ready`, `getPort()` answers the port
+ * that was REQUESTED (`0` here), never the one that was bound, so an
+ * unconfigured auth origin stayed `http://localhost:0` (or the
+ * `http://localhost:3000` default) while the server listened elsewhere. The
+ * mock-server cases above cannot see that: their `getPort()` answers the bound
+ * port from the start.
+ */
+describe('AuthPlugin corrects an unconfigured base URL to the port the transport bound (real boot)', () => {
+  const SECRET = 'test-secret-at-least-32-chars-long';
+  let kernel: ObjectKernel | undefined;
+
+  afterEach(async () => {
+    try {
+      await kernel?.shutdown();
+    } catch {
+      /* a refused boot leaves the kernel stopped */
+    }
+    kernel = undefined;
+  });
+
+  /** Publishes an in-memory SQLite driver the way a datasource plugin does. */
+  function sqliteDriverPlugin(): Plugin {
+    return {
+      name: 'test.driver.sqlite',
+      type: 'standard',
+      version: '1.0.0',
+      async init(ctx: PluginContext) {
+        ctx.registerService(
+          'driver.default',
+          new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
+        );
+      },
+    };
+  }
+
+  /**
+   * Builds the better-auth instance from a `kernel:ready` hook registered after
+   * the auth plugin's own, as the development admin seed's sign-up does on
+   * `os dev`: the instance then exists before the server listens.
+   */
+  function buildsAuthOnReady(): Plugin {
+    return {
+      name: 'test.builds-auth-on-ready',
+      type: 'standard',
+      version: '1.0.0',
+      dependencies: ['com.objectstack.auth'],
+      async init() {},
+      async start(ctx: PluginContext) {
+        ctx.hook('kernel:ready', async () => {
+          await ctx.getService<AuthManager>('auth').getAuthInstance();
+        });
+      },
+    };
+  }
+
+  async function bootOnPortZero(
+    options: AuthPluginOptions,
+    opts: { authBeforeServer?: boolean; buildAuthOnReady?: boolean } = {},
+  ) {
+    kernel = new ObjectKernel({ logger: { level: 'silent' } });
+    await kernel.use(sqliteDriverPlugin());
+    await kernel.use(new ObjectQLPlugin());
+    const server = new HonoServerPlugin({ port: 0 });
+    const auth = new AuthPlugin({ secret: SECRET, ...options });
+    if (opts.authBeforeServer) {
+      await kernel.use(auth);
+      await kernel.use(server);
+    } else {
+      await kernel.use(server);
+      await kernel.use(auth);
+    }
+    if (opts.buildAuthOnReady) await kernel.use(buildsAuthOnReady());
+    await kernel.bootstrap();
+
+    const boundPort = kernel.getService<{ getPort(): number }>('http-server').getPort();
+    // The window is real: the kernel assigned a port, so `0` was never it.
+    expect(boundPort).toBeGreaterThan(0);
+    return { boundPort, authManager: kernel.getService<AuthManager>('auth') };
+  }
+
+  it('no base URL at all: the auth origin ends on the bound port', async () => {
+    const { boundPort, authManager } = await bootOnPortZero({});
+
+    expect(authManager.getConsoleUrl('/login')).toBe(`http://localhost:${boundPort}/_console/login`);
+  }, 30_000);
+
+  it('the `os dev -p 0` shape (host-defaulted http://localhost:0), auth used before the server: the bound port', async () => {
+    const { boundPort, authManager } = await bootOnPortZero(
+      { baseUrl: 'http://localhost:0', baseUrlDefaulted: true },
+      { authBeforeServer: true },
+    );
+
+    expect(authManager.getConsoleUrl('/login')).toBe(`http://localhost:${boundPort}/_console/login`);
+  }, 30_000);
+
+  it('a better-auth instance built on kernel:ready (the dev admin seed) is rebuilt on the bound origin', async () => {
+    const { boundPort, authManager } = await bootOnPortZero(
+      { baseUrl: 'http://localhost:0', baseUrlDefaulted: true },
+      { buildAuthOnReady: true },
+    );
+
+    const instance = (await authManager.getAuthInstance()) as unknown as { options: { baseURL?: string } };
+    expect(instance.options.baseURL).toBe(`http://localhost:${boundPort}`);
+    expect(authManager.getConsoleUrl('/login')).toBe(`http://localhost:${boundPort}/_console/login`);
+  }, 30_000);
+
+  it('CONTROL: a configured http://localhost is kept as written on the same boot', async () => {
+    const { authManager } = await bootOnPortZero({ baseUrl: 'http://localhost' }, { buildAuthOnReady: true });
+
+    const instance = (await authManager.getAuthInstance()) as unknown as { options: { baseURL?: string } };
+    expect(instance.options.baseURL).toBe('http://localhost');
+    expect(authManager.getConsoleUrl('/login')).toBe('http://localhost/_console/login');
+  }, 30_000);
 });

@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 308 |
-| Object name statically decidable | 214 |
-| Object name chosen at run time | 94 |
-| Against a tenancy-enabled object | 207 |
+| Write call sites | 311 |
+| Object name statically decidable | 216 |
+| Object name chosen at run time | 95 |
+| Against a tenancy-enabled object | 209 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 238 |
+| Threading a tenant context | 240 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
-| Options argument unreadable | 58 |
-| …and decidably tenancy-enabled | 31 |
-| Threading a decidably elevated context | 173 |
+| Options argument unreadable | 59 |
+| …and decidably tenancy-enabled | 32 |
+| Threading a decidably elevated context | 174 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 123 |
+| Threading a context of undecidable elevation | 125 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-12 at `0e97e095f`.
+Measured on 2026-11-13 at `fc310c98b`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1139 |
-| engine-shaped types recognised | 134 |
+| tracked non-test sources scanned | 1150 |
+| engine-shaped types recognised | 136 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 291 |
+| same-named calls subtracted as non-engine | 293 |
 
 ## Every site
 
@@ -119,6 +119,7 @@ Measured on 2026-11-12 at `0e97e095f`.
 | `packages/plugins/plugin-approvals/src/stored-process-package-backfill.ts` | `update` | `sys_approval_request` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/action-invocation-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
+| `packages/plugins/plugin-audit/src/app-activity-door.ts` | `insert` | `sys_activity` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/amendment-writer.ts` | `insert` | `AUDIT_AMENDMENT_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/sealer.ts` | `insert` | `AUDIT_CHECKPOINT_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `insert` | `AUDIT_SIGNING_KEY_OBJECT` | undecidable | elevated | 1 |
@@ -186,6 +187,7 @@ Measured on 2026-11-12 at `0e97e095f`.
 | `packages/plugins/plugin-auth/src/scim-connection-admin.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `update` | `sys_scim_connection_credential` | enabled | elevated | 2 |
+| `packages/plugins/plugin-auth/src/scim-deactivation-key-revocation.ts` | `update` | `SystemObjectName.API_KEY` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `delete` | `sys_user_permission_set` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/scim-identity-source.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
@@ -212,6 +214,7 @@ Measured on 2026-11-12 at `0e97e095f`.
 | `packages/plugins/plugin-security/src/claim-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/cleanup-package-permissions.ts` | `delete` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/invitation-placement.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
+| `packages/plugins/plugin-security/src/position-renamed-holder-carry.ts` | `update` | `sys_user_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-security/src/stored-permission-set-package-backfill.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |

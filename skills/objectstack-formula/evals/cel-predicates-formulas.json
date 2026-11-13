@@ -90,6 +90,16 @@
         "must_contain": ["record.budget != null", "record.budget > 200000"],
         "must_not_contain": ["has(record.budget) && record.budget >", "{record."]
       }
+    },
+    {
+      "id": 10,
+      "prompt": "On `event`, add a `start_day` formula that shows the day of the `start_at` datetime field as `YYYY-MM-DD` text.",
+      "expected_output": "`F`isoDate(date(record.start_at))``. A `date` / `datetime` field reads as its ISO text and `isoDate` takes a timestamp, so the build refuses the field handed to it directly (`date-text-call`); `date()` parses the text first. The same wrap goes ahead of a timestamp method: `date(record.start_at).getFullYear()`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["isoDate(date(record.start_at))", "F`"],
+        "must_not_contain": ["isoDate(record.start_at)", "{record."]
+      }
     }
   ]
 }

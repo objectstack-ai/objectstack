@@ -441,6 +441,9 @@ export function HookDefaultInspector({
             locale={locale}
             disabled={readOnly}
             testId="hook-body-capabilities"
+            // objectstack#32004 — a hook body sends no mail: the hook parse
+            // refuses the grant, so it is not offered here.
+            withheld={{ tokens: ['email.send'], flagKey: 'engine.inspector.hook.capabilityNotForHook' }}
           />
         )}
       </div>

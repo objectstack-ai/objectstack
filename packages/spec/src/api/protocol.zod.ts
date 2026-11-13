@@ -994,9 +994,28 @@ export const GetMetaItemLayeredResponseSchema = lazySchema(() => z.object({
  *
  * This is that ONE element shape, declared once and used by both halves, which
  * is the whole point of D3's "reuse the Zod envelope": a consumer reads the
- * same six keys whether the verdict arrived on a refusal or on a success.
+ * same keys — six required, plus the optional `userMessage` — whether the
+ * verdict arrived on a refusal or on a success.
  * `@objectstack/metadata-protocol` re-exports this type as its
  * `RuntimeAuthoringIssue` rather than declaring a second interface (#4717).
+ *
+ * ## Two audiences, two channels (ruling record 6819749037)
+ *
+ * `rule` is the stable id a consumer groups or suppresses by, and `message` /
+ * `hint` are the rule author's developer-facing English: what `os validate`,
+ * logs and an AI author read. `userMessage` is the sentence for the PERSON who
+ * saved the metadata, in the request's language: the ruling's option C, under
+ * which the producer of a finding composes its user-facing text in the
+ * request's locale, the rule id stays unchanged, and every client of the door
+ * (the console, the CLI, MCP) receives the text already in that language
+ * instead of each keeping a per-rule translation table. Same field name and same producer-marked meaning
+ * as `ApiErrorSchema.userMessage` (`contract.zod.ts`), under the ladder its
+ * "Language" section declares for platform-composed text: the locale the
+ * request names, else the workspace default, else `en`, each code read
+ * against the platform locale table whole and then one subtag shorter at a
+ * time. Where the sentences live is the producer's own business; the authoring
+ * rules in `@objectstack/lint` keep one catalog per rule file, covering the
+ * platform locale table (`PLATFORM_LOCALES`, `@objectstack/spec/system`).
  */
 export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
   rule: z.string().describe(
@@ -1037,6 +1056,13 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
     'How the gate treated this finding. `error` means the write was REFUSED '
     + '(these appear on the 422, never on a 2xx); `warning` / `info` are '
     + 'advisory — the write succeeded and the finding is FYI.',
+  ),
+  userMessage: z.string().optional().describe(
+    'The finding\'s user-facing sentence, composed by its producer in the request\'s locale (else the '
+    + 'workspace default locale, else `en`) — the same field name and producer-marked meaning as '
+    + '`ApiErrorSchema.userMessage`. Present only when the producer authors a user sentence for this '
+    + '`rule`; absent, a consumer renders `message` as before. Consumers render it as received; `rule` '
+    + 'stays the stable id and `message` / `hint` stay the developer-facing text.',
   ),
 }));
 
@@ -2558,8 +2584,8 @@ export const FindReferencesToMetaResponseSchema = lazySchema(() => z.object({
  *
  * Transcribed from `rollbackMetaItem`'s declared return
  * (`@objectstack/metadata-protocol` `protocol.ts`); objectui's
- * `metadata-client.ts` docblock independently documents the same five fields
- * (#12038 survey §3d).
+ * `metadata-client.ts` docblock independently documents its first five fields
+ * (#12038 survey §3d); `advisories` was added after that survey (#32700).
  */
 export const RollbackMetaItemResponseSchema = lazySchema(() => z.object({
   success: z.boolean().describe('Whether the rollback landed.'),
@@ -2570,6 +2596,22 @@ export const RollbackMetaItemResponseSchema = lazySchema(() => z.object({
   seq: z.number().describe('The new live row\'s history sequence number.'),
   restoredFromVersion: z.number().describe('Which history version was restored.'),
   message: z.string().optional().describe('Rollback note, when one was recorded.'),
+  advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+    'What the rollback did beyond restoring the row, in '
+    + 'the same element shape and omitted-when-empty discipline as '
+    + '`SaveMetaItemResponseSchema.advisories`. Present ONLY when at least one '
+    + 'entry was raised: an empty array is never emitted, so a clean answer\'s '
+    + 'bytes are unchanged and a caller that ignores this key behaves exactly '
+    + 'as before. Three rules ride it: `object-storage-sync-refused` (`warning`), '
+    + 'the restored object\'s storage sync was refused; and, per stored computed '
+    + 'field (a non-`formula` field declaring `expression`) the restore makes '
+    + 'compute something new (added back, turned from a formula or a plain '
+    + 'field, or its expression, stored type or scale changed), the fill of '
+    + 'the object\'s existing rows the save door also runs: '
+    + '`stored-expression-filled` (`info`, the rows written) or '
+    + '`stored-expression-fill-incomplete` (`warning`, what is left and how to '
+    + 'fill it). The restore itself SUCCEEDED either way.',
+  ),
 }));
 
 /**

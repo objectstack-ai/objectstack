@@ -30,6 +30,28 @@ services.email.sendTemplate(input: SendTemplateInput): Promise<SendEmailResult>
 
 `replyTo` is not bounded. It is the caller's choice of Reply-To address and makes no claim about the sender.
 
+## From a script body
+
+An action or a job body sends mail with `ctx.email.send(input)` when it declares the `email.send` capability (`os build` infers it from the call). The input is `BodyMailSendInputSchema` (`@objectstack/spec/data`): `to`, `cc`, `bcc`, `replyTo`, `subject`, `text` and/or `html`, and `related`, the record the message is about.
+
+- The message is sent from the configured sender. Its display name names the calling user beside the organization, for example `Ann Lee via Acme`. Replies go to `replyTo`.
+- It is recorded as sent by the calling user and under the caller's organization, with the same bounds as the HTTP door. `from`, `sentBy`, `organizationId`, `headers` and `identityMail` are not inputs, and a call that names one is refused with `400 VALIDATION_ERROR`.
+- `related` must be a record the caller can read, in the caller's own scope. Otherwise the call is refused with `404 RECORD_NOT_FOUND` and nothing is sent.
+- A message names at most 50 recipients across `to`, `cc` and `bcc`. Each of the three takes at most 4,000 characters as the mail log records it (every recipient as `"Name" <address>`, joined by `, `), and a `replyTo` at most 320. The subject takes at most 998 characters, and `text` and `html` at most 1,000,000 each. A message over any of these is refused with `400 VALIDATION_ERROR`.
+- While the organization's mail log records `OS_EMAIL_APP_SEND_HOURLY_LIMIT` messages (default 200) in the last hour, the call is refused with `429 RATE_LIMIT_EXCEEDED`. A caller with no organization is counted against the whole log. The count is read before the send, so two calls racing for the last message of the hour can both be sent.
+- The message is sent only if the mail log records it. When the row cannot be written, the call is refused with `503 SERVICE_UNAVAILABLE` and nothing is sent.
+- A message cannot be taken back, so a hook body cannot send mail: the write that runs the hook may still roll back. A hook whose body is granted `email.send` is refused when it is saved, validated, built or bound, and a call from a hook body is refused with `403 PERMISSION_DENIED`. Send mail on a record change from an action, a job or a flow.
+- A call made while an action or a job runs inside a transaction, or inside the body's own `ctx.api.transaction`, is refused with `409 RESOURCE_CONFLICT`.
+- A job body has no calling user, so its message is recorded with no `sentBy`.
+
+The call answers `{ id, status }`. A deployment with no mail service answers `501 NOT_IMPLEMENTED`.
+
+A row written into the mail log (`sys_email`, `sys_identity_email`) at `queued` by anything other than the mail service is sent from the configured sender, with no `From`, `Sender` or `Return-Path` header of its own, whatever the row said. Where no sender is configured, the mail log refuses such a row.
+
+<Callout type="warn">
+**Breaking for direct inserts.** Before this release, a `queued` row an app inserted into the mail log was sent from the `from_address` the row named. It is now sent from the configured sender. Send through `ctx.email.send`, which names the calling user in the sender's display name, instead of inserting the row.
+</Callout>
+
 ## Returns
 
 `SendEmailResult`:

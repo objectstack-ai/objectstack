@@ -51,6 +51,8 @@
  * | `getReadableFields` throws | throws {@link ObjectSchemaMaskEvaluationError} | the exit answers 5xx — never the unmasked body, never an empty-fields 200 |
  * | otherwise | `project` | fields ∉ readable are deleted whole, references included |
  * | `canReadObject` → not `true` (ruling record 6787890900) | `hidden` | left out of every list; a read answers as for a name that names no object |
+ * | `canReadObject` → not `true`, the field posture is determined, and the object's declared `schemaReadDelegate` answers `true` (decision 6840464379) | the field posture | served as to a reader of the object: listed, and projected by the caller's own field security |
+ * | the declared `schemaReadDelegate` throws (or its lookup does) | throws {@link ObjectSchemaMaskEvaluationError} | the exit answers 5xx — never a false "no such object" |
  * | `canReadObject` throws | throws {@link ObjectSchemaMaskEvaluationError} | the exit answers 5xx — never an empty list, never a false "no such object" |
  *
  * ## D4 exempts the definition, not the runtime projections (#22250)
@@ -371,6 +373,69 @@ export interface ObjectSchemaMaskSecuritySurface {
     canReadObject?(object: string, context?: unknown): Promise<boolean> | boolean;
 }
 
+/**
+ * [ADR-0106 amendment, exception by maintainer decision 6840464379] The kernel
+ * service an object's `schemaReadDelegate` names: the authority on which
+ * callers, refused by the object read check, are still served the object's
+ * DEFINITION — the callers the service's own door serves the object's rows to.
+ *
+ * Asked only after `canReadObject` has refused the caller, with the caller's
+ * own context. Only `true` admits, and what it admits is the definition,
+ * projected by the caller's field posture exactly as for a reader of the
+ * object: the data door's answer about the rows does not move. A delegate
+ * answers for the objects it owns and `false` for any other name, since any
+ * object may name it. A throw is an evaluation fault (5xx), never "absent".
+ */
+export interface ObjectSchemaReadDelegate {
+    authorizeSchemaRead(objectName: string, context: unknown): Promise<boolean> | boolean;
+}
+
+/**
+ * Where {@link resolveObjectSchemaMaskPosture} finds an object's declared
+ * schema-read delegate (decision 6840464379): the name its live registered
+ * definition declares in `schemaReadDelegate`, and the kernel service
+ * registered under that name, both for the request's environment. Each
+ * schema-serving transport builds ONE with {@link objectSchemaReadDelegateSource}
+ * and hands it to every posture it resolves, so no outlet can disagree about
+ * the exception. An outlet that hands none applies no exception: the object
+ * stays absent for the caller the read check refuses, which fails closed.
+ */
+export interface ObjectSchemaReadDelegateSource {
+    /** The service the object's registered definition names in `schemaReadDelegate`, or `undefined`. */
+    declaredDelegate(objectName: string): Promise<string | undefined> | string | undefined;
+    /** The kernel service registered under `name` in the request's environment, or `undefined`. */
+    service(name: string): Promise<unknown> | unknown;
+}
+
+/**
+ * Build a transport's {@link ObjectSchemaReadDelegateSource} from its two
+ * lookups: the data engine (whose `getSchema` answers the registry as it is at
+ * the call — never a set collected at boot, which a later registration or a
+ * removed declaration would contradict) and the kernel service lookup. The
+ * engine is resolved once, on the first object that needs it; the name is read
+ * on every call.
+ */
+export function objectSchemaReadDelegateSource(lookups: {
+    /** The request's environment's data engine (`objectql`), or `undefined`. */
+    engine: () => Promise<unknown> | unknown;
+    /** The kernel service registered under `name` in the request's environment, or `undefined`. */
+    service: (name: string) => Promise<unknown> | unknown;
+}): ObjectSchemaReadDelegateSource {
+    let engine: Promise<unknown> | undefined;
+    return {
+        async declaredDelegate(objectName) {
+            engine ??= Promise.resolve().then(lookups.engine);
+            const registry = (await engine) as { getSchema?: (name: string) => unknown } | null | undefined;
+            const definition = typeof registry?.getSchema === 'function'
+                ? registry.getSchema(objectName) as { schemaReadDelegate?: unknown } | null | undefined
+                : undefined;
+            const declared = definition?.schemaReadDelegate;
+            return typeof declared === 'string' && declared !== '' ? declared : undefined;
+        },
+        service: (name) => lookups.service(name),
+    };
+}
+
 /** Structured-degradation sink for ADR-0106 D6's middle tier. */
 export interface ObjectSchemaMaskTelemetry {
     /** A `warn`-level structured record (functional degradation, not durability loss). */
@@ -393,10 +458,15 @@ export const OBJECT_SCHEMA_MASK_UNDETERMINED_METRIC = 'objectstack_meta_field_vi
  * [ruling record 6787890900] For a caller the mask applies to, it also decides
  * whether the object exists for them at all: `hidden` when the security
  * service's object-level read admission (`canReadObject`) does not admit
- * them. The D4 exemptions and the D8 switch precede it unchanged.
+ * them. The D4 exemptions and the D8 switch precede it unchanged. [decision
+ * 6840464379] The one exception: an object whose owner declares a
+ * `schemaReadDelegate` is served, field-projected, to the caller that delegate
+ * admits ({@link admittedBySchemaReadDelegate}); `schemaReadDelegates` is where
+ * the declaration is found.
  *
  * @throws {ObjectSchemaMaskEvaluationError} when the security service throws
- *   evaluating either the caller's readable fields or their object read.
+ *   evaluating either the caller's readable fields or their object read, or a
+ *   declared schema-read delegate throws.
  */
 export async function resolveObjectSchemaMaskPosture(input: {
     /** Object machine name (`req.params.name`). */
@@ -409,8 +479,13 @@ export async function resolveObjectSchemaMaskPosture(input: {
     enabled: boolean;
     /** Optional sink for the D6 middle tier. */
     telemetry?: ObjectSchemaMaskTelemetry;
+    /**
+     * [decision 6840464379] Where an object's declared `schemaReadDelegate` is
+     * found; absent, no delegate is asked and a refused object stays absent.
+     */
+    schemaReadDelegates?: ObjectSchemaReadDelegateSource;
 }): Promise<ObjectSchemaMaskPosture> {
-    const { objectName, context, security, enabled, telemetry } = input;
+    const { objectName, context, security, enabled, telemetry, schemaReadDelegates } = input;
     if (!enabled) return { kind: 'passthrough', reason: 'disabled' };
 
     const ask = typeof security?.getMetadataReadableFields === 'function'
@@ -450,7 +525,18 @@ export async function resolveObjectSchemaMaskPosture(input: {
             // `false`: the object is absent, which fails closed.)
             throw new ObjectSchemaMaskEvaluationError(objectName, error);
         }
-        if (admitted !== true) posture = { kind: 'hidden', fields };
+        // [decision 6840464379] The one exception, declared by the object's
+        // owner: its `schemaReadDelegate` may serve the definition — and only
+        // the definition, projected by this caller's field posture — to the
+        // callers its own door serves the rows to. Asked only after the read
+        // check refused, so it can widen nothing a reader is not already
+        // served; and never on an undetermined field posture, which would
+        // serve the definition unmasked (D6 tier 2): it stays absent then.
+        if (admitted !== true) {
+            const delegated = fields.kind !== 'undetermined'
+                && await admittedBySchemaReadDelegate(objectName, context, schemaReadDelegates, telemetry);
+            if (!delegated) posture = { kind: 'hidden', fields };
+        }
     } else if (ask) {
         // A security service with a field posture and no object-level read
         // admission: object visibility is not narrowed in this deployment —
@@ -480,6 +566,50 @@ function warnNoObjectReadAdmissionOnce(security: object, telemetry: ObjectSchema
         + 'until the service implements it',
         { decision: 'object-visibility-not-narrowed' },
     );
+}
+
+/** The declared delegates {@link admittedBySchemaReadDelegate} has already named as unusable, per object. */
+const unusableSchemaReadDelegateWarned = new Set<string>();
+
+/**
+ * [decision 6840464379] Does the object's declared `schemaReadDelegate` serve
+ * its definition to this caller, whom the object read check refused?
+ *
+ * `false` — the object stays absent — when no source is handed, when the
+ * object declares no delegate, and when the declared service is not registered
+ * or does not implement `authorizeSchemaRead` (fails closed, said once per
+ * object at warn, naming the service). Only a literal `true` admits. A lookup
+ * or a verdict that throws is the D6 tier-3 fault, as a throwing
+ * `canReadObject` is: an outlet answers 5xx, never a false "no such object".
+ */
+async function admittedBySchemaReadDelegate(
+    objectName: string,
+    context: unknown,
+    source: ObjectSchemaReadDelegateSource | undefined,
+    telemetry: ObjectSchemaMaskTelemetry | undefined,
+): Promise<boolean> {
+    if (!source) return false;
+    try {
+        const name = await source.declaredDelegate(objectName);
+        if (typeof name !== 'string' || name === '') return false;
+        const delegate = (await source.service(name)) as Partial<ObjectSchemaReadDelegate> | null | undefined;
+        if (typeof delegate?.authorizeSchemaRead !== 'function') {
+            const key = `${objectName}\u0000${name}`;
+            if (!unusableSchemaReadDelegateWarned.has(key)) {
+                unusableSchemaReadDelegateWarned.add(key);
+                telemetry?.warn?.(
+                    `[ADR-0106] object '${objectName}' names '${name}' as its schemaReadDelegate, but no registered `
+                    + 'service by that name implements `authorizeSchemaRead` — the object stays absent for every caller '
+                    + 'who may not read it. Register the service, or remove the declaration.',
+                    { object: objectName, delegate: name, decision: 'answer-absent' },
+                );
+            }
+            return false;
+        }
+        return (await delegate.authorizeSchemaRead(objectName, context)) === true;
+    } catch (error) {
+        throw new ObjectSchemaMaskEvaluationError(objectName, error);
+    }
 }
 
 /**

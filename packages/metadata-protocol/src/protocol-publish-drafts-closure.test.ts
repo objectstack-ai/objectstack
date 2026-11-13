@@ -529,3 +529,346 @@ describe('publishPackageDrafts judges each draft against the BATCH closure (#103
         expect(rulesOf(res, 'shyx_ticket')).toContain('security-master-detail-ungranted');
     });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#32666] The flow readonly-write rule judges a flow write against the object
+// universe this door gathers: the batch's own drafts, the live objects, and on
+// the live save door the live objects alone. A flow `update_record` node that
+// writes a field its object declares `readonly: true`, run as the user, is a
+// silent no-op at run time (the engine strips the key and the step reports
+// success), so `flow-update-readonly-field` refuses it at `error`.
+//
+// The card filed this door as never running the rule. Measured: on a FLOW
+// write it runs and refuses in every order below. The control publishes the
+// remedy the rule's fix line names for an autolaunched flow: a `screen` flow
+// declared `runAs: 'system'`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** An object whose `status` the object locks against hand edits. */
+const leaveRequest = () => ({
+    name: 'shyx_leave_req',
+    label: 'Leave Request',
+    sharingModel: 'private',
+    fields: {
+        name: { type: 'text', label: 'Name' },
+        status: {
+            type: 'select',
+            label: 'Status',
+            readonly: true,
+            options: [{ label: 'Draft', value: 'draft' }, { label: 'Pending', value: 'pending' }],
+        },
+    },
+});
+
+/** The card's flow: an autolaunched flow, no `runAs`, one `update_record` writing `status`. */
+const submitFlow = (name: string, overrides: Record<string, unknown> = {}) => ({
+    name,
+    label: 'Submit for approval',
+    type: 'autolaunched',
+    variables: [{ name: 'recordId', type: 'text', isInput: true }],
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        {
+            id: 'mark',
+            type: 'update_record',
+            label: 'Mark pending',
+            config: {
+                objectName: 'shyx_leave_req',
+                filter: { id: { dialect: 'cel', source: 'recordId' } },
+                fields: { status: 'pending' },
+            },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+        { id: 'e1', source: 'start', target: 'mark' },
+        { id: 'e2', source: 'mark', target: 'end' },
+    ],
+    ...overrides,
+});
+
+/** The one `flow-update-readonly-field` issue a refusal carries, located on the card's node. */
+const expectReadonlyWriteIssue = (issues: any[] | undefined) => {
+    const found = (issues ?? []).filter((i: any) => i.rule === 'flow-update-readonly-field');
+    expect(found, JSON.stringify(issues)).toHaveLength(1);
+    expect(found[0]).toMatchObject({ severity: 'error', path: 'flows[0].nodes[1].config.fields.status' });
+    expect(found[0].message).toMatch(/'status' of object 'shyx_leave_req'/);
+};
+
+describe('[#32666] a flow writing a readonly field is refused at both write doors', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('publish-drafts: the flow and its object drafted in ONE batch, and the batch rolls back', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageDraft(protocol, 'object', leaveRequest());
+        await stageDraft(protocol, 'flow', submitFlow('shyx_leave_submit'));
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0 });
+        const causal = res.failed.find((f) => f.name === 'shyx_leave_submit')!;
+        expect(causal?.code, JSON.stringify(res.failed)).toBe('INVALID_METADATA');
+        expectReadonlyWriteIssue((causal as any).issues);
+        expect(res.failed.find((f) => f.name === 'shyx_leave_req')?.code).toBe('BATCH_ABORTED');
+    });
+
+    it('publish-drafts: the object published first, the flow in a later batch', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageDraft(protocol, 'object', leaveRequest());
+        expect(await protocol.publishPackageDrafts({ packageId: PKG })).toMatchObject({ outcome: 'published' });
+        await stageDraft(protocol, 'flow', submitFlow('shyx_leave_submit'));
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0 });
+        const causal = res.failed.find((f) => f.name === 'shyx_leave_submit')!;
+        expect(causal?.code, JSON.stringify(res.failed)).toBe('INVALID_METADATA');
+        expectReadonlyWriteIssue((causal as any).issues);
+    });
+
+    it('the live save door: a flow saved active against the live object is refused 422', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageDraft(protocol, 'object', leaveRequest());
+        expect(await protocol.publishPackageDrafts({ packageId: PKG })).toMatchObject({ outcome: 'published' });
+
+        const flow = submitFlow('shyx_leave_submit');
+        const err: any = await (protocol as any)
+            .saveMetaItem({ type: 'flow', name: flow.name, item: flow, packageId: PKG })
+            .then(() => null, (e: unknown) => e);
+
+        expect({ code: err?.code, status: err?.status }, String(err?.message)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expectReadonlyWriteIssue(err?.issues);
+    });
+
+    it('control: the remedy the fix line names, a screen flow declared runAs:\'system\', publishes', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageDraft(protocol, 'object', leaveRequest());
+        await stageDraft(protocol, 'flow', submitFlow('shyx_leave_submit', { type: 'screen', runAs: 'system' }));
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 2 });
+        expect(rulesOf(res, 'shyx_leave_submit')).not.toContain('flow-update-readonly-field');
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#32666, ruled letter A] The REVERSE order: the flow goes live while `status`
+// is writable, then the OBJECT makes `status` readonly. The flow is untouched,
+// so its own write never runs again; the object write is judged against the
+// package's live flows (`RuntimeStackContext.flows`) and refused for the
+// conflict it ADDS — at both doors. A conflict already on the tenant is not
+// charged to it, and the way out (elevate the flow first) publishes clean.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** `leaveRequest()` with `status` writable — the shape the flow went live against. */
+const writableLeaveRequest = () => {
+    const o = leaveRequest();
+    const { readonly: _drop, ...status } = o.fields.status;
+    return { ...o, fields: { ...o.fields, status } };
+};
+
+/** `leaveRequest()` with `status` locked by a predicate instead of statically. */
+const conditionalLeaveRequest = () => {
+    const o = writableLeaveRequest();
+    return { ...o, fields: { ...o.fields, status: { ...o.fields.status, readonlyWhen: "record.status == 'pending'" } } };
+};
+
+/** The one subject finding an object refusal carries, keyed by the flow's name. */
+const expectFlowSubjectIssue = (issues: any[] | undefined, rule = 'flow-update-readonly-field') => {
+    const found = (issues ?? []).filter((i: any) => i.rule === rule);
+    expect(found, JSON.stringify(issues)).toHaveLength(1);
+    expect(found[0]).toMatchObject({ path: 'flows.shyx_leave_submit.nodes[1].config.fields.status' });
+    expect(found[0].message).toMatch(/'status' of object 'shyx_leave_req'/);
+};
+
+/** The object and the card's flow, live, with `status` writable. */
+async function liveWritableWithFlow(protocol: ObjectStackProtocolImplementation, flow = submitFlow('shyx_leave_submit')) {
+    await stageDraft(protocol, 'object', writableLeaveRequest());
+    await stageDraft(protocol, 'flow', flow);
+    const res = await protocol.publishPackageDrafts({ packageId: PKG });
+    expect(res, JSON.stringify(res.failed)).toMatchObject({ outcome: 'published', publishedCount: 2 });
+}
+
+describe('[#32666] an object write that makes a field readonly is judged against the live flows that write it', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('publish-drafts: the object made readonly after the flow went live is refused 422', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await liveWritableWithFlow(protocol);
+        await stageDraft(protocol, 'object', leaveRequest());
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0 });
+        const causal = res.failed.find((f) => f.name === 'shyx_leave_req')!;
+        expect(causal?.code, JSON.stringify(res.failed)).toBe('INVALID_METADATA');
+        expectFlowSubjectIssue((causal as any).issues);
+    });
+
+    it('the live save door: the same object saved active is refused 422', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await liveWritableWithFlow(protocol);
+
+        const object = leaveRequest();
+        const err: any = await (protocol as any)
+            .saveMetaItem({ type: 'object', name: object.name, item: object, packageId: PKG })
+            .then(() => null, (e: unknown) => e);
+
+        expect({ code: err?.code, status: err?.status }, String(err?.message)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expectFlowSubjectIssue(err?.issues);
+    });
+
+    it('readonlyWhen: the object publishes, carrying the `-when` advisory', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await liveWritableWithFlow(protocol);
+        await stageDraft(protocol, 'object', conditionalLeaveRequest());
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 1 });
+        const advisories = res.published.find((p: any) => p.name === 'shyx_leave_req')?.advisories;
+        expectFlowSubjectIssue(advisories, 'flow-update-readonly-when-field');
+    });
+
+    it('the way out: the flow elevated and published first, then the field made readonly, publishes clean', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await liveWritableWithFlow(protocol);
+        await stageDraft(protocol, 'flow', submitFlow('shyx_leave_submit', { type: 'screen', runAs: 'system' }));
+        expect(await protocol.publishPackageDrafts({ packageId: PKG })).toMatchObject({ outcome: 'published' });
+        await stageDraft(protocol, 'object', leaveRequest());
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 1 });
+        expect(rulesOf(res, 'shyx_leave_req')).not.toContain('flow-update-readonly-field');
+    });
+
+    it('the way out in ONE batch: the redrafted flow replaces its live copy as the subject', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await liveWritableWithFlow(protocol);
+        // The object staged FIRST, so it is judged before the flow's draft is
+        // promoted: the live row it reads is still the runAs:'user' flow.
+        await stageDraft(protocol, 'object', leaveRequest());
+        await stageDraft(protocol, 'flow', submitFlow('shyx_leave_submit', { type: 'screen', runAs: 'system' }));
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 2 });
+    });
+
+    it('a conflict already on the tenant is not charged to an unrelated object write', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        // The broken state, made through the documented escape hatch: the
+        // field is already readonly and the live flow already writes it.
+        await liveWritableWithFlow(protocol);
+        process.env.OS_ALLOW_UNLINTED_METADATA_WRITES = '1';
+        await stageDraft(protocol, 'object', leaveRequest());
+        expect(await protocol.publishPackageDrafts({ packageId: PKG })).toMatchObject({ outcome: 'published' });
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+
+        // A label edit adds no conflict, so it publishes.
+        const renamed = { ...leaveRequest(), label: 'Leave Request (renamed)' };
+        await stageDraft(protocol, 'object', renamed);
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 1 });
+    });
+
+    it('a flow of ANOTHER package is out of scope', async () => {
+        const OTHER = 'app.other';
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await liveWritableWithFlow(protocol);
+        // Re-home the live flow row to another package.
+        for (const r of rows.values()) if (r.type === 'flow') r.package_id = OTHER;
+        await stageDraft(protocol, 'object', leaveRequest());
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+        expect(rulesOf(res, 'shyx_leave_req')).not.toContain('flow-update-readonly-field');
+    });
+    it('a flow redrafted UNFIXED in the same batch is refused on its own flow write, naming the flow', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await liveWritableWithFlow(protocol);
+        // The object staged first and the flow redrafted with only a label
+        // edit, still runAs:'user'. The object write leaves a redrafted flow
+        // to its own write; that write meets the readonly draft in the batch.
+        await stageDraft(protocol, 'object', leaveRequest());
+        await stageDraft(protocol, 'flow', submitFlow('shyx_leave_submit', { label: 'Submit (renamed)' }));
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0 });
+        const causal = res.failed.find((f: any) => f.code !== 'BATCH_ABORTED')!;
+        expect(causal, JSON.stringify(res.failed)).toMatchObject({ name: 'shyx_leave_submit', code: 'INVALID_METADATA' });
+        const issues = ((causal as any).issues ?? []).filter((i: any) => i.rule === 'flow-update-readonly-field');
+        expect(issues, JSON.stringify((causal as any).issues)).toHaveLength(1);
+        // The flow write's own spelling: the written flow is `flows[0]`.
+        expect(issues[0]).toMatchObject({ path: 'flows[0].nodes[1].config.fields.status' });
+    });
+
+    it('confined: an object draft that breaks a live sibling under an UNRELATED rule publishes exactly as before', async () => {
+        // A master draft drops `code`, which a live detail's lookup names in
+        // `lookupColumns`. In a batch the written draft is folded into the
+        // object universe, so the sibling's finding cancels and the draft
+        // publishes; it must still, with a live flow in the package carried
+        // as a subject. Only the readonly-flow-writes judgment leaves the
+        // written draft out.
+        const master = () => ({
+            name: 'shyx_master', label: 'Master', sharingModel: 'private',
+            fields: { name: { type: 'text', label: 'Name' }, code: { type: 'text', label: 'Code' } },
+        });
+        const detail = () => ({
+            name: 'shyx_detail', label: 'Detail', sharingModel: 'private',
+            fields: { m: { type: 'lookup', label: 'Master', reference: 'shyx_master', lookupColumns: ['code'] } },
+        });
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await liveWritableWithFlow(protocol);
+        await stageDraft(protocol, 'object', master());
+        await stageDraft(protocol, 'object', detail());
+        expect(await protocol.publishPackageDrafts({ packageId: PKG })).toMatchObject({ outcome: 'published' });
+
+        const { code: _code, ...fields } = master().fields;
+        const withoutCode = { ...master(), fields };
+        await stageDraft(protocol, 'object', withoutCode);
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 1 });
+    });
+});

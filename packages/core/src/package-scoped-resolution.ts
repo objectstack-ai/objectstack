@@ -137,9 +137,9 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * `(package, name)`, and its doors, flow actions and flow endpoints resolve a
  * name by package), then the picklist family (#31700): `picklist`,
  * `mapping` and `dataset`, the `api` and the engine's `function` registry,
- * and `tool` beside the AI family (#31985), whose one by-name reader
- * (`/meta/tool/NAME`) resolves by package. A type not listed here keeps one
- * package holder per deployment.
+ * then `webhook` (#31699 PR 2), and `tool` beside the AI family (#31985),
+ * whose one by-name reader (`/meta/tool/NAME`) resolves by package. A type
+ * not listed here keeps one package holder per deployment.
  *
  * Every member but {@link ENGINE_FUNCTION_TYPE} is a metadata type ADR-0150
  * addresses by package ({@link PACKAGE_SCOPED_TYPES}). The function registry
@@ -167,6 +167,8 @@ export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] 
   'dataset',
   'api',
   'function',
+  // #31699 PR 2
+  'webhook',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
@@ -564,8 +566,14 @@ export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 
       return `${subject} is held by ${refusal.candidates.length} ${counted} in this environment and the caller names ` +
         `no package: ${named}. Nothing picks one of them: address it by its package.`;
     case 'outside-closure':
+      // [#32929] Two fixes, because the first is not always open: when the
+      // holder already depends on the caller (a module of the app that reads
+      // it), declaring the holder back is a dependency cycle the kernel
+      // refuses at boot. The sentence is static; the answer does not move.
       return `${subject} is held outside the declared dependency closure of package "${refusal.callerPackageId}": ` +
-        `${named}. Declare a dependency on the package that holds it (ADR-0141).`;
+        `${named}. Declare a dependency on the package that holds it (ADR-0141). If that package already depends on ` +
+        `"${refusal.callerPackageId}", the dependency would be a cycle: move what reads it into that package, or move the ` +
+        `${typeLabel(refusal.type)} into "${refusal.callerPackageId}" (ADR-0150 D3).`;
     case 'not-held-by-qualifier':
       return `${subject} is not held by ${refusal.callerPackageId === null ? 'the environment' : `package "${refusal.callerPackageId}"`}, ` +
         `which the address names exactly (ADR-0150 D5): it is held by ${named}. Address it by its holder.`;

@@ -135,11 +135,14 @@ import { peelStoredEnvelope } from './stored-envelope.js';
  * ADR-0150 child B), which joins in the same change that adds it to
  * `NAMESPACE_SCOPED_BARE_NAME_TYPES`; then `permission` (#32162); then `flow`
  * (#31696), which joins in the same change that adds it to that set; then the
- * picklist family's `picklist`, `mapping` and `dataset` (#31700); then `tool`
- * (#31985, ADR-0150 child B), likewise in the change that narrows it.
+ * picklist family's `picklist`, `mapping` and `dataset` (#31700); then
+ * `webhook` (#31699 PR 2), so a host with no registry lists each package's
+ * declaration of one name; then `tool` (#31985, ADR-0150 child B), likewise
+ * in the change that narrows it.
  */
 export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set([
-  'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset', 'tool',
+  'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset',
+  'webhook', 'tool',
 ]);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */

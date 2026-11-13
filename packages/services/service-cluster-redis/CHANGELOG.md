@@ -1,5 +1,287 @@
 # @objectstack/service-cluster-redis
 
+## 18.4.0
+
+### Patch Changes
+
+- dc79e38: feat(service-cache)!: a multi-node deployment on the redis cluster driver shares one Redis cache, so cache-backed limits hold across replicas; a per-process cache there refuses to boot
+  
+  Clause-②: yes (narrowing) — new exports and options widen the public surface, and one configuration that used to boot is now refused: `CacheServicePlugin({ adapter: 'memory' })` in a deployment that declares multi-node (`OS_EXPECT_MULTI_NODE=true` / `OS_CLUSTER_REPLICAS` > 1) over the `redis` cluster driver.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row changes shape: what moves is which cache adapter a plugin option set selects at boot, and the one refusal is a boot-time error that names its own remedy. Nothing at rest records the choice, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for one configuration only: a host that passes `adapter: 'memory'` explicitly AND declares multi-node over the redis cluster driver. Single-node boots, and every boot that leaves `adapter` unset, are unaffected.
+  
+  - **Before.** `CacheServicePlugin` registered an in-process `MemoryCacheAdapter` on every node. `RedisCacheAdapter` threw `not yet implemented` from every method, and `adapter: 'redis'` threw at `init`. On N replicas every counter kept in the cache counted per process: better-auth's sign-in limits (through `rateLimit.customStorage`), the inbound API budget, the OTP send budget, the daily SMS quota and the `notify` node's per-address email limit each admitted N times the declared limit, and nothing at boot said so.
+  - **Now (`@objectstack/service-cache`).** With `adapter` unset, the deployment's topology decides at `init`:
+    - single node (no multi-node declaration): `MemoryCacheAdapter`, the same boot as before; the cluster service is not read;
+    - multi-node declared over the `redis` cluster driver: `RedisCacheAdapter`, on a connection duplicated from the driver's (same Redis, same key prefix), closed at `kernel:shutdown`. Boot logs `registered redis cache adapter — one cache for every node on this Redis`;
+    - multi-node declared over that driver with no shared cache possible (`adapter: 'memory'`, or a driver build that offers no connection): `init` throws, naming the fix;
+    - multi-node declared over any other driver, or with no cluster service: `MemoryCacheAdapter` plus one `warn` that cache-backed limits multiply by the replica count.
+  
+    `adapter: 'redis'` now works: over `redis.client` (a host-owned ioredis client, never closed by the plugin), else the redis cluster driver's connection, else `init` throws. The plugin declares `com.objectstack.service.cluster` as an optional dependency, so it reads the driver after the driver started, in either registration order.
+  - **`RedisCacheAdapter`** is implemented. It takes a `client` (constructing none from a URL; `url` is deprecated and refused with a prescription when it is the only thing passed), stores entries at `<keyPrefix>cache:<key>` (default prefix `os:`, the driver's), JSON-encodes values (a `Date` reads back as its ISO string; `undefined`, functions and `bigint` are refused with a `TypeError`), lets Redis expire them (`SET … PX`; `ttl` in seconds, `0` = no expiry), throws Redis failures instead of answering a miss, and confines `clear()` and `stats().keyCount` to its own namespace, so the driver's `kv:` / `ctr:` / lock keys under the same prefix are never touched. `hits` / `misses` stay per process. Counters remain read-modify-write (the contract has no atomic increment): two nodes counting one key in the same instant can both be admitted at a limit's boundary, the bounded imprecision ADR-0069 D2 accepts.
+  - **New in `@objectstack/service-cache`:** the `redis` option (`CacheServicePluginRedisOptions`: `client`, `keyPrefix`, `defaultTtl`) and the `RedisCacheClient` type. `redisUrl` is deprecated (never read).
+  - **New in `@objectstack/service-cluster`:** `offerClusterDriverConnection(cluster, { driver, client, keyPrefix })` and `readClusterDriverConnection(cluster, driver)`, the seam a driver offers its connection through. The offer is a non-enumerable property under a `Symbol.for` key, so it never serialises and a second copy of the package reads it too.
+  - **`@objectstack/service-cluster-redis`** offers its ioredis client and key prefix through that seam. Its own behaviour is unchanged.
+  
+  Better-auth's `secondaryStorage` stays off: sessions remain in `sys_session`, and the shared cache only carries the rate-limit counters.
+  
+  **The remedy** for the refused configuration: drop `adapter` (or pass `adapter: 'redis'`) so the cache shares the cluster driver's Redis. A host that deliberately wants per-process caches must also drop the multi-node declaration.
+- 9e1f1f9: fix(cluster): a Redis outage no longer crashes replicas, is logged once, and caches re-read on reconnect
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Every API addition below is a new export or an optional member (a widening). The one new default is the bounded command time on the redis driver. Multi-replica deployments on the `redis` cluster driver only. The single-node default (the in-process `memory` driver, no declared replicas) behaves exactly as before: it never loses a connection, so none of the paths below runs on it.
+  
+  - **No crash on a dead lock (`@objectstack/service-job`).** `CronJobAdapter` leader-elects every scheduled fire on the cluster lock. When the lock store was unreachable, `acquire` rejected inside a timer callback, the rejection went unhandled, and every replica exited at its next tick. A failed `acquire` now skips that fire (no node can prove it alone runs it) and the next tick asks again; a failed `release` after the fire ran is absorbed (the lease expires on its TTL). The adapter logs ONE warning per lock outage — not one per tick — and one info line when the lock answers again. No process-wide `unhandledRejection` handler is added.
+  - **The driver watches its connections (`@objectstack/service-cluster-redis`).** Every ioredis client the driver holds (the command connection and the pub/sub subscriber) now has an `error` listener, so ioredis no longer prints `[ioredis] Unhandled error event` with a stack per reconnect attempt. The driver logs one warning when the store becomes unreachable (naming `host:port`, never the URL or a password) and one info line when it returns. New option: `driverOptions.logger` (`{ warn, info? }`, default `console`).
+  - **Bounded commands.** `createRedisClient()` now sets `commandTimeout: REDIS_COMMAND_TIMEOUT_MS` (2000 ms; exported). A black-holed Redis (a socket that accepts and never answers) used to hold a caller about 30 s — a sign-in counting through the shared cache included, since the cache derives its connection with `client.duplicate()`, which inherits the bound. Every command the driver and the shared cache issue is O(1); a caller that needs longer passes its own `options.commandTimeout`, or its own client through `driverOptions.client`.
+  - **`cluster.resync` (`@objectstack/service-cluster`).** Cross-node cache hints ride at-most-once pub/sub, so a hint published during an outage was lost and a peer kept serving what it had cached until restart. When the driver's connection returns after an outage it now emits ONE local `cluster.resync` event (never published to peers). New exports: `onClusterResync(cluster, handler)` to subscribe (a no-op on the memory driver), `readClusterDriverHealth(cluster)` (a passive reading of the driver's connection state, type `ClusterDriverLivenessHealth`: `{ driver, nodeId, state: 'unknown' | 'up' | 'down', since, outages, lastError? }`, `undefined` on the memory driver; the active store probe `/ready` uses is `probeClusterDriverHealth()`), and `ClusterDriverLiveness` / `offerClusterDriverLiveness` for driver authors, plus `CLUSTER_RESYNC_EVENT`, `describeConnectionError` and `redactCredentials`.
+  - **The caches re-read on it.** `MetadataClusterBridgePlugin` calls each attached lane's resync seam: `MetadataManager.resyncClusterPubSub()` (`@objectstack/metadata`: drops every list cache and the endpoint index, so the next `list()` re-reads the loaders; registry entries are kept), `DatasourceAdminService.resyncDatasourceMutationPubSub()` (`@objectstack/service-datasource`: re-converges every stored datasource and every held pool from this replica's own read), and `AutomationEngine.resyncConnectorCredentialPubSub()` (`@objectstack/service-automation`: the connector reconcile a peer's signal runs; the connector-credential door gains an optional `resyncFromCluster()`). `AuthzClusterBridgePlugin` advances the engine's write epoch (reason `remote`), retiring cached grants. The `metadata.mutated` registry lane has no resync yet; it still converges per item on delivered signals and fully at boot.
+- ff8ef4c: fix(service-cache): the shared cache's Redis connection reports its outage once instead of printing an unhandled error per reconnect
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  During a Redis outage, the connection the shared cache derives from the redis cluster driver's (`duplicate()`) had no `error` listener. Every reconnect attempt on every replica printed `[ioredis] Unhandled error event` with a stack, which buried the single outage warning operators need.
+  
+  - `@objectstack/service-cluster`: new `watchClusterDriverConnection(cluster, client, source)` reports a connection derived from the driver's into the driver's liveness. It returns a disposer and attaches nothing when the driver offers no liveness. `ClusterDriverLiveness` gains `watchConnection(client, source)`, the one listener style both use.
+  - `@objectstack/service-cluster-redis`: `watchRedisConnection` delegates to `ClusterDriverLiveness.watchConnection`. Its signature and behaviour are unchanged.
+  - `@objectstack/service-cache`: the plugin watches the connection it derives, as source `'cache'`. One outage now logs one warning across all of the driver's connections, and `cluster.resync` waits until the cache's connection is back too. If the driver offers no liveness (a redis driver released before the liveness offer), the connection gets a liveness of its own, so its outage is still logged once, without credentials, through the plugin's logger. The plugin detaches before its deliberate `quit()` on shutdown, so a shutdown is not reported as an outage. An injected `redis.client` belongs to its owner and gets no listener, and the memory cache is unchanged.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [dc79e38]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [9e1f1f9]
+- Updated dependencies [01cbbba]
+- Updated dependencies [41106b5]
+- Updated dependencies [00205e1]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [f56354c]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [ad622d3]
+- Updated dependencies [ff8ef4c]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [fc4af7f]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [1368536]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [de6d893]
+- Updated dependencies [326453e]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [e336a33]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/service-cluster@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

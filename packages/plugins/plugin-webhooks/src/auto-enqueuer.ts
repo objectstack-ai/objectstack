@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { createHash } from 'node:crypto';
 import type { IDataEngine, IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
 import type { WebhookTriggerType } from '@objectstack/spec/automation';
-import type { EnqueueHttpInput } from '@objectstack/service-messaging';
+import { HttpDelivery, type EnqueueHttpInput } from '@objectstack/service-messaging';
 import { METADATA_ACTIVATION_TABLE, omitInternalFieldsFromWriteResponse } from '@objectstack/core';
 import {
     WEBHOOK_SECRET_FIELD,
@@ -24,6 +25,7 @@ import {
     type LegacyDefinitionCredentialKey,
 } from './webhook-legacy-cleartext.js';
 import {
+    declaredWebhookActivationPath,
     declaredWebhookRefId,
     type DeclaredWebhook,
     type DeclaredWebhookReader,
@@ -38,6 +40,29 @@ import {
  * closes.
  */
 const SYSTEM_CTX = { isSystem: true } as const;
+
+/** `sys_http_delivery.dedup_key`'s declared bound: the `(source, dedup_key)` unique index's key part (191). */
+const DEDUP_KEY_MAX = (HttpDelivery.fields.dedup_key as { maxLength?: number }).maxLength ?? 191;
+
+/** The prefix of a digested dedup key: never the start of a row id or of `declared:`, so it meets no plain key. */
+export const WEBHOOK_DEDUP_DIGEST_PREFIX = 'sha256:';
+
+/**
+ * [#31699] A webhook delivery's `dedup_key`: `<subscription id>:<event id>`,
+ * as it always was, while that fits the column; past the cap, a fixed-length
+ * digest of exactly that string. A declared webhook's subscription id names its
+ * package (`declared:PKG/NAME`), so a long name of a long package can pass the
+ * index-bound cap that `declared:NAME` met; the digest keeps such a delivery
+ * at-most-once (the same subscription and event give the same key on any node)
+ * instead of failing the insert. A key that fits is never digested, so no key
+ * that fitted before moves.
+ */
+export function webhookDedupKey(subscriptionId: string, eventId: string): string {
+    const key = `${subscriptionId}:${eventId}`;
+    return key.length <= DEDUP_KEY_MAX
+        ? key
+        : `${WEBHOOK_DEDUP_DIGEST_PREFIX}${createHash('sha256').update(key).digest('hex')}`;
+}
 
 /**
  * The authored trigger vocabulary, taken from the spec rather than restated
@@ -523,7 +548,9 @@ export class AutoEnqueuer {
      * whatever its provenance — answers as itself and the declaration is
      * withheld, said once per name (regime C; `declared-webhooks.ts`). That is
      * what keeps a declared webhook from firing twice beside a row of its name,
-     * and a row's `active: false` in force.
+     * and a row's `active: false` in force. A row names no package, so it is
+     * matched by name, the safe direction (#31699): every slot of the name is
+     * withheld, whichever package declares it, and none fires beside the row.
      */
     private async resolveDeclared(): Promise<
         { subscriptions: CachedSubscription[] } | undefined
@@ -564,7 +591,10 @@ export class AutoEnqueuer {
         for (const d of declared) {
             const name = d.webhook.name;
             if (heldByRow.has(name)) {
-                this.reportDeclarationWithheld(name);
+                this.reportDeclarationWithheld(
+                    name,
+                    declared.filter((s) => s.webhook.name === name).map((s) => declaredWebhookActivationPath(name, s.namespace)),
+                );
                 continue;
             }
             // `active` is the declared `isActive`, or the activation ledger's switch over it.
@@ -588,7 +618,9 @@ export class AutoEnqueuer {
     private projectDeclared(d: DeclaredWebhook): CachedSubscription | null {
         const wh = d.webhook;
         const sub = this.parseRow({
-            id: declaredWebhookRefId(wh.name),
+            // [ADR-0150 D5, #31699] One subscription per slot: `declared:PKG/NAME`
+            // for a package's declaration, `declared:NAME` for the environment's.
+            id: declaredWebhookRefId(wh.name, d.packageId),
             name: wh.name,
             object_name: wh.object ?? null,
             triggers: wh.triggers ?? [],
@@ -612,7 +644,7 @@ export class AutoEnqueuer {
      * the row is in force and dispatching (or switched off on purpose), so
      * nothing claimed is being lost.
      */
-    private reportDeclarationWithheld(name: string): void {
+    private reportDeclarationWithheld(name: string, switches: readonly string[]): void {
         if (this.declarationWithheldReported.has(name)) return;
         this.declarationWithheldReported.add(name);
         this.logger?.warn?.(
@@ -620,7 +652,9 @@ export class AutoEnqueuer {
                 'of the same name answers for it (a row that held the name before a package declared it). The row ' +
                 'stays in force as it is. To return to the ' +
                 'declaration, delete the row; to change the declared webhook, author a copy under a new name and ' +
-                `switch the declared one off (POST /api/v1/security/_activation/webhook/${name} with ` +
+                (switches.length > 1
+                    ? `switch the declared ones off (${switches.map((path) => `POST ${path}`).join(', ')}, each with `
+                    : `switch the declared one off (POST ${switches[0] ?? declaredWebhookActivationPath(name)} with `) +
                 '{ "enabled": false }).',
             { webhook: name },
         );
@@ -1207,7 +1241,7 @@ export class AutoEnqueuer {
             void this.enqueue({
                 source: 'webhook',
                 refId: sub.id,
-                dedupKey: `${sub.id}:${eventId}`,
+                dedupKey: webhookDedupKey(sub.id, eventId),
                 label: event.type,
                 url: sub.url,
                 method: sub.method,
@@ -1364,7 +1398,7 @@ export class AutoEnqueuer {
             void this.enqueue({
                 source: 'webhook',
                 refId: sub.id,
-                dedupKey: `${sub.id}:${eventId}`,
+                dedupKey: webhookDedupKey(sub.id, eventId),
                 label: event.type,
                 url: sub.url,
                 method: sub.method,

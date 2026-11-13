@@ -1245,6 +1245,12 @@ like any banned account's, with one field added:
   sends `active: true` again. An administrator's ban that a deactivation
   arrived on top of keeps the administrator's reason, and answers as an
   administrator's ban.
+- A deactivation, or a `DELETE /Users/{id}`, also revokes every API key the
+  user owns (`revoked_reason: scim_deactivated`). A re-activation re-arms none
+  of them, and no one can restore them: the owner's Restore and a platform
+  administrator's are both refused `403 PERMISSION_DENIED`. The person creates
+  a new key under **Account → Developer → API Keys** and replaces the old one
+  wherever it is configured.
 - The cause is told only after the password verified: a wrong password is the
   ordinary `401 INVALID_EMAIL_OR_PASSWORD`, whatever the account's state. It
   names no connection, provider or other account.
