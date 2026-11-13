@@ -45,7 +45,7 @@ import { REFERENCE_SITES } from './reference-sites.js';
 import { computeMetadataDiagnostics } from './metadata-diagnostics.js';
 import { hasMetadataRedactor, redactMetadataItem } from './metadata-redaction.js';
 import { isPairRowRemoval } from './protocol-packaged-base-refusal.js';
-import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
+import { canonicalMetaType, canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import { remainingRowsPhrase } from './protocol-authoring-refusals.js';
 import { memberOption, mutationEventMember, resolveBundleMemberSelector } from './protocol-bundle-members.js';
@@ -1177,13 +1177,25 @@ export class ProtocolDiffDeleteLoadFacet {
                         // would prescribe deleting the live customization. The
                         // one predicate, on the row's `package_id` column. The
                         // census only: what this loop loads is unchanged.
+                        //
+                        // [ADR-0150 D4, #32552] …judged as the reads judge it
+                        // (`declinesStoredRow`): for a flow and an action
+                        // against every package that ships the name
+                        // ({@link someShipperOf}), so a second holder's
+                        // served override is not named for deletion; for the
+                        // six sealed types against the name's first-registered
+                        // shipper alone, which is the only override the reads
+                        // serve for them until #33131 moves them.
+                        const servedOverrideOf = (base: string | undefined) => isServedOverrideRowOf(
+                            record as ServedOverrideRow, base, installedManifestsOfEngine(host.engine),
+                        );
+                        const recordName = String(record.name);
+                        const perShipperType = ['flow', 'action'].includes(canonicalMetaType(normalizedType));
                         if (
-                            !host.isHostCodeDatasource(normalizedType, String(record.name))
-                            // [ADR-0150 D4, #32552] …judged against every
-                            // package that ships the name ({@link someShipperOf}).
-                            && !someShipperOf(host, normalizedType, String(record.name), (base) => isServedOverrideRowOf(
-                                record as ServedOverrideRow, base, installedManifestsOfEngine(host.engine),
-                            ))
+                            !host.isHostCodeDatasource(normalizedType, recordName)
+                            && !(perShipperType
+                                ? someShipperOf(host, normalizedType, recordName, servedOverrideOf)
+                                : servedOverrideOf(host.packagedArtifactOwner({ type: normalizedType, name: recordName })))
                         ) {
                             sealedOverlays.push({ type: normalizedType, name: String(record.name) });
                         }

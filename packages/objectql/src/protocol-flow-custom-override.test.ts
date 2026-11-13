@@ -783,16 +783,23 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
     const sharedAction = (label: string, extra: Record<string, unknown> = {}) => ({
         name: SHARED, label, type: 'script', body: { language: 'js', source: `return { ran: '${label}' };` }, ...extra,
     });
-    const holderManifest = (id: string, ns: string) => ({
+    /** An import mapping of one name, a sealed type that keeps the first-registered holder's judgment until #33131. */
+    const MAPPING = 'shared_feed';
+    const sharedMapping = (ns: string, label: string, extra: Record<string, unknown> = {}) => ({
+        name: MAPPING, label, sourceFormat: 'csv', targetObject: `${ns}_task`,
+        fieldMapping: [{ source: 'Title', target: 'title' }], mode: 'insert', ...extra,
+    });
+    const holderManifest = (id: string, ns: string, opts: { mapping?: boolean } = {}) => ({
         id, name: ns, version: '1.0.0', namespace: ns, type: 'app',
         objects: [{ name: `${ns}_task`, label: 'Task', sharingModel: 'private', fields: { title: { name: 'title', label: 'title', type: 'text' } } }],
         flows: [flowBody(`SHIPPED-${ns}`)],
         actions: [sharedAction(`SHIPPED-${ns}`)],
+        ...(opts.mapping ? { mappings: [sharedMapping(ns, `SHIPPED-${ns}`)] } : {}),
     });
     const nsOf = (id: string) => id.split('.').pop()!;
 
     /** The holders registered in `holders`' order, each with its pair and its pair's declared flow and action overrides. */
-    async function bootHolders(holders: readonly string[]) {
+    async function bootHolders(holders: readonly string[], opts: { mapping?: boolean } = {}) {
         const engine = new ObjectQL();
         const { driver, stores } = makeMemoryDriver();
         engine.registerDriver(driver, true);
@@ -801,7 +808,7 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
         for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
             engine.registry.registerObject(o as any, 'test-package');
         }
-        for (const id of holders) engine.registerApp(holderManifest(id, nsOf(id)));
+        for (const id of holders) engine.registerApp(holderManifest(id, nsOf(id), opts));
         const protocol = new ObjectStackProtocolImplementation(engine, () => new Map());
         for (const base of holders) {
             await (protocol as any).installPackage({
@@ -904,6 +911,32 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
             const named = await census();
             expect(named).toHaveLength(1);
             expect(named[0]).toContain(`flow×1 (${FLOW})`);
+        });
+
+        // [#32552 review s1] The census judges a row as the reads serve it. The
+        // reads serve a second holder's declared override per shipper for a flow
+        // and an action only (#32613); the six sealed types keep the name's
+        // first-registered shipper until #33131, so the second holder's mapping
+        // override is unserved and the census still names it.
+        it(`CONTROL, ${nsOf(first)} registered first: a sealed type's census keeps the first-registered holder's judgment (a mapping)`, async () => {
+            const { engine, protocol } = await bootHolders(first === ALPHA ? [ALPHA, BETA] : [BETA, ALPHA], { mapping: true });
+            for (const base of [ALPHA, BETA]) {
+                await engine.insert('sys_metadata', {
+                    type: 'mapping', name: MAPPING, organization_id: null, package_id: `${base}.custom`,
+                    metadata: JSON.stringify(sharedMapping(nsOf(base), `OVERRIDE-${nsOf(base)}`, { overrides: { package: base, basedOn: '1.0.0' } })),
+                    state: 'active', version: 1,
+                }, { context: { isSystem: true } });
+            }
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            let named: string[];
+            try {
+                await (protocol as any).loadMetaFromDb();
+                named = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('metadata_sealed_overlay_unserved'));
+            } finally {
+                warn.mockRestore();
+            }
+            expect(named).toHaveLength(1);
+            expect(named[0]).toContain(`mapping×1 (${MAPPING})`);
         });
 
 
