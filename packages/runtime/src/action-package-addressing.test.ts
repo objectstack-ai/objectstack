@@ -885,6 +885,41 @@ describe('[#32365] the bare action read weighs the package-less holder and serve
                 }
             });
 
+            it('NEIGHBOUR — an ENABLED third package C bound to `lead`: `lead` answers C\'s own declaration, never the environment\'s item, in either registration order', async () => {
+                const C = 'com.acme.gamma';
+                for (const envFirst of [false, true]) {
+                    twoHoldersAndEnvironment(envFirst);
+                    install(C);
+                    ship(C, 'lead');
+                    const order = `env registered ${envFirst ? 'first' : 'last'}`;
+                    const onLead = await routeTo('lead');
+                    expect([onLead.refusal, onLead.degraded], order).toEqual([undefined, undefined]);
+                    expect(onLead.action, order).toMatchObject({ name: 'approve', label: 'gamma', objectName: 'lead' });
+                }
+            });
+
+            it('NEIGHBOUR — a candidate whose own address answers `not-held-by-qualifier` may own `lead`: the bare read\'s refusal stands, never the environment\'s item', async () => {
+                twoHoldersAndEnvironment(false);
+                const AB = [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }];
+                const refusal = (candidates: any[], reason: string) => new PackageScopedNameRefusedError({
+                    status: 'refused', reason, type: 'action', name: 'approve', callerPackageId: null, candidates,
+                    message: 'refused',
+                } as any);
+                const bare = refusal(AB, 'ambiguous-in-environment');
+                const stub: any = {
+                    getMetaItems: async () => ({ items: [] }),
+                    getMetaItemForExecution: async (request: { packageId?: string }) => {
+                        if (!request.packageId) throw bare;
+                        if (request.packageId === A) throw refusal([{ kind: 'package', packageId: A }], 'not-held-by-qualifier');
+                        return { item: { name: 'approve', label: 'beta', type: 'script', objectName: 'contact', _packageId: B } };
+                    },
+                };
+                const stubDeps = { ...deps, resolveService: (async (_ctx: unknown, name: string) => (name === 'protocol' ? stub : undefined)) as any };
+                const onLead = await resolveRouteActionDeclaration(stubDeps, { request: {} } as any, { ql: engine, objectName: 'lead', actionName: 'approve' });
+                expect([onLead.action, onLead.degraded]).toEqual([undefined, undefined]);
+                expect(onLead.refusal?.candidates).toEqual(AB);
+            });
+
             it('the platform\'s item on `lead` (a package-less item with no row behind it) is not the environment\'s: `lead` stays no declaration', async () => {
                 twoHoldersAndEnvironment(false);
                 storedRows = [];
