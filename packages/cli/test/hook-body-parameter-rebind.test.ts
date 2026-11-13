@@ -276,6 +276,16 @@ describe('capability inference follows the rebound names', () => {
       async (ctx: any) => { await ctx.api.object('t').insert({ n: await ctx.api.object('t').count({}) }); },
     ],
     [
+      'email.send / activity.append through a renamed context',
+      async (h: any) => { await h.email.send({ to: 'a@b.test', subject: 's', text: 't' }); await h.activity.append({ object: 'o', recordId: 'r', type: 't', summary: 's' }); },
+      async (ctx: any) => { await ctx.email.send({ to: 'a@b.test', subject: 's', text: 't' }); await ctx.activity.append({ object: 'o', recordId: 'r', type: 't', summary: 's' }); },
+    ],
+    [
+      'email.send / activity.append through destructured members',
+      async ({ email, activity }: any) => { await email.send({ to: 'a@b.test', subject: 's', text: 't' }); await activity.append({ object: 'o', recordId: 'r', type: 't', summary: 's' }); },
+      async (ctx: any) => { await ctx.email.send({ to: 'a@b.test', subject: 's', text: 't' }); await ctx.activity.append({ object: 'o', recordId: 'r', type: 't', summary: 's' }); },
+    ],
+    [
       'log through an object rest element',
       ({ input, ...rest }: any) => { rest.log.info(String(input.name)); },
       (ctx: any) => { ctx.log.info(String(ctx.input.name)); },
