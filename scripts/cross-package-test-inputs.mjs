@@ -1013,6 +1013,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/src/data/objects/task.object.ts',
       'examples/app-showcase/src/ui/views/task.view.ts',
       'sdui.manifest.json',
+      //   src/authored-site-expression.test.ts (#32872) IMPORTS the tree's one
+      //     code/prose separator to list the calls the gate's walk makes at a
+      //     validation or formula site without counting the comments that name
+      //     them. A real read: the enumeration changes if the mask does.
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
     ],
     heldBy: {
       // `const commandsDir = join(repoRoot, 'packages/cli/src/commands')`

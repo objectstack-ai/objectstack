@@ -5,7 +5,10 @@ import { applyInjectedSystemColumns } from '@objectstack/metadata-core';
 import { describe, expect, it } from 'vitest';
 
 // The repo's one code/prose separator, so a call spelled in a comment or a
-// string is not read as a call the gate makes.
+// string is not read as a call the gate makes. The `.mjs` is the module, and
+// `scripts/js-comment-mask.d.mts` beside it is the hand-written declaration
+// that gives `maskCommentsAndLiterals` its type, so this test's typecheck
+// verdict reads that file too.
 import { maskCommentsAndLiterals } from '../../../scripts/js-comment-mask.mjs';
 
 import {
