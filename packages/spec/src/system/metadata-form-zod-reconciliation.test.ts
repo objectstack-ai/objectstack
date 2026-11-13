@@ -218,6 +218,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     why: 'the Capabilities block is a toggle grid; apiMethods is a method whitelist (array of ApiMethod) that needs its own control, and is authored on the object body rather than as a switch',
   },
   {
+    kind: 'omit',
+    type: 'object',
+    path: 'enable',
+    key: 'aiReadable',
+    why: "the read-only AI exposure of a system object (ruling A on the read half of #32442): the parse refuses it on any object whose name does not start with sys_, and the Studio object editor authors business objects, so a toggle there would offer a value every save of that object refuses. Its writers are system objects declared in code (sys_approval_request first, the server half's)",
+  },
+  {
     kind: 'subset',
     type: 'object',
     path: 'fields',
