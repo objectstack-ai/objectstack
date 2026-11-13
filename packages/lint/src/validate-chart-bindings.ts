@@ -200,6 +200,13 @@ export interface ChartBindingFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's user-facing sentence interpolates, set where the
+   * finding is advice the publish door can return (a report chart's
+   * `series[]` entry); its sentence is in `validate-chart-bindings.user-text.ts`
+   * (`AuthoringFinding.userTextParams`).
+   */
+  userTextParams?: UserTextParams;
 }
 
 // `recordsOf` — the ONE collection reader (`object-graph.ts`), not the
@@ -211,6 +218,7 @@ export interface ChartBindingFinding {
 // it with; see that function's header for why the seam reports nothing itself.
 import { recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents, type AnyRec } from './page-walk.js';
+import type { UserTextParams } from './finding-user-text.js';
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -308,6 +316,13 @@ interface ChartBinding {
    * and resolve against `values`, which on them IS the query's measure set.
    */
   ownSelection?: string[];
+  /**
+   * The report a report CHART binding belongs to, for the user sentence of its
+   * advisory `series[]` findings (`validate-chart-bindings.user-text.ts`). Set
+   * on the report chart binding and nowhere else: that is the one advisory
+   * position the publish door reaches.
+   */
+  report?: string;
   where: string;
   /** Path of the binding's container, for the dataset-level finding. */
   path: string;
@@ -463,6 +478,11 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
               ? `Bind a measure that dataset "${dsName}" declares, or declare "${name}" on it.`
               : `Correct the name to a measure that dataset "${dsName}" declares, or drop the entry.`) +
             suggestName(name, ds.measures),
+          // The user sentence (`validate-chart-bindings.user-text.ts`): only a
+          // report chart's series entry is advice the publish door returns.
+          ...(position === 'report-series' && binding.report !== undefined
+            ? { userTextParams: { report: binding.report, measure: name, dataset: dsName } }
+            : {}),
         });
         return;
       }
@@ -486,6 +506,13 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
               : `Add "${name}" to \`values\`, or point the ${
                   position === 'query' ? 'axis' : 'entry'
                 } at a selected measure.`,
+          ...(position === 'report-series' && binding.report !== undefined
+            ? {
+              userTextParams: {
+                report: binding.report, measure: name, dataset: dsName, plotted: [...selected].sort().join(', '),
+              },
+            }
+            : {}),
         });
       }
     };
@@ -610,6 +637,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
           .filter((s): s is { name: string; path: string; kind: 'report-series' } => !!s.name),
         where: `${where} · chart`,
         path: `${path}.chart`,
+        report: reportName,
       });
     };
 
