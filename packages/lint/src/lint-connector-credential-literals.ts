@@ -70,6 +70,7 @@
 
 import { isCredentialShapedLiteral, isCredentialShapedName } from './credential-literal.js';
 import { recordsOf } from './object-graph.js';
+import type { UserTextParams } from './finding-user-text.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -88,6 +89,14 @@ export interface ConnectorCredentialLiteralFinding {
   path: string;
   message: string;
   hint: string;
+  /**
+   * The names this finding's user sentence interpolates
+   * (`lint-connector-credential-literals.user-text.ts`): the connector, the
+   * entry's NAME when the finding is about a map entry, and its position
+   * (`header` · `env` · `credential-env` · `stdio-auth`). ⛔ Never the value,
+   * for the module note's reason; see `AuthoringFinding.userTextParams`.
+   */
+  userTextParams?: UserTextParams;
 }
 
 /**
@@ -194,6 +203,7 @@ export function lintConnectorCredentialLiterals(stack: AnyRec): ConnectorCredent
           // `os explain connector-credential-literal`.
           message: `${judged.entry} '${key}' in ${label} holds a credential-shaped literal, ${KEPT}; ${steer}`,
           hint: judged.entry === 'env' ? ENV_ROUTE : HEADER_ROUTE,
+          userTextParams: { connector: name, name: key, position: judged.entry },
         });
       }
     }
@@ -213,6 +223,7 @@ export function lintConnectorCredentialLiterals(stack: AnyRec): ConnectorCredent
           'providerConfig.transport.credentialEnv reads as a credential, not a variable name, and is served on ' +
           'every metadata read; put the secret behind `auth.credentialRef` and name its variable here',
         hint: CREDENTIAL_ENV_ROUTE,
+        userTextParams: { connector: name, position: 'credential-env' },
       });
     }
 
@@ -234,6 +245,7 @@ export function lintConnectorCredentialLiterals(stack: AnyRec): ConnectorCredent
           `auth '${auth.type}' reaches nothing: a stdio transport passes the resolved credential to the server only ` +
           'in the variable `transport.credentialEnv` names, and this entry names none',
         hint: STDIO_AUTH_UNPLACED_ROUTE,
+        userTextParams: { connector: name, position: 'stdio-auth' },
       });
     }
   });
