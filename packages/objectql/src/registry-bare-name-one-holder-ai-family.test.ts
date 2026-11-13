@@ -18,14 +18,18 @@
  *    and another's of another under one name never meet (CONTROL);
  *  - two packages' tools under different names both install (CONTROL).
  *
- * [ADR-0150 D2/D9, child B, #31701] `agent` and `skill` have narrowed to the
- * namespace (`NAMESPACE_SCOPED_BARE_NAME_TYPES`): the matrix below refuses
- * their second holder as a CO-OWNER of the first holder's namespace (a
- * package of namespace `alpha` that depends on `com.acme.alpha`), and a
- * `tool`'s as a package of another namespace, as before. "the narrowing" pins
- * what changed: two namespaces' packages each hold the name, at every door and
- * through the cold boot, while a co-owner, a package with no namespace and a
- * built-in name are still refused.
+ * [ADR-0150 D2/D9, child B, #31701 and #31985] `agent`, `skill` and `tool`
+ * have narrowed to the namespace (`NAMESPACE_SCOPED_BARE_NAME_TYPES`): the
+ * matrix below refuses an agent's or a skill's second holder as a CO-OWNER of
+ * the first holder's namespace (a package of namespace `alpha` that depends on
+ * `com.acme.alpha`), and a tool's as a package that declares NO namespace. A
+ * tool is also one of the namespace co-owner rule's types (child N,
+ * `namespace-co-owner-names.ts`), which refuses a co-owner's tool first, at
+ * every install, boot included, with its own envelope — as before this change.
+ * "the narrowing" pins what changed: two namespaces' packages each hold the
+ * name, at every door and through the cold boot, while a co-owner, a package
+ * with no namespace, two packages of one shareable namespace and a built-in
+ * name are still refused.
  *
  * Every refusal is asserted by its ADR-0112 envelope (`code` + `status`), the
  * two holders it names and the rename it carries.
@@ -111,13 +115,21 @@ const pkg = (id: string, decl: Partial<Record<AiType, string[]>> = {}, extra: Re
 const narrowed = (type: AiType) => (NAMESPACE_SCOPED_BARE_NAME_TYPES as readonly string[]).includes(type);
 
 /**
- * The package that rivals `com.acme.alpha` for a name of `type`: for a type
- * narrowed to the namespace, a co-owner of alpha's namespace (it declares
- * `alpha` and depends on alpha, as the namespace gate requires, and its object
- * carries the namespace's prefix); otherwise a package of its own namespace.
+ * The package that rivals `com.acme.alpha` for a name of `type`: for an agent
+ * or a skill, narrowed to the namespace, a co-owner of alpha's namespace (it
+ * declares `alpha` and depends on alpha, as the namespace gate requires, and
+ * its object carries the namespace's prefix); for a tool, narrowed too, a
+ * package that declares no namespace — the namespace co-owner rule (child N)
+ * refuses a tool's co-owner ahead of this rule, pinned in "the narrowing";
+ * otherwise a package of its own namespace.
  */
 const rival = (type: AiType, id: string, decl: Partial<Record<AiType, string[]>> = {}, extra: Record<string, unknown> = {}) => {
   if (!narrowed(type)) return pkg(id, decl, extra);
+  if (type === 'tool') {
+    const plain = pkg(id, decl, extra);
+    delete plain.namespace;
+    return plain;
+  }
   const tag = id.split('.').pop()!;
   return pkg(id, decl, {
     namespace: 'alpha',
@@ -127,8 +139,11 @@ const rival = (type: AiType, id: string, decl: Partial<Record<AiType, string[]>>
   });
 };
 
-/** The rename a refusal of `id`'s `name` carries: its namespace prefixed. */
-const renameOf = (type: AiType, id: string, name: string) => `${narrowed(type) ? 'alpha' : id.split('.').pop()}_${name}`;
+/** The rename a refusal of `id`'s `name` carries: its namespace prefixed (none for a package with no namespace). */
+const renameOf = (type: AiType, id: string, name: string): string | undefined => {
+  if (!narrowed(type)) return `${id.split('.').pop()}_${name}`;
+  return type === 'tool' ? undefined : `alpha_${name}`;
+};
 
 const caught = async (fn: () => unknown): Promise<Refusal | undefined> => {
   try {
@@ -295,7 +310,8 @@ describe.each(TYPES)('%s — after the cold boot, a second package declaring a n
       expect(warnings[0]).toContain(`the ${bareNameTypeLabel(type)} "${name}"`);
       expect(warnings[0]).toContain('com.acme.alpha');
       expect(warnings[0]).toContain('com.acme.beta');
-      expect(warnings[0]).toContain(renameOf(type, 'com.acme.beta', name));
+      const rename = renameOf(type, 'com.acme.beta', name);
+      if (rename) expect(warnings[0]).toContain(rename);
       expect(warnings[0]).toContain('changes nothing about which holder each caller is served');
     });
 
@@ -322,10 +338,10 @@ describe.each(TYPES)('%s — after the cold boot, a second package declaring a n
   });
 });
 
-describe('the narrowing — agent and skill hold one name per namespace (ADR-0150 D2/D9, child B)', () => {
-  const NARROWED = ['agent', 'skill'] as const;
+describe('the narrowing — agent, skill and tool hold one name per namespace (ADR-0150 D2/D9, child B)', () => {
+  const NARROWED = ['agent', 'skill', 'tool'] as const;
 
-  it('the switch holds agent and skill, the later families\' narrowed types, and no other covered type', () => {
+  it('the switch holds agent, skill and tool, the later families\' narrowed types, and no other covered type', () => {
     // Later child B cards append their own type, each pinned in its family's file.
     const SWITCHED: readonly string[] = [...NARROWED, 'action', 'email_template', 'flow', 'picklist', 'mapping', 'dataset', 'api', 'function', 'webhook'];
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toEqual(SWITCHED);
@@ -359,14 +375,18 @@ describe('the narrowing — agent and skill hold one name per namespace (ADR-015
       expect(await caught(() => registry.registerItem(type, body(type, name, 'beta'), 'name', 'com.acme.beta'))).toBeUndefined();
     });
 
-    it('a co-owner of the holder\'s namespace is still refused beside two namespaces\' holders, naming only its own namespace\'s holder', async () => {
-      const { register } = await boot();
-      expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
-      expect(await register(pkg('com.acme.beta', { [type]: [name] }))).toBeUndefined();
-      const err = await register(rival(type, 'com.acme.gamma', { [type]: [name] }));
-      expectRefusal(err, 'com.acme.gamma', { kind: 'package', packageId: 'com.acme.alpha' }, `alpha_${name}`);
-      expect(err!.conflicts!.map((c) => c.existingHolder)).toEqual([{ kind: 'package', packageId: 'com.acme.alpha' }]);
-    });
+    // A tool's co-owner is the namespace co-owner rule's to refuse, first
+    // ("a tool's co-owner" below); this rule's co-owner reading is an agent's and a skill's.
+    if (type !== 'tool') {
+      it('a co-owner of the holder\'s namespace is still refused beside two namespaces\' holders, naming only its own namespace\'s holder', async () => {
+        const { register } = await boot();
+        expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+        expect(await register(pkg('com.acme.beta', { [type]: [name] }))).toBeUndefined();
+        const err = await register(rival(type, 'com.acme.gamma', { [type]: [name] }));
+        expectRefusal(err, 'com.acme.gamma', { kind: 'package', packageId: 'com.acme.alpha' }, `alpha_${name}`);
+        expect(err!.conflicts!.map((c) => c.existingHolder)).toEqual([{ kind: 'package', packageId: 'com.acme.alpha' }]);
+      });
+    }
 
     it('a package with no namespace is still refused beside a holder, and a holder with no namespace still refuses one', async () => {
       const { register } = await boot();
@@ -396,18 +416,22 @@ describe('the narrowing — agent and skill hold one name per namespace (ADR-015
       expect(registry.sealBareNameHolders().filter((c) => c.type === type)).toEqual([]);
     });
 
-    it('the cold boot of two namespaces\' holders and a co-owner reports the co-owner against its own namespace\'s holder only', async () => {
-      const registry = new SchemaRegistry();
-      registry.logLevel = 'silent';
-      for (const m of [
-        pkg('com.acme.alpha', { [type]: [name] }),
-        pkg('com.acme.beta', { [type]: [name] }),
-        rival(type, 'com.acme.gamma', { [type]: [name] }),
-      ]) registry.installPackage(m as never, 'code');
-      expect(registry.sealBareNameHolders()).toEqual([
-        { type, name, incomingPackageId: 'com.acme.gamma', existingHolder: { kind: 'package', packageId: 'com.acme.alpha' }, rename: `alpha_${name}` },
-      ]);
-    });
+    // A tool's co-owner is the namespace co-owner rule's to refuse, first
+    // ("a tool's co-owner" below); this rule's co-owner reading is an agent's and a skill's.
+    if (type !== 'tool') {
+      it('the cold boot of two namespaces\' holders and a co-owner reports the co-owner against its own namespace\'s holder only', async () => {
+        const registry = new SchemaRegistry();
+        registry.logLevel = 'silent';
+        for (const m of [
+          pkg('com.acme.alpha', { [type]: [name] }),
+          pkg('com.acme.beta', { [type]: [name] }),
+          rival(type, 'com.acme.gamma', { [type]: [name] }),
+        ]) registry.installPackage(m as never, 'code');
+        expect(registry.sealBareNameHolders()).toEqual([
+          { type, name, incomingPackageId: 'com.acme.gamma', existingHolder: { kind: 'package', packageId: 'com.acme.alpha' }, rename: `alpha_${name}` },
+        ]);
+      });
+    }
 
     it('a built-in name is still refused to a package of any namespace', async () => {
       const builtIns = BUILT_IN_BARE_NAMES[type] as Set<string>;
@@ -421,10 +445,89 @@ describe('the narrowing — agent and skill hold one name per namespace (ADR-015
     });
   });
 
-  it('CONTROL — a tool has not narrowed: a package of another namespace is still refused its name', async () => {
-    const { register } = await boot();
+  describe('[#31985] a tool\'s co-owner — refused by the namespace co-owner rule (child N), ahead of this one, as before', () => {
+    const coOwner = (id: string) => {
+      const tag = id.split('.').pop()!;
+      return pkg(id, { tool: ['shared_tool'] }, {
+        namespace: 'alpha',
+        objects: [itemObject(`alpha_${tag}`)],
+        dependencies: { 'com.acme.alpha': '^1.0.0' },
+      });
+    };
+    const expectCoOwnerRefusal = (err: Refusal | undefined, incoming: string) => {
+      const refusal = err as (Refusal & { existingPackageIds?: string[]; namespace?: string }) | undefined;
+      expect(refusal, 'the registration was refused').toBeDefined();
+      expect(refusal!.name).toBe('NamespaceNameConflictError');
+      expect([refusal!.code, refusal!.status]).toEqual([NAMESPACE_CONFLICT_CODE, 422]);
+      expect(refusal!.incomingPackageId).toBe(incoming);
+      expect(refusal!.namespace).toBe('alpha');
+      expect(refusal!.existingPackageIds).toEqual(['com.acme.alpha']);
+    };
+
+    it('beside two namespaces\' holders, at the package door, naming only its own namespace\'s holder', async () => {
+      const { registry, register } = await boot();
+      expect(await register(pkg('com.acme.alpha', { tool: ['shared_tool'] }))).toBeUndefined();
+      expect(await register(pkg('com.acme.beta', { tool: ['shared_tool'] }))).toBeUndefined();
+      expectCoOwnerRefusal(await register(coOwner('com.acme.gamma')), 'com.acme.gamma');
+      expect(registry.getPackage('com.acme.gamma')).toBeUndefined();
+    });
+
+    it('during the cold boot too: the co-owner is refused at its registration, and the seal then reports no tool clash', async () => {
+      const registry = new SchemaRegistry();
+      registry.logLevel = 'silent';
+      registry.installPackage(pkg('com.acme.alpha', { tool: ['shared_tool'] }) as never, 'code');
+      registry.installPackage(pkg('com.acme.beta', { tool: ['shared_tool'] }) as never, 'code');
+      expectCoOwnerRefusal(await caught(() => registry.installPackage(coOwner('com.acme.gamma') as never, 'code')), 'com.acme.gamma');
+      expect(registry.sealBareNameHolders().filter((c) => c.type === 'tool')).toEqual([]);
+    });
+  });
+
+  it('[#31985] a tool of a package of another namespace installs beside the holder\'s and each package serves its own; the bare read refuses naming both', async () => {
+    const { registry, register } = await boot();
     expect(await register(pkg('com.acme.alpha', { tool: ['shared_tool'] }))).toBeUndefined();
-    expectRefusal(await register(pkg('com.acme.beta', { tool: ['shared_tool'] })), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, 'beta_shared_tool');
+    expect(await register(pkg('com.acme.beta', { tool: ['shared_tool'] }))).toBeUndefined();
+    expect(marker(registry.resolveItem('tool', 'shared_tool', 'com.acme.alpha'))).toBe('alpha tool');
+    expect(marker(registry.resolveItem('tool', 'shared_tool', 'com.acme.beta'))).toBe('beta tool');
+    const refused = await caught(() => registry.resolveItem('tool', 'shared_tool'));
+    expect([refused?.code, refused?.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+    expect(refused!.message).toContain('com.acme.alpha');
+    expect(refused!.message).toContain('com.acme.beta');
+  });
+
+  // [#31985, ADR-0150 D3 as #32183 reads it] Once two namespaces may each
+  // hold a tool name, the two holder reads part: a by-name read judges the
+  // SERVED holders (a disabled package holds no name), the install door every
+  // holder it has installed (a disable is reversible, so it never admits what
+  // the re-enable would refuse).
+  it.each([['enabled holder first', ['com.acme.alpha', 'com.acme.beta']], ['disabled holder first', ['com.acme.beta', 'com.acme.alpha']]] as const)('[#31985] one of two namespaces\' tool holders disabled (%s): the bare read serves the enabled one; re-enabled, refused naming both; the door still counts the disabled one', async (_order, order) => {
+    const { registry, register } = await boot();
+    for (const id of order) expect(await register(pkg(id, { tool: ['shared_tool'] }))).toBeUndefined();
+    registry.disablePackage('com.acme.beta');
+    expect(registry.packageScopedHoldersOf('tool', 'shared_tool')).toEqual(['com.acme.alpha']);
+    expect([...registry.packageScopedHoldersOf('tool', 'shared_tool', null, { includeDisabledPackages: true })].sort())
+      .toEqual(['com.acme.alpha', 'com.acme.beta']);
+    expect(marker(registry.resolveItem('tool', 'shared_tool'))).toBe('alpha tool');
+    expect(marker(registry.resolveItem('tool', 'shared_tool', 'com.acme.alpha'))).toBe('alpha tool');
+
+    // The door: a package with no namespace is refused beside the disabled
+    // holder too, naming it — every installed holder counts there.
+    const bare = pkg('com.acme.plain', { tool: ['shared_tool'] });
+    delete bare.namespace;
+    const err = await register(bare);
+    expect([err?.code, err?.status]).toEqual([NAMESPACE_CONFLICT_CODE, 422]);
+    expect(err!.conflicts!.map((c) => c.existingHolder)).toEqual(
+      expect.arrayContaining([{ kind: 'package', packageId: 'com.acme.alpha' }, { kind: 'package', packageId: 'com.acme.beta' }]),
+    );
+    // …and a third namespace's tool installs beside both.
+    expect(await register(pkg('com.acme.gamma', { tool: ['shared_tool'] }))).toBeUndefined();
+    registry.disablePackage('com.acme.gamma');
+
+    registry.enablePackage('com.acme.beta');
+    const refused = await caught(() => registry.resolveItem('tool', 'shared_tool'));
+    expect([refused?.code, refused?.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+    expect(refused!.message).toContain('com.acme.alpha');
+    expect(refused!.message).toContain('com.acme.beta');
+    expect(refused!.message).not.toContain('com.acme.gamma');
   });
 });
 
