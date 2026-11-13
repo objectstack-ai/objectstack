@@ -515,6 +515,29 @@ export async function computeWithheldUpdateFilter(
 }
 
 /**
+ * [#32442] Parent columns an activity row never serves in `metadata.old` /
+ * `metadata.new`, by parent object: each holds another record's field values,
+ * served on its own row through its owner's door. The value stays at rest.
+ */
+export const ACTIVITY_SIDE_COPY_COLUMNS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  sys_approval_request: Object.freeze(['payload_json']),
+});
+
+/** Drop the side-copy columns of `object` from one snapshot; whether any went. */
+function dropSideCopies(object: string, snapshot: Record<string, unknown>): boolean {
+  const columns = ACTIVITY_SIDE_COPY_COLUMNS[object];
+  if (!columns) return false;
+  let dropped = false;
+  for (const column of columns) {
+    if (column in snapshot) {
+      delete snapshot[column];
+      dropped = true;
+    }
+  }
+  return dropped;
+}
+
+/**
  * Redact the value-bearing columns of the activity rows one read is about to
  * hand back, as `context`. Mutates the rows in place (they are the read's own
  * result objects). Exported for direct testing.
@@ -549,6 +572,18 @@ export async function redactActivityRows(
     if (!object) {
       stripValueBearing(row);
       continue;
+    }
+    // [#32442] Ahead of the served-fields answer, for every reader.
+    if (ACTIVITY_SIDE_COPY_COLUMNS[object] && 'metadata' in row) {
+      // Stored as a JSON string; an already-parsed object is narrowed in place.
+      const inPlace = isRecord(row.metadata);
+      const copied = inPlace ? (row.metadata as Record<string, unknown>) : parseMetadata(row.metadata);
+      let dropped = false;
+      for (const side of ['old', 'new'] as const) {
+        const snapshot = copied?.[side];
+        if (isRecord(snapshot) && dropSideCopies(object, snapshot)) dropped = true;
+      }
+      if (dropped && !inPlace) row.metadata = JSON.stringify(copied);
     }
     const answer = await servedFor(object);
     if (answer === undefined) continue;

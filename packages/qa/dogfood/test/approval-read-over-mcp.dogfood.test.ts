@@ -31,7 +31,8 @@
 //      fields; the team member's returns exactly the team's;
 //   ⭐ the same query as the submitter returns nothing;
 //   ⭐ a member on no request reads nothing: by query, by id, by aggregate;
-//   ⭐ the snapshot field the approver may not read is not served to them;
+//   ⭐ the snapshot field the approver may not read is not served to them,
+//      on the request row or in the activity rows its writes left;
 //   ⭐ the object is listed and described; no write tool opens it, and
 //      `sys_approval_action` stays refused;
 //   ⭐ the query tool's text names the "pending for me" filter shape;
@@ -44,6 +45,7 @@ import { bootStack } from '@objectstack/verify';
 import { ApprovalsServicePlugin } from '@objectstack/plugin-approvals';
 import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
 import { MCPServerPlugin } from '@objectstack/mcp';
+import { AuditPlugin } from '@objectstack/plugin-audit';
 import { defineStack, defineFlow } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
@@ -253,7 +255,7 @@ describe('an approver\'s agent lists the approvals waiting on them over MCP (#32
         defaultPermissionSets: [...securityDefaultPermissionSets, baselineSet, submitterSet],
         fallbackPermissionSet: baselineSet.name,
       }),
-      extraPlugins: [new RecordChangeTriggerPlugin(), new ApprovalsServicePlugin(), new MCPServerPlugin()],
+      extraPlugins: [new RecordChangeTriggerPlugin(), new ApprovalsServicePlugin(), new MCPServerPlugin(), new AuditPlugin()],
     });
     ql = await stack.kernel.getServiceAsync('objectql');
     await stack.signIn();
@@ -345,6 +347,23 @@ describe('an approver\'s agent lists the approvals waiting on them over MCP (#32
     const own = await tool({ bearer: submitter }, 'get_record', { objectName: REQUEST, recordId: first.requestId });
     expect(own.isError, own.text).toBe(false);
     expect(own.text).toContain(STORED);
+  });
+
+  it('⭐ the activity rows the request\'s writes left do not serve the approver the snapshot either', async () => {
+    // Control: the mirror stored the snapshot, masked field and all, in the
+    // request's activity rows.
+    const stored = rowsOf(await ql.find('sys_activity', {
+      where: { object_name: REQUEST, record_id: first.requestId }, context: SYS.context,
+    }));
+    expect(stored.length, 'the request\'s insert left an activity row').toBeGreaterThan(0);
+    expect(JSON.stringify(stored)).toContain(STORED);
+    // The approver reads those rows on the data door (their participant read
+    // of the parent admits them) and is not served the snapshot.
+    const res = await stack.api('/data/sys_activity', { headers: { Authorization: `Bearer ${approver}` } });
+    const text = await res.text();
+    expect(res.status, text).toBe(200);
+    expect(text, 'the approver reads the request\'s activity').toContain(first.requestId);
+    expect(text).not.toContain(STORED);
   });
 
   it('⭐ the object is listed and described for the approver; no write tool opens it, and sys_approval_action stays refused', async () => {
