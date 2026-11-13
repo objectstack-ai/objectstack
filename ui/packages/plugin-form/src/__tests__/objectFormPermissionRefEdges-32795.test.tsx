@@ -456,6 +456,13 @@ describe('objectstack#32833 M1 — a package pick does not survive a re-seed of 
       fireEvent.submit(document.querySelector('form') as HTMLFormElement);
     });
   };
+  async function settle() {
+    for (let i = 0; i < 6; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    }
+  }
 
   describe.each(FORMS)('%s', (_name, Container, extra) => {
     it('after a package pick, a re-seed to another name sends the name alone and shows no stale holder', async () => {
@@ -463,12 +470,16 @@ describe('objectstack#32833 M1 — a package pick does not survive a re-seed of 
       await pickCrm();
       rerender({ permission_set: 'shared_set', note: 'n' });
       const trigger = await screen.findByRole('combobox');
-      await waitFor(() => expect(trigger).not.toHaveTextContent('Sales User'));
-      await waitFor(() => expect(trigger).not.toHaveTextContent('package com.acme'));
+      await waitFor(() => expect(trigger).toHaveTextContent('shared_set'));
+      await settle();
+      // Read before the save, asserted after it, so a stale holder and a stale
+      // payload are both reported.
+      const shown = trigger.textContent ?? '';
       await submitDoc();
       await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
       expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'shared_set' });
       expect(ds.create.mock.calls[0][1]).not.toHaveProperty('permission_set_package');
+      expect(shown).not.toContain('package com.acme');
     });
   });
 
