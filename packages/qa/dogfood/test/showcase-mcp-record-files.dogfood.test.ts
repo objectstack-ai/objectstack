@@ -689,7 +689,11 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
         const body: any = await res.json();
         expect(res.status, JSON.stringify(body)).toBe(413);
         expect(await invoicesOf(claimId)).toEqual([]);
-        expect(await ql.find('sys_file', { where: { name: { $in: picks.map((p) => p.name) } }, ...SYS })).toEqual([]);
+        // Nothing of the send is stored: no file names the claim, and the
+        // refused PDF's name is nowhere (the other two names recur in the
+        // earlier cases' claims, so they are judged by the claim instead).
+        expect(await ql.find('sys_file', { where: { ref_object: UPLOAD_CLAIM, ref_id: claimId }, ...SYS })).toEqual([]);
+        expect(await ql.find('sys_file', { where: { name: 'big-invoice.pdf' }, ...SYS })).toEqual([]);
       } finally {
         storage.setLimitsSnapshot({});
       }
