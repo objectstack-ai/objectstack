@@ -55,6 +55,7 @@ import { bundleMemberDiscriminator } from './protocol-bundle-members.js';
 import { packageScopedRefusalOf } from './protocol-meta-item-reads.js';
 import { isPairRowRemoval } from './protocol-packaged-base-refusal.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { isServedOverrideRowOf } from './served-override.js';
 import { HEAL_BINDING_UNKNOWN, type HealPackageBinding } from './protocol-heal-binding.js';
 import type { ViewContainerWrite } from './protocol-package-bindings.js';
 import type { ProtocolHost } from './protocol-host.js';
@@ -168,6 +169,42 @@ function soleHolderOf(registry: { packageScopedHoldersOf?(type: string, name: st
     const holders = typeof registry.packageScopedHoldersOf === 'function' ? registry.packageScopedHoldersOf(type, name) ?? [] : [];
     if (holders.length > 1) return null;
     return holders[0];
+}
+
+/**
+ * [#33131, ADR-0150 D4, epic #31527 red line 2] The code package a stored row
+ * bound to `packageId` is the declared override of, when that package ships
+ * `(type, name)`: the base its body names (`overrides.package`), judged by the
+ * one served-override predicate on the row's own binding and body
+ * ({@link isServedOverrideRowOf}). `undefined` for every other row: a row
+ * bound to no package, to the shipper itself, an undeclared row, or one
+ * declaring a package that ships no item of the name.
+ *
+ * The envelope such a row wears in the registry is that base's own artifact.
+ * The lookup at the row's binding (a `.custom` pair, which ships nothing)
+ * falls to the first package that registered the name, so where two packages
+ * ship it the second holder's override was registered under the first
+ * holder's `_packageId`, the registry bound it to that holder's slot, and the
+ * first holder's slot served the second holder's override (the served list,
+ * the execution view the automation engine arms from). With one shipper the
+ * two lookups answer the same artifact. No shipper is picked: the base is the
+ * one the row itself declares.
+ */
+function declaredOverrideBaseOf(
+    host: Pick<ProtocolHost, 'engine' | 'shippedArtifactsOf'>,
+    type: string,
+    name: string,
+    data: unknown,
+    packageId: string | null | undefined,
+): string | undefined {
+    const bound = boundPackageOf(packageId);
+    if (bound === undefined) return undefined;
+    const declared = (data as { overrides?: { package?: unknown } | null } | null | undefined)?.overrides?.package;
+    if (typeof declared !== 'string' || declared === '' || declared === bound) return undefined;
+    if (!shippingPackageIds(host.shippedArtifactsOf(type, name)).has(declared)) return undefined;
+    return isServedOverrideRowOf({ type, package_id: bound, metadata: data }, declared, installedManifestsOfEngine(host.engine))
+        ? declared
+        : undefined;
 }
 
 /**
@@ -712,7 +749,12 @@ export class ProtocolRegistryHydrationFacet {
         // one holder's, and with two or more holders none, registering as the
         // environment's tenant row that each holder's exact read judges
         // (ADR-0150 D4). ⛔ Never a pick between two.
-        const envelopePackage = options.packageId ?? (scoped ? soleHolderOf(registry, canonicalType, rowName) : undefined);
+        // [#33131, ADR-0150 D4] …and a pair's declared override of a shipper
+        // wears that shipper's own envelope ({@link declaredOverrideBaseOf}),
+        // never the first-registered shipper's the lookup at the pair's id
+        // falls back to.
+        const envelopePackage = declaredOverrideBaseOf(host, type, rowName, data, options.packageId)
+            ?? options.packageId ?? (scoped ? soleHolderOf(registry, canonicalType, rowName) : undefined);
         const artifact = envelopePackage === null ? undefined : host.lookupArtifactItem(
             type, (data as any).name, envelopePackage ?? undefined, bundleMemberOf(type, data),
         );
