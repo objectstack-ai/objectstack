@@ -144,16 +144,11 @@ describe('#8422 stdio bridge by-id writes throw the shared not-found envelope', 
 function makeRowFilteringEngine() {
   const row = { id: 'secret1', title: 'owner only' };
   const visibleTo = (opts?: { context?: { userId?: string } }) => opts?.context?.userId === 'owner';
-  return {
-    find: vi.fn(async (_object: string, query?: { where?: { id?: unknown } }, opts?: { context?: { userId?: string } }) =>
-      query?.where?.id === row.id && visibleTo(opts) ? [row] : []),
-    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
-    insert: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
-    count: vi.fn(async () => 0),
-    aggregate: vi.fn(async () => [{ n: 0 }]),
-  };
+  // The file's one engine double, with its by-id read made row-filtering.
+  const engine = makeEmptyEngine();
+  const find = vi.fn(async (_object: string, query?: { where?: { id?: unknown } }, opts?: { context?: { userId?: string } }) =>
+    query?.where?.id === row.id && visibleTo(opts) ? [row] : []);
+  return Object.assign(engine, { find });
 }
 
 function stdioBridgeAs(principal: ExecutionContext) {
