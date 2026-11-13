@@ -32,6 +32,13 @@
       "evidence": "packages/plugins/plugin-security/src/delegated-admin-gate.ts:positionIsDelegatable",
       "proof": "packages/qa/dogfood/test/delegation-of-duty.dogfood.test.ts#delegation-of-duty",
       "note": "ADR-0091 D3: gates the self-service delegation branch — a non-admin may delegate this position only when delegatable=true, time-boxed and reasoned (enforced fail-closed in the D12 gate). ADR-0054 high-risk class (delegation): the proof drives a gated delegation write over HTTP and asserts the delegate's grant resolves in-window and dies at valid_until."
+    },
+    "renamedFrom": {
+      "status": "live",
+      "verifiedAt": "2026-11-13",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/plugins/plugin-security/src/position-renamed-holder-carry.ts#carryRenamedPositionHolders (the executor: at kernel:bootstrapped, from SecurityPlugin's start hooks, it reads every catalog position's renamedFrom and moves each sys_user_position row of an allowed old name to the new name as the system, or refuses the old name by reason: claimed-twice, still-declared, held-by-other, owned-by-other, switched-off); packages/spec/src/identity/position.zod.ts#refuseSelfRenamedFrom and #refuseDishonestPositionRenamedFrom (the parse-time doors)",
+      "note": "LIVE since objectstack#32983 (ruling A1, record 6841971722): holders only; every other stored reference to an old name is named in the boot log, never rewritten. Pinned in packages/plugins/plugin-security/src/position-renamed-holder-carry.test.ts and packages/spec/src/identity/position-renamed-from.test.ts."
     }
   }
 }

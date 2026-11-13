@@ -71,7 +71,8 @@ import { FlowFunctionEntrySchema, FlowFunctionEffectSchema, FlowFunctionLoweredD
 import { JobSchema } from './system/job.zod';
 
 // Security Protocol
-import { PositionSchema, refuseDishonestPositionRenamedFrom } from './identity/position.zod';
+import { PositionSchema } from './identity/position.zod';
+import { refuseDishonestPositionRenamedFrom } from './identity/position-renamed-from';
 import { PermissionSetSchema, findHierarchyScopeGrants } from './security/permission.zod';
 import { judgePermissionSetOwnerBinding } from './security/permission-set-owner-binding';
 import { judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from './kernel/collection-item-owner-stamp';

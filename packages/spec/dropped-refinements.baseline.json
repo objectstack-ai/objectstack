@@ -156,6 +156,8 @@
         "manifest.permissions.element.fields.valueType",
         "manifest.permissions.element.objects.valueType.out.out",
         "manifest.permissions.element.rowLevelSecurity.element",
+        "manifest.positions",
+        "manifest.positions.element",
         "manifest.reports.element",
         "manifest.reports.element.blocks.element",
         "manifest.reports.element.blocks.element.runtimeFilter",
@@ -330,6 +332,8 @@
         "data.options[1].manifest.permissions.element.fields.valueType",
         "data.options[1].manifest.permissions.element.objects.valueType.out.out",
         "data.options[1].manifest.permissions.element.rowLevelSecurity.element",
+        "data.options[1].manifest.positions",
+        "data.options[1].manifest.positions.element",
         "data.options[1].manifest.reports.element",
         "data.options[1].manifest.reports.element.blocks.element",
         "data.options[1].manifest.reports.element.blocks.element.runtimeFilter",
@@ -475,6 +479,8 @@
         "options[1].manifest.permissions.element.fields.valueType",
         "options[1].manifest.permissions.element.objects.valueType.out.out",
         "options[1].manifest.permissions.element.rowLevelSecurity.element",
+        "options[1].manifest.positions",
+        "options[1].manifest.positions.element",
         "options[1].manifest.reports.element",
         "options[1].manifest.reports.element.blocks.element",
         "options[1].manifest.reports.element.blocks.element.runtimeFilter",
@@ -560,6 +566,8 @@
         "data.packages.element.options[1].manifest.permissions.element.fields.valueType",
         "data.packages.element.options[1].manifest.permissions.element.objects.valueType.out.out",
         "data.packages.element.options[1].manifest.permissions.element.rowLevelSecurity.element",
+        "data.packages.element.options[1].manifest.positions",
+        "data.packages.element.options[1].manifest.positions.element",
         "data.packages.element.options[1].manifest.reports.element",
         "data.packages.element.options[1].manifest.reports.element.blocks.element",
         "data.packages.element.options[1].manifest.reports.element.blocks.element.runtimeFilter",
@@ -1228,6 +1236,11 @@
         "",
         "syncUrl",
         "url"
+      ]
+    },
+    "identity/Position": {
+      "sites": [
+        ""
       ]
     },
     "identity/SCIMError": {
