@@ -29,8 +29,12 @@
  * sender is the configured address, with a display name naming the calling
  * user beside the organization; at most `BODY_MAIL_RECIPIENT_LIMIT` recipients
  * per message across `to`, `cc` and `bcc` (each slot by the schema, the sum
- * here); and no send while the organization's mail log already records
- * {@link appMailHourlyLimit} messages in the last hour.
+ * here), each slot and a `replyTo` within what the mail log's columns hold as
+ * recorded; no send while the organization's mail log already records
+ * {@link appMailHourlyLimit} messages in the last hour; and no send at all
+ * unless the mail log records it (`requireLogRow`). The hourly count is read
+ * before the send and is not held across it, so callers racing the last free
+ * slot can each pass it: the limit bounds a body's volume, not an exact count.
  *
  * Timeline: the entry is written by the activity feed's owner
  * (`appendAppActivity` on the `audit` service, `@objectstack/plugin-audit`),
@@ -39,6 +43,9 @@
  */
 
 import {
+  BODY_ACTIVITY_METADATA_LIMIT,
+  BODY_MAIL_ADDRESS_LIMIT,
+  BODY_MAIL_ADDRESS_LIST_LIMIT,
   BODY_MAIL_RECIPIENT_LIMIT,
   BodyActivityAppendInputSchema,
   BodyMailSendInputSchema,
@@ -55,7 +62,14 @@ export interface BodyDoorCaller {
   /** The caller's active organization, or `undefined` when it has none. */
   organizationId: string | undefined;
   /** The execution context a record the body points at is read in: the caller's own. */
-  readContext: Record<string | symbol, unknown>;
+  readContext?: Record<string | symbol, unknown>;
+  /**
+   * Read one record in the caller's own scope, answering the row or nothing.
+   * Where the host holds the caller's scope as an api rather than a context
+   * (a hook: `body-runner.ts`), it reads through this, and `readContext` is
+   * not read.
+   */
+  readRecord?: (object: string, id: string) => Promise<unknown>;
 }
 
 /** What the body runner hands {@link buildBodyDoors} for one invocation. */
@@ -130,12 +144,64 @@ function recipientCount(value: unknown): number {
 }
 
 /**
+ * The characters one address takes as the mail log records it: the bare
+ * address, or `"Name" <address>` with each `"` in the name escaped. Read the
+ * way {@link BodyMailSendInputSchema}'s description states the limits, with
+ * every display name counted as quoted.
+ */
+function recordedAddressLength(value: unknown): number {
+  if (typeof value === 'string') return value.trim().length;
+  const { name, address } = value as { name?: string; address: string };
+  const shown = name?.trim() ?? '';
+  const bare = address.trim().length;
+  return shown.length === 0 ? bare : shown.length + (shown.match(/"/g)?.length ?? 0) + 5 + bare;
+}
+
+/** The characters one recipient slot takes as recorded: its addresses joined by `", "`. */
+function recordedSlotLength(value: unknown): number {
+  if (value === undefined) return 0;
+  const list = Array.isArray(value) ? value : [value];
+  return list.reduce((sum: number, a) => sum + recordedAddressLength(a), 0) + 2 * Math.max(0, list.length - 1);
+}
+
+/** Refuse a message whose slots, as recorded, exceed what the mail log's columns hold. */
+function refuseOverRecordedLimits(message: BodyMailSendInput): void {
+  const recipients = recipientCount(message.to) + recipientCount(message.cc) + recipientCount(message.bcc);
+  if (recipients > BODY_MAIL_RECIPIENT_LIMIT) {
+    throw doorError(
+      'VALIDATION_ERROR',
+      `ctx.email.send: a message may name at most ${BODY_MAIL_RECIPIENT_LIMIT} recipients across \`to\`, \`cc\` and \`bcc\`; this one names ${recipients}. Send it in smaller messages.`,
+    );
+  }
+  for (const slot of ['to', 'cc', 'bcc'] as const) {
+    const length = recordedSlotLength(message[slot]);
+    if (length > BODY_MAIL_ADDRESS_LIST_LIMIT) {
+      throw doorError(
+        'VALIDATION_ERROR',
+        `ctx.email.send: \`${slot}\` takes ${length} characters as the mail log records it ("Name" <address>, joined by ", "), ` +
+          `over the ${BODY_MAIL_ADDRESS_LIST_LIMIT} it holds. Send it in smaller messages.`,
+      );
+    }
+  }
+  if (message.replyTo !== undefined) {
+    const length = recordedAddressLength(message.replyTo);
+    if (length > BODY_MAIL_ADDRESS_LIMIT) {
+      throw doorError(
+        'VALIDATION_ERROR',
+        `ctx.email.send: \`replyTo\` takes ${length} characters as the mail log records it ("Name" <address>), over the ${BODY_MAIL_ADDRESS_LIMIT} it holds.`,
+      );
+    }
+  }
+}
+
+/**
  * The caller's read scope: the context with the body's elevation taken off.
  * An action body's engine context is the caller's envelope elevated
- * (`buildActionExecutionContext`); this hands back the envelope.
+ * (`buildActionExecutionContext`); this hands back the envelope. No context is
+ * a scope with no principal.
  */
 export function callerScopeOf(context: Record<string | symbol, unknown> | undefined): Record<string | symbol, unknown> {
-  if (!context || typeof context !== 'object') return { isSystem: true };
+  if (!context || typeof context !== 'object') return {};
   const out: Record<string | symbol, unknown> = { ...context };
   if (out[APP_AUTOMATION_ELEVATION] !== undefined) {
     delete out[APP_AUTOMATION_ELEVATION];
@@ -145,10 +211,13 @@ export function callerScopeOf(context: Record<string | symbol, unknown> | undefi
 }
 
 /** Answer whether `object`/`id` is a record the caller can read. Never throws. */
-async function readableByCaller(ql: any, object: string, id: string, readContext: Record<string | symbol, unknown>): Promise<boolean> {
-  if (!ql || typeof ql.findOne !== 'function') return false;
+async function readableByCaller(ql: any, object: string, id: string, caller: BodyDoorCaller): Promise<boolean> {
   try {
-    const row = await ql.findOne(object, { where: { id }, fields: ['id'] }, { context: readContext });
+    let row: any;
+    if (caller.readRecord) row = await caller.readRecord(object, id);
+    else if (caller.readContext && ql && typeof ql.findOne === 'function') {
+      row = await ql.findOne(object, { where: { id }, fields: ['id'] }, { context: caller.readContext });
+    } else return false;
     return row != null && String(row.id) === id;
   } catch {
     return false;
@@ -156,7 +225,7 @@ async function readableByCaller(ql: any, object: string, id: string, readContext
 }
 
 async function requireReadable(ql: any, ref: { object: string; id: string }, caller: BodyDoorCaller, door: string): Promise<void> {
-  if (await readableByCaller(ql, ref.object, ref.id, caller.readContext)) return;
+  if (await readableByCaller(ql, ref.object, ref.id, caller)) return;
   throw doorError(
     'RECORD_NOT_FOUND',
     `${door}: no '${ref.object}' record '${ref.id}' that this caller can read. The door acts only on a record the caller can read.`,
@@ -205,10 +274,28 @@ async function senderFor(ql: any, email: IEmailService, caller: BodyDoorCaller):
     nameOf(ql, 'sys_organization', caller.organizationId),
   ]);
   const base = orgName ?? configuredName;
-  const name = userName ? (base ? `${userName} via ${base}` : userName) : configuredName;
+  const name = fitSenderName(userName ? (base ? `${userName} via ${base}` : userName) : configuredName, address);
   return name ? { name, address } : { address };
 }
 
+/**
+ * A sender display name cut so `"Name" <address>` fits the mail log's sender
+ * column ({@link BODY_MAIL_ADDRESS_LIMIT}); none when the address leaves no room.
+ */
+function fitSenderName(name: string | undefined, address: string): string | undefined {
+  if (!name) return undefined;
+  const room = BODY_MAIL_ADDRESS_LIMIT - address.length - 5;
+  if (room < 1) return undefined;
+  const cut = name.slice(0, room).trim();
+  return cut.length > 0 ? cut : undefined;
+}
+
+/**
+ * Refuse a send while the mail log already records the hourly limit: the
+ * caller's organization's messages, or, for a caller with no organization,
+ * the whole log's. Read before the send, not held across it (see the module
+ * docblock).
+ */
 async function refuseOverHourlyLimit(ql: any, caller: BodyDoorCaller): Promise<void> {
   const limit = appMailHourlyLimit();
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -221,9 +308,12 @@ async function refuseOverHourlyLimit(ql: any, caller: BodyDoorCaller): Promise<v
   }
   const sent = await ql.count('sys_email', { where }, { context: { isSystem: true } });
   if (typeof sent === 'number' && sent >= limit) {
+    const counted = caller.organizationId
+      ? "this organization's mail log records"
+      : 'with no organization to count by, the whole mail log records';
     throw doorError(
       'RATE_LIMIT_EXCEEDED',
-      `ctx.email.send: this organization's mail log records ${sent} messages in the last hour, at the limit of ${limit}. ` +
+      `ctx.email.send: ${counted} ${sent} messages in the last hour, at the limit of ${limit}. ` +
         'Try again later; an operator raises the limit with OS_EMAIL_APP_SEND_HOURLY_LIMIT.',
     );
   }
@@ -238,13 +328,7 @@ export function buildBodyDoors(opts: BodyDoorOptions): BodyDoors {
     email: {
       async send(input: unknown) {
         const message = parseInput<BodyMailSendInput>(BodyMailSendInputSchema as any, input, 'ctx.email.send');
-        const recipients = recipientCount(message.to) + recipientCount(message.cc) + recipientCount(message.bcc);
-        if (recipients > BODY_MAIL_RECIPIENT_LIMIT) {
-          throw doorError(
-            'VALIDATION_ERROR',
-            `ctx.email.send: a message may name at most ${BODY_MAIL_RECIPIENT_LIMIT} recipients across \`to\`, \`cc\` and \`bcc\`; this one names ${recipients}. Send it in smaller messages.`,
-          );
-        }
+        refuseOverRecordedLimits(message);
         const email = service<IEmailService>(getService, 'email');
         if (!email || typeof email.send !== 'function') {
           throw doorError('NOT_IMPLEMENTED', 'ctx.email.send: this deployment has no mail service.');
@@ -260,6 +344,7 @@ export function buildBodyDoors(opts: BodyDoorOptions): BodyDoors {
           ...bounded.input,
           ...(related ? { relatedObject: related.object, relatedId: related.id } : {}),
           ...(from ? { from } : {}),
+          requireLogRow: true,
         } as SendEmailInput;
         const result = await email.send(sendInput);
         return { id: String(result?.id ?? ''), status: String(result?.status ?? '') };
@@ -272,6 +357,15 @@ export function buildBodyDoors(opts: BodyDoorOptions): BodyDoors {
           input,
           'ctx.activity.append',
         );
+        if (entry.metadata !== undefined) {
+          const size = JSON.stringify(entry.metadata)?.length ?? 0;
+          if (size > BODY_ACTIVITY_METADATA_LIMIT) {
+            throw doorError(
+              'VALIDATION_ERROR',
+              `ctx.activity.append: \`metadata\` takes ${size} characters as JSON, over the ${BODY_ACTIVITY_METADATA_LIMIT} an entry holds.`,
+            );
+          }
+        }
         const audit = service<{ appendAppActivity?: (e: unknown, s: unknown) => Promise<{ id: string }> }>(getService, 'audit');
         if (!audit || typeof audit.appendAppActivity !== 'function') {
           throw doorError('NOT_IMPLEMENTED', 'ctx.activity.append: this deployment has no activity feed.');

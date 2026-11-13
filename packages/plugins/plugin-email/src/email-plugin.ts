@@ -1114,7 +1114,10 @@ export class EmailServicePlugin implements Plugin {
                     const fresh = Array.isArray(rows) ? rows[0] : (rows as any)?.data?.[0];
                     const target = fresh ?? row;
                     if (target.status !== 'queued' || target.message_id) return;
-                    await svc.deliverPersistedRow(target, undefined, object);
+                    // Sent from the configured sender, as the insert-time bound
+                    // recorded it (`outbox-sender-bound.ts`), whatever the row
+                    // says by the time it is read here.
+                    await svc.deliverPersistedRow(target, { asConfiguredSender: true }, object);
                   } catch (err: any) {
                     // `error`, not `warn` (#5161): the insert returned, the row
                     // is there, everything looks normal — and the mail was NOT

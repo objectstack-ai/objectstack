@@ -25,10 +25,24 @@ describe('an outbox row the mail service did not write is sent as the configured
     expect(row.from_address).toBe('Acme <noreply@acme.test>');
   });
 
-  it('leaves the column empty when no sender is configured, so the delivery fails that row', () => {
+  it('empties the column when no sender is configured, so the mail log refuses the row', () => {
     const row = { status: 'queued', from_address: 'ceo@acme.test' };
     boundOutboxRowSender('sys_email', row, source({ from: undefined }));
     expect(row.from_address).toBe('');
+  });
+
+  it('takes every sender header out of the row\'s headers, and keeps the others', () => {
+    const row: Record<string, unknown> = {
+      status: 'queued',
+      from_address: 'ceo@acme.test',
+      headers_json: JSON.stringify({ From: 'ceo@acme.test', ' sender ': 'x@acme.test', 'Return-Path': 'y@acme.test', 'X-Campaign': 'q4' }),
+    };
+    boundOutboxRowSender('sys_email', row, source());
+    expect(JSON.parse(String(row.headers_json))).toEqual({ 'X-Campaign': 'q4' });
+
+    const only: Record<string, unknown> = { status: 'queued', headers_json: JSON.stringify({ Sender: 'x@acme.test' }) };
+    boundOutboxRowSender('sys_email', only, source());
+    expect(only.headers_json).toBeNull();
   });
 
   it('CONTROL: a row the service wrote keeps the sender its send decided', () => {

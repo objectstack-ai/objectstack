@@ -881,6 +881,12 @@ export class QuickJSScriptRunner implements ScriptRunner {
     // declared the token on a host built without kernel services is told the
     // door is unavailable, never handed `undefined is not a function`. Settled
     // through the same deferred-promise pump every other host call uses.
+    //
+    // A door call inside `ctx.api.transaction` is refused (`409
+    // RESOURCE_CONFLICT`): a door reads and writes outside the body's
+    // transaction, so what it wrote would outlive a rollback and what the body
+    // wrote inside it is not yet readable to it. Called after the transaction
+    // settles, it acts on what was committed.
     const installDoor = (
       member: 'email' | 'activity',
       fnName: 'send' | 'append',
@@ -901,6 +907,15 @@ export class QuickJSScriptRunner implements ScriptRunner {
         deferreds.add(deferred);
         void (async () => {
           try {
+            if (txState.open) {
+              throw Object.assign(
+                new Error(
+                  `ctx.${member}.${fnName} cannot be called inside ctx.api.transaction: the door acts outside the transaction, ` +
+                    'so a rollback would not undo it. Call it after the transaction commits.',
+                ),
+                { code: 'RESOURCE_CONFLICT', status: 409, statusCode: 409 },
+              );
+            }
             const seam = (ctx[member] as Record<string, ((i: unknown) => Promise<unknown>) | undefined> | undefined)?.[fnName];
             if (typeof seam !== 'function') {
               throw Object.assign(

@@ -23,12 +23,30 @@ import { requiredOneOf } from '../shared/refinement-projection';
 export const BODY_MAIL_RECIPIENT_LIMIT = 50;
 
 /**
+ * The most characters each of `to`, `cc` and `bcc` may take as the mail log
+ * records it: every recipient as `"Name" <address>` (or the bare address),
+ * joined by `", "`. The log's address columns hold this many.
+ */
+export const BODY_MAIL_ADDRESS_LIST_LIMIT = 4000;
+
+/** The most characters an address may have, and a `replyTo` as recorded (`"Name" <address>`). */
+export const BODY_MAIL_ADDRESS_LIMIT = 320;
+
+/** The most characters `ctx.activity.append`'s `metadata` may take, written as JSON. */
+export const BODY_ACTIVITY_METADATA_LIMIT = 8000;
+
+/**
  * One recipient: a bare address, or a display name with an address. The same
  * two forms `SendEmailInput` takes (`@objectstack/spec/contracts`).
  */
 const BodyMailAddressSchema = z.union([
-  z.string().min(1),
-  z.object({ name: z.string().optional(), address: z.string().min(1) }).strict(),
+  z.string().min(1).max(BODY_MAIL_ADDRESS_LIMIT),
+  z
+    .object({
+      name: z.string().max(200).optional(),
+      address: z.string().min(1).max(BODY_MAIL_ADDRESS_LIMIT),
+    })
+    .strict(),
 ]);
 
 const BodyMailAddressesSchema = z.union([
@@ -43,8 +61,8 @@ const BodyMailAddressesSchema = z.union([
  */
 export const BodyDoorRecordRefSchema = z
   .object({
-    object: z.string().min(1).describe('Object name of the record'),
-    id: z.string().min(1).describe('Record id'),
+    object: z.string().min(1).max(100).describe('Object name of the record'),
+    id: z.string().min(1).max(100).describe('Record id'),
   })
   .strict()
   .describe('A record the door reads in the caller\'s scope before it acts');
@@ -56,10 +74,15 @@ export type BodyDoorRecordRef = z.input<typeof BodyDoorRecordRefSchema>;
  * The sender is the deployment's configured sender, and the door names the
  * calling user beside the organization in its display name; a reply goes to
  * `replyTo`. The message is recorded as sent by the calling user and under the
- * caller's organization. At least one of `text` or `html`. At most
+ * caller's organization. At least one of `text` or `html`.
+ *
+ * Two limits read across fields, which a JSON Schema cannot state exactly, so
+ * the schema's description states them and the door holds them: at most
  * {@link BODY_MAIL_RECIPIENT_LIMIT} recipients across `to`, `cc` and `bcc`
- * together: each slot is held to that number here, and the door refuses a call
- * whose three slots add up to more.
+ * together (each slot alone is held to that number here), and each of the
+ * three at most {@link BODY_MAIL_ADDRESS_LIST_LIMIT} characters as the mail log
+ * records it; a `replyTo` as recorded is at most
+ * {@link BODY_MAIL_ADDRESS_LIMIT}.
  */
 export const BodyMailSendInputSchema = z
   .object({
@@ -67,9 +90,9 @@ export const BodyMailSendInputSchema = z
     cc: BodyMailAddressesSchema.optional().describe('Carbon-copy recipients'),
     bcc: BodyMailAddressesSchema.optional().describe('Blind carbon-copy recipients'),
     replyTo: BodyMailAddressSchema.optional().describe('Reply-To address; the sender itself is the configured one'),
-    subject: z.string().min(1).describe('Subject line'),
-    text: z.string().optional().describe('Plain-text body'),
-    html: z.string().optional().describe('HTML body'),
+    subject: z.string().min(1).max(998).describe('Subject line'),
+    text: z.string().max(1_000_000).optional().describe('Plain-text body'),
+    html: z.string().max(1_000_000).optional().describe('HTML body'),
     related: BodyDoorRecordRefSchema.optional().describe('The record the message is about'),
   })
   .strict()
@@ -77,8 +100,14 @@ export const BodyMailSendInputSchema = z
     message: 'A message needs a body: give `text`, `html`, or both.',
     path: ['text'],
   })
-  .describe('ctx.email.send input: a message a script body hands to the mail service');
-export type BodyMailSendInput = z.infer<typeof BodyMailSendInputSchema>;
+  .describe(
+    'ctx.email.send input: a message a script body hands to the mail service. ' +
+      `At most ${BODY_MAIL_RECIPIENT_LIMIT} recipients across to, cc and bcc together; ` +
+      `each of to, cc and bcc at most ${BODY_MAIL_ADDRESS_LIST_LIMIT} characters as recorded ` +
+      '("Name" <address>, joined by ", "); ' +
+      `a replyTo at most ${BODY_MAIL_ADDRESS_LIMIT} characters as recorded.`,
+  );
+export type BodyMailSendInput = z.input<typeof BodyMailSendInputSchema>;
 
 /**
  * `ctx.activity.append(input)` — one entry a body adds to a record's activity
@@ -89,18 +118,26 @@ export type BodyMailSendInput = z.infer<typeof BodyMailSendInputSchema>;
  * timeline vocabulary less the values only the platform records
  * (`SYS_ACTIVITY_PLATFORM_TYPES`); the record, and `source` when given, must be
  * readable by the caller. `metadata` is a plain object the timeline stores
- * beside the entry, and may not use the keys the platform's own entries carry.
+ * beside the entry, at most {@link BODY_ACTIVITY_METADATA_LIMIT} characters as
+ * JSON (a limit the door holds, stated in the description), and may not use the
+ * keys the platform's own entries carry.
  */
 export const BodyActivityAppendInputSchema = z
   .object({
-    object: z.string().min(1).describe('Object name of the record the entry is about'),
-    recordId: z.string().min(1).describe('Id of the record the entry is about'),
-    type: z.string().min(1).describe('Activity kind, from the open vocabulary less the platform-only values'),
+    object: z.string().min(1).max(255).describe('Object name of the record the entry is about'),
+    recordId: z.string().min(1).max(255).describe('Id of the record the entry is about'),
+    type: z.string().min(1).max(100).describe('Activity kind, from the open vocabulary less the platform-only values'),
     summary: z.string().min(1).max(500).describe('One-line summary'),
-    recordLabel: z.string().optional().describe('Display label of the record, as of the entry'),
+    recordLabel: z.string().max(255).optional().describe('Display label of the record, as of the entry'),
     source: BodyDoorRecordRefSchema.optional().describe('The record the entry points at for its detail'),
-    metadata: z.record(z.string(), z.unknown()).optional().describe('Display hints stored beside the entry'),
+    metadata: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe(`Display hints stored beside the entry, at most ${BODY_ACTIVITY_METADATA_LIMIT} characters as JSON`),
   })
   .strict()
-  .describe('ctx.activity.append input: one entry a script body adds to a record timeline');
-export type BodyActivityAppendInput = z.infer<typeof BodyActivityAppendInputSchema>;
+  .describe(
+    'ctx.activity.append input: one entry a script body adds to a record timeline. ' +
+      `metadata is at most ${BODY_ACTIVITY_METADATA_LIMIT} characters as JSON.`,
+  );
+export type BodyActivityAppendInput = z.input<typeof BodyActivityAppendInputSchema>;

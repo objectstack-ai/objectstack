@@ -78,6 +78,7 @@ import { mapDataError } from '@objectstack/types';
 import { resolveHookRefusal, type HookRefusalI18nSource } from './hook-refusal-catalogue.js';
 import { isRelayedSandboxRefusal } from './quickjs-runner.js';
 import { buildBodyDoors, callerScopeOf, type BodyDoorCaller } from './body-doors.js';
+import { deriveHookApi, seedHookUnreadMembership, seedHookUserGrants } from '@objectstack/objectql';
 
 interface FactoryOptions {
   ql: any;
@@ -95,6 +96,12 @@ interface FactoryOptions {
    * time. Absent, a body that calls either door is told it is unavailable.
    */
   getService?: (name: string) => unknown;
+  /**
+   * The package that holds the bodies this runner binds, the first part of a
+   * door's `origin`. Absent, {@link appId}: a bundle with no `packages[]` is
+   * its own one package.
+   */
+  originPackageId?: string;
 }
 
 /**
@@ -486,7 +493,7 @@ export function hookBodyRunnerFactory(
         buildBodyLogSurface(opts, { kind: 'hook', name: hook.name }),
         buildTitleSurface(engineCtx, opts.ql, { kind: 'hook', name: hook.name }),
       );
-      installBodyDoors(sandboxCtx, opts, { kind: 'hook', name: hook.name }, hookDoorCaller(engineCtx));
+      installBodyDoors(sandboxCtx, opts, { kind: 'hook', name: hook.name }, hookDoorCaller(engineCtx, hook.name));
       try {
         opts.logger?.debug?.('[BodyRunner] hook fired', { appId: opts.appId, hook: hook.name });
         const result = await runner.run(body, sandboxCtx, {
@@ -1188,7 +1195,13 @@ function installBodyDoors(
   origin: { kind: 'hook' | 'action' | 'job'; name: string },
   caller: BodyDoorCaller,
 ): void {
-  const doors = buildBodyDoors({ ql: opts.ql, getService: opts.getService, packageId: opts.appId, origin, caller });
+  const doors = buildBodyDoors({
+    ql: opts.ql,
+    getService: opts.getService,
+    packageId: opts.originPackageId ?? opts.appId,
+    origin,
+    caller,
+  });
   sandboxCtx.email = doors.email;
   sandboxCtx.activity = doors.activity;
 }
@@ -1198,16 +1211,54 @@ function nonEmptyString(value: unknown): string | undefined {
 }
 
 /**
- * A hook body's caller: the session of the write that fired it, and the scope
- * that write ran in ({@link executionContextFromHook}). A hook fired by a
- * write with no caller reads as the system.
+ * A hook body's caller: the user of the write that fired it, read in that
+ * user's own scope.
+ *
+ * The scope is built from the write's whole execution context, which only the
+ * engine's hook api holds (`ctx.session` is a projection of it), by the two
+ * steps a `runAs: 'user'` hook takes (`hook-run-as.ts`, `@objectstack/objectql`):
+ * the context as the user, never as the system, whatever elevation the write
+ * or the hook's own `runAs` carried; then the user's grants, seeded where the
+ * context carries none. Built once per invocation, at the first record a door
+ * reads, so a body that never calls a door costs nothing.
+ *
+ * A write with no calling user stamps no user, and a door reads only what the
+ * body's own api reads. A host whose hook api cannot derive a scope (a hook
+ * context assembled by hand) reads with the session's user and organization
+ * and no elevation.
  */
-function hookDoorCaller(engineCtx: any): BodyDoorCaller {
+function hookDoorCaller(engineCtx: any, hookName: string): BodyDoorCaller {
   const session = engineCtx?.session;
+  const userId = nonEmptyString(session?.userId);
+  const organizationId = nonEmptyString(session?.organizationId);
+  const api = engineCtx?.api;
+  const derivable = !!api && typeof api.object === 'function' && (!userId || typeof api.withRunAs === 'function');
+  if (!derivable) {
+    return {
+      userId,
+      organizationId,
+      readContext: userId ? { userId, ...(organizationId ? { tenantId: organizationId } : {}) } : {},
+    };
+  }
+  let scoped: Promise<any> | undefined;
+  const callerApi = (): Promise<any> =>
+    (scoped ??= (async () => {
+      if (!userId) return api;
+      const asUser = deriveHookApi(api, 'user', {
+        hook: hookName,
+        object: typeof engineCtx?.object === 'string' ? engineCtx.object : undefined,
+        event: engineCtx?.event,
+      });
+      try {
+        return await seedHookUserGrants(asUser);
+      } catch {
+        return seedHookUnreadMembership(asUser);
+      }
+    })());
   return {
-    userId: nonEmptyString(session?.userId),
-    organizationId: nonEmptyString(session?.organizationId),
-    readContext: executionContextFromHook(engineCtx) ?? { isSystem: true },
+    userId,
+    organizationId,
+    readRecord: async (object, id) => (await callerApi()).object(object).findOne({ where: { id }, fields: ['id'] }),
   };
 }
 

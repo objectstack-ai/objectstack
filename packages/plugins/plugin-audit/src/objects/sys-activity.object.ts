@@ -375,8 +375,8 @@ export const SysActivity = ObjectSchema.create({
     }),
 
     // The activity door (`app-activity-door.ts`) stamps the app code that wrote
-    // an entry here; the platform's own writers leave it empty, so a reader
-    // tells an app's entry from a recorded one.
+    // an entry here. Every other writer leaves it empty: the platform's own,
+    // and, while it is still taken, an app's insert into this object.
     origin: Field.text({
       label: 'Origin',
       required: false,
@@ -385,7 +385,7 @@ export const SysActivity = ObjectSchema.create({
       maxLength: 500,
       description:
         'The app code that added this entry through the activity door, as "<package>/<kind>:<name>" '
-        + '(for example "com.acme.crm/action:send_email"). Empty on an entry the platform recorded.',
+        + '(for example "com.acme.crm/action:send_email"). Empty on an entry not written through the activity door.',
       group: 'Context',
     }),
 

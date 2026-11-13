@@ -38,7 +38,7 @@ const result = BodyActivityAppendInputSchema.parse(data);
 
 ## BodyActivityAppendInput
 
-ctx.activity.append input: one entry a script body adds to a record timeline
+ctx.activity.append input: one entry a script body adds to a record timeline. metadata is at most 8000 characters as JSON.
 
 ### Properties
 
@@ -50,7 +50,7 @@ ctx.activity.append input: one entry a script body adds to a record timeline
 | **summary** | `string` | ✅ | One-line summary |
 | **recordLabel** | `string` | optional | Display label of the record, as of the entry |
 | **source** | `{ object: string; id: string }` | optional | The record the entry points at for its detail |
-| **metadata** | `Record<string, any>` | optional | Display hints stored beside the entry |
+| **metadata** | `Record<string, any>` | optional | Display hints stored beside the entry, at most 8000 characters as JSON |
 
 ### Nested Shape: `BodyActivityAppendInput.source`
 
@@ -78,7 +78,7 @@ A record the door reads in the caller's scope before it acts
 
 ## BodyMailSendInput
 
-ctx.email.send input: a message a script body hands to the mail service
+ctx.email.send input: a message a script body hands to the mail service. At most 50 recipients across to, cc and bcc together; each of to, cc and bcc at most 4000 characters as recorded ("Name" `<address>`, joined by ", "); a replyTo at most 320 characters as recorded.
 
 ### Properties
 

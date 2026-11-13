@@ -68,6 +68,42 @@ describe('the door capabilities gate ctx.email.send and ctx.activity.append', ()
     expect(got).toEqual([{ to: 'pat@example.test', subject: 'Hi', text: 'x' }]);
   });
 
+  it('refuses a door call inside ctx.api.transaction, and serves one after it settles', async () => {
+    const reached: unknown[] = [];
+    const seam = async (input: unknown) => {
+      reached.push(input);
+      return { id: 'em_1', status: 'queued' };
+    };
+    const api = { object: () => ({}) };
+    const err = await refusalOf(() =>
+      runner.runScript(
+        {
+          language: 'js',
+          source:
+            "await ctx.api.transaction(async () => { await ctx.email.send({ to: 'pat@example.test', subject: 'Hi', text: 'x' }); });",
+          capabilities: ['api.transaction', 'email.send'],
+        },
+        { input: {}, api, email: { send: seam } } as any,
+        actionOpts,
+      ),
+    );
+    expect(err.innerMessage).toContain('ctx.email.send cannot be called inside ctx.api.transaction');
+    expect(reached).toHaveLength(0);
+
+    const out = await runner.runScript(
+      {
+        language: 'js',
+        source:
+          "await ctx.api.transaction(async () => {}); var r = await ctx.email.send({ to: 'pat@example.test', subject: 'Hi', text: 'x' }); return r.status;",
+        capabilities: ['api.transaction', 'email.send'],
+      },
+      { input: {}, api, email: { send: seam } } as any,
+      actionOpts,
+    );
+    expect((out as { value: unknown }).value).toBe('queued');
+    expect(reached).toHaveLength(1);
+  });
+
   it('tells a body on a host with no door that the door is not available', async () => {
     const err = await refusalOf(() =>
       runner.runScript(
@@ -141,5 +177,37 @@ describe('a hook body\'s mail and timeline entry carry the user whose write fire
         stamp: { actorId: 'usr_ann', organizationId: 'org_acme', origin: 'com.acme.crm/hook:mail_new_contact' },
       },
     ]);
+  });
+
+  it('names the package that holds the body in the origin, not the bundle', async () => {
+    const appended: any[] = [];
+    const getService = (name: string): unknown =>
+      name === 'audit'
+        ? {
+            appendAppActivity: async (entry: unknown, stamp: unknown) => {
+              appended.push({ entry, stamp });
+              return { id: 'act_1' };
+            },
+          }
+        : undefined;
+    const ql = { findOne: async (_object: string, query: any) => ({ id: query.where.id }) };
+    const factory = hookBodyRunnerFactory(runner, {
+      ql,
+      appId: 'com.acme.bundle',
+      originPackageId: 'com.acme.crm',
+      getService,
+    } as any);
+    const fn = factory({
+      name: 'note_contact',
+      object: 'crm_contact',
+      events: ['afterInsert'],
+      body: {
+        language: 'js',
+        source: "await ctx.activity.append({ object: 'crm_contact', recordId: 'c1', type: 'completed', summary: 'x' });",
+        capabilities: ['activity.append'],
+      },
+    } as any);
+    await fn!({ object: 'crm_contact', event: 'afterInsert', input: {}, result: { id: 'c1' }, session: { userId: 'usr_ann', organizationId: 'org_acme' } } as any);
+    expect(appended[0].stamp.origin).toBe('com.acme.crm/hook:note_contact');
   });
 });

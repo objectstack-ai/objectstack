@@ -70,8 +70,11 @@ export type FeedFilterMode = z.input<typeof FeedFilterMode>;
  * and offers in pickers/filters, never the ceiling of legal values. An app may
  * contribute its own values — the sanctioned authoring channel is
  * `activityMilestones[].type` (ADR-0052 §5b.2, `z.string()`, forwarded
- * verbatim), and an app's server-side action can insert one directly — and an
- * undeclared value is stored verbatim, not rejected.
+ * verbatim), and a script body adds one through `ctx.activity.append`
+ * (capability `activity.append`, input `BodyActivityAppendInputSchema`)
+ * — and an undeclared value is stored verbatim, not rejected. The door refuses
+ * only the values in {@link SYS_ACTIVITY_PLATFORM_TYPES}, which name what the
+ * platform itself recorded.
  *
  * What that binds for a consumer of this constant:
  *

@@ -401,11 +401,21 @@ export function bindAppArtifactHandlers(
         const bindable = hookGroups.filter((group) => group.hooks.length > 0 || Object.keys(group.functions).length > 0);
         if (bindable.length > 0) {
             if (typeof ql.bindHooks === 'function') {
-                const bodyRunner = hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId, i18n: options.i18n, getService: options.getService });
+                const scriptRunner = new QuickJSScriptRunner();
                 // One `bindHooks` per owner: the binder replaces an owner's hook
                 // set on each call, so an owner is never bound twice.
                 for (const group of bindable) {
                     try {
+                        // Per owner, so a body's door `origin` names the package
+                        // that holds it, not the bundle.
+                        const bodyRunner = hookBodyRunnerFactory(scriptRunner, {
+                            ql,
+                            logger,
+                            appId,
+                            i18n: options.i18n,
+                            getService: options.getService,
+                            originPackageId: handlerOwnerPackage(group.owner),
+                        });
                         ql.bindHooks(group.hooks, {
                             packageId: group.owner,
                             functions: group.functions,
@@ -448,28 +458,38 @@ export function bindAppArtifactHandlers(
     try {
         const total = actionGroups.reduce((sum, group) => sum + group.actions.length, 0);
         if (total > 0 && typeof ql.registerAction === 'function') {
-            const actionBodyRunner = actionBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId, getService: options.getService });
-            for (const { owner: actionOwner, actions } of actionGroups) for (const action of actions) {
-                const handler = actionBodyRunner(action);
-                if (!handler) continue;
-                // Object-less actions register under the canonical `'global'`
-                // key (#3913) — the literal every reader probes
-                // (`actionHandlerObjectKeys`), since `executeAction` is an
-                // exact-string Map lookup with no wildcard semantics.
-                const objectKey =
-                    typeof action.object === 'string' && action.object.length > 0
-                        ? action.object
-                        : GLOBAL_ACTION_OBJECT_KEY;
-                try {
-                    ql.registerAction(objectKey, action.name, handler, actionOwner);
-                    out.actions++;
-                } catch (err: any) {
-                    logger.warn(`${tag} Failed to register action body`, {
-                        appId,
-                        action: action.name,
-                        object: objectKey,
-                        error: err?.message ?? String(err),
-                    });
+            const scriptRunner = new QuickJSScriptRunner();
+            for (const { owner: actionOwner, actions } of actionGroups) {
+                // Per owner, so a body's door `origin` names the package that holds it.
+                const actionBodyRunner = actionBodyRunnerFactory(scriptRunner, {
+                    ql,
+                    logger,
+                    appId,
+                    getService: options.getService,
+                    originPackageId: handlerOwnerPackage(actionOwner),
+                });
+                for (const action of actions) {
+                    const handler = actionBodyRunner(action);
+                    if (!handler) continue;
+                    // Object-less actions register under the canonical `'global'`
+                    // key (#3913) — the literal every reader probes
+                    // (`actionHandlerObjectKeys`), since `executeAction` is an
+                    // exact-string Map lookup with no wildcard semantics.
+                    const objectKey =
+                        typeof action.object === 'string' && action.object.length > 0
+                            ? action.object
+                            : GLOBAL_ACTION_OBJECT_KEY;
+                    try {
+                        ql.registerAction(objectKey, action.name, handler, actionOwner);
+                        out.actions++;
+                    } catch (err: any) {
+                        logger.warn(`${tag} Failed to register action body`, {
+                            appId,
+                            action: action.name,
+                            object: objectKey,
+                            error: err?.message ?? String(err),
+                        });
+                    }
                 }
             }
         }
@@ -1765,7 +1785,17 @@ export async function scheduleAppArtifactJobs(
     // D4, #15005). Identical reference on every bundle that carries no
     // `packages[]`.
     const collections = resolveArtifactCollections(bundle);
-    const bodyRunner = jobBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId, getService: (name) => ctx.getService(name) });
+    const scriptRunner = new QuickJSScriptRunner();
+    // Per job, so a body's door `origin` names the package that declares it
+    // (`declaringPackageOf`, below); the bundle's id where no one package does.
+    const bodyRunner = (job: Parameters<ReturnType<typeof jobBodyRunnerFactory>>[0], packageId: string | undefined) =>
+        jobBodyRunnerFactory(scriptRunner, {
+            ql,
+            logger,
+            appId,
+            getService: (name) => ctx.getService(name),
+            ...(packageId ? { originPackageId: packageId } : {}),
+        })(job);
     const metrics = resolveMetrics(ctx);
     // [#20281 stage ③] Jobs armed with NO organization on a posture whose
     // writes need one (`group`): legal, and refused at their first
@@ -1892,7 +1922,8 @@ export async function scheduleAppArtifactJobs(
         } else if (job.body) {
             // The body wins over a `handler` beside it, as for hooks. When it
             // cannot be bound the factory has said why, and nothing runs.
-            const bound = bodyRunner({ ...job, organization });
+            const declarer = declaringPackageOf(job);
+            const bound = bodyRunner({ ...job, organization }, typeof declarer === 'string' ? declarer : undefined);
             if (!bound) {
                 out.notScheduled.push(jobName);
                 continue;

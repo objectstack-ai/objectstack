@@ -304,7 +304,7 @@ import type * as M204 from './ai/dataset-tools.zod.js';
 import type * as M205 from './ai/object-query-source.zod.js';
 
 // ---------------------------------------------------------------------------
-// 854 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 856 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -951,7 +951,9 @@ export type Iso_data_hookBody__ExpressionBodySchema = Assert<Eq< z.input< typeof
 export type Iso_data_hookBody__HookBodyCapability = Assert<Eq< z.input< typeof M68.HookBodyCapability >, z.infer< typeof M68.HookBodyCapability > >>;
 
 // data/hook-body-doors.zod.ts
+export type Iso_data_hookBodyDoors__BodyActivityAppendInputSchema = Assert<Eq< z.input< typeof M206.BodyActivityAppendInputSchema >, z.infer< typeof M206.BodyActivityAppendInputSchema > >>;
 export type Iso_data_hookBodyDoors__BodyDoorRecordRefSchema = Assert<Eq< z.input< typeof M206.BodyDoorRecordRefSchema >, z.infer< typeof M206.BodyDoorRecordRefSchema > >>;
+export type Iso_data_hookBodyDoors__BodyMailSendInputSchema = Assert<Eq< z.input< typeof M206.BodyMailSendInputSchema >, z.infer< typeof M206.BodyMailSendInputSchema > >>;
 
 // data/hook.zod.ts
 export type Iso_data_hook__HookContextSchema = Assert<Eq< z.input< typeof M69.HookContextSchema >, z.infer< typeof M69.HookContextSchema > >>;
@@ -1829,7 +1831,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 854 isomorphic pins', () => {
+  it('still declares all 856 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2892,7 +2894,12 @@ describe('ADR-0122 type-alias convention', () => {
     // (`data/hook-body-doors.zod.ts` `BodyDoorRecordRefSchema`): two bounded
     // strings, strict, no default and no transform
     // (Iso_data_hookBodyDoors__BodyDoorRecordRefSchema). +1 added.
-    expect(pins).toHaveLength(854);
+    // 854 -> 856 are the two door inputs beside it, `BodyMailSendInputSchema`
+    // and `BodyActivityAppendInputSchema`: bounded strings, unions, a record
+    // and one projectable refinement, no default and no transform. Their
+    // names end in `Input`, which the alias gate reads as claiming a state, so
+    // they are pinned here by choice rather than by the gate's order. +2 added.
+    expect(pins).toHaveLength(856);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
