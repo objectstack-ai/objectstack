@@ -198,6 +198,23 @@ interface AccountRow {
   idToken?: string | null;
 }
 
+/** One `where` clause of the better-auth adapter. */
+interface AdapterWhere {
+  field: string;
+  value: unknown;
+}
+
+/**
+ * The two better-auth adapter calls this reads and writes the provider row
+ * through (`ctx.context.adapter`): keyword-object calls on the vendor's
+ * `ssoProvider` model, the same ones the vendor's own update-provider makes,
+ * not the data engine's `(object, data, options)` door.
+ */
+export interface SsoProviderRowAdapter {
+  findOne(args: { model: string; where: AdapterWhere[] }): Promise<Record<string, unknown> | null>;
+  update(args: { model: string; where: AdapterWhere[]; update: Record<string, unknown> }): Promise<unknown>;
+}
+
 /** The members of better-auth's endpoint context this module reads. */
 export interface SignOutAuthContext {
   baseURL: string;
@@ -208,10 +225,7 @@ export interface SignOutAuthContext {
     deleteVerificationByIdentifier: (identifier: string) => Promise<unknown>;
     findAccounts: (userId: string) => Promise<AccountRow[]>;
   };
-  adapter: {
-    findOne: (args: { model: string; where: Array<{ field: string; value: unknown }> }) => Promise<Record<string, unknown> | null>;
-    update: (args: { model: string; where: Array<{ field: string; value: unknown }>; update: Record<string, unknown> }) => Promise<unknown>;
-  };
+  adapter: SsoProviderRowAdapter;
 }
 
 /** A session as `getSession` answers it. */
