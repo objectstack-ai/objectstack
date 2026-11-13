@@ -2444,7 +2444,7 @@ export type DroppedFieldsNotice = DroppedFieldsEvent | UnrecognizedDropReasonEve
  * {@link WriteWarningEvent} — is unchanged: a subscriber's `fields: string[]`
  * stays `string[]` and is now TRUE rather than asserted.
  */
-type WireDroppedFieldsEntry = { object?: unknown; fields: unknown[]; reason?: unknown };
+export type WireDroppedFieldsEntry = { object?: unknown; fields: unknown[]; reason?: unknown };
 
 /** Whether the wire's `reason` is an arm the installed spec pin declares. */
 function isRecognizedDropReason(reason: unknown): reason is DroppedFieldsEvent['reason'] {
@@ -2466,8 +2466,14 @@ function isRecognizedDropReason(reason: unknown): reason is DroppedFieldsEvent['
  * them: both are parsed afterwards, so a missing `object` or an unnameable
  * `reason` still reaches the user as the warning it is (objectui#3484's
  * silence is the worse failure).
+ *
+ * Exported with {@link asDroppedFieldsNotice} (objectstack#33009): a flow
+ * run's answer carries the same `droppedFields` wire (`AutomationResult`,
+ * objectstack#32861) but reaches the console outside this adapter, so its
+ * reader (`app-shell`'s `utils/flowDroppedFields`) parses it with these two —
+ * one parser for every `droppedFields` the console reads, never a second copy.
  */
-function isWireDroppedFieldsEntry(e: unknown): e is WireDroppedFieldsEntry {
+export function isWireDroppedFieldsEntry(e: unknown): e is WireDroppedFieldsEntry {
   return (
     !!e &&
     typeof e === 'object' &&
@@ -2506,7 +2512,7 @@ function isWireDroppedFieldsEntry(e: unknown): e is WireDroppedFieldsEntry {
  * Extra server-sent keys still ride along: the spread preserves them, and only
  * the three parsed keys are rewritten.
  */
-function asDroppedFieldsNotice(
+export function asDroppedFieldsNotice(
   entry: WireDroppedFieldsEntry,
   fallbackObject: string,
 ): DroppedFieldsNotice {

@@ -89,6 +89,7 @@ import { toast } from 'sonner';
 import { createServerActionHandler } from '@object-ui/core';
 import type { ActionDef, ActionResult, ServerActionFetch } from '@object-ui/core';
 import { interpretFlowResponse, judgeFlowLaunch, type FlowLaunchJudgement } from './flowResponse.js';
+import { announceFlowDroppedFields, type FlowDroppedFieldsContext } from './flowDroppedFields.js';
 
 /** The door a flow click went through. */
 export type ConsoleFlowLaunchDoor = 'action' | 'trigger';
@@ -143,6 +144,11 @@ export interface ConsoleFlowLaunchInput {
   objects: readonly unknown[] | undefined;
   /** The host's active language, which a refused write's permission line is read in. */
   language: string;
+  /**
+   * What the run's `droppedFields` warning is spoken with: the host's `t`,
+   * its field-label convention and its data source (objectstack#33009).
+   */
+  droppedFields: FlowDroppedFieldsContext;
 }
 
 export interface ConsoleFlowLaunch<S = unknown> {
@@ -160,9 +166,21 @@ export interface ConsoleFlowLaunch<S = unknown> {
  * Hand the launch back to its host, first speaking the success toast the
  * ActionRunner cannot (see the header). The result is `silent` exactly when
  * `successToast` is set, so the user reads one toast either way.
+ *
+ * Then the answer's `droppedFields` (objectstack#33009): a write step that
+ * dropped a read-only field ran and the run succeeded, so the user is warned
+ * beside the success, not instead of it. Not on a failed launch: its toast
+ * says the run failed, and "saved, but" beside it would contradict it.
  */
-function settled<S>(launch: ConsoleFlowLaunch<S>): ConsoleFlowLaunch<S> {
+function settled<S>(
+  launch: ConsoleFlowLaunch<S>,
+  json: unknown,
+  droppedFields: FlowDroppedFieldsContext,
+): ConsoleFlowLaunch<S> {
   if (launch.judged.successToast) toast.success(launch.judged.successToast);
+  // Not awaited: the label lookup must not hold the click's outcome (or its
+  // refresh), and the reader never rejects.
+  if (launch.judged.result.success !== false) void announceFlowDroppedFields(json, droppedFields);
   return launch;
 }
 
@@ -202,7 +220,7 @@ export async function launchConsoleFlow<S = unknown>(
         action.refreshAfter,
         action.successMessage,
       ),
-    });
+    }, answered.json, input.droppedFields);
   }
 
   const res = await input.fetch(
@@ -222,5 +240,5 @@ export async function launchConsoleFlow<S = unknown>(
       action.refreshAfter,
       action.successMessage,
     ),
-  });
+  }, json, input.droppedFields);
 }

@@ -322,7 +322,8 @@ import {
   Button,
   cn,
 } from '@object-ui/components';
-import { notifyDataChanged, useObjectTranslation } from '@object-ui/react';
+import { notifyDataChanged, useObjectTranslation, useSafeFieldLabel } from '@object-ui/react';
+import type { TranslateFn } from '@object-ui/i18n';
 import { UploadingScopeProvider, useUploadingScope } from '@object-ui/fields';
 import type { ActionCopyTemplate } from '@object-ui/core';
 import {
@@ -347,6 +348,7 @@ import {
   type ScreenSpec,
 } from './ScreenView.js';
 import { flowSuccessCopy, interpretFlowResponse } from '../utils/flowResponse.js';
+import { announceFlowDroppedFields } from '../utils/flowDroppedFields.js';
 import { activeFlowsBundle, type FlowsTranslation } from '../utils/flowsBundle.js';
 
 export type { ScreenSpec, ScreenFieldSpec } from './ScreenView.js';
@@ -521,6 +523,7 @@ export interface FlowRunnerProps {
 
 export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dataSource, objects }: FlowRunnerProps) {
   const { t, i18n, language } = useObjectTranslation();
+  const { fieldLabel } = useSafeFieldLabel();
   const [screen, setScreen] = useState<ScreenSpec | null>(null);
   const [runId, setRunId] = useState('');
   const [flowName, setFlowName] = useState('');
@@ -610,6 +613,11 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
       return;
     }
     setResumeError(null);
+    // A write step after the pause that dropped a read-only field reports it
+    // on this answer (objectstack#33009): warned beside whatever the answer
+    // goes on to show, through the launch's own reader. Not awaited — the
+    // label lookup never holds the next screen or the close.
+    void announceFlowDroppedFields(json, { t: t as TranslateFn, fieldLabel, dataSource });
     // The run reached an `end` node declaring `outcome: 'refused'` — a
     // successful evaluation that said no (objectstack#14945, ruling of
     // 2026-09-05). Checked BEFORE the terminal-success tail below, which is
