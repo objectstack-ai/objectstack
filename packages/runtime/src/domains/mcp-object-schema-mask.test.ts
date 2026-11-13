@@ -3,8 +3,9 @@
 /**
  * [ADR-0106 D1/D5] The HTTP MCP bridge's object-schema reads answer a caller
  * the field set the `/meta` object door answers that caller: `describeObject`
- * (behind `describe_object` and `validate_expression`), `optionFieldsOf` and
- * `listObjects`' `fieldCount` go through the door's own masker and projection
+ * (behind `describe_object` and `validate_expression`), `optionFieldsOf`,
+ * `servedObjectDefinitionOf` (#32872, the definition `validate_expression`
+ * hands the publish gate's passes) and `listObjects`' `fieldCount` go through the door's own masker and projection
  * (`resolveObjectMasker` / `maskObjectSchema`, `domains/meta.ts`).
  *
  * Two halves:
@@ -122,9 +123,11 @@ describe('[ADR-0106] HTTP MCP bridge object-schema reads — the shared case tab
             described: await settle(() => bridge.describeObject(OBJECT)),
             listed: await settle(() => bridge.listObjects()),
             options: await settle(() => bridge.optionFieldsOf(OBJECT)),
+            definition: await settle(() => bridge.servedObjectDefinitionOf(OBJECT)),
             // The same caller's answers for a name nothing declares.
             unknownDescribed: await settle(() => bridge.describeObject('no_such_object')),
             unknownOptions: await settle(() => bridge.optionFieldsOf('no_such_object')),
+            unknownDefinition: await settle(() => bridge.servedObjectDefinitionOf('no_such_object')),
         };
     }
 
@@ -143,12 +146,13 @@ describe('[ADR-0106] HTTP MCP bridge object-schema reads — the shared case tab
                 // declares, and left out of the listing.
                 expect(reads.described).toEqual(reads.unknownDescribed);
                 expect(reads.options).toEqual(reads.unknownOptions);
+                expect(reads.definition).toEqual(reads.unknownDefinition);
                 expect(reads.described.value).toBeNull();
                 expect((reads.listed.value as any[]).map((o) => o.name)).not.toContain(OBJECT);
                 return;
             }
             if (expected.kind === 'fault') {
-                for (const read of [reads.described, reads.listed, reads.options]) {
+                for (const read of [reads.described, reads.listed, reads.options, reads.definition]) {
                     expect(read.error, `${testCase.id}: refused, never served`).toBeDefined();
                     expect({ code: read.error.code, status: read.error.status }).toEqual(REFUSED);
                 }
@@ -159,14 +163,18 @@ describe('[ADR-0106] HTTP MCP bridge object-schema reads — the shared case tab
                 expect(JSON.stringify(reads.described.value)).toBe(JSON.stringify(baseline.described.value));
                 expect(JSON.stringify(reads.listed.value)).toBe(JSON.stringify(baseline.listed.value));
                 expect(JSON.stringify(reads.options.value)).toBe(JSON.stringify(baseline.options.value));
+                expect(JSON.stringify(reads.definition.value)).toBe(JSON.stringify(baseline.definition.value));
                 return;
             }
             const described: any = reads.described.value;
             expect(described.fields.map((f: any) => f.name))
                 .toEqual(FLS_CONTRACT_ALL_FIELDS.filter((name) => expected.present.includes(name)));
             expect((reads.listed.value as any[]).find((o) => o.name === OBJECT)?.fieldCount).toBe(expected.present.length);
+            // [#32872] The definition the gate's passes judge is the same caller's object.
+            expect(Object.keys((reads.definition.value as any).fields).sort())
+                .toEqual(FLS_CONTRACT_ALL_FIELDS.filter((name) => expected.present.includes(name)).sort());
             for (const name of expected.absent) {
-                for (const read of [reads.described, reads.listed, reads.options]) {
+                for (const read of [reads.described, reads.listed, reads.options, reads.definition]) {
                     expect(JSON.stringify(read.value), `${testCase.id}: '${name}' must not exist for this caller`)
                         .not.toMatch(new RegExp(`\\b${name}\\b`));
                 }

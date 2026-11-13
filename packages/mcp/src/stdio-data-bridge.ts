@@ -1184,6 +1184,16 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         .map(([key]) => key);
     },
 
+    // [#32872] The object `describeObject` reads, whole: what
+    // `validate_expression` hands the publish gate's own passes at a
+    // validation rule or a formula field. Rendered to nobody; the tool answers
+    // the gate's findings only.
+    // [ADR-0106 D1] …the principal's object, so no field it cannot read is judged.
+    async servedObjectDefinitionOf(name: string): Promise<Record<string, unknown> | null> {
+      const def = (await servedView.getObject(name)) as Record<string, unknown> | undefined;
+      return def ?? null;
+    },
+
     async query(object, opts) {
       const context = await resolvePrincipal();
       await enforceApiExposure(reads, object, GATED_ACTIONS.query, context);

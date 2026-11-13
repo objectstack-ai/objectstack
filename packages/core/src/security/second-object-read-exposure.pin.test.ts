@@ -337,6 +337,18 @@ const CALLERS: Record<string, Classification> = {
       "ADDRESSED object, whose record is `getData` behind the route's own `get` exposure gate, and the related rows " +
       "are the child's `findData` behind the child's `list` exposure. Pinned by `packages/rest/src/record-page-routes.test.ts`",
   },
+  // [#32872] MCP `validate_expression`'s run of the publish gate's own passes.
+  'packages/lint/src/authored-site-expression.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "`authoredExpressionHopTargets` names the object each `record.REF.FIELD` hop of the caller's expression points " +
+      "at, so the MCP tool can hand the gate that object's DEFINITION: the bridge's `servedObjectDefinitionOf`, the " +
+      "caller's ADR-0106 view of the same declaration `describe_object` serves (an `enable.apiEnabled: false` object " +
+      "is described on every MCP transport, `mcp-server-runtime.merged-object-resources.test.ts`). The gate then " +
+      "judges whether FIELD is declared there. It reads no record of the target and serves none of its values. " +
+      "Pinned by `packages/mcp/src/mcp-validate-expression.test.ts` (a target the data API does not serve is judged " +
+      "on its described schema with no record read; a system-object target is not read at all)",
+  },
   // [#30379] The package disable door's dependent-rule scan.
   'packages/runtime/src/domains/packages.ts': {
     kind: 'not-a-served-read',

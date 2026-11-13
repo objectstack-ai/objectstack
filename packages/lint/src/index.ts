@@ -75,6 +75,15 @@ export type { DatasetMeasureAggregateFinding, GroupKeyClass } from './validate-d
 
 export { validateStackExpressions, fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } from './validate-expressions.js';
 export type { ExprIssue } from './validate-expressions.js';
+// [#32872] The gate's verdict on one validation rule or formula field, the
+// MCP `validate_expression` tool's second half (the shared validator is its first).
+export {
+  judgeAuthoredSiteExpression,
+  authoredExpressionHopTargets,
+  AUTHORED_RULE_NAME,
+  AUTHORED_FORMULA_FIELD_NAME,
+} from './authored-site-expression.js';
+export type { AuthoredSiteExpression, AuthoredExpressionSite } from './authored-site-expression.js';
 export { STORED_EXPRESSION_CROSS_RECORD_INPUT, STORED_EXPRESSION_VOLATILE_INPUT } from './stored-expression-inputs.js';
 
 // #4763 — `has(x)` reads as a null guard and is not one. The decision procedure
