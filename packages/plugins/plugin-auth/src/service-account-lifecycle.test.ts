@@ -414,6 +414,18 @@ describe('[ADR-0151 D6] revoke-key and restore-key: one key, under the restore g
     expect(await keyRow(k)).toMatchObject({ revoked: true, revoked_reason: 'organization_membership_ended' });
   });
 
+  it('a key the directory deactivation revoked is never restored, not by the owner and not by a platform administrator', async () => {
+    const id = await account();
+    const k = await keyOf(id);
+    await engine.update('sys_api_key', { id: k, revoked: true, revoked_reason: 'scim_deactivated' }, SYSTEM);
+    for (const by of [OWNER, ADMIN, PLATFORM]) {
+      const refused = await restoreKey(by, k);
+      expect(refused).toMatchObject(DENIED);
+      expect(JSON.stringify(refused.body)).toMatch(/directory deactivated .* cannot be restored\. Create a new key instead\./);
+    }
+    expect(await keyRow(k)).toMatchObject({ revoked: true, revoked_reason: 'scim_deactivated' });
+  });
+
   it('another member cannot touch the key; a person\'s key is answered as unknown', async () => {
     const id = await account();
     const k = await keyOf(id);
