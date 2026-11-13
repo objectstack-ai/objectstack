@@ -33,7 +33,7 @@ import type { TenantLayer0Verdict } from '@objectstack/spec/security';
 import { applyProtection, pluralToSingular } from '@objectstack/spec/shared';
 import type { SchemaRegistry } from './registry.js';
 import { SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
-import { ExpressionEngine, analyzeRelationshipTraversals, isUnparseableDate } from '@objectstack/formula';
+import { ExpressionEngine, analyzeRelationshipTraversals, formulaReadOrder, isUnparseableDate } from '@objectstack/formula';
 import type { EvalError, EvalOptionLabels, EvalPermissions } from '@objectstack/formula';
 import { declaredOptionLabels } from './formula-option-labels.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY, AssembledViewArtifactSchema, isAggregatedViewContainer, isViewContainerShaped } from '@objectstack/spec';
@@ -1368,6 +1368,13 @@ export interface FormulaPlanEntry {
    * sentence — the lint refuses the same shape with the same words.
    */
   hopConflict?: string;
+  /**
+   * [#33100] Why this formula cannot be evaluated at all: it reads its own
+   * value, directly or through the formulas it reads. Such a formula is not
+   * evaluated (there is no order in which it could be): it reads `null` and
+   * the fault sink carries this sentence, naming the cycle.
+   */
+  cycle?: string;
 }
 
 /**
@@ -1522,6 +1529,13 @@ function deleteWalkTargetOf(fdef: { type?: unknown } | null | undefined, reader:
  * caller named, and {@link withoutFormulaWidening} cuts them back off the rows
  * once the read is done, so the caller gets the projection it declared plus
  * the formula's value. `widened` is absent whenever nothing was widened.
+ *
+ * [#33100] A formula may read another formula (`record.f_sibling * 2`), and
+ * every authoring door accepts that. The plan therefore carries every formula
+ * a planned formula reads, transitively, even when the caller did not name it,
+ * and is ordered so each formula is evaluated after the formulas it reads —
+ * see {@link orderFormulaPlan}. A formula planned only because another reads
+ * it is widening too: it is listed in `widened` and cut off the answer.
  */
 /**
  * ONE plan entry for a field's declared `expression`: the envelope, the
@@ -1576,6 +1590,8 @@ function planFormulaProjection(
     }
   }
   if (plan.length === 0) return { plan: [] };
+  // [#33100] The formulas the planned ones read, and the order they evaluate in.
+  const ordered = orderFormulaPlan(plan, schema.fields);
   // For formulas: project all schema fields so CEL `record.<field>` lookups
   // see complete data. Static dependency analysis on AST is M9.7 work.
   if (Array.isArray(requestedFields) && requestedFields.length > 0) {
@@ -1592,12 +1608,75 @@ function planFormulaProjection(
     // [#22300] What the widening added — `id` included when the caller did not
     // name it — is what the read cuts back off once the formulas are computed.
     const named = new Set(requestedFields);
-    const widened = Array.from(projected).filter((f) => !named.has(f));
-    return { plan, projected: Array.from(projected), ...(widened.length > 0 ? { widened } : {}) };
+    // [#33100] A formula planned only because a named formula reads it is
+    // cut off the answer the same way; it is never projected (no column).
+    const widened = [...Array.from(projected), ...ordered.added].filter((f) => !named.has(f));
+    return { plan: ordered.plan, projected: Array.from(projected), ...(widened.length > 0 ? { widened } : {}) };
   }
   // Implicit/full projection — leave projected undefined so the driver
   // returns its default columns (typically *).
-  return { plan };
+  return { plan: ordered.plan };
+}
+
+/**
+ * [#33100] A formula read plan in an order it can be evaluated in.
+ *
+ * {@link applyFormulaPlan} evaluates the entries one after the other over the
+ * same row and writes each value onto it, so a formula reading another formula
+ * (`record.f_sibling * 2`) sees that formula's value only when it comes LATER
+ * in the plan. The plan used to be the declaration order of the object's
+ * fields (or the caller's projection order), so the reader read `null` with
+ * "No such key: f_sibling" whenever it was declared first, and on every
+ * projection naming it without the formula it reads, while the publish gate,
+ * `validate_expression` and the Studio editor all accept the expression.
+ *
+ * Two steps, over the `record.<field>` names each formula reads (the member
+ * reader {@link storedExpressionReads} the stored-expression plan already uses,
+ * so the lint and this plan agree on which spellings name a field):
+ *
+ *  1. Closure: a formula field a planned formula reads joins the plan,
+ *     transitively. Those are returned as `added`; a projection cuts them back
+ *     off the answer.
+ *  2. Order: each formula after the formulas it reads; otherwise the order
+ *     the entries came in — `@objectstack/formula`'s `formulaReadOrder`, the
+ *     answer the authoring lint refuses a cycle by, sentence included.
+ *
+ * A formula that reads its own value, itself or through the formulas it reads,
+ * has no order to be evaluated in. Every formula on such a cycle is marked
+ * with `cycle` and reads `null` with that sentence as its fault — it is never
+ * evaluated, so nothing loops. A formula that merely reads one of them is
+ * evaluated as usual, over the `null` that one reads.
+ */
+function orderFormulaPlan(
+  requested: FormulaPlanEntry[],
+  fields: Record<string, any>,
+): { plan: FormulaPlanEntry[]; added: string[] } {
+  const byName = new Map<string, FormulaPlanEntry>(requested.map((entry) => [entry.name, entry]));
+  const added: string[] = [];
+  const formulaReads = new Map<string, string[]>();
+  const pending = [...requested];
+  for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
+    const reads = [...(storedExpressionReads(next) ?? [])].filter((name) => {
+      const def = fields[name];
+      return def?.type === 'formula' && Boolean(def.expression);
+    });
+    formulaReads.set(next.name, reads);
+    for (const name of reads) {
+      if (byName.has(name)) continue;
+      const entry = formulaPlanEntry(name, fields[name], fields);
+      byName.set(name, entry);
+      added.push(name);
+      pending.push(entry);
+    }
+  }
+  // No formula reads another — the common case keeps the plan as it was.
+  if (![...formulaReads.values()].some((reads) => reads.length > 0)) {
+    return { plan: requested, added };
+  }
+  // `formulaReads` was filled requested-first, so a formula no other reads keeps its place.
+  const { order, cycles } = formulaReadOrder(formulaReads);
+  for (const [name, message] of cycles) byName.get(name)!.cycle = message;
+  return { plan: order.map((name) => byName.get(name)!), added };
 }
 
 /**
@@ -2835,6 +2914,13 @@ function applyFormulaPlan(
       if (fp.hopConflict) {
         rec[fp.name] = null;
         onFault?.(fp.name, { kind: 'runtime', message: fp.hopConflict });
+        continue;
+      }
+      // [#33100] A formula on a cycle of formulas has no order to be computed
+      // in: it reads null and names the cycle, and nothing is evaluated.
+      if (fp.cycle) {
+        rec[fp.name] = null;
+        onFault?.(fp.name, { kind: 'runtime', message: fp.cycle });
         continue;
       }
       let scope: Record<string, unknown> = rec;
