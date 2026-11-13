@@ -48,7 +48,7 @@ export const BodyDoorRecordRefSchema = z
   })
   .strict()
   .describe('A record the door reads in the caller\'s scope before it acts');
-export type BodyDoorRecordRef = z.infer<typeof BodyDoorRecordRefSchema>;
+export type BodyDoorRecordRef = z.input<typeof BodyDoorRecordRefSchema>;
 
 /**
  * `ctx.email.send(input)` — a message a body hands to the mail service.
