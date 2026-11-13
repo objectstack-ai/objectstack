@@ -86,6 +86,22 @@ describe('MCP resume_run — where it is registered', () => {
     expect((await listTools(makeBridge(vi.fn()))).run_action.description).toContain('resume_run');
     expect((await listTools(makeBridge())).run_action.description).not.toContain('resume_run');
   });
+
+  it('teaches both doors that an AI service account is refused a gated action whatever it sends', async () => {
+    // [ADR-0151 D3 rule 3] The runtime never reads `confirm` for an agent
+    // acting for itself, so neither tool may leave the retry as its only lesson.
+    const tools = await listTools(makeBridge(vi.fn()));
+    for (const name of ['run_action', 'resume_run']) {
+      const tool = tools[name];
+      expect(tool.description, name).toContain('confirm: true');
+      expect(tool.description, name).toContain("Under an AI service account's own key");
+      expect(tool.description, name).toContain('refused whatever it sends');
+      expect(tool.inputSchema.properties.confirm.description, name).toContain(
+        "Under an AI service account's own key it is not read",
+      );
+    }
+    expect(tools.run_action.description).toContain('ai.requiresConfirmation: false when it is safe unattended');
+  });
 });
 
 describe('MCP resume_run — its declared shape', () => {

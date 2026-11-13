@@ -589,7 +589,14 @@ async function executeFlow(
     // [ruling record 6377848497, letter A] The same check then asks the flow's
     // own `requiredPermissions`: an endpoint is a door that starts a flow by
     // name, so the flow's declaration binds here as at the other doors.
-    const startRefusal = await flowStartRefusal(service, plan.flow, ctx.executionContext);
+    //
+    // [ADR-0151 Non-goals; ruling record 6812617393, letter C] And between the
+    // two, the AI service account rule. An endpoint starts its flow by NAME:
+    // no action is in hand, and neither the endpoint nor the flow declares an
+    // AI opt-in, so nothing here carries one and the door says so. An AI
+    // service account is therefore refused an elevated (`runAs: 'system'`)
+    // flow at a declared endpoint, as at the trigger route.
+    const startRefusal = await flowStartRefusal(service, plan.flow, ctx.executionContext, { aiExposed: false });
     if (startRefusal) {
         return apiErrorResponse({
             message: startRefusal.message,

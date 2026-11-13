@@ -62,6 +62,17 @@ import {
   type LayeredProbe,
 } from './packaged-permission-set-lock.js';
 
+/** The packages a `409` refusal of a read naming no package names (ADR-0150 D5), or `undefined` for any other error. */
+function refusedPackageHolders(error: unknown): string[] | undefined {
+  const failure = error as { code?: unknown; refusal?: { candidates?: unknown } } | null;
+  const candidates = failure?.refusal?.candidates;
+  if (failure?.code !== 'RESOURCE_CONFLICT' || !Array.isArray(candidates)) return undefined;
+  const packages = candidates
+    .filter((c) => !!c && typeof c === 'object' && c.kind === 'package' && typeof c.packageId === 'string')
+    .map((c) => c.packageId as string);
+  return packages.length > 0 ? packages : undefined;
+}
+
 /** Context subset of the protocol's MetadataAuthoringGateContext this gate consumes. */
 export interface PermissionSetLockGateContext {
   type: string;
@@ -83,7 +94,18 @@ export function registerPackagedPermissionSetLockGate(protocol: any, ql: any): b
         const envelope = await protocol.getMetaItemLayered({ type: 'permission', name: ctx.name });
         probe = { status: 'read', envelope };
       } catch (e) {
-        probe = { status: 'failed', reason: String((e as Error)?.message ?? e) };
+        // [ADR-0150 D3, #31698] A read naming no package of a name two
+        // packages hold is refused naming each: each holder's layers are then
+        // read at its package, so the lock judges every one of them.
+        const holders = refusedPackageHolders(e);
+        try {
+          if (!holders) throw e;
+          const envelopes: unknown[] = [];
+          for (const packageId of holders) envelopes.push(await protocol.getMetaItemLayered({ type: 'permission', name: ctx.name, packageId }));
+          probe = { status: 'read', envelopes };
+        } catch (failure) {
+          probe = { status: 'failed', reason: String((failure as Error)?.message ?? failure) };
+        }
       }
     }
     // A metadata-door save that targets a package-declared name is an

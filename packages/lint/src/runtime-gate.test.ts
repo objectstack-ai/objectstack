@@ -238,8 +238,22 @@ describe('runtime publish gate (#4463)', () => {
         expect(s.baseline[key]).toEqual(context[key]);
         expect(s.candidate[key]).toEqual(context[key]);
       }
-      expect(s.baseline).not.toHaveProperty('flows');
+      // [#32666] `flows` is a context collection now, carried as judged
+      // subjects of an object write; a flow write's own collection is still
+      // just the written flow.
+      expect(s.baseline.flows).toEqual([]);
       expect(s.candidate.flows).toEqual([{ name: 'f1' }]);
+    });
+
+    it('[#32666] drops a passed `flows` context on a flow write, so `flows[0]` stays the write', () => {
+      const withFlows = { ...context, flows: [{ name: 'live_a' }, { name: 'f1', stale: true }] };
+      const s = buildRuntimeWriteSnapshots({ type: 'flow', item: { name: 'f1' }, context: withFlows })!;
+      expect(s.baseline.flows).toEqual([]);
+      expect(s.candidate.flows).toEqual([{ name: 'f1' }]);
+      // On an object write the same context is carried in both passes.
+      const o = buildRuntimeWriteSnapshots({ type: 'object', item: { name: 'acct' }, context: withFlows })!;
+      expect(o.baseline.flows).toEqual(withFlows.flows);
+      expect(o.candidate.flows).toEqual(withFlows.flows);
     });
 
     it('REPLACES the stored self for a write into a context collection', () => {
@@ -265,7 +279,7 @@ describe('runtime publish gate (#4463)', () => {
       // the invariant under test is "every context collection is present and
       // empty", so it has to name the whole set or it stops measuring the shape
       // it exists for.
-      expect(s.baseline).toEqual({ objects: [], permissions: [], books: [], datasets: [] });
+      expect(s.baseline).toEqual({ objects: [], permissions: [], books: [], datasets: [], flows: [] });
       expect(s.candidate.books).toEqual([{ name: 'b1' }]);
     });
   });

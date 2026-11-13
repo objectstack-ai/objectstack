@@ -389,6 +389,22 @@
           "acme.crm:crm_support_intake"
         ]
       }
+    },
+    {
+      "id": 22,
+      "prompt": "An administrator wants a flow they start by hand that tells everyone in the organization, in their inbox, about Saturday's 02:00-04:00 maintenance window. Write it.",
+      "expected_output": "An `autolaunched` flow (it is only ever started explicitly) whose `notify` node has `recipients: 'org:members'`, an inline `title` / `message` and `channels: ['inbox']`. The selector reaches every member of the run's organization, else that of the record the notification is about; the organization is never written in the string, and any other `org:` value reaches nobody, with a warning. Not a `get_record` over `sys_member` or `sys_user` feeding a `loop` of notifies, and not a hand-written list of user ids, which is stale by the next member.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "notify",
+          "recipients: 'org:members'"
+        ],
+        "must_not_contain": [
+          "objectName: 'sys_member'",
+          "objectName: 'sys_user'"
+        ]
+      }
     }
   ]
 }

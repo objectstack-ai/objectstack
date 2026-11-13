@@ -203,7 +203,15 @@ describe('compose-key dispositions export, pin 4 — each disposition is what co
     // non-colliding element for every key, not a bare string.
     const element = (key: string, side: 'a' | 'b') => ({ name: `${key}_${side}` });
     const a = raw({ manifest: manifestA, ...Object.fromEntries(concatKeys.map((key) => [key, [element(key, 'a')]])) });
-    const b = raw({ manifest: manifestB, ...Object.fromEntries(concatKeys.map((key) => [key, [element(key, 'b')]])) });
+    // The selected (last) manifest is a `plugin` package because the
+    // single-app rule (ADR-0019 D3 as amended) refuses two `apps` under one
+    // `app` or `module` package id and does not judge `plugin`; this pin's
+    // subject is the concat pass. If a ruling holds `plugin` to one app too,
+    // retype it.
+    const b = raw({
+      manifest: { ...manifestB, type: 'plugin' },
+      ...Object.fromEntries(concatKeys.map((key) => [key, [element(key, 'b')]])),
+    });
     const composed = composeStacks([a, b]) as unknown as Record<string, unknown>;
 
     for (const key of concatKeys) {

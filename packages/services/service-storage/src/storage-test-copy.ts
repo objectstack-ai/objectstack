@@ -11,13 +11,9 @@
  * here, is answered in English, the sentence every caller got before.
  *
  * The table carries every language on the platform locale table
- * (`@objectstack/spec/system` `PLATFORM_LOCALES`). The four entries this package
- * served first keep their keys (`zh-CN`, `ja-JP`, `es-ES`); the caller's code is
- * read through the table's own reader, `platformLocaleTagOf`, so a stored
- * alias (`zh-TW`, `pt`, `en-US`) and a table tag (`zh-Hans`, `ja`) both find
- * their entry. A code the table does not name is shortened one subtag at a
- * time (RFC 4647 lookup: `fr-CA` → `fr`, `zh-Hant-TW` → `zh-Hant`); nothing
- * left ⇒ English.
+ * (`@objectstack/spec/system` `PLATFORM_LOCALES`), keyed and read as
+ * `copy-locale.ts` says: one reader for every table of sentences this package
+ * serves.
  *
  * Only the sentences the product writes live here. An adapter's own error
  * text (the S3 SDK's, the file system's) is passed through verbatim: in
@@ -26,7 +22,7 @@
  * untranslated part is. The operator log lines stay English.
  */
 
-import { platformLocaleTagOf, type PlatformLocaleTag } from '@objectstack/spec/system';
+import { copyLocaleOf, type CopyLocale } from './copy-locale.js';
 
 /** The English refusal for S3 settings missing a bucket or a region. */
 export const S3_SETTINGS_INCOMPLETE_MESSAGE =
@@ -57,8 +53,7 @@ export interface StorageTestCopy {
 }
 
 /** The table's keys: the platform locale table's languages, the first four under their older codes. */
-export type StorageTestCopyLocale =
-  'en' | 'zh-CN' | 'zh-Hant' | 'es-ES' | 'ar' | 'fr' | 'pt-BR' | 'ru' | 'de' | 'ja-JP' | 'ko';
+export type StorageTestCopyLocale = CopyLocale;
 
 export const STORAGE_TEST_COPY: Record<StorageTestCopyLocale, StorageTestCopy> = {
   en: {
@@ -129,31 +124,8 @@ export const STORAGE_TEST_COPY: Record<StorageTestCopyLocale, StorageTestCopy> =
   },
 };
 
-/** Each platform locale table tag → the key that serves it. */
-const KEY_BY_TABLE_TAG: Record<PlatformLocaleTag, StorageTestCopyLocale> = {
-  en: 'en',
-  'zh-Hans': 'zh-CN',
-  'zh-Hant': 'zh-Hant',
-  es: 'es-ES',
-  ar: 'ar',
-  fr: 'fr',
-  'pt-BR': 'pt-BR',
-  ru: 'ru',
-  de: 'de',
-  ja: 'ja-JP',
-  ko: 'ko',
-};
-
-/** The key that serves a caller's code, or `undefined` (⇒ English). */
-export function storageTestCopyLocaleOf(locale: string | undefined): StorageTestCopyLocale | undefined {
-  if (!locale) return undefined;
-  const subtags = locale.split('-');
-  for (let n = subtags.length; n > 0; n -= 1) {
-    const tag = platformLocaleTagOf(subtags.slice(0, n).join('-'));
-    if (tag) return KEY_BY_TABLE_TAG[tag];
-  }
-  return undefined;
-}
+/** The key that serves a caller's code, or `undefined` (⇒ English): the package's one reader, `copyLocaleOf`. */
+export const storageTestCopyLocaleOf: (locale: string | undefined) => StorageTestCopyLocale | undefined = copyLocaleOf;
 
 /** The copy for a caller's locale; English when the code names no language on the table. */
 export function storageTestCopy(locale: string | undefined): StorageTestCopy {

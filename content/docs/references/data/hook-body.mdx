@@ -67,7 +67,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | :--- | :--- | :--- | :--- |
 | **language** | `'js'` | ✅ |  |
 | **source** | `string` | ✅ | Function body source |
-| **capabilities** | `Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]` | optional (default: `[]`) | Granted capability tokens |
+| **capabilities** | `Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log' \| 'email.send' \| 'activity.append'>[]` | optional (default: `[]`) | Granted capability tokens |
 | **timeoutMs** | `integer` | optional | Per-invocation timeout (ms) |
 | **memoryMb** | `integer` | optional | Per-invocation memory cap (MB) |
 
@@ -85,6 +85,8 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 * `api.transaction`
 * `crypto.uuid`
 * `log`
+* `email.send`
+* `activity.append`
 
 
 ---
@@ -99,7 +101,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | :--- | :--- | :--- | :--- |
 | **language** | `'js'` | ✅ |  |
 | **source** | `string` | ✅ | Function body source |
-| **capabilities** | `Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]` | optional (default: `[]`) | Granted capability tokens |
+| **capabilities** | `Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log' \| 'email.send' \| 'activity.append'>[]` | optional (default: `[]`) | Granted capability tokens |
 | **timeoutMs** | `integer` | optional | Per-invocation timeout (ms) |
 | **memoryMb** | `integer` | optional | Per-invocation memory cap (MB) |
 

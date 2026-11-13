@@ -16,9 +16,10 @@
 //    ledgered code, a declared one is kept), and no row is written.
 //  - acceptance[2]: a declarative `operation: 'update'` action whose patch
 //    repeats a `unique: true` email: `POST /actions/OBJECT/ACTION` answers
-//    409 UNIQUE_VIOLATION, `error.details` carries exactly `developerMessage`
-//    and `object` (a field's `unique: true` is a tenancy-scoped composite
-//    index, so the driver names no single column), and the row keeps its own
+//    409 UNIQUE_VIOLATION, `error.details` carries exactly `developerMessage`,
+//    `field` and `object` (a field's `unique: true` is the tenancy-scoped
+//    composite `(organization_id, email)`, whose organization part is the
+//    implied scope, so the refusal names `email`), and the row keeps its own
 //    email.
 //  - acceptance[3]: a storage route forced into a server fault — the local
 //    adapter's root sits under a regular FILE, so every write it makes fails
@@ -94,11 +95,12 @@ describe('[#26572] error answers made honest, over HTTP on a booted scratch app'
       freeId = idOf(await free.json());
     });
 
-    it('409 UNIQUE_VIOLATION, details exactly { developerMessage, object }, and the row keeps its email', async () => {
+    it('409 UNIQUE_VIOLATION, details exactly { developerMessage, field, object }, and the row keeps its email', async () => {
       const res = await stack.apiAs(admin, 'POST', '/actions/errsent_contact/errsent_take_email', { recordId: freeId });
       const body: any = await res.json();
       expect({ status: res.status, code: body?.error?.code }, JSON.stringify(body)).toEqual({ status: 409, code: 'UNIQUE_VIOLATION' });
-      expect(Object.keys(body.error.details ?? {}).sort()).toEqual(['developerMessage', 'object']);
+      expect(Object.keys(body.error.details ?? {}).sort()).toEqual(['developerMessage', 'field', 'object']);
+      expect(body.error.details.field).toBe('email');
       expect(body.error.details.object).toBe('errsent_contact');
 
       const read = await stack.apiAs(admin, 'GET', `/data/errsent_contact/${freeId}`);

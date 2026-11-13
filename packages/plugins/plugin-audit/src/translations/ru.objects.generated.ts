@@ -191,6 +191,10 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         label: "Метаданные",
         help: "Дополнительный контекст, сериализованный в JSON"
       },
+      origin: {
+        label: "Origin",
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry not written through the activity door."
+      },
       changed_fields: {
         label: "Изменённые поля",
         help: "Набор ключей записанного изменения: для обновления — каждое поле, названное в записанных старых/новых значениях; для остальных строк — пусто. Проставляется платформой при записи; отдаётся только с теми полями, которые доступны читателю. NULL означает, что строка ещё не помечена (выполните `os migrate activity-changed-fields`)."

@@ -29,11 +29,11 @@
  *   2. Language and country, 3. timezone, 4. default currency: the
  *      localization keys, edited in place with the Settings page's own fields,
  *      pre-filled from the browser and written only on the row's Confirm.
- *   5. Email delivery: mail can deliver; links to Setup → Mail Delivery.
- *      Only for a session that may write mail, and left out while the
- *      deployment notice on the same page states that no email service is
- *      set up (it claims the `mail` item, app-shell's `useHomeItemClaim`):
- *      what that notice says is ruled (objectstack#30120), so the row yields.
+ *   5. Email delivery, OPTIONAL (objectstack#32643): mail can deliver; links
+ *      to Setup → Mail Delivery. Only for a session that may write mail. The
+ *      row says it is optional and never holds the checklist open
+ *      (`OPTIONAL_ROWS`): a deployment that sends no mail has nothing to set
+ *      up. A setup that delivers still reads done.
  *   6. Invite colleagues: a second member or a pending invitation; links to
  *      Setup → Users, where Invite User is.
  *   7. The built-in AI: a provider is in use in the running system, as the
@@ -58,8 +58,10 @@
  * zh-CN page read 「当前为English、美国 (US)」.
  *
  * A row whose state cannot be read is left out rather than shown as not done.
- * Once every row shown is done the checklist draws nothing; it comes back on
- * its own if a setting is unset again.
+ * Once every REQUIRED row shown is done the checklist draws nothing, whatever
+ * the optional rows say (`checklistCompletion`), and its progress line counts
+ * the required rows alone; it comes back on its own if a setting is unset
+ * again.
  *
  * Rows that are done are folded away: the list draws the rows still to do, and
  * one control under them names how many are done and shows them (in their
@@ -97,7 +99,6 @@ import {
   resolveSetupAppPath,
   useConnectedAccess,
   useHomeItemClaim,
-  useHomeItemClaimed,
   useMetadata,
 } from '@object-ui/app-shell';
 import { useAuth } from '@object-ui/auth';
@@ -117,9 +118,11 @@ import {
   LOCALE_KEY,
   LOCALIZATION_NAMESPACE,
   TIMEZONE_KEY,
+  checklistCompletion,
   deviceStorage,
   dismissRecordKey,
   hasInvitedColleagues,
+  isOptionalRow,
   isOrganizationNamed,
   localizationRows,
   markDismissed,
@@ -193,11 +196,14 @@ function ChecklistRow({
   action?: ReactNode;
   children?: ReactNode;
 }) {
+  const { t } = useObjectTranslation();
+  const optional = isOptionalRow(id);
   return (
     <li
       className="flex items-start gap-3 py-3"
       data-testid={`first-run-checklist-row-${id}`}
       data-done={done ? 'true' : 'false'}
+      data-optional={optional ? 'true' : undefined}
     >
       {done ? (
         <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" aria-hidden />
@@ -205,7 +211,17 @@ function ChecklistRow({
         <Circle className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
       )}
       <div className="min-w-0 flex-1">
-        <p className={cn('text-sm font-medium', done && 'text-muted-foreground')}>{title}</p>
+        <p className={cn('text-sm font-medium', done && 'text-muted-foreground')}>
+          {title}
+          {optional ? (
+            <span
+              className="ml-2 rounded-full border border-border px-1.5 py-px align-middle text-[11px] font-normal text-muted-foreground"
+              data-testid={`first-run-checklist-optional-${id}`}
+            >
+              {t('console.firstRunChecklist.optional')}
+            </span>
+          ) : null}
+        </p>
         {detail ? <p className="mt-0.5 text-[13px] text-muted-foreground">{detail}</p> : null}
         {children}
       </div>
@@ -465,10 +481,8 @@ export function FirstRunChecklist() {
   // connected one only once the checklist is going to draw.
   const assistantPath = connectAssistantPath(apps);
   const assistant = useConnectedAccess({ enabled: Boolean(settings && !dismissed && assistantPath) });
-  // One Home card per item (app-shell's `homeItemClaims`): the deployment
-  // notice's email line outranks the mail row; this checklist's assistant row,
-  // while it is open, outranks Home's Connect an AI Assistant card.
-  const mailSaidByNotice = useHomeItemClaimed('mail');
+  // One Home card per item (app-shell's `homeItemClaims`): this checklist's
+  // assistant row, while it is open, outranks Home's Connect an AI Assistant card.
   const drawsAssistantRow = Boolean(
     settings && !dismissed && orgId && userId && recordKey && assistantPath &&
       assistant.state === 'ready' && !assistant.connected,
@@ -570,7 +584,7 @@ export function FirstRunChecklist() {
     });
   }
 
-  if (settings.mail && !mailSaidByNotice) {
+  if (settings.mail) {
     const done = settings.mail.done;
     rows.push({
       id: 'mail',
@@ -676,8 +690,11 @@ export function FirstRunChecklist() {
     });
   }
 
+  // Done rows are folded away, the optional ones included; only the required
+  // ones decide whether the checklist is still drawn and what its progress says.
   const doneCount = rows.filter((row) => row.done).length;
-  if (rows.length === 0 || doneCount === rows.length) return null;
+  const completion = checklistCompletion(rows);
+  if (completion.complete) return null;
 
   const hide = () => {
     markDismissed(deviceStorage(), recordKey);
@@ -700,7 +717,7 @@ export function FirstRunChecklist() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span className="text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
-              {t('console.firstRunChecklist.progress', { done: doneCount, total: rows.length })}
+              {t('console.firstRunChecklist.progress', { done: completion.done, total: completion.total })}
             </span>
             <button
               type="button"

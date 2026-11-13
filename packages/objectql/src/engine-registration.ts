@@ -170,6 +170,16 @@ export class RegistrationFacet {
       // not inside an arrival the `manifest` service or a reload already judged
       // as a whole — meets the registry's one picklist re-judge first, before
       // anything of it registers ({@link SchemaRegistry.admitPicklistArrival}).
+      //
+      // [ADR-0144 D2 and D6, amended] A body registered on its own is a whole
+      // run: once the cold boot has sealed the registry, the run ends by asking
+      // the record-currency follow door of every object layer it registered —
+      // its `objects`, its `objectExtensions` (step 2b, after them) and its
+      // nested plugins' objects (step 7) — and a refusal puts the body back
+      // like any other. Inside a run another caller opened (an artifact, a
+      // reload) this run is part of that one and the question waits for its
+      // end. ⛔ Never asked per body there: a later member or the residual can
+      // still complete the pair.
       this._registry.admitPicklistArrival([manifest], () =>
           this._registry.restoringOnRefusal(() => this.registerPackageBody(manifest, id, namespace, version, source, scope)));
 

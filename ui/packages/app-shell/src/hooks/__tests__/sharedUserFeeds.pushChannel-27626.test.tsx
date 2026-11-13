@@ -118,8 +118,27 @@ describe('objectstack#27626 — the bell polls only as the fallback of a push ch
     await advance(1);
     expect(reads()).toEqual({ approvals: 2, inbox: 2 });
 
+    // objectstack#32627: every answer here is the same empty one, so each
+    // tick that finds nothing new waits longer for the next (120 s, then the
+    // 180 s ceiling): ticks at 180, 360 and 540 s, never one sooner than 60 s.
     await advance(9 * FALLBACK_MS);
-    expect(reads()).toEqual({ approvals: 11, inbox: 11 });
+    expect(reads()).toEqual({ approvals: 5, inbox: 5 });
+  });
+
+  it('objectstack#32627 CONTROL: approvals whose answer changes on every read keep the 60 s fallback', async () => {
+    let total = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        total += 1;
+        return Promise.resolve(new Response(JSON.stringify({ data: [], total }), { status: 200 }));
+      }),
+    );
+    mountBothFeeds();
+    await settle();
+    await advance(10 * FALLBACK_MS);
+    // The inbox still answers the same empty window; the approvals do not.
+    expect(reads()).toEqual({ approvals: 11, inbox: 5 });
   });
 
   it('with a channel open, nothing polls, and a pushed change reads only its own feed', async () => {

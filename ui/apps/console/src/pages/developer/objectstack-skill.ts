@@ -133,11 +133,18 @@ create/update payload.
 - **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
-  unknown fields/functions) and advisory warnings (text/boolean fields misused
-  in arithmetic; an error at a \`validation\` site, worded for the rule's
-  \`severity\`, and at a \`flow_condition\` of a record-triggered or
-  time-relative flow, where it fails the run; a warning on any other flow), plus the fields and
-  stdlib functions in scope. \`site\` is \`formula\` | \`validation\` |
+  unknown fields/functions; at a \`formula\` or \`validation\` site, every other
+  refusal the publish gate gives there: a reference read both through the
+  relationship and as a value, more than one hop, a hop to a field the target
+  does not declare or into a stored-metadata table, and at a \`validation\` site
+  an unguarded nullable field or a read of \`parent\`) and advisory warnings
+  (text/boolean fields misused in arithmetic; an error at a \`validation\` site,
+  worded for the rule's \`severity\`, and at a \`flow_condition\` of a
+  record-triggered or time-relative flow, where it fails the run; a warning on
+  any other flow; at a \`formula\` or \`validation\` site, a read of an
+  external object's unprovisioned system column), plus the fields and stdlib
+  functions in scope. A hop target follows the same system-object fence as
+  \`describe_object\`. \`site\` is \`formula\` | \`validation\` |
   \`flow_condition\` | \`template\` (default \`formula\`). Pass the rule's
   \`severity\` or the flow's \`triggerKind\` (\`record_change\` by default) to
   get the verdict the publish gate gives that rule or flow; for a
@@ -180,14 +187,19 @@ create/update payload.
   \`confirm: true\` on an action \`list_actions\` reports as
   \`requiresConfirmation\` — the server REFUSES such a call without it
   (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing runs. Ask your human first;
-  the flag asserts an approval, it does not obtain one.
+  the flag asserts an approval, it does not obtain one. Under an AI service
+  account's own key (an agent acting for itself, for no person) the call is
+  refused whatever it sends and nothing runs: hand the action to a person, or
+  its author declares \`ai.requiresConfirmation: false\` when it is safe
+  unattended.
 - **resume_run({ runId, values?, confirm? })** — continue a flow run that
   \`run_action\` answered with \`status: "paused"\` and a \`screen\` (a form the
   flow needs filled in). Send the screen's field values in \`values\`, keyed by
   the names in \`screen.fields\`. The run completes, or pauses again on its next
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
-  (including \`confirm: true\` for an action flagged \`requiresConfirmation\`).
+  (including \`confirm: true\` for an action flagged \`requiresConfirmation\`,
+  and its refusal under an AI service account's own key whatever the call sends).
 
 ## Conventions & gotchas
 

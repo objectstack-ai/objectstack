@@ -59,7 +59,6 @@ import { resolveSectionGroupReferences } from './sectionGroups';
 import {
   sanitizeFormData,
   dirtyEditPayload,
-  createOwnerPayload,
   snapshotLoadedRecord,
   advanceLoadedRecord,
   type LoadedRecordSnapshot,
@@ -67,7 +66,8 @@ import {
 import { closedForRecord, closedFormAffordance, fieldWriteGate, gateFormFields } from './fieldWriteGate';
 import { RecordFieldAccessForForm } from './recordFieldAccess';
 import { ClosedAffordanceNotice } from './closedAffordanceNotice';
-import { seedCreateValues, omitServerResolvedDefaults } from './schemaDefaults';
+import { seedCreateValues } from './schemaDefaults';
+import { createWritePayload } from './writePayload';
 import { resolveInitialRecord } from './initialRecord';
 import { usePermissions } from '@object-ui/permissions';
 import { useOccSave } from './occSave';
@@ -762,10 +762,14 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
       // values this form opened with — `formData`, which on a create is the
       // seed and nothing else (objectui#12359; `createOwnerPayload` holds the
       // rule). A seeded owner left alone is not a pick and is not sent; the
-      // server judges a pick, and its refusal is this form's error below.
+      // server judges a pick, and its refusal is this form's error below. On a
+      // permission-set grant it writes the package of the holder the user
+      // picked the same way (objectstack#32770): `createWritePayload` is the
+      // record form's create step, so every key a create adds back reaches
+      // this form too.
       const owner = { values: data, objectSchema, canEdit };
       const writePayload = schema.mode === 'create'
-        ? omitServerResolvedDefaults(createOwnerPayload(payload, formData, owner), objectSchema)
+        ? createWritePayload(payload, formData, schema.objectName, owner, objectSchema)
         : dirtyEditPayload(payload, loadedRecordRef.current, schema, owner);
 
       if (schema.submitHandler) {

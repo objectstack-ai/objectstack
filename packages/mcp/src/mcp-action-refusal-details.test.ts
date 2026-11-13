@@ -47,7 +47,7 @@ import { describe, it, expect } from 'vitest';
 import { AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
-import type { McpActionBridge, McpDataBridge } from './mcp-http-tools.js';
+import { FLOW_FAILURE_RELAY_LEAD, type McpActionBridge, type McpDataBridge } from './mcp-http-tools.js';
 
 type Bridge = McpDataBridge & McpActionBridge;
 
@@ -183,4 +183,110 @@ describe('run_action / resume_run over HTTP /mcp: a permission refusal withholds
       });
     });
   }
+});
+
+/**
+ * [#32757] A flow run that failed on a declared refusal tells the agent which
+ * sentence to relay, by the console's read order, without moving the envelope.
+ *
+ * The thrown value is what the runtime's MCP bridge throws for a flow action
+ * that RAN and failed (`FlowActionRefusal`, `runtime/src/action-execution.ts`):
+ * `Flow 'F' failed: …` with `code` `FLOW_FAILED`, `status` 400, the run's
+ * artefacts as `details` (`refusalThrownByBridge` assigns them) and the
+ * producer-marked `userMessage` as a field when the run carries one.
+ *
+ *  - `content[0]` stays the door's envelope byte for byte (the `/actions`
+ *    answer, ruling B′ keeps the inner refusal nested): pinned whole.
+ *  - `content[1]` is the relay sentence: the author's `errorMessage`, else
+ *    `userMessage`, else `innerRefusal.message`; each rung pinned by a case
+ *    that also carries the rungs below it.
+ *  - A run that carried none of the three gets no second block, and a code
+ *    other than `FLOW_FAILED` never gets one, whatever its `details` say.
+ */
+const FLOW = 'claim_submit';
+const INNER_SENTENCE = 'pin32757 Invoice is required';
+const CHAIN = `Flow '${FLOW}' failed: Node 'set_pending' failed: update_record(${OBJECT}) failed: ${INNER_SENTENCE}`;
+const SUMMARY = { failedNodeId: 'set_pending' };
+const INNER = { code: 'VALIDATION_FAILED', message: INNER_SENTENCE };
+
+function flowRunRefusal(details: Record<string, unknown> | undefined, userMessage?: string): () => Error {
+  return () => {
+    const err = Object.assign(new Error(CHAIN), {
+      code: 'FLOW_FAILED',
+      status: 400,
+      ...(details !== undefined ? { details } : {}),
+      ...(userMessage !== undefined ? { userMessage } : {}),
+    });
+    err.name = 'FlowActionRefusal';
+    return err;
+  };
+}
+
+describe('run_action / resume_run over HTTP /mcp: a failed flow run names the reason to relay (#32757)', () => {
+  for (const door of DOORS) {
+    it(`${door.tool}: an inner refusal rides as a second text block; the envelope is unchanged`, async () => {
+      const details = { summary: SUMMARY, innerRefusal: INNER };
+      const { result } = await callOverHttp(readerBridge(flowRunRefusal(details)), door.tool, door.args);
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toHaveLength(2);
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        error: { code: 'FLOW_FAILED', message: CHAIN, status: 400, details },
+      });
+      expect(result.content[1]).toEqual({ type: 'text', text: `${FLOW_FAILURE_RELAY_LEAD}${INNER_SENTENCE}` });
+    });
+
+    it(`${door.tool}: the read order is the console's — errorMessage, then userMessage, then innerRefusal`, async () => {
+      const author = 'pin32757 Attach the e-invoice before submitting';
+      const marked = 'pin32757 marked sentence';
+      const all = await callOverHttp(
+        readerBridge(flowRunRefusal({ errorMessage: author, innerRefusal: INNER }, marked)), door.tool, door.args,
+      );
+      expect(all.result.content[1].text).toBe(`${FLOW_FAILURE_RELAY_LEAD}${author}`);
+
+      const noAuthor = await callOverHttp(
+        readerBridge(flowRunRefusal({ innerRefusal: INNER }, marked)), door.tool, door.args,
+      );
+      expect(JSON.parse(noAuthor.result.content[0].text).error.userMessage).toBe(marked);
+      expect(noAuthor.result.content[1].text).toBe(`${FLOW_FAILURE_RELAY_LEAD}${marked}`);
+    });
+
+    it(`${door.tool}: a failure that met no refusal gets no invented sentence`, async () => {
+      for (const details of [undefined, { summary: SUMMARY }, { innerRefusal: { message: INNER_SENTENCE } }]) {
+        const { result } = await callOverHttp(readerBridge(flowRunRefusal(details)), door.tool, door.args);
+        expect(result.isError).toBe(true);
+        expect(result.content, JSON.stringify(details)).toHaveLength(1);
+        expect(JSON.parse(result.content[0].text).error.code).toBe('FLOW_FAILED');
+      }
+    });
+
+    it(`${door.tool}: control — another code carrying the same details gets no second block`, async () => {
+      const thrown = () => Object.assign(new Error('pin32757 refused'), {
+        code: 'VALIDATION_FAILED', status: 400, details: { innerRefusal: INNER },
+      });
+      const { result } = await callOverHttp(readerBridge(thrown), door.tool, door.args);
+      expect(result.isError).toBe(true);
+      expect(result.content).toHaveLength(1);
+    });
+  }
+
+  it('the run_action and resume_run descriptions teach the same read order', async () => {
+    const body = { jsonrpc: '2.0', id: nextId++, method: 'tools/list', params: {} };
+    const runtime = new MCPServerRuntime({ name: 'pin', version: '0.0.0' });
+    const res = await runtime.handleHttpRequest(
+      new Request('http://localhost/api/v1/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify(body),
+      }),
+      { bridge: readerBridge(writeSideDenial), parsedBody: body },
+    );
+    const tools = (JSON.parse(await res.text()) as { result: { tools: Array<{ name: string; description: string }> } })
+      .result.tools;
+    const runAction = tools.find((t) => t.name === 'run_action')!.description;
+    const order = ['details.errorMessage', 'userMessage', 'details.innerRefusal.message'].map((m) => runAction.indexOf(m));
+    expect(order.every((i) => i >= 0), runAction).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(tools.find((t) => t.name === 'resume_run')!.description).toContain('second text block');
+  });
 });

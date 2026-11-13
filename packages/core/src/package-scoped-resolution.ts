@@ -136,8 +136,10 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * `email_template` (#31699), then `flow` (#31696: the engine holds a flow per
  * `(package, name)`, and its doors, flow actions and flow endpoints resolve a
  * name by package), then the picklist family (#31700): `picklist`,
- * `mapping` and `dataset`, the `api` and the engine's `function` registry. A
- * type not listed here keeps one package holder per deployment.
+ * `mapping` and `dataset`, the `api` and the engine's `function` registry,
+ * then `webhook` (#31699 PR 2), and `tool` beside the AI family (#31985),
+ * whose one by-name reader (`/meta/tool/NAME`) resolves by package. A type
+ * not listed here keeps one package holder per deployment.
  *
  * Every member but {@link ENGINE_FUNCTION_TYPE} is a metadata type ADR-0150
  * addresses by package ({@link PACKAGE_SCOPED_TYPES}). The function registry
@@ -154,6 +156,8 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
 export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
   'agent',
   'skill',
+  // the AI family's third type, in its own change (#31985)
+  'tool',
   'action',
   'email_template',
   'flow',
@@ -163,6 +167,8 @@ export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] 
   'dataset',
   'api',
   'function',
+  // #31699 PR 2
+  'webhook',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
@@ -559,9 +565,29 @@ export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 
     case 'ambiguous-in-environment':
       return `${subject} is held by ${refusal.candidates.length} ${counted} in this environment and the caller names ` +
         `no package: ${named}. Nothing picks one of them: address it by its package.`;
-    case 'outside-closure':
-      return `${subject} is held outside the declared dependency closure of package "${refusal.callerPackageId}": ` +
-        `${named}. Declare a dependency on the package that holds it (ADR-0141).`;
+    case 'outside-closure': {
+      // [#32929] Two fixes, because the first is not always open: when the
+      // holder already depends on the caller (a module of the app that reads
+      // it), declaring the holder back is a dependency cycle the kernel
+      // refuses at boot. The sentence is static; the answer does not move.
+      const caller = refusal.callerPackageId;
+      const moveIn = `move the ${typeLabel(refusal.type)} into "${caller}"`;
+      const packages = refusal.candidates.filter((c) => c.kind === 'package').length;
+      const head = `${subject} is held outside the declared dependency closure of package "${caller}": ${named}.`;
+      // [#32967] Only the environment holds it (step 3's environment
+      // candidate): no package holds it, so there is nothing to depend on.
+      if (packages === 0) {
+        return `${head} No package holds it, so no dependency reaches it: ${moveIn} (ADR-0150 D3).`;
+      }
+      // [#32967] Two or more package holders: depending on every one would
+      // only turn this refusal into `ambiguous-in-closure`.
+      const declare = packages === 1
+        ? 'Declare a dependency on the package that holds it (ADR-0141).'
+        : `Declare a dependency on the one package whose ${typeLabel(refusal.type)} is meant; depending on more than one ` +
+          'leaves the name ambiguous (ADR-0141).';
+      return `${head} ${declare} If that package already depends on "${caller}", the dependency would be a cycle: ` +
+        `move what reads it into that package, or ${moveIn} (ADR-0150 D3).`;
+    }
     case 'not-held-by-qualifier':
       return `${subject} is not held by ${refusal.callerPackageId === null ? 'the environment' : `package "${refusal.callerPackageId}"`}, ` +
         `which the address names exactly (ADR-0150 D5): it is held by ${named}. Address it by its holder.`;

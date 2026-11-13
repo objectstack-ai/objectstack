@@ -756,6 +756,55 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= on the dispatcher (ADR
 });
 
 /**
+ * [#31699 PR 2, narrowing row (1)] A webhook name two packages of two
+ * namespaces hold: the bare item read and the published read
+ * (`GET /meta/webhook/NAME/published`, which asks the protocol's bare item read
+ * for the item's package) both answer `409 RESOURCE_CONFLICT` naming both,
+ * never the first registered package's. With the three type sets at main's
+ * (webhook not package-scoped), the same registry answers `200` with the first
+ * registered package's declaration, and this pin goes red: that is the move.
+ */
+describe('#31699 — a webhook name two packages hold: the item read and the published read answer 409', () => {
+    it('bare `GET /meta/webhook/NAME` and `GET /meta/webhook/NAME/published`: 409 naming both; the namespace address reads one', async () => {
+        ship('webhook', 'task_changed', A);
+        ship('webhook', 'task_changed', B);
+        for (const path of ['/webhook/task_changed', '/webhook/task_changed/published']) {
+            const answer = await read(path);
+            expect([answer.status, answer.body?.error?.code], path).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(answer.body?.error?.message, path).toContain(`package "${A}"`);
+            expect(answer.body?.error?.message, path).toContain(`package "${B}"`);
+        }
+        expect(labelOf(await read('/webhook/alpha/task_changed'))).toBe('alpha webhook');
+    });
+
+    it('CONTROL — one holder: the item read serves it, and the published read answers as before (nothing published: 404)', async () => {
+        ship('webhook', 'solo_hook', A);
+        expect(labelOf(await read('/webhook/solo_hook'))).toBe('alpha webhook');
+        expect((await read('/webhook/solo_hook/published')).status).toBe(404);
+    });
+
+    // [#31699 PR 2 × #32183] Both reads judge the served holders (#32497,
+    // merged from main): a disabled co-holder holds no name for them.
+    // BASE (main: this head with `webhook` out of the three type sets, dists
+    // rebuilt, same fixture): the item read answered the first registered
+    // holder's when it is the enabled one and 404 when it is the disabled one,
+    // and the first registered again once both are enabled. This branch's
+    // round-3 head 2200b8c9, before #32497, answered 409 naming both.
+    it.each([['alpha first', [A, B]], ['beta first', [B, A]]] as const)('[FROM the first registered, or 404 when it is the disabled one, TO the enabled holder\'s] one enabled and one disabled holder (%s): the item read serves the enabled one, the published read answers as for it alone (404, nothing published); re-enabled, both 409, where the item read served the first registered', async (_order, order) => {
+        for (const id of order) ship('webhook', 'twin_hook', id);
+        registry.disablePackage(B);
+        const item = await read('/webhook/twin_hook');
+        expect([item.status, labelOf(item)], JSON.stringify(item.body)).toEqual([200, 'alpha webhook']);
+        const published = await read('/webhook/twin_hook/published');
+        expect([published.status, JSON.stringify(published.body).includes(B)], JSON.stringify(published.body)).toEqual([404, false]);
+        registry.enablePackage(B);
+        for (const path of ['/webhook/twin_hook', '/webhook/twin_hook/published']) {
+            expect((await read(path)).status, path).toBe(409);
+        }
+    });
+});
+
+/**
  * [#32183 × #32310, ADR-0150 D3] The caller arm (`?callerPackage=`) is a D3
  * resolution, so it judges the served holders: a disabled package holds no
  * name for it either. It reads `packageScopedHoldersOf` from the exact

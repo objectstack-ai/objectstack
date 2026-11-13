@@ -77,6 +77,8 @@ import {
 import { mapDataError } from '@objectstack/types';
 import { resolveHookRefusal, type HookRefusalI18nSource } from './hook-refusal-catalogue.js';
 import { isRelayedSandboxRefusal } from './quickjs-runner.js';
+import { buildBodyDoors, callerScopeOf, type BodyDoorCaller } from './body-doors.js';
+import { deriveHookApi, openTransactionKind, seedHookUnreadMembership, seedHookUserGrants } from '@objectstack/objectql';
 
 interface FactoryOptions {
   ql: any;
@@ -88,6 +90,18 @@ interface FactoryOptions {
    * declared refusal is answered with its declared message.
    */
   i18n?: HookRefusalI18nSource;
+  /**
+   * Kernel service lookup for the two platform doors a body reaches
+   * (`ctx.email.send`, `ctx.activity.append`; `body-doors.ts`), read at call
+   * time. Absent, a body that calls either door is told it is unavailable.
+   */
+  getService?: (name: string) => unknown;
+  /**
+   * The package that holds the bodies this runner binds, the first part of a
+   * door's `origin`. Absent, {@link appId}: a bundle with no `packages[]` is
+   * its own one package.
+   */
+  originPackageId?: string;
 }
 
 /**
@@ -455,6 +469,21 @@ export function hookBodyRunnerFactory(
     }
     const body = parsed.data;
 
+    // [#32004] A hook body sends no mail: a message cannot be taken back if the
+    // write that runs the hook rolls back. The parse refuses the grant
+    // (`HookSchema`); a hook that reaches this bind without that parse is
+    // refused here, thrown like the binding refusal above.
+    if (body.language === 'js' && (body.capabilities ?? []).includes('email.send')) {
+      throw Object.assign(
+        new Error(
+          `Hook '${hook.name}' was not bound: its body is granted \`email.send\`, and a hook body cannot send mail, `
+            + 'because a message cannot be taken back if the write that runs the hook rolls back. Send mail on a '
+            + 'record change from an action, a job or a flow.',
+        ),
+        { code: 'PERMISSION_DENIED', status: 403, statusCode: 403 },
+      );
+    }
+
     // [#21520] A wildcard target names no family table, so it binds — but it
     // admits every object, the family's among them, and the boundary is that a
     // body never touches those tables. So the body is not run for a family
@@ -478,6 +507,13 @@ export function hookBodyRunnerFactory(
         opts.ql,
         buildBodyLogSurface(opts, { kind: 'hook', name: hook.name }),
         buildTitleSurface(engineCtx, opts.ql, { kind: 'hook', name: hook.name }),
+      );
+      installBodyDoors(
+        sandboxCtx,
+        opts,
+        { kind: 'hook', name: hook.name },
+        hookDoorCaller(engineCtx, hook.name, opts.logger),
+        engineCtx?.transaction,
       );
       try {
         opts.logger?.debug?.('[BodyRunner] hook fired', { appId: opts.appId, hook: hook.name });
@@ -589,6 +625,13 @@ export function actionBodyRunnerFactory(
         actionCtx,
         opts.ql,
         buildBodyLogSurface(opts, { kind: 'action', name: action.name }),
+      );
+      installBodyDoors(
+        sandboxCtx,
+        opts,
+        { kind: 'action', name: action.name },
+        actionDoorCaller(actionCtx),
+        actionCtx?.executionContext?.transaction,
       );
       try {
         opts.logger?.debug?.('[BodyRunner] action fired', {
@@ -756,6 +799,7 @@ export function jobBodyRunnerFactory(
         buildBodyLogSurface(opts, { kind: 'job', name: job.name }),
         job.organization,
       );
+      installBodyDoors(sandboxCtx, opts, { kind: 'job', name: job.name }, jobDoorCaller(job.organization));
       try {
         opts.logger?.debug?.('[BodyRunner] job fired', { appId: opts.appId, job: job.name });
         const result = await runner.run(body, sandboxCtx, {
@@ -1168,6 +1212,129 @@ function buildEngineRepoFacade(ql: any, objectName: string, context?: any) {
  * ({@link refuseBodyPermanentDeletes}): app-authored code cannot purge, so its
  * deletes enter the recycle bin, whatever envelope the body runs under.
  */
+/**
+ * Install the two platform doors (`body-doors.ts`) on a body's sandbox
+ * context, built with the caller the HOST resolved for this invocation.
+ */
+function installBodyDoors(
+  sandboxCtx: ScriptContext,
+  opts: FactoryOptions,
+  origin: { kind: 'hook' | 'action' | 'job'; name: string },
+  caller: BodyDoorCaller,
+  threadedTransaction?: unknown,
+): void {
+  const doors = buildBodyDoors({
+    ql: opts.ql,
+    getService: opts.getService,
+    packageId: opts.originPackageId ?? opts.appId,
+    origin,
+    caller,
+    // Read at call time: the transaction the write that runs this body stands
+    // in, the engine's ambient one or the handle the write's context carries.
+    openTransaction: () => {
+      const kind = openTransactionKind(opts.ql, threadedTransaction);
+      return kind === 'separate' ? { kind, handle: threadedTransaction } : { kind };
+    },
+  });
+  sandboxCtx.email = doors.email;
+  sandboxCtx.activity = doors.activity;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * A hook body's caller: the user of the write that fired it, read in that
+ * user's own scope.
+ *
+ * The scope is built from the write's whole execution context, which only the
+ * engine's hook api holds (`ctx.session` is a projection of it), by the two
+ * steps a `runAs: 'user'` hook takes (`hook-run-as.ts`, `@objectstack/objectql`):
+ * the context as the user, never as the system, whatever elevation the write
+ * or the hook's own `runAs` carried; then the user's grants, seeded where the
+ * context carries none. Built once per invocation, at the first record a door
+ * reads, so a body that never calls a door costs nothing.
+ *
+ * A write with no calling user stamps no user, and a door reads only what the
+ * body's own api reads. A host whose hook api cannot derive a scope (a hook
+ * context assembled by hand) reads with the session's user and organization
+ * and no elevation.
+ */
+function hookDoorCaller(engineCtx: any, hookName: string, logger?: FactoryOptions['logger']): BodyDoorCaller {
+  const session = engineCtx?.session;
+  const userId = nonEmptyString(session?.userId);
+  const organizationId = nonEmptyString(session?.organizationId);
+  const api = engineCtx?.api;
+  const derivable = !!api && typeof api.object === 'function' && (!userId || typeof api.withRunAs === 'function');
+  if (!derivable) {
+    return {
+      userId,
+      organizationId,
+      readContext: userId ? { userId, ...(organizationId ? { tenantId: organizationId } : {}) } : {},
+    };
+  }
+  let scoped: Promise<any> | undefined;
+  const callerApi = (): Promise<any> =>
+    (scoped ??= (async () => {
+      if (!userId) return api;
+      const asUser = deriveHookApi(api, 'user', {
+        hook: hookName,
+        object: typeof engineCtx?.object === 'string' ? engineCtx.object : undefined,
+        event: engineCtx?.event,
+      });
+      try {
+        return await seedHookUserGrants(asUser);
+      } catch (err) {
+        // The hook wrapper's fail-safe for the same step (`installRunAsApi`,
+        // `@objectstack/objectql`): the user's grants could not be read, so the
+        // read runs on the context's own grants and an empty membership set.
+        // It sees less, never more, so a record may answer as not found.
+        logger?.warn?.(
+          `[BodyRunner] hook '${hookName}': the calling user's grants could not be resolved for a door's record read, ` +
+            'so it reads with the triggering context\'s own grants and no membership; a record the user reads through ' +
+            'a permission set may answer as not found',
+          { hook: hookName, error: (err as { message?: unknown } | undefined)?.message },
+        );
+        return seedHookUnreadMembership(asUser);
+      }
+    })());
+  return {
+    userId,
+    organizationId,
+    readRecord: async (object, id) => (await callerApi()).object(object).findOne({ where: { id }, fields: ['id'] }),
+  };
+}
+
+/**
+ * An action body's caller: the action door's caller envelope, which the body's
+ * own engine context carries elevated (`buildActionExecutionContext`), with the
+ * elevation taken off ({@link callerScopeOf}). An action called from host code
+ * with no caller reads as the system.
+ */
+function actionDoorCaller(actionCtx: any): BodyDoorCaller {
+  const ec = actionCtx?.executionContext;
+  const userId = nonEmptyString(ec?.userId) ?? nonEmptyString(actionCtx?.user?.id);
+  const organizationId = nonEmptyString(ec?.tenantId) ?? nonEmptyString(actionCtx?.session?.organizationId);
+  const readContext =
+    ec && typeof ec === 'object'
+      ? callerScopeOf(ec)
+      : userId
+        ? { userId, ...(organizationId ? { tenantId: organizationId } : {}) }
+        : { isSystem: true };
+  return { userId, organizationId, readContext };
+}
+
+/** A job body has no calling user: it acts in its declared organization. */
+function jobDoorCaller(organization: string | undefined): BodyDoorCaller {
+  const organizationId = nonEmptyString(organization);
+  return {
+    userId: undefined,
+    organizationId,
+    readContext: { isSystem: true, ...(organizationId ? { tenantId: organizationId } : {}) },
+  };
+}
+
 function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
   return refuseBodyPermanentDeletes(
     refuseStoredMetadataBodyWrites(

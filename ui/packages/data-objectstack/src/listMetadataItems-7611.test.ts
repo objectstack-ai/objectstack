@@ -98,3 +98,55 @@ describe('ObjectStackAdapter.listMetadataItems (objectui#7611)', () => {
     await expect(adapter.listMetadataItems('position')).rejects.toThrow(/items list/);
   });
 });
+
+describe('ObjectStackAdapter.listMetadataItems — the holder package (objectstack#32770)', () => {
+  it("carries each item's served `_packageId` verbatim as `packageId`, overlay sentinel included", async () => {
+    const { adapter } = makeAdapter(() =>
+      json(200, {
+        success: true,
+        data: {
+          type: 'permission',
+          items: [
+            { name: 'sales_user', label: 'Sales User', _packageId: 'com.acme.crm' },
+            { name: 'sales_user', label: 'Sales User', _packageId: 'sys_metadata' },
+            { name: 'auditor', _packageId: 'com.acme.hr' },
+          ],
+        },
+      }),
+    );
+
+    await expect(adapter.listMetadataItems('permission')).resolves.toStrictEqual([
+      { name: 'sales_user', label: 'Sales User', packageId: 'com.acme.crm' },
+      { name: 'sales_user', label: 'Sales User', packageId: 'sys_metadata' },
+      { name: 'auditor', packageId: 'com.acme.hr' },
+    ]);
+  });
+
+  it('CONTROL: an item served with no string package reads exactly as before, with no `packageId` key', async () => {
+    const { adapter } = makeAdapter(() =>
+      json(200, {
+        success: true,
+        data: {
+          type: 'permission',
+          items: [
+            { name: 'sales_user', label: 'Sales User' },
+            { name: 'auditor', _packageId: '' },
+            { name: 'org_admin', label: 'Org Admin', _packageId: 7 },
+            { name: 'viewer', _packageId: null },
+          ],
+        },
+      }),
+    );
+
+    const items = await adapter.listMetadataItems('permission');
+    expect(items).toStrictEqual([
+      { name: 'sales_user', label: 'Sales User' },
+      { name: 'auditor' },
+      { name: 'org_admin', label: 'Org Admin' },
+      { name: 'viewer' },
+    ]);
+    expect(JSON.stringify(items)).toBe(
+      '[{"name":"sales_user","label":"Sales User"},{"name":"auditor"},{"name":"org_admin","label":"Org Admin"},{"name":"viewer"}]',
+    );
+  });
+});

@@ -338,6 +338,10 @@ const fr = {
     registryRef: {
       loadFailed: "La liste n'a pas pu être chargée. Vous pouvez toujours saisir le nom.",
       notFound: "{{name}} (introuvable)",
+      holderPackage: "{{item}} · paquet {{package}}",
+      holderEnvironment: "{{item}} · défini dans cet environnement",
+      holderUnresolved: "{{name}} (fourni par plusieurs paquets ; aucun n'est indiqué)",
+      holderNeedsPackage: "Ce formulaire désigne un ensemble d'autorisations par son seul nom. Lorsque plusieurs paquets fournissent un ensemble du même nom, seul celui défini dans cet environnement peut être choisi ici.",
     },
     preferenceOption: {
       allTopics: "Tous les sujets ({{value}})",
@@ -1399,6 +1403,7 @@ const fr = {
     saving: "Enregistrement…",
     lockedByApproval: "Verrouillé pour approbation",
     lockedTooltip: "Cet enregistrement a une demande d'approbation en attente ; la modification est verrouillée",
+    lockedByState: "Non modifiable dans son état actuel",
     writeStrippedTitle: "Enregistré — mais certains champs n'ont pas été appliqués",
     writeWarningsTitle: "Enregistré — avec des avertissements",
     writeStrippedReadonly: "En lecture seule, donc non appliqué : {{fields}}",
@@ -2355,6 +2360,7 @@ const fr = {
       dismiss: "Masquer la liste",
       showDone: "Afficher les étapes terminées ({{done}})",
       hideDone: "Masquer les étapes terminées",
+      optional: "Facultatif",
       set: "Définir",
       change: "Modifier",
       view: "Voir",
@@ -2789,6 +2795,7 @@ const fr = {
         invalidCredentials: "E-mail ou mot de passe invalide. Après plusieurs échecs, la connexion est suspendue pendant un moment. Mot de passe oublié ? Réinitialisez-le pour vous connecter immédiatement.",
         invalidCredentialsNoMail: 'E-mail ou mot de passe invalide. Après plusieurs échecs, la connexion est suspendue pendant un moment. Mot de passe oublié ? Demandez à votre administrateur de le réinitialiser.',
         emailNotVerified: "Veuillez vérifier votre adresse e-mail avant de vous connecter.",
+        accountDeactivated: "Votre compte a été désactivé par votre organisation. Contactez votre administrateur.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -4075,6 +4082,7 @@ const fr = {
       get_authoring_rules: "Consulter les règles d’écriture",
       get_metadata_schema: "Consulter le format des métadonnées",
       get_package: "Examiner le paquet",
+      get_record_history: "Lire l'historique de cette fiche",
       list_metadata: "Lister les métadonnées existantes",
       list_objects: "Lister les objets existants",
       list_packages: "Lister les paquets existants",

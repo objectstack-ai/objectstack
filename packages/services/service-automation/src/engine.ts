@@ -67,6 +67,8 @@ import { runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
 import { flowContentChecksum } from './flow-identity.js';
 import { carriedRefusalOfResult, readCarriedRefusal, type CarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
+import { withDroppedFields } from './run-dropped-fields.js';
+import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 // #5660 — the degrade registration reports a FOREIGN failure (a third-party
 // provider factory's text), so it renders it as structured `meta` rather than
 // interpolating it into the log message. See ./thrown-cause-diagnostics.ts.
@@ -432,6 +434,16 @@ export interface NodeExecutionResult {
      * copies them onto the {@link StepLogEntry}.
      */
     warnings?: string[];
+    /**
+     * #32861: the data engine's own drop events behind the strip warnings
+     * above — the structured half a write node (`create_record` /
+     * `update_record`) received from `onFieldsDropped`. Copied onto the
+     * {@link StepLogEntry} beside `warnings`, and folded from there onto the
+     * run's terminal answer (`AutomationResult.droppedFields`), so the door
+     * that started the run can tell its caller which values never landed.
+     * Omitted when nothing was dropped.
+     */
+    droppedFields?: DroppedFieldsEvent[];
     /** Used by decision nodes — returns the selected branch label */
     branchLabel?: string;
     /**
@@ -1109,6 +1121,14 @@ export interface StepLogEntry {
      * partially didn't land instead of a silent success.
      */
     warnings?: string[];
+    /**
+     * #32861: the structured drop events behind those warnings
+     * ({@link NodeExecutionResult.droppedFields}). On the step, not in a
+     * run-scoped side table, so a run that pauses keeps them with the steps it
+     * persists and the resumed run's terminal answer folds the whole run
+     * (`dropEventsOf`).
+     */
+    droppedFields?: DroppedFieldsEvent[];
     /**
      * #1479: structured-region grouping. When a step ran inside a `loop` /
      * `parallel` / `try_catch` body region, these tag it with its **immediate**
@@ -7158,7 +7178,9 @@ export class AutomationEngine implements IAutomationService {
      * copy of anybody else's.
      *
      * A `runAs:'system'` run, a user-less run, a context carrying every fact,
-     * and an engine with no resolver wired resolve nothing.
+     * and an engine with no resolver wired resolve nothing. A `runAs:'system'`
+     * run therefore keeps the `principalKind` its launch door forwarded: no
+     * resolution here would re-seed it (ADR-0151 Non-goals).
      */
     private seedRunGrants(
         flowName: string,
@@ -7637,6 +7659,9 @@ export class AutomationEngine implements IAutomationService {
                 // (a `subflow` roll-up, a runtime test asserting the sweep wrote
                 // something) never has to re-read the run to learn what it did.
                 summary,
+                // #32861 — the values a write step did not store, so the door
+                // that started the run can tell its caller. Omitted when none.
+                ...withDroppedFields(steps),
             };
         } catch (err: unknown) {
             // [#15788] The run REFUSED — an `end` node declaring
@@ -8548,10 +8573,21 @@ export class AutomationEngine implements IAutomationService {
      * `!childRes.success` before reaching here — which is what lets #15617's
      * `failures` ride this seam under exactly its declared rule: the contained
      * failures of a child that COMPLETED, never a failed child's own `failed`.
+     *
+     * #33019 — the same seam carries the child's `droppedFields` (its own
+     * answer's), folded onto that awaiting step through the one fold
+     * (`foldDropEvents`), so the parent's terminal answer — folded from its
+     * steps — reports a paused child's or a `map` item's dropped values
+     * wherever this method credits its totals. A failed child answers none.
      */
-    private creditChildRun(steps: StepLogEntry[], nodeId: string, child: FlowRunSummary | undefined): void {
+    private creditChildRun(
+        steps: StepLogEntry[],
+        nodeId: string,
+        child: FlowRunSummary | undefined,
+        childDroppedFields?: readonly DroppedFieldsEvent[],
+    ): void {
         // The body lives in ./run-resume.ts (#25222).
-        creditChildRun(steps, nodeId, child);
+        creditChildRun(steps, nodeId, child, childDroppedFields);
     }
 
     /**
@@ -8567,6 +8603,11 @@ export class AutomationEngine implements IAutomationService {
      *   because it is engine-internal control flow, not data the parent's
      *   variable map should ever see — the reserved-name guard
      *   (`applyResumeSignal`) polices that map, and a refusal is not a variable.
+     * @param childDroppedFields - #33019: the drop events of the child run
+     *   whose completion triggered this resume (the up-bubble path), folded
+     *   onto the awaiting step beside `childSummary`. A parameter for the same
+     *   reason: the parent's answer reads them from its steps, never from its
+     *   variable map.
      */
     private resumeInternal(
         runId: string,
@@ -8579,6 +8620,7 @@ export class AutomationEngine implements IAutomationService {
         skipBubble: boolean,
         childSummary?: FlowRunSummary,
         childRefusal?: ChildRunRefusal,
+        childDroppedFields?: readonly DroppedFieldsEvent[],
     ): Promise<AutomationResult> {
         // The body lives in ./run-resume.ts (#25222).
         const host: ThisParameterType<typeof resumeInternal> = {
@@ -8610,7 +8652,7 @@ export class AutomationEngine implements IAutomationService {
             failAncestors: (...a) => this.failAncestors(...a),
             renderFlowTerminalMessage: (...a) => this.renderFlowTerminalMessage(...a),
         };
-        return resumeInternal.call(host, runId, signal, skipBubble, childSummary, childRefusal);
+        return resumeInternal.call(host, runId, signal, skipBubble, childSummary, childRefusal, childDroppedFields);
     }
 
     /**
@@ -8782,6 +8824,11 @@ export class AutomationEngine implements IAutomationService {
          * control flow, not a variable.
          */
         refusal?: ChildRunRefusal,
+        /**
+         * #33019 — this child's drop events (the ones its own terminal answer
+         * carries), credited to the parent's awaiting step beside `summary`.
+         */
+        droppedFields?: readonly DroppedFieldsEvent[],
     ): Promise<void> {
         const ctx = run.context as Record<string, unknown> | undefined;
         const parentRunId = ctx?.$parentRunId;
@@ -8796,7 +8843,7 @@ export class AutomationEngine implements IAutomationService {
                 // the one writer allowed to set them (#3853 follow-up).
                 ? engineBuilt({ variables: { [`${mapNode}.$mapItemOutput`]: output ?? null, [`${mapNode}.$mapItemDone`]: true } })
                 : this.buildSubflowResumeSignal(run.context, output);
-            const parentRes = await this.resumeInternal(parentRunId, sig, false, summary, refusal);
+            const parentRes = await this.resumeInternal(parentRunId, sig, false, summary, refusal, droppedFields);
             if (!parentRes.success) {
                 // #6499 — `parentRes.error` is the envelope field that carries
                 // a failing node's / driver's text VERBATIM (#5912 left it

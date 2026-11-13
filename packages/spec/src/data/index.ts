@@ -228,6 +228,7 @@ export * from './autonumber-format';
 export * from './validation.zod';
 export * from './hook.zod';
 export * from './hook-body.zod';
+export * from './hook-body-doors.zod';
 // [#26170] A hook's refusal catalogue: the code spelling, the save-time reading
 // of a body's literal throws, and the sentences the schema and the body runner
 // both speak.
@@ -333,6 +334,11 @@ export * from './datasource-credential-redaction';
 // (#25211), which resolve the datasource a saved object names and the objects
 // a saved datasource is named by, and judge the pair here rather than copy it.
 export * from './external-binding-datasource';
+
+// [ruling A on the read half of #32442] The read-only AI exposure declaration
+// `enable.aiReadable`: its one reading (`isAiReadExposed`, for the surfaces
+// that admit an object to the AI read tools) and its parse refusal.
+export * from './ai-read-exposure';
 
 // External Datasource Federation — SQL↔field type compatibility (ADR-0015)
 export * from './type-compat';

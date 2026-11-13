@@ -44,6 +44,28 @@
  *   `withoutDeniedFields` with the reader's field permissions, as every surface
  *   that draws a display value from a whole row does (objectui#10594).
  *
+ * ## Object and list values: attachments are drawn, the rest is left out
+ *
+ * A field whose value is an object or a list is drawn only when it is an
+ * attachment, and by this rule alone:
+ *
+ * - **Attachments are drawn**: a declared field whose type is in the spec's
+ *   media family `FILE_REFERENCE_TYPES` (`file`, single or `multiple`,
+ *   `image`, `avatar`, `video`, `audio`), whichever form the snapshot holds
+ *   (the stored `sys_file` id, the expanded `{ id, name, url }` object, a list
+ *   of either). Each is drawn through the field's own cell, the record page's:
+ *   a file is a link to the platform's download endpoint, an image a
+ *   thumbnail that opens. The summary adds no download channel; the endpoint
+ *   judges the reader's access. Attachments are drawn full width after the
+ *   rows and are never cut by `SNAPSHOT_SUMMARY_ROWS`, because they are what
+ *   the approver decides on. An empty one (no id, an empty list) gets no row.
+ * - **Every other object or list value is left out**, whatever its type: an
+ *   address, a location, `json` / `object`, `composite`, `record`,
+ *   `repeater`, `grid`, `vector`, a multi-value option list (`multiselect`,
+ *   `checkboxes`, `tags`) and a multi-value reference. Their faces are
+ *   blocks, maps or chip lists that a one-line glance row cannot hold without
+ *   cutting them, and the record itself, a click away, draws them whole.
+ *
  * Until the object's definition answers, or when it cannot (no definition, a
  * refused read), nothing is drawn: without the declarations there is no
  * declared label, no face and no `hidden` to honour.
@@ -175,7 +197,7 @@ function DeclaredSummary({ target, fields, shown, display }: {
   const childFields = summed === null ? null : declaredFields(child.item, summed);
   const summarized = summed !== null && childFields ? { name: summed, fields: childFields } : null;
   const plan = planSnapshotSummary(shown, fields, display, summarized);
-  const keys = plan.lead ? [plan.lead, ...plan.rows] : plan.rows;
+  const keys = [...(plan.lead ? [plan.lead] : []), ...plan.rows, ...plan.attachments];
   if (keys.length === 0) return null;
 
   const declaredLabel = (key: string) => {
@@ -208,6 +230,16 @@ function DeclaredSummary({ target, fields, shown, display }: {
             <div key={key} className="min-w-0" data-summary-field={key}>
               <div className="text-[11px] text-muted-foreground">{labelOf.get(key)}</div>
               <div className="truncate" title={display?.[key]}>{valueOf(key)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {plan.attachments.length > 0 && (
+        <div className="space-y-2 text-sm">
+          {plan.attachments.map((key) => (
+            <div key={key} className="min-w-0" data-summary-attachment={key}>
+              <div className="text-[11px] text-muted-foreground">{labelOf.get(key)}</div>
+              <FieldFace objectName={target} def={{ ...(fields[key] as FieldDef), name: key }} value={shown[key]} snapshot={shown} fields={fields} />
             </div>
           ))}
         </div>

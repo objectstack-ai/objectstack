@@ -6,10 +6,11 @@
  * number the 变更 badge shows.
  *
  * The case the line exists for: the copilot writes a draft to the object the
- * author has open. The Data pillar read that object when it opened it (no
- * draft then), and does not re-read it on the copilot's pulse; the ledger the
- * badge counts does. So the line follows the ledger: it shows as the draft
- * lands, and goes when a publish or a discard takes the item off the ledger.
+ * author has open. The ledger the badge counts re-reads on the copilot's
+ * pulse, and so does the Data pillar's own reading of the open object
+ * (objectstack#32610). The line follows the ledger: it shows as the draft
+ * lands, and goes when a publish or a discard takes the item off the ledger,
+ * an object opened WITH a draft included.
  *
  * Real: the surface, its top bar, `usePendingDrafts`, the Data pillar and its
  * header. Stubbed: the metadata client (the object, no draft of its own),
@@ -40,7 +41,11 @@ vi.mock('sonner', () => ({
 }));
 
 /** What `_drafts` answers: the package's pending drafts, server-side. */
-const server = vi.hoisted(() => ({ drafts: [] as Array<Record<string, unknown>> }));
+const server = vi.hoisted(() => ({
+  drafts: [] as Array<Record<string, unknown>>,
+  /** The open object's own pending draft, as stored; `null` for none. */
+  objectDraft: null as Record<string, unknown> | null,
+}));
 
 const mockClient = {
   save: vi.fn(async () => ({})),
@@ -55,10 +60,14 @@ const mockClient = {
   listTypes: vi.fn(async () => ({ entries: [] })),
   layered: vi.fn(async (type: string, name: string) => {
     if (type === 'app') return { effective: { name: 'acme_app', label: 'Acme', navigation: [] } };
-    if (type === 'object') return { effective: OBJECT, code: OBJECT };
+    if (type === 'object') return { effective: OBJECT, code: OBJECT, ...(server.objectDraft ? { draft: server.objectDraft } : {}) };
     return { effective: { name } };
   }),
-  getDraft: vi.fn(async () => null),
+  getDraft: vi.fn(async (type: string) =>
+    type === 'object' && server.objectDraft
+      ? { type, name: OBJECT.name, item: { ...server.objectDraft, _draft: true }, version: 'v2' }
+      : null,
+  ),
   get: vi.fn(async () => undefined),
   references: vi.fn(async () => []),
   publishPackageDrafts: vi.fn(async () => {
@@ -108,6 +117,7 @@ const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => bo
 
 beforeEach(() => {
   server.drafts = [];
+  server.objectDraft = null;
   window.sessionStorage.clear();
   vi.stubGlobal(
     'fetch',
@@ -181,7 +191,7 @@ describe('the item header\'s draft line follows the badge\'s ledger (objectui#12
     expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('2');
     // The longer sentence says what N counts.
     expect(headerStatus()).toHaveAccessibleDescription(tFormat('engine.studio.itemDraftPendingTitle', 'en', { count: 2 }));
-    // The pillar's own reading of the object was never asked again.
+    // The pillar's own reading re-read the object, which has no draft of its own here.
     expect(screen.queryByText(t('engine.studio.unpublishedDraft', 'en'))).toBeNull();
   });
 
@@ -220,5 +230,37 @@ describe('the item header\'s draft line follows the badge\'s ledger (objectui#12
 
     await waitFor(() => expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('1'));
     expect(headerStatus()).toBeNull();
+  });
+});
+
+const objectDraftReads = () =>
+  (mockClient.getDraft.mock.calls as unknown as Array<[string, string]>).filter(
+    ([type, name]) => type === 'object' && name === OBJECT.name,
+  ).length;
+
+describe('the item header\'s draft line after the copilot\'s undo, the object opened WITH a draft (objectstack#32610)', () => {
+  it('goes once the undo empties the ledger, and the pillar re-reads its own reading of the object', async () => {
+    server.objectDraft = { ...OBJECT, description: 'copilot draft' };
+    server.drafts = COPILOT_DRAFTS;
+    render(
+      <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
+        <Routes>
+          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /Task/ }, SLOW));
+    await waitFor(() => expect(headerStatus()).toHaveTextContent(draftLine(2)), SLOW);
+    const before = objectDraftReads();
+    expect(before).toBeGreaterThan(0);
+
+    // Undo all: both drafts are discarded server-side, and the undo announces it.
+    server.objectDraft = null;
+    await copilotDrafts([]);
+
+    await waitFor(() => expect(headerStatus()).toBeNull());
+    expect(screen.queryByTestId('studio-changes-count')).toBeNull();
+    await waitFor(() => expect(objectDraftReads()).toBe(before + 1));
+    expect(screen.queryByText(t('engine.studio.unpublishedDraft', 'en'))).toBeNull();
   });
 });

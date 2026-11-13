@@ -50,7 +50,7 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 import { readPublishBackfillRequest } from './protocol-publish-backfill-request.js';
 import type { PublishBackfillReceipt } from './protocol-publish-backfill-request.js';
 import { commitPlanKey } from './protocol-bundle-members.js';
-import { mutationEventPackage } from './protocol-mutation-package.js';
+import { mutationEventPackage, projectorEventPackage } from './protocol-mutation-package.js';
 import type { CommitPlanItem } from './protocol-bundle-members.js';
 import type { PreflightViolationCode } from './protocol-audit-entry.js';
 import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
@@ -1439,6 +1439,8 @@ export class ProtocolHistoryAndPublishFacet {
             state: 'active',
             organizationId: null,
             body: args.body,
+            // [#31698] The row this publish wrote (ADR-0150 D4).
+            ...projectorEventPackage(args.singularType, args.packageId),
         });
         if (publishProjection) out.projectionApplied = publishProjection;
         host.emitMetadataMutation({

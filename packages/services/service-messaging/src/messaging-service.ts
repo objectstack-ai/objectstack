@@ -34,6 +34,7 @@ import type {
     UnregisterDeviceResponse,
 } from '@objectstack/spec/api';
 import type { UserDevice } from '@objectstack/spec/system';
+import { SystemObjectName } from '@objectstack/spec/system';
 import {
     assertNotificationTextKeys,
     type NotificationTextKeys,
@@ -45,6 +46,96 @@ export const NOTIFICATION_EVENT_OBJECT = 'sys_notification';
 
 /** Receipt states that count as "read" for the inbox unread badge (ADR-0030). */
 const READ_RECEIPT_STATES = new Set(['read', 'clicked', 'dismissed']);
+
+/** The organization column an inbox row and a receipt are stamped with. */
+const ORGANIZATION_COLUMN = 'organization_id';
+
+/** A row's organization id, or `undefined` for an organization-less row. */
+function organizationOf(row: Record<string, unknown> | null | undefined): string | undefined {
+    const org = row?.[ORGANIZATION_COLUMN];
+    return org != null && String(org) !== '' ? String(org) : undefined;
+}
+
+/**
+ * [#32512] Which organizations named by a user's inbox rows no longer exist.
+ *
+ * An organization delete keeps every engine-owned row (`ObjectQL.outlivesOrganization`,
+ * seat decisions 6305179819 and 6307135388), and `sys_inbox_message` is one, so
+ * a deleted organization's messages stay stored until their 90-day TTL. They
+ * are kept, never shown: the inbox list and its `unreadCount` ask this which
+ * of the organizations they are about to serve still has its
+ * `sys_organization` row, and serve no row of one that does not. Retention is
+ * untouched, and nothing is deleted.
+ *
+ * Mark-read is deliberately NOT narrowed: it writes only the caller's own
+ * receipt and shows nothing, and a client that lists the inbox through another
+ * door (the Console bell reads `sys_inbox_message` through the data API) must
+ * still be able to clear a row it shows.
+ *
+ * One memo per reader call: each organization is asked about at most once, in
+ * one `id $in` read projecting `id` alone, and only when a row the call read
+ * names it. An organization-less row (`organization_id` NULL: a platform
+ * notification, a single-organization install's) is never in question.
+ *
+ * A failed read is not evidence that an organization is gone: the call then
+ * serves what it read, exactly as before this existed, and says so once per
+ * service (a composition that registers no `sys_organization` holds no
+ * organization that could have been deleted).
+ */
+class DeletedOrganizations {
+    private readonly deleted = new Map<string, boolean>();
+
+    constructor(
+        private readonly data: IDataEngine,
+        private readonly onReadFault: (err: unknown) => void,
+    ) {}
+
+    /** Of the organizations `rows` name, the ones with no `sys_organization` row. */
+    async among(rows: ReadonlyArray<Record<string, unknown> | null | undefined>): Promise<ReadonlySet<string>> {
+        const named = new Set<string>();
+        for (const row of rows) {
+            const org = organizationOf(row);
+            if (org !== undefined) named.add(org);
+        }
+        const unknown = [...named].filter((org) => !this.deleted.has(org));
+        if (unknown.length > 0) {
+            try {
+                // A yes/no about organization rows, by id — see INBOX_SYSTEM_CONTEXT.
+                const live = (await this.data.find(SystemObjectName.ORGANIZATION, {
+                    where: { id: { $in: unknown } },
+                    fields: ['id'],
+                }, { context: INBOX_SYSTEM_CONTEXT })) as Array<Record<string, unknown>>;
+                const found = new Set(live.map((r) => String(r?.id)));
+                for (const org of unknown) this.deleted.set(org, !found.has(org));
+            } catch (err) {
+                this.onReadFault(err);
+                for (const org of unknown) this.deleted.set(org, false);
+            }
+        }
+        return new Set([...named].filter((org) => this.deleted.get(org) === true));
+    }
+
+    /** Does `row` name an organization this memo has found deleted? */
+    names(row: Record<string, unknown> | null | undefined): boolean {
+        const org = organizationOf(row);
+        return org !== undefined && this.deleted.get(org) === true;
+    }
+}
+
+/**
+ * `where` narrowed to leave out rows of the `excluded` organizations. An
+ * organization-less row stays in: the platform's `$nin` is NULL-safe (a value
+ * that is not there is "not among this list", #5298, on SQL and in memory
+ * alike). No exclusion ⇒ the very same `where`, so a reader that finds no
+ * deleted organization asks the engine exactly what it asked before.
+ */
+function excludingOrganizations(
+    where: Record<string, unknown>,
+    excluded: ReadonlySet<string>,
+): Record<string, unknown> {
+    if (excluded.size === 0) return where;
+    return { ...where, [ORGANIZATION_COLUMN]: { $nin: [...excluded] } };
+}
 
 /**
  * One row of the inbox list REST response — the `Notification` shape in the API
@@ -265,6 +356,8 @@ export class MessagingService {
     private readonly channelProviders = new Map<string, ChannelProvider>();
     /** [#18050] Provider ids whose throw has already been announced — the log is said once, the PROBE is not. */
     private readonly providerThrewAnnounced = new Set<string>();
+    /** [#32512] Whether a failed organization-existence read has been said — once per service, see {@link DeletedOrganizations}. */
+    private organizationReadFaultAnnounced = false;
     private readonly now: () => string;
     private readonly resolver: RecipientResolver;
     private readonly preferences: PreferenceResolver;
@@ -681,6 +774,11 @@ export class MessagingService {
      * wrong. This signature stays as it is: it is the published
      * `INotificationService` contract, and the REST door needs exactly it.
      *
+     * [#32512] A row whose organization no longer exists is kept (the inbox
+     * is engine-owned, so an organization delete leaves its rows to their TTL)
+     * and never served: not listed and not counted in `unreadCount`. See
+     * {@link DeletedOrganizations}.
+     *
      * Returns the REST contract shape: `{ notifications, unreadCount }`.
      */
     async listInbox(
@@ -691,18 +789,40 @@ export class MessagingService {
         if (!data || !userId) return { notifications: [], unreadCount: 0 };
 
         const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
-        const where: Record<string, unknown> = { user_id: userId };
-        if (opts.type) where.topic = opts.type;
+        const userWhere: Record<string, unknown> = { user_id: userId };
+        if (opts.type) userWhere.topic = opts.type;
 
-        const [rows, stateByNotif] = await Promise.all([
+        // [#32512] A deleted organization's rows are kept (engine-owned) but
+        // never served. The window is read, the organizations it names are
+        // checked, and while it holds a row of a deleted one the window is
+        // read again without that organization, so a full page stays a full
+        // page of rows the user may see. Each pass excludes at least one more
+        // organization, so this ends; an inbox naming no deleted organization
+        // costs one window read and one `sys_organization` read, as before
+        // plus that one.
+        const deleted = this.deletedOrganizations(data);
+        const excluded = new Set<string>();
+        const readWindow = (where: Record<string, unknown>) =>
             // The explicit system opt-in, scoped by `where.user_id` — see INBOX_SYSTEM_CONTEXT.
             data.find(
                 INBOX_OBJECT,
                 { where, orderBy: [{ field: 'created_at', order: 'desc' }], limit },
                 { context: INBOX_SYSTEM_CONTEXT },
-            ) as Promise<Array<Record<string, unknown>>>,
+            ) as Promise<Array<Record<string, unknown>>>;
+        let where = userWhere;
+        const [firstWindow, stateByNotif] = await Promise.all([
+            readWindow(where),
             this.readReceiptStates(data, userId),
         ]);
+        let fetched = firstWindow;
+        for (;;) {
+            const fresh = [...(await deleted.among(fetched))].filter((org) => !excluded.has(org));
+            if (fresh.length === 0) break;
+            for (const org of fresh) excluded.add(org);
+            where = excludingOrganizations(userWhere, excluded);
+            fetched = await readWindow(where);
+        }
+        const rows = fetched.filter((m) => !deleted.names(m));
 
         let windowUnread = 0;
         const all: InboxNotificationView[] = rows.map((m) => {
@@ -727,9 +847,9 @@ export class MessagingService {
         // (`rows.length === limit`) can be hiding rows, and that is exactly the
         // case commit 17d095413 fixed. So the common inbox — fewer messages than the
         // page size — costs precisely what it cost before this change.
-        const unreadCount = rows.length < limit
+        const unreadCount = fetched.length < limit
             ? windowUnread
-            : await this.countUnreadTotal(data, where, stateByNotif);
+            : await this.countUnreadTotal(data, where, stateByNotif, deleted);
 
         const notifications = opts.read === undefined ? all : all.filter((n) => n.read === opts.read);
         return { notifications, unreadCount };
@@ -795,15 +915,20 @@ export class MessagingService {
         data: IDataEngine,
         where: Record<string, unknown>,
         stateByNotif: ReadonlyMap<string, string>,
+        deleted: DeletedOrganizations,
     ): Promise<number> {
         // `where` is listInbox's own, so it carries `user_id` — see INBOX_SYSTEM_CONTEXT.
         const ids = (await data.find(INBOX_OBJECT, {
             where,
-            fields: ['notification_id'],
+            fields: ['notification_id', ORGANIZATION_COLUMN],
         }, { context: INBOX_SYSTEM_CONTEXT })) as Array<Record<string, unknown>>;
 
+        // [#32512] The badge counts only rows the list may serve: a deleted
+        // organization outside the window is found here, by the same memo.
+        await deleted.among(ids);
         let unread = 0;
         for (const row of ids) {
+            if (deleted.names(row)) continue;
             const nid = row?.notification_id != null ? String(row.notification_id) : null;
             const state = nid ? stateByNotif.get(nid) : undefined;
             if (!state || !READ_RECEIPT_STATES.has(state)) unread += 1;
@@ -1147,6 +1272,22 @@ export class MessagingService {
             fields: ['id'],
         }, { context: INBOX_SYSTEM_CONTEXT });
         return message != null;
+    }
+
+    /**
+     * [#32512] A fresh {@link DeletedOrganizations} memo for one reader call,
+     * whose failed read is said once per service.
+     */
+    private deletedOrganizations(data: IDataEngine): DeletedOrganizations {
+        return new DeletedOrganizations(data, (err) => {
+            if (this.organizationReadFaultAnnounced) return;
+            this.organizationReadFaultAnnounced = true;
+            this.ctx.logger.warn(
+                `[messaging] could not read whether the organizations of an inbox still exist ` +
+                `(${(err as Error)?.message ?? String(err)}); inbox rows are served as stored, ` +
+                `a deleted organization's included (said once)`,
+            );
+        });
     }
 
     /**

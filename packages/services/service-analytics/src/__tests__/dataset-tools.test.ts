@@ -402,12 +402,125 @@ describe('query_dataset', () => {
     expect(plain).not.toHaveProperty('warning');
   });
 
+  // The tool asks the service for one row past the cap so `truncated` is a
+  // fact, then serves `cap` rows. Every member of the answer aligned to `rows`
+  // by index is served to the same length, entry i beside row i: a drill
+  // sidecar that kept the probe row described a bucket the caller was never
+  // shown. Members aligned to something else are served as the service
+  // answered them.
+  describe('a truncated answer serves every row-aligned sidecar to the served rows', () => {
+    const rows = [
+      { stage: 'draft', revenue: 1 },
+      { stage: 'paid', revenue: 2 },
+      { stage: 'void', revenue: 3 },
+    ];
+
+    for (const limit of [1, 2]) {
+      it(`limit ${limit}: drillRawRows holds exactly the served rows' raw values, in row order`, async () => {
+        const { service } = await bootWired(rows);
+        const out = await service.datasetTools({ loadDatasets: loadSaved }).queryDataset(
+          { datasetName: 'pipeline', selection: { measures: ['revenue'], dimensions: ['stage'], limit } },
+          ADMIN,
+        );
+        expect(out).toMatchObject({ rowCount: limit, truncated: true, dimensionFields: { stage: 'stage' } });
+        expect(out.rows).toHaveLength(limit);
+        expect(out.drillRawRows).toHaveLength(out.rows.length);
+        out.rows.forEach((row, i) => expect(out.drillRawRows?.[i]).toEqual({ stage: row.stage }));
+      });
+    }
+
+    it('trims drillRanges with the rows and leaves totals, drillRawTotals, dimensionFields and drillScopes as answered', async () => {
+      const { service } = await bootWired();
+      const range = (gte: string, lt: string) => ({ closed_on: { field: 'closed_on', gte, lt } });
+      const totals = [{ dimensions: [], rows: [{ revenue: 6 }] }];
+      const drillRawTotals = [[{}]];
+      const drillScopes = { revenue: { amount: { $null: false } } };
+      vi.spyOn(service, 'queryDataset').mockResolvedValue({
+        rows: rows.map((r) => ({ ...r })),
+        fields: [{ name: 'stage', type: 'string' }, { name: 'revenue', type: 'number' }],
+        object: 'crm_opp',
+        totals,
+        dimensionFields: { stage: 'stage' },
+        drillRawRows: rows.map((r) => ({ stage: r.stage })),
+        drillRawTotals,
+        drillRanges: [range('2026-01-01', '2026-02-01'), range('2026-02-01', '2026-03-01'), range('2026-03-01', '2026-04-01')],
+        drillScopes,
+      });
+      const out = await service.datasetTools({ loadDatasets: loadSaved }).queryDataset(
+        { datasetName: 'pipeline', selection: { measures: ['revenue'], dimensions: ['stage'], limit: 2 } },
+        ADMIN,
+      );
+      expect(out).toMatchObject({ rowCount: 2, truncated: true });
+      expect(out.drillRawRows).toEqual([{ stage: 'draft' }, { stage: 'paid' }]);
+      expect(out.drillRanges).toEqual([range('2026-01-01', '2026-02-01'), range('2026-02-01', '2026-03-01')]);
+      // Aligned to `totals`, keyed by name, or describing the whole answer: not row-indexed.
+      expect(out.totals).toEqual(totals);
+      expect(out.drillRawTotals).toEqual(drillRawTotals);
+      expect(out.dimensionFields).toEqual({ stage: 'stage' });
+      expect(out.drillScopes).toEqual(drillScopes);
+    });
+
+    it('CONTROL: an answer within the cap is served as the service answered it', async () => {
+      const { service } = await bootWired(rows);
+      const direct = await service.queryDataset(PIPELINE as never, { measures: ['revenue'], dimensions: ['stage'] } as never, ADMIN);
+      const out = await service.datasetTools({ loadDatasets: loadSaved }).queryDataset(
+        { datasetName: 'pipeline', selection: { measures: ['revenue'], dimensions: ['stage'], limit: 3 } },
+        ADMIN,
+      );
+      expect(out).toMatchObject({ rowCount: 3, truncated: false });
+      expect(out.rows).toEqual(direct.rows);
+      expect(out.drillRawRows).toEqual(direct.drillRawRows);
+      expect(out.drillRawRows).toEqual([{ stage: 'draft' }, { stage: 'paid' }, { stage: 'void' }]);
+    });
+  });
+
   it('answers 503 when the dataset read itself fails, never NOT_FOUND', async () => {
     const { service } = await bootWired();
     const tools = service.datasetTools({ loadDatasets: async () => { throw new Error('loader down'); } });
     await expect(
       tools.queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'] } }, ME),
     ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+  });
+
+  // A selection naming no measure has nothing to project. The spec selection
+  // accepts `measures: []`, so it used to reach `service.queryDataset`, whose
+  // SELECT had an empty projection: the SQL driver answered 500
+  // `DATABASE_ERROR` with its own text, and with dimensions the tool served
+  // group rows carrying no measure. The tool now refuses it before anything is
+  // read, with the REST door's answer to the same selection
+  // (`POST /analytics/dataset/query`: 400 `VALIDATION_FAILED`, the same
+  // sentence). Both faces this executor serves are pinned: the direct member
+  // the MCP bridge calls, and `execute`, the registry face the product AI's
+  // chat tool calls. The dogfood suite holds the REST door and the MCP tool to
+  // one answer for one caller.
+  it.each([
+    ['without dimensions', { measures: [] }],
+    ['with dimensions', { measures: [], dimensions: ['stage'] }],
+  ])('refuses measures: [] %s 400 VALIDATION_FAILED in the REST door\'s words, on both faces, reading nothing', async (_case, selection) => {
+    const { service, reads } = await bootWired();
+    const spy = vi.spyOn(service, 'queryDataset');
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    const input = { datasetName: 'pipeline', selection };
+    const direct = await tools.queryDataset(input, ME).catch((e) => e);
+    const chat = await tools.execute({ toolName: 'query_dataset', input }, ME).catch((e) => e);
+    for (const e of [direct, chat]) {
+      expect(e).toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+      expect(messageOf(e)).toBe('body.selection.measures must be a non-empty array of measure names.');
+    }
+    expect(spy).not.toHaveBeenCalled();
+    expect(reads).toEqual([]);
+  });
+
+  it('CONTROL: a selection naming a measure, with dimensions, is served on both faces as before', async () => {
+    const { service } = await bootWired([{ stage: 'won', revenue: 100 }]);
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    const input = { datasetName: 'pipeline', selection: { measures: ['revenue'], dimensions: ['stage'] } };
+    const direct = await tools.queryDataset(input, ME);
+    const chat = await tools.execute({ toolName: 'query_dataset', input }, ME);
+    for (const out of [direct, chat] as Array<{ rows: unknown[]; rowCount: number }>) {
+      expect(out.rows).toEqual([{ stage: 'won', revenue: 100 }]);
+      expect(out.rowCount).toBe(1);
+    }
   });
 
   it('dispatches by tool name through execute, and refuses an unknown one', async () => {

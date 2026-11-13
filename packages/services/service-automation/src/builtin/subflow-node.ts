@@ -209,6 +209,11 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
         success: true as const,
         output: { output: child.output ?? null },
         ...(metrics ? { metrics } : {}),
+        // #32861 — the values the child's write steps did not store ride up
+        // onto this step, so the parent's answer (`AutomationResult.droppedFields`)
+        // tells the caller about a drop its delegated write met. Set by the
+        // child's terminal success only, so a failed child carries none.
+        ...(child.droppedFields?.length ? { droppedFields: child.droppedFields } : {}),
       };
 
       // [#18110] The child REFUSED — an `end` inside it declared

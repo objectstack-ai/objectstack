@@ -39,10 +39,12 @@
  *    the vendor would refuse learns no count.
  * 2. **The organization's own auth structure goes with it.** That is
  *    {@link ORGANIZATION_AUTH_STRUCTURE}: members and invitations (better-auth
- *    deletes them), and teams, team members and the organization-admin grants
- *    its owners and admins hold ({@link removeOrganizationAuthStructure}, from
- *    `beforeDeleteOrganization`). Any other grant the organization holds is
- *    counted as a record.
+ *    deletes them), and teams, team members and the grants a membership
+ *    confers ({@link organizationAuthStructureSetNames}): the organization-admin
+ *    grants its owners and admins hold, and the self-registration grant
+ *    ([#32787]) a self-registrant's first membership landed there
+ *    ({@link removeOrganizationAuthStructure}, from `beforeDeleteOrganization`).
+ *    Any other grant the organization holds is counted as a record.
  * 3. **One unit of work.** `AuthManager.handleRequest` runs the whole request
  *    inside one engine transaction and rolls it back on any 4xx/5xx answer, the
  *    subject-erasure wrapper's posture. On a driver without transactions the
@@ -89,9 +91,9 @@ const GRANT_OBJECT = 'sys_user_permission_set';
  *
  * - `sys_member`, `sys_invitation`: better-auth's `adapter.deleteOrganization`;
  * - `sys_team`, `sys_team_member`, and in `sys_user_permission_set` ONLY the
- *   grants of the organization-admin sets ({@link ORGANIZATION_ADMIN_SET_NAMES}),
- *   the ones a membership grade confers: {@link removeOrganizationAuthStructure}.
- *   Every other grant scoped to the organization is counted.
+ *   grants a membership confers ({@link organizationAuthStructureSetNames}):
+ *   {@link removeOrganizationAuthStructure}. Every other grant scoped to the
+ *   organization is counted.
  */
 export const ORGANIZATION_AUTH_STRUCTURE: readonly string[] = [
   'sys_member',
@@ -103,6 +105,43 @@ export const ORGANIZATION_AUTH_STRUCTURE: readonly string[] = [
 
 /** The permission sets a membership grade grants, by name (ADR-0131 D4). */
 export const ORGANIZATION_ADMIN_SET_NAMES: readonly string[] = [ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS];
+
+/**
+ * What the delete is told about the deployment: the permission set its
+ * audience declares for a self-registrant (`audience.selfRegistrationPermissionSet`,
+ * read live through `AuthManager#getAudience` when the delete runs), or none.
+ */
+export interface OrganizationDeleteOptions {
+  selfRegistrationSet?: string;
+}
+
+/**
+ * The permission sets whose grants in an organization are that
+ * organization's own auth structure, by name: the ones a membership confers.
+ *
+ * - The organization-admin sets ({@link ORGANIZATION_ADMIN_SET_NAMES}), which
+ *   an owner or admin grade confers (ADR-0131 D4).
+ * - [#32787] The deployment's declared self-registration set, which a
+ *   self-registrant's FIRST membership confers: `AuthManager#settleSelfRegistrationGrant`
+ *   writes it with that membership, owned by its organization, and never a
+ *   second one (ADR-0131 D3/D9). Like every grant, it applies only while that
+ *   organization is the active one (`grantAppliesInTenant`, core's
+ *   `resolve-authz-context.ts`), so once the organization is deleted it
+ *   confers nothing anywhere, and removing it with the organization changes
+ *   nothing the person can do in any other organization. Counted as a record,
+ *   it refused the delete of every self-registrant's first organization.
+ *
+ * A grant of any other set is counted (maintainer ruling on #24948, letter B).
+ * A set the deployment no longer declares for self-registrants is any other
+ * set.
+ */
+export function organizationAuthStructureSetNames(selfRegistrationSet: string | undefined): string[] {
+  const names = [...ORGANIZATION_ADMIN_SET_NAMES];
+  if (typeof selfRegistrationSet === 'string' && selfRegistrationSet && !names.includes(selfRegistrationSet)) {
+    names.push(selfRegistrationSet);
+  }
+  return names;
+}
 
 /** One table the organization still owns rows in, and how many. */
 export interface OrganizationOwnedRows {
@@ -136,13 +175,14 @@ function rowsOf(result: unknown): any[] {
 export async function organizationDeleteRefusal(
   engine: IDataEngine,
   organizationId: string,
+  options: OrganizationDeleteOptions = {},
 ): Promise<OrganizationOwnedRows[] | undefined> {
   const counting = engine as CountingEngine;
   if (typeof counting.organizationOwnedRowCounts !== 'function') return undefined;
   const owned = await counting.organizationOwnedRowCounts(organizationId, { exclude: ORGANIZATION_AUTH_STRUCTURE });
 
   // The grants: every grant scoped to the organization, less those of the
-  // organization-admin sets. Two counts rather than one `$nin`, so a grant
+  // sets a membership confers. Two counts rather than one `$nin`, so a grant
   // whose set name is NULL (written before the column existed) is counted
   // too: a NULL never matches `NOT IN`.
   const tenantGrants = await engine.count(GRANT_OBJECT, {
@@ -150,11 +190,14 @@ export async function organizationDeleteRefusal(
     context: SYSTEM_CTX,
   });
   if (tenantGrants > 0) {
-    const adminGrants = await engine.count(GRANT_OBJECT, {
-      where: { organization_id: organizationId, [GRANT_SET_NAME_FIELD]: { $in: [...ORGANIZATION_ADMIN_SET_NAMES] } },
+    const structureGrants = await engine.count(GRANT_OBJECT, {
+      where: {
+        organization_id: organizationId,
+        [GRANT_SET_NAME_FIELD]: { $in: organizationAuthStructureSetNames(options.selfRegistrationSet) },
+      },
       context: SYSTEM_CTX,
     });
-    const others = tenantGrants - adminGrants;
+    const others = tenantGrants - structureGrants;
     if (others > 0) owned.push({ object: GRANT_OBJECT, count: others });
   }
   return owned;
@@ -257,9 +300,11 @@ export async function isDefaultOrganizationTarget(
 
 /**
  * Delete the part of the organization's auth structure better-auth leaves
- * behind: its teams with their members, and the organization-admin grants its
- * owners and admins hold. Called from `beforeDeleteOrganization`, inside the
- * request's transaction, so a later failure rolls it back.
+ * behind: its teams with their members, and the grants a membership confers
+ * there ({@link organizationAuthStructureSetNames}: the organization-admin
+ * grants its owners and admins hold, and the self-registration grant). Called
+ * from `beforeDeleteOrganization`, inside the request's transaction, so a
+ * later failure rolls it back.
  *
  * Team members first, by their team: `sys_team_member` reaches the
  * organization only through `team_id`, a required lookup, so a team still
@@ -269,7 +314,11 @@ export async function isDefaultOrganizationTarget(
  * waiting on plugin-security's member-delete reconcile: measured on a booted
  * showcase, they were still present when the organization row was deleted.
  */
-export async function removeOrganizationAuthStructure(engine: IDataEngine, organizationId: string): Promise<void> {
+export async function removeOrganizationAuthStructure(
+  engine: IDataEngine,
+  organizationId: string,
+  options: OrganizationDeleteOptions = {},
+): Promise<void> {
   const teams = rowsOf(
     await engine.find('sys_team', { where: { organization_id: organizationId }, fields: ['id'], context: SYSTEM_CTX }),
   );
@@ -285,7 +334,10 @@ export async function removeOrganizationAuthStructure(engine: IDataEngine, organ
     }
   }
   await engine.delete(GRANT_OBJECT, {
-    where: { organization_id: organizationId, [GRANT_SET_NAME_FIELD]: { $in: [...ORGANIZATION_ADMIN_SET_NAMES] } },
+    where: {
+      organization_id: organizationId,
+      [GRANT_SET_NAME_FIELD]: { $in: organizationAuthStructureSetNames(options.selfRegistrationSet) },
+    },
     multi: true,
     context: SYSTEM_CTX,
   });

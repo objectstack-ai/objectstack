@@ -1061,7 +1061,8 @@ describe('[ADR-0131 D5] the walled posture: deployment-level acceptance is host 
 /**
  * [ADR-0150 D8 R3] A suggestion reads the set its `permission_set_package`
  * names; a null column, and a stale one, resolves from the suggesting
- * package (`package_id`) by D3. A name the rule refuses is never picked: the refusal names every
+ * package (`package_id`) by D3 — a stale one inside its own package's
+ * namespace only (#31698). A name the rule refuses is never picked: the refusal names every
  * candidate and the operator's bind.
  */
 describe('[ADR-0150 D8 R3] a suggestion reads its set by its package column', () => {
@@ -1069,12 +1070,18 @@ describe('[ADR-0150 D8 R3] a suggestion reads its set by its package column', ()
   const HR = 'com.example.hr';
   const SUITE = 'com.example.suite';
   const OTHER = 'com.example.other';
+  /** A package of HR's namespace that holds no set. */
+  const HR_OLD = 'com.example.hr-old';
+  /** A package of another namespace that holds no set. */
+  const OPS = 'com.example.ops';
   const SHARED = 'shared_default';
   const packages = [
-    { enabled: true, manifest: { id: CRM, permissions: [{ name: SHARED, label: 'CRM', isDefault: true, objects: {} }] } },
-    { enabled: true, manifest: { id: HR, permissions: [{ name: SHARED, label: 'HR', isDefault: true, objects: {} }] } },
+    { enabled: true, manifest: { id: CRM, namespace: 'crm', permissions: [{ name: SHARED, label: 'CRM', isDefault: true, objects: {} }] } },
+    { enabled: true, manifest: { id: HR, namespace: 'hr', permissions: [{ name: SHARED, label: 'HR', isDefault: true, objects: {} }] } },
     { enabled: true, manifest: { id: SUITE, dependencies: { [CRM]: '*', [HR]: '*' } } },
     { enabled: true, manifest: { id: OTHER } },
+    { enabled: true, manifest: { id: HR_OLD, namespace: 'hr' } },
+    { enabled: true, manifest: { id: OPS, namespace: 'ops' } },
   ];
   /** {@link makeQl}, its registry carrying the package-scoped reads a `SchemaRegistry` carries (a pre-phase-1 clash on `shared_default`). */
   function scopedQl() {
@@ -1114,7 +1121,7 @@ describe('[ADR-0150 D8 R3] a suggestion reads its set by its package column', ()
 
   it('a stale column (its package no longer serves the set) reads as a null one, from the suggesting package', async () => {
     const ql = scopedQl();
-    rows(ql).push(row('s_moved', HR, 'com.example.gone'), row('s_stale', SUITE, 'com.example.gone'));
+    rows(ql).push(row('s_moved', HR, HR_OLD), row('s_stale', SUITE, 'com.example.gone'));
     const { suggestion } = await confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, 's_moved');
     expect(suggestion).toMatchObject({ status: 'confirmed' });
     // ⛔ The same stale column where the suggesting package reaches two holders: refused, naming both.
@@ -1122,6 +1129,25 @@ describe('[ADR-0150 D8 R3] a suggestion reads its set by its package column', ()
     expect(err).toBeInstanceOf(SuggestionStateError);
     expect(err.message).toContain(CRM);
     expect(err.message).toContain(HR);
+  });
+
+  it('⛔ [#31698] a stale column whose holder is outside its package\'s namespace is a 409 naming that holder — nothing is confirmed', async () => {
+    const ql = scopedQl();
+    // HR's own set is what the suggesting package reads; the column names a package of another namespace.
+    rows(ql).push(row('s_other_column', HR, OPS));
+    const err = await confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, 's_other_column').catch((e) => e);
+    expect(err).toBeInstanceOf(SuggestionStateError);
+    expect(err.message).toContain(`is held by package "${HR}"`);
+    expect(everyoneSets(ql)).not.toContain(SHARED);
+  });
+
+  it('CONTROL [#31698]: a stale column of a package with no namespace, or not installed, has none to bound it, and reads from the suggesting package', async () => {
+    for (const [id, column] of [['s_no_namespace', OTHER], ['s_gone', 'com.example.gone']] as const) {
+      const ql = scopedQl();
+      rows(ql).push(row(id, HR, column));
+      const { suggestion } = await confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, id);
+      expect(suggestion, id).toMatchObject({ status: 'confirmed' });
+    }
   });
 
   it('⛔ a null column the rule refuses is a 409 naming every candidate and the bind — never the first holder', async () => {

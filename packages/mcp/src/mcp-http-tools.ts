@@ -30,7 +30,12 @@
  *    action tools yield PER ACTION: a `sys_*` action whose author declared
  *    `ai.exposed: true` (the bridge attests it as `aiExposed`) is listed and
  *    run like any other exposed action (#27681, ADR-0011) — no other key and
- *    no deployment switch opens one.
+ *    no deployment switch opens one. The READ tools (list, describe, query,
+ *    get one, aggregate) yield PER OBJECT the same way: a `sys_*` object whose
+ *    author declared `enable.aiReadable: true` (the bridge attests it through
+ *    `isAiReadExposed`, {@link McpDataBridge.aiReadExposed}) is read like any
+ *    other object, under every later gate (#32442). No write tool ever opens a
+ *    `sys_*` object.
  *  - The bridge is bound to the caller's principal; tools cannot widen it.
  *  - Errors are returned as tool errors (text), never thrown across the wire,
  *    and never include secrets.
@@ -87,6 +92,10 @@ import {
   type ExprFaultOutcome,
   type FieldRole,
 } from '@objectstack/formula';
+// [#32872] The publish gate's own passes at a validation rule and a formula
+// field, run over the served definitions (see `VALIDATE_SITE_MAP.gatePasses`).
+// [#32872] Types only: the entry itself is loaded lazily, in `gatePassFindings`.
+import type { AuthoredExpressionSite } from '@objectstack/lint';
 // [#16913] The unknown-key error map every `strictToolInput` shape below is
 // built with. Imported, never re-implemented: #4001 is this repo's ruling on
 // silent key stripping and its explicit instruction is that the parts already
@@ -141,6 +150,24 @@ export interface McpDataBridge {
   listObjectsDiagnosed?(): Promise<DiagnosedObjectListing<McpObjectSummary>>;
   describeObject(name: string): Promise<unknown | null>;
   /**
+   * [#32442, ruling A] Has the system object `name` opted its records into the
+   * AI READ tools? The bridge answers with `isAiReadExposed`
+   * (`@objectstack/spec/data`), the ONE reading of `enable.aiReadable`, over
+   * the object's whole served definition: the stored-metadata family answers
+   * `false` before the key is read, and only the boolean `true` opens.
+   *
+   * The read tools (`list_objects`, `describe_object`, `query_records`,
+   * `get_record`, `aggregate_records`) ask it only for a `sys_*` name their
+   * fail-closed guard would otherwise refuse. An attested object is then read
+   * exactly like a business object: AS the caller, under the caller's
+   * permissions, row-level security, the object's own read gates and field
+   * masking. It never opens a write: every write tool keeps refusing `sys_*`.
+   *
+   * OPTIONAL and fail-closed: a bridge that omits it, or whose answer throws,
+   * keeps every system object refused, exactly as before.
+   */
+  aiReadExposed?(name: string): Promise<boolean>;
+  /**
    * [#28715] The fields of `name` that declare options — the fields a
    * formula's `label(record.<field>)` can answer on — or `null` when no such
    * object is served. Read from the same object {@link describeObject} reads,
@@ -159,6 +186,22 @@ export interface McpDataBridge {
    * no `label()` target check, exactly as before (the validator's opt-in).
    */
   optionFieldsOf?(name: string): Promise<readonly string[] | null>;
+  /**
+   * [#32872] The object definition of `name` whole, as this caller is served
+   * it — the same read {@link describeObject} projects — or `null` when no
+   * such object is served. `validate_expression` hands it, with the
+   * definitions of the objects the expression reads through, to
+   * `@objectstack/lint`'s `judgeAuthoredSiteExpression`, so the tool gives
+   * the publish gate's verdict at a `validation` / `formula` site: the passes
+   * that judge what a field declares (`required`, `defaultValue`, a
+   * `reference`'s target, an external binding) read the definition, which
+   * `describeObject`'s projection does not carry. Never rendered to the
+   * caller: only the gate's findings are.
+   *
+   * OPTIONAL, like {@link optionFieldsOf}: a bridge that omits it gets the
+   * shared validator's verdict alone, exactly as before.
+   */
+  servedObjectDefinitionOf?(name: string): Promise<Record<string, unknown> | null>;
   query(
     object: string,
     opts: {
@@ -333,10 +376,13 @@ export interface McpActionSummary {
    * credential before running it: an `api` action whose target endpoint does
    * not accept the credential the caller connected with (an OAuth access token
    * is honoured on the MCP endpoint only, so an endpoint outside it cannot read
-   * it). The action is still listed, so an agent can tell its user why it
-   * cannot run it; `code` is the standard error code `run_action` answers with
-   * (`UNAUTHENTICATED`), `reason` the sentence it carries, including what would
-   * let the action run. Absent when the action can be run.
+   * it), or an action declaring `ai.requiresConfirmation: true` listed for an
+   * AI service account, which never confirms an action for itself (ADR-0151 D3
+   * rule 3). The action is still listed, so an agent can tell its user why it
+   * cannot run it; `code` is the error code `run_action` answers with
+   * (`UNAUTHENTICATED` for the endpoint, `ACTION_CONFIRMATION_REQUIRED` for the
+   * account), `reason` the sentence it carries, including what would let the
+   * action run. Absent when the action can be run.
    */
   unavailable?: McpActionUnavailable;
 }
@@ -469,6 +515,12 @@ const DEFAULT_MAX_LIMIT = 50;
 /** A `sys_`-prefixed object is a system table — off-limits to external agents. */
 function isSystemObject(name: string): boolean {
   return /^sys_/i.test(name);
+}
+
+/** `items` kept where `keep` answers true, asked concurrently, in order. */
+async function filterAsync<T>(items: readonly T[], keep: (item: T) => Promise<boolean>): Promise<T[]> {
+  const verdicts = await Promise.all(items.map(keep));
+  return items.filter((_, i) => verdicts[i]);
 }
 
 /**
@@ -683,7 +735,63 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
   // `details` rides only on a refusal, as `/actions` serves no producer
   // context on a fault.
   const details = answer.status < 500 ? (err as { details?: unknown } | null | undefined)?.details : undefined;
-  return codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
+  const result = codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
+  // [#32757] Read, never stamped: `FLOW_FAILED` (a flow that RAN and failed)
+  // is the one arm whose `details` are the run's artefacts; `satisfies` keeps
+  // the spelling checked against the registered vocabulary.
+  const relay = answer.code === ('FLOW_FAILED' satisfies ErrorCode) ? flowFailureRelaySentence(details, answer.userMessage) : undefined;
+  return relay === undefined
+    ? result
+    : { ...result, content: [...result.content, { type: 'text' as const, text: `${FLOW_FAILURE_RELAY_LEAD}${relay}` }] };
+}
+
+/**
+ * [#32757] The lead of the plain sentence a failed flow run's tool error
+ * carries beside its envelope. Exported for the pin; not on the package entry.
+ */
+export const FLOW_FAILURE_RELAY_LEAD =
+  'Tell the user this reason, not the flow and node chain in the error message: ';
+
+/**
+ * [#32757] What a failed flow run tells its END USER, chosen by the console's
+ * own read order (`flowFailureMessage` in `ui/packages/app-shell/src/utils/
+ * flowResponse.ts`): the flow author's `errorMessage`, then the producer-marked
+ * `userMessage`, then the message of the refusal the run's write node met
+ * (`innerRefusal`, served without the node and operation prefixes). The run's
+ * own `message` is the console's last rung and is not repeated: a failure that
+ * carries none of the three gets no sentence, so this never invents one.
+ *
+ * ## Why a second content block, and not a promoted code
+ *
+ * Measured on the HTTP `/mcp` face: a flow action whose `update_record` met a
+ * `requiredWhen` refusal answered `FLOW_FAILED` with the message
+ * `Flow 'F' failed: Node 'N' failed: update_record(OBJECT) failed: …`, and an
+ * agent relayed that chain to the employee while the console's toast read the
+ * field's own sentence. The wire may not lead with the inner refusal instead:
+ * `FlowInnerRefusalSchema` (`@objectstack/spec/api`, ruling B′) keeps it a
+ * NESTED member, never promoted over `code` or `message`, and this tool answers
+ * what `/api/v1/actions` answers ({@link errorResultFromThrown}). So the
+ * envelope in `content[0]` stays byte for byte the door's, and the sentence
+ * rides as `content[1]`, plain text, read by the same order as the console —
+ * the maintainer's ruling on the card (options B and D together; the tool
+ * descriptions teach the same order).
+ *
+ * The details are read as the spec declares them (`FlowFailureDetailsSchema`):
+ * strings only, and an `innerRefusal` only when its `code` is a string, as the
+ * console reads it. ⛔ The permission and delegated-scope rungs the console
+ * substitutes are its own localized lines; here the refusal's sentence stands,
+ * and its language is the caller's locale's, decided upstream.
+ */
+function flowFailureRelaySentence(details: unknown, userMessage: string | undefined): string | undefined {
+  const run = details && typeof details === 'object' && !Array.isArray(details)
+    ? (details as { errorMessage?: unknown; innerRefusal?: unknown })
+    : {};
+  const usable = (text: unknown): string | undefined =>
+    typeof text === 'string' && text.trim() !== '' ? text : undefined;
+  const inner = run.innerRefusal as { code?: unknown; message?: unknown } | null | undefined;
+  return usable(run.errorMessage)
+    ?? usable(userMessage)
+    ?? (inner && typeof inner === 'object' && typeof inner.code === 'string' ? usable(inner.message) : undefined);
 }
 
 /**
@@ -1624,6 +1732,27 @@ function jsonText(value: unknown): string {
  * pass hands the validator the object's option-bearing fields on a formula
  * field's `expression` and nowhere else, so the tool asks the bridge for them
  * on the `formula` site only and answers every other site as the gate does.
+ *
+ * [#32640] `traversalHydration`: the sites where the gate runs the shared
+ * validator with `ExprSchemaHint.traversalHydration` — a validation rule's
+ * condition and a formula field's `expression`, the two seams the engine
+ * hydrates one relationship hop for (`@objectstack/lint`'s rule pass and
+ * `judgeFieldFormula`). There the validator refuses a reference read both
+ * through the relationship and as a plain value, and a second hop, in the
+ * gate's words; nothing hydrates a flow condition or a template, so the gate
+ * does not ask there and neither does the tool.
+ *
+ * [#32872] `gatePasses`: the sites where the gate judges with passes of its
+ * own beyond the shared validator — the null-guard gate, the hop to a field
+ * the target does not declare, the hop into a stored-metadata table, a rule
+ * reading `parent`, the unprovisioned-anchor warning — each private to
+ * `@objectstack/lint`'s walk. There the tool asks the gate itself
+ * (`judgeAuthoredSiteExpression`) over the served definitions
+ * (`McpDataBridge.servedObjectDefinitionOf`) and adds its findings to the
+ * validator's. A flow condition and a template are not judged by this: the
+ * gate's own passes there (the unprovisioned-anchor warning on an
+ * object-bound flow predicate, the null-guard gate on a record-triggered
+ * flow's conditions) are not run by the tool.
  */
 const VALIDATE_SITE_MAP: Record<
   string,
@@ -1632,6 +1761,8 @@ const VALIDATE_SITE_MAP: Record<
     scope: 'record' | 'flattened';
     slot: z.ZodType;
     optionLabels?: true;
+    traversalHydration?: true;
+    gatePasses?: AuthoredExpressionSite;
     /**
      * [#29904, #29926, #29959] What the gate's runtime does on a fault at this
      * site, from the caller's optional `severity` / `triggerKind` — the two
@@ -1647,14 +1778,18 @@ const VALIDATE_SITE_MAP: Record<
     }) => ExprFaultOutcome | undefined;
   }
 > = {
-  formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true },
+  formula: {
+    role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true, traversalHydration: true,
+    gatePasses: 'formula',
+  },
   // [#29904, #29926] A `severity: 'error'` rule (the default) fails closed: a
   // fault refuses the write. An advisory rule (`warning` / `info`) fails open:
   // the rule is skipped and the write proceeds. The gate grades a
   // text-vs-number comparison an error worded for each; the tool answers what
   // the gate will for the severity it is told.
   validation: {
-    role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema,
+    role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema, traversalHydration: true,
+    gatePasses: 'validation',
     faultOutcome: ({ severity }) => (severity === 'warning' || severity === 'info' ? 'fail-open' : 'fail-closed'),
   },
   // [#29926, #29959] A record-triggered flow's start, edge or `decision`
@@ -1673,6 +1808,64 @@ const VALIDATE_SITE_MAP: Record<
   },
   template: { role: 'template', scope: 'record', slot: TemplateExpressionInputSchema },
 };
+
+/** [#32872] A gate pass's finding, as the tool answers it: the source it reads and the gate's sentence. */
+interface GatePassFinding {
+  source: string;
+  message: string;
+}
+
+const NO_GATE_PASS_FINDINGS: { errors: GatePassFinding[]; warnings: GatePassFinding[] } = { errors: [], warnings: [] };
+
+/**
+ * [#32872] The publish gate's findings at a `validation` / `formula` site
+ * beyond the shared validator's, judged by `@objectstack/lint`'s
+ * `judgeAuthoredSiteExpression` over the definitions the caller is served:
+ * the subject's, and each object the expression reads through. A bridge
+ * without `servedObjectDefinitionOf`, or an object it does not serve, adds
+ * none; a target it does not serve is not judged, as at the gate.
+ *
+ * A hop target follows the same system-object fence as `describe_object`:
+ * `exposed` is the tool's object-name guard, and a target it refuses is
+ * neither read nor judged, so a hop into a system object is judged only
+ * where the server exposes system objects (`allowSystemObjects`).
+ *
+ * `@objectstack/lint`'s root entry is loaded here, on the first call that
+ * needs it, never at module load: the boot path reaches lint only through
+ * its `/runtime` entry, as every other server-side consumer does.
+ */
+async function gatePassFindings(
+  bridge: McpDataBridge,
+  exposed: (objectName: string) => boolean,
+  site: AuthoredExpressionSite,
+  objectName: string,
+  expression: string,
+  severity: ValidationSeverity | undefined,
+): Promise<{ errors: GatePassFinding[]; warnings: GatePassFinding[] }> {
+  if (!bridge.servedObjectDefinitionOf) return NO_GATE_PASS_FINDINGS;
+  const subject = await bridge.servedObjectDefinitionOf(objectName);
+  if (!subject) return NO_GATE_PASS_FINDINGS;
+  const { authoredExpressionHopTargets, judgeAuthoredSiteExpression } = await import('@objectstack/lint');
+  const targets: Array<Record<string, unknown>> = [];
+  for (const target of authoredExpressionHopTargets(subject, expression)) {
+    if (target === objectName || !exposed(target)) continue;
+    const def = await bridge.servedObjectDefinitionOf(target);
+    if (def) targets.push(def);
+  }
+  const findings = judgeAuthoredSiteExpression({
+    site,
+    objectName,
+    expression,
+    ...(severity ? { severity } : {}),
+    objects: [subject, ...targets],
+  });
+  const errors: GatePassFinding[] = [];
+  const warnings: GatePassFinding[] = [];
+  for (const { severity: level, source, message } of findings) {
+    (level === 'warning' ? warnings : errors).push({ source, message });
+  }
+  return { errors, warnings };
+}
 
 /** [#29959] A validation rule's `severity`, as `ValidationRuleSchema` spells it. */
 type ValidationSeverity = 'error' | 'warning' | 'info';
@@ -2119,6 +2312,30 @@ export function registerObjectTools(
     }
     return undefined;
   };
+  /**
+   * [#32442] Does the bridge attest this system object's read opt-in
+   * ({@link McpDataBridge.aiReadExposed})? Fail-closed: no member, or a throw,
+   * is `false`.
+   */
+  const attestsAiRead = async (objectName: string): Promise<boolean> => {
+    if (typeof bridge.aiReadExposed !== 'function') return false;
+    try {
+      return (await bridge.aiReadExposed(objectName)) === true;
+    } catch {
+      return false;
+    }
+  };
+  /**
+   * [#32442] The guard of the READ tools only (`describe_object`,
+   * `query_records`, `get_record`, `aggregate_records`): {@link guard}, except
+   * that a `sys_*` object the bridge attests as AI-readable is admitted. Every
+   * write tool keeps {@link guard}, so no declaration opens a system write.
+   */
+  const readGuard = async (objectName: string): Promise<string | undefined> => {
+    const bad = guard(objectName);
+    if (bad === undefined || !isSystemObject(objectName)) return bad;
+    return (await attestsAiRead(objectName)) ? undefined : bad;
+  };
 
   if (canRead) {
     server.registerTool(
@@ -2157,9 +2374,11 @@ export function registerObjectTools(
           const diagnosed = bridge.listObjectsDiagnosed
             ? await bridge.listObjectsDiagnosed()
             : { objects: await bridge.listObjects(), degraded: false, errors: [] };
+          // [#32442] A system object is listed only where the bridge attests
+          // its read opt-in, the same admission `readGuard` makes.
           const visible = allowSystem
             ? diagnosed.objects
-            : diagnosed.objects.filter((o) => !isSystemObject(o.name));
+            : await filterAsync(diagnosed.objects, async (o) => !isSystemObject(o.name) || await attestsAiRead(o.name));
           if (!diagnosed.degraded) {
             return textResult({ objects: visible, totalCount: visible.length });
           }
@@ -2193,7 +2412,7 @@ export function registerObjectTools(
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       async ({ objectName }) => {
-        const bad = guard(objectName);
+        const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
           const def = await bridge.describeObject(objectName);
@@ -2215,11 +2434,16 @@ export function registerObjectTools(
       {
         description:
           'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns ' +
-          'build-time errors (bare field refs, unknown fields, unknown functions) and advisory warnings ' +
+          'build-time errors (bare field refs, unknown fields, unknown functions; at a `formula` or `validation` site, every ' +
+          'other refusal the publish gate gives there: a reference field read both through the relationship and as a plain ' +
+          'value, more than one hop, a hop to a field the target does not declare or into a stored-metadata table, and at a ' +
+          '`validation` site an unguarded nullable field or a read of `parent`) and advisory warnings ' +
           '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
           '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
-          'a warning on any other flow; date-equality pitfalls), plus the fields and stdlib ' +
-          'functions in scope so you can self-correct. `site` says where the expression will live: a `formula` ' +
+          'a warning on any other flow; date-equality pitfalls; at a `formula` or `validation` site, a read of an ' +
+          'external object\'s unprovisioned system column), plus the fields and stdlib ' +
+          'functions in scope so you can self-correct. A hop target follows the same system-object fence as ' +
+          '`describe_object`. `site` says where the expression will live: a `formula` ' +
           'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions). ' +
           'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition), so the verdict is ' +
           'the one the publish gate gives that rule or flow. A time-relative flow\'s conditions read a row of the object ' +
@@ -2304,7 +2528,8 @@ export function registerObjectTools(
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
-          const { role, scope, slot, optionLabels, faultOutcome: outcomeOf } = VALIDATE_SITE_MAP[site ?? 'formula'];
+          const { role, scope, slot, optionLabels, traversalHydration, gatePasses, faultOutcome: outcomeOf } =
+            VALIDATE_SITE_MAP[site ?? 'formula'];
           const faultOutcome = outcomeOf?.({
             severity: severity ?? 'error',
             triggerKind: triggerKind ?? 'record_change',
@@ -2322,6 +2547,8 @@ export function registerObjectTools(
             fieldTypes,
             scope,
             ...(optionFields ? { optionFields } : {}),
+            // [#32640] The gate's relationship-traversal checks, where it runs them.
+            ...(traversalHydration ? { traversalHydration } : {}),
             ...(faultOutcome ? { faultOutcome } : {}),
             // [#30250] A time-relative sweep's run is fired by no write: the
             // gate's run-fails sentence there names none, and so does this one.
@@ -2343,13 +2570,18 @@ export function registerObjectTools(
                 })),
                 warnings: [],
               };
+          // [#32872] …and, at a validation rule or a formula field, every other
+          // pass the gate runs there, in the gate's own words.
+          const gate = slotParse.success && gatePasses
+            ? await gatePassFindings(bridge, (name) => guard(name) === undefined, gatePasses, objectName, expression, severity)
+            : NO_GATE_PASS_FINDINGS;
           const inScope = introspectScope(role, hint);
           const inferredType =
             slotParse.success && role === 'value' ? inferExpressionType(expression, hint) : undefined;
           return textResult({
-            ok: result.ok,
-            errors: result.errors,
-            warnings: result.warnings,
+            ok: result.ok && gate.errors.length === 0,
+            errors: [...result.errors, ...gate.errors],
+            warnings: [...result.warnings, ...gate.warnings],
             ...(inferredType ? { inferredType } : {}),
             inScope: {
               dialect: inScope.dialect,
@@ -2369,7 +2601,13 @@ export function registerObjectTools(
       {
         description:
           'Query records from an object with optional filter, field selection, sorting and pagination. ' +
-          'Runs under the caller\'s permissions and row-level security.',
+          'Runs under the caller\'s permissions and row-level security. ' +
+          'A filter value "{current_user_id}" stands for you. ' +
+          // [#32442] The console's My Pending list, filter for filter: the
+          // participant read alone also serves requests the caller submitted
+          // or already decided, so an agent must not guess "mine" from it.
+          'For example, where the app runs approvals, the ones waiting on you: objectName "sys_approval_request", where ' +
+          '{"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}; decide one with run_action.',
         inputSchema: strictToolInput(
           {
             surface: 'this query_records call',
@@ -2415,7 +2653,7 @@ export function registerObjectTools(
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       async ({ objectName, where, fields, limit, offset, orderBy }) => {
-        const bad = guard(objectName);
+        const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
           const result = await bridge.query(objectName, {
@@ -2516,7 +2754,7 @@ export function registerObjectTools(
           annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
         },
         async ({ objectName, aggregations, groupBy, where, timezone }) => {
-          const bad = guard(objectName);
+          const bad = await readGuard(objectName);
           if (bad) return errorResult(bad);
           try {
             const rows = (await aggregateFn(objectName, {
@@ -2554,7 +2792,7 @@ export function registerObjectTools(
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       async ({ objectName, recordId }) => {
-        const bad = guard(objectName);
+        const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
           const record = await bridge.get(objectName, recordId);
@@ -2918,7 +3156,17 @@ export function registerActionTools(
         'but the action body itself runs as trusted application code with the app\'s full data authority. ' +
         'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
         'An action the author gated (list_actions reports requiresConfirmation) is REFUSED unless you also ' +
-        'send confirm: true — ask the human first, then retry; nothing runs on a refused call.' +
+        'send confirm: true — ask the human first, then retry; nothing runs on a refused call. ' +
+        // [ADR-0151 D3 rule 3] `actionConfirmationRefusal` (runtime) never reads
+        // the member for an AI service account, so no retry is taught to one.
+        'Under an AI service account\'s own key (an agent acting for itself, for no person) the call is ' +
+        'refused whatever it sends and nothing runs: hand the action to a person, or its author declares ' +
+        'ai.requiresConfirmation: false when it is safe unattended. ' +
+        // [#32757] The read order `flowFailureRelaySentence` applies, taught
+        // to the reader as well, as the console reads it.
+        'A flow action that fails answers error.code FLOW_FAILED with a message naming the flow and node, ' +
+        'which is for diagnosis: tell the user the reason in the second text block, which is the flow\'s ' +
+        'details.errorMessage, else userMessage, else details.innerRefusal.message — never the flow and node chain.' +
         // [#15705] Named only where `resume_run` is actually registered below,
         // so this description never points an agent at a tool it cannot call.
         (canResume
@@ -2992,7 +3240,8 @@ export function registerActionTools(
             'Set to true to confirm a call the app author gated with ai.requiresConfirmation '
             + '(list_actions reports requiresConfirmation for each action). Assert this only when '
             + 'the human in the loop has approved THIS call; without it a gated action is refused '
-            + 'and nothing runs.',
+            + 'and nothing runs. Under an AI service account\'s own key it is not read: the call is '
+            + 'refused whatever it sends.',
           ),
         },
       ),
@@ -3089,7 +3338,10 @@ export function registerActionTools(
           '(author AI opt-in, your capabilities, your read access to the record). The rest of the flow runs ' +
           'the app\'s business logic and can mutate data. When list_actions reports requiresConfirmation for ' +
           'the action that started the run, send confirm: true (ask the human first); without it the call ' +
-          'is refused and the run stays paused.',
+          'is refused and the run stays paused. Under an AI service account\'s own key the call is refused ' +
+          'whatever it sends and the run stays paused: hand it to a person. A run that fails answers as ' +
+          'run_action does: tell the user the reason in the second text block, never the flow and node chain ' +
+          'in the error message.',
         inputSchema: strictToolInput(
           {
             surface: 'this resume_run call',
@@ -3131,7 +3383,8 @@ export function registerActionTools(
                 'Set to true to confirm resuming a run of an action the app author gated with '
                 + 'ai.requiresConfirmation (list_actions reports requiresConfirmation). Assert this only when '
                 + 'the human in the loop has approved THIS call; without it the call is refused and the run '
-                + 'stays paused.',
+                + 'stays paused. Under an AI service account\'s own key it is not read: the call is refused '
+                + 'whatever it sends.',
               ),
           },
         ),
@@ -3276,16 +3529,37 @@ export function registerFileTools(
 
   if (canWrite && typeof bridge.createUploadLink === 'function') {
     const linkFn = bridge.createUploadLink.bind(bridge);
+    // [#32686] Ruling A: a link for a file field of a record not yet created,
+    // where the bridge serves it.
+    const newRecordLinkFn =
+      typeof bridge.createUploadLinkForNewRecord === 'function' ? bridge.createUploadLinkForNewRecord.bind(bridge) : undefined;
+    // `recordId` is optional exactly where a link can name no record, so the
+    // listed schema says what the handler takes; the handler reads it as
+    // possibly absent either way.
+    const uploadLinkRecordId: z.ZodType<string | undefined> = newRecordLinkFn
+      ? z.string().optional().describe(`${RECORD_ID_DESCRIPTION} Omit it for a record not yet created (with field).`)
+      : z.string().describe(RECORD_ID_DESCRIPTION);
     server.registerTool(
       note('create_upload_link'),
       {
         description:
           'Create a link through which the user uploads one file onto a record: into a file field (field) or ' +
           'as an attachment (attachments: true). Give the link to the user to open in a browser where they are ' +
-          'signed in to this deployment as themselves; it works only for them, once, for this record and field ' +
-          'only, and expires (see expiresAt). The upload is stored as the user, so they must be able to edit the ' +
-          'record (and the field): a record a pending approval locks, or a read-only field, gets no link, and an ' +
-          'upload the field cannot take when it arrives is refused with the reason, attaching nothing.',
+          'signed in to this deployment as themselves; it works only for them, once, for this record and this ' +
+          'field (or its attachments) only, and expires (see expiresAt). The upload is stored as the user, so they ' +
+          'must be able to edit the record. A field link also needs a field they may write, and gets no link for ' +
+          'a field declared read-only (readonly), a field read-only on this record in its current state ' +
+          '(readonlyWhen), or a record a pending approval locks. An attachments link asks only what attaching ' +
+          'asks, so a record a pending approval locks still takes attachments. An upload refused when it arrives ' +
+          '(for a field link: the field became read-only, or the record was locked, after the link was made) ' +
+          'answers the reason and attaches nothing.' +
+          (newRecordLinkFn
+            ? ' For a record you have not created yet (a required file field), omit recordId and name the field: ' +
+              'the user must be able to create such records, and the answer carries fileIds, the id(s) the upload ' +
+              'is stored under. Once the user has uploaded, create the record with the field set to fileIds[0] ' +
+              '(the array, for a multi-file field). The id works only for this user\'s own write into that field ' +
+              'of that object, in one record, within an hour of the upload.'
+            : ''),
         inputSchema: strictToolInput(
           {
             surface: 'this create_upload_link call',
@@ -3299,7 +3573,7 @@ export function registerFileTools(
           },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
+            recordId: uploadLinkRecordId,
             field: z.string().optional().describe('A file or image field of the record the upload fills'),
             attachments: z
               .literal(true)
@@ -3314,6 +3588,34 @@ export function registerFileTools(
         if (bad) return errorResult(bad);
         if ((field === undefined) === (attachments === undefined)) {
           return errorResult('Say where the upload lands: either field (a file field of the record) or attachments: true.');
+        }
+        if (recordId === undefined) {
+          // [#32686] No record yet: a file field only, where the bridge serves it.
+          if (field === undefined) {
+            return errorResult(
+              'An attachment needs its record: create the record first, then ask for a link with its recordId. ' +
+                'For a file field of a record not yet created, name the field instead.',
+            );
+          }
+          if (!newRecordLinkFn) return errorResult('recordId is required: name the record the upload lands on.');
+          try {
+            const link = await newRecordLinkFn(objectName, { field });
+            return textResult({
+              url: link.url,
+              expiresAt: link.expiresAt,
+              singleUse: true,
+              objectName,
+              field,
+              fileIds: link.fileIds,
+              instructions:
+                'Give this link to the user to open in a browser where they are signed in to this deployment, and ' +
+                'pick the file. It works only for them, once, until expiresAt. Once they have uploaded, create the ' +
+                `record with ${field} set to fileIds[0] (the array, for a multi-file field). Before the upload, ` +
+                'that create is refused as an upload that never completed.',
+            });
+          } catch (err) {
+            return errorResultWithCode(err);
+          }
         }
         try {
           const target = field !== undefined ? { field } : { attachments: true as const };

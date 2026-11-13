@@ -113,7 +113,7 @@ import {
 } from './package-slotted-store.js';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
-import { peelStoredEnvelope, STORED_ENVELOPE_KEYS } from './stored-envelope.js';
+import { peelStoredEnvelope, STORED_BODY_KEY, STORED_ENVELOPE_KEYS } from './stored-envelope.js';
 // [#13913] Registry-free expansion of an aggregated view container reached
 // through THIS manager's own store — see `getViewsByObject`.
 import { expandRuntimeViewContainer } from './view-container-expansion.js';
@@ -183,6 +183,26 @@ export interface MetadataUnregisterOptions extends MetadataWriteOptions {
 function isPackageMember(item: unknown, packageId: string): boolean {
   const meta = item as { packageId?: unknown; package?: unknown; _packageId?: unknown } | null | undefined;
   return meta?.packageId === packageId || meta?.package === packageId || meta?._packageId === packageId;
+}
+
+/**
+ * [#33003] The body {@link MetadataManager.register} stores for an environment
+ * row the boot pass stamped with `stamp`: `data` without that stamp, at the top
+ * and in the publish envelope's `metadata` body (`revertPackage` restores the
+ * stamped snapshot there, and the store's package read peels to it). The
+ * registry keeps `data` as it is, stamp included. A copy: `data` is never
+ * changed.
+ */
+function withoutEnvironmentRowStamp(data: Record<string, unknown>, stamp: string): Record<string, unknown> {
+  const stored: Record<string, unknown> = { ...data };
+  delete stored._packageId;
+  const body = stored[STORED_BODY_KEY];
+  if (body !== null && typeof body === 'object' && !Array.isArray(body) && (body as { _packageId?: unknown })._packageId === stamp) {
+    const unstamped: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+    delete unstamped._packageId;
+    stored[STORED_BODY_KEY] = unstamped;
+  }
+  return stored;
 }
 
 /**
@@ -415,6 +435,12 @@ interface ClusterMetadataRemoval {
   /** The package whose item the origin removed; absent for a removal by name. */
   packageId?: string;
   /**
+   * [ADR-0150 D4, #31698] The origin removed its registry entry only
+   * ({@link MetadataManager.unregisterInMemory}): no loader copy was deleted
+   * there, so a peer deletes none either.
+   */
+  registryOnly?: true;
+  /**
    * [ADR-0150 D3, #32560] The origin judged a removal naming no package of an
    * action name to take the environment's own item only: a peer deletes the
    * name's package-less slots from its in-memory copy, never a package's.
@@ -431,12 +457,33 @@ interface ClusterMetadataRemoval {
 function receivedRemovalOf(payload: ClusterMetadataChangedPayload): ClusterMetadataRemoval | undefined {
   const removal: unknown = payload.removal;
   if (removal === null || typeof removal !== 'object') return undefined;
-  const { packageId, packagelessOnly } = removal as { packageId?: unknown; packagelessOnly?: unknown };
+  const { packageId, registryOnly, packagelessOnly } = removal as { packageId?: unknown; registryOnly?: unknown; packagelessOnly?: unknown };
+  if (registryOnly !== undefined && registryOnly !== true) return undefined;
+  const only: { registryOnly?: true } = registryOnly === true ? { registryOnly: true } : {};
   // [#32560] Read wrongly, a package-less-only removal would delete by name
   // and take the package's item: one that is not `true` is dropped too.
-  if (packagelessOnly !== undefined) return packagelessOnly === true && packageId === undefined ? { packagelessOnly } : undefined;
-  if (packageId === undefined) return {};
-  return typeof packageId === 'string' ? { packageId } : undefined;
+  if (packagelessOnly !== undefined) return packagelessOnly === true && packageId === undefined ? { packagelessOnly, ...only } : undefined;
+  if (packageId !== undefined && typeof packageId !== 'string') return undefined;
+  return {
+    ...(packageId !== undefined ? { packageId } : {}),
+    ...only,
+  };
+}
+
+/**
+ * [ADR-0150 D4, #31698] {@link MetadataManager.unregisterInMemory}'s options.
+ *
+ * `packageId` names the slot of a type stored per `(package, name)`: a
+ * package's own slot, or `null` for the name's package-less slot. Omitted,
+ * every slot of the name goes, refused (`PackageScopedNameRefusedError`)
+ * when two or more packages hold it, as {@link MetadataManager.unregister}
+ * refuses. A type outside that set has one entry per name, and the option
+ * changes nothing for it.
+ */
+export interface MetadataInMemoryRemovalOptions {
+  packageId?: string | null;
+  /** `false` announces nothing to `subscribe` watchers or cluster peers. */
+  notify?: boolean;
 }
 
 /**
@@ -619,6 +666,25 @@ export class MetadataManager implements IMetadataService {
   private loaders: Map<string, MetadataLoader> = new Map();
   /** [#31699 R5-A] The loader {@link loadMany} read each item object from ({@link MetadataRegisterOptions}). */
   private readonly loadedFrom = new WeakMap<object, MetadataLoader>();
+  /**
+   * [#32986] The items of every OTHER type (one not stored per
+   * `(package, name)`: `object`, `view`, `app`, `hook`, `dashboard` …) that
+   * {@link loadMany} read from a stored-row loader (`datasource:`) naming no
+   * package: the environment's own rows. The boot priming pass stamps one with
+   * the host's declared package (`_packageId`), and the stamp stays — ObjectQL
+   * registers such an `object` as the host package's contribution — but the
+   * row is not the package's item, so {@link unregisterPackage} leaves it
+   * ({@link isStampedEnvironmentRow}). [#33003] A copy that replaces one
+   * joins the set ({@link carryEnvironmentRowMark}), and {@link register}
+   * stores a member without the stamp.
+   */
+  private readonly storedEnvironmentRows = new WeakSet<object>();
+  /**
+   * [#33003] The host stamp each {@link storedEnvironmentRows} member carried
+   * on, so an unstamped replacement passes it on to the copy after it
+   * ({@link carryEnvironmentRowMark}).
+   */
+  private readonly environmentRowHosts = new WeakMap<object, string>();
   // Protected so subclasses can access serializers if needed
   protected serializers: Map<MetadataFormat, MetadataSerializer>;
   protected logger: Logger;
@@ -1129,6 +1195,13 @@ export class MetadataManager implements IMetadataService {
     const existed = this.writeRegistryEntry(type, name, data);
     this.invalidateListCache(type);
 
+    // [#33003] An environment row the boot pass stamped is stored as the
+    // environment's own row: without the host stamp, so the next boot reads it
+    // naming no package again, whichever writer rewrote it
+    // ({@link withoutEnvironmentRowStamp}).
+    const stamp = this.environmentRowStamp(data);
+    const stored = stamp === undefined ? data : withoutEnvironmentRowStamp(data as Record<string, unknown>, stamp);
+
     // Persist only to database-backed loaders that declare write capability.
     // FilesystemLoader is read-only at runtime — writing to it can crash in
     // read-only environments (e.g. serverless, containerized deployments).
@@ -1150,7 +1223,7 @@ export class MetadataManager implements IMetadataService {
         await loader.bindReadRowPackage?.(type, name, data);
         continue;
       }
-      await loader.save(type, name, data);
+      await loader.save(type, name, stored);
     }
 
     // Publish metadata.{type}.created / .updated event to realtime service.
@@ -1207,6 +1280,45 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * [ADR-0150 D4, #31698] The removal half of {@link registerInMemory}: drop
+   * the in-memory registry entry of `(type, name)`, or one slot of it
+   * ({@link MetadataInMemoryRemovalOptions}), and nothing else. ⛔ No loader
+   * is asked to delete: a caller that registered a copy of a stored row
+   * removes its copy, and the row stays.
+   *
+   * {@link unregister} is the removal of the ITEM: it deletes from every
+   * writable loader first, so a caller that only wants its in-memory copy
+   * gone, while the stored row lives on, deletes that row through it.
+   *
+   * Announced unless `notify: false`: the watcher `deleted` event, and a
+   * cluster removal marked registry-only, so each peer drops the same slot
+   * and deletes no loader copy of its own.
+   *
+   * @throws {PackageScopedNameRefusedError} no `packageId` given, and two or
+   *   more packages hold the name.
+   */
+  unregisterInMemory(type: string, name: string, options?: MetadataInMemoryRemovalOptions): void {
+    type = canonicalMetadataServiceType(type);
+    const store = this.registry.get(type);
+    const slot = options?.packageId;
+    const keys = slot === null && PACKAGE_SLOTTED_STORE_TYPES.has(type)
+      ? storeKeysNamed(store, type, name).filter((key) => slotPackageOf(key) === undefined)
+      : storeRemovalKeys(store, type, name, slot).keys;
+    if (keys.length === 0) return;
+    this.deleteRegistryEntries(type, name, keys);
+    this.invalidateListCache(type);
+    if (options?.notify === false) return;
+    this.notifyWatchers(type, {
+      type: 'deleted',
+      metadataType: type,
+      name,
+      path: '',
+      data: undefined,
+      timestamp: new Date().toISOString(),
+    }, { ...(typeof slot === 'string' && PACKAGE_SLOTTED_STORE_TYPES.has(type) ? { packageId: slot } : {}), registryOnly: true });
+  }
+
+  /**
    * Put `data` in the in-memory registry under the key the store's write rule
    * gives it ({@link storeWriteKey}: the name, or for a type stored per
    * `(package, name)` the item's package slot), dropping any key the write
@@ -1217,6 +1329,8 @@ export class MetadataManager implements IMetadataService {
     const { key, replaces } = slot === undefined ? storeWriteKey(typeStore, type, name, data) : { key: slot, replaces: [] };
     if (!typeStore) this.registry.set(type, (typeStore = new Map()));
     const existed = typeStore.has(key) || replaces.length > 0;
+    // [#33003] A copy of an environment row the boot pass stamped, carrying its stamp or none, is that row.
+    this.carryEnvironmentRowMark(typeStore.get(key), data);
     for (const replaced of replaces) typeStore.delete(replaced);
     typeStore.set(key, data);
     recordStoreWrite(typeStore, key);
@@ -2538,6 +2652,10 @@ export class MetadataManager implements IMetadataService {
    * `(package, name)` drops this package's slot and keeps another package's
    * same-named item — and, for such a type, the storage half deletes only this
    * package's row and the `deleted` event names this package.
+   *
+   * [#32986] Of every other type, an environment row the boot priming pass
+   * stamped with this package (the host's) is not one of its items, and stays
+   * ({@link isStampedEnvironmentRow}).
    */
   async unregisterPackage(packageName: string): Promise<void> {
     // Collect all items to delete (type and name pairs). [#32517] One entry
@@ -2550,6 +2668,10 @@ export class MetadataManager implements IMetadataService {
       for (const [key, data] of typeStore) {
         // [#32246] A by-package type: also every item in the package's slot,
         // a package-less customization of its item (D4) included.
+        // [#32986] Not the environment's own row the boot pass stamped with
+        // this package: since #32198 the stamp alone made it a member, and the
+        // removal deleted it from the registry and from storage.
+        if (!slotted && this.isStampedEnvironmentRow(data, packageName)) continue;
         if (isPackageMember(data, packageName) || (slotted && slotPackageOf(key) === packageName)) {
           const slot = `${type}\u0000${slotOfKey(key)}`;
           const entry = itemsToDelete.get(slot);
@@ -2566,6 +2688,62 @@ export class MetadataManager implements IMetadataService {
         ...(PACKAGE_SLOTTED_STORE_TYPES.has(type) ? { packageId: packageName } : {}),
       });
     }
+  }
+
+  /**
+   * [#32986] Whether `data` is one of the {@link storedEnvironmentRows} that
+   * names `packageId` only by the `_packageId` stamp — the boot priming pass's
+   * host stamp, which `applyProtection` writes on an unstamped item alone. The
+   * row's own body named no package when the loader handed it on, so
+   * `packageId` / `package` naming the package is the item's own claim (the
+   * row is the package's, as {@link isPackageMember} reads it).
+   */
+  private isStampedEnvironmentRow(data: unknown, packageId: string): boolean {
+    if (data === null || typeof data !== 'object' || !this.storedEnvironmentRows.has(data)) return false;
+    const meta = data as { packageId?: unknown; package?: unknown; _packageId?: unknown };
+    return meta._packageId === packageId && meta.packageId !== packageId && meta.package !== packageId;
+  }
+
+  /**
+   * [#33003] The host stamp of `data` when it is one of the
+   * {@link storedEnvironmentRows} naming its package by that stamp alone
+   * ({@link isStampedEnvironmentRow}); `undefined` for every other item.
+   */
+  private environmentRowStamp(data: unknown): string | undefined {
+    const stamp = (data as { _packageId?: unknown } | null | undefined)?._packageId;
+    return typeof stamp === 'string' && this.isStampedEnvironmentRow(data, stamp) ? stamp : undefined;
+  }
+
+  /**
+   * [#33003] Writing `data` over `before`, where `before` is one of the
+   * {@link storedEnvironmentRows}: `data` is that row rewritten, and keeps its
+   * mark, when no loader handed it out and it carries the row's host stamp or
+   * none. A copy that also names the package by its own key stays the
+   * package's item ({@link isStampedEnvironmentRow} reads every key at each
+   * use); a copy stamped with another package is that package's. The host
+   * stamp is remembered ({@link environmentRowHosts}), so a copy stamped with
+   * the host after an unstamped replacement (an `importMetadata` without
+   * `merge`, a `bulkRegister`, a `rollback` to an authored version, then
+   * ObjectQL's object-copy follow) is still the row.
+   *
+   * Every writer that registers such a copy reaches this — ObjectQL's
+   * late-manifest bridge (the `ownPreviousCopy` re-register and
+   * `restoreExtendedObjectCopies`) and its object-copy follow
+   * (`registerInMemory`), `publishPackage` / `revertPackage` over
+   * {@link collectPackageMembers}, `importMetadata`, `bulkRegister` and
+   * {@link rollback} — so the copy keeps the row's mark instead of the mark
+   * riding the replaced object. An item a loader handed out (a file's, a
+   * stored row's) is that loader's item, never a copy: a stored row is marked
+   * by {@link loadMany} itself.
+   */
+  private carryEnvironmentRowMark(before: unknown, data: unknown): void {
+    if (data === null || typeof data !== 'object' || data === before || this.loadedFrom.has(data)) return;
+    if (before === null || typeof before !== 'object' || !this.storedEnvironmentRows.has(before)) return;
+    const host = this.environmentRowHosts.get(before) ?? this.environmentRowStamp(before);
+    const stamp = (data as { _packageId?: unknown })._packageId;
+    if (stamp !== undefined && stamp !== host) return;
+    this.storedEnvironmentRows.add(data);
+    if (host !== undefined) this.environmentRowHosts.set(data, host);
   }
 
   /**
@@ -3647,6 +3825,18 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * [#32812] The protocol of the loader {@link loadMany} read `item` — that
+   * very object — from (`'datasource:'` for a loader of stored rows,
+   * `DatabaseLoader` or another that declares the protocol under its own
+   * name); `undefined` for an object it did not hand out. The boot priming
+   * pass asks it to keep the host's package off a package-less stored row
+   * (`MetadataPlugin`'s pass).
+   */
+  sourceLoaderProtocolOf(item: object): string | undefined {
+    return this.loadedFrom.get(item)?.contract.protocol;
+  }
+
+  /**
    * Load multiple metadata items from loaders.
    * Aggregates results from all loaders.
    */
@@ -3706,7 +3896,14 @@ export class MetadataManager implements IMetadataService {
             kept.add(key);
         }
         results.push(item);
-        if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
+        if (item !== null && typeof item === 'object') {
+          this.loadedFrom.set(item, loader);
+          // [#32986] Read here, before the boot pass stamps it. A type stored
+          // per `(package, name)` is not stamped on such a row (#32812).
+          if (loader.contract.protocol === 'datasource:' && !PACKAGE_SLOTTED_STORE_TYPES.has(type) && indexedItemPackageId(item) === undefined) {
+            this.storedEnvironmentRows.add(item);
+          }
+        }
     });
     return results;
   }
@@ -4220,10 +4417,24 @@ export class MetadataManager implements IMetadataService {
         // node keeps serving what the origin removed. Started here, so an
         // in-memory delete that runs no `await` (`MemoryLoader`) has landed
         // before the invalidation below.
+        //
+        // [ADR-0150 D4, #31698] …and a removal naming a package drops that
+        // package's registry slot only. Another package's slot of the name
+        // stays: it may hold an item no loader can restore
+        // (`registerInMemory`), and the origin did not remove it. A removal
+        // the origin made in its registry alone deletes no loader copy here.
         const removal = receivedRemovalOf(p);
-        if (removal && p.event.name) void this.removeNodeLocalCopies(p.type, p.event.name, removal);
+        if (removal && p.event.name && !removal.registryOnly) {
+          void this.removeNodeLocalCopies(p.type, p.event.name, removal);
+        }
         try {
-          this.invalidateForForeignWrite(p.type, p.event.name);
+          if (removal?.packageId !== undefined && p.event.name && PACKAGE_SLOTTED_STORE_TYPES.has(p.type)) {
+            const store = this.registry.get(p.type);
+            this.deleteRegistryEntries(p.type, p.event.name, storeRemovalKeys(store, p.type, p.event.name, removal.packageId).keys);
+            this.invalidateListCache(p.type);
+          } else {
+            this.invalidateForForeignWrite(p.type, p.event.name);
+          }
         } catch (err) {
           this.logger.error('Cluster remote invalidation failed', undefined, {
             type: p.type,
@@ -4414,10 +4625,16 @@ export class MetadataManager implements IMetadataService {
     // Restore the metadata using the dedicated rollback path so that a single
     // 'revert' history entry is written (instead of a conflicting 'update' entry)
     const restoredMetadata = targetVersion.metadata;
+    // [#33003] A version restored over an environment row the boot pass
+    // stamped is that row (a version a rewrite stored before #33003 carries the
+    // host stamp): stored without the stamp, as {@link register} stores it.
+    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
+    if (!slotted) this.carryEnvironmentRowMark(this.registry.get(type)?.get(name), restoredMetadata);
+    const stamp = this.environmentRowStamp(restoredMetadata);
     await dbLoader.registerRollback(
       type,
       name,
-      restoredMetadata,
+      stamp === undefined ? restoredMetadata : withoutEnvironmentRowStamp(restoredMetadata as Record<string, unknown>, stamp),
       version,
       options?.changeNote,
       options?.recordedBy,
@@ -4430,7 +4647,6 @@ export class MetadataManager implements IMetadataService {
     // as the row it was written to is. [S4] One restored by the environment
     // address is filed under the bare slot, as its row is, even when one
     // package holds the name (the write rule would file it under that package's).
-    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
     if (slotted && isPackageCaller(address?.packageId)) {
       this.writeRegistryEntry(type, name, withEntryPackage({ name, data: restoredMetadata, packageId: address.packageId }));
     } else if (slotted && address !== undefined) {
@@ -4542,6 +4758,17 @@ function withEntryPackage<T>(entry: MetadataKeyedItem<T>): T {
  * name (a nested or extension-less file, a row whose `name` column is empty)
  * is answered as before, unstamped. A loader that holds nothing per package is
  * not read twice.
+ *
+ * [#32521; epic #31527 red line 2] A name two or more of the loader's keyed
+ * entries carry with their own packages (a name two packages hold, which
+ * `DatabaseLoader` now answers a row per package of): each body of that name
+ * is stamped with the package of the one keyed entry whose own body it is
+ * (the same content, each entry used once), so both holders are handed on
+ * stamped and the boot priming pass registers each. A body no such entry's
+ * body equals — a package-less row's among them — stays unstamped. Only where
+ * the bodies of the name are exactly the rows keyed by it (each of those rows'
+ * bodies carries the name, and as many bodies carry it as rows are keyed by
+ * it); otherwise none of them is stamped, as above.
  */
 async function withLoaderEntryPackages<T>(
   loader: MetadataLoader,
@@ -4552,18 +4779,37 @@ async function withLoaderEntryPackages<T>(
   if (typeof loader.loadManyKeyed !== 'function' || typeof loader.loadManySlots !== 'function') return items;
   const nameOf = (body: unknown): unknown => (body as { name?: unknown } | null)?.name;
   const packageOf = new Map<string, string | null>();
+  const entriesKeyed = new Map<string, { count: number; ownBodies: boolean }>();
+  const heldBodies = new Map<string, Array<{ body: string; packageId: string }>>();
   for (const entry of await loader.loadManyKeyed<T>(type, options)) {
-    const own = nameOf(entry.data) === entry.name ? entry.packageId ?? null : null;
+    const ownBody = nameOf(entry.data) === entry.name;
+    const own = ownBody ? entry.packageId ?? null : null;
     packageOf.set(entry.name, packageOf.has(entry.name) ? null : own);
+    const keyed = entriesKeyed.get(entry.name) ?? { count: 0, ownBodies: true };
+    entriesKeyed.set(entry.name, { count: keyed.count + 1, ownBodies: keyed.ownBodies && ownBody });
+    if (own !== null) heldBodies.set(entry.name, [...(heldBodies.get(entry.name) ?? []), { body: JSON.stringify(entry.data), packageId: own }]);
   }
   const bodiesNamed = new Map<string, number>();
   for (const item of items) {
     const name = nameOf(item);
     if (typeof name === 'string') bodiesNamed.set(name, (bodiesNamed.get(name) ?? 0) + 1);
   }
+  // [#32521] Paired by content only where the bodies of the name are exactly
+  // the rows keyed by it: every such row's body carries the name, and no other
+  // body does.
+  const severallyHeld = new Set([...heldBodies]
+    .filter(([name, held]) => held.length > 1 && entriesKeyed.get(name)!.ownBodies && entriesKeyed.get(name)!.count === bodiesNamed.get(name))
+    .map(([name]) => name));
   return items.map((item) => {
     const name = nameOf(item);
-    if (typeof name !== 'string' || bodiesNamed.get(name) !== 1) return item;
+    if (typeof name !== 'string') return item;
+    const held = heldBodies.get(name);
+    if (held !== undefined && severallyHeld.has(name)) {
+      const body = JSON.stringify(item);
+      const at = held.findIndex((entry) => entry.body === body);
+      return at === -1 ? item : withEntryPackage({ name, data: item, packageId: held.splice(at, 1)[0]!.packageId });
+    }
+    if (bodiesNamed.get(name) !== 1) return item;
     const packageId = packageOf.get(name);
     return packageId ? withEntryPackage({ name, data: item, packageId }) : item;
   });

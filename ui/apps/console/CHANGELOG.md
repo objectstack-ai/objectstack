@@ -1,5 +1,516 @@
 # @object-ui/console
 
+## 18.4.0
+
+### Patch Changes
+
+- a4c3e73: feat(console,mobile,auth): the Console registers the mobile shell's push token under its own session and unregisters it on sign-out and when the shell removes the connection
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`:** in the ObjectStack mobile shell, a signed-in person who has reached Home or an app is asked for push permission once per page load, after a short delay (never on a sign-in screen): the Console calls `getPushToken()` and registers the token with `POST /api/v1/notifications/devices`. A `null` answer (simulator, permission denied, no token) sends nothing. A token the shell rotates is registered again; an unchanged token for the same person is not sent twice. Another person signing in on the page registers the device for them, and the registry moves the token away from the previous person. An impersonation never registers, so the impersonated person's pushes never reach the administrator's device. The registration sends `deviceId` as the shell's `installId` when it has one, and `origin` only when the page was loaded over `http:` or `https:`. The device is unregistered (`DELETE /api/v1/notifications/devices/:deviceId`) before sign-out ends the session, and when the shell removes this connection; a shell that is neither iOS nor Android registers nothing. A browser is unchanged.
+  - **`@object-ui/mobile`:** `ObjectStackNative` gains the optional `installId` (`string | null`), and the package exports `NATIVE_PUSH_TOKEN_CHANGED_EVENT` (`objectstack-native:pushTokenChanged`, announced as `has('pushTokenChanged')`) with its event type `NativePushTokenChangedEvent`. Both are feature-detected: a shell that predates them carries neither.
+  - **`@object-ui/auth`:** `registerBeforeSignOut(step)` registers a step that `signOut()` awaits while the session still exists, and returns the function that removes it. The steps run together and can never hold sign-out back: a rejection is reported and dropped, and sign-out goes ahead after `BEFORE_SIGN_OUT_TIMEOUT_MS` (3 s) whether or not they have settled.
+- f35b361: fix(console): the sign-in page finishes the mobile sign-in hand-off instead of landing on a missing Console page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The mobile app opens the Console's sign-in page in the system browser with `?redirect=` naming the hand-off route (`/api/v1/auth/one-time-token/handoff?...`), so that a user whose identity provider refuses embedded WebViews can still sign in. After sign-in the page sent every safe redirect through the Console mount, so the browser landed on `/_console/apps/.../api/v1/auth/one-time-token/handoff?...` and the page said it does not exist. Now:
+  
+  - A `redirect` whose path is exactly the hand-off route under the auth base the Console talks to is navigated to unprefixed, by script from the sign-in page. Every other redirect, `/api/v1/data/x` included, stays a Console route as before; a lookalike path, another base path or an absolute URL is never followed out of the mount.
+  - The hand-off comes before the organization steps: a user with several organizations is no longer sent to the picker first, and one with no active organization does not wait for it to be chosen.
+  - A session created more than five minutes ago, which the hand-off refuses, keeps the sign-in form on screen instead of forwarding to a JSON refusal. Signing in on that form makes a new session and forwards.
+  - The sign-up page does the same after a sign-up.
+- cde492d: feat(plugin-auth): a page navigation to the mobile sign-in hand-off that has to sign in first goes to the sign-in page, so the app opens only the hand-off
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /api/v1/auth/one-time-token/handoff` answered a missing or old session with `401` as raw JSON, so the mobile app had to open the Console's `/login` route itself and know how that page treats `redirect`. An installed app stays in use for months, so a Console upgrade could strand it. Now the app opens only the hand-off:
+  
+  - A page navigation with no session, or with one older than five minutes, answers `302` to this deployment's Console sign-in page, with `redirect` naming the same request. `Location` is root-relative, so the browser stays on the origin the request arrived on, and `uiBasePath` is honoured.
+  - Any other request still answers `401`, so the app's anonymous probe keeps reading "this server registered me". A navigation reporting `Sec-Fetch-Site: same-origin` answers `401` too: it is the sign-in page forwarding a session the route refuses. A deployment that does not serve the Console keeps the `401` too, and says so once at `warn`.
+  - A token is still minted only for a session under five minutes old, and every `400` (a cross-site navigation, an unknown parameter, an unregistered scheme, a bad challenge) is still decided first, with no redirect.
+  - A device whose clock is behind does not bounce between the route and the sign-in page. The redirect carries `handoff_refused_at`, the server's time of the refusal, and the page holds its form for any session not created after it, whatever the device's clock says. A session created after it forwards, so a provider's sign-in that returns to the same URL still ends at the app. The links between the sign-in and sign-up pages carry the mark beside a hand-off `redirect`, and every other link is unchanged.
+  
+  An app can change its entry only once its server runs this release: an older server answers the new entry with JSON.
+- 27b0bc7: feat(console,app-shell): registering from an invitation link joins that invitation's organization and enters the app in one step
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`: `/register`** opened from an invitation link (`?redirect=/accept-invitation/ID`) now accepts THAT invitation as the account the sign-up just created, switches the session to its organization and enters the console root. A new member used to pass three screens: the sign-up, the accept page ("Accept invitation"), and "Invitation accepted … Continue". The server still decides: an address that is not the invited one is refused, nothing is accepted, and the page goes on to the accept page as before, which shows the refusal. A person who opens the page already signed in accepts nothing there, and a sign-up that waits for email verification is accepted from the accept page the verification mail returns to.
+  - **`@object-ui/app-shell`: `DefaultRegisterPage`** does the same; it used to go to `/` after the sign-up and leave the invitation behind. New export **`useInvitationSignUpJoin(redirect)`**, the one hook both register pages call, answering `none`, `joining`, `joined` or `refused` (type `InvitationSignUpJoin`).
+- c322421: fix(console,auth): after an explicit sign-out, whoever signs in next lands on their own home, not on the page the previous person had open
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/auth`: `AuthContextValue.sessionEndedBySignOut`**, `true` from a `signOut()` until a session is established again in the tab, whoever it belongs to; `false` on load, while signed in, and after a session that ended any other way (expired, revoked, signed out in another tab). It is a new required member of the exported `AuthContextValue` type: code that builds its own value of that type (a test double, a custom provider) must add `sessionEndedBySignOut: false` (or its own reading) to type-check.
+  - **`@object-ui/console`: `LoginRedirect`** sends the visitor to `/login` with no `?redirect=` after an explicit sign-out. A new member signing in after the administrator signed out of a Setup page used to land on that page and read "you do not have access to this app". A session that expires or is revoked under the person still keeps the path (list state stripped as before), so that person signs back in where they were.
+- 4128213: fix(console): a nav entry with no icon draws its object's icon, record field labels read in one style, a count chart fits a small count, and a page whose entry failed to load retries (#30126)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Navigation icons.** An app navigation entry of type `object` that names no `icon` now draws the icon its object declares, in the sidebar and in the `nav:menu` page block. Before, every such row drew the same generic page icon, so an app whose navigation names no icons showed one icon down the whole sidebar. The icon is read by object name from the metadata the console already holds, so no request is added and the navigation is not written to. An authored `icon` wins, and an object with no icon, a dashboard, page or report entry, and a host with no resolver keep the generic icon. `@object-ui/layout` exports `resolveNavItemIcon`, the types `NavIconTarget` and `NavTargetIconResolver`, and an optional `resolveTargetIcon` prop on `NavigationRenderer`, alongside the existing `resolveTargetLabel`.
+  - **Record field labels.** A record page's section field labels no longer carry an uppercase transform. Only Latin text took it, so in a zh console an untranslated label (`REPAIR COST`) read in capitals beside a translated one (`负责人`). Section labels now render as authored, in the style of the highlights strip above them.
+  - **Small count charts.** A count axis whose largest value is a small whole number (1 to 3) now tops out at that number, so a chart of one record draws its bar to the top of the axis instead of a quarter of the way up a 0–4 axis. An axis with an authored `min`, `max` or `stepSize`, fractional values, or a count of 4 or more draws as before.
+  - **Boot retry.** When the page's entry script fails to load before anything mounts (the server went away between serving the page and serving its entry, as during an `os dev` restart), the page now reloads itself, backing off from 1 second and doubling, at most five times per tab. Before, the loading splash stayed forever. The count is cleared on the first mount, and where `sessionStorage` cannot be read nothing retries.
+- 6c48d48: fix(console): a person who verifies their email during the mobile sign-in hand-off gets a mail link that works, and the hand-off's refusal time survives the verification pages (#30157)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a server that requires email verification, a person signing up from the mobile app's sign-in (the hand-off `redirect` on `/register`) got a verification mail whose link landed on a Console page that does not exist (`/_console/api/v1/auth/one-time-token/handoff?…`). The mail is usually opened in a browser that is not the app's sign-in window, and often on another device, so the link now returns to `/verify-email?handoff=verified`: the page says the address is confirmed and to go back to the app and sign in there. It offers no Console sign-in and hands out no sign-in token in that browser. The same holds for the "Resend verification email" mail. Every other `redirect` (an invitation, a Console page) keeps the link it had.
+  
+  The hand-off's refusal time (`handoff_refused_at`) is now carried through `/verify-email-prompt` on all three hops: `/login`'s "email not verified" branch, `/register`'s "verification required" branch, and "Back to login". Beside any other `redirect`, those links are unchanged.
+  
+  New string: `auth.verifyEmail.handoffSuccessDescription` (all ten locales).
+- 18870c9: feat(console)!: an administrator's first-run checklist on Home replaces the currency and time zone dialog, and a country typed by name is saved as its code (#30206)
+  
+  Clause-②: yes (narrowing) — the published `@object-ui/i18n` packs (all ten) drop the `console.workspaceTimezonePrompt.*` keys, which had no reader outside the removed dialog. The widening half: new console i18n keys `console.firstRunChecklist.*` and `console.settingsView.invalidFormat` / `.invalidFormatHelp` / `.invalidFormatPick` (all ten packs).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/i18n/src/locales/en.ts#TranslationKeys) the key type of the console's own translation catalogue: no Zod schema, no spec declaration and no stored metadata reads it, so the compiler is the channel that reaches every caller -->
+  
+  The dialog that asked for the system timezone and default currency opened over the first page an administrator visited, before anything needed a currency, and once covered the toast that said how to share an invitation. It is gone. The same questions, and the other things a new workspace needs, are now rows of a checklist at the top of Home (`/home`):
+  
+  1. **Organization name**: done once the organization no longer carries the name the platform gave it ("Default Organization"). Links to Setup → Organization.
+  2. **Default language and country**, 3. **System timezone**, 4. **Default currency**: done once the setting is set (for language, country and timezone, set by someone rather than left at the platform default; for the currency, which has no default, holding any value). Each opens in place with the Settings page's own fields, pre-filled from the browser: language, country and currency from the browser's first language (so `zh-CN` offers 中文, China and CNY together), the timezone from the browser's zone. Nothing is written until the row's Confirm, which saves through the Settings page's own `PUT /api/settings/localization`.
+  5. **Email delivery**: done once mail can deliver (a provider other than `log`, a From address, and a host for SMTP). Shown only to a session that may write mail. Links to Setup → Mail Delivery.
+  6. **Invite colleagues**: done once there is a second member or a pending invitation. Links to Setup → Users.
+  
+  Each row's state is read from the real setting every time, never from a click. The checklist is shown only to a session that may write `localization`; a member sees nothing, and a member's Home sends no settings namespace read. It draws nothing once every row is done, and its close button hides it for that administrator in that workspace on that device, writing nothing to the server. The rules the dialog was built on still hold: the browser's zone and currency are never written without the administrator's Confirm, and an unset currency stays on the list until it is set.
+  
+  **BREAKING** (`@object-ui/i18n`, TypeScript only): the exported `TranslationKeys` (`typeof en`) loses the 14 `console.workspaceTimezonePrompt.*` keys, in all ten packs (ar, de, en, es, fr, ja, ko, pt, ru, zh). A `t()` call that names one still compiles, since its key is a `string`, and reads the key back. Nothing replaces them one for one; the fix is to delete the reference.
+  
+  | Removed key | Replacement |
+  |:---|:---|
+  | `console.workspaceTimezonePrompt.title`, `.description`, `.laterHint`, `.decline`, `.confirm`, `.saved`, `.notNow` | none: the dialog is retired; the timezone is a row of `console.firstRunChecklist` (`.timezone.*`) |
+  | `console.workspaceTimezonePrompt.currencyTitle`, `.currencyDescription`, `.currencyConfirm`, `.currencySaved` | none: the currency is a row of `console.firstRunChecklist` (`.currency.*`) |
+  | `console.workspaceTimezonePrompt.bothTitle`, `.bothConfirm`, `.bothSaved` | none: the checklist confirms each row on its own |
+  
+  Typing a country's name into a country picker now saves its code: 「中国」 typed into 默认国家, whose option reads 「中国 (CN)」, saves `CN` instead of being refused by the server's two-letter format check. Only a name exactly one option carries counts; any other text is sent as typed, as before. When the server does refuse a value for its format (`invalid_format`), the Settings page and the checklist now say so in the reader's language, naming the setting by its label: "Choose a value for Default country from the list." for a picker, and "Gateway model is not in a valid format. Use provider/model." (with the field's own help line) for a typed field. Every other refusal keeps the server's sentence.
+- c580081: fix(ui): the console form page Edit, the kanban drop prompt and the Edit wizard judge a field's `requiredWhen` as the engine does, a transition gate against the stored record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/console` form page (`/forms/:name?recordId=`):** an Edit no longer refuses a record that already sits inside a `requiredWhen` gate without the value (for example a contract activated before its signed-copy rule existed). The field shows no required marker there, and an unrelated edit saves, as REST `PATCH` already accepts. Still refused: the edit that moves a record into the gate without the value, and clearing the value of a record that held it. A create form enforces as before.
+  - **`@object-ui/plugin-kanban` drop prompt:** dropping a card no longer asks for a field the engine lets rest. A record already inside the gate without the value moves between columns with no dialog; a drop that moves a compliant record into the gate still asks for the value first.
+  - **`@object-ui/plugin-form` Edit wizard:** the final submit's cross-step check no longer refuses a record that already sits inside a `requiredWhen` gate without the value; it asks `requiredWhenRestsOnStoredRecord` about the record as first read. The record reaches only that stored-record check, so a `visibleWhen` reading `previous` is still unevaluable at that check, as before. Moving a compliant record into the gate is still refused, and a Create wizard enforces as before.
+  
+  All three read the stored-record verdict `resolveFieldRuleState` already returns (`requiredWhenAtRest`, or its exported check `requiredWhenRestsOnStoredRecord`); no second rule.
+- b6f4c0e: feat(console): the Allowed IP ranges setting shows the address the server judges before you save
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A save of `auth.allowed_ip_ranges` whose list leaves out the saving request's own address is refused, and until now the Authentication settings page only told the admin that address in the refusal. The page now reads `GET /api/v1/auth/admin/client-address` (the save check's own reading of the address, `server.trustProxy` included) and draws one line under the field: the address, and whether it came from a trusted proxy's forwarded headers or, with `trustProxy` off, from the connection itself (behind a proxy, the proxy's address). When the server cannot establish an address the line says a non-empty list cannot be saved from here. The line stays beside a refusal. A caller the route refuses (not a platform admin), or a server without the route, sees no line and the page is otherwise unchanged. `@object-ui/i18n` adds `console.settingsView.clientAddressDirect`, `clientAddressViaProxy` and `clientAddressUnknown` in all ten shipped locales.
+- ac56acf: fix(console): a value set on a deployment-level settings page reads `Modified`, names the default, and offers Reset to default (#30329)
+  
+  Clause-②: yes (widening) — two published language-pack keys in every built-in pack: `console.settingsView.sourceBadgeModified` and `console.settingsView.defaultValueHint` (with `{{value}}`).
+  Metadata-protocol: none
+  
+  A settings page whose manifest declares `scope: 'global'` (Setup's Authentication page is one) writes the deployment's row. A value it had saved was badged `Inherited from Global`, as if it came from somewhere else, and had no Reset to default, so going back meant knowing the default or emptying the box.
+  
+  - The page now passes each row the scope its Save writes, resolved the way the server resolves it: the specifier's `scope`, else the manifest's, else the spec default `tenant`. A value whose effective layer is that scope reads `Modified`, names the default layer's value (`Default: 8`; an option's label, Yes or No for a toggle; never a secret's), and offers Reset to default. Reset puts `null` in the draft and Save sends it, like any other change.
+  - An env-locked value never gets Reset. A value from a layer above the page's scope still reads `Inherited from …`, and the organization and user pages keep their `Overrides …` badges unchanged.
+  - An unset number box now reads empty after Reset; it kept showing the last number.
+- a91409c: fix(core,react,i18n,components,app-shell,console): a write refused because the object's external datasource does not accept writes says the table is read-only, not "you don't have permission"
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/core`: `isExternalWriteRefusal(err)`**, re-exported from `@object-ui/react` beside the other write-refusal readers. True when the server refused a write with `EXTERNAL_WRITE_FORBIDDEN`, the ADR-0015 write gate's code for an object bound to an external datasource that does not admit writes (`datasource.external.allowWrites` and `object.external.writable` must both be true). Read from `code`, then `details.code`, like `isPermissionError`. The refusal is a 403, so `isPermissionError` answers true for it too: a caller asks this first.
+  - **`@object-ui/i18n`: `form.readOnlyExternalSource`**, in all ten packs: "This table is read-only. Its records come from an external data source that does not accept changes."
+  - **Every surface that met this refusal now says the table is read-only:** the console record form page and the record dialog (`@object-ui/components` form), which said "you don't have permission to save this record"; the record page delete, the list row delete and the record page inline edit, which showed the gate's raw diagnostic; and the calendar's drag-to-reschedule and the record path's stage change. A permission line sent an administrator through permission sets for a grant that cannot exist.
+- 4831d50: fix(console): a language picked on the register page is saved as the new person's own language when registering signs them in (#30338)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A language picked in the register page's menu used to apply on that browser only: once the sign-up signed the person in, their saved language stayed empty, so another device, or the language their mail is written in, did not follow the pick. The register page now saves the pick to the person's own language setting before it moves on, the way the sign-in page does, on every way it leaves after a sign-up, joining an organization from an invitation link included. `DefaultRegisterPage` does the same for a pick made earlier on another signed-out page. Nothing is saved when no language was picked, a language the person already has is kept, and a save that fails does not hold up the sign-up (the pick still applies on that browser). A pick followed by a reload of the register page, or by an identity provider's redirect, is still not saved.
+- 7b10a30: fix(auth): the forgot-password page no longer says a reset link was sent on a deployment that sends no mail (#30366)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `GET /api/v1/auth/config` reports `features.emailDelivery`: `false` when no email service is wired or the stock `log` transport only writes mail to the server console. On such a deployment the forgot-password form used to answer every request with "Check your email — we've sent a password reset link", although no mail leaves. When the server reports `emailDelivery: false`, the success screen now says a reset link can't be emailed here and to ask an administrator, who can set a new password from Setup → Users.
+  
+  The text describes the deployment, never the address: it carries no address, and a known and an unknown address read the same, so the page adds no account-existence oracle. Only an explicit `false` changes it; a server that predates the flag (no `emailDelivery` key) or a failed config fetch keeps the "check your email" screen, since those deployments may well send mail.
+  
+  `ForgotPasswordFormLabels` gains `noDeliveryTitle` and `noDeliveryDescription`, and `AuthPublicConfig.features` gains `emailDelivery`. New strings `auth.forgotPassword.noDeliveryTitle` and `auth.forgotPassword.noDeliveryDescription` in all ten locales, passed by the Console's forgot-password page and `DefaultForgotPasswordPage`.
+- 8b0fbb8: fix(app-shell,fields,plugin-form,plugin-gantt,plugin-grid,components,console): record pages, forms, drawers and preview cards draw a served object label as served
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Now.** The record page (its title, breadcrumbs, related-list titles, delete and access-denied copy), the record form page and the console's create/edit dialog (title, save toast, way back to the list), the record drawer, the record preview card, the hover card over a lookup, a record-pointer cell, an object-ref cell, the closed-form notice, the gantt name column, the page header's record chrome, a form view's heading, the AI dock's surface chip, the Activity row and the report index name an object by the label the server served, as given. The server has already translated it, by its label order for an overridden item, so a `.custom` object extension's rename is kept over the base package's translation. Before, the served label reached the client's catalog lookup only as its fallback, so the base package's translation of the old name won on these surfaces after the list and header were fixed.
+  - **Unchanged.** When no label is served, the catalog key is asked first and the machine name (or its humanized form) stays the last resort, as before. An unedited object shows the same text as before, because the server serves the catalog's translation for it. Related lists and reference rails that only know an object's name, and the packaged-actions table (its object list is read without the session's language), still look the name up in the catalog. English is unchanged.
+- bbd6072: fix(console): a language picked on the sign-in page is saved as the person's own language when they have none (#30399)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A language picked in the sign-in page's menu used to apply on that browser only: after signing in, the person's saved language stayed empty, so another device, or the language their mail is written in, did not follow the pick. The sign-in page now saves the pick to the person's own language setting before it moves on, when they have not chosen one yet. A language they already chose is kept, nothing is saved when no language was picked on the page, and a save that fails does not hold up the sign-in (the pick still applies on that browser). `@object-ui/app-shell` gains `hasSignInLanguagePick`, `saveSignInLanguagePick` and the `SignInLanguagePickWriter` type for the sign-in page. A pick followed by a reload of the sign-in page, or by an identity provider's redirect, is still not saved.
+- 35a8f08: fix(console): the sign-in page no longer offers "Sign in as dev admin" when email and password sign-in is off
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Under `os dev`, the sign-in page drew the dev-seeded admin row whenever `/api/v1/auth/config` reported `devSeedAdmin`. Its chip signs in with email and password, so with that sign-in turned off the server refused it (`EMAIL_PASSWORD_DISABLED`) while the rest of the page correctly offered only the configured providers. The row is now drawn only when the same config does not report `emailPassword.enabled: false`, the answer the sign-in form already reads.
+- c447019: feat(console): a settings toggle that declares `confirmOffText` asks before it is turned off
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A settings manifest's `toggle` specifier may declare `confirmOffText` (`SpecifierSchema`: "Confirm dialog text shown before a toggle's value changes to off (omit = no confirm)"), and the authentication manifest declares it on `email_password_enabled`. The Console's settings page did not read the key, so Setup turned email and password sign-in off without asking. Now turning such a toggle off opens a confirmation carrying that text, translated through `settings.NAMESPACE.keys.KEY.confirmOffText` when the locale has it (an inline locale map literal is picked for the page's language otherwise). Cancel leaves the toggle on and puts nothing in the page's unsaved changes, so nothing can be saved; Continue turns it off, and Save sends it like any other edit. Turning a toggle on asks nothing, and a toggle without the key changes at once, exactly as before.
+- 5bca14f: feat(i18n)!: the Console's language packs are the platform locale table's, keyed by its tags, and Traditional Chinese (`zh-Hant`) ships, generated from Simplified (#30511)
+  
+  Clause-②: yes (narrowing) — widens: a `zh-Hant` pack (the `zhHant` export of `@object-ui/i18n/locales`, the `@object-ui/i18n/locales/zh-Hant` module), the `resolveBuiltInLanguage` export of `@object-ui/i18n`, and every stored or browser code the platform locale table reads as one of its tags (`zh-TW`, `zh-HK`, `zh-MO` → `zh-Hant`; `zh`, `zh-CN`, `zh-SG` → `zh-Hans`; `pt` → `pt-BR`). Narrows: the Simplified Chinese and Portuguese packs are keyed `zh-Hans` and `pt-BR`, no longer `zh` and `pt`, in `builtInLocales`, `BUILT_IN_LANGUAGE_CODES`, `getLoadedBuiltInLocales()` and `getAvailableLanguages()`, and their modules `@object-ui/i18n/locales/zh` and `@object-ui/i18n/locales/pt` are `@object-ui/i18n/locales/zh-Hans` and `@object-ui/i18n/locales/pt-BR`.
+  Metadata-protocol: none
+  Skills-docs: follow-up owed — `skills/objectui/guides/i18n.md` (its "Built-in locales" list names ten packs, with `zh` and `pt`)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata changes shape: no spec key, object definition, stored row or authorable spelling is added, removed or renamed, so `objectstack migrate meta` has nothing to rewrite and no ledger entry could project. The FROM/TO lines below are source rewrites for TypeScript and JavaScript consumers of `@object-ui/i18n`'s `./locales` subpath (two members of `builtInLocales`, two modules). That is the class `runtime-export-retired` exists for, but it reads a package's root entry only and refuses a subpath operand, and the root entry retires nothing here; so this category is held, and the gap is named here rather than left to the detector. -->
+  
+  **BREAKING** for code that reads a built-in pack by its old key or module path.
+  
+  - **Why.** The Console's packs follow the platform locale table (`PLATFORM_LOCALES` in `@objectstack/spec/system`, ruling F of #29349) instead of a list of their own: one pack per table tag, keyed by the tag, in the table's order. A language the table gains is a pack the parity and drift suites demand on the run that first sees it.
+  - **Traditional Chinese.** `src/locales/zh-Hant.ts` is generated from `zh-Hans.ts` by `pnpm --filter @object-ui/i18n gen:zh-hant` (OpenCC `s2twp`, pinned, with the phrase rules of the www.objectos.ai converter) and is never edited by hand; a package test fails when it is not what the generator writes. It carries no `console.ai.*` gate-only outbound keys, exactly as the other non-gate packs.
+  - **The marketplace namespace follows.** The lazy `marketplace` namespace keys its catalogues by the same tags (`@object-ui/i18n/namespaces/marketplace`'s `MARKETPLACE_LANGUAGE_CODES` and `resolveMarketplaceLanguage` answer `zh-Hans`, `zh-Hant`, `pt-BR`), ships a `zh-Hant` catalogue generated by the same command, and resolves a stored code through the table as the packs do, so a `zh-TW` reader's marketplace pages are Traditional too.
+  - **One locale ladder.** The Console picks which offered language renders a user's stored `sys_user.locale` with `resolveLocaleAmong` from `@objectstack/spec/system`, the order the server's `resolveLocale` uses, instead of a copy of it: a deployment offering both scripts renders a `zh-TW` row in its Traditional spelling, and a variant the table reads as the language itself (`es-ES` for `es`) is taken ahead of the first offered variant, as the server takes it.
+  - **Stored codes keep working.** A `sys_user.locale` value, a saved device language or an `Accept-Language` tag written before the table is read through the table's aliases: `zh-CN` still renders Simplified Chinese, `pt` Portuguese (Brazil), and `zh-TW` / `zh-HK` / `zh-MO` now render Traditional Chinese instead of Simplified. `loadBuiltInLocale`, `isBuiltInLanguage` and i18next's fallback chain accept every alias.
+  - **Studio.** The Studio namespace still ships `en` and `zh` only; a `zh-Hant` reader sees its Simplified catalogue there.
+  
+  The fix, for code that names a pack:
+  
+  - FROM `builtInLocales.zh` TO `builtInLocales['zh-Hans']`
+  - FROM `builtInLocales.pt` TO `builtInLocales['pt-BR']`
+  - FROM `import zh from '@object-ui/i18n/locales/zh'` TO `import zh from '@object-ui/i18n/locales/zh-Hans'`
+  - FROM `import pt from '@object-ui/i18n/locales/pt'` TO `import pt from '@object-ui/i18n/locales/pt-BR'`
+  - FROM comparing a code from `BUILT_IN_LANGUAGE_CODES`, `getAvailableLanguages()` or the keys of `getLoadedBuiltInLocales()` with `'zh'` or `'pt'` TO comparing `resolveBuiltInLanguage(code)` with `'zh-Hans'` or `'pt-BR'`
+- a058413: fix(i18n): the Console language menu offers the platform locale table's languages, intersected with the app's locale list
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata an author writes changes: `i18n.supportedLocales` accepts the same values, `GET /api/v1/i18n/locales` reports the same list and no stored shape is rewritten; what narrows is the Console menu's reading of that list, and a language outside the platform locale table has no replacement spelling to migrate to -->
+  
+  **BREAKING** for an app whose locale list names a language outside the platform locale table (for example `th`): the Console language menu no longer offers it. No first-party app does — examples/app-crm, app-showcase, app-todo and HotCRM declare only table languages, through read-alias spellings that now show as their table entries.
+  
+  The Console language menu now offers the platform locale table's languages,
+  intersected with the app's locale list (ruling F). `offerableLanguages` reads
+  each code the app lists through the table's read aliases and offers table tags
+  only, de-duplicated, in the app's order:
+  
+  - a stored spelling is its table entry with the table's own label: an app
+    declaring `zh-CN`, `ja-JP` or `es-ES` shows 简体中文, 日本語 and Español instead
+    of 中文（中国）, 日本語 (日本) and Español de España, and a pick writes the
+    table tag (`zh-Hans`) to `sys_user.locale`;
+  - two spellings of one language (`zh-CN` beside `zh-Hans`) are one entry;
+  - a code the table does not name (for example `th`) is no longer offered, and
+    neither is an out-of-table key of `config.resources` in the offline fallback.
+    A stored choice of such a code still boots, then reverts and is cleared once
+    the app's list arrives.
+  
+  The menu's checkmark and the profile page's language card compare a stored
+  spelling through the same resolution, so an account storing `zh-CN` sees one
+  简体中文 entry, ticked.
+  
+  Migration: none for a metadata author — `i18n.supportedLocales` accepts the
+  same values and `GET /api/v1/i18n/locales` reports the same list. An app that
+  relied on the menu offering a language outside the platform locale table has
+  no replacement; that language is not complete on the platform's own surfaces.
+- 062236c: fix(console): a link inside an app's doc keeps the app shell, and the docs chrome reads the session language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A doc read inside an app (`/apps/APP/docs/BOOK/DOC`) rewrote its body cross-references to the portal's `/docs/NAME`, so following one left the app: no top bar, no app navigation. They now resolve under the app's own docs route, as the book sidebar already did, and the header's home link goes to the app's docs index. The header's "Documentation" label, the portal heading and the book sidebar's synthetic "Uncategorized" group title now read the new `help.documentation` and `help.uncategorized` keys, present in all ten locale packs; the group is titled by its key, and authored group labels keep the server's translation.
+- 115a43a: feat(console): a settings field an environment variable pins offers to clear the value saved beneath the pin
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`:** on a Setup settings page, a field an `OS_*` environment variable pins still shows the lock badge and stays read-only. When the namespace read lists a value stored beneath the pin at the scope the page writes (a secret's as the read mask), the row also says that a value is saved there and that the environment value stays in force, and offers "Clear the saved value". The control asks first, then writes `null` for that one key, the one write the server lets through a pin; the page's unsaved edits are left as they are. After the clear the row still reads the environment value, and the saved value no longer comes back when the variable is removed. A pinned field with nothing stored at that scope, a field no variable pins, and the first-run checklist show no control.
+  - **`@object-ui/i18n`:** four new `console.settingsView` keys in all eleven packs: `savedBeneathPin`, `clearSaved`, `clearSavedConfirm` and `savedCleared`.
+- c1da957: feat(console): the Setup → Audit Log drawer opens the selected row's own record page, which lists the other changes to the same record
+  
+  Clause-②: yes (widening) — two new console keys (`console.system.auditLog.openEntryPage`, `console.system.auditLog.openEntryPageHint`) ship in every published `@object-ui/i18n` pack; nothing is narrowed.
+  Metadata-protocol: none
+  
+  The Audit Log drawer gains an "Open entry page" link to the console's record route for `sys_audit_log` and the row's id, under the app the page is mounted in, carrying the way back to the Audit Log. The platform's record page for the ledger lists every row with the same `record_id`, so from a settings write's `config_change` row, which carries only a digest, an administrator now reaches the CRUD mirror's rows that hold the old and new value. On a row that names a record the drawer says so under the link. `@object-ui/i18n` ships the two strings in all ten built-in languages (`console.system.auditLog.openEntryPage`, `console.system.auditLog.openEntryPageHint`).
+- 7d9f1e9: fix(console): the "Download skill" SKILL.md teaches `delete_record` with `confirm: true`, and the rest of what the server serves
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Integrations page's "Download skill" button wrote a SKILL.md that taught `delete_record({ objectName, recordId })` with no `confirm`. The MCP server refuses that call with `ACTION_CONFIRMATION_REQUIRED` and deletes nothing, so an agent that followed the downloaded skill failed every delete. The download now carries the same text the MCP server serves to an API key or a session: `delete_record({ objectName, recordId, confirm })` with the confirmation rule, the business-action tools (`list_actions`, `run_action`, `resume_run`), `validate_expression`, the OAuth connection track, and the `Authorization: Bearer` key form. A test compares the download with the server's renderer byte for byte, so the two cannot drift apart again unnoticed.
+- 5cb7d7e: feat(mcp): `delete_records` deletes many records of one object in one confirmed call, by a filter or an id list (#30891)
+  
+  Clause-②: yes (widening) — the MCP surface (HTTP `/api/v1/mcp` and the stdio server) registers one more tool, `delete_records`, offered to an OAuth token that carries both `data:read` and `data:write`; no existing tool, input or answer changes.
+  Metadata-protocol: none
+  
+  An agent that had to clear a set of records called `delete_record` once per row, and confirmed each one. `delete_records` takes the selection as `where` (a filter, `{}` for every record) or `recordIds` (an id list), never both.
+  
+  - **The preview is the refusal.** A call without `confirm: true` deletes nothing. It answers `delete_record`'s refusal (`428` `ACTION_CONFIRMATION_REQUIRED`, the same `details` keys, `details.actionName` naming `delete_records`) with a `preview` member beside `error`: how many records the selection matches for this caller (`matched`), how many a confirmed call attempts (`wouldAttempt`), up to ten sample ids and, for an id list, the ids that name no readable record (`notFound`). The agent shows that to its human and retries with `confirm: true` once they approve.
+  - **A confirmed call deletes each record as `delete_record` does**, through the same bridge member, under the caller's permissions, row-level security and the object's delete rules (`beforeDelete` hooks, restricted relations). No caller bypasses a package's locking rule, an administrator included. Records a rule refuses stay, and the answer groups them by code, status and reason, with their ids: `{ matched, attempted, deleted, refused, refusals: [{ code, status, reason, count, recordIds }], remaining, cap }`. A refusal's `details` stays off the wire, as on every other tool.
+  - **A fault is not a refusal.** A rule's refusal and a fault are told apart the way the REST `/data` door tells them apart (its own classifier): a 4xx verdict (a coded rule refusal, a sandboxed hook body's `400 HOOK_ABORTED`) is grouped and the call goes on; a 5xx verdict (a code hook's bare `throw new Error`, a lost connection, a driver error, a driver's own string code) stops the call at that record. The tool error names the fault and the record, and carries the call's `progress` (`deleted`, `stoppedAt`, `notAttempted`): the records deleted before it stay deleted.
+  - **At most 200 records per call**, the bound REST `POST /data/:object/deleteMany` applies by default (`batch.maxBatchSize`). A filter is read in id order at the cap, and the count says whether more match; when more than 200 match, the answer says how many remain and the next call with the same selection continues. When the deployment has no aggregate support, the answer says `matchedMoreThan: 200` instead of guessing a count. On a deployment whose read page size or row budget (`OS_DATA_MAX_PAGE_SIZE`, `OS_DATA_QUERY_ROW_BUDGET`) is under 200, one call runs at that size, since the data door refuses a larger read, and the answer's `cap` names it; a longer id list is refused before anything is read.
+  - **Scopes.** Over OAuth the tool needs both `data:read` and `data:write`: its preview reads the selection's ids and count, a read a `data:write`-only token is not granted.
+  
+  What a preview cannot say: which records a delete rule will refuse. The engine has no delete dry run, so the rules are judged when the confirmed call runs, and the preview says so.
+  
+  `@object-ui/console`: the Integrations page's "Download skill" SKILL.md is a byte-for-byte mirror of the server's (#31015's drift pin), so it carries the same `delete_records` bullet.
+  
+  `@objectstack/spec` changes only doc comments: `AIActionConfirmation` names `delete_records` as the third door of the confirmation member, and the error-code ledger's `ACTION_CONFIRMATION_REQUIRED` rows name both delete tools.
+- a0b40f2: feat(console): Home offers Connect an AI Assistant until the person has connected one; the first-run checklist gains its row
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: Home shows a card to every signed-in person who has connected nothing yet: they can work in this system from Claude, Doubao and similar AI assistants, as themselves, with one button to Connect an AI Assistant. It is hidden once they have authorized an assistant or hold an API key that still works (read by `useConnectedAccess`, the same read as the Connect page's Connected line), and once they close it (remembered for that person on that browser, like Home's other dismissible items). While the read is out or fails, and where MCP is turned off, it is not shown. `useConnectedAccess` and `connectAssistantPath` are now exported, and the avatar menu item reads its path from `connectAssistantPath`.
+  - **`@object-ui/console`**: the administrator's first-run checklist gains "Connect an AI assistant", done once that administrator has authorized an assistant or holds a working API key (never from a click), with a link to the page; left out when that cannot be read or MCP is turned off.
+  - **`@object-ui/i18n`**: `home.connectAssistant.title`, `body`, `action`, `dismiss` and `console.firstRunChecklist.connectAssistant.title`, `todo`, `done`, `action` added in all eleven packs.
+- 6ee8c61: fix(service-settings)!: a `json` setting persists a JSON object or array, and the console sends one; data lifecycle quotas and retention overrides saved as text are read and applied
+  
+  Clause-②: yes (narrowing) — the settings save door and the env door start refusing a `json` value that is not a JSON object or array, which they accept today; ADR-0007:123 already declares `json` persists an object, so the narrowing enforces the declared contract and widens nothing
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes. What narrows is the value a settings door accepts for a `json` key: a stored value is runtime state in `sys_setting` / `sys_platform_setting` and an `OS_*` override is a deployment's environment, so there is nothing for a migration to rewrite. Values already stored as JSON text are handled by their one reader (`LifecycleService`): quota text is read as the object it holds, with a warning, and retention-override text waits for an administrator's save. -->
+  
+  **BREAKING** accept-set narrowing at the settings doors (`@objectstack/service-settings`): a `json` key takes a JSON object or array, as ADR-0007 declares.
+  
+  - **Before.** `PUT /api/settings/:namespace` stored any value under a `json` key. The console's `json` field sent the textarea's text, so Setup → Data Lifecycle saved `lifecycle.quotas`, `lifecycle.quota_defaults` and `lifecycle.retention_overrides` as strings, answered "saved", and the lifecycle sweep read every quota and override as absent: no `quota-exceeded` alert, no override applied, nothing logged.
+  - **Now.** The save door refuses a string, number or boolean under a `json` key with `400 SETTINGS_VALIDATION` and one `invalid_type` field error for the key, and stores nothing. An object, an array and `null` (a clear) are accepted. A value already stored under a key the save does not touch does not block it. An `OS_*` override for a `json` key whose text does not parse to an object or array is not in force: one `error` line names the variable, and the key resolves from the next layer of the cascade.
+  - **Who moves.** The console now parses the text at Save: valid JSON is sent as the object or array, blank text as a clear, and text that does not parse blocks Save on that row with "Invalid JSON". A `json` value the page loads as text (and is not locked) is put in the draft as it stands, so the page opens with one unsaved change per such key and a note on its row saying the value is stored as text; Save sends the object. A script that PUTs JSON text for a `json` key gets the 400.
+  
+  **The remedy.** Send the parsed value, not its text: `{ "quotas": { "sys_audit_log": 1000 } }`, not `{ "quotas": "{\"sys_audit_log\": 1000}" }`. For an `OS_*` override, set JSON text of an object, such as `OS_LIFECYCLE_QUOTAS='{"sys_audit_log":1000}'`.
+  
+  **Values saved as text before this release** (`@objectstack/objectql`). A deployment that saved the Data Lifecycle page through the old console holds JSON text, which applied nothing. After the upgrade the lifecycle service treats the three keys by what they drive:
+  
+  - `quotas` and `quota_defaults` only raise alerts, so text that holds a JSON object is read as that object and applied, with one warning per stored value: `lifecycle.quotas is stored as JSON text, not an object … Save the Data Lifecycle settings page again to store it as an object.`
+  - `retention_overrides` drives the reaper and the archiver, which delete rows, so its text is **not** applied: the declared retention windows stay in force and no row is reaped or archived on the old windows. One error per stored value names the key (and the organization, for an organization's own value) and the fix: open Setup → Data Lifecycle, check the value and save the page once. The page opens with the stored text already marked as an unsaved change and sends it as an object, so that one Save, with no edit, is what puts the window in force.
+  
+  A stored value that is not a JSON object still applies nothing, as before, and is now reported once at `error`.
+- dc7f5c4: feat(console): the Access policy page shows the address the server judges beside Allowed IP ranges
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An organization's `access_policy.allowed_ip_ranges` save is refused when the list leaves out the saving request's own address, and until now **Setup → Access policy** told the organization administrator that address only in the refusal. The page now reads `GET /api/v1/auth/client-address` (the organization administrator's read, answered to a caller holding `setup.write` in their current organization) and draws the note the Authentication page already draws under its own Allowed IP ranges: the address, and whether it came from a trusted proxy's forwarded headers or, with `trustProxy` off, from the connection itself (behind a proxy, the proxy's address); when the server cannot establish an address, that a non-empty list cannot be saved from here. The Authentication page keeps reading the platform administrator's route. A caller the route refuses, a server without the route, or any other failed read draws no note and no toast, and the page is otherwise unchanged. No translation key is added: the three existing note sentences are reused.
+- 9a63ecb: fix(console): the shared-record page shows a lookup as "Linked record", never its stored id
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`**: on a share link (`/s/TOKEN`), a lookup or master-detail field with a value now reads "Linked record" instead of the referenced record's stored id, which an anonymous visitor could not use and which read as a broken page. An empty one still reads as empty. Which field is a lookup comes from the `type` the resolve answer's `fields` projection already serves; the page sends no extra request and reads nothing about the referenced record. An answer from a server that predates the projection carries no type, so its rows render as before.
+  - **`@object-ui/i18n`**: every pack gains `sharedRecord.linkedRecord` (en "Linked record", zh-Hans 「已关联记录」).
+- eff90af: fix(console): the shared-record page shows a user field as "Linked user", never its sys_user id
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`**: on a share link (`/s/TOKEN`), a user field with a value now reads "Linked user" instead of the stored `sys_user` id, which an anonymous visitor could not use. An empty one still reads as empty. It follows the lookup rule from the same page: the field is recognized by the `type: 'user'` the resolve answer's `fields` projection already serves, the page sends no extra request, and nothing reads the user record.
+  - **`@object-ui/i18n`**: every pack gains `sharedRecord.linkedUser` (en "Linked user", zh-Hans 「已关联用户」).
+- f88ca70: feat(console): Setup draws a `map` setting as a table of keyed rows instead of "Unsupported specifier type: map"
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`:** a settings row whose specifier is `type: 'map'` (Data Lifecycle's retention overrides, row quotas and per-class quota defaults) shows one row per stored entry, in stored order, under the declared `keyColumn` and `columns` headers. A row is added by picking its key from the keys the server serves as the specifier's `options`; a key another row uses is not offered again, and a stored key the server no longer offers stays on its row marked "Not offered". A `duration` cell is a whole number plus a unit (hours, days, weeks, years) and is saved as the literal (`'90d'`); a `positive_integer` cell is saved as a number. Save sends the map as an object through the page's existing patch, and removing every row sends `null`. A refused save marks the row its `constraint.entry` names, and the cell its `constraint.column` names, beside the server's sentence. An env-pinned map is read-only. Any other unknown specifier type still draws the unsupported-type line.
+  - **`@object-ui/i18n`:** eleven `console.settingsView.map*` keys in every locale pack: the add picker, the remove button, the "Not offered" marker and its hint, the empty-table line, the key search placeholder, the unit select's name, and the four duration units.
+- 76e4c2c: feat: a settings `map` specifier's column headers can be translated, and Data Lifecycle's three map tables ship translated headers
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - `PlatformTranslationDataSchema` (`@objectstack/spec/system`): the platform bundle's `settings.<namespace>.keys.<key>` entry gains two optional groups, spelled as the `map` specifier spells its headers. `keyColumn` translates the key column and `columns.<name>` each value column, keyed by the column's `name`. Each carries `label` (the header) and `help` (the column's `description`, shown as the header's hover text), and is strict like its siblings: an undeclared leaf is refused, with `description` → `help` and `title` → `label` named, and `headers` / `columnLabels` → `columns`, `keyHeader` → `keyColumn` named on the setting entry. A bundle written before this change parses exactly as it did. `settings` stays platform-only, so no application bundle can write these groups.
+  - `@objectstack/service-settings`: every shipped non-English bundle (zh-CN, zh-Hant, ja-JP, ko, es-ES, pt-BR, fr, de, ru, ar) translates the five headers of `lifecycle.retention_overrides`, `lifecycle.quotas` and `lifecycle.quota_defaults` (`Object`, `Keep rows for`, `Expire rows after`, `Max rows`, `Lifecycle class`). The settings translation coverage test now holds each `map` header to the same per-locale coverage as the setting's label, and refuses header copy for a setting that is not a map or a column the map does not declare.
+  - `@object-ui/console`: the Settings page's map table reads the two groups. A header with no translation keeps the manifest's text, as every other settings string does. The key column now shows its declared `description` as hover text, as the value columns already did.
+  - Stored values, the save door and the manifest shape do not change.
+- f4b1f9e: fix(console): a Console served from a host with an underscore or a trailing dot registers the mobile shell's push device again, without an origin
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`:** the push device registration sent `window.location.origin` for any `http:` or `https:` page. The server refuses an `origin` its host pattern cannot carry, an underscore (`http://my_svc:3000`, a container or compose service name) or a trailing dot (`https://crm.example.com.`), and a refused member refuses the whole registration, so that device got no pushes at all. The Console now keeps the origin only when the published `RegisterDeviceRequestSchema` (`@objectstack/spec/api`) accepts it, the same schema the server parses the body with; otherwise the device registers without `origin`, as the spec describes, and its pushes carry no origin. Every other host still sends its origin.
+- f75466c: fix(console): a clean self-hosted install reads as a first run — the sign-in page leads with creating the owner account, sign-up says every problem inline at once, Home says each item once, and a wrong password on a box with no mail points to the administrator
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  What a visitor and an administrator see on a fresh deployment (objectstack#32021):
+  
+  - **Sign-in on a box nobody has an account on.** The page asked the first visitor "Welcome back". When `GET /api/v1/auth/bootstrap-status` answers `hasOwner: false` (the probe that already switched the card's footer between "Sign up" and "Have an invitation?"), the card is now titled "Set up this deployment" and leads with a "Create the owner account" button, with the sign-in form below it. The probe now runs for every posture that offers a form to a visitor not invited, not only `invite_only`. A probe that fails, or a box that has an owner, keeps "Welcome back" exactly as before.
+  - **Sign-up.** `RegisterForm` is `noValidate` and checks every field on submit, so the browser's one-at-a-time bubble (in the browser's language) is gone, and a short password that also does not match shows both messages together, each under its own field with `aria-invalid` and `aria-describedby`. Three new labels, `nameRequiredError`, `emailRequiredError` and `emailInvalidError`, carry the empty-name, empty-email and malformed-email messages; the minimum stays 8, as the auth config serves none. The banner still carries what the server refuses.
+  - **Home.** "No email service is set up" and "Connect an AI assistant" are each said once: the deployment notice keeps its email line (what it says and who sees it are ruled, objectstack#30120), and the first-run checklist leaves its Email delivery row out while that line is drawn; the checklist's assistant row, while it is not done, stands in for Home's Connect an AI Assistant card, which members (who get no checklist) still see. The notice now uses the same 1120px width as the rest of Home, and the checklist sits closer under it, so "Your apps" is not pushed below the fold.
+  - **The checklist's assistant row** says it is about an external AI assistant over MCP, and that the built-in AI is set up separately.
+  - **A wrong password with no mail transport.** When `/api/v1/auth/config` reports `features.emailDelivery: false`, the refusal says to ask the administrator to reset the password, instead of pointing to a reset email that never arrives.
+  - **zh-CN wording.** The checklist names the current language and country in the reader's language; the managed-by note says 账号系统 instead of 「经身份服务写入」; and the AI settings page translates Embedder, Trace, Prompt and PII (向量化, 请求追踪, 提示词, 个人敏感信息).
+  
+  New `@object-ui/i18n` keys, in every pack: `auth.login.firstOwner.{title,description,createButton,signInDivider}`, `auth.login.errors.invalidCredentialsNoMail`, `auth.register.{nameRequiredError,emailRequiredError,emailInvalidError}` and `auth.register.firstOwner.{title,description}`. Nothing is removed or renamed.
+- a127a45: feat(console): the first-run checklist shows the AI provider the server is running and folds the rows that are done; every "not found" page now has a way back
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  What an administrator sees on Home, and what anyone sees after following a stale link (objectstack#32021 item 4, objectstack#32157):
+  
+  - **The built-in AI on the first-run checklist.** A new row, "Set up the built-in AI", reads `live.provider` from `GET /api/settings/ai`. That field says which provider the running system uses and where it came from. The row never reads `values.provider`, because that only says what was saved, and the runtime can detect a provider from its own boot environment while nothing is saved. When a provider is in use, the row is done and names it by its option label, followed by "set in Setup" or "detected from the server environment". When `source` is `none`, the row is not done and links to Setup → AI & Embedder. A server that does not state the provider at all draws no row, because unknown is not the same as unset. Only a session that may write the `ai` namespace reads it. The external assistant row keeps its wording and stays a separate step.
+  - **Rows that are done are folded away.** The checklist now draws only the rows still to do. Under them, one control ("Show completed (N)" / "Hide completed", with `aria-expanded`) shows the done rows in their place or folds them again. Every visit starts folded, so the card keeps the first screen for the work left. Progress still counts every row.
+  - **A way back from every not-found page.** Four pages now share one `NotFoundState`, each keeping its own title and cause: unknown object, unmatched URL, unknown record and unknown app. Each page offers its own way back first, then "Back to home", which goes to the deployment's declared landing app when it has one. For an unmatched URL that is "Go back". For an unknown record it is "Back to OBJECT-LIST", a link to the object's list. For an unknown app it is "Retry". Before this change, the unknown-object and unknown-record pages offered no way out. The "no access to this app" page uses the same Home button.
+  
+  New `@object-ui/i18n` keys in every pack: `console.firstRunChecklist.aiProvider.{title,todo,doneSettings,doneEnvironment,action}`, `console.firstRunChecklist.{showDone,hideDone}` and `empty.backToList`. No key is removed or renamed.
+- cc8c4b0: fix(console): a refused single sign-on says why in words an end user can act on, "Sign in with SSO" with no email asks for one, and a checkbox no longer draws as a circle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The login page names each refusal.** A single sign-on refused with `SELF_REGISTRATION_CLOSED`, `account_not_linked`, `saml_error` / `invalid_saml_response` or `state_not_found` used to read "the sign-in link expired or was already used. Please try again." followed by the raw cause in parentheses. Each now has its own sentence ("Your account isn't set up for this system yet. Ask your administrator to invite you.", and so on). The code and the server's description, which are written for administrators, move behind a "Technical details" toggle under the banner. A code with no sentence of its own keeps the generic one.
+  - **`LoginForm` checks the email before it asks the server.** Pressing "Sign in with SSO" with an empty or whitespace-only email field used to send the request and show the server's `email, organizationSlug, domain or providerId is required`. It now shows "Enter your work email to sign in with SSO." and sends nothing. The same sentence replaces the untranslated one a phone number in that field got. The text is the new `LoginFormLabels.ssoEmailRequiredText` label (optional; English default as above), which both login pages pass from `auth.login.ssoEmailRequiredText`.
+  - **`@object-ui/i18n`** adds `auth.login.ssoEmailRequiredText` and `auth.login.errors.ssoAccountNotInvited`, `ssoAccountNotLinked`, `ssoResponseRejected`, `ssoStartFromLoginPage` and `ssoTechnicalDetails` to all 11 packs.
+  - **Console theme:** the 16px checkbox drew `rounded-sm` at 10px under the theme's larger corner radius, so every checkbox looked like a radio button, for example the two independent toggles of "Edit Sign-In Options". The console stylesheet now gives the checkbox a 4px corner; every other `rounded-sm` is unchanged.
+- 33c3b5e: perf(i18n, console)!: the console's Developer pages and its Connect an AI assistant strings load on demand, off the English pack every page load pays for
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/i18n/src/locales/en.ts#TranslationKeys) the key type of the console's own translation catalogue: no Zod schema, no spec declaration and no stored metadata reads it, so the compiler is the channel that reaches every caller -->
+  
+  The `console.developer.*` and `connectAgent.*` groups left the language packs (all eleven) for a new lazy namespace, `@object-ui/i18n/namespaces/developer`: one partial pack per platform locale table tag, fetched when a surface that reads them mounts and merged into the page's i18next instance. Call sites are unchanged — they still ask `t('console.developer.…')` / `t('connectAgent.…')` of the default namespace. The readers are the console's four Developer pages (API console, flow runs, public forms, integrations), the Connect an assistant page's widget and the AI Assistants tab of a user record; each renders under a frame that shows a skeleton until its strings are in, never English in a translated console nor a raw key.
+  
+  The marketplace namespace and the new one share one runtime, `createPackNamespace` (`@object-ui/i18n`'s `namespaces/packNamespace.ts`); `@object-ui/i18n/namespaces/marketplace`'s exports are unchanged.
+  
+  Every string is still in every language and no text changed: `@object-ui/i18n/locales` (the all-packs door) hands out each language complete, its pack merged with every namespace catalogue, so key parity and `registerBuiltInLocales()` still cover the moved keys.
+  
+  **BREAKING** (`@object-ui/i18n`, TypeScript and the pack modules): the package entry's `en`, the exported `TranslationKeys` (`typeof en`) and the pack modules `@object-ui/i18n/locales/<code>` no longer hold the `console.developer.*` and `connectAgent.*` keys. A `t()` call that names one still compiles, since its key is a `string`. A component outside the console's Developer pages and app-shell's connect widgets that reads one of those keys calls `useDeveloperNamespace()` (from `@object-ui/i18n/namespaces/developer`) and renders it once the answer is `ready`; code that reads the catalogue objects directly reads them from `@object-ui/i18n/locales`, whose languages are complete.
+- c04aa29: fix(auth): a sign-in refused because the identity provider deactivated the account says so, instead of "You have been banned… contact support"
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The login page tells a deactivation from a ban.** plugin-auth refuses the password sign-in of an account its identity provider deactivated through SCIM with `403 BANNED_USER` and `details: { cause: 'scim_deactivated' }`. The Console login page and `DefaultLoginPage` showed better-auth's "You have been banned from this application. Please contact support if you believe this is an error." for it. They now show "Your account has been deactivated by your organization. Contact your administrator." in the session's language. An administrator's ban answers with no `details` and keeps the server's wording.
+  - **`@object-ui/auth`:** a refused call that goes through the auth client's error mapping now carries the response body's `details` object on the thrown error (`error.details`), beside `code`, `message`, `dependents` and `userMessage`. A `details` value that is not a plain object is not carried.
+  - **`LoginForm`'s `errorMessages`** is read under `CODE:cause` first (the refusal's `code` and `details.cause`, for example `BANNED_USER:scim_deactivated`), then under `CODE`, then the server's message is shown. A refusal with no cause, or with a cause the map has no entry for, answers exactly as before.
+  - **`@object-ui/i18n`** adds `auth.login.errors.accountDeactivated` to all 11 packs.
+- 75102c8: fix(console, grid): fewer requests per list navigation: a grouped grid asks the row write verdict once per operation, a list writes the user's preference row only when a preference changed, the inbox and approvals polls back off while nothing changes, and the command palette keeps the keys typed while it opens
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `@object-ui/plugin-grid`: a server-grouped grid hands its rows to the record-grained write verdict (`POST /api/v1/security/explain`) once every open group's page has answered, instead of once per group. A list grouped into seven groups asked fourteen times; it now asks once per operation (`update`, `delete`), each request carrying every row on screen. The rows of each group still draw as soon as that group answers.
+  - Console: a sort, column layout, density, hidden-field or filter change that re-states what the user already stored, or that is undone before its write leaves, sends no `sys_user_preference` write. Each change is compared with the value the store holds.
+  - Console: the inbox and approvals feeds double the delay before the next poll each time a poll answers what is already on screen, up to 3 minutes, and return to the 60 s cadence on the first changed answer, on returning to the tab, and when a push channel opens or closes. Every poll still reads the whole window, so no arrival is dropped: it shows up at the next poll.
+  - Console: the keys typed between ⌘K (or the header search button) and the palette's input taking focus are the start of the query, instead of going to the page.
+- c68fa38: fix(console): opening the Console at its root asks `/meta/app` and the boot preference read once, not twice
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Opening the Console at `/_console/` (a bookmark, the post-sign-in landing) resolved the landing app in one data shell and then mounted a second one for the app it redirected to, so `GET /api/v1/meta/app` and the boot `sys_user_preference` read went out again, one round trip later. The root now resolves the landing in the same shell the app page uses, so each of those reads goes out once, the same as opening the app page directly. Where the root lands is unchanged, and so is the organization check: a session with no active organization is still sent to the organization picker by the page it lands on.
+- 6aa95dc: fix(console): email delivery is an optional row on the first-run checklist, and Home's deployment notice no longer says that no email service is set up
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The first-run checklist on Home stayed until every row was done, so an administrator whose applications send no mail, and every hosted tenant, kept it for good because of the Email delivery row. That row is now marked Optional and is not counted: the progress line counts the other rows, and the checklist disappears once they are done, whether mail is set up or not. A mail setup that delivers still reads done, and the row still links to Setup → Mail Delivery.
+  
+  The deployment notice no longer draws the server's `email_not_configured` finding ("No email service is set up…"), on Home or on System Overview. The notice should speak about mail only when something needs mail and cannot send it, and the server does not state that today. A production deployment whose only finding is the unset email service now shows no notice. Hiding the notice still sends the fingerprint the server served.
+  
+  `@object-ui/i18n` adds one locale key in every pack: `console.firstRunChecklist.optional`.
+- 5fb79bc: fix(console, plugin-detail): an approval request opens in the app that owns its record, its record card opens the record, the record page's copy never throws, and the decision comment is on the request page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - An approval request opened from Home's "Awaiting approval", from a notification, or from the Approvals inbox now opens under the app whose navigation lists the request's record: the app it was opened from when that app lists the record's object, otherwise the first app that does, otherwise Setup. It used to open under whichever app it was asked from, with that app's sidebar, even when that app never names the record.
+  - The record card on an approval request's page now links its title to the record, under the same app. The page's own record links reach only the objects that page loads, which never included the request's record, so the card's title was plain text.
+  - A record page's click-to-copy (`DetailSection`) no longer throws or leaves a rejected promise when the browser has no clipboard API or refuses the write; the copy then does nothing.
+  - A rejected, returned or approved request's page shows the comment its deciding action was recorded with, and who recorded it, above the tabs. It was only on the Timeline tab.
+- 8e3d4a5: docs(mcp): the served `SKILL.md` and the `run_action` / `resume_run` tool descriptions stop teaching an AI service account a confirmation retry it can never pass (#32936)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  No runtime change: the refusal already exists (`actionConfirmationRefusal`, ADR-0151 D3 rule 3), and this changes only what the texts tell an agent.
+  
+  - **`renderSkillMarkdown`.** The `run_action` entry keeps `confirm: true` after the human approves, and adds: under an AI service account's own key (an agent acting for itself, for no person) the call is refused whatever it sends and nothing runs; hand the action to a person, or its author declares `ai.requiresConfirmation: false` when it is safe unattended. The `resume_run` entry names the same refusal. The Console's "Download skill" mirror carries the same bytes.
+  - **HTTP MCP tools.** The `run_action` and `resume_run` descriptions, and both tools' `confirm` member descriptions, say the same thing in the same terms.
+- 0216d00: fix(console): the first-run checklist's email row reads done when the running system delivers mail, including mail set up through the deployment's environment
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`.** The email row now follows the provider the server states is in use (`live.provider` of `GET /api/settings/mail`). Mail configured through the environment (`OS_EMAIL_*`, the stack's `email` block, or a transport the host hands over) saves nothing in Settings, so the row used to stay not done although mail was delivered. The development log, which delivers nothing, keeps the row not done even when saved values look complete. A server that does not state the provider is judged on the saved values, as before.
+- 7f5a237: fix(auth): the Console's phone-code sign-in and verify-email page continue to the two-factor prompt when the account has an enrolled second factor
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`AuthClient.signInWithPhoneOtp`** now answers `SignInResult`, the same type `signIn` and `signInWithPhonePassword` answer: a session, or `{ twoFactor: { methods } }` when the server accepted the code for an account with an enrolled second factor. Finish it with `verifySignInTwoFactor`. It used to reject with "No account is registered for this phone number." for that answer. Code that reads `result.user` / `result.session` straight off the answer must check `result.twoFactor` first.
+  - **`AuthContextValue.signInWithPhoneOtp`** resolves `{ twoFactorRequired: boolean }` instead of `void`; on `true`, `twoFactorChallenge` is set and `LoginForm` draws the same code step the password sign-in paths reach. A hand-built `AuthContextValue` (a test double passed to `AuthCtx.Provider`) whose `signInWithPhoneOtp` resolves nothing must now resolve `{ twoFactorRequired: false }`.
+  - **Console `/verify-email`**: when verifying the address would also sign in an account with an enrolled second factor, the page says the email is verified (it used to say verification failed) and sends the person to sign in, where the two-factor step follows.
+  - A custom `AuthClient` implementation (a test double, an alternative backend) keeps type-checking as long as it returns a session; it may now also return the challenge.
+- 136eba4: feat(plugin-auth, console): the OAuth consent page names where the grant is sent and marks a client no platform administrator registered as unverified
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The OAuth consent page shows, beside the name and logo the client declared at registration, two facts the server establishes from the authorization request it signed, so the self-declared name is never the only identity a person approves:
+  
+  - **Where the grant goes.** A new session-required door, `POST /api/v1/auth/oauth-consent/request` with body `{ oauth_query }` (the signed query the provider sends the consent page), answers `{ clientId, redirectUri, registeredByAdministrator }`. `redirectUri` is read from the request only after the provider's own signature check, the check `/oauth2/consent` runs, so it is the redirect `/oauth2/authorize` validated and the one a consent sends the code to; it is never read from the client's registration metadata. A request this server did not sign, or whose signature expired, is `400 VALIDATION_ERROR`; a client the provider does not serve is `404 RESOURCE_NOT_FOUND`; the body takes `oauth_query` only and the route takes no query parameter. The page shows the redirect's host (with its port) for an `http(s)` redirect, a loopback one included, and any other redirect, such as a native app's custom scheme, as it is.
+  - **Whether a platform administrator registered the client.** `registeredByAdministrator` is `true` only when the account the stored client names as its registrant holds platform-admin standing (ADR-0068 D2). Every other client reads `false` and the page marks it as an unverified application, naming the destination in the mark: a dynamically registered client, with or without a session, and a client any other account registered through a self-service door. Whether dynamic registration itself is narrowed is not changed here.
+  - **Authorize waits for the destination.** Until the server has answered, and whenever it cannot, Authorize is disabled and the page says the destination could not be confirmed. Deny always works.
+  
+  The new strings ship in all 11 console locales (`en`, `zh-Hans`, `zh-Hant`, `ja`, `ar`, `de`, `es`, `fr`, `ko`, `pt-BR`, `ru`).
+- f127b04: fix(plugin-auth)!: under invite_only, a self-serve sign-up is admitted only by the invitation it presents
+  
+  Clause-②: yes (narrowing) — under the `invite_only` audience posture an email-and-password sign-up for an invited address is admitted only when it presents that invitation's id as `invitationId`, and the address alone is refused `SELF_REGISTRATION_CLOSED`; a social OAuth creation is admitted by an invitation only when its identity provider verified the address. The sign-up request widens: `RegisterRequestSchema` and `RegisterRequest` gain `invitationId`, `SignUpData`, `RegisterForm` and the auth context's `signUp` gain it, and `os register` gains `--invitation`.
+  Metadata-protocol: added — RegisterRequest gains the optional invitationId key (packages/spec/authorable-surface/api.json)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key is removed, renamed or re-shaped and no stored row is rewritten: RegisterRequest gains an optional key, and a sign-up under invite_only that does not present its invitation is refused with the posture's existing code and message. -->
+  
+  **BREAKING** accept-set narrowing at the email-and-password sign-up door (`@objectstack/plugin-auth`), under the `invite_only` audience posture, the default.
+  
+  A sign-up under `invite_only` presents the invitation it is admitted by: the invitation's id, the last segment of the `/accept-invitation/` link the invitation mail carries, sent in the `/sign-up/email` body as `invitationId` beside `email`, `password` and `name`. The invitation must be pending, unexpired and addressed to that email. Anything else is refused `403 SELF_REGISTRATION_CLOSED` with the same message an uninvited sign-up gets, and nothing is written.
+  
+  **Upgrading.** A client that signs an invitee up sends `invitationId` beside the `email`, `password` and `name` it already sends. The one-line fix: send the id the invitation link carries as `invitationId`.
+  
+  **Who moves.** Nothing in this repository: the Console, the SDK, the CLI, the `@objectstack/verify` harness and the test fixtures all present the id; a client outside it that signs invitees up under `invite_only`, such as a custom front-end or a script, sends the accept link's last path segment as `invitationId`.
+  
+  **Operators.** Deploy the Console bundle together with the server; on a deployment with no mail transport, hand the invitee the link with the invitation's **Copy Invite Link** action; give an out-of-band recovery invitation row an `id` of your own, which the sign-up sends; and review accounts created before the upgrade that are unverified and hold or accepted an invitation.
+  
+  - **Unchanged:** the first account of a new deployment, and the operator's own provisioning (admin create, SCIM, the boot command's seed), need no invitation. The `open` and `email_domain` postures match an invitation by address as before. A magic-link or email-OTP creation, whose own flow answers from the mailbox, matches by address; an SSO provider's creation is unchanged.
+  - **Social OAuth under `invite_only`:** a creation through a social provider is admitted by an invitation only when the provider verified the address; otherwise it is refused with the same code as an uninvited sign-up.
+  - **No mail transport:** hand the invitee the link with the invitation's **Copy Invite Link** action; it carries the id.
+  - `@objectstack/spec`: `RegisterRequestSchema` declares the optional `invitationId`.
+  - `@objectstack/client`: `auth.register()` sends it through, typed by the widened `RegisterRequest`.
+  - `@objectstack/cli`: `os register --invitation ID`.
+  - `@objectstack/verify`: the harness's `signUp` presents the invitation it seeds.
+  - `@object-ui/auth`: `SignUpData.invitationId`, `RegisterForm`'s `invitationId` prop and the sixth argument of the context's `signUp` send it.
+  - `@object-ui/console`: `/register` opened from an invitation link sends that link's id with the sign-up; so does `@object-ui/app-shell`'s `DefaultRegisterPage`, whose package now also exports `invitationIdOf`.
+- a1d0b1e: fix(console): a settings action whose handler declares `confirmText` asks before it runs
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The settings manifest's action handler (`SpecifierHandlerSchema`, its `http` and `action` arms) declares `confirmText`: "Confirm dialog text before invoking (omit = no confirm)". The Console's `action_button` row never read it, so an action its manifest marked as needing a confirmation ran on the first click. Now a declared `confirmText` opens a confirmation dialog carrying that text (translated through `settings.NAMESPACE.actions.ID.confirmText` when the locale has it); Cancel runs nothing and Continue runs the action once. A handler without `confirmText`, and a `navigate` handler, runs on click exactly as before.
+- 7993aa7: Login page: a refused IdP-initiated SAML sign-in (`?error=unsolicited_response`) now tells the user to start sign-in from this system's login page instead of showing the generic single sign-on failure. The technical cause stays behind the details toggle.
+- b463ec6: fix(console): the audit log reads the grid's clock, and the zh-CN settings page uses full-width punctuation
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console's audit log formatted its timestamp column with the bare `Intl` default. A zh-CN reader saw a 24-hour clock (`2026/11/10 07:24:26`) beside the grid's 12-hour cells (`2026/11/10 上午7:03`), and the column ignored the workspace's declared display zone. It now draws through `formatDateTimeStamp`, a new export of `@object-ui/core`: the grid's numeric date and 12-hour clock, to the second, in the display zone. English is unchanged (`3/4/2020, 3:30:00 PM`); a de-DE reader now reads the 12-hour clock its grid cells already show.
+  
+  Six zh-CN strings on the settings page (the environment-lock message and chip title, the three encryption-refusal messages, and the unsupported-setting row) put half-width `:` and `,` inside Chinese sentences; they now use `：` and `，`. No key was added, removed or moved.
+- @objectstack/sdui-parser@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

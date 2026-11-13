@@ -39,16 +39,17 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { isServedOverrideRowOf } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { someShipperOf } from './protocol-environment-rows.js';
 import type { ServedOverrideRow } from './served-override.js';
 import { REFERENCE_SITES } from './reference-sites.js';
 import { computeMetadataDiagnostics } from './metadata-diagnostics.js';
 import { hasMetadataRedactor, redactMetadataItem } from './metadata-redaction.js';
 import { isPairRowRemoval } from './protocol-packaged-base-refusal.js';
-import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
+import { canonicalMetaType, canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import { remainingRowsPhrase } from './protocol-authoring-refusals.js';
 import { memberOption, mutationEventMember, resolveBundleMemberSelector } from './protocol-bundle-members.js';
-import { mutationEventPackage } from './protocol-mutation-package.js';
+import { mutationEventPackage, projectorEventPackage } from './protocol-mutation-package.js';
 import {
     carryCatalogedErrorCode,
     carryDeclaredUserMessage,
@@ -391,7 +392,7 @@ export class ProtocolDiffDeleteLoadFacet {
     }
 
     /** [#28355] The body of {@link deleteMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async deleteMetaItemUnaudited(host: Pick<ProtocolHost, 'assertLockAllowsDelete' | 'dropObjectStorage' | 'dropStorageRemainingRowsRefusal' | 'emitMetadataMutation' | 'engine' | 'environmentId' | 'findEnvironmentRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'originGatedRemovalRefusal' | 'packagedArtifactOwner' | 'packagedBaseRefusal' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseRemoval' | 'registryAllowsOverlay' | 'restoreArtifactRegistryView' | 'runMutationProjector' | 'shouldDropStorage' | 'storedParentForToken'>, request: DeleteMetaItemRequest): Promise<{
+    static async deleteMetaItemUnaudited(host: Pick<ProtocolHost, 'assertLockAllowsDelete' | 'dropObjectStorage' | 'dropStorageRemainingRowsRefusal' | 'emitMetadataMutation' | 'engine' | 'environmentId' | 'findEnvironmentRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'originGatedRemovalRefusal' | 'packagedArtifactOwner' | 'packagedBaseRefusal' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseRemoval' | 'registryAllowsOverlay' | 'restoreArtifactRegistryView' | 'runMutationProjector' | 'shippedArtifactsOf' | 'shouldDropStorage' | 'storedParentForToken'>, request: DeleteMetaItemRequest): Promise<{
             success: boolean;
             message?: string;
             reset?: boolean;
@@ -427,10 +428,13 @@ export class ProtocolDiffDeleteLoadFacet {
         // flow's armed) again. Admitted past the sealed-removal refusal and
         // told to the store as a runtime-only removal, as the declared save
         // is ({@link isPairRowRemoval}).
-        const pairRowRemoval = isPairRowRemoval(
-            request.type, host.packagedArtifactOwner({ type: request.type, name: request.name }), request.packageId,
-            installedManifestsOfEngine(host.engine),
-        );
+        // [ADR-0150 D4, #32552] Judged against every package that ships the
+        // name ({@link someShipperOf}): two namespaces' items of one name each
+        // carry their own pair, so the pair named here is judged against its
+        // own base, never against whichever shipper registered first.
+        const installed = installedManifestsOfEngine(host.engine);
+        const pairRowRemoval = someShipperOf(host, request.type, request.name,
+            (base) => isPairRowRemoval(request.type, base, request.packageId, installed));
         // Two-tier authorization for delete (mirrors saveMetaItem).
         //  • Artifact-backed item → delete becomes a tombstone overlay,
         //    requires `allowEnvironmentOverlay`…
@@ -840,6 +844,8 @@ export class ProtocolDiffDeleteLoadFacet {
                     name: request.name,
                     state: 'deleted',
                     organizationId: null,
+                    // [#31698] The row this delete removed (ADR-0150 D4).
+                    ...projectorEventPackage(singularTypeForRepo, packageId),
                 });
                 host.emitMetadataMutation({
                     type: singularTypeForRepo,
@@ -1103,7 +1109,7 @@ export class ProtocolDiffDeleteLoadFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#loadMetaFromDb`; the method's docblock there is its contract. */
-    static async loadMetaFromDb(host: Pick<ProtocolHost, 'classifyObjectContribution' | 'convertStoredItem' | 'engine' | 'ensureOverlayMembersBackfilled' | 'findEnvironmentRows' | 'hydrateOverlayIntoRegistry' | 'isHostCodeDatasource' | 'isUnservedSealedOverlay' | 'overlayPackageMismatchError' | 'packagedArtifactOwner' | 'packagelessAddress' | 'reportPageRequiresAbsentAtLoad' | 'reportSealedOverlayRows' | 'resolveSduiManifest' | 'storeHydratedIntoRegistry'>): Promise<{ loaded: number; errors: number; invalid: number; storeUnavailable: boolean }> {
+    static async loadMetaFromDb(host: Pick<ProtocolHost, 'classifyObjectContribution' | 'convertStoredItem' | 'engine' | 'ensureOverlayMembersBackfilled' | 'findEnvironmentRows' | 'hydrateOverlayIntoRegistry' | 'isHostCodeDatasource' | 'isUnservedSealedOverlay' | 'overlayPackageMismatchError' | 'packagedArtifactOwner' | 'packagelessAddress' | 'reportPageRequiresAbsentAtLoad' | 'reportSealedOverlayRows' | 'resolveSduiManifest' | 'shippedArtifactsOf' | 'storeHydratedIntoRegistry'>): Promise<{ loaded: number; errors: number; invalid: number; storeUnavailable: boolean }> {
         let loaded = 0;
         let errors = 0;
         let invalid = 0;
@@ -1171,13 +1177,25 @@ export class ProtocolDiffDeleteLoadFacet {
                         // would prescribe deleting the live customization. The
                         // one predicate, on the row's `package_id` column. The
                         // census only: what this loop loads is unchanged.
+                        //
+                        // [ADR-0150 D4, #32552] …judged as the reads judge it
+                        // (`declinesStoredRow`): for a flow and an action
+                        // against every package that ships the name
+                        // ({@link someShipperOf}), so a second holder's
+                        // served override is not named for deletion; for the
+                        // six sealed types against the name's first-registered
+                        // shipper alone, which is the only override the reads
+                        // serve for them until #33131 moves them.
+                        const servedOverrideOf = (base: string | undefined) => isServedOverrideRowOf(
+                            record as ServedOverrideRow, base, installedManifestsOfEngine(host.engine),
+                        );
+                        const recordName = String(record.name);
+                        const perShipperType = ['flow', 'action'].includes(canonicalMetaType(normalizedType));
                         if (
-                            !host.isHostCodeDatasource(normalizedType, String(record.name))
-                            && !isServedOverrideRowOf(
-                                record as ServedOverrideRow,
-                                host.packagedArtifactOwner({ type: normalizedType, name: String(record.name) }),
-                                installedManifestsOfEngine(host.engine),
-                            )
+                            !host.isHostCodeDatasource(normalizedType, recordName)
+                            && !(perShipperType
+                                ? someShipperOf(host, normalizedType, recordName, servedOverrideOf)
+                                : servedOverrideOf(host.packagedArtifactOwner({ type: normalizedType, name: recordName })))
                         ) {
                             sealedOverlays.push({ type: normalizedType, name: String(record.name) });
                         }

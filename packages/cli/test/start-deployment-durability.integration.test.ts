@@ -460,12 +460,14 @@ describe('#30120 — without the switch, a production start on its defaults boot
       { id: 'auth_secret_generated', severity: 'high', variable: 'OS_AUTH_SECRET', file: join(osHome, 'auth-secret') },
       { id: 'data_key_file', severity: 'high', variable: 'OS_SECRET_KEY', file: join(osHome, 'dev-crypto-key') },
     ]);
-    // The default boot stores uploads locally and sends no mail: the two
-    // lower-severity lines.
+    // The default boot stores uploads locally: the one lower-severity line.
+    // It sends no mail either, and that is not a finding (mail is optional).
     expect(adminNotice.body?.data?.findings?.filter((f: any) => f.severity === 'low').map((f: any) => f.id)).toEqual([
       'file_storage_local',
-      'email_not_configured',
     ]);
+    expect(adminNotice.body?.data?.fingerprint).toBe(
+      'database_local_file+auth_secret_generated+data_key_file+file_storage_local',
+    );
   });
 
   it('a member is refused the notice 403, and the answer names no server path', () => {

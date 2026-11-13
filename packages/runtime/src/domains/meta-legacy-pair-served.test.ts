@@ -208,7 +208,9 @@ for (const environmentId of [undefined, 'env_hotcrm'] as const) {
  * [#32501, ADR-0150 D5, epic red line 2] A stored row read at an exact address
  * wears the envelope of the package that address reads, and `/layers` reads
  * that package's code layer: never the package that registered the name first.
- * The real engine and SQL store, so the rows are read as a deployment reads them.
+ * The real engine and SQL store. The rows are inserted straight into
+ * `sys_metadata`, not hydrated through `loadMetaFromDb`; the hydrated rows
+ * answer the same (measured by the contract review of #32808).
  *
  * BASE (main 874166b6, measured on this fixture):
  *  - alpha's pair override row, beta registered first: `?package=alpha.custom`
@@ -227,8 +229,16 @@ for (const environmentId of [undefined, 'env_hotcrm'] as const) {
  * alpha registered ahead of the modules (the code layer's lookup lands on
  * alpha, which #32497's `exactQualifierItem` refuses); with a module of the
  * App registered first and no other shipper, `/layers` there answered 200
- * with that module's body as its code layer, the move the last pin's
+ * with that module's body as its code layer, the move the App pair row pin's
  * module-first cases hold.
+ *
+ * Re-measured again for the contract review of #32808: with NO stored row
+ * and the App's two modules the only shippers of the name, `?package=` the
+ * App pair and its `/layers` answered 200 with the first registered
+ * module's item on `main`, on this real engine as on the bare
+ * `SchemaRegistry` composition; with another package registered ahead of
+ * the modules, both doors already answered 409. The registration shape
+ * decides the FROM, not the composition (the last pin).
  */
 describe('#32501 — a stored row at an exact address wears the envelope of the package the address reads', () => {
     const ALPHA = 'com.acme.alpha';
@@ -343,5 +353,38 @@ describe('#32501 — a stored row at an exact address wears the envelope of the 
         const layers = await read('/meta/dashboard/d/layers', { package: `${SUITE}.custom` });
         expect([layers.status, layers.body?.error?.code], JSON.stringify(layers.body).slice(0, 400)).toEqual([409, 'RESOURCE_CONFLICT']);
         for (const id of [ONE, TWO]) expect(String(layers.body?.error?.message)).toContain(`package "${id}"`);
+    }, 60_000);
+
+    // [#32808 review S1] No stored row: the App pair's own address is refused on the
+    // real engine too, at `?package=` and at the installed pair's namespace on the
+    // qualified path. BASE (main 2f80f2897): the module-first cases answered 200
+    // with the first registered module's item on all three doors; with alpha
+    // registered ahead of the modules all three already answered 409 (the order
+    // controls).
+    it.each([
+        ['one first, no other shipper', [ONE, TWO]], ['two first, no other shipper', [TWO, ONE]],
+        ['alpha, then one', [ALPHA, ONE, TWO]], ['alpha, then two', [ALPHA, TWO, ONE]],
+    ] as const)('no stored row, two modules of the App holding the name (%s): the App pair is refused naming both, on the plain read, `/layers` and the qualified path', async (_order, shippers) => {
+        const { engine, read } = await bootShippers(shippers);
+        // The installed pair's namespace qualifies the same address on the qualified path.
+        engine.registry.installPackage({
+            id: `${SUITE}.custom`, name: 'suite custom', version: '0.1.0', type: 'module', namespace: 'suite_custom', dependencies: { [SUITE]: '^1' },
+        } as any, 'authored');
+        for (const [path, query] of [
+            ['/meta/dashboard/d', { package: `${SUITE}.custom` }],
+            ['/meta/dashboard/d/layers', { package: `${SUITE}.custom` }],
+            ['/meta/dashboard/suite_custom/d', {}],
+        ] as const) {
+            const answer = await read(path, query);
+            expect([answer.status, answer.body?.error?.code], `${path} ${JSON.stringify(answer.body).slice(0, 400)}`)
+                .toEqual([409, 'RESOURCE_CONFLICT']);
+            for (const id of [ONE, TWO]) expect(String(answer.body?.error?.message)).toContain(`package "${id}"`);
+        }
+        // CONTROL — each module's own address serves its own shipped item.
+        for (const id of [ONE, TWO]) {
+            const own = await read('/meta/dashboard/d', { package: id });
+            expect([own.status, ...envelope(own.body)], JSON.stringify(own.body).slice(0, 400))
+                .toEqual([200, `${id.split('.').pop()} shipped`, id, 'package']);
+        }
     }, 60_000);
 });

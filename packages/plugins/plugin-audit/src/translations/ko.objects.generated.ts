@@ -191,6 +191,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "메타데이터",
         help: "JSON으로 직렬화된 추가 컨텍스트"
       },
+      origin: {
+        label: "Origin",
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry not written through the activity door."
+      },
       changed_fields: {
         label: "변경된 필드",
         help: "기록된 변경의 키 집합입니다. 수정이면 기록된 이전/새 값이 가리키는 모든 필드이고, 그 밖의 행은 비어 있습니다. 쓰기 시점에 플랫폼이 기록하며, 읽는 사람에게 제공되는 필드로 좁혀서 제공됩니다. NULL은 아직 기록되지 않은 행입니다(`os migrate activity-changed-fields` 실행)."

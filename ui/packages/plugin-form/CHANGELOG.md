@@ -1,5 +1,493 @@
 # @object-ui/plugin-form
 
+## 18.4.0
+
+### Patch Changes
+
+- 2e33533: feat(ui): a home-currency amount shows the rate and document date it was converted at
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A `record`-mode amount that declares `currencyConfig.homeAmount` (ADR-0144 D5) has its home field filled by the server when the record is saved. That home field now draws as a read-only amount in the organization's home currency, with the line "Converted at RATE on DATE" taken from the record's own rate and document-date fields, or "In the home currency (rate 1)" when the amount was already in the home currency. This holds on the record page and on authored form sections (the record dialog, the drawer and an inline `ObjectForm`), where it used to be a disabled number box with no currency symbol. A form laid out automatically still leaves readonly fields out, the home field included.
+  
+  `@object-ui/i18n` adds `homeAmountSourceOf`, `withHomeAmountSource`, `readHomeAmountSource`, `HOME_AMOUNT_SOURCE_KEY` and the `HomeAmountSource` type, plus two locale keys in every pack: `fields.currencyHome.convertedAt` and `fields.currencyHome.homeCurrency`. `@object-ui/fields` exports `HomeAmountHint`.
+  
+  The Studio field editor gains the three `homeAmount` pickers under `record` mode (home amount field, document date, rate field), listing only the fields the spec accepts for each. Re-picking an amount's currency code field no longer deletes its `homeAmount`.
+- c580081: fix(ui): the console form page Edit, the kanban drop prompt and the Edit wizard judge a field's `requiredWhen` as the engine does, a transition gate against the stored record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/console` form page (`/forms/:name?recordId=`):** an Edit no longer refuses a record that already sits inside a `requiredWhen` gate without the value (for example a contract activated before its signed-copy rule existed). The field shows no required marker there, and an unrelated edit saves, as REST `PATCH` already accepts. Still refused: the edit that moves a record into the gate without the value, and clearing the value of a record that held it. A create form enforces as before.
+  - **`@object-ui/plugin-kanban` drop prompt:** dropping a card no longer asks for a field the engine lets rest. A record already inside the gate without the value moves between columns with no dialog; a drop that moves a compliant record into the gate still asks for the value first.
+  - **`@object-ui/plugin-form` Edit wizard:** the final submit's cross-step check no longer refuses a record that already sits inside a `requiredWhen` gate without the value; it asks `requiredWhenRestsOnStoredRecord` about the record as first read. The record reaches only that stored-record check, so a `visibleWhen` reading `previous` is still unevaluable at that check, as before. Moving a compliant record into the gate is still refused, and a Create wizard enforces as before.
+  
+  All three read the stored-record verdict `resolveFieldRuleState` already returns (`requiredWhenAtRest`, or its exported check `requiredWhenRestsOnStoredRecord`); no second rule.
+- 8e5fabe: fix(app-shell): after Setup → Datasources syncs objects, the dialog links each new object and names the two steps left: add it to an app, and grant access
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The result.** When a Sync run creates at least one object, the dialog stays open on the result instead of closing behind a toast: the count line, one link per created object (label, with the name beside it when they differ) that opens the object under the app the page is in, and the two steps left before people can use it, adding it to an app and granting access in a permission set. A run that creates nothing closes the dialog as before. Refused tables are still reported in the error toast.
+  - **The widening.** Four new `studio` namespace rows in `@object-ui/i18n` (en and zh): `engine.datasource.syncNextStepsOne`, `engine.datasource.syncNextSteps`, `engine.datasource.syncNextStepApp` and `engine.datasource.syncNextStepAccess`.
+  - **Form labels.** A declared field with no `label` is drawn in the form under its name with the first letter capitalised and underscores as spaces (`part_no` → `Part no`), the rule the list already draws it under, so one field reads the same in both. An authored label is unchanged.
+- 8b0fbb8: fix(app-shell,fields,plugin-form,plugin-gantt,plugin-grid,components,console): record pages, forms, drawers and preview cards draw a served object label as served
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Now.** The record page (its title, breadcrumbs, related-list titles, delete and access-denied copy), the record form page and the console's create/edit dialog (title, save toast, way back to the list), the record drawer, the record preview card, the hover card over a lookup, a record-pointer cell, an object-ref cell, the closed-form notice, the gantt name column, the page header's record chrome, a form view's heading, the AI dock's surface chip, the Activity row and the report index name an object by the label the server served, as given. The server has already translated it, by its label order for an overridden item, so a `.custom` object extension's rename is kept over the base package's translation. Before, the served label reached the client's catalog lookup only as its fallback, so the base package's translation of the old name won on these surfaces after the list and header were fixed.
+  - **Unchanged.** When no label is served, the catalog key is asked first and the machine name (or its humanized form) stays the last resort, as before. An unedited object shows the same text as before, because the server serves the catalog's translation for it. Related lists and reference rails that only know an object's name, and the packaged-actions table (its object list is read without the session's language), still look the name up in the catalog. English is unchanged.
+- 5268f50: fix(plugin-form): the warning for a `scale` on a currency inline grid column names the currency's CLDR fraction digits
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console warning for an inline grid column that renders as `currency` and carries `scale` repeats the spec's refusal, which now says "the currency's CLDR fraction digits (2 for USD, 0 for JPY, 3 for KWD) decide how the cell displays the amount" instead of naming the ISO 4217 minor unit. Words only: the same columns are reported, and the column still renders at its currency's digits.
+- 6be71ab: fix(ui): a stored field carrying an `expression` is read-only on every write surface, as a formula is
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Before.** A non-`formula` field with an `expression` (for example a `currency` amount computed from quantity times unit price) is computed by the engine on every write, so a client-sent value never stands. The record form still drew it as an editable input, a list grid offered an editable cell, the record page offered inline edit, and the import wizard offered it as a column to write. The save then replaced what the user typed, with no message.
+  - **Now.** Such a field is computed exactly as a `formula` is. The auto-layout create form leaves it out. The auto-layout edit form, and an authored form section on create or edit, draw its type's read face (the formatted value, no input), and the edit save does not send it. A list grid cell, the record page's details body, its highlight strip and its path stage offer no editor. The import wizard offers it only as a match key, as it does a `readonly` field, and the spreadsheet import bar does not offer it. The value itself is unchanged: the engine computed it before and still does.
+  - **The widening.** `@object-ui/core` exports `isExpressionComputedField(def)`. It answers whether an object field carries a non-empty `expression`, either a bare CEL string or the `source` of the `{ dialect, source }` envelope, which is the spec's own reading. Every gate above asks it alongside its type list. Nothing is removed or renamed.
+- 8ce5827: fix(fields, plugin-form): the permission-set picker lists one option per package that provides a set's name, and a grant's New form saves the package picked
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A permission set is identified by its package and its name, and the registry serves one item per package that provides a name. The `permission-ref` picker listed them by name alone, so two packages' sets of one name were two identical options, and a grant could not say which one it meant.
+  
+  - **Now.** Where more than one package provides a permission set's name, the picker lists one option per provider, each naming it: "Sales User (sales_user) · package com.acme.crm", or "… · defined in this environment" for the environment's own set. On a permission-set grant's New form, picking a package's set saves its package in the grant's package column beside the name. Picking the environment's set, or a name only one package provides, saves the name alone, as before.
+  - **Where a form cannot name the package** (editing a grant, whose package the server re-stamps by its own rule, and an action input that takes a set's name only), a package's option is listed but cannot be picked, and a note under the picker says why. The environment's own set can still be picked. The picker never chooses between packages by their order.
+  - **Shown values.** A stored name more than one package provides is shown as the set its grant's package column names. Without one it is shown as the environment's own set, or, where two packages provide it and none is named, as naming none.
+  - **Unchanged.** A name one provider serves is listed, saved and shown exactly as before, with no note, on every form. The relationship pickers keep their autofill on every form, and every other widget gets no new prop. Every other read-only column, every other object's, and every edit are still stripped from the save. The server still judges the package: an insert naming a package that does not provide the set is refused.
+  - **The widening.** `DataSource.listMetadataItems` (`@object-ui/types`) may answer an optional `packageId` on each item: the package it was served under, verbatim. `ObjectStackAdapter` (`@object-ui/data-objectstack`) answers it from the item's `_packageId`, and an item served without one reads as before. `@object-ui/fields` exports `PERMISSION_SET_GRANT_COLUMNS`, the grant's name and package columns, and `@object-ui/plugin-form` exports nothing new. `@object-ui/i18n` adds four `fields.registryRef.*` strings in every locale.
+- 5c0f113: fix(fields, plugin-form): the permission-set picker refuses an option it cannot address by itself, knows a grant by its object, and the list cell labels a set by its package
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Edges the permission-set picker still had once two packages provide one permission-set name (after #32770):
+  
+  - **A disabled option.** The picker now refuses an option this form cannot address by itself. It no longer relies on the dropdown not letting it be clicked. Such a click writes nothing.
+  - **Which form is a grant's.** The picker treats a column as the grant's permission-set column only on a permission-set grant's form. The form now tells the picker which object it edits. A `permission_set` column on another object, or a field no record form stamped, lists a package's option without letting it be picked, as an action input does.
+  - **A seeded package.** A permission-set grant's New form no longer opens with a package already filled in, whoever supplied it (a prefill, a duplicated record). The save only writes a package the user picked, so a seeded one showed a choice the save did not keep. The form now shows the name as the server will read it, and a package the user picks is saved as before.
+  - **Option keys.** A package's option is keyed by the name and package as a pair, so no stored value can share its key.
+  - **The list and detail cell.** Where more than one package provides a name and the row carries the grant's package column, the cell shows the label of the set that row names. Where the row names none of them, it shows the bare name.
+  - **Unchanged.** A name one provider serves is listed, saved and shown exactly as before. An edit form, every other object's form, and every other seeded field are unchanged. The server still judges every write. The save keeps the package under exactly the same conditions as before.
+  - **The widening.** `@object-ui/fields` exports `withFormObject` and `FORM_OBJECT_KEY`. The record form uses them to stamp the object it edits on a `permission-ref` field. `@object-ui/plugin-form` exports nothing new. No translated string is added.
+- b232220: fix(plugin-form): the modal and drawer record forms save the package of a permission-set holder the user picked on a New form
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Where two packages provide one permission-set name, a permission-set grant's New form lets the user pick which package's set to grant, and saves that package beside the name. The full-page, tabbed and wizard forms already did. The modal and drawer forms showed the pick and then saved the name alone, so the server read the grant without the package the user chose. They now save it under exactly the same conditions as the other forms: on a New form only, for the grant object only, and only when the user changed it from what the form opened with. The server still judges every write.
+  
+  A package picked on an open New form now stays with the name it was picked for. If the app re-fills the open form with another permission set (a new prefill while the form stays open), the form used to keep the earlier package beside the new name: it showed that package as the new name's holder and saved the two together, so the grant could go to a package the user never chose for that name. Now, while the permission-set field is on screen, the package is cleared when the name changes any way other than the user's own pick, so the form shows the new name as the server will read it and saves the name alone. This applies to the full-page, tabbed, modal and drawer forms. The wizard form ignores a re-fill, as before, and closing and reopening a form already started clean. One case is not covered: if the section that holds the permission-set field is hidden while the form is re-filled and then shown again, the form keeps the earlier package beside the new name.
+  
+  A name one provider serves, an edit form, and every other object's form are unchanged. No export and no translated string is added.
+- 767f110: fix(ui): a child amount that follows its parent's currency draws in the parent's currency
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `record`-mode amount on a master-detail child may name its parent's code field, `currencyField: 'invoice.currency_code'` (ADR-0144 D2 as amended). The console now draws such an amount in the parent's currency, symbol and fraction digits, on every surface that shows it: the object grid and list view (the read expands the `master_detail` even when no column shows it), the record form and detail view, a related list on the parent's page (cells and the totals line), and the line grid of the master-detail form and the record page's line-items panel (and the master-detail totals). Two lines under one parent read its currency; lines under two parents read each their own. A parent with no code yet shows no symbol, never the tenant's.
+  
+  A sibling-pointer amount (`currencyField: 'currency_code'`) keeps reading the row's own code, and now also does so in a grid or list that does not show the code column (the read carries the code field) and in a related list (the cell receives its row).
+  
+  A roll-up `summary` that declares its currency (ADR-0144 D6 as amended) draws as money in the parent record's currency, in the table cell and on the form.
+  
+  `@object-ui/i18n` reads the parent path in `resolveFieldCurrency` and exports `recordCurrencyPath`, `recordCurrencyReadField`, `withFollowedParent` and the `RecordCurrencyPath` type. `@object-ui/fields` exports `withFollowedParentObject`, `FOLLOWED_PARENT_OBJECT_KEY` and the `ColumnCurrencies` type, and `GridField` takes `columnCurrencies`.
+  
+  The Studio currency picker offers the parent code fields reached through the object's `master_detail` fields, as `relation.field`, and a stored path reads as the pick; its hint says so.
+- 20c7073: fix(plugin-form): the master-detail inline grid takes its line-position field from `@objectstack/spec`
+  
+  `deriveDetail` now asks `deriveInlineGridSortField` from `@objectstack/spec/data` for the child field the grid stamps on drag-reorder and orders the lines by, and the renderer's own copy of the sort-position names is gone. The spec's names and rule are the ones the renderer used (the first child field, in field-map order, named `position`, `sort_order`, `sequence`, `line_no`, `line_number` or `sort`), so no grid changes behaviour: the grid columns, the row form and the line-position field now read one list, and the `field-no-consumers` lint rule credits the same field the grid reads.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- Updated dependencies [96b5dab]
+- Updated dependencies [7da99b7]
+- Updated dependencies [85d9264]
+- Updated dependencies [3214615]
+- Updated dependencies [d0512c2]
+- Updated dependencies [4261169]
+- Updated dependencies [8b90442]
+- Updated dependencies [8fefefd]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [8fefefd]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [604a2b3]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [2e33533]
+- Updated dependencies [2a32bd4]
+- Updated dependencies [ba875d2]
+- Updated dependencies [bb61872]
+- Updated dependencies [4211f50]
+- Updated dependencies [a1d243e]
+- Updated dependencies [7d0b47c]
+- Updated dependencies [9728ab1]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [1e6f542]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [b379262]
+- Updated dependencies [7945a3b]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [c2be734]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [f0ad1f7]
+- Updated dependencies [03be565]
+- Updated dependencies [7e9fa4b]
+- Updated dependencies [bc8945f]
+- Updated dependencies [42afac7]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [a9fb14b]
+- Updated dependencies [6f095b9]
+- Updated dependencies [ac890f5]
+- Updated dependencies [5f80129]
+- Updated dependencies [0c7e95a]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [c8e6d38]
+- Updated dependencies [d99cd3b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [b6caa14]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [25fea77]
+- Updated dependencies [ea5807e]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [6c48d48]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [31260ca]
+- Updated dependencies [ef2ad31]
+- Updated dependencies [2046d21]
+- Updated dependencies [18870c9]
+- Updated dependencies [243eba1]
+- Updated dependencies [fa9c0aa]
+- Updated dependencies [5174603]
+- Updated dependencies [f6faf75]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [6a8f415]
+- Updated dependencies [56cac5e]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [648089d]
+- Updated dependencies [10ecafd]
+- Updated dependencies [b6f4c0e]
+- Updated dependencies [b4f4781]
+- Updated dependencies [042efb7]
+- Updated dependencies [48231b0]
+- Updated dependencies [0d54279]
+- Updated dependencies [8e5fabe]
+- Updated dependencies [ac56acf]
+- Updated dependencies [a91409c]
+- Updated dependencies [ab12a3b]
+- Updated dependencies [2b35374]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [7b10a30]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [a058413]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [062236c]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [d996c38]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [47c457b]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [5268f50]
+- Updated dependencies [7b2e557]
+- Updated dependencies [115a43a]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [c1da957]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [b631573]
+- Updated dependencies [78d4fe9]
+- Updated dependencies [78eb352]
+- Updated dependencies [a0b40f2]
+- Updated dependencies [6ddf827]
+- Updated dependencies [d9d3eb7]
+- Updated dependencies [2ce2646]
+- Updated dependencies [bd1b768]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [1c66988]
+- Updated dependencies [584f7b8]
+- Updated dependencies [065bba7]
+- Updated dependencies [d8d0791]
+- Updated dependencies [66b17a3]
+- Updated dependencies [f5e23e2]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [3f61e4f]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [51992df]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [1f37085]
+- Updated dependencies [534a287]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [9a63ecb]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [eff90af]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [ce965cf]
+- Updated dependencies [f88ca70]
+- Updated dependencies [f67f3b3]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [1ff1d45]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2c6b936]
+- Updated dependencies [46ec2ec]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [e728d7a]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [f56354c]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [e627eaa]
+- Updated dependencies [6be71ab]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [3684d18]
+- Updated dependencies [ac8fede]
+- Updated dependencies [60996d4]
+- Updated dependencies [2715a09]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [52ffd5a]
+- Updated dependencies [f6b8985]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [94019a6]
+- Updated dependencies [60f8149]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [f75466c]
+- Updated dependencies [a127a45]
+- Updated dependencies [49bc3be]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [0a81d2a]
+- Updated dependencies [1368536]
+- Updated dependencies [cc8c4b0]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [de6d893]
+- Updated dependencies [33c3b5e]
+- Updated dependencies [326453e]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [4820ea2]
+- Updated dependencies [e336a33]
+- Updated dependencies [4d9ac62]
+- Updated dependencies [e47da23]
+- Updated dependencies [c04aa29]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [c4b6160]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [8a3eeef]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [ee230a2]
+- Updated dependencies [a888c5c]
+- Updated dependencies [967822a]
+- Updated dependencies [9ae8291]
+- Updated dependencies [fa1134c]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [d094752]
+- Updated dependencies [6aa95dc]
+- Updated dependencies [6cde924]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [5b1fe45]
+- Updated dependencies [c54a23d]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1a6c330]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [8ce5827]
+- Updated dependencies [5c0f113]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [b232220]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [f84205b]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [767f110]
+- Updated dependencies [767f110]
+- Updated dependencies [341448e]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [6303e74]
+- Updated dependencies [e1dac19]
+- Updated dependencies [136eba4]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+- Updated dependencies [b463ec6]
+  - @object-ui/components@18.4.0
+  - @object-ui/core@18.4.0
+  - @object-ui/fields@18.4.0
+  - @object-ui/react@18.4.0
+  - @object-ui/types@18.4.0
+  - @object-ui/i18n@18.4.0
+  - @objectstack/spec@18.4.0
+  - @object-ui/permissions@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

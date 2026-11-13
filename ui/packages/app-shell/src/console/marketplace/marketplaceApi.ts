@@ -213,6 +213,35 @@ export interface MarketplacePackageVersion {
    * `null` and absent read as `supported_locales` does.
    */
   locale_coverage?: MarketplaceLocaleCoverage | null;
+  /**
+   * The existing objects this version extends (its `objectExtensions`),
+   * measured by the control plane when the version was published, never
+   * authored. `[]` = it extends nothing. `null` = not measured: "could not
+   * read what this package extends", ⛔ never "extends nothing". Platform
+   * (`sys_*`) targets come first. Absent on a catalog that does not serve it
+   * yet; then the install surfaces read the served manifest instead
+   * (`InstallPreview.objectExtensions`, `installPreview.ts`). `ObjectExtensionDisclosure`
+   * draws it.
+   */
+  object_extensions?: readonly MarketplaceObjectExtension[] | null;
+}
+
+/** One object a version extends (`MarketplacePackageVersion.object_extensions`). */
+export interface MarketplaceObjectExtension {
+  /** The extended object's name (the extension's `extend`). */
+  object: string;
+  /** True for a platform (`sys_*`) object. */
+  platform: boolean;
+  /** Fields it adds or redeclares; a redeclared field replaces the owner's definition. */
+  fields: readonly string[];
+  /** Owner fields whose display it patches (`fieldPatches`). */
+  field_patches: readonly string[];
+  /** Validation rules it adds or replaces by name (`(unnamed)` for an unnamed rule). */
+  validations: readonly string[];
+  /** How many indexes it adds. */
+  indexes: number;
+  /** Whether it overrides the object's label, plural label or description. */
+  relabels: boolean;
 }
 
 /** A version's measured translation coverage (`MarketplacePackageVersion.locale_coverage`). */

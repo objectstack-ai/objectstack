@@ -343,6 +343,10 @@ const es = {
     registryRef: {
       loadFailed: "No se pudo cargar la lista. Todavía puede escribir el nombre.",
       notFound: "{{name}} (no encontrado)",
+      holderPackage: "{{item}} · paquete {{package}}",
+      holderEnvironment: "{{item}} · definido en este entorno",
+      holderUnresolved: "{{name}} (lo proporcionan varios paquetes; no se indica ninguno)",
+      holderNeedsPackage: "Este formulario indica un conjunto de permisos solo por su nombre. Si varios paquetes proporcionan un conjunto con el mismo nombre, aquí solo se puede elegir el definido en este entorno.",
     },
     preferenceOption: {
       allTopics: "Todos los temas ({{value}})",
@@ -1402,6 +1406,7 @@ const es = {
     saving: "Guardando…",
     lockedByApproval: "Bloqueado para aprobación",
     lockedTooltip: "Este registro tiene una solicitud de aprobación pendiente; la edición está bloqueada",
+    lockedByState: "No editable en su estado actual",
     writeStrippedTitle: "Guardado, pero algunos campos no se aplicaron",
     writeWarningsTitle: "Guardado, con advertencias",
     writeStrippedReadonly: "De solo lectura, por lo que no se aplicó: {{fields}}",
@@ -2359,6 +2364,7 @@ const es = {
       dismiss: "Ocultar lista",
       showDone: "Mostrar completados ({{done}})",
       hideDone: "Ocultar completados",
+      optional: "Opcional",
       set: "Configurar",
       change: "Cambiar",
       view: "Ver",
@@ -2793,6 +2799,7 @@ const es = {
         invalidCredentials: "Correo o contraseña inválidos. Tras varios intentos fallidos, el inicio de sesión se pausa durante un tiempo. ¿Olvidaste tu contraseña? Restablécela para iniciar sesión de inmediato.",
         invalidCredentialsNoMail: 'Correo o contraseña inválidos. Tras varios intentos fallidos, el inicio de sesión se pausa durante un tiempo. ¿Olvidaste tu contraseña? Pide a tu administrador que la restablezca.',
         emailNotVerified: "Verifique su correo electrónico antes de iniciar sesión.",
+        accountDeactivated: "Tu organización ha desactivado tu cuenta. Ponte en contacto con tu administrador.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -4079,6 +4086,7 @@ const es = {
       get_authoring_rules: "Consultar las reglas de autoría",
       get_metadata_schema: "Consultar el formato de los metadatos",
       get_package: "Revisar el paquete",
+      get_record_history: "Leer el historial del registro",
       list_metadata: "Listar los metadatos existentes",
       list_objects: "Listar los objetos existentes",
       list_packages: "Listar los paquetes existentes",

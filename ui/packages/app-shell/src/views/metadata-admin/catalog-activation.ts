@@ -244,25 +244,29 @@ export async function writeCatalogActivation(
 }
 
 /**
- * The ledger as it reads once `name` of `holder` was switched to `now`: the
- * by-name state, and — where the page lists more than one holder of the name —
- * that holder's own row (the door writes the row naming the holder's package,
- * ADR-0150 D4). `holder` omitted: the by-name state, as before.
+ * The ledger as it reads once `name` was switched to `now`, for `holding`'s
+ * set of it: the `(package, name)` row of the holder switched, wherever the
+ * page holds one (the door writes the row naming the holder's package,
+ * ADR-0150 D4); and the by-name state wherever the page reads the name by its
+ * name — no holding, or a holding of one holder (a pick from a refusal that
+ * named one candidate). `holding` omitted: the by-name state, as before.
  */
 export function ledgerAfterSwitch<L extends CatalogLedgerRead>(
   ledger: L,
   name: string,
   now: boolean,
-  holder?: PermissionSetHolder,
+  holding?: PermissionSetHolding,
 ): L {
-  if (holder === undefined) {
-    const states = new Map(ledger.states);
-    states.set(name, now);
-    return { ...ledger, states };
+  let states = ledger.states;
+  if (!holding || holding.holders.length <= 1) {
+    const byName = new Map(ledger.states);
+    byName.set(name, now);
+    states = byName;
   }
+  if (!holding) return { ...ledger, states };
   const permissionRows = [
-    ...ledger.permissionRows.filter((row) => !(row.name === name && row.packageId === holder)),
-    { name, packageId: holder, active: now },
+    ...ledger.permissionRows.filter((row) => !(row.name === name && row.packageId === holding.packageId)),
+    { name, packageId: holding.packageId, active: now },
   ];
-  return { ...ledger, permissionRows };
+  return { ...ledger, states, permissionRows };
 }

@@ -70,9 +70,10 @@ its `ENV`.
 of the three on its own disk, it prints a warning block naming each file and the
 variable that moves it off that disk. Administrators also see it in the Console:
 a standing notice on the home page and at the top of Setup's System Overview,
-listing the same files with a button that copies the variables to set, plus two
-lower-severity lines when uploads are stored on the local disk or no email
-service is set up. Members never see it, and it is not on the public auth
+listing the same files with a button that copies the variables to set, plus a
+lower-severity line when uploads are stored on the local disk. Mail is optional
+and is not one of them: a deployment without an email service gets no line
+for it. Members never see it, and it is not on the public auth
 config (it is read from `GET /api/settings/deployment/notice`, which needs
 `manage_platform_settings`). An administrator can hide it: the hide is written
 to the audit log as a `config_change` (and refused where no audit log is
@@ -109,7 +110,7 @@ docker run -p 8080:8080 \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET \
   -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:18.3.0
+  ghcr.io/objectstack-ai/objectstack:18.4.0
 ```
 
 (`OS_ARTIFACT_PATH` also accepts an `https://` URL, so the artifact can come
@@ -127,7 +128,7 @@ docker run -p 8080:8080 \
   -e OS_ARTIFACT_URL="https://releases.example.com/hotcrm-2.2.2.json#sha256=<64 hex chars>" \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:18.3.0
+  ghcr.io/objectstack-ai/objectstack:18.4.0
 ```
 
 Both schemes work: `https://…` is fetched at boot, `file:///…` is read directly
@@ -184,7 +185,7 @@ COPY . .
 RUN npx os build              # → dist/objectstack.json
 
 # ── Runtime: the official ObjectStack runtime image ──────────────────
-FROM ghcr.io/objectstack-ai/objectstack:18.3.0
+FROM ghcr.io/objectstack-ai/objectstack:18.4.0
 COPY --from=build --chown=node:node /app/dist/objectstack.json /srv/app/objectstack.json
 ```
 
@@ -207,7 +208,7 @@ FROM node:22-slim
 RUN npm install --prefix /tmp/os-installer-npm --no-save --no-audit --no-fund "npm@11.21.0" \
  && export PATH="/tmp/os-installer-npm/node_modules/.bin:$PATH" \
  && test "$(npm --version)" = "11.21.0" \
- && npm install -g @objectstack/cli@18.3.0 "pg@^8.0.0" "mysql2@^3.0.0" \
+ && npm install -g @objectstack/cli@18.4.0 "pg@^8.0.0" "mysql2@^3.0.0" \
  && npm cache clean --force \
  && rm -rf /tmp/os-installer-npm
 

@@ -112,7 +112,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `pm:retriage` | 向分诊提问(改判、跨域 PR 指定车道、改路由、拆卡、裁 dev 报告留下的分叉;既裁冲突砍项与整树席改标归执行席 ⛔ 不问),定车道与改路由限未派发卡,异议评论写明所求;与现行 `pm:*` 并存、⛔ 不摘原标;带本标签的 `pm:queue` 卡跳过派发 |
 | `finding` | 立卡三类内待首次定级,定级即离标;三类外关 not planned;不占队列不进收件箱 |
 | `tooling` | 修复落在门禁/脚本/workflow/技能/席位协议/PM 工具面而非产品包;分诊首触打,与 `domain:*` 同笔;三具名读者 = 候选查询排除、首触即关、普查半态行 |
-| `target:<major>` | 发版阻塞:每个 backlog 恰好一个生产者 |
+| `target:<major>` | ⛔ 不再作发版阻塞标记:阻塞卡只升 `priority:p0`,窗与回落见 `references/filing-gate.md` 定级判据 |
 | `pm:epic`(父单或 sub-issue) | 已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
 | `pm:seat` | 座位登记贴:协议载体,不是待分诊的工作 |
 | `priority:p0` | 插队:同轮立即派发,越过 `batch`、深度等待(`LOCK_DEPTH_HOLD`)与一切并发上限;无槽即暂停低级在飞 dev 腾位(机制 `references/execution-duties.md`);⛔ 不豁免同文件串行与认领协议 |
@@ -198,7 +198,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - `pr_create` 派不请;`pr_ready` 只补交棒漏;非例外 head 移 ⇒ 撤挂回等;脱中继 PR 自读请/派。
 - 速读「需要你做的」求批点名 PASS 评论 id+`Head-sha`;无 PASS ⇒ 写 contract review owed 不求批。
 - ④ 轮报单列 awaiting a human merge 并现读请审人;⛔ 未请审不在 chat 报「等你批」,先补请。
-- skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
+- skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席自读(清单不减)后落地。
 - 受管面两层:Tier S = `.claude/**`+下行 S 面,余皆 Tier H 等人批;S 经达档 PASS 后 ready → 入队。
 - 本仓 `.github/workflows/**` 由 `readWorkflowDiff` 定档:发布路径、C2 触发、拒读或未读 ⇒ H,余 S。
 - 入队资格:每 check 绿或预期 skip,⛔ 非必查子集;名单 check-expected-skips.mjs 只判 objectstack。

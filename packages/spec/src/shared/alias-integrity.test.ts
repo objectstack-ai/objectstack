@@ -1053,7 +1053,12 @@ describe('alias integrity — every table is a true claim about its schema', () 
 
     const capabilities = bySurface.get('`enable`');
     expect(capabilities, 'ObjectCapabilities no longer declares through strictObject').toBeDefined();
-    expect(Object.keys(capabilities!.options.guidance ?? {}).sort()).toEqual(['mru', 'trash']);
+    // The retired-flag tombstones `mru` / `trash`, and [ruling A on the read
+    // half of #32442] the write-arm names `enable.aiReadable` refuses with its
+    // read-only prescription.
+    expect(Object.keys(capabilities!.options.guidance ?? {}).sort()).toEqual([
+      'ai', 'aiEditable', 'aiExposed', 'aiWritable', 'aiWrite', 'mru', 'trash',
+    ]);
   });
 
   it('NO module outside the shared helpers writes its own `unrecognized_keys` map', () => {

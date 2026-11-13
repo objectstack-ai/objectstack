@@ -142,6 +142,30 @@ describe('[ADR-0151 D3] stdio: an AI service account\'s key admits the account i
     expect(context.isSystem).toBe(false);
   });
 
+  it('[ADR-0151 D3 rule 3] the data bridge stdio registers carries no action seam (listActions, runAction, resumeRun)', async () => {
+    // The account rule lives at the action doors (`run_action`, `resume_run`,
+    // REST `/actions`, a host door), pinned in `@objectstack/runtime`. Over
+    // stdio the account's tools are the bridge registered here; this holds
+    // that it carries no action seam, so an action door that ever joins stdio
+    // fails here first and is asked to carry the rule.
+    process.env.OS_MCP_STDIO_API_KEY = BOT_KEY;
+    const { ctx } = createHarness();
+    let bridge: Record<string, unknown> | undefined;
+    const bridgeDataTools = vi
+      .spyOn(MCPServerRuntime.prototype, 'bridgeDataTools')
+      .mockImplementation((b: unknown) => { bridge = b as Record<string, unknown>; return []; });
+    try {
+      await startStdio(ctx);
+    } finally {
+      bridgeDataTools.mockRestore();
+    }
+    expect(bridge, 'stdio registered no data bridge').toBeDefined();
+    expect(typeof bridge!.listObjects).toBe('function');
+    for (const seam of ['listActions', 'runAction', 'resumeRun']) {
+      expect(typeof bridge![seam], `stdio now carries \`${seam}\``).toBe('undefined');
+    }
+  });
+
   it('CONTROL: a person\'s key through the same face is a human principal, with the everyone anchor', async () => {
     const context = await contextFor(MIA_KEY);
     expect(context.userId).toBe('u_mia');

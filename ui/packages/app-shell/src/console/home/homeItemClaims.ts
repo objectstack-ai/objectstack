@@ -5,17 +5,18 @@
  *
  * Home stacks several cards above the apps, mounted by different owners: the
  * first-run checklist (the console's Home route), the deployment notice and the
- * Connect an AI Assistant card (this package's `HomePage`). Two of their items
- * overlap — "no email service is set up" and "connect an AI assistant" — and
- * each card decides on its own reads whether to draw them. This store is where
- * a card says "I am drawing this item now", and where another card asks.
+ * Connect an AI Assistant card (this package's `HomePage`). One of their items
+ * overlaps — "connect an AI assistant" — and each card decides on its own
+ * reads whether to draw it. This store is where a card says "I am drawing this
+ * item now", and where another card asks.
  *
  * Who yields to whom is decided at the call sites, not here:
- *  - `mail`: the deployment notice claims it while it draws its email line on
- *    Home (what the notice states is ruled, so it never yields); the
- *    checklist's Email delivery row stands aside meanwhile.
  *  - `connect_assistant`: the checklist claims it while it draws its Connect
  *    an AI assistant row, not yet done; Home's card stands aside meanwhile.
+ *
+ * Mail is no longer such an item (objectstack#32643): the deployment notice
+ * says nothing about an unset email service, so the checklist's optional Email
+ * delivery row is the one card that speaks of mail.
  *
  * A claim lasts while the claiming component is mounted and says it draws the
  * item; unmounting or hiding releases it, and the yielding card comes back.
@@ -25,7 +26,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
 /** The items more than one Home card can draw. */
-export type HomeItem = 'mail' | 'connect_assistant';
+export type HomeItem = 'connect_assistant';
 
 const claims = new Map<HomeItem, number>();
 const listeners = new Set<() => void>();

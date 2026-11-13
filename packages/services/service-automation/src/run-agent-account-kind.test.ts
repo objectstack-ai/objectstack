@@ -60,3 +60,53 @@ describe('[ADR-0151 D3] an AI service account\'s run is an agent principal on ev
         }
     });
 });
+
+/**
+ * [ADR-0151 Non-goals; ruling record 6812617393, letter C] Elevation is not a
+ * change of kind. An AI service account a door admitted to start a
+ * `runAs: 'system'` flow stays an agent on every data operation the elevated
+ * run makes, so a hook reading its session (ADR-0151 D5) can tell an
+ * agent-started elevated run from a person's. Run setup resolves no grants
+ * for a system run, so the kind the launch door forwarded is the one kept.
+ */
+describe('[ADR-0151 Non-goals] an elevated run an AI service account started carries its kind', () => {
+    it('the door-forwarded kind survives run setup and rides every data operation, beside isSystem', async () => {
+        const h = host(ACCOUNT_GRANTS);
+        const run: any = { userId: 'u_bot', tenantId: 'org_1', runAs: 'system', principalKind: 'agent' };
+
+        await seedRunGrants.call(h, 'bank_verify', run, 'triggering');
+
+        expect(run.principalKind).toBe('agent');
+        expect(resolveRunDataContext(run)).toMatchObject({ isSystem: true, userId: 'u_bot', principalKind: 'agent' });
+        // Elevation reads no grants: nothing was resolved for the account.
+        expect(h.userGrantsResolver).not.toHaveBeenCalled();
+    });
+
+    it('the kind is the door\'s, never one setup looks up: an elevated run handed only a user carries none', async () => {
+        const h = host(ACCOUNT_GRANTS);
+        const run: any = { userId: 'u_bot', tenantId: 'org_1', runAs: 'system' };
+
+        await seedRunGrants.call(h, 'bank_verify', run, 'triggering');
+
+        expect(run.principalKind).toBeUndefined();
+        expect('principalKind' in (resolveRunDataContext(run) as object)).toBe(false);
+        expect(h.userGrantsResolver).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL: a person\'s elevated run carries no kind', async () => {
+        const run: any = { userId: 'u_mia', tenantId: 'org_1', runAs: 'system' };
+
+        await seedRunGrants.call(host(PERSON_GRANTS), 'bank_verify', run, 'triggering');
+
+        const facts = resolveRunDataContext(run);
+        expect(facts).toMatchObject({ isSystem: true, userId: 'u_mia' });
+        expect('principalKind' in (facts as object)).toBe(false);
+    });
+
+    it('CONTROL: only the literal agent kind is carried onto an elevated run\'s operations', () => {
+        for (const value of ['human', 'AGENT', '', 1]) {
+            const facts = resolveRunDataContext({ userId: 'u_mia', tenantId: 'org_1', runAs: 'system', principalKind: value } as any);
+            expect('principalKind' in (facts as object)).toBe(false);
+        }
+    });
+});

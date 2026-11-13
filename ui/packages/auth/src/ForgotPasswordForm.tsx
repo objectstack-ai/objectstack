@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from './useAuth.js';
 import type { AuthLinkComponentProps } from './types.js';
 import {
@@ -145,6 +145,13 @@ export function ForgotPasswordForm({
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  // One reset request at a time. The ref is read and set synchronously in the
+  // handler, so a second submit that fires before React re-renders (a fast
+  // double or triple click) sees the first one still pending and is ignored;
+  // `sending` is the same fact for the render (button and input disabled).
+  // The provider's `isLoading` is the session read and never covers this call.
+  const resetRequestPending = useRef(false);
+  const [sending, setSending] = useState(false);
   // Phone (SMS OTP) reset branch (framework#2780). Only offered when the
   // server reports `features.phoneNumberOtp` — the phoneNumber plugin plus a
   // deliverable SMS service — so the link never leads to codes that can't
@@ -226,6 +233,9 @@ export function ForgotPasswordForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (resetRequestPending.current) return;
+    resetRequestPending.current = true;
+    setSending(true);
     setError(null);
 
     try {
@@ -237,6 +247,9 @@ export function ForgotPasswordForm({
       const authError = err instanceof Error ? err : new Error(String(err));
       setError(authError.message);
       onError?.(authError);
+    } finally {
+      resetRequestPending.current = false;
+      setSending(false);
     }
   };
 
@@ -457,14 +470,14 @@ export function ForgotPasswordForm({
             onChange={(e) => setEmail(e.target.value)}
             required
             autoComplete="email"
-            disabled={isLoading}
+            disabled={isLoading || sending}
             className={AUTH_INPUT_CLASS}
           />
         </div>
 
-        <button type="submit" disabled={isLoading} className={AUTH_PRIMARY_BUTTON_CLASS}>
-          {isLoading && <AuthSpinner />}
-          {isLoading ? l.submittingButton : l.submitButton}
+        <button type="submit" disabled={isLoading || sending} className={AUTH_PRIMARY_BUTTON_CLASS}>
+          {(isLoading || sending) && <AuthSpinner />}
+          {isLoading || sending ? l.submittingButton : l.submitButton}
         </button>
 
         {phoneOtpEnabled && (

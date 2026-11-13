@@ -75,6 +75,7 @@ import {
   type SchemaLike,
   applyNonGridRowCeiling,
   nonGridRowCeilingQuery,
+  GANTT_ROW_CEILING,
   type NonGridCeilingResult,
   isRealCalendarDate,
   toDateInputValue,
@@ -673,7 +674,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
    * large was the whole filtered result set (objectui#7210)?
    *
    * State rather than a value derived from `data.length`: once the rows are
-   * capped, `data.length === NON_GRID_ROW_CEILING` is exactly what a result
+   * capped, `data.length === GANTT_ROW_CEILING` is exactly what a result
    * set of exactly the ceiling ALSO looks like, so the fact has to be carried
    * from the response that knew it. Every path that sets `data` sets this too.
    *
@@ -1052,16 +1053,19 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       const result = await adapter.find(resource, {
         $filter: queryFilter,
         $orderby: convertSortToQueryParams(schema.sort),
-        // The platform ceiling (objectui#7210, ruling a′). The gantt still
-        // fetches the whole FILTERED result set — a truthful
+        // The gantt's own ceiling, `GANTT_ROW_CEILING` (objectstack#32421,
+        // ruling B), not the shared `NON_GRID_ROW_CEILING` the
+        // non-virtualised tree prices (objectui#7210, ruling a′). The gantt
+        // still fetches the whole FILTERED result set — a truthful
         // `min(start) → max(end)` range and the group rollups need all of it,
         // which is why paging this at `pagination.pageSize` was rejected — but
-        // "the whole result set" now stops at a number instead of at whatever
-        // the table happens to hold. One probe row past the ceiling is what
-        // makes the cut DETECTABLE; `applyNonGridRowCeiling` slices it back off.
-        // ⛔ Not authorable: an authored `limit` / `pagination.pageSize` still
-        // cannot reach this query, by the same ruling.
-        ...nonGridRowCeilingQuery(),
+        // "the whole result set" stops at a number instead of at whatever the
+        // table happens to hold. One probe row past the ceiling is what makes
+        // the cut DETECTABLE; `applyNonGridRowCeiling` slices it back off at
+        // the SAME ceiling. ⛔ Not authorable: an authored `limit` /
+        // `pagination.pageSize` still cannot reach this query, and neither
+        // does a datasource's `external.rowCap`, by both rulings.
+        ...nonGridRowCeilingQuery(GANTT_ROW_CEILING),
         ...(expand.length > 0 ? { $expand: expand } : {}),
         // objectui#10250 — the term and its field narrowing, sent together
         // or not at all. See `searchTerm` above.
@@ -1072,7 +1076,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
             }
           : {}),
       });
-      const capped = applyNonGridRowCeiling(result);
+      const capped = applyNonGridRowCeiling(result, GANTT_ROW_CEILING);
       if (isCurrent()) {
         setData(capped.rows);
         setRowCeiling(capped);

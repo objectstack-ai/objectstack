@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-auth",
-  "version": "18.3.0",
+  "version": "18.4.0",
   "license": "Apache-2.0",
   "description": "Authentication & Identity Plugin for ObjectStack",
   "type": "commonjs",
@@ -60,7 +60,7 @@
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "better-auth": "1.7.12",
-    "fast-xml-parser": "5.10.1",
+    "fast-xml-parser": "5.12.0",
     "hono": "^4.13.9",
     "jose": "^6.2.12"
   },

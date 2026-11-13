@@ -303,7 +303,38 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
  * objects × permissions × books, `validateWidgetBindings` resolves widget
  * bindings against datasets (#7529). Widening the snapshot is a one-key edit
  * here plus a `CONTEXT_STACK_KEYS` entry, made when a rule that RESOLVES
- * REFERENCES INTO the collection actually crosses the wall, never in advance.
+ * REFERENCES INTO the collection actually crosses the wall — or [#32666] when
+ * a write type's verdict needs the collection's entries as JUDGED SUBJECTS
+ * (below) — never in advance.
+ *
+ * [#32666] Judged subjects are the second, narrower admission, and `flows` is
+ * the one collection admitted on it. An OBJECT write can break a live flow
+ * without touching it: the object makes a field `readonly`, and a `runAs:'user'`
+ * flow that writes the field becomes a silent no-op (`flow-update-readonly-field`).
+ * The verdict is about the flow, so the flow has to be in the snapshot — not as
+ * something a reference resolves into, but as the entry a rule judges against
+ * the written object. Three properties keep the admission as narrow as that:
+ *
+ * - Only the members that DECLARE the subject judge it. The gate withholds
+ *   every {@link SUBJECT_ONLY_CONTEXT_KEYS} collection from its ordinary
+ *   differential, so every rule of the door — `validatePresetComparands` and
+ *   `validateStackExpressions` included, which walk `stack.flows` — judges
+ *   exactly the snapshot it judged before the collection was carried. The
+ *   subjects reach a separate SUBJECT differential that runs the
+ *   reference-integrity suite with `subjectPass` set, which runs only its
+ *   members declaring `subjects: ['flows']` (`validateReadonlyFlowWrites`).
+ *   The host carries the WRITTEN package's live flows on an `object` write
+ *   only.
+ * - On a write of the subject's own type (a `flow` write), the gate drops the
+ *   context copy, so the written flow stays the sole member of its collection
+ *   and its findings keep the positional `flows[0]` spelling the flow-write
+ *   wire has always carried.
+ * - The subject differential has the ordinary differential's three passes, so
+ *   a flow already broken on the tenant is in the stored universe and is not
+ *   charged to the object write; only the conflicts this write ADDS refuse it.
+ *   Its objects are `subjectObjects` when the host states them (the publish
+ *   batch's fold WITHOUT the written object's own draft, so the stored self is
+ *   the live body), `objects` otherwise.
  *
  * [commit a227afa41] `positions` / `apps` are the measured limit of that sentence, and
  * the reason it now says RESOLVES rather than reads. `security-role-word`
@@ -378,7 +409,38 @@ export interface RuntimeStackContext {
    * datasets off this one.
    */
   datasets?: readonly unknown[];
+  /**
+   * [#32666] The written package's live flow declarations (stack key `flows`),
+   * carried on an OBJECT write only, as judged subjects (see the interface's
+   * docblock).
+   *
+   * `validateReadonlyFlowWrites` judges each against the candidate's objects:
+   * an object write that makes a field `readonly` while a carried `runAs:'user'`
+   * flow writes it adds a `flow-update-readonly-field` finding located on that
+   * flow (`readonlyWhen` adds the `-when` advisory), and the object write is
+   * refused for it — the admin is told, at that moment, which flow still writes
+   * the field. A finding the stored universe already holds is not charged.
+   *
+   * ⛔ Not carried on a `flow` write: the gate ignores it there
+   * ({@link SUBJECT_ONLY_CONTEXT_KEYS}). Flows of other packages are out of
+   * scope, by the ruling that admitted this collection; so are hook and action
+   * bodies, which are judged on their own writes.
+   */
+  flows?: readonly unknown[];
 }
+
+/**
+ * [#32666] The context collections carried only as JUDGED SUBJECTS of another
+ * write type, never as the universe a write of their own type lands in.
+ *
+ * On a write of a collection's own type the gate drops the context copy, so the
+ * written item is the sole member of its collection, exactly as before the
+ * collection was carried: `flows[0]` IS the written flow, its findings keep the
+ * positional spelling ({@link nameKeyFindingPath}), and the flow write's
+ * verdict is the one it always was. On every other write type the collection is
+ * an ordinary context collection: in every pass, name-keyed on the wire.
+ */
+export const SUBJECT_ONLY_CONTEXT_KEYS: ReadonlySet<keyof RuntimeStackContext> = new Set(['flows']);
 
 /**
  * Which package a write belongs to, and what that package is allowed to reach.
@@ -679,6 +741,9 @@ const CONTEXT_STACK_KEY_ORDER = {
   permissions: true,
   books: true,
   datasets: true,
+  // [#32666] Last, so the four collections ahead of it keep their order, their
+  // snapshot key order and the derived pattern's source.
+  flows: true,
 } as const satisfies { [K in keyof RuntimeStackContext]-?: true };
 
 /**
@@ -855,7 +920,11 @@ export function buildRuntimeWriteSnapshotSet(
     // [#30005] `datasets` stays whole, so the objects a written dashboard or
     // report binds THROUGH a dataset are kept beside the closure (limb 5,
     // {@link datasetBoundObjectNames}) — in both passes, by the same rule.
-    const raw = (args.context?.[key] ?? []) as readonly AnyRec[];
+    // [#32666] A judged-subject collection is dropped on a write of its own
+    // type, so the written item is the sole member (SUBJECT_ONLY_CONTEXT_KEYS).
+    const raw = (key === stackKey && SUBJECT_ONLY_CONTEXT_KEYS.has(key)
+      ? []
+      : args.context?.[key] ?? []) as readonly AnyRec[];
     const collection = key === 'objects'
       ? (narrowObjectsToWriteClosure(
           raw,
@@ -1044,8 +1113,12 @@ export const WRITTEN_STACK_KEYS: ReadonlySet<string> = new Set(Object.values(TYP
  * ## Measured against the list it replaces (#13390)
  *
  * The members and their order are derived, never transcribed — today `objects`,
- * `permissions`, `books`, `datasets`. So **no member needs a hand-written
- * exception** and none is kept. If a future member ever does need one, state it
+ * `permissions`, `books`, `datasets`, `flows`. So **no member needs a hand-written
+ * exception** and none is kept. [#32666] `flows` is not one: it is name-keyed by
+ * this derivation, and the one write that must keep its index — a `flow` write,
+ * where the context copy is dropped — is decided per write by
+ * {@link nameKeyFindingPath} from {@link SUBJECT_ONLY_CONTEXT_KEYS}, not by
+ * leaving it out of this set. If a future member ever does need one, state it
  * here WITH its reason — quietly re-introducing a literal is the thing this
  * constant now exists to prevent.
  *
@@ -1093,16 +1166,28 @@ const TOP_LEVEL_INDEX = buildTopLevelIndexPattern(NAME_KEYED_STACK_KEYS);
  * Fallback is the positional spelling, never a hole: an entry that is missing,
  * unnamed, or whose name will not splice into a dotted path keeps the index.
  *
+ * [#32666] `writtenStackKey` is the written type's stack key. A judged-subject
+ * collection ({@link SUBJECT_ONLY_CONTEXT_KEYS}) is name-keyed on every other
+ * write type and keeps its index on a write of its own type, where the context
+ * copy was dropped and `flows[0]` IS the write. Omitted, every name-keyed
+ * collection is rewritten.
+ *
  * Applied AFTER the differential, not before it: the fingerprint diff keys on
  * the rules' raw positional paths, where two entries can never collide — two
  * stored items that (illegitimately) share a name must not have their distinct
  * findings merged or cancelled by the rewrite.
  */
-export function nameKeyFindingPath(path: string, candidate: AnyRec): string {
+export function nameKeyFindingPath(path: string, candidate: AnyRec, writtenStackKey?: string): string {
   const m = TOP_LEVEL_INDEX.exec(path);
   if (!m) return path;
   const [, stackKey, index, rest] = m;
   if (!NAME_KEYED_STACK_KEYS.includes(stackKey!)) return path;
+  // [#32666] On a write of a judged-subject collection's own type the context
+  // copy was dropped, so the written item is the sole member and its index is
+  // the stable spelling (SUBJECT_ONLY_CONTEXT_KEYS).
+  if (stackKey === writtenStackKey && SUBJECT_ONLY_CONTEXT_KEYS.has(stackKey as keyof RuntimeStackContext)) {
+    return path;
+  }
   const collection = candidate[stackKey!] as readonly unknown[] | undefined;
   const entry = collection?.[Number(index)];
   const name = entry && typeof entry === 'object' ? (entry as AnyRec).name : undefined;
@@ -1183,6 +1268,87 @@ function runRules(
 }
 
 /**
+ * [#32666] The registry entries the SUBJECT differential runs. Only the
+ * reference-integrity suite has members that declare a judged subject
+ * (`ReferenceIntegrityRule.subjects`), and with `subjectPass` set it runs only
+ * those members; no other entry is run on that pass, so no other rule ever
+ * reads a carried subject.
+ */
+export const SUBJECT_PASS_ENTRIES: ReadonlySet<string> = new Set(['validateReferenceIntegrity']);
+
+/** [#32666] `context` with every judged-subject collection withheld. */
+function withoutSubjectCollections(context: RuntimeStackContext | undefined): RuntimeStackContext | undefined {
+  if (context === undefined) return undefined;
+  if (![...SUBJECT_ONLY_CONTEXT_KEYS].some((k) => context[k] !== undefined)) return context;
+  const out: Record<string, unknown> = { ...context };
+  for (const k of SUBJECT_ONLY_CONTEXT_KEYS) delete out[k];
+  return out as RuntimeStackContext;
+}
+
+/**
+ * [#32666] The context of the SUBJECT differential, or `null` when this write
+ * carries no subject to judge: none was handed, or the written type is the
+ * subject's own (a `flow` write is judged on its own verdict).
+ */
+function subjectContextFor(
+  type: string,
+  context: RuntimeStackContext | undefined,
+  subjectObjects: readonly unknown[] | undefined,
+): RuntimeStackContext | null {
+  if (context === undefined) return null;
+  const writtenKey = stackKeyForType(type);
+  const carried = [...SUBJECT_ONLY_CONTEXT_KEYS].filter(
+    (k) => k !== writtenKey && (context[k]?.length ?? 0) > 0,
+  );
+  if (carried.length === 0) return null;
+  return subjectObjects !== undefined ? { ...context, objects: subjectObjects } : context;
+}
+
+/**
+ * The differential over one snapshot set: the findings the candidate holds
+ * that neither the baseline nor (#22118) the stored universe answers for,
+ * name-keyed for the wire.
+ */
+function addedFindings(
+  rules: readonly AuthoringRule[],
+  snapshots: NonNullable<ReturnType<typeof buildRuntimeWriteSnapshotSet>>,
+  ctx: AuthoringRuleContext,
+  type: string,
+  item: unknown,
+): AuthoringFinding[] {
+  const before = new Set(runRules(rules, snapshots.baseline, ctx).map(fingerprint));
+  // [#22118] The stored universe answers for a sibling's finding that needs
+  // the written item present: one located on ANOTHER entry that the stored
+  // universe already holds is not new, so it is not this write's. Findings
+  // located on the written item are never read from this pass — the stored
+  // self's own condition cancels nothing — so they are judged as before,
+  // against the baseline alone. Positional paths compare across the passes
+  // because `stored` puts the stored self at the item's slot.
+  if (snapshots.stored) {
+    const stackKey = stackKeyForType(type)!;
+    const located = {
+      snapshot: snapshots.stored,
+      stackKey,
+      itemName: (item as AnyRec).name as string,
+      writtenSlot: (snapshots.candidate[stackKey] as readonly unknown[]).length - 1,
+    };
+    for (const f of runRules(rules, snapshots.stored, ctx)) {
+      if (isLocatedOnAnotherEntry(f.path, located)) before.add(fingerprint(f));
+    }
+  }
+  return runRules(rules, snapshots.candidate, ctx)
+    .filter((f) => !before.has(fingerprint(f)))
+    // [commit def0d3e63] The wire shape: collection-resident findings key their
+    // top-level collection entry by NAME, not by this gate's private snapshot
+    // index. Rewritten only on what leaves the gate — the differential above
+    // ran on the rules' raw positional paths.
+    .map((f) => {
+      const path = nameKeyFindingPath(f.path, snapshots.candidate, stackKeyForType(type) ?? undefined);
+      return path === f.path ? f : { ...f, path };
+    });
+}
+
+/**
  * Judge one about-to-be-published metadata item against the shared registry.
  *
  * Returns an empty `errors` array when the item is clean OR when no rule gates
@@ -1239,6 +1405,17 @@ export function runRuntimeAuthoringRules(args: {
    * an owner they cannot see.
    */
   rlsMembershipResolverKeys?: readonly string[];
+  /**
+   * [#32666] The objects the SUBJECT differential judges the carried subjects
+   * against, when they differ from `context.objects`. A package publish folds
+   * the batch's drafts into `context.objects`, the written object's own draft
+   * among them, so there the written object's stored self IS the candidate and
+   * a finding the write adds on a carried flow would cancel against itself. The
+   * host hands the fold without the written draft here; the ordinary
+   * differential keeps `context.objects`, so no other rule's verdict moves.
+   * Omitted, the subject differential uses `context.objects`.
+   */
+  subjectObjects?: readonly unknown[];
 }): RuntimeGateResult {
   const rules = runtimeAuthoringRulesFor(args.type);
   const empty: RuntimeGateResult = { errors: [], advisories: [], rulesRun: [] };
@@ -1251,10 +1428,14 @@ export function runRuntimeAuthoringRules(args: {
   // universe on an update into a context collection. See the builder's own
   // docblock; it is exported precisely so tests exercise this construction
   // and not a mirror of it.
+  // [#32666] The ordinary differential never sees a judged-subject collection:
+  // withheld here, every rule of the door judges the snapshot it judged before
+  // the collection was carried. The subjects are judged below, on their own.
+  const ordinaryContext = withoutSubjectCollections(args.context);
   const snapshots = buildRuntimeWriteSnapshotSet({
     type: args.type,
     item: args.item,
-    ...(args.context !== undefined ? { context: args.context } : {}),
+    ...(ordinaryContext !== undefined ? { context: ordinaryContext } : {}),
     ...(args.packageScope !== undefined ? { packageScope: args.packageScope } : {}),
   });
   if (!snapshots) return empty;
@@ -1298,36 +1479,30 @@ export function runRuntimeAuthoringRules(args: {
       ? { membershipKeyOwners: membershipKeyOwnersOf(args.context?.objects, args.rlsMembershipResolverKeys) }
       : {}),
   };
-  const before = new Set(runRules(rules, snapshots.baseline, ctx).map(fingerprint));
-  // [#22118] The stored universe answers for a sibling's finding that needs
-  // the written item present: one located on ANOTHER entry that the stored
-  // universe already holds is not new, so it is not this write's. Findings
-  // located on the written item are never read from this pass — the stored
-  // self's own condition cancels nothing — so they are judged as before,
-  // against the baseline alone. Positional paths compare across the passes
-  // because `stored` puts the stored self at the item's slot.
-  if (snapshots.stored) {
-    const stackKey = stackKeyForType(args.type)!;
-    const located = {
-      snapshot: snapshots.stored,
-      stackKey,
-      itemName: (args.item as AnyRec).name as string,
-      writtenSlot: (snapshots.candidate[stackKey] as readonly unknown[]).length - 1,
-    };
-    for (const f of runRules(rules, snapshots.stored, ctx)) {
-      if (isLocatedOnAnotherEntry(f.path, located)) before.add(fingerprint(f));
+  const added = addedFindings(rules, snapshots, ctx, args.type, args.item);
+
+  // [#32666] The SUBJECT differential: the carried subjects, judged by only
+  // the members declaring them (`ReferenceIntegrityRule.subjects`), against
+  // `subjectObjects` when the host states them. Same three passes, so a
+  // conflict the stored universe already holds is not charged.
+  const subjectContext = subjectContextFor(args.type, args.context, args.subjectObjects);
+  if (subjectContext) {
+    const subjectRules = rules.filter((r) => SUBJECT_PASS_ENTRIES.has(r.name));
+    const subjectSnapshots = subjectRules.length > 0
+      ? buildRuntimeWriteSnapshotSet({
+          type: args.type,
+          item: args.item,
+          context: subjectContext,
+          ...(args.packageScope !== undefined ? { packageScope: args.packageScope } : {}),
+        })
+      : null;
+    if (subjectSnapshots) {
+      // `restoredCredentialPaths` is spelled against the ordinary candidate;
+      // no subject member reads it, so it is not carried across.
+      const { restoredCredentialPaths: _spelledForOrdinary, ...subjectCtx } = ctx;
+      added.push(...addedFindings(subjectRules, subjectSnapshots, { ...subjectCtx, subjectPass: true }, args.type, args.item));
     }
   }
-  const added = runRules(rules, snapshots.candidate, ctx)
-    .filter((f) => !before.has(fingerprint(f)))
-    // [commit def0d3e63] The wire shape: collection-resident findings key their
-    // top-level collection entry by NAME, not by this gate's private snapshot
-    // index. Rewritten only on what leaves the gate — the differential above
-    // ran on the rules' raw positional paths.
-    .map((f) => {
-      const path = nameKeyFindingPath(f.path, snapshots.candidate);
-      return path === f.path ? f : { ...f, path };
-    });
 
   return {
     errors: added.filter((f) => f.severity === 'error'),

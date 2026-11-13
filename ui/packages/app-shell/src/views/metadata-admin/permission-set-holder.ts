@@ -166,17 +166,36 @@ function isCandidate(value: unknown): value is PermissionSetHolderCandidate {
   return c?.kind === 'package' && typeof c.packageId === 'string' && c.packageId !== '';
 }
 
-/**
- * The holders a door's `409 RESOURCE_CONFLICT` names, structured
- * (`error.details.candidates`), or `null` for any other answer — a refusal of
- * another kind, or one that names no candidate.
- */
-export function holderCandidatesOf(json: unknown): PermissionSetHolderCandidate[] | null {
-  const error = (json as { error?: { code?: unknown; details?: { candidates?: unknown } } } | null)?.error;
-  if (error?.code !== 'RESOURCE_CONFLICT') return null;
-  const candidates = error.details?.candidates;
+function candidatesIn(code: unknown, details: unknown): PermissionSetHolderCandidate[] | null {
+  if (code !== 'RESOURCE_CONFLICT') return null;
+  const candidates = (details as { candidates?: unknown } | null | undefined)?.candidates;
   if (!Array.isArray(candidates) || candidates.length === 0 || !candidates.every(isCandidate)) return null;
   return candidates as PermissionSetHolderCandidate[];
+}
+
+/**
+ * The holders a door's `409 RESOURCE_CONFLICT` names, structured, or `null`
+ * for any other answer — a refusal of another kind, or one that names no
+ * candidate. Either body shape the server sends: the wrapped envelope
+ * (`error.code`, `error.details.candidates`, the clone and activation doors)
+ * and the flat one (`code`, `details.candidates`, the `/data` doors since
+ * objectstack#32740).
+ */
+export function holderCandidatesOf(json: unknown): PermissionSetHolderCandidate[] | null {
+  const body = json as { code?: unknown; details?: unknown; error?: unknown } | null;
+  const error = body?.error as { code?: unknown; details?: unknown } | null | undefined;
+  if (error && typeof error === 'object') return candidatesIn(error.code, error.details);
+  return candidatesIn(body?.code, body?.details);
+}
+
+/**
+ * {@link holderCandidatesOf} for an error the console's data source threw on
+ * a refused write: `@objectstack/client` puts the body's code on `code` and
+ * its `details` on `details`, whichever body shape the server sent.
+ */
+export function holderCandidatesOfError(err: unknown): PermissionSetHolderCandidate[] | null {
+  const e = err as { code?: unknown; details?: unknown } | null;
+  return candidatesIn(e?.code, e?.details);
 }
 
 /** The package a chosen candidate is addressed by: its id, or none for the environment's own set. */

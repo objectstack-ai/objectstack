@@ -62,7 +62,7 @@ import { useRecentItems } from '../context/RecentItemsProvider.js';
 import { useRecentItemLabel } from '../hooks/useRecentItemLabel.js';
 import { recentItemObject } from '../console/home/recentItemTypeLabel.js';
 import type { RecentItem } from '../context/RecentItemsProvider.js';
-import { useCommandPalette } from '../context/CommandPaletteProvider.js';
+import { COMMAND_PALETTE_TESTID, useCommandPalette, useCommandPaletteTypeahead } from '../context/CommandPaletteProvider.js';
 import { ErrorBoundary } from './ErrorBoundary.js';
 import { confirmUnsavedLeave } from './unsavedEdits.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -248,6 +248,9 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   useEffect(() => {
     if (!open) setInputValue('');
   }, [open]);
+  // What was typed between the shortcut and this input's focus starts the
+  // query (objectstack#32627).
+  useCommandPaletteTypeahead(open, setInputValue);
 
   const baseUrl = `/apps/${appName || appRouteSegment(activeApp)}`;
   // A record hit's own base: the app that lists its object (objectstack#28890).
@@ -462,7 +465,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
       contentProps={{
         // Stable locator so the overlay is addressable by an automated driver
         // without relying on i18n-fragile visible text (C4).
-        'data-testid': 'overlay:command-palette',
+        'data-testid': COMMAND_PALETTE_TESTID,
       }}
     >
       <CommandInput

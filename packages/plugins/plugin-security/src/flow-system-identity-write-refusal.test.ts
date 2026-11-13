@@ -49,6 +49,8 @@ import {
   FLOW_SYSTEM_IDENTITY_WRITE_OBJECTS,
   assertAppAutomationAppendOnlyWriteAllowed,
   assertFlowSystemIdentityWriteAllowed,
+  resetAppAutomationAppendOnlyInsertWarnings,
+  warnAppAutomationAppendOnlyInsert,
 } from './flow-system-identity-write-refusal.js';
 import { SysUserPermissionSet, SysUserPosition } from './objects/index.js';
 import { SysPermissionSet, SysPosition, SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
@@ -606,5 +608,33 @@ describe("[seat decision on the contract review] an elevated automation's delete
 
     expect(await stored(engine, 'sys_user', 'usr_departed')).toBe(null);
     expect(await stored(engine, 'sys_activity', 'act_1')).toMatchObject({ id: 'act_1', actor_id: null });
+  });
+});
+
+describe('an elevated automation\'s insert into an append-only object is told, once, to use the platform doors', () => {
+  const schemaOf = (object: string) => (object === 'sys_activity' ? { managedBy: 'append-only' } : { managedBy: 'user' });
+  const hook = markAppAutomationElevation({ isSystem: true }, 'hook');
+  afterEach(() => resetAppAutomationAppendOnlyInsertWarnings());
+
+  it('names ctx.email.send and ctx.activity.append, once per elevation and object', () => {
+    const warn = vi.fn();
+    const op = { object: 'sys_activity', operation: 'insert', context: hook };
+    const line = warnAppAutomationAppendOnlyInsert(op, schemaOf, warn);
+    expect(line).toMatch(/Deprecated/);
+    expect(line).toMatch(/ctx\.email\.send/);
+    expect(line).toMatch(/ctx\.activity\.append/);
+    expect(warnAppAutomationAppendOnlyInsert(op, schemaOf, warn)).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const action = markAppAutomationElevation({ isSystem: true }, 'action');
+    expect(warnAppAutomationAppendOnlyInsert({ ...op, context: action }, schemaOf, warn)).toBeDefined();
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('CONTROL: says nothing for an unelevated insert, another verb, or another object', () => {
+    const warn = vi.fn();
+    expect(warnAppAutomationAppendOnlyInsert({ object: 'sys_activity', operation: 'insert', context: { isSystem: true } }, schemaOf, warn)).toBeUndefined();
+    expect(warnAppAutomationAppendOnlyInsert({ object: 'sys_activity', operation: 'find', context: hook }, schemaOf, warn)).toBeUndefined();
+    expect(warnAppAutomationAppendOnlyInsert({ object: 'crm_note', operation: 'insert', context: hook }, schemaOf, warn)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
   });
 });

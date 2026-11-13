@@ -26,6 +26,7 @@ import {
     isObjectSchemaMaskingEnabled,
     relateObjectSchemaMaskPosture,
     resolveObjectSchemaMaskPosture,
+    objectSchemaReadDelegateSource,
     type ObjectSchemaMaskPosture,
     // [#12702 · ADR-0131 D6] Which callers a `/meta` item write admits:
     // `manage_metadata` (or `isSystem`), the one predicate the REST doors run
@@ -433,11 +434,22 @@ export async function resolveObjectMasker(
     }
     const security = await deps.resolveService(context, 'security').catch(() => undefined);
     const execCtx = (context as any)?.executionContext;
+    // [decision 6840464379] Where an object's declared `schemaReadDelegate` is
+    // found — this request's kernel, as `RestServer.resolveObjectMasker` finds
+    // it, so the two transports give the same verdict. Resolved only when an
+    // object the read check refused needs it. One fault differs: a lookup that
+    // fails here reads as not registered (the object stays absent), where
+    // REST's environment leg answers 5xx; ADR-0106 allows both.
+    const schemaReadDelegates = objectSchemaReadDelegateSource({
+        engine: () => deps.resolveService(context, 'objectql'),
+        service: (name) => deps.resolveService(context, name),
+    });
     return (objectName: string) => resolveObjectSchemaMaskPosture({
         objectName,
         context: execCtx,
         security: security as any,
         enabled: true,
+        schemaReadDelegates,
         telemetry: {
             warn: (message, meta) => {
                 (globalThis as any).console?.warn?.(message, meta);

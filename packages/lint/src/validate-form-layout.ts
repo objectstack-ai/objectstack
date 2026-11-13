@@ -57,6 +57,7 @@
  */
 
 import { collectionEntries } from './collection-entries.js';
+import type { UserTextParams } from './finding-user-text.js';
 // [#13855] The field-group reference question, shared with
 // `validate-page-field-bindings` so both layout escape hatches resolve a
 // `section.group` against one index and report the same way.
@@ -92,6 +93,12 @@ export interface FormLayoutFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's user-facing sentence interpolates, set at both
+   * advisory push sites; the sentences are `validate-form-layout.user-text.ts`
+   * (`AuthoringFinding.userTextParams`).
+   */
+  userTextParams?: UserTextParams;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -220,14 +227,20 @@ export function validateFormLayout(stack: AnyRec): FormLayoutFinding[] {
         // ── (c) [#13855] a section's `group` names a declared field group ──
         // Both buckets, for the reason (a) reads both: a rule that judges only
         // the canonical spelling is silent on the legacy one.
+        //
+        // The user sentence's names are added HERE, not in the shared helper:
+        // its other host (`validate-page-field-bindings`) emits its group id
+        // on no write the publish door judges, so it authors no sentence. The
+        // helper returns a finding only when `objName` resolves, and each
+        // finding's `path` is its reference's, which names the group.
+        const groupRefs = sectionGroupRefs(sections, `${site.path}.${bucket}`);
+        const groupAt = new Map(groupRefs.map((ref) => [ref.path, ref.key]));
         findings.push(
-          ...checkSectionGroupRefs(
-            sectionGroupRefs(sections, `${site.path}.${bucket}`),
-            objName,
-            objectFieldGroups,
-            where,
-            FORM_SECTION_GROUP_UNKNOWN,
-          ),
+          ...checkSectionGroupRefs(groupRefs, objName, objectFieldGroups, where, FORM_SECTION_GROUP_UNKNOWN)
+            .map((finding) => ({
+              ...finding,
+              userTextParams: { view: viewName, object: objName ?? '', group: groupAt.get(finding.path) ?? '' },
+            })),
         );
 
         for (let s = 0; s < sections.length; s++) {
@@ -251,6 +264,7 @@ export function validateFormLayout(stack: AnyRec): FormLayoutFinding[] {
                 hint:
                   `Fix the field name, or add "${fname}" to ${objName}. Section field ` +
                   `references must match the object's field names exactly.`,
+                userTextParams: { view: viewName, object: objName ?? '', field: fname },
               });
             }
           }

@@ -27,6 +27,18 @@ export function mutationEventPackage(packageId: unknown): { packageId: string | 
 }
 
 /**
+ * [ADR-0150 D4, #31698] The `packageId` of a door's awaited projector event:
+ * the row's binding, as {@link mutationEventPackage} stamps it, for
+ * `permission` alone, the one type whose projector (the security catalog's
+ * echo) keeps a copy per `(package, name)`. Every other type's projector
+ * event keeps its shape, and so does a write whose binding is not stated
+ * (`undefined`).
+ */
+export function projectorEventPackage(type: string, packageId: string | null | undefined): { packageId?: string | null } {
+    return type === 'permission' && packageId !== undefined ? mutationEventPackage(packageId) : {};
+}
+
+/**
  * The binding a received event names: a package id, `null` (a row known to be
  * bound to no package), or `undefined` (the producer did not say).
  */

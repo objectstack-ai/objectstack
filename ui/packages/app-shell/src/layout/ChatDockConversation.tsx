@@ -140,6 +140,9 @@ export function ChatDockConversation({
     onBoundPackageChange?.(editPackageId);
   }, [editPackageId, onBoundPackageChange]);
   const pendingFirstMessageRef = React.useRef<PendingFirstMessage | null>(null);
+  // ADR-0028 — the composer's picked model, held here so it outlives the keyed
+  // pane's remount when the first send mints the conversation.
+  const [selectedModelId, setSelectedModelId] = React.useState<string | undefined>(undefined);
 
   // OSS / no AI seat → the whole dock body is inert (the launcher is gated too).
   if (!isLoading && agents.length === 0) return null;
@@ -163,6 +166,8 @@ export function ChatDockConversation({
       initialMessages={paneInitialMessages}
       pendingFirstMessageRef={pendingFirstMessageRef}
       ensureConversation={ensureConversation}
+      selectedModelId={selectedModelId}
+      onSelectedModelChange={setSelectedModelId}
       onSent={() => {}}
       onShare={() => {}}
       showDebug={false}

@@ -1,5 +1,59 @@
 # @object-ui/plugin-markdown
 
+## 18.4.0
+
+### Patch Changes
+
+- Updated dependencies [96b5dab]
+- Updated dependencies [7da99b7]
+- Updated dependencies [85d9264]
+- Updated dependencies [3214615]
+- Updated dependencies [d0512c2]
+- Updated dependencies [4261169]
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [604a2b3]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [bb61872]
+- Updated dependencies [4211f50]
+- Updated dependencies [c2be734]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [6db9198]
+- Updated dependencies [aa57c76]
+- Updated dependencies [ea5807e]
+- Updated dependencies [d3f23d2]
+- Updated dependencies [ff12aed]
+- Updated dependencies [bff5ba2]
+- Updated dependencies [31260ca]
+- Updated dependencies [56cac5e]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [a91409c]
+- Updated dependencies [8b0fbb8]
+- Updated dependencies [ad2393f]
+- Updated dependencies [5bca14f]
+- Updated dependencies [5268f50]
+- Updated dependencies [b631573]
+- Updated dependencies [1f37085]
+- Updated dependencies [534a287]
+- Updated dependencies [6be71ab]
+- Updated dependencies [3224545]
+- Updated dependencies [3684d18]
+- Updated dependencies [ac8fede]
+- Updated dependencies [36b216b]
+- Updated dependencies [0a81d2a]
+- Updated dependencies [4d9ac62]
+- Updated dependencies [8a3eeef]
+- Updated dependencies [8ce5827]
+- Updated dependencies [6303e74]
+- Updated dependencies [b463ec6]
+  - @object-ui/components@18.4.0
+  - @object-ui/core@18.4.0
+  - @object-ui/types@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

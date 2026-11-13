@@ -191,6 +191,9 @@ function entryKey(entry: Pick<DraftChangeEntry, 'type' | 'name' | 'member'>): st
  * Names that exist in the PUBLISHED world for a type — the plain (no
  * `preview=draft`) list. One request classifies every draft of that type:
  * a draft whose name is absent here is NEW; present means publish UPDATES it.
+ * Except a `view`: the list never enumerates a stored view container, only
+ * what it expands to, so an unlisted view draft asks the by-name door
+ * (objectstack#32755; the classification loop in `DraftChangesPanel`).
  * (A per-item `/published` probe would be O(drafts) requests, and the REST
  * tree has no such sub-route — the generic :name handler answers anything.)
  *
@@ -1656,19 +1659,47 @@ export function DraftChangesPanel({
       await Promise.all([
         ...classifyMembers,
         ...types.map(async (type) => {
-          let published: Set<string> | null = null;
+          let published: Set<string>;
           try {
             published = await publishedNamesOf(type);
           } catch {
             return;
           }
+          // A `view` name absent from the list is NOT yet known to be new
+          // (objectstack#32755). The list door enumerates the views a stored
+          // `defineView` container EXPANDS to and never the container itself,
+          // so a container stored under its own name — `<object>.default`
+          // carrying a `form` — is published yet absent here, and its next
+          // draft read *New*. The by-name door serves that row, so it answers
+          // for every unlisted view draft, as it does for a bundle member.
+          // Listed names need no read; a read that fails leaves the entry
+          // unclassified rather than guessing either way.
+          const confirmed = new Set<string>();
+          const unknown = new Set<string>();
+          if (type === 'view') {
+            const unlisted = drafts.filter((d) => d.type === type && !d.member && !published.has(d.name));
+            await Promise.all(
+              unlisted.map(async (target) => {
+                const key = entryKey(target);
+                try {
+                  if ((await fetchItemBody(target.type, target.name, { packageId: target.packageId })) !== null) {
+                    confirmed.add(key);
+                  }
+                } catch {
+                  unknown.add(key);
+                }
+              }),
+            );
+          }
           setEntries((prev) =>
             prev
-              ? prev.map((entry) =>
-                  entry.type === type && !entry.member
-                    ? { ...entry, kind: published!.has(entry.name) ? 'update' : 'new' }
-                    : entry,
-                )
+              ? prev.map((entry) => {
+                  if (entry.type !== type || entry.member) return entry;
+                  const key = entryKey(entry);
+                  if (unknown.has(key)) return entry;
+                  const exists = published.has(entry.name) || confirmed.has(key);
+                  return { ...entry, kind: exists ? 'update' : 'new' };
+                })
               : prev,
           );
         }),

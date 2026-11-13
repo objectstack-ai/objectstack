@@ -106,6 +106,15 @@ export interface RunIdentityContext {
    * kernel `ExecutionContext.principalKind`: the security plugin then applies
    * the agent ceiling and withholds the member baseline. Present on a
    * `runAs:'user'` run whose setup seeded it ({@link runPrincipalKind}).
+   *
+   * [ADR-0151 Non-goals; ruling record 6812617393] Present on a
+   * `runAs:'system'` run too, when the run context carries it: the account a
+   * door admitted to start the elevated run stays named as an agent on every
+   * write the run makes. Attribution there, like {@link actor}: the
+   * `isSystem` short-circuit precedes every gate that reads the kind, so it
+   * narrows and widens nothing for the run's own operations; a hook reads it
+   * off its session (ADR-0151 D5), and a `runAs:'user'` hook one of the
+   * run's writes fires de-elevates to an agent's context, never a person's.
    */
   principalKind?: 'agent';
   /**
@@ -261,7 +270,9 @@ export interface SeededRunContext extends AutomationContext {
    * [ADR-0151 D3] `'agent'` when the acting user is an AI service account, as
    * the same resolver reports it (`resolveUserAuthzGrants`' `principalKind`).
    * Seeded with the positions and permission sets, and removed with them by
-   * the decision switch: it is the acting user's fact.
+   * the decision switch: it is the acting user's fact. A `runAs:'system'` run
+   * resolves no grants, so the kind its launch door forwarded is the one it
+   * keeps (`seedRunGrants`), until a decision moves the run to a decider.
    */
   principalKind?: 'agent';
   /**
@@ -339,7 +350,7 @@ export function runPermissionSetAddresses(
 /**
  * [ADR-0151 D3] `'agent'` when run setup seeded the acting user as an AI
  * service account ({@link SeededRunContext.principalKind}), `undefined` for a
- * person.
+ * person. Read by both arms of {@link resolveRunDataContext}.
  */
 export function runPrincipalKind(context: AutomationContext | undefined): 'agent' | undefined {
   return (context as SeededRunContext | undefined)?.principalKind === 'agent' ? 'agent' : undefined;
@@ -486,6 +497,15 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
       // there is no user to resolve, and a `runAs:'user'` hook it fires is
       // refused for want of one.
       ...(context.userId ? {} : { positions: [], permissions: [] }),
+      // [ADR-0151 Non-goals; ruling record 6812617393] Elevation is not a
+      // change of kind either. An AI service account a door admitted to start
+      // this run (the author's `ai.exposed` opt-in, flow start admission's
+      // rule 2) stays an agent on every write the run makes, as on the user
+      // arm below: a hook reads the kind off its session (ADR-0151 D5), which
+      // is how the governance seam tells an agent-started elevated run from a
+      // person's. `isSystem` has answered before any gate reads it, so for
+      // the run's own operations it is attribution and nothing else.
+      ...(runPrincipalKind(context) ? { principalKind: 'agent' as const } : {}),
       ...(flowRunId ? { flowRunId } : {}),
       ...(locale ? { locale } : {}),
       ...(impersonatedBy ? { impersonatedBy } : {}),

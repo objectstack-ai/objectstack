@@ -110,6 +110,14 @@ export interface RenderSkillOptions {
    */
   fileTools?: boolean;
   /**
+   * [#32686] Whether the host's bridge also serves an upload link for a
+   * record not yet created (`createUploadLinkForNewRecord`), so
+   * `create_upload_link` takes no `recordId` with a `field`. Renders only
+   * with `create_upload_link`'s own entry ({@link fileTools}, `data:write`).
+   * Default false: the renderer cannot see the bridge, so the host says so.
+   */
+  newRecordUploadLinks?: boolean;
+  /**
    * [ADR-0149 D2] Whether the host's bridge carries the dataset pair
    * (`list_datasets` / `query_dataset`, `registerDatasetTools`). The entries,
    * and the D3 selection rule that teaches a client when to use them, render
@@ -118,6 +126,24 @@ export interface RenderSkillOptions {
    * renderer cannot see the bridge, so the host says so.
    */
   datasetTools?: boolean;
+  /**
+   * [#32766] The text a host that mounts a build door adds to the DATA-ONLY
+   * skill — the same string it passes as `dataOnlyInstructions` on the
+   * authoring injection of `handleHttpRequest`, so `initialize` and this file
+   * say the same thing (for example, that building needs an OAuth connection
+   * with `metadata:write`). Markdown, rendered verbatim as its own block
+   * after the tool list.
+   *
+   * It renders only when {@link authoringTools} names at least one tool (the
+   * host has a build door to point at) AND {@link grantedScopes} do NOT admit
+   * the family (`grantsAuthoringTools`): the exact complement of the
+   * authoring section, so a skill carries one or the other and never both. A
+   * host that injects no authoring tools — and the public `GET /mcp/skill`
+   * route of this framework, which passes none — renders the data skill
+   * byte-identical to before (cloud#4329, ruled B: the hint only where a
+   * build door is mounted).
+   */
+  dataOnlyInstructions?: string;
 }
 
 const URL_PLACEHOLDER = '<YOUR_ENV_MCP_URL>'; // e.g. https://<env>.objectos.app/api/v1/mcp
@@ -203,6 +229,21 @@ const UPLOAD_LINK_TOOL_LINES = `- **create_upload_link({ objectName, recordId, f
 `;
 
 /**
+ * [#32686] The two-call flow for a record whose file field must be filled
+ * when it is created, rendered under `create_upload_link`'s entry where the
+ * bridge serves a link with no record.
+ */
+const NEW_RECORD_UPLOAD_LINK_LINES = `  For a record you have not created yet (a required file field, such as an
+  expense line's invoice), omit \`recordId\` and name \`field\`: the answer
+  carries \`fileIds\`. Once the user has uploaded, call \`create_record\` with
+  the field set to \`fileIds[0]\` (the array, for a multi-file field); before
+  the upload, that create is refused as an upload that never completed. The
+  id goes only into that field of that object, in one record, by this
+  user's own write, within an hour of the upload. The user must be able to
+  create such records.
+`;
+
+/**
  * [ADR-0149 D2/D3] The dataset pair's entries and the selection rule that
  * tells a client when a governed metric answers instead of an object query.
  * The rule is ADR-0149 D3's, in the client's terms: an exact word match
@@ -249,7 +290,10 @@ function renderFileToolLines(options: RenderSkillOptions): string {
   // Mirrors the gates in `registerFileTools` (`!scopes || scopes.includes(…)`).
   const read = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
   const write = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_WRITE);
-  return (read ? READ_FILE_TOOL_LINES : '') + (write ? UPLOAD_LINK_TOOL_LINES : '');
+  return (
+    (read ? READ_FILE_TOOL_LINES : '') +
+    (write ? UPLOAD_LINK_TOOL_LINES + (options.newRecordUploadLinks === true ? NEW_RECORD_UPLOAD_LINK_LINES : '') : '')
+  );
 }
 
 /**
@@ -270,6 +314,13 @@ export function renderSkillMarkdown(options: RenderSkillOptions = {}): string {
       ? options.authoringTools
       : undefined;
   const description = authoringTools ? OBJECTSTACK_SKILL_DESCRIPTION_WITH_AUTHORING : OBJECTSTACK_SKILL_DESCRIPTION;
+  // [#32766] The host's data-only text: only beside a build door it injected
+  // tools for, and only where the authoring section does not render.
+  const dataOnlyText = options.dataOnlyInstructions?.trim();
+  const dataOnlyBlock =
+    !authoringTools && dataOnlyText && options.authoringTools && options.authoringTools.length > 0
+      ? `\n${dataOnlyText}\n`
+      : '';
   // Mirrors the native data gate in `wireBridgeTools` (`!scopes || scopes.includes(data:read)`).
   const describeObjectRegistered = !options.grantedScopes || options.grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
 
@@ -354,11 +405,18 @@ create/update payload.
 - **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
-  unknown fields/functions) and advisory warnings (text/boolean fields misused
-  in arithmetic; an error at a \`validation\` site, worded for the rule's
-  \`severity\`, and at a \`flow_condition\` of a record-triggered or
-  time-relative flow, where it fails the run; a warning on any other flow), plus the fields and
-  stdlib functions in scope. \`site\` is \`formula\` | \`validation\` |
+  unknown fields/functions; at a \`formula\` or \`validation\` site, every other
+  refusal the publish gate gives there: a reference read both through the
+  relationship and as a value, more than one hop, a hop to a field the target
+  does not declare or into a stored-metadata table, and at a \`validation\` site
+  an unguarded nullable field or a read of \`parent\`) and advisory warnings
+  (text/boolean fields misused in arithmetic; an error at a \`validation\` site,
+  worded for the rule's \`severity\`, and at a \`flow_condition\` of a
+  record-triggered or time-relative flow, where it fails the run; a warning on
+  any other flow; at a \`formula\` or \`validation\` site, a read of an
+  external object's unprovisioned system column), plus the fields and stdlib
+  functions in scope. A hop target follows the same system-object fence as
+  \`describe_object\`. \`site\` is \`formula\` | \`validation\` |
   \`flow_condition\` | \`template\` (default \`formula\`). Pass the rule's
   \`severity\` or the flow's \`triggerKind\` (\`record_change\` by default) to
   get the verdict the publish gate gives that rule or flow; for a
@@ -401,15 +459,20 @@ create/update payload.
   \`confirm: true\` on an action \`list_actions\` reports as
   \`requiresConfirmation\` — the server REFUSES such a call without it
   (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing runs. Ask your human first;
-  the flag asserts an approval, it does not obtain one.
+  the flag asserts an approval, it does not obtain one. Under an AI service
+  account's own key (an agent acting for itself, for no person) the call is
+  refused whatever it sends and nothing runs: hand the action to a person, or
+  its author declares \`ai.requiresConfirmation: false\` when it is safe
+  unattended.
 - **resume_run({ runId, values?, confirm? })** — continue a flow run that
   \`run_action\` answered with \`status: "paused"\` and a \`screen\` (a form the
   flow needs filled in). Send the screen's field values in \`values\`, keyed by
   the names in \`screen.fields\`. The run completes, or pauses again on its next
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
-  (including \`confirm: true\` for an action flagged \`requiresConfirmation\`).
-${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}
+  (including \`confirm: true\` for an action flagged \`requiresConfirmation\`,
+  and its refusal under an AI service account's own key whatever the call sends).
+${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}${dataOnlyBlock}
 ## Conventions & gotchas
 
 - **Permissions/RLS apply to every call.** Fewer rows than expected, or a

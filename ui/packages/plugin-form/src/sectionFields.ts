@@ -42,7 +42,7 @@
 
 import type { FormField } from '@object-ui/types';
 import { evalFieldPredicate, isBlankPredicateText, isExpressionComputedField, type FieldRulePredicate } from '@object-ui/core';
-import { mapFieldTypeToFormType, buildValidationRules, fieldHelpText, withFollowedParentObject } from '@object-ui/fields';
+import { mapFieldTypeToFormType, buildValidationRules, fieldHelpText, withFollowedParentObject, withFormObject } from '@object-ui/fields';
 import { withHomeAmountSource } from '@object-ui/i18n';
 import { isCreateFormMode, isRequiredInForm } from './schemaDefaults';
 import { findCustomFieldMember } from './customFieldsMerge';
@@ -347,7 +347,13 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     // that produced it, so its widget can draw the read face and say so.
     // ... and an amount that follows its parent's currency carries the parent
     // object (ADR-0144 D2 as amended), so its widget can read the parent's code.
-    field: withFollowedParentObject(withHomeAmountSource(field, ctx.objectSchema?.fields, fieldName), ctx.objectSchema?.fields),
+    // ... and a `permission-ref` field carries the object this form edits
+    // (objectstack#32795), so the widget recognises the grant's name column by
+    // its object and its column.
+    field: withFormObject(
+      withFollowedParentObject(withHomeAmountSource(field, ctx.objectSchema?.fields, fieldName), ctx.objectSchema?.fields),
+      ctx.objectName,
+    ),
     options: field.options,
     multiple: field.multiple,
     // Field-level conditional rules (ADR-0036) — the form renderer resolves

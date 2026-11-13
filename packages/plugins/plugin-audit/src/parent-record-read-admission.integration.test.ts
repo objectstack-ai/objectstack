@@ -46,6 +46,7 @@ import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { AuditPlugin } from './audit-plugin.js';
+import { LEDGER_AUDIT_CAPABILITY } from './audit-log-read-visibility.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -228,4 +229,145 @@ describe('parent-record read gates: the object-level read admission', () => {
     expect(vaultRowIds.length).toBeGreaterThan(0);
     for (const id of vaultRowIds) expect(after.value).toContain(id);
   });
+});
+
+/**
+ * A row about a record is served to a reader only when the reader can open
+ * that record through the data door — so a parent object whose `enable` block
+ * the data door refuses `get` for is a parent of no gate, for every reader,
+ * administrators included (`parent-record-read-gate.ts`, "A parent the data
+ * door does not serve"). The ledger's audit capability is decided first, so
+ * its holder is still served every ledger row.
+ *
+ * The stand-in security service admits every object to every caller and
+ * narrows no row, so what is measured is the door's declaration alone: with
+ * the object-level admission (the leaf path) and without it (the whole-read
+ * probe).
+ */
+describe('parent-record read gates: a parent the data door does not serve', () => {
+  const COMMENT = 'sys_comment';
+  /** `apiEnabled: false, apiMethods: []`: the door serves no operation. */
+  const SEALED = 'door_sealed';
+  /** `apiMethods: ['list']`: the door lists it and refuses `get`. */
+  const LIST_ONLY = 'door_list_only';
+  /** `apiMethods: ['get', 'list']`: the door opens a record of it. */
+  const SERVED = 'door_served';
+  /** No `enable` block: nothing declared, nothing refused. */
+  const PLAIN = 'door_plain';
+  const DOOR_PACKAGE = 'com.objectstack.audit.test.door-served-parent';
+  const HOLDER = { userId: 'u_holder', tenantId: 'org_1', positions: ['org_member'], systemPermissions: [LEDGER_AUDIT_CAPABILITY] };
+
+  const doorSecurity: {
+    canReadObject?: (object: string, context?: any) => Promise<boolean>;
+    getReadFilter: (object: string, context?: any) => Promise<Record<string, unknown> | undefined>;
+  } = { getReadFilter: async () => undefined };
+  const admitAll = async () => true;
+
+  let kernel: ObjectKernel;
+  let engine: ObjectQL;
+  const recordIds: Record<string, string> = {};
+
+  /** One read path at a time: `leaf` with the object-level admission, `probe` without it. */
+  const paths = ['leaf', 'probe'] as const;
+  const on = async <T>(path: (typeof paths)[number], run: () => Promise<T>): Promise<T> => {
+    if (path === 'probe') delete doorSecurity.canReadObject;
+    try {
+      return await run();
+    } finally {
+      doorSecurity.canReadObject = admitAll;
+    }
+  };
+  const parentsOf = (rows: Row[]) => new Set(rows.map((r) => String(r.object_name)));
+
+  beforeAll(async () => {
+    doorSecurity.canReadObject = admitAll;
+    kernel = new ObjectKernel({ logger: { level: 'silent' } });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(singlePostureTenancy());
+    await kernel.use(new AuditPlugin());
+    await kernel.use({
+      name: 'test.door-security-stand-in',
+      type: 'standard',
+      version: '1.0.0',
+      async init(ctx: PluginContext) {
+        ctx.registerService('security', doorSecurity);
+      },
+    } as Plugin);
+    await kernel.bootstrap();
+
+    engine = kernel.getService<ObjectQL>('objectql');
+    const driver = new SqliteWasmDriver({ filename: ':memory:' });
+    await driver.connect();
+    engine.registerDriver(driver, true);
+    engine.registry.registerObject({ ...objectOf(SEALED, 'Sealed'), enable: { apiEnabled: false, apiMethods: [] } } as any, DOOR_PACKAGE);
+    engine.registry.registerObject({ ...objectOf(LIST_ONLY, 'List only'), enable: { apiMethods: ['list'] } } as any, DOOR_PACKAGE);
+    engine.registry.registerObject({ ...objectOf(SERVED, 'Served'), enable: { apiEnabled: true, apiMethods: ['get', 'list'] } } as any, DOOR_PACKAGE);
+    engine.registry.registerObject(objectOf(PLAIN, 'Plain') as any, DOOR_PACKAGE);
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine);
+
+    // The rows are the platform's own: the real CRUD mirror writes the activity
+    // and ledger rows, and a comment is written as the system on each record.
+    for (const object of [SEALED, LIST_ONLY, SERVED, PLAIN]) {
+      recordIds[object] = (await engine.insert(object, { name: `${object} one` }, { context: SYS })).id;
+      await engine.update(object, { name: `${object} one, renamed` }, { where: { id: recordIds[object] }, context: SYS });
+      await engine.insert(COMMENT, { thread_id: `${object}:${recordIds[object]}`, body: 'a note', author_id: 'u_fixture' }, { context: SYS });
+    }
+  }, 120_000);
+
+  afterAll(async () => {
+    if (kernel) {
+      await Promise.race([kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+    }
+  }, 30_000);
+
+  it('control: every gated object stores rows about every parent', async () => {
+    for (const object of [ACTIVITY, LEDGER, COMMENT]) {
+      const stored: Row[] = await engine.find(object, { context: SYS });
+      for (const parent of [SEALED, LIST_ONLY, SERVED, PLAIN]) {
+        expect(stored.filter((r) => r.object_name === parent && r.record_id === recordIds[parent]).length, `${object} about ${parent}`)
+          .toBeGreaterThanOrEqual(1);
+      }
+    }
+  });
+
+  for (const path of paths) {
+    for (const object of [ACTIVITY, LEDGER, COMMENT]) {
+      it(`${path}: a member is not served a ${object} row about a parent the data door does not serve, by list, count, aggregate or findOne`, async () => {
+        const rows: Row[] = await on(path, () => engine.find(object, { context: MEMBER }));
+        const parents = parentsOf(rows);
+        expect(parents.has(SEALED)).toBe(false);
+        expect(parents.has(LIST_ONLY)).toBe(false);
+        // CONTROL: a parent the door serves, and one that declares no `enable`, keep their rows.
+        expect(parents.has(SERVED)).toBe(true);
+        expect(parents.has(PLAIN)).toBe(true);
+
+        expect(await on(path, () => engine.count(object, {}, { context: MEMBER }))).toBe(rows.length);
+        const groups: Row[] = await on(path, () =>
+          engine.aggregate(object, { groupBy: ['object_name'], aggregations: [{ function: 'count', alias: 'n' }], context: MEMBER }),
+        );
+        const grouped = new Set(groups.map((g) => String(g.object_name)));
+        expect(grouped.has(SEALED) || grouped.has(LIST_ONLY)).toBe(false);
+        expect(grouped.has(SERVED)).toBe(true);
+
+        const stored: Row[] = await engine.find(object, { where: { object_name: SEALED }, context: SYS });
+        expect(stored.length).toBeGreaterThanOrEqual(1);
+        expect(await on(path, () => engine.findOne(object, { where: { id: stored[0].id }, context: MEMBER }))).toBeNull();
+      });
+    }
+
+    it(`${path}: an administrator is not served an activity row about a parent the data door does not serve`, async () => {
+      const parents = parentsOf(await on(path, () => engine.find(ACTIVITY, { context: ADMIN })));
+      expect(parents.has(SEALED)).toBe(false);
+      expect(parents.has(LIST_ONLY)).toBe(false);
+      expect(parents.has(SERVED)).toBe(true);
+    });
+
+    it(`${path}: CONTROL — a holder of the ledger's audit capability is still served every ledger row`, async () => {
+      const stored: Row[] = await engine.find(LEDGER, { context: SYS });
+      const served: Row[] = await on(path, () => engine.find(LEDGER, { context: HOLDER }));
+      expect(ids(served)).toEqual(ids(stored.filter((r) => r.tenant_id)));
+      expect(parentsOf(served).has(SEALED)).toBe(true);
+    });
+  }
 });

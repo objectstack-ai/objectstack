@@ -118,6 +118,7 @@ export interface ActorGuardHost {
   readonly orgRolesMap: AuthManager['orgRolesMap'];
   readonly organizationDeleteStandingJudge: AuthManager['organizationDeleteStandingJudge'];
   computeAuthGate: AuthManager['computeAuthGate'];
+  getAudience: AuthManager['getAudience'];
   getDataEngine: AuthManager['getDataEngine'];
   resolveActor: AuthManager['resolveActor'];
 }
@@ -222,7 +223,7 @@ export async function assertActorNotHeld(this: Pick<ActorGuardHost, 'computeAuth
 }
 
 /** The body of `AuthManager#assertOrganizationDeletable`; the method's docblock there is its contract. */
-export async function assertOrganizationDeletable(this: Pick<ActorGuardHost, 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteStandingJudge' | 'resolveActor'>, ctx: any): Promise<void> {
+export async function assertOrganizationDeletable(this: Pick<ActorGuardHost, 'getAudience' | 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteStandingJudge' | 'resolveActor'>, ctx: any): Promise<void> {
   const engine = this.getDataEngine();
   if (!engine) return;
   const organizationId = typeof ctx?.body?.organizationId === 'string' ? ctx.body.organizationId : '';
@@ -322,9 +323,13 @@ export async function assertOrganizationDeletable(this: Pick<ActorGuardHost, 'ge
     }
   }
 
+  // [#32787] The self-registration grant is the organization's own structure,
+  // by the set the deployment declares now (`organizationAuthStructureSetNames`).
   const owned = defaultOrganization
     ? await defaultOrganizationDeleteRefusal(engine, organizationId)
-    : await organizationDeleteRefusal(engine, organizationId);
+    : await organizationDeleteRefusal(engine, organizationId, {
+        selfRegistrationSet: this.getAudience().selfRegistrationPermissionSet,
+      });
   if (owned && owned.length > 0) {
     const { APIError } = await import('better-auth/api');
     throw new APIError('CONFLICT', { code: ORGANIZATION_DELETE_REFUSAL_CODE, ...organizationNotEmptyBody(owned) });

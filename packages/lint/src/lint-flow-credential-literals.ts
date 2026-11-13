@@ -48,6 +48,7 @@
 import { isCredentialShapedLiteral } from './credential-literal.js';
 import { walkFlowNodes } from './flow-walk.js';
 import { recordsOf } from './object-graph.js';
+import type { UserTextParams } from './finding-user-text.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -66,6 +67,13 @@ export interface FlowCredentialLiteralFinding {
   path: string;
   message: string;
   hint: string;
+  /**
+   * The names this finding's user sentence interpolates
+   * (`lint-flow-credential-literals.user-text.ts`): the flow, the node, the
+   * entry's NAME and its position. ⛔ Never the value, for the module note's
+   * reason; see `AuthoringFinding.userTextParams`.
+   */
+  userTextParams?: UserTextParams;
 }
 
 /**
@@ -157,7 +165,13 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
       const where = regionTrail
         ? `flow '${flowName}' · ${regionTrail} · node '${nodeId}' (${nodeType})`
         : `flow '${flowName}' · node '${nodeId}' (${nodeType})`;
-      const report = (entryPath: string, what: string, steer: string, route: string): void => {
+      const report = (
+        entryPath: string,
+        what: string,
+        steer: string,
+        route: string,
+        entry: { name: string; position: 'header' | 'query' | 'input' },
+      ): void => {
         findings.push({
           severity: 'warning',
           rule: FLOW_CREDENTIAL_LITERAL,
@@ -168,6 +182,7 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
           // `os explain flow-credential-literal`.
           message: `${what} holds a credential-shaped literal, ${SERVED}; ${steer}`,
           hint: route,
+          userTextParams: { flow: flowName, node: nodeId, name: entry.name, position: entry.position },
         });
       };
 
@@ -176,13 +191,19 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
         if (isRec(headers)) {
           for (const [name, value] of Object.entries(headers)) {
             if (!isCredentialShapedLiteral(name, value)) continue;
-            report(`${path}.config.headers${keySegment(name)}`, `header '${name}'`, STEER_CONNECTOR, HEADER_ROUTE);
+            report(`${path}.config.headers${keySegment(name)}`, `header '${name}'`, STEER_CONNECTOR, HEADER_ROUTE, {
+              name,
+              position: 'header',
+            });
           }
         }
         if (typeof url === 'string') {
           for (const [name, value] of queryParameters(url)) {
             if (!isCredentialShapedLiteral(name, value)) continue;
-            report(`${path}.config.url`, `url query parameter '${name}'`, STEER_CONNECTOR, QUERY_ROUTE);
+            report(`${path}.config.url`, `url query parameter '${name}'`, STEER_CONNECTOR, QUERY_ROUTE, {
+              name,
+              position: 'query',
+            });
           }
         }
       }
@@ -202,7 +223,7 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
             return;
           }
           if (isCredentialShapedLiteral(name, value)) {
-            report(at, `connector input '${label}'`, STEER_INPUT, INPUT_ROUTE);
+            report(at, `connector input '${label}'`, STEER_INPUT, INPUT_ROUTE, { name: label, position: 'input' });
           }
         };
         walk(connectorConfig.input, '', `${path}.connectorConfig.input`, '', 0);

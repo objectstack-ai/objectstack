@@ -213,9 +213,14 @@ export async function collectBatchPendingDeclarations(
     // how `pages` left this literal in the same edit it left
     // `RuntimeStackContext`.
     const pending: { [K in keyof RuntimePendingDeclarations]-?: unknown[] } = {
-        objects: [], permissions: [], books: [], datasets: [],
+        objects: [], permissions: [], books: [], datasets: [], flows: [],
     };
     let any = false;
+    // [#32666] A flow draft is read only to subtract it from the live flows an
+    // OBJECT write of this batch carries (`objectWriteFlowSubjects`); nothing
+    // else reads `pending.flows`. A batch with no object draft has no such
+    // write, so it pays no flow-draft read and is folded exactly as before.
+    const batchHasObjectDraft = drafts.some((d) => canonicalMetaType(d.type) === 'object');
     for (const d of drafts) {
         // The canonical fold, same boundary the promote applies: a stored
         // manifest-plural spelling must route to the same collection its
@@ -224,6 +229,7 @@ export async function collectBatchPendingDeclarations(
         const singular = canonicalMetaType(d.type);
         const key = (CLOSURE_CONTEXT_KEY_BY_TYPE as Record<string, keyof RuntimePendingDeclarations>)[singular];
         if (!key) continue;
+        if (key === 'flows' && !batchHasObjectDraft) continue;
         const repo = this.getOverlayRepo();
         // ── The repository-shape guard, and why it degrades ALL-OR-NOTHING
         //

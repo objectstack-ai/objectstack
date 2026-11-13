@@ -1,5 +1,1530 @@
 # Changelog
 
+## 18.4.0
+
+### Minor Changes
+
+- 4be8a2e: feat(spec)!: retire `emailAndPassword.revokeSessionsOnPasswordReset` — a completed password reset always ends every session the account holds, and there is no setting (#29909)
+  
+  Clause-②: no (narrowing) — `EmailAndPasswordConfig.revokeSessionsOnPasswordReset` becomes a `retiredKey()` tombstone, so the schema parse and `tsc` refuse it at any value, and plugin-auth's entry guard refuses it at any value too, `true` included, which it accepted before. Nothing is widened.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered email-and-password-revoke-sessions-on-reset-retired -->
+  
+  **BREAKING** for a configuration that still writes `emailAndPassword.revokeSessionsOnPasswordReset`, at any value.
+  
+  - **`@objectstack/spec`.** `EmailAndPasswordConfig.revokeSessionsOnPasswordReset` is retired (ADR-0049 enforce-or-remove). A completed self-service password reset already ended every session the account holds, on every reset door, and an explicit `false` was already refused at boot, so the key could hold one value only. It is now a tombstone: a typed configuration that writes it fails `tsc`, and `AuthConfigSchema` / `EmailAndPasswordConfigSchema` refuse it with the prescription. The authorable-surface row reads `[RETIRED]`, `RETIRED_KEYS_BY_MAJOR[18]` lists `system/EmailAndPasswordConfig:revokeSessionsOnPasswordReset`, and the upgrade guide carries the semantic entry `email-and-password-revoke-sessions-on-reset-retired`. The prescription is exported as `REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED` (`@objectstack/spec/system`). No ADR-0087 conversion: the key lives in the configuration a host hands the auth plugin, never in a stack or a stored row, so `os migrate meta` has nothing to rewrite.
+  - **`@objectstack/plugin-auth`.** The auth manager takes its configuration unparsed, so it refuses the retired key itself, where the configuration enters: at construction, which stops the boot, and on a configuration patch, where the standing configuration keeps ruling. It now refuses `true` as well as `false`, with the tombstone's own prescription. `true` asked for what the platform does anyway; the key is to be deleted either way. The auth instance still sets better-auth's own option of that name itself, so a completed reset ends the account's sessions exactly as before.
+  - **Unchanged.** What a password reset does: every self-service reset door ends every session the account holds, and each ended session is stamped `revoke_reason: password_reset`. An absent key is accepted, as before.
+  
+  **The remedy.** Delete `revokeSessionsOnPasswordReset` from the `emailAndPassword` block of the auth configuration, whatever it holds; nothing replaces it.
+- b70d9aa: feat(plugin-auth,platform-objects): per-provider SSO sign-in options for IdP-initiated sign-in and just-in-time accounts, and `invite_only` now refuses an SSO sign-in by someone who was not invited
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  **Behaviour change for existing deployments.** Under the `invite_only` audience posture, which is the default, an enterprise SSO sign-in (OIDC or SAML, through `@better-auth/sso`) by a person who has no account and no pending invitation is now refused. It redirects to the error page with `error=SELF_REGISTRATION_CLOSED`, and no user is created. Before, such a sign-in created the account. To keep the old behaviour for a provider, turn on its new `allowJit` option: **Setup → SSO Providers → Edit Sign-In Options**, or `POST /api/v1/auth/sso/update-provider` with `{ providerId, allowJit: true }`. Unchanged: a person who already has an account, a person with a pending invitation, the first human of an empty deployment, every sign-in under the `email_domain` or `open` posture, and the social and `oidcProviders` sign-ins.
+  
+  - **Two options on each SSO provider, both off by default.** `sys_sso_provider` gains `allow_idp_initiated` and `allow_jit` (boolean, default false, history tracked). They are declared to `@better-auth/sso` as provider `additionalFields`, so its own `/sso/register` and `/sso/update-provider` accept them, a non-boolean is refused 400 `VALIDATION_ERROR`, and the people who can write a provider today are the only ones who can change them. Every change writes a `sys_audit_log` row and a field-level activity line with the old and the new value.
+  - **IdP-initiated sign-in (SAML and OIDC).** Off, a SAML Response with no `InResponseTo` is refused `error=unsolicited_response`, and an OIDC callback with a `code` and no `state` is refused `error=state_not_found`, as before. On, the vendor's own IdP-initiated handling runs for that provider only. For SAML, the vendor's plugin-wide `saml.allowIdpInitiated` now answers the provider's column for each ACS request. For OIDC, the column is carried into the configuration the vendor reads, and an `allowIdpInitiated` member stored in that configuration is ignored and removed on the next write.
+  - **Setup.** The SSO Providers list shows both options, and each row has an **Edit Sign-In Options** action.
+- 7d4fcb6: `GET /api/v1/auth/config` can now say whether this host creates Developer Edition organizations, in a new optional `features.developerEditionCreate` flag. It is derived from the host's organization-create choices (`AuthManagerOptions.organizationEditions`, served as `features.organizationEditions`): `true` exactly when they hold a choice whose `edition` is `developer`, which a host declares only where its own organization-create door accepts `?edition=developer`. With no such choice, it is served as `false`, so no developer choice is offered.
+  
+  The flag only advertises: nothing in `@objectstack/plugin-auth` reads it to change behaviour, and no door here takes an edition. A host that declares a `developer` choice without serving that door offers a choice its server ignores.
+  
+  Like every public auth flag, it is classified in `PUBLIC_AUTH_FEATURES` (shell surface: a console form outside the login pages reads it straight off `/auth/config`; opt-in), so an action, a param or a field group may now also name it: `requiresFeature: 'developerEditionCreate'` is a new accepted value, lowered to `features.developerEditionCreate == true`.
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — the skills name the PUBLIC_AUTH_FEATURES registry, never its members
+- f714b0a: `GET /api/v1/auth/config` can now serve the editions a host's organization-create door accepts, as `features.organizationEditions`: a list of choices, each with the door's `edition` query value (snake_case, e.g. `developer`), a `label` and a `hint` the host already resolved in the request language, and an optional `memberLimit` when the edition caps its members (`OrganizationEditionChoiceSchema` in `@objectstack/spec/api`). A create-organization form draws each one as a choice that starts unchecked and sends its `edition` value when picked, with no product words of its own: the words are the host's.
+  
+  A host declares them with the new `AuthManagerOptions.organizationEditions` option, a function `({ acceptLanguage }) => choices` that `getPublicConfig()` calls with the request's `accept-language` header. `getPublicConfig(request?)` now takes the request for that purpose, and plugin-auth's `/config` route passes it. Unset, or answering an empty list, no `organizationEditions` key is served. Each `edition` value may appear only once in the list. A host answer the public contract rejects (a blank translated hint, an `edition` used twice), an option that throws, or one that answers a promise (the option is synchronous), is never published and never fails the rest of the public config: no choices are served, `developerEditionCreate` is `false`, and the failure is logged once at `error`, naming the option and the first issue. A throw is named by its error class, with its message in the log detail, and one process logs at most 32 distinct failures.
+  
+  `features.developerEditionCreate` is now derived from that list: `true` exactly when it holds a `developer` choice. The `AuthManagerOptions.developerEditionCreate` option it was set from until now never shipped in a release and is gone; declare a `developer` entry in `organizationEditions` instead. The flag is classified on the new `shell` surface of `PublicAuthFeatureSurface` (a console form outside the login pages reads it straight off `/auth/config`), not `login`.
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — the skills name the PUBLIC_AUTH_FEATURES registry and the auth config contract, never these members; nothing a metadata author writes changed
+
+### Patch Changes
+
+- 9728ab1: fix(plugin-auth): a locked account is answered like a wrong password, a password reset clears the lock, and attempts are counted before they are checked
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **A locked account answers like a wrong password.** A password sign-in for an account the ADR-0069 D2 lockout holds was refused `403 ACCOUNT_LOCKED`. Only an account that exists can be locked, so that answer told anyone who typed an address whether it has an account. It is now refused exactly as a wrong password is: `401 INVALID_EMAIL_OR_PASSWORD`, the same body, and the same password check before the answer. The lock still holds against the correct password, and the account's `login_failed` audit row still records the reason `ACCOUNT_LOCKED`. A deployment that wants the explicit answer sets the new `AuthManagerOptions.lockoutRefusal: 'explicit'` (default `'uniform'`), and is answered `403 ACCOUNT_LOCKED` as before. A sign-in reached outside better-auth's endpoint pipeline cannot be answered uniformly; it is refused `403 ACCOUNT_LOCKED` and logged as a degradation.
+  - **A completed password reset clears the lock.** A reset through the emailed link or the phone code now clears `failed_login_count` and `locked_until`, so the new password signs in at once. Before, the lock stayed until it ran out or an administrator unlocked it. The second factor's own lock is not cleared by a reset; the administrator's Unlock action still clears both.
+  - **Attempts that arrive together cannot outrun the lock.** Each attempt is now counted before its password is checked, in one atomic write that also sets the lock when the count reaches the threshold, so at most the threshold's number of attempts reach the password check before the lock holds. A successful sign-in still clears the count, and a refusal that comes after the password passed (an organization's IP list, a ban, an unverified address) still neither counts nor clears. Attempts on a locked account are now counted too; the lock's expiry does not move.
+  - **The console names the pause.** The sign-in refusal copy (`auth.login.errors.invalidCredentials`) now says that repeated failures pause sign-in for a while and that resetting the password signs in right away, in all 11 console locales (`en`, `zh-Hans`, `zh-Hant`, `ja`, `ar`, `de`, `es`, `fr`, `ko`, `pt-BR`, `ru`).
+- f6a429b: feat(plugin-auth,platform-objects,core): `sys_api_key.revoked_reason` accepts `organization_membership_ended`, and no user-context Restore lifts it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/platform-objects`: `sys_api_key.revoked_reason` gains the option `organization_membership_ended`** ("Organization membership ended"), beside `admin_password_reset`. It is the word `sys_session.revoke_reason` already carries when a membership removal ends a session, so one grep finds every place the platform acts on a membership ending, across sessions and keys. The platform never writes it: a host that removes someone from the organization and revokes their keys writes it in the system context, beside `revoked: true`. The column stays readonly and off the ADR-0092 D2 whitelist, so no data-API write sets or clears it. The field's help text names both reasons and who can restore each; the six translated locales carry the new option and the new help.
+  - **`@objectstack/plugin-auth`: the restore guard refuses every user-context restore of a key carrying that reason**, a platform administrator's included (by the `admin_full_access` grant or by the `OS_PLATFORM_OWNER_EMAIL` anchor), on the by-id path and per row on a multi-row update: `403 PERMISSION_DENIED`, nothing written, and a message that says the owner's membership ended and that a member creates a new key (`POST /api/v1/keys`, or the API Keys page). This is the `restore_api_key` row action's own door (`PATCH /api/v1/data/sys_api_key/{id}` with `{ revoked: false }`). Re-arming the key would hand a non-member's credential back its access, whoever clicks Restore, and on a `single` deployment no per-request membership check refuses the key, so `revoked` is the only barrier. A system-context un-revoke still lands and clears the reason, as for every reason. `admin_password_reset` keeps its rule unchanged: a platform administrator restores it, its owner does not.
+  - **`@objectstack/core`: the key door's `403 API_KEY_REVOKED` text for such a key** says it was revoked because its owner's membership in the organization ended and cannot be restored, and names the new-key road. It used to offer "its owner or a platform administrator can restore it", a restore the guard now refuses. Code, status and every carried field are unchanged.
+- c23501b: fix: a user's language preference is stored in its BCP-47 case, so `zh-cn` and `ZH-CN` are saved as `zh-CN` and the console renders that user's language (#29895)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_user.locale` used to store a tag as written. The column checks only the shape of a tag, so `zh-cn` was accepted, and the console, which picks its UI language by exact match, then rendered English for that user with no error. Every write of the column is now stored in BCP-47 case: language lower case, region upper case, script title case (`ZH-HANS-cn` → `zh-Hans-CN`). This applies to the data API (`PATCH /api/v1/data/sys_user/:id` and its bulk form), the admin user import and the identity-provider locale sync. The fold is the one `LocaleSchema` applies to translation locales. Nothing new is refused: `zh_CN` is still refused with 400, and an empty value still clears the preference. Rows stored mis-cased before this release are not rewritten. Such a row reads back as stored until the column is written again.
+- cde492d: feat(plugin-auth): a page navigation to the mobile sign-in hand-off that has to sign in first goes to the sign-in page, so the app opens only the hand-off
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /api/v1/auth/one-time-token/handoff` answered a missing or old session with `401` as raw JSON, so the mobile app had to open the Console's `/login` route itself and know how that page treats `redirect`. An installed app stays in use for months, so a Console upgrade could strand it. Now the app opens only the hand-off:
+  
+  - A page navigation with no session, or with one older than five minutes, answers `302` to this deployment's Console sign-in page, with `redirect` naming the same request. `Location` is root-relative, so the browser stays on the origin the request arrived on, and `uiBasePath` is honoured.
+  - Any other request still answers `401`, so the app's anonymous probe keeps reading "this server registered me". A navigation reporting `Sec-Fetch-Site: same-origin` answers `401` too: it is the sign-in page forwarding a session the route refuses. A deployment that does not serve the Console keeps the `401` too, and says so once at `warn`.
+  - A token is still minted only for a session under five minutes old, and every `400` (a cross-site navigation, an unknown parameter, an unregistered scheme, a bad challenge) is still decided first, with no redirect.
+  - A device whose clock is behind does not bounce between the route and the sign-in page. The redirect carries `handoff_refused_at`, the server's time of the refusal, and the page holds its form for any session not created after it, whatever the device's clock says. A session created after it forwards, so a provider's sign-in that returns to the same URL still ends at the app. The links between the sign-in and sign-up pages carry the mark beside a hand-off `redirect`, and every other link is unchanged.
+  
+  An app can change its entry only once its server runs this release: an older server answers the new entry with JSON.
+- 09720e2: `GET /api/v1/auth/config` now says whether email leaves the deployment, in a new optional `features.emailDelivery` flag. It is `true` only when the wired email service reports itself configured, and `false` with no email service or with the stock `log` transport, which writes mail to the server console instead of sending it. The forgot-password page can read it to stop saying a reset link was sent on a deployment that sends no mail.
+  
+  The flag describes the deployment, not an address: `POST /api/v1/auth/request-password-reset` still answers a known and an unknown address the same way, with or without mail.
+  
+  Like every public auth flag, it is classified in `PUBLIC_AUTH_FEATURES` (login surface, opt-in), so an action may now also name it: `requiresFeature: 'emailDelivery'` is a new accepted value, lowered to `features.emailDelivery == true`.
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+- 8fed00f: fix(plugin-auth): Create User's refusal of its permission set reads as two sentences: no user was created, then the grant's own reason (#30117)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When the permission set named on `POST /api/v1/auth/admin/create-user` is refused, the answer still says first that no user was created, and now follows with the grant's reason as its own sentence, for example: `The permission set was not assigned, so no user was created. There is no permission set named 'xyz': choose one from the list.` Status, code, `fields` and the rollback (no user is created) are unchanged.
+- 9afcd6a: fix(plugin-auth)!: an organization cannot require multi-factor authentication while two-factor enrollment is off, and the MFA gate never holds a user who has no way to enroll (#30201)
+  
+  Clause-②: no (narrowing) — while the two-factor feature is off, a write that turns `sys_organization.require_mfa` on (an insert with it on, or an update of a row that stores it off) is refused `400 VALIDATION_FAILED`, a value an administrator could save before; re-saving a row that already stores it on passes. No published export, error code or settings key is added; nothing is widened.
+  Metadata-protocol: none
+  Skills-docs: follow-up owed — content/docs/permissions/authentication.mdx (the `mfa_required` row says `require_mfa` is settable per organization with no condition; it needs two-factor on)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime accept set on one platform-owned data column, `sys_organization.require_mfa`, judged against the deployment's two-factor state at write time; the remedy is a deployment or settings change (turn two-factor on), which no ledger entry can derive. The other categories are closed on facts: the bumped package publishes (not unpublished); no ADR-0087 id covers this column and this diff adds none (not registered, not already-registered); no published export is added, removed or retyped, so no interface or type narrows (not runtime-export-retired, runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing on `sys_organization.require_mfa` writes, served by every data door (the organization's edit form, REST, MCP), on a deployment where two-factor is off.
+  
+  - **Before.** An administrator could tick Require Multi-Factor Auth on an organization while two-factor was off (the default, `features.twoFactor: false`), and it saved. Once the grace period ended, every member, the owner included, was held `403 MFA_REQUIRED` and sent to enroll, and the enrollment endpoint (`POST /api/v1/auth/two-factor/enable`) answered 404: the twoFactor plugin that serves it was never turned on. Nobody could undo it from inside the product, because Setup sits behind the same gate. The global switch never had this hole: the `auth.mfa_required` setting turns the requirement and the plugin on as one piece.
+  - **Now.** While two-factor is off, a write that turns `require_mfa` on is refused: an insert with it on, or an update of a row whose stored value is off. The refusal carries one `fields[]` entry on `require_mfa` (`invalid_value`) saying why, who would have been locked out, and the ways forward. It applies to every write context, the system's included, on the by-id door, an insert, and a multi-row update, which is judged row by row (one row turning it on refuses the whole write, with nothing written). Re-sending `require_mfa: true` for a row that already stores it (a whole-row update, an import re-run, a save with no change) passes, so other edits of that row are not blocked. Clearing the column and writing other columns pass as before, and every write passes once two-factor is on (read per write, so no restart is needed).
+  - **The gate.** ADR-0069 D3's MFA gate holds a user only while they can enroll. With two-factor off, an MFA requirement (an organization's `require_mfa`, or `auth.mfa_required` under an `OS_AUTH_TWO_FACTOR=false` pin, or a host that sets `mfaRequired` without `plugins.twoFactor`) holds nobody and starts no grace clock, and the server says so once in a warning with the remedy. An organization row stored with `require_mfa = true` before this release therefore locks no one out; it starts holding unenrolled members once two-factor is turned on.
+  - **One answer.** Whether two-factor is on is decided in one place, the same `OS_AUTH_TWO_FACTOR` env, then `plugins.twoFactor`, then off, for the plugin list, `features.twoFactor` in `/api/v1/auth/config`, the gate and the write refusal.
+  - **Unchanged.** An enrolled user is never held. With two-factor on, the requirement and its grace period behave exactly as before. The `auth.mfa_required` setting still turns two-factor on with the requirement.
+  
+  **The remedy.** To require multi-factor authentication for one organization, turn two-factor enrollment on for the deployment first, with `OS_AUTH_TWO_FACTOR=true`, and then tick the organization's box. Unless `OS_AUTH_TWO_FACTOR` is set to `false` (the env var outranks the settings), turning on the `auth.mfa_required` setting instead also works: it requires multi-factor authentication for every organization and turns enrollment on with it.
+- 870ebce: fix(plugin-auth)!: saving the auth settings refuses to turn off the last way to sign in (#30202)
+  
+  Clause-②: yes (narrowing) — a save an administrator could make before is now refused at the settings save door with the existing `SETTINGS_VALIDATION` / `invalid_value` field error: a save after which email and password is off and nothing else signs anyone in, judged on the whole save, including the Google change that removes the last provider while email and password is off. No new error code or settings key. The widening half: `SettingsWritePredicateInput`, exported from `@objectstack/service-settings`, gains an optional `batch` field, the whole write a predicate is asked about.
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches `auth.email_password_enabled` or the settings write predicate; `content/docs/deployment/environment-variables.mdx` already names the `OS_AUTH_EMAIL_PASSWORD_ENABLED` override used for recovery below.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: auth.email_password_enabled and the auth.google_* keys keep their declarations, and the save door now refuses only the save that leaves no way to sign in. The predicate input's new batch field is optional and additive. A value stored before is not rewritten (the existing OS_AUTH_EMAIL_PASSWORD_ENABLED override recovers it), so there is nothing at rest for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the auth settings save door (`PUT /api/settings/auth`, `SettingsService.setMany('auth', …)`): a save that would leave no way to sign in is refused, where it was saved before.
+  
+  - **Before.** Setup → Settings → Authentication, "Enable email/password login" off, save: "Settings saved", with no social provider and SSO off. After the next sign-out nobody could sign in, the administrator included.
+  - **Now.** A save after which email and password is off and no other way in is in force answers `400 SETTINGS_VALIDATION`. The field error sits at `email_password_enabled` (`code: invalid_value`, `constraint.lastSignInMethod: email_password`), and its message, in the caller's language (en, zh-CN, ja-JP, es-ES), says to keep or set up another sign-in method before or in that save. Nothing in that batch is written, and email and password stays on.
+  - **The whole save is judged.** `{ email_password_enabled: false, google_enabled: false }` (or with `google_client_secret` cleared) on a deployment signing in with email and password plus Google is refused, with a field error at each of the two keys. Google filled in (switch, client ID and secret) in the same save that turns email and password off is accepted, and so is the switch alone over a client ID and secret already stored.
+  - **What counts as another way in.** A social or OIDC provider in force whose client ID and client secret are both set; enterprise SSO switched on with at least one identity provider registered (the switch alone does not count); phone-number sign-in; a host sign-in handoff the host declared. `ssoOnlyMode` alone, magic link, passkeys, and a provider listed without its credentials do not count.
+  - **The other direction.** While email and password is off, `google_enabled: false`, or clearing `google_client_id` / `google_client_secret` when no environment variable or stack config supplies it, is refused (`constraint.lastSignInMethod: google`) if Google is the last way in.
+  - **Already locked out.** Set `OS_AUTH_EMAIL_PASSWORD_ENABLED=true` and restart: the environment override wins over the stored `false`, and email and password sign-in comes back. Then set up another method before turning it off again.
+  - **For a write predicate's author (`@objectstack/service-settings`).** `SettingsWritePredicateInput.batch` holds every key the write sets in the namespace, the asked key among them, with the value it would store (`null` clears). `setMany` always passes it, frozen. A rule over several keys judges the state after the whole write from it instead of one key against the rest as they stand. Existing predicates need no change.
+- d1d90b7: fix(plugin-auth)!: clearing the allowed IP ranges applies at once, and a console save that leaves out the saving address is refused
+  
+  Clause-②: yes (narrowing) — a settings console save (`PUT /api/settings/auth`) of an `allowed_ip_ranges` list none of whose entries matches the saving request's own address is refused, where it was stored before; and `@objectstack/service-settings` widens its published surface: three new exported types (`SettingsWriteOptions`, `SettingsRequestTransport`, `SettingsWritePredicateOptions`), `setMany`'s fourth parameter accepts `SettingsWriteOptions`, `registerWritePredicate` takes an optional fourth `options`, and `SettingsWritePredicateInput` gains an optional `transport`.
+  Metadata-protocol: none
+  Skills-docs: none — `skills/**` teaches no `allowed_ip_ranges`; `content/docs/permissions/authentication.mdx` describes the setting and does not yet state the save refusal or the recovery, which ship here in the refusal text and this entry (the page is outside this change's surface and is named for a follow-up).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata an author writes changes and no stored row is rewritten: a console save of a setting value is refused when it would lock out the saving request -->
+  
+  **BREAKING** for an administrator who saves, through the settings console, an allowed-IP list (ADR-0069 D5) that does not include the address they are connected from.
+  
+  - **Clearing applies at once.** The console sends an emptied field as `null`, which resolves with source `default`, and the settings binding used to skip a default-sourced `allowed_ip_ranges`: the last stored list kept refusing sign-in (`403 IP_NOT_ALLOWED`) until a restart while the field showed empty. A cleared or restored-default value now hands the gate back to the deployment's own declaration in the same pass: no list when it declared none, the `allowedIpRanges` the plugin options or an `auth:configure` handler declared otherwise.
+  - **The save is refused.** A list no entry of which matches the saving request's address is refused with `400 SETTINGS_VALIDATION`, `invalid_value` at `allowed_ip_ranges`, the address in `constraint.clientAddress`, and a message in the caller's language that names it. The address is the one the gate judges at sign-in: the transport's peer address, or the forwarded one when the stack declares `server.trustProxy`. When the server cannot establish the address, every non-empty list is refused, because the gate would refuse that request too. Clearing the list is never refused, and an in-process write (boot, seed, migration) carries no request and is not judged.
+  - **Recovery when already locked out.** Start the server with `OS_AUTH_ALLOWED_IP_RANGES` set to an empty value. The settings env override wins over the stored list and opens the gate; remove it once the list is fixed.
+  - **`@objectstack/service-settings`.** `setMany`'s options (`SettingsWriteOptions`) and a write predicate's input gain an optional `transport` (`SettingsRequestTransport`: the transport's peer address and request headers), which the settings routes set on a save so a write predicate can judge the change against the caller's own connection. A predicate sees only the headers it names at registration (`registerWritePredicate(…, { requestHeaders })`, `SettingsWritePredicateOptions`), so a credential header never reaches one that did not ask for it. The transport identifies and authorizes nothing and is never stored.
+  - **Who moves.** An administrator adds their own address or range to the list, or saves it from an address inside it.
+- a93ef3e: fix(plugin-auth)!: deleting the last identity provider is refused, and a boot that serves no sign-in method says so (#30300)
+  
+  Clause-②: yes (narrowing) — a request an administrator could make before is now refused: `POST /api/v1/auth/sso/delete-provider` (Setup's "Delete SSO Provider") on the last identity provider, while email and password is off and nothing else signs anyone in, answers `409 DELETE_RESTRICTED` (an existing standard code, the one an organization delete refused for the same reason answers), or `503 SERVICE_UNAVAILABLE` when the provider list cannot be read to tell. No new error code, setting or field. The widening half: `AuthManager` gains `setSsoProviderDeleteFloor()`, marked `@internal`, through which `AuthPlugin` hands it the judge. The boot report is a new `error` log line only; nothing about the boot's outcome changes.
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches deleting an SSO provider or the sign-in boot reports; `content/docs/deployment/self-hosting.mdx` gains "No sign-in method left" with the three doors and the recovery.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: sys_sso_provider keeps its columns and the delete endpoint keeps its request shape; it now refuses only the delete that leaves no way to sign in. Nothing stored is rewritten, so there is nothing at rest for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at `POST /api/v1/auth/sso/delete-provider`: deleting the identity provider that is the last way to sign in is refused, where it was deleted before.
+  
+  - **Before.** Email and password off, one SSO identity provider registered and nothing else in force. Setup → the provider → "Delete SSO Provider": `200 {"success":true}`, the row gone. From then on nobody could sign in, the administrator included (measured on a real boot).
+  - **Now.** That delete answers `409` with `code: DELETE_RESTRICTED`, `lastSignInMethod: enterprise_sso`, and a message in the caller's language (en, zh-CN, ja-JP, es-ES) saying to turn email and password back on, or register another identity provider or set up another sign-in method, first. Nothing is deleted. When the provider list cannot be read to tell, it answers `503 SERVICE_UNAVAILABLE` instead of letting the delete through.
+  - **Still allowed.** Deleting a provider while another one remains, while email and password is on, while enterprise SSO is switched off, or while another way in counts: a social or OIDC provider with a client ID and secret, phone-number sign-in, or a host sign-in handoff. An unknown provider is still the vendor's `404`, and a caller with no session the vendor's `401`; the vendor's own provider-access check still decides who may delete which provider.
+  - **The redeploy door.** A boot whose configuration no longer declares the last way in (for example a redeploy without the `GOOGLE_CLIENT_*` pair while email and password is off) still boots, as before, and now reports at `error` under the grep token `no_sign_in_method_at_boot`, naming the consequence and the recovery. It is a positive claim only: a provider table that cannot be read says nothing. Refusing such a boot is a later option, not done: a deployment that signs people in through a door the auth plugin cannot see must keep starting.
+  - **Already locked out.** Set `OS_AUTH_EMAIL_PASSWORD_ENABLED=true` and restart: the environment override wins over a stored `auth.email_password_enabled = false` and over the stack config, and email and password sign-in comes back.
+- 0e4dfbe: fix(plugin-auth)!: the global `auth.mfa_required` switch cannot be saved on while `OS_AUTH_TWO_FACTOR=false` keeps two-factor enrollment off (#30302)
+  
+  Clause-②: no (narrowing) — while `OS_AUTH_TWO_FACTOR` is set to off, a save that turns the `auth.mfa_required` setting on is refused `400 SETTINGS_VALIDATION` (`invalid_value` at `mfa_required`), a value an administrator could save before; saving it off, or re-saving a value already in force, passes. No published export, error code, settings key or `/auth/config` member is added; nothing is widened.
+  Metadata-protocol: none
+  Skills-docs: updated here — `content/docs/permissions/authentication.mdx` (the `mfa_required` row) and `docs/HARDENING.md` (the MFA row); `skills/**` teaches neither `mfa_required` nor `require_mfa`, so no skill or eval moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime accept set on one settings key, `auth.mfa_required`, judged against the deployment's `OS_AUTH_TWO_FACTOR` env var at save time; the remedy is a deployment change (set the env var on, or remove it), which no ledger entry can derive. The other categories are closed on facts: the bumped package publishes (not unpublished); no ADR-0087 id covers this key and this diff adds none (not registered, not already-registered); no published export is added, removed or retyped, so no interface or type narrows (not runtime-export-retired, runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing on the `auth.mfa_required` settings save (Setup → Authentication, `PUT /api/settings/auth`, `SettingsService.setMany`), on a deployment that sets `OS_AUTH_TWO_FACTOR` to off.
+  
+  - **Before.** Turning on "Require multi-factor authentication" saved and read as on. The settings pass turns the requirement and the two-factor plugin on as one piece, but the `OS_AUTH_TWO_FACTOR` env var outranks the plugin flag, so under `OS_AUTH_TWO_FACTOR=false` nobody could enroll an authenticator app, and the MFA gate, which holds only a user who can enroll, enforced nothing. An organization's own `require_mfa` already refused this state; the global switch did not.
+  - **Now.** That save is refused before anything is written: the whole save, other keys in it included, with one field error at `mfa_required` naming `OS_AUTH_TWO_FACTOR`, in the caller's language (English, Simplified Chinese, Japanese, Spanish), and the constraint `{ twoFactor: false, overriddenBy: 'OS_AUTH_TWO_FACTOR' }`.
+  - **Unchanged.** With `OS_AUTH_TWO_FACTOR` unset or on, the switch saves and turns enrollment on with the requirement, as before. Turning it off is never refused. A switch saved on before this release is left as stored and still not enforced; `GET /api/v1/auth/config` answers `features.twoFactor: false` there, the same decision the gate makes, which is the reading a console uses to say the requirement is not enforced.
+  
+  **The remedy.** Set `OS_AUTH_TWO_FACTOR=true` on the deployment (or remove it) and restart, then turn on `auth.mfa_required`.
+- b5765be: fix(plugin-auth)!: clearing an authentication setting, or restoring the namespace's defaults, takes effect at once (#30312)
+  
+  Clause-②: yes (narrowing) — one save an administrator could make before is now refused at the settings save door with the existing `SETTINGS_VALIDATION` / `invalid_value` field error: clearing `auth.email_password_enabled` on a deployment that itself declared email and password off, when nothing else signs anyone in after the save. Before, that clear was saved and changed nothing at runtime; now a clear applies, and that one would lock everyone out. No new error code, settings key or export.
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches the auth settings namespace, its clear or the sign-in floor.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: every auth key keeps its declaration. A clear now applies the deployment's own declared value, which is what a clear always documented; the save door refuses only the one clear that would leave no way to sign in. Nothing at rest is rewritten, so there is nothing for a migration to do. -->
+  
+  **BREAKING** accept-set narrowing at the auth settings save door (`PUT /api/settings/auth`, `SettingsService.setMany('auth', …)`): one clear that was saved before is refused.
+  
+  - **The fix.** A cleared `auth.*` key (the console sends `null`) or a namespace reset resolves `source: 'default'`. Every key except `allowed_ip_ranges` (#30203) then kept its last stored value in force until a restart: lockout threshold, max sessions per user, password policy, session lifetime, MFA, API-key lifetime, rate limits, Google, audience. Now the running value returns in the same pass to what the deployment declared (plugin options, `auth:configure`), or to the built-in default where it declared nothing. A value in a block the auth manager judges (`emailAndPassword`, `plugins`, `audience`) is restored through that same block, so it is judged as a save of it would be. Environment overrides keep ruling.
+  - **The refused clear.** With email and password declared off by the deployment and turned on in Setup, and no other way in (Google switched off in Setup, no other provider, no SSO, no phone sign-in, no host handoff), clearing "Enable email/password login" now answers `400 SETTINGS_VALIDATION` at `email_password_enabled` (`constraint.lastSignInMethod: email_password`), and nothing is written. Set up another sign-in method first, or save the toggle on explicitly instead of clearing it.
+  - **Session lifetime.** A stored `session_expiry_days` / `session_refresh_days` now overrides its field of the deployment's declared `session` block instead of replacing the whole block.
+- 5a878a3: fix(plugin-auth): an IPv6 CIDR in the allowed IP ranges admits the IPv6 clients inside it, at the sign-in gate and at the settings save check
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `auth.allowed_ip_ranges` (ADR-0069 D5) promises CIDR ranges, but its matcher read only IPv4 CIDR and exact addresses: an IPv6 entry such as `2001:db8::/32` was compared as text, so it never matched a real client. The sign-in gate then refused every IPv6 client the list named, and the settings save check refused the save for an administrator connected over IPv6 from inside it. `ipMatchesRange` now reads an IPv6 CIDR as the first `n` of 128 bits, and both doors use it, so they keep judging the same address the same way.
+  
+  - An exact IPv6 entry matches the address it denotes however it is spelled (`2001:DB8:0:0::1` matches `2001:db8::1`).
+  - An IPv4-mapped address, dotted (`::ffff:203.0.113.5`) or hex (`::ffff:cb00:7105`), is still judged as the IPv4 address it maps. A zone identifier on an address (`fe80::1%eth0`) is dropped before matching.
+  - Families never cross: an IPv4 range never admits a pure IPv6 address, and an IPv6 range never admits an IPv4 one.
+  - An IPv6 prefix must be a whole number from 0 to 128. An entry with any other prefix matches only its base address, as it did before. IPv4 entries are read exactly as before.
+- 1aeeafd: fix(plugin-auth)!: an MCP access token can be revoked — `/oauth2/revoke` and the Console's consent withdraw end it on the next request, through the OAuth consent it was minted under
+  
+  Clause-②: no (narrowing) — the MCP door refuses a bearer whose consent is gone or newer than the token, which the published contract already promises (`packages/spec/src/contracts/auth-service.ts` `verifyMcpAccessToken`: "a falsy value when the token is unknown/expired/revoked … callers fail CLOSED"), and a bearer with no `azp` claim to key that read; the revoke door's 200 for an invalid or another client's token removes a refusal RFC 7009 §2.1/§2.2 already negates. The contract text is not changed.
+  Metadata-protocol: none
+  Skills-docs: none — `skills/**` says nothing about revoking an MCP OAuth access token or withdrawing a consent, so no published skill text moves; the rule is documented in `mcp-token-revocation.ts` and on `AuthManager.verifyMcpAccessToken`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable key, value or export is removed or renamed; no metadata parses or saves differently, and only which OAuth bearers the MCP door admits after a revoke narrows -->
+  
+  **BREAKING** narrowing at the MCP OAuth door and `/oauth2/revoke` (`@objectstack/plugin-auth`), executing the maintainer's ruling A of objectstack-ai/cloud#3606.
+  
+  - **The consent is the revocable record.** An MCP access token is a JWT the authorization server never stores, so `verifyMcpAccessToken` now reads, on every MCP request, the consent the token was minted under: one indexed read of `sys_oauth_consent` by the token's client (`azp`), user (`sub`) and organization (`organization_id`). The token is refused when that consent is gone, when it was created after the token was issued (revoked, then granted again), when the token carries no `azp`, and when the read fails (fail closed). The MCP route answers a refused bearer `401`.
+  - **`POST /oauth2/revoke`.** The provider still authenticates the client first, unchanged. For an MCP access token issued to that client, the revoke now deletes the consent and the client's refresh family for that user and answers `200`, where it answered `400 unsupported_token_type` and the token kept working until it expired. A token issued to another client answers `200` and changes nothing. An unknown or invalid token answers `200` (RFC 7009 §2.2) where it answered `400 invalid_request`. A `token_type_hint` that names another token type does not end the search (RFC 7009 §2.1): the MCP access token is revoked all the same. A request the provider refuses before it looks at the token (no client, an unknown client, a malformed request) keeps its refusal. A store error while revoking answers `503 server_error` (RFC 7009 §2.2.1: the token still stands, retry later), and a retry completes it.
+  - **The Console's withdraw (`POST /oauth2/delete-consent`)** now ends the agent's access on its next request, with no other change: it deletes the same row the MCP door reads.
+  - **A server-only `skip_consent` client** has no consent row: its tokens are admitted without one, and revoking one keeps the honest `unsupported_token_type`.
+  - **The accepted cost.** After a revoke, the person sees the consent page again on the next connect.
+- 26c2efd: fix(plugin-auth): Setup's Register SAML Provider registers a complete form; it answered 400 for every one
+  
+  Clause-②: no — a form the bridge always refused registers; nothing a caller sends today is refused
+  Metadata-protocol: none
+  
+  - **Before.** `POST /api/v1/auth/admin/sso/register-saml` (Setup → SSO Providers → Register SAML Provider) answered `400 SAML_REGISTER_FAILED` "[body.samlConfig.idpMetadata] idpMetadata.entityID is required when IdP metadata XML is not provided" for every complete form. The bridge sent `samlConfig` with no IdP descriptor, which `@better-auth/sso` requires when no IdP metadata XML is given, so no SAML provider could be registered from Setup.
+  - **Now.** The bridge sends `samlConfig.idpMetadata.entityID` from the form's IdP Entity ID field (`issuer`), and a complete form registers the provider (one `sys_sso_provider` row) and answers the SP ACS and metadata URLs as before. The form's fields, the required set and the refusal of an incomplete form (`400 INVALID_REQUEST` naming the missing field) are unchanged. The IdP SSO URL and signing certificate stay where they were (`samlConfig.entryPoint`, `samlConfig.cert`).
+- 2445cb4: fix(service-settings): a clear of an env-pinned setting clears the stored value beneath the pin, so the allowed-IP lockout recovery holds once the variable is removed
+  
+  Clause-②: yes (widening) — `SettingsService.setMany` / `set` (and `PUT /api/settings/:namespace`) accept a clear (`null` / `undefined`) of a key an `OS_*` override in force pins, where every write to such a key was refused `409 SETTINGS_LOCKED`; every other write is still refused. No export, type or error code changes.
+  Metadata-protocol: none
+  
+  - **A clear goes through an env pin.** An `OS_*` override in force decides the value in force and still refuses every write but a clear. A clear (`null` / `undefined`, never a value such as `''` that a key would store) clears the value stored beneath the pin, so the key falls back to its default once the override is removed. It changes nothing in force: the answer still reads the env value with `source: 'env'` and `locked: true`. It meets every judgment a clear meets without a pin: a locked row at an upper scope, or a locked row at the write's own scope for a caller that is not the platform, still refuses it `SETTINGS_LOCKED` (`locked-by-<scope>`), and the key's write predicates still run.
+  - **Why.** The override hides the stored value from every read, and used to refuse every write to it, so an operator who pinned a key to recover from a bad stored value got the same value back the moment the pin was lifted. For `auth.allowed_ip_ranges` that meant the documented recovery (`OS_AUTH_ALLOWED_IP_RANGES` set empty) opened the gate only until the variable was removed, and the next restart locked the administrator out again.
+  - **Recovery when locked out by `allowed_ip_ranges` (`@objectstack/plugin-auth`).** Start the server with `OS_AUTH_ALLOWED_IP_RANGES` set to an empty value, sign in, clear the stored list with a settings request that sets `allowed_ip_ranges` to `null` (`PUT /api/settings/auth`), then remove the variable. The save refusal's message names these four steps in all four of its languages. This supersedes the recovery sentence of the earlier entry for the allowed-IP save refusal ("remove it once the list is fixed"): removing the variable without the clear brings the stored list back at the next restart. The Setup console still shows a pinned field read-only, so the clear is a settings API request for now.
+- 455b4f0: feat(plugin-auth): a platform admin can read the address the allowed IP ranges save check will judge, before saving, at `GET /api/v1/auth/admin/client-address` (#30398)
+  
+  Clause-②: yes (widening) — a new authenticated HTTP read on the auth mount, ledgered `server-only` in the plugin's auth route ledger; no spec schema, SDK method or package export moves.
+  Metadata-protocol: none
+  
+  A save of `auth.allowed_ip_ranges` (ADR-0069 D5) is refused when the list leaves out the address the saving request comes from, and the refusal names that address. Until now that refusal was the only place the address appeared, so an administrator learned which address counts by being refused. The new read answers it beforehand.
+  
+  - **The answer.** `200 { success: true, data: { clientAddress, trustProxy } }` with `Cache-Control: no-store`. `clientAddress` is the caller's address exactly as the save check and the sign-in gate judge it, through the same call the save check makes: the forwarded `X-Forwarded-For` / `X-Real-IP` address only when the stack declares `server.trustProxy`, the connection's peer address otherwise, in the same text (an IPv4-mapped peer reads `::ffff:127.0.0.1`, as the refusal names it). It is `null` when the server cannot establish an address; while any list is set, such a connection is refused at sign-in and any non-empty list at the save. `trustProxy` says whether forwarded headers counted.
+  - **Who may read it.** A platform admin, through the gate every ObjectStack `/admin/*` auth route uses: no session answers `401 UNAUTHENTICATED`, a session held by the authentication policy (an expired password, required two-factor not set up) answers `403` with that posture's code, and any other caller `403 PERMISSION_DENIED`. It is not served to anonymous callers, and `GET /api/v1/auth/config` is unchanged.
+  - **Closed query set.** The route takes no query parameters; any one is refused with `400 VALIDATION_ERROR`.
+  - **Behind the allow-list.** Like every auth route except the sign-in page's two render reads, the read is judged by the allow-list in force: a caller already outside it gets `403 IP_NOT_ALLOWED`.
+  
+  The save check, the sign-in gate and the address rule are unchanged: the save check now reaches the rule through the helper the read shares, with the same inputs.
+- e8e924f: fix(plugin-auth,platform-objects): an organization's require-MFA refusal reads in the caller's language, an accepted save that turns it on names the grace period in force, and the field help says two-factor must be on (#30411)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** Saving `sys_organization.require_mfa` on while two-factor enrollment was off was refused with an English sentence, whatever language the administrator's console used. An accepted save that turned it on answered nothing about when members would be blocked, and the configured grace period (`auth.mfa_grace_period_days`) was readable only through the `auth` settings, which need `manage_platform_settings`, a capability an organization administrator does not hold. The field help did not say the requirement needs two-factor on.
+  - **Now.** The refusal is in the request's language (English, Simplified Chinese, Japanese, Spanish; matched from `Accept-Language` exactly, then by language, else English), with the same shape as before: `400 VALIDATION_FAILED`, one `require_mfa` / `invalid_value` field entry carrying the same sentence as the top-level message. A save that is admitted and turns the requirement on (two-factor on, the stored value off, or an insert) answers a save `notice` on the create or update answer, in the same language: every member without an authenticator app must enroll, within the grace period in force, in days, read per write from the same setting the MFA gate's clock holds to. A save that turns nothing on (clearing it, re-saving a stored `true`, writing other columns) answers no notice. The field help, in all four languages, says the requirement needs two-factor authentication on for the deployment (`OS_AUTH_TWO_FACTOR=true`) and that saving it on is refused while it is off.
+  - **Unchanged.** Which writes are refused and which are admitted, the refusal's code, status and field entry, the MFA gate and its grace clock, and every `auth` setting and its read permission. No member is added to any answer: `notice` is the create and update answers' existing optional member.
+- 1c5cee6: fix(service-settings): an `OS_LOCALIZATION_LOCALE` naming a language the boot is still loading is no longer dropped, and Setup's default language accepts by the same locale matcher as the IdP locale claim (#30456)
+  
+  Clause-②: yes (widening) — `@objectstack/core` exports `resolveOfferedLocale(requested, offered)`; `SettingsService` gains `holdOptionSourceVerdicts()` and `sealOptionSources()`. The save of `localization.locale` (`PUT /api/settings/localization`, `SettingsService.setMany`) and an `OS_LOCALIZATION_LOCALE` override now also accept a region or base of an offered language (`fr-FR` where `fr` is offered, `fr` where `fr-FR` is) and another case of an offered code (`zh-cn` for `zh-CN`); nothing accepted before is refused. The IdP locale claim (`resolveIdpLocale`) lands a script or region spelling on the offered code the platform locale table says it means (`zh-TW` on `zh-Hant`, not on a `zh-Hans` listed first).
+  Metadata-protocol: none
+  
+  - **The boot window.** The deployment's locale list fills during the boot: the app's authored translations arrive at `kernel:ready`. A `kernel:ready` reader of `localization.locale` (auth's mail and SMS default language) could ask before the language an `OS_LOCALIZATION_LOCALE` override names was in the list; the override was then reported `IGNORED` and the reader kept the next layer's value, though the boot went on to offer that language. `SettingsServicePlugin` now holds the option verdict on a sourced key until `kernel:bootstrapped`: while held, an override the list does not admit yet is in force and not reported; at `kernel:bootstrapped` it is judged again, and one the list still does not admit is reported once, as before, and a settings change is emitted for `localization.locale` so a reader that applied it reads the key again. The other value checks (pattern, domain, bounds, format) are judged at once, as ever. A `SettingsService` constructed without the plugin judges at once, as it always has.
+  - **One matcher.** Setup's default language and the IdP locale claim now both ask `resolveOfferedLocale` (`@objectstack/core`): `resolveLocale`'s exact and case-insensitive steps, then the platform locale table's language (`zh-TW` is `zh-Hant`, `en-US` is `en`), then `resolveLocale`'s base-language and variant steps. A language one door takes, the other takes too.
+  - **Comment.** `AUTH_EMAIL_TEMPLATE_LOCALES` (plugin-auth) no longer claims to be the setting's options: since #30286 the setting offers the deployment's locale list, and the two ends agree through `normalizeAuthEmailLocale`'s pass-through and the email service's `en-US` fallback.
+- deabe3b: fix(settings): settings refusals, live statements and action answers are written in every platform language, and `zh-TW` reads Traditional Chinese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Every module-local settings copy table carries the eleven platform languages** (the platform locale table: English, Simplified and Traditional Chinese, Spanish, Arabic, French, Brazilian Portuguese, Russian, German, Japanese, Korean). Before, they carried four (Setup → Email's live statement two), so a caller in any other language read English. Covered: the allowed-IP-ranges save refusal, the sign-in method floor refusals, the `auth.mfa_required` refusal and the organization MFA refusal and save notice (`@objectstack/plugin-auth`); Setup → Email's live-transport statement and "Send test email" answers (`@objectstack/plugin-email`); the default-currency lock and the "no longer offered" locale option (`@objectstack/service-settings`).
+  - **`zh-TW`, `zh-HK` and `zh-MO` callers read Traditional Chinese.** Each table looks the caller's code up with core's `resolveLocale`, which reads it through the platform locale table's read aliases; a code naming no language on the table is answered in English, as before.
+  - **"Send test SMS" (`sms/test`, `@objectstack/service-sms`) answers in the caller's language** (`Accept-Language`, else `?locale`), like the mail and storage connection tests. It read no locale before and answered English in every console language. A provider's own error text still passes through verbatim.
+  - **The two answers `SettingsService.runAction` writes itself** (the built-in `reset` result and the refusal for an action with no registered handler) are written in the caller's language. With no locale, or one off the platform table, every sentence is the English one callers read before.
+- 9038187: fix(audit): name the impersonating administrator on identity writes and on an approval decided while impersonating
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two writes an administrator makes while impersonating a user still read as the user's own in the audit ledger. Both now carry the same attribution-only `impersonatedBy` a record write from that session already carries, recorded as `sys_audit_log.metadata.impersonated_by`. `user_id`, `actor` and every permission stay the impersonated user's.
+  
+  - **Identity-table writes (`@objectstack/plugin-auth`).** A write better-auth makes on the user's behalf (renaming the profile, changing an email, a membership change, an admin route such as set-user-manager) runs as the system and is credited to the user through `attributedUserId`. On an impersonation session it now also names the administrator, read from the session row's `impersonatedBy`, never from the request body. `authSystemWriteContext()` builds it, and the adapter's `withSystemContext` writes now use that same builder. `resolveAttributedActor()` (new) answers the user and the administrator together; `runAttributedToUser()` also accepts the admitted actor object, whose new optional `impersonatedBy` the platform-admin gate fills from the session.
+  - **The approval decider's segment (`@objectstack/spec`, `@objectstack/plugin-approvals`, `@objectstack/service-automation`).** `ResumeSignal.impersonatedBy` (new, optional) names the administrator when the decider decided from an impersonation session. It is honoured only beside `resumedBy`, on a signal carrying `RESUME_AUTHORITY_SERVICE`, so an HTTP body cannot set it. The approvals decision door fills it from the decision request's context, and a stranded decision's journal keeps it for the replay. The nodes after the decision now carry exactly the decision's administrator, and none when the decider acted in their own name. Before this, a trigger user deciding their own run kept the stamp of the write that started it, and a decider deciding while impersonated carried none.
+  
+  No schema column and no migration.
+- 6bd00d2: feat(plugin-auth): a person can read the AI assistants they have authorized and when each was last used, and a platform administrator can read another person's
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two new reads, both ObjectStack mounts ahead of the better-auth catch-all and both in `AUTH_ROUTE_LEDGER`:
+  
+  - `GET /api/v1/auth/authorized-clients` answers the signed-in person's own OAuth consents (Claude Desktop, an IDE agent, any MCP client). It is keyed by the session and nothing else: it takes no query parameter, and one that is sent (`?userId=` included) is refused `400 VALIDATION_ERROR` rather than ignored.
+  - `GET /api/v1/auth/admin/authorized-clients?userId=ID` answers another person's, for a platform administrator only. It is gated exactly as the admin session doors are (ADR-0068 D2, a held session refused per ADR-0069 D3). The gate runs before the query is read, so anyone else (an organization owner or admin included) gets one `403 PERMISSION_DENIED` whether or not the person exists. It lists every organization the person granted in. A missing, empty or repeated `userId` is `400`, and an id naming no user is `404 RESOURCE_NOT_FOUND`. It is read only.
+  
+  Each row carries exactly `id` (the consent id, the key `POST /oauth2/delete-consent` takes), `clientId`, `name`, `scopes`, `organizationId`, `authorizedAt` and `lastUsedAt`. Nothing in it identifies or reconstructs a token. The answer is newest first, at most 200 rows, with `truncated: true` when the person holds more, and it is sent with `Cache-Control: no-store`.
+  
+  `lastUsedAt` is the start of the most recent clock hour in which the client made a verified MCP call under that consent, or `null` when none has been recorded. The server writes it after `verifyMcpAccessToken` admits a token, and only on the consent that admitted it: the consent for the token's client, person and organization, created no later than the token was issued, the rule the verifier's own consent read applies. So a revoked consent, or a token of an earlier grant, stamps nothing. The write is off the request path, at most once per consent per hour in each process (several processes may each write the same hour start), from the verified token and the server clock alone. A store failure never fails the MCP call, and each distinct failure is logged once per process at `error`; a consent withdrawn between the stamp's read and its write is not a failure. It lands in the new `sys_oauth_consent.last_used_at` column, so a deployment picks it up at its next schema sync. Until then the reads answer `500` and the stamp logs that error once per process.
+- b5696b4: feat(plugin-auth, service-settings)!: the access policy is set per organization, and the multi-factor requirement has three levels
+  
+  Clause-②: yes (narrowing) — a new `access_policy` settings namespace (scope `tenant`) carries each organization's allowed IP ranges, idle, absolute and concurrent session limits and multi-factor requirement; `auth.mfa_required` changes from a toggle to the levels `off` / `administrators` / `everyone`, `sys_organization.require_mfa` is no longer writable, and `AuthManagerOptions.mfaRequired` becomes `mfaRequirement`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-auth/src/auth-manager.ts#AuthManagerOptions) the narrowed operands are a runtime option of the auth manager (`AuthManagerOptions.mfaRequired`, which the compiler names at every caller), a settings value (`auth.mfa_required`, rewritten from a stored toggle to a level by plugin-auth at boot) and a platform object column's editability (`sys_organization.require_mfa`, whose stored value plugin-auth moves into the organization's access policy at boot); no packages/spec schema, registered node type or ADR-0087 conversion surface names any of them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING.** The access policy is set per organization (rulings of record on objectstack-ai/cloud#3668: 「支持按组织（推荐）」, 「可以，按三档做（推荐）」). Each organization sets its own allowed IP ranges, session idle timeout, absolute session lifetime, concurrent-session cap and multi-factor requirement in **Settings → Access policy** (the `access_policy` namespace, one row per organization, written by its administrators). The deployment's values in **Settings → Authentication** are the default and the floor: an organization may tighten and never loosen.
+  
+  The rule per key — a value weaker than the deployment's is refused at the save, and enforcement holds the floor whatever is stored:
+  
+  - `allowed_ip_ranges`: each range must lie inside a deployment range (any range when the deployment sets none), and the list must admit the address it is saved from. A request must pass both lists. A session is scoped to an organization only from an address its list admits: the sign-in is refused with `403 IP_NOT_ALLOWED` when the organization the session would be scoped to does not admit the address, and so is a switch of the active organization. A session the organization's list no longer admits (it roamed, or the list was tightened) is signed out on its next session read through the auth routes. Sign-in itself, before any organization is chosen, is judged by the deployment's list alone. A platform administrator is held by the deployment's list only, so an organization that locks out its own administrators can be reopened, and the save check does not refuse a platform administrator's save from outside an organization's list.
+  - `session_idle_timeout_minutes`, `session_absolute_max_hours`: `0` keeps the deployment's limit; a positive value may not exceed the deployment's. The shorter of the two applies to every session scoped to the organization. A switch of the active organization is judged against the target organization's limits before it lands, from the session's last request in any organization; a session past either is signed out and the switch refused.
+  - `max_concurrent_sessions_per_user`: `0` keeps the deployment's cap; a positive value may not exceed the deployment's. The deployment's cap still counts every session of the user, in any organization; an organization's cap counts only the user's sessions in that organization and signs out only those, oldest first. Both are checked at sign-in and when a session switches into the organization.
+  - `mfa_required`: `off` keeps the deployment's level; a level may not be weaker than the deployment's. The stronger of the two applies. `administrators` holds platform administrators, the organization's own administrators (owner or admin membership) and delegated administrators (a permission set with an `adminScope`), and lets everyone else through.
+  
+  What to do on upgrade:
+  
+  - `auth.mfa_required` saved as on now reads `everyone`, and as off `off`. A stored toggle is rewritten at the first boot; the `OS_AUTH_MFA_REQUIRED` env override still reads `true`/`false` with a warning for one major release — set it to `off`, `administrators` or `everyone`. A **write** of `true` or `false` to `auth.mfa_required` is now refused by the setting's option table (`invalid_option`): write `everyone` or `off`. Consumer: objectstack-ai/cloud's `apps/cloud/test/settings-cross-org-doors.test.ts` (`:533` writes `true`, `:552` expects it back) must be rewritten to `everyone` when the framework pin moves past this release.
+  - An organization whose `sys_organization.require_mfa` was on now carries `access_policy.mfa_required` set to `everyone`. Moved at the first boot (unless the organization already chose a level), and the column is cleared once the row lands; a move that fails is logged at `error` and retried at the next boot. The column is now readonly: a data-API write to it is refused like any other non-editable column.
+  - A host that passed the auth manager or plugin option `mfaRequired: true` passes `mfaRequirement: 'everyone'` (or `'administrators'`) instead. A host still passing `mfaRequired` is refused at construction (and on `applyConfigPatch`) with an error naming the replacement, never run without the requirement.
+  
+  What does not change: with no organization policy saved, every deployment enforces exactly what it enforced before, and the deployment's own keys keep their names.
+- ea62933: feat(plugin-auth, plugin-audit): a sign-in the IP allow-list refuses leaves one `login_failed` row in the audit log, bounded per client address
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A sign-in refused by the ADR-0069 D5 IP allow-list used to leave nothing in `sys_audit_log`: the deployment's list answered `403 IP_NOT_ALLOWED` with only a once-per-process operator line, and an organization's own list refused the session silently. Both now write a `login_failed` row with `metadata.reason: "IP_NOT_ALLOWED"`, `metadata.rule: "ip_allow_list"`, `metadata.endpoint` and `metadata.attempts`, and the client address and user agent in `ip_address` / `user_agent`:
+  
+  - **The deployment's list** refuses before any account is resolved. Its row names the account when the request's `email` resolves to one (the password sign-in's own account lookup), and is written with no account otherwise. Only `/sign-in/*` endpoints are recorded; a refused session read or sign-out is not a sign-in. The row is written off the response path, so the refusal's status, body and timing do not depend on whether the address names an account.
+  - **An organization's own list** refuses when the session is created. Its row names the account and the organization (`tenant_id`). A refused switch of the active organization is not a sign-in and writes no row.
+  
+  The rows are bounded so a scanner cannot flood the table: per client address, in a 10-minute window from its first refusal, only the 1st, 10th and 100th refusal write a row (`attempts` 1, 10, 100); across all addresses, at most 1000 rows per 10-minute window, with one operator `warn` line in a window once the cap drops a row. The bound is held in each server process, so N replicas write up to N times as many rows. No row carries the submitted identifier or the password.
+  
+  `@objectstack/plugin-audit`'s `AuthSessionAuditEvent.userId` and `@objectstack/plugin-auth`'s `AuthEventAuditSurface` event `userId` are now optional: a `login_failed` with no `userId` is written with `user_id` and `record_id` null (a row about no record, read under the ledger's own grant, platform administrators only when it names no organization). Any other event without a `userId` still writes nothing. `AuthManager.resolveRefusedSignInAccountId(email)` is new: the account a refused sign-in names, used only for that row. A sink registered on the `audit` service slot now receives `login_failed` events with no `userId`, so a custom sink must accept one. The exported `signInFailureEventFor` now answers `null` for `reason: 'IP_NOT_ALLOWED'`, because the door that refused the sign-in writes that row itself.
+- 256a4b7: fix(plugin-auth): a sign-in that enforced MFA holds records the hold on its own `login` row
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A sign-in held by the ADR-0069 D3 enforced-MFA requirement (the requirement is on, the account never enrolled, its grace window has lapsed) used to leave the compliance ledger nothing to say about the hold: the sign-in succeeds, a session is minted and its `login` row is written exactly like any other, while every request on that session is answered `MFA_REQUIRED`. The `login` row of such a sign-in now carries `reason: "MFA_REQUIRED"` and `rule: "mfa_required"` in its `metadata`, beside `endpoint`, so an enforcement report can list who was held by the MFA policy, from which address and when.
+  
+  The hold is asked once, when the session is created, of the same posture computation the session gate asks. It is not asked on every session read, so a held sign-in has exactly one row, and no `login_failed` row is written for it: the session exists. A posture read that fails records no hold, which is the gate's own fail-open direction. A deployment without the audit plugin makes no extra read. Every other `login`, `logout`, `login_failed` and `account_locked` row is unchanged, and no row carries the attempted credential.
+- 41dc302: feat(plugin-auth): a platform administrator can mint and revoke SCIM connection credentials
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  Skills-docs: updated here — `content/docs/permissions/authentication.mdx` ("SCIM Connection Credentials" under Admin User Management); `skills/**` teaches no SCIM setup
+  
+  An identity provider (Okta, Entra ID) provisions users through `/api/v1/auth/scim/v2/*` with a bearer credential that this platform issues, but nothing could issue one: the mint existed with no caller, and the credential object refuses create on the data API, so no identity provider could connect. Two routes now do it, for the platform administrator only (the shared ADR-0068 gate: anyone else is refused `403 PERMISSION_DENIED`, `401 UNAUTHENTICATED` when signed out):
+  
+  - `POST /api/v1/auth/admin/scim/mint-credential` with `{ connectionId, label?, expiresAt?, provisioningDomainId?, organizationId? }` answers `{ credentialId, connectionId, token, expiresAt }`. `connectionId` is at most 246 characters, so the connection's audit actor `svc:scim:<connectionId>` fits `sys_audit_log.actor`. The `token` is shown once, in that response only (`Cache-Control: no-store`); only its keyed one-way digest is stored, and it is not readable through the data API, the audit log or the logs. Refused `503 SERVICE_UNAVAILABLE` while SCIM is off. The credential row is owned by `organizationId` when given (it must exist), otherwise by the Default Organization.
+  - `POST /api/v1/auth/admin/scim/revoke-credential` with `{ credentialId }` switches the credential off, so the identity provider's next SCIM request with it answers `401`. `404 RESOURCE_NOT_FOUND` for an unknown credential, `409 RESOURCE_CONFLICT` for one already revoked. Served whether or not SCIM is on.
+  
+  Rotation is a second mint for the same `connectionId`, moving the identity provider to the new bearer, then revoking the old one. Each mint and each revoke writes one `sys_audit_log` row naming the administrator and the connection, never the credential. Nothing that existed changes: no route, response or stored row moves, and the credential object stays read-only on the data API.
+- ed4b832: feat(plugin-auth): a SCIM group push grants the ordinary permission set its group mapping names
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An identity provider that pushes a group over SCIM now changes what its members may do. A platform administrator saves a mapping from one SCIM connection's group to one permission set with `POST /api/v1/auth/admin/scim/set-group-mapping` (`connectionId`, `groupExternalId` or `groupDisplayName`, `permissionSet`), and deletes one with `POST /api/v1/auth/admin/scim/delete-group-mapping` (`mappingId`). Both run the platform-admin gate the SCIM credential door runs. A connection whose credential names no organization, or whose credentials name two, is refused `400 VALIDATION_FAILED` on `connectionId`, so every mapping, and every grant it makes, belongs to exactly one organization. Only live credentials (active and unexpired, as the bearer verifier reads them) decide that organization: a credential revoked in one organization does not block a mapping once a new one is minted in another. Saving the same group and set again is idempotent; if that mapping was saved while another organization owned the connection, the save is refused `409 RESOURCE_CONFLICT` naming the old mapping, which must be deleted first. The rows live in the new platform object `sys_idp_group_mapping`, which the data API only lists.
+  
+  When a group's membership changes, `@better-auth/scim`'s projection grants each member the mapped set in the organization that owns the connection, inside the SCIM transaction, written by the connection (`svc:scim:CONNECTION_ID` in the audit trail). Removing a member removes that grant. A group nobody mapped grants nothing. The projection asks the boundary again before every grant it writes, so a set that becomes an administrator set after its mapping was saved grants nothing. A grant the projection did not make, such as one an administrator made by hand, is never removed. Saving or deleting a mapping applies it to the group's current members at once.
+  
+  A mapping can never make anyone an administrator. The save refuses, with `400 VALIDATION_FAILED` on `permissionSet`, every set outside the organization boundary: `admin_full_access`, the organization-administrator sets, the agent ceiling sets, a set with a superuser wildcard or an `adminScope`, and a set with a capability not scoped to the organization. The judgement is plugin-security's own delegated-administration predicate, now served as the optional `ISecurityService.organizationBoundaryFailure(setName)` member. Without a security service the save is refused `503` and nothing is granted.
+  
+  The break-glass guard's refusal no longer tells operators that "the SCIM group mapping is too broad": a group mapping never moves administrator standing, so the sentence now says to grant another account standing first.
+  
+  The v18 organization-ownership ceremony (`os migrate organization-ownership`) inventories `sys_idp_group_mapping` with the attribution fate, like the other organization-owned rows written with their organization: a database that holds the new table plans and applies as before.
+- d463b99: fix(plugin-auth,plugin-audit): a SCIM-driven write names the SCIM connection that performed it, on its audit row
+  
+  Clause-②: yes (widening) — `authSystemWriteContext()`, published through `export * from './auth-actor-attribution.js'`, now declares an optional `actor` member on the context it returns; nothing it returned before is removed or narrowed.
+  Metadata-protocol: none
+  
+  An identity provider's SCIM writes (the `sys_user` create, the deactivation's ban update, the delete, and the `sys_scim_*` rows written beside them) used to leave `sys_audit_log` rows with `actor`, `user_id` and `metadata` all null, so no row said which SCIM connection (which IdP) acted, and "who deactivated this account" had no answer.
+  
+  - **`@objectstack/plugin-auth`.** The SCIM request scope `handleRequest` opens around every `/scim/v2/*` request now carries the connection the bearer verified as: the bearer verifier records it, and `authSystemWriteContext()` gives every write of that request `actor: 'svc:scim:CONNECTION_ID'` on `ExecutionContext.actor`, with no `attributedUserId`. The connection id is the label's identifier because it is immutable and keys every resource the connection provisions. Writes outside a SCIM request are unchanged.
+  - **`@objectstack/plugin-audit`.** The audit writer records that label on `sys_audit_log.actor`, as it records any service principal, and the connection id alone as `metadata.scim_connection_id`, read off the same label so the two never disagree. `user_id` stays null, because no human acted. Rows of every other actor are unchanged.
+  - **Never on a row:** the bearer, its digest and the credential row stay out of the write context, so none of them can reach `actor`, `metadata` or any other column.
+- 30002df: fix(plugin-auth): a refused enterprise OIDC sign-in names its cause
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The SSO callback (`/sso/callback/:providerId`) used to answer every refused ID token with the same redirect, `error=invalid_provider&error_description=token_not_verified`, so an administrator could not tell a wrong audience from an expired token, a foreign issuer or a retired signing key. `error_description` now names the cause: `id_token_expired`, `id_token_not_yet_valid`, `id_token_audience_mismatch`, `id_token_issuer_mismatch`, `id_token_signing_key_unknown` or `id_token_signature_invalid`. A refusal outside those classes keeps `token_not_verified`. `error=` is unchanged. The server writes one `warn` line per refusal with `providerId`, `protocol: 'oidc'` and `cause`, and no token content or account signal. The list is exported as `SSO_OIDC_REFUSAL_CAUSES`.
+  
+  better-auth's own log lines now go to the `AuthManager` logger at the level better-auth chose (`error` stays `error`, `warn` stays `warn`) instead of the console. With no logger configured they still go to the console. A message that is an error object is logged as its name and message, as better-auth's console logger printed it; the vendor's further arguments pass through unchanged. The vendor's `error` line for a classified ID-token refusal is replaced by the `warn` line above.
+  
+  SAML refusals are unchanged: `@better-auth/sso` does not expose their cause.
+- b065fad: fix(plugin-auth): a refused SAML sign-in lands on the error URL, as OIDC does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The SAML ACS (`POST /sso/saml2/sp/acs/:providerId`) used to redirect an account refusal (`account_not_linked`, `signup_disabled`, `unable_to_link_account`, `unable_to_create_user`, `email_not_verified`, `unable_to_create_session`) to the sign-in's success `callbackURL` with only `?error=`, so the user landed on the signed-in page without being signed in. A response over the size limit was sent to the app origin. Every SAML refusal now lands where the OIDC callback sends one: the sign-in's `errorCallbackURL`, or the platform's sign-in page when none was given. `error=` and `error_description` are unchanged. A successful sign-in still lands on `callbackURL`.
+- 8c9260f: feat(plugin-auth): an SSO sign-in grants the ordinary permission set its IdP group is mapped to
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An enterprise SSO provider (OIDC or SAML, through `@better-auth/sso`) can now drive what its users may do from the groups the identity provider sends at sign-in, through the same `sys_idp_group_mapping` mappings a SCIM connection uses. There is no second mapping model.
+  
+  - **Where the groups come from.** Set the provider's own claim mapping to fill `groups`: `mapping.extraFields: { groups: 'groups' }` for an OIDC claim named `groups`, or the attribute name an IdP uses for SAML (for example Entra ID's groups claim URI). The value may be one string or a list of strings. A provider whose mapping fills no `groups` behaves as before.
+  - **Saving a mapping.** `POST /api/v1/auth/admin/scim/set-group-mapping` now also takes `providerId` in place of `connectionId` (exactly one of the two; both is `400 VALIDATION_FAILED` on `providerId`). The grant's organization is the provider's own `organization_id`; a provider that names none, or an unknown provider, is refused `400 VALIDATION_FAILED` on `providerId`. With SSO off the save is refused `503`. The same platform-admin gate and the same organization-boundary judgement apply: administrator sets and every set outside the organization boundary are refused, and without a security service the save is refused `503`. The row is stored with `source_kind: 'sso'` (a new option on `sys_idp_group_mapping.source_kind`) and `source_id` = the provider id.
+  - **At each sign-in.** Every sign-in through the provider matches each group value against the provider's mappings (by `groupExternalId` when the mapping names one, which suits Entra ID's group object ids, else by exact `groupDisplayName`) and makes the user's grants follow them: a mapped group grants its set in the provider's organization, and a group the user has left loses the set at their next sign-in. A sign-in with no groups removes the grants that provider made earlier. The boundary is asked again before every grant, so a set that becomes an administrator set after its mapping was saved grants nothing, and with no security service nothing is granted. Only grants the provider made (their `reason` names the provider) are ever removed: a grant made by hand, or by SCIM, is never touched. Every write goes through the engine, so the break-glass last-administrator guard still refuses what it refuses elsewhere. If applying the mappings fails, the sign-in still succeeds and the failure is logged at `error`.
+  - **Deleting a mapping.** `POST /api/v1/auth/admin/scim/delete-group-mapping` removes an SSO mapping and, at once, the grants its provider made of that set in that organization, unless another of the provider's mappings still names that set (then each user's next sign-in decides).
+- f5e23e2: feat(plugin-auth)!: an organization administrator reads the client address their access-policy list is judged by, and the console's notices over the retired `require_mfa` column are gone
+  
+  Clause-②: yes (narrowing) — the published `@object-ui/i18n` packs (all eleven) drop the `console.organizationMfa.needsTwoFactor` and `.nowRequired` keys, which had no reader outside the removed notices. Both keys were added by the still-pending `.changeset/30295-org-mfa-notice-and-enroll-refusal.md` and never released, so no published version of the packs carries them. The widening half: a new served read, `GET /api/v1/auth/client-address`.
+  Metadata-protocol: none
+  Skills-docs: none — `skills/**` teaches no access-policy key, client-address read or console notice, and `content/docs/**` teaches no per-organization access policy; its `allowed_ip_ranges` section in `permissions/authentication.mdx` is the deployment's own list, whose platform-admin read it names correctly.
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/i18n/src/locales/en.ts#TranslationKeys) the key type of the console's own translation catalogue: no Zod schema, no spec declaration and no stored metadata reads it, so the compiler is the channel that reaches every caller -->
+  
+  **An organization administrator sees their judged address before saving their organization's Allowed IP ranges.** A save of `access_policy.allowed_ip_ranges` that leaves out the saving request's own address is refused, and until now an organization administrator learned that address only from the refusal: `GET /api/v1/auth/admin/client-address` answers platform administrators alone. `GET /api/v1/auth/client-address` answers the same `{ clientAddress, trustProxy }`, the address the save check judges (`server.trustProxy` deciding whether forwarded headers count; `null` when the server cannot establish one), to the caller who may save that list: `setup.write` in their current organization, resolved the way the settings door resolves a saving caller. It is the caller's own address only; the query set is closed and empty (`400 VALIDATION_ERROR`), the answer is `Cache-Control: no-store`. Anonymous: `401 UNAUTHENTICATED`. A held session: `403` with its posture's code. A member without `setup.write`: `403 PERMISSION_DENIED`. An unreachable permission store: `503 SERVICE_UNAVAILABLE`. The console's Access policy page does not read it yet.
+  
+  **The organization's IP list is judged on an objectstack mount's own session read too.** The routes the auth plugin mounts itself under `/api/v1/auth` (the platform-admin routes, the authorized-AI-assistant routes, session revoke, add member and the others that read the caller's session in process) now carry the address the deployment's IP gate established for the request to that read, so a session whose organization's Allowed IP ranges no longer admit it is ended there (`revoke_reason: ip_not_allowed`), as it already was on a session read through better-auth's own routes. Data requests outside the auth mount are judged by neither list, as before.
+  
+  `sys_session.revoke_reason`'s published vocabulary (the field description) now names `ip_not_allowed`.
+  
+  **BREAKING** (`@object-ui/i18n`, TypeScript only): the exported `TranslationKeys` (`typeof en`) loses the two `console.organizationMfa.*` keys, in all eleven packs (ar, de, en, es, fr, ja, ko, pt-BR, ru, zh-Hans, zh-Hant). A `t()` call that names one still compiles, since its key is a `string`, and reads the key back. Both keys come from the still-pending `.changeset/30295-org-mfa-notice-and-enroll-refusal.md` and were never released: a consumer of a published `@object-ui/i18n` never had them.
+  
+  | Removed key | Replacement |
+  |:---|:---|
+  | `console.organizationMfa.needsTwoFactor` | none: `sys_organization.require_mfa` is read-only and off the organization form; the multi-factor requirement is the access policy's `mfa_required` level, whose save refusal names two-factor itself |
+  | `console.organizationMfa.nowRequired` | none: the same column can no longer be turned on, so no save turns the requirement on from the organization form |
+- 6a01718: refactor(plugin-auth): the SCIM connection-id cap is derived from the exported service-principal prefix
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `POST /api/v1/auth/admin/scim/mint-credential` refuses a `connectionId` longer than 246 characters so the connection's audit actor `svc:scim:CONNECTION_ID` fits the 255 characters of `sys_audit_log.actor`. That cap was computed from the prefix spelled out a second time; it now reads the length of `SCIM_SERVICE_PRINCIPAL_PREFIX`, the constant the actor label itself is built from, so the two can no longer drift apart. Nothing a caller sees changes: the cap is still 246, and the refusal is still `400 INVALID_REQUEST`.
+  
+  Exported (completing the record of the SCIM credential routes, whose release note names the routes only): two public `AuthManager` methods back them. `isScimWired()` answers whether the SCIM service provider is mounted on this deployment (the same decision that mounts `/scim/v2`), and `mintScimConnectionCredential(engine, input)` mints a connection bearer with the deployment's auth secret, the key the mounted SCIM verifier digests with.
+- e11a575: feat(auth): withdraw an authorized AI assistant, for the person themself and for a platform administrator
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two new routes beside the authorized-clients reads, each keyed by the consent `id` those reads answer on every row:
+  
+  - `POST /api/v1/auth/authorized-clients/withdraw` with `{ "id": "…" }` withdraws one of the signed-in person's own authorized assistants. Only that person's grant is withdrawn: an id that names someone else's grant answers `404 RESOURCE_NOT_FOUND`, byte for byte the same as an id that names nothing, and leaves it in place.
+  - `POST /api/v1/auth/admin/authorized-clients/withdraw` with `{ "userId": "…", "id": "…" }` does the same for a person a platform administrator manages, behind the same gate as `GET /api/v1/auth/admin/authorized-clients`: anyone else is refused once (`401` anonymous, `403 PERMISSION_DENIED` otherwise), whoever the body names and whether or not the person or the grant exists.
+  
+  A withdraw revokes the grant the way `/oauth2/revoke` does: the consent row, then the client's refresh tokens. The assistant's token is refused on its next MCP call, and it must be authorized again to reconnect. Both routes take a closed body (an unknown key, or a missing or empty value, is `400 VALIDATION_ERROR`) and no query parameter, and answer `{ success: true, data: { id } }` with `Cache-Control: no-store`.
+  
+  `@objectstack/client` adds `oauth.authorizedClients.withdraw(id)` and `oauth.authorizedClients.withdrawForUser(userId, id)`, both answering `AuthorizedClientWithdrawal` (`{ id }`).
+  
+  better-auth's own `POST /api/v1/auth/oauth2/delete-consent` is unchanged and stays outside the SDK: it answers an unknown id and another person's id differently, and leaves the refresh tokens behind. Use the new routes instead.
+- 9f61e06: fix(plugin-auth): withdrawing an AI assistant in one organization no longer signs it out of the person's other organizations
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A person can authorize the same AI assistant (an OAuth client such as Claude Desktop) in two organizations. Withdrawing it in one of them, from the console (`POST /api/v1/auth/authorized-clients/withdraw` or the admin door) or with `POST /oauth2/revoke`, deleted only that organization's consent but every refresh token the assistant held for that person, in every organization. The assistant then stopped working in the other organization once its access token expired, and the person had to authorize it there again. A withdraw now deletes the refresh tokens minted in the withdrawn organization only: every one of them, rotated or live, and the access tokens minted from them. The other organization's refresh token keeps refreshing. A refresh token minted with no active organization belongs to the grant with no organization and is deleted when that grant is withdrawn. `/oauth2/revoke` answers exactly as before.
+- d36d4ad: feat(plugin-auth): a "SCIM Credentials" entry in Setup > Access Control while SCIM is wired
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/plugin-auth`** contributes a Setup navigation entry `nav_scim_credentials` ("SCIM Credentials") that opens `sys_scim_connection_credential`, the object the console's Mint Credential and Revoke Credential actions live on. It sits in the Access Control group after SSO Providers and carries the same gate (`manage_platform_settings`). It is contributed only while SCIM is wired, decided by `isScimWired()`, the same answer the `/admin/scim/mint-credential` door reads before it refuses 503, so the entry never opens a list whose Mint button can only fail. The mint and revoke doors keep their own platform-admin gate; the entry widens nothing. The SSO Providers entry is unchanged, and a deployment with neither SSO nor SCIM wired gets no plugin-auth Setup entry, as before.
+  - **`@objectstack/platform-objects`** adds the label `apps.setup.navigation.nav_scim_credentials` to the Setup app's translation bundle in en, zh-CN, ja-JP, es-ES, zh-Hant and ar (a new published key, hence the widening arm).
+- 7fe019f: fix(auth): an MCP access token is recorded as used only once the MCP door admits the call, so a banned person's refused calls no longer show their AI assistant as used
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `IAuthService` gains one optional member, `recordMcpAccessTokenUse(principal)`. Verifying a token is not admitting the call: the MCP door (`@objectstack/runtime`) refuses a banned subject after `verifyMcpAccessToken` answers, and a call whose authorization store cannot be read is a 503. Before this change `AuthManager.verifyMcpAccessToken` itself scheduled the coarse last-use stamp (`sys_oauth_consent.last_used_at`), so an administrator reading `GET /admin/authorized-clients?userId=` for a banned person saw the assistant as used in an hour when every call was refused.
+  
+  Now `verifyMcpAccessToken` records nothing. The door calls `recordMcpAccessTokenUse` once, after its ban read and after the request context resolves, with the very object the verifier returned; `AuthManager` stamps only a principal object its own verifier returned, once, so a hand-built principal or a copy records nothing. The member returns nothing and never throws. The stamp's bound is unchanged: at most one write per consent per hour in each process.
+  
+  A custom `IAuthService` needs nothing: the member is optional, and a door whose auth service lacks it admits the call exactly as before. A host that calls `AuthManager.verifyMcpAccessToken` itself and wants the call shown as used calls `recordMcpAccessTokenUse(principal)` with the verifier's result once it has admitted the call.
+- 2f369cd: fix(plugin-auth): a correct-password sign-in refused afterwards, by an organization's allowed IP ranges, a ban or an unverified address, no longer counts toward the account lockout
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ADR-0069 D2 lockout counter read every refused `/sign-in/email` as a wrong password. Three refusals come only after the password verified: an organization's own IP list (`403 IP_NOT_ALLOWED`, judged when the new session is scoped to it), a ban (`403 BANNED_USER`, judged when the session is created) and an address the deployment requires verified (`403 EMAIL_NOT_VERIFIED`). Each raised the count, so an account holder with the right password could lock their own account: a member signing in from outside the organization's network was then refused `ACCOUNT_LOCKED` from inside it, a lifted ban left a lock behind, and a person waiting for their verification mail was locked out once it arrived. These three refusals now leave the counter as it stands, neither counting nor clearing it. A wrong password still counts in every case, and a successful sign-in still clears the count. The refusals' status, code and message and their `login_failed` audit rows are unchanged.
+- 9b3c29d: fix(plugin-auth): the organization client-address read answers a revoked or expired API key with the key's own refusal, not a 500
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /api/v1/auth/client-address` resolves its caller through the settings door's composition, which admits an API key. A key its own lifecycle refuses (revoked, expired, inactive) was answered `500 INTERNAL_ERROR` with an error log line. The route now relays that refusal as the error declares it: `403` with `API_KEY_REVOKED`, `API_KEY_EXPIRED` or `API_KEY_INACTIVE` and the refusal's located message, as the settings routes and REST already answer the same key, and logs nothing for it. The `503` store-outage answer, the `401` / `403` admission refusals and an organization administrator's answer are unchanged.
+- c6c2426: feat(plugin-auth): `answerOneTimeTokenHandoff` — a host that forwards `/api/v1/auth/*` to a kernel's `AuthManager` answers the mobile sign-in hand-off
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The package root now exports `answerOneTimeTokenHandoff(manager, request, serving)` with its input types `OneTimeTokenHandoffManager` and `OneTimeTokenHandoffServing`, and `HandoffAnswer` as a type beside them. It is the whole body of `GET /api/v1/auth/one-time-token/handoff`: AuthPlugin's own mount now calls it, and its answers do not change.
+  
+  A host that serves no AuthPlugin routes and forwards the auth routes to an `AuthManager` it did not mount (a per-environment kernel with no HTTP server, AuthPlugin with `registerRoutes: false`) used to answer the hand-off `404`, because the route existed only on AuthPlugin's own server and a token minted outside the hand-off is unredeemable by design. Such a host now answers it for the manager it forwards to: `answerOneTimeTokenHandoff(manager, { url, headers, queries }, { authMountPath: '/api/v1/auth', server, serverEnv, onUnserved })`. A `302` answer carries `headers` and no body; every other status carries `body` as JSON with `headers`. The sign-in page a signed-out navigation is sent to is the one `server` answers, and `Location` stays root-relative, so the browser stays on the host it arrived on. The seams the hand-off is built from (`runOneTimeTokenHandoff`, `withHandoffChallenge`, `resolveHandoffSignInEntry`, the token-store hasher) stay unexported, so no host can mint outside the challenge scope.
+- 59630d9: fix(plugin-auth): disabling an OAuth client refuses its already-issued tokens on their next call, and a platform administrator's revoke of someone else's API key holds against its owner
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **OAuth clients.** Disabling a client (the Disable action of `sys_oauth_application`, `POST /api/v1/auth/admin/oauth2/toggle-disabled`) refused it a new token, but the MCP door kept serving the access tokens it already held until they expired, up to an hour. The door now reads the client on every call, beside the consent it already reads, and refuses with the same `401` a withdrawn grant gets when the client is disabled, when its row is gone, or when the read fails. Disabling is a pause: the consent and the refresh token stay, so enabling the client again serves them again. To end the grant, withdraw it (`POST /api/v1/auth/authorized-clients/withdraw`, or the admin door) or call `/oauth2/revoke`. Each MCP call now makes two indexed reads (the client by `client_id`, then the consent) instead of one.
+  
+  **API keys.** A revoked key is restorable, and until now its owner could restore a key an administrator had revoked the moment it was revoked. When a platform administrator revokes a key that is not theirs, `sys_api_key.revoked_reason` now records `administrator_suspended`, and only a platform administrator can restore that key. The owner's restore is refused `403 PERMISSION_DENIED`, naming the reason, and the key door's `403 API_KEY_REVOKED` says who can restore it. Restoring clears the reason, as before, and the same key works again with no re-issue. A host that stops a key itself writes the same value in the system context, beside `revoked: true`. The owner's own revoke still records no reason. An administrator's revoke never replaces a reason the key already carries, so a key revoked because its owner's membership ended stays restorable by no one. One multi-row revoke that matches both a key this rule stamps and a key that already carries a reason is refused whole with `400 VALIDATION_ERROR`; revoke those keys separately. The new select option and its description are translated in every shipped locale.
+  
+  This does not stop a person from minting a new key of their own. A key acts as its owner, so stopping an agent for good takes a credential its owner cannot re-issue.
+- 96b9350: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Setup → SSO Providers forms now set the groups claim an SSO sign-in grants permission sets from. It is stored where `POST /api/v1/auth/sso/register` stores it, the provider's `mapping.extraFields.groups`, and nowhere else.
+  
+  - **Register SSO Provider** takes **Map: Groups claim** and **Register SAML Provider** takes **Map: Groups attribute**. Left blank, the provider maps no groups, as before.
+  - **Show Groups Claim** (`POST /api/v1/auth/admin/sso/get-groups-claim`) shows a provider's claim, including one the register door wrote.
+  - **Edit Groups Claim** (`POST /api/v1/auth/admin/sso/set-groups-claim`) sets it, or removes it when blank. It writes through `/sso/update-provider` and keeps every other mapping member as stored.
+  
+  Both new routes run the platform-admin gate of the other `/admin/sso` bridges and answer only `{ providerId, groupsClaim }`.
+  
+  Fixed: `POST /api/v1/auth/sso/update-provider` with an `oidcConfig` was refused 400 "clientSecret is required" for any OIDC provider whose client secret is held in `sys_secret`. The vendor reads the provider through an adapter update, and that read now carries the client secret like every other provider read.
+- 450bfb6: A permission-set grant (`sys_user_permission_set`) and an audience-binding suggestion (`sys_audience_binding_suggestion`) are now read by their `permission_set_package` column (ADR-0150 D8 rows R1 and R3). A set column resolves that exact (package, name) through the core security catalog; a null column keeps today's resolution rule, where a name held by two or more packages is refused, naming every candidate and the `os migrate stored-references bind` fix, and confers nothing. One write seam per table stamps the column on every write that names a set, by the same rule the boot backfill uses. Because the column now decides which `admin_full_access` a grant confers, it is declared on the administrator standing surface, and the last-administrator guard counts a write that re-points it like one that re-points the name. The install gate is unchanged: a permission-set name is still held by one package per environment.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 5a8dbc7: feat(security)!: an AI service account is the agent principal of its own requests, under the agent ceiling (ADR-0151 D3)
+  
+  Clause-②: no (narrowing) — every agent principal's permission sets are now read under the agent ceiling (no View All, no Modify All, no transfer, restore or purge, no system permission, no admin scope). The OAuth-connected assistant's first-party sets carry none of these bits, so only a deployment that edited its own agent set to carry one sees a narrower answer. No door, request or response shape, error code or status changes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export of a package root is removed or retyped. The narrowing reads only agent principals' permission sets at evaluation and refuses one class of assignment write; there is no stored shape for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an agent principal whose permission sets carry View All, Modify All, a destructive grant (transfer, restore, purge), a system permission or an admin scope. Measured first-party: 0 (none of the 3 OAuth agent ceiling sets carries any of these bits, and no AI service account row can exist until registration lands).
+  
+  - **Before.** An agent principal's sets were applied as written.
+  - **Now.** Those bits are cleared when the sets are read, and assigning such a set (or a position binding one) to an AI service account is refused by name.
+  - **The remedy.** Grant the agent the CRUD bits it needs on the objects it reads; a bypass bit or an administrative grant is a person's to hold.
+  
+  An AI service account (a `sys_user` row whose `principal_kind` is `agent`) now acts as itself. Its API key, on REST, on `/mcp` and over stdio, admits a context whose `userId` is the account, with `principalKind: 'agent'` and no `onBehalfOf`. Its own grants are its whole authority:
+  
+  - It does not receive the `everyone` anchor's permission sets or the member baseline. Its floor is the restricted agent set, so a new account can do nothing until it is granted something.
+  - It carries no system permission and is never a platform or organization administrator, whatever it holds: it never carries `admin_full_access` or an organization administrator set at all, so no reader that judges standing by a set's name (the approvals override and the `admin_rescue` slate among them) counts it.
+  - Every agent principal's permission sets are read under the agent ceiling: no View All, no Modify All, no transfer, restore or purge, no system permission and no admin scope. A set edited after it was assigned still grants nothing above the ceiling. The permission sets an OAuth-connected assistant receives carry none of these bits, so it is unchanged.
+  - Assigning an account a permission set, or a position whose sets, carry any of those bits is refused `400 VALIDATION_FAILED` (`invalid_value`), naming the set and what in it is above the ceiling.
+  
+  Flow runs, attachment and comment access checks, mention checks and the access explainer read the account as the agent it is. A person's sign-in, keys and grants are unchanged.
+  
+  Nothing registers an AI service account yet; the registration, key and lifecycle doors follow in a later change.
+- c924627: feat(plugin-auth): an AI service account's lifecycle — suspend, resume, change owner, retire, and revoke or restore one key (ADR-0151 D6)
+  
+  Clause-②: yes (widening) — six new auth doors (`POST /api/v1/auth/service-account/suspend`, `resume`, `set-owner`, `retire`, `revoke-key`, `restore-key`) and a suspension when an account's owner leaves its organization. Nothing existing is removed, retyped or refused: the suspension acts only on rows of the agent kind.
+  Metadata-protocol: none
+  
+  Every door takes a signed-in session only (`401` without one, and for a caller carrying only an API key, so an account can never lift its own stop or touch its own keys), and answers a person's id as unknown (`404`).
+  
+  - **Suspend** (the account's owner, an administrator of its organization, or a platform administrator): writes the account's ban state (`banned`, no expiry, `ban_reason` `AI service account suspended`, followed by `: ` and the caller's optional reason), so every key it holds is refused on its next call. Nothing is revoked. A ban already in force stays exactly as it is.
+  - **Resume** (an administrator only; the owner is refused `403`): lifts the ban, and the same keys work again. An administrator of the account's organization lifts only a suspension these doors (or the owner's leaving) wrote; any other ban, such as a platform administrator's `/admin/ban-user`, only a platform administrator lifts (`403` otherwise). Refused `409` for a retired account, and for one whose owner is no longer a member of its organization.
+  - **Set owner** (an administrator): names another person of the account's organization as its accountable owner (`400 VALIDATION_FAILED` at `ownerId` otherwise). It does not resume the account.
+  - **The owner leaves**: when the owner's membership of the account's organization ends (removed, deleted, or moved to another organization), the account is suspended until an administrator names a new owner and resumes it. A stop already in place keeps its own reason.
+  - **Retire** (an administrator): ends the account's membership and revokes every key it holds with `organization_membership_ended`, in one unit of work. The account's row stays, so what it wrote still names it. Terminal: no key mints or is restored after.
+  - **Revoke key, restore key** (the owner or an administrator): one key stops or works again; the account's other keys are untouched. A platform administrator's revoke of a key carrying no reason records `administrator_suspended`, which only a platform administrator lifts; a key revoked because its membership ended is never restored; an existing reason is never overwritten.
+- fb94249: feat(plugin-auth): register an AI service account and mint its API key (ADR-0151 D1, D4)
+  
+  Clause-②: yes (widening) — two new auth doors (`POST /api/v1/auth/service-account/register`, `POST /api/v1/auth/service-account/create-key`), two new `sys_user` actions, and `readRequestedApiKeyExpiry`, `signApiKeyExpiry`, `ApiKeyExpiryRefusal` and `ApiKeyExpiryCeilingRefusal` newly exported by `@objectstack/core`. Nothing existing is removed, retyped or refused: the break-glass guard and the upgrade-report audience now leave AI service accounts out, and an account row is only written by the new door (or by a seed).
+  Metadata-protocol: none
+  
+  An organization administrator, or a platform administrator, can now register an **AI service account**: Setup → Users → *Register AI Service Account*, or `POST /api/v1/auth/service-account/register` with a `name` and an optional `ownerId`. One act writes a `sys_user` of kind `agent`, accountable to the named owner (the caller by default; the owner must be an active member of the organization), with a placeholder email that is never delivered and never collides with a real address, and a plain `member` membership of the caller's active organization. If either write is refused, neither stays.
+  
+  The account's owner, an administrator of its organization, or a platform administrator mints its API key: *Create API Key* on the account, or `POST /api/v1/auth/service-account/create-key` with `userId`. The key is shown once, bound to the account's organization, and signed under the same expiry policy and ceiling as `POST /api/v1/keys` (the two now share one rule in `@objectstack/core`); a date past the ceiling is refused `400 VALIDATION_FAILED` at `expires_at`, with the message `POST /api/v1/keys` gives, which names the latest date allowed. `POST /api/v1/keys` answers exactly as before. The key acts as the account, under the agent ceiling.
+  
+  Both doors read the caller from a signed-in session only: anonymous is `401`, and a caller carrying only an API key (the account's own included) is `401` too, so an account can neither register another nor mint its own key. Refusals reuse the existing codes: `403 PERMISSION_DENIED`, `400 VALIDATION_FAILED`, `404 RESOURCE_NOT_FOUND` for an id that is not an account, `409 RESOURCE_CONFLICT` for an account with no active membership, `503` when the authority read is unavailable.
+  
+  An AI service account is never counted as one of the administrators the break-glass guard keeps (whatever grant or membership grade it holds), and never receives the upgrade report or counts as an organization's administrator there.
+- 98ba756: feat(auth): an AI service account is a `sys_user` row of kind `agent` that never signs in (ADR-0151 D1, D2)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `sys_user` gains two columns. `principal_kind` is `human` (the default, and what every existing row reads as) or `agent`, an AI service account. `accountable_user_id` names the person accountable for an AI service account. Both are system-managed: the generic data path never writes them.
+  
+  Rules that hold for every writer, the system included:
+  
+  - A user is created with its kind and the kind never changes. An update that turns a person into an AI service account, or the reverse, is refused `400 VALIDATION_FAILED` on `principal_kind`.
+  - An AI service account names an existing person as its accountable owner; a person names none. Creating or updating a row against that is refused `400 VALIDATION_FAILED` on `accountable_user_id` (`required`, `reference_not_found` or `invalid_value`).
+  - An AI service account never holds a session: password, magic link, one-time code, passkey, social and SSO sign-in, impersonation and every server-minted session are refused `403 PERMISSION_DENIED`. It never holds a password or a sign-in provider link either.
+  - The membership reconciler and the one-time membership backfill never bind an AI service account (`reconcileMembership` answers the new outcome `agent-account`).
+  
+  Nothing registers an AI service account yet: the registration, key and lifecycle doors, and the account's own authority under the agent ceiling, follow in later changes. Every existing user, sign-in and membership behaves as before.
+- 9253be4: feat(plugin-audit): an API key or OAuth access token admitting a request leaves a `credential_use` row in `sys_audit_log`, once per credential per use window
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Credential use left no ledger row naming the credential: the only trace was the credential's own last-use stamp. An audit export or SIEM stream had nothing to read for "which key or token acted as whom, and when".
+  
+  - **`sys_audit_log.action` gains `credential_use`** (`@objectstack/plugin-audit`). One row per credential per use window, written when the credential's own throttled use stamp lands: `sys_api_key.last_used_at` (the shared key-admission seam, at most once per key per hour, so every door that admits a key counts: REST, the runtime dispatcher and its `/mcp` face, the stdio MCP transport, the storage doors) and `sys_oauth_consent.last_used_at` (an OAuth access token's use on the `/mcp` door, at most once per consent per clock hour). No new timer: a second use inside the window writes no row.
+  - **The row** names the credential's owner (`user_id`, `actor`), the credential row (`object_name` / `record_id`), the organization it is bound to (`tenant_id`, or none), and in `metadata` the `credential_kind` (`api_key` / `oauth_access_token`), the `credential_id`, the window start (`used_at`) and, for a token, the `client_id`. It never carries a key, a token, a key hash or a key prefix.
+  - **A `skip_consent` OAuth client** (`@objectstack/plugin-auth`) has no consent row to stamp. Its use is handed to the new `audit` slot member `recordCredentialUse` from the same stamp point and under the same throttle (at most once per client, user and organization per clock hour in each process); the row names the client's `sys_oauth_application` row.
+  - **Where the use came from:** the source address and the user agent (`ip_address` / `user_agent`) are recorded by the change that follows this one in the same release; see its entry.
+  
+  Nothing about which credentials are admitted changes. To read the rows: filter `sys_audit_log` on `action = 'credential_use'`.
+- c8223fb: feat(spec,plugin-auth): the `auth` service publishes `isOrganizationAdministrator(userId, organizationId)`, the one reading of "is this user an administrator in this organization"
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/spec`: `IAuthService.isOrganizationAdministrator?(userId, organizationId)`**, an optional member: true for any of ADR-0090 D12's three kinds of administrator, tenant-level (the `PLATFORM_ADMIN` rung), organization-level (the `TENANT_ADMIN` rung, from an owner or admin membership) and delegated (a permission set carrying an `adminScope`). A delegated grant that cannot be read counts as an administrator. Read-only and in-process; no route reaches it.
+  - **`@objectstack/plugin-auth`: `AuthManager.isOrganizationAdministrator`** implements it. It is the method the multi-factor requirement's `administrators` level already asked (formerly the package-internal `isMfaAdministrator`, renamed), so a caller outside plugin-auth, such as an access-policy console previewing who that level would hold, gets the gate's own answer, delegated administrators included. Ask it through the service: `ctx.getService<IAuthService>('auth').isOrganizationAdministrator?.(userId, organizationId)`. Nothing the gate decides changes.
+- 4ed2092: fix(plugin-auth): the forced-reset flag and its clear are audited under the person who caused them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An administrator's forced password reset (`POST /api/v1/auth/admin/set-user-password`) and the user's own password change (`POST /api/v1/auth/change-password`) each write `sys_user.must_change_password`, and plugin-audit recorded both writes with a null `actor` and `user_id`, as if the system had made them. Both writes now carry their caller on the attribution seam every identity write already uses (`authSystemWriteContext`), so the `sys_audit_log` row for the set names the administrator (and, from an impersonation session, the administrator at the keyboard as `impersonated_by`), and the row for the clear names the user.
+  
+  - **Unchanged.** Both writes still run as the system: what they may write, the values they write and both doors' answers are the same. The sign-in stamp row is unchanged. A password change is credited only to the account's own holder: a request whose session names nobody (the emailed-link reset) or another account leaves the row the system's, as before.
+  - **Also attributed.** The administrator-created user's `must_change_password` set (`POST /api/v1/auth/admin/create-user`) goes through the same write and is now credited to the creating administrator.
+- 26d30d7: feat(plugin-audit): the `credential_use` row records where the use came from, the client address and the user agent
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A `credential_use` row in `sys_audit_log` named which API key or OAuth access token acted as whom, but not from where: `ip_address` and `user_agent` were null, because neither credential's use stamp held the request's client facts. A leaked key used from a new address looked the same as normal use.
+  
+  - **`ip_address`** is the address the deployment establishes for the request under its one client-address trust rule: `X-Forwarded-For` / `X-Real-IP` only when `server.trustProxy` is declared, otherwise the transport's own peer address. No forwarded header is ever recorded as the address without `trustProxy`. **`user_agent`** is the request's `User-Agent`, as presented.
+  - **Why an address is missing** is written on the row as `metadata.ip_address_absent`: `stdio` (the stdio MCP transport has no network peer), `undetermined` (the trust rule established no address), `not_supplied` (the door that admitted the credential handed over no client facts yet), or `unrecordable` (the established value does not fit the address column, so it is not stored). An address is never guessed.
+  - **The facts are the first use's in the window.** The row is still written once per credential per use window, when the credential's own throttled stamp lands, so `ip_address` and `user_agent` are those of the use that opened the window. A second use inside the window, from any address, writes no row.
+  - **Doors:** REST, the runtime dispatcher (its `/mcp` face included) and the stdio MCP transport hand their client facts over. An API key admitted at any other door records its user agent and `not_supplied` for the address.
+  - **Contract (`@objectstack/spec`, widening):** `IAuthService` gains the optional `resolveClientAddress(transport)` (the address the deployment establishes for a request; `AuthManager` already implements it), and `recordMcpAccessTokenUse(principal, transport?)` takes the admitted request's headers and peer address as an optional second argument. The new `AuthRequestTransport` type names that argument.
+  - **`@objectstack/core`:** `resolveApiKeyAdmission` takes an optional trailing `client` argument, `resolveAuthzContext` an optional `client` input and `resolveRequestExecutionContext` an optional `transport` input. None is read for any admission verdict: which credentials are admitted does not change.
+  
+  The address and user agent are stored under the audit log's existing retention and access rules, and the row still never carries a key, a token, a key hash or a key prefix.
+- 489f0ce: feat(plugin-auth): a SCIM request the door refuses is handed to the `audit` slot as a bounded `scim_refused` event
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A `/scim/v2/*` request answered 400 or above (a bearer that verifies as no connection, a duplicate create, a malformed PATCH, an unknown user) used to leave no trace anywhere, so a SCIM console or a SIEM feed could not show a connection's errors. `handleRequest` now observes the answer in its SCIM arm and hands the `audit` service slot's new optional `recordScimRefusal` member one event per refusal, after the response: the connection the bearer verified as and the organization its credential belongs to (or, when it verified as none, which kind of credential was presented: `scim_bearer`, `other` or `none`), the resource type and method, the status, the SCIM `scimType` or machine `code` the answer carried, and the client address. Never the request body, the bearer or any part of it, its digest, an attribute value, the resource id or the error's `detail` text.
+  
+  The events are bounded per process: at most 20 per connection (or, for a bearer that verified as no connection, per client address) in a 10-minute window, and at most 1000 per window across all keys, with one `warn` line when that cap drops one. Every dropped refusal is counted, and the next event for the same key carries the count as `suppressed`.
+  
+  `AuthEventAuditSurface` (the locally declared shape of the `audit` slot) gains the optional `recordScimRefusal` member and the `ScimRefusalAuditEventInput` type. An `audit` service without the member, or no `audit` service at all, writes nothing, and the SCIM answer is the same either way. Some refusals are answered before the bearer is verified, so their event names no connection, as a 401's does.
+  
+  The bearer verifier now hands back the credential row's `organization_id` on the verification's `connection` (`organizationId`, read in the probe it already makes; the vendor copies only `id` and `provisioningDomainId`), and `recordScimRequestConnection` keeps it on the request scope (`ScimRequestScope.organizationId`) beside the connection id, under the same first-verified-wins rule.
+- f00fb1b: fix(core)!: every door that admits an API key records where the use came from on the `credential_use` row (#31898)
+  
+  Clause-②: yes (narrowing) — `RequestExecutionContextInput.transport` in `@objectstack/core` becomes a required key, typed `{ remoteAddress } | undefined`: a caller of `resolveRequestExecutionContext` now states the transport's peer address, or states that it hands none.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/request-execution-context.ts#RequestExecutionContextInput) the narrowed member is an input key of a runtime TypeScript interface, which the compiler names at every caller (TS2741); no packages/spec schema, registered node type, stored row or ADR-0087 conversion surface names it, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a TypeScript caller of `resolveRequestExecutionContext`.
+  
+  Since #31821 the `credential_use` audit row records the client address and user agent of the use that opened the window, but only REST, the runtime dispatcher (its `/mcp` face included) and the stdio MCP transport handed their client facts over. An API key admitted at any other door wrote `metadata.ip_address_absent: 'not_supplied'`. Every door that can admit an API key now hands them over, so no door writes `not_supplied`:
+  
+  - the storage family (its sign-in gate reader, the parent-governed download authorizer and the upload attacher), the settings routes, the sharing-rule shareable-objects list, the share-link routes, the notification preference options, the datasource admin routes, the print route, the own-row delete routes, the organization settings door, the cloud-connection status and setup doors, and the marketplace local-plugin install.
+  
+  Each door hands only its transport's own peer address and the request headers. The address recorded is the one the deployment establishes under its one client-address trust rule (`IAuthService.resolveClientAddress`): `X-Forwarded-For` / `X-Real-IP` only when `server.trustProxy` is declared, otherwise the peer. No door reads a forwarded header itself. `@objectstack/core` exports the one helper the doors use, `credentialUseClientFor(authService, { headers, remoteAddress })`, and `transportPeerAddressOf(c)` for a Hono door's socket peer.
+  
+  Which credentials a door admits does not change. Doors that read only a session (`credentials: 'session-only'`) read no key and write no row; they state `transport: undefined`.
+  
+  What to do on upgrade:
+  
+  - A caller of `resolveRequestExecutionContext` that omitted `transport` no longer compiles (`TS2741: Property 'transport' is missing`). Pass `transport: { remoteAddress }` with the transport's own peer address (`undefined` when it has none), or `transport: undefined` for a call that hands no client facts, such as a `'session-only'` call. Never pass a forwarded header as `remoteAddress`: the auth service applies the trust rule.
+- b4acdb7: Clause-②: no
+  Metadata-protocol: none
+  
+  fix(plugin-auth): a configured `http://localhost` base URL is kept as written.
+  
+  On `kernel:ready` AuthPlugin used to rewrite any configured `http://localhost…` origin to `http://localhost:<bound port>`. Behind a proxy (`OS_AUTH_URL=http://localhost`, app listening on :3000) invite links, invitation mail and the sign-in / reset URLs in auth mail then pointed at a port nobody published. The port correction now applies only when no base URL was configured: no `baseUrl` option, or one the host filled from its own loopback fallback. `os serve` marks that case with the new `baseUrlDefaulted` option (set when none of `OS_AUTH_URL`, `BETTER_AUTH_URL` or `OS_BASE_URL` is set). An explicit `OS_AUTH_URL`, `OS_BASE_URL` or `baseUrl` is the public origin and is honoured as documented; a dev server with nothing configured is still corrected to the port it bound. Trusted-origins resolution is unchanged.
+- aad7d2f: fix(security): carry each permission set's package from the grant to the per-request evaluation
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When two installed packages each ship a permission set of the same name, a request now gets the set its grant names and no other. The authorization resolver records the `(package, name)` each granted set resolved to on `ExecutionContext.permissionSetAddresses`, and the security plugin's evaluator reads every set through the security catalog at that address. It used to take the first set of the name the metadata list returned. A name that arrives with no address (an API key's seeded sets, an agent's scope ceiling, the baseline) resolves by ADR-0150 D3 with no caller: one holder answers as before, two or more are refused, naming every candidate once in the log, and nothing is granted.
+  
+  The activation ledger now switches a set off per holder, through its row's `package_id`: switching off one package's `sales_rep` leaves another package's `sales_rep` granting. A set the `everyone` anchor carries because a deployment accepted a package's suggestion resolves at the package the suggestion row names. The access explainer reports the same holders enforcement reads. Every context built by hand from the resolver's grants (objectql's scoped context, a `runAs: 'user'` flow run, storage, the audit mention gate and the organization-administrator check) carries the addresses with the names.
+  
+  A deployment where every set name has one holder sees no change.
+  
+  Two server-side exports gain a field and an option, and keep what they had. `readDisabledCatalogNames(...)` (`@objectstack/core`) adds `permissionSets`, its switched-off holders, asked with `permissionSetSwitchedOff(disabled, packageId, name)`; its `permissions` name set is unchanged. `PermissionEvaluator.resolvePermissionSets` adds `options.catalogLoader`, which takes `{ name, packageId? }` requests; called without it, the method reads the metadata list, the bootstrap sets and the by-name loader as before. Resolved sets come back in the order they did before.
+- 4f6fb53: fix(security): read every administrator identity and every grant gate by the permission set's package, not its name alone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When another package ships a permission set under one of the platform's names (`admin_full_access`, `organization_admin`, `organization_admin_no_bypass`), a grant of that package's set is now granted like any other set and confers no administration. Platform standing, the tenant-administrator rung, the approvals override, the access explainer's posture, the break-glass guard's administrator count, the Default Organization's owner binding, the role-change answer and the upgrade report's recipients all read the platform's own set: the holder whose package declares the kernel namespace `sys`. The deployment-config administrator is given the platform's `admin_full_access` even beside another package's set of that name.
+  
+  The delegated-admin gate compares `(package, name)`. A scope's allowlist names a holder: each name resolves from the package of the set that carries the scope, so a delegate allowed to grant one package's `sales_rep` cannot grant another package's `sales_rep`, by a direct grant or through a position. A grant is judged at the holder its package column names, and at the holder the write seam will stamp from the name.
+  
+  The security plugin's evaluator, when no security catalog is bound, no longer picks the first of two sets that share a name: such a name grants nothing and is logged, naming every holder.
+  
+  A deployment where every set name has one holder sees no change.
+- 577a4ff: feat(plugin-auth): an Okta or Entra ID app tile starts an OIDC sign-in (third-party-initiated login)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An IdP app tile starts an OIDC sign-in by sending the browser to the app's initiate login URI with `iss` and no `code` (OIDC Core 1.0 §4). On the provider's callback, `GET /api/v1/auth/sso/callback/:providerId`, `@better-auth/sso` answered that request `error=state_not_found`, because its own IdP-initiated handling runs only for a callback with a `code` and no `state`.
+  
+  Under maintainer ruling A on #32150 (record 6764924025), a callback request carrying `iss` and no `code`, `state` or `error` now starts the vendor's own sign-in (`POST /sign-in/sso`, a fresh `state`, and PKCE when the provider uses it) and answers `302` to the IdP, only when all four hold: the provider is a registered OIDC provider, its `allowIdpInitiated` option is on, `iss` equals its registered issuer byte for byte, and `target_link_uri` is absent, or sent once on the same origin or a trusted origin. Any miss keeps `error=state_not_found` and writes one `warn` line naming it (`provider_not_registered`, `provider_not_oidc`, `idp_initiated_off`, `issuer_mismatch`, `target_link_uri_untrusted`, `start_refused`).
+  
+  The entry mints nothing: it sets no session cookie and writes no `sys_session` row. The start carries no cookie and no `authorization` header, and it is handed the transport of the request it serves, so the vendor's per-address rate limit counts each caller as it counts a direct `POST /sign-in/sso`. A session is still created only by the vendor's callback after the IdP returns a `code` for that `state`, the code exchange succeeds and the ID token verifies. A callback with a foreign or missing `state` is refused as before. No configuration key is added. Documented in `content/docs/permissions/sso.mdx` ("From an IdP app tile").
+  
+  The SAML refusal causes are now exported from the package entry beside the OIDC ones: `SSO_SAML_REFUSAL_CAUSES`, `SSO_SAML_UNCLASSIFIED_REFUSAL` and the `SsoSamlRefusalCause` type.
+- 02498c9: feat(plugin-auth, platform-objects): an SSO provider maps who a sign-in resolves to (SAML email, first, last and display name; OIDC email and name), and a refused SAML response names its cause
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **Attribute mapping.** `@better-auth/sso` reads a SAML user's email from the `email` attribute (else the NameID) and the name from `givenName` + `surname`, else `displayName`, else the NameID. Okta sends the full name as `name` and Entra ID sends claim URIs, so their users were named after their NameID, and nothing in the platform could map other attribute names.
+  
+  - **Register SAML Provider** takes four new optional fields, `mapEmail`, `mapFirstName`, `mapLastName` and `mapName`, stored as the provider's `mapping.email` / `firstName` / `lastName` / `name` beside the groups attribute. Blank leaves the default. The help text names the Okta and Entra ID attribute names.
+  - **Show Attribute Mapping** and **Edit Attribute Mapping** on `sys_sso_provider` show and change the mapping of an existing provider, SAML or OIDC, through two new platform-admin bridges, `POST /api/v1/auth/admin/sso/get-attribute-mapping` and `POST /api/v1/auth/admin/sso/set-attribute-mapping` (route ledger rows, `server-only`, `requires: 'sso'`). A member left untouched keeps its value, a cleared one goes back to the default, and the groups claim and every other member of the stored mapping are kept. An OIDC provider maps `email` and `name` only; `firstName` / `lastName` on one answer `400 INVALID_REQUEST`. An unknown provider is `404 RESOURCE_NOT_FOUND`. The answer carries the provider id, its protocol and the four members, nothing else of the stored configuration. The edit is not offered to an AI caller: the email member decides which account a sign-in links to.
+  - The labels are translated in all ten locales.
+  
+  **SAML refusal causes.** The vendor answers every samlify rejection with `error=saml_error&error_description=Invalid SAML response`. After it refuses, the posted response is now read once more against the provider's configured signing certificates and IdP entity id, in samlify's order, and `error_description` names the first of four causes that applies: `saml_idp_status_not_success`, `saml_response_unsigned`, `saml_signing_certificate_mismatch` (the IdP certificate rotation case) or `saml_issuer_mismatch`. One `warn` line carries the provider id, `protocol: 'saml'` and the cause. `error=saml_error` is unchanged, any other refusal keeps `Invalid SAML response`, and nothing about the accept decision changes. No cryptography runs; neither the redirect nor the line carries assertion content, and the answer is the same for every account. `fast-xml-parser` (the parser the vendor already uses) becomes a direct dependency of plugin-auth.
+  
+  Documented in `content/docs/permissions/sso.mdx` ("Map the user's email and name", "Why a SAML sign-in was refused").
+- 2830f31: fix(plugin-auth)!: a user a SCIM directory provisions reads `idp_provisioned` from the moment SCIM creates it, and users a directory provisioned earlier are marked once at boot
+  
+  Clause-②: yes (narrowing) — every refusal and hidden action keyed on a directory-owned identity (`sys_user.source = 'idp_provisioned'`) now applies to a SCIM-provisioned user who holds no local password: `POST /api/v1/auth/admin/set-user-manager` answers `403 PERMISSION_DENIED` with reason `idp_provisioned`; the admin bulk import (`POST /api/v1/auth/admin/import-users`) refuses that user's `manager_id` link through the same refusal; `admin/set-user-password` on a cloud-managed environment answers `409 RESOURCE_CONFLICT`; the Setup "Set Manager" row action is hidden; and the self-service Change Password, Change Email and Delete My Account actions are hidden (ADR-0135 D4, D5.2).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, no export changes, and `sys_user.source` keeps its two values. The stored rows the rule covers are marked by the boot pass itself, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing for SCIM-provisioned users (ADR-0135 D4).
+  
+  - A user a SCIM connection creates, re-links through a tombstone or reprovisions reads `sys_user.source = 'idp_provisioned'` ("IdP-Provisioned" in Setup), written in the same transaction as the SCIM write. On a create or another active write the mark fails closed: if it cannot be written, the SCIM request fails, nothing persists, and the identity provider retries it. On a deactivation or a `DELETE` the account is disabled first and the mark after it is best-effort, so a mark that cannot be written never leaves a deprovisioned account enabled; it is logged at `error` and re-run by the next active write and the boot pass.
+  - At boot, every user that owns a `sys_scim_subject` row and does not already read `idp_provisioned` is marked. The pass logs how many users it marked and writes nothing on a later boot.
+  - A user who holds a local password keeps `env_native`: setting a password on a directory-provisioned user still flips it to `env_native`, and a later SCIM sync or boot leaves that value.
+  - `sys_user.source`'s description names SCIM directory provisioning beside federated SSO (`@objectstack/platform-objects`).
+  
+  **Who moves: the manager of a SCIM-provisioned user.** For a SCIM-provisioned user with no local password, the admin set-manager endpoint, the Setup "Set Manager" button and the bulk import's `manager_id` column all refuse ("directory wins, per identity"). The platform does not write the manager from SCIM: it declares the SCIM `manager` attribute without projecting it onto `sys_user.manager_id`, and an existing `manager_id` value stays as it is. An approval node whose `manager` rung resolves to nobody for such a user can declare `onEmptyApprovers: 'fallback'` with a `fallbackApprovers` list; the other remedy is a provisioning path your deployment supplies that writes the column.
+- c419609: fix(plugin-auth): a directory deactivation revokes the user's API keys, and no one restores them
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **The rule.** Deactivating a user through SCIM (`active: false`), or deleting one (`DELETE /Users/{id}`), revokes every API key the user owns. Each key row stays, with `revoked: true` and `revoked_reason: scim_deactivated`. A later re-activation lifts the directory's ban and re-arms none of those keys: the person creates a new key (`POST /api/v1/keys`, or the API Keys page) and replaces the old one wherever it is configured. An administrator's own ban and unban are unchanged and leave keys alone. The user's local password is not changed by this release.
+  
+  **Who can restore such a key.** No one, from a user context. The owner's Restore is refused `403 PERMISSION_DENIED`, and so is a platform administrator's, naming the reason and the new-key road. The AI service account door (`POST /api/v1/auth/service-account/restore-key`) refuses it the same way. The key door's `403 API_KEY_REVOKED` says the key cannot be restored and names no restorer. A key the user had already revoked, or that carried `admin_password_reset` or `administrator_suspended`, is restamped with `scim_deactivated` by the deactivation; a key that carried `organization_membership_ended` keeps it, since no one restores either.
+  
+  **`@objectstack/platform-objects`: `sys_api_key.revoked_reason` gains the option `scim_deactivated`** ("Deactivated by the directory"), beside `admin_password_reset`, `organization_membership_ended` and `administrator_suspended`. The column stays readonly and off the ADR-0092 D2 whitelist, so no data-API write sets or clears it. The field's help text names the new reason and that no one restores it; every shipped locale carries the new option and help.
+  
+  **If the revocation does not finish.** The deactivation still lands: the account is disabled and the SCIM request succeeds. The server logs one `error` line naming the user, how many keys were and were not revoked, and the remedy (revoke the remaining `sys_api_key` rows with that reason). The next SCIM write that leaves the user inactive runs the revocation again.
+- b74db27: fix(plugin-auth): a SCIM request refused by the provider's schema check names the connection its valid bearer belongs to
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A SCIM request whose body fails the provider's schema check (a malformed PATCH operation, a `POST /Users` with no `userName`) is refused `400 invalidValue` before the bearer is verified. Its `scim_refused` audit row used to name no connection (actor empty, `scim_connection_id: unknown`), even when the bearer was valid, so a SCIM console that filters on the connection's `svc:scim:` actor never showed the most common identity-provider mapping error.
+  
+  The row now names the connection (and the credential's organization) when the presented bearer belongs to a live credential. The bearer is resolved after the SCIM answer has been sent, only for a row the existing per-address and global bounds admit, through the same read-only lookup the verifier uses. A forged, revoked or expired bearer still reads `unknown`; a credential of any other shape is unchanged. The lookup writes nothing: a refused request does not update the credential's last use. The bearer, any part of it and its digest still never reach the event, the row or a log line. The SCIM answer itself is unchanged.
+- e34723f: feat(plugin-auth, platform-objects): a SCIM connection credential shows a token hint and when it was last used, so two credentials of one connection can be told apart during a rotation
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `sys_scim_connection_credential` gains two read-only columns, both in the `all` list view and readable through the data API's list door:
+  
+  - `token_hint`: the last four characters of the bearer, stored when the credential is minted. The mint door (`POST /api/v1/auth/admin/scim/mint-credential`) answers it as `data.tokenHint` beside the token, and the mint result dialog shows it, so an administrator can match a row to the bearer they pasted into the identity provider. Never a prefix (every bearer starts with the constant `oss_scim_`), never the bearer, never the digest, which stays internal.
+  - `last_used_at`: written by the SCIM bearer verifier on a successful verification only, at most once per credential per minute. A refused bearer (unknown, revoked or expired) writes nothing. A failed write never fails the SCIM request; it is logged once per distinct failure at `error`, naming the credential row and never the bearer.
+  
+  Existing credentials: a credential minted before this release has no `token_hint`, and none can be backfilled because the bearer is not stored. It shows empty; mint a new credential to get one. Its `last_used_at` starts filling on its next successful SCIM request.
+- 9052363: feat(plugin-auth): an IdP group mapping says whether it matches a current group of its source
+  
+  Clause-②: yes (widening) — three new read-only columns on `sys_idp_group_mapping` (`match_status`, `matched_group_id`, `match_changed_at`), shown in its `all` list view. No package export changes. Nothing existing is removed, retyped or refused; the object's data API stays list-only.
+  Metadata-protocol: none
+  
+  A group mapping now says whether the group it names is one its SCIM connection pushes right now. `match_status` reads `matched` (with `matched_group_id`, the `sys_scim_group` it matches), `unmatched` (the identity provider renamed or deleted the group, or never pushed it) or `not_applicable` (an SSO provider, which sends groups only as a sign-in claim and stores no group list). `match_changed_at` records when the answer last changed, so a console can show "matches no current group since …".
+  
+  plugin-auth keeps the columns current on every write to either side: a SCIM group create, rename (`PATCH` or `PUT`) or delete, and a mapping save. A membership change writes nothing to the mapping. The answers are re-judged once per boot too, so mappings saved before this release read right after the upgrade. A failure to re-judge never fails the SCIM request that triggered it; it is logged at `error` and heals on the next write or boot.
+  
+  Who gets which grant does not change: the projection still matches on every membership change, and a mapping that matches nothing still grants nothing.
+- b6fc890: fix(plugin-auth): the AI service account register door answers a licence refusal with its own status and code, not 500 (ADR-0151 D7)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `POST /api/v1/auth/service-account/register` writes a `sys_user` row and its `sys_member` row in one unit of work. A hook or engine middleware that refuses either write by throwing a declared error (a numeric `statusCode` or `status` in 400-599 and a non-empty string `code`, such as a licence plugin's AI-seat cap: 402 `ai_seat_limit_reached`) is now answered with that status, and nothing is written. Before, the user-row refusal answered `500 INTERNAL_ERROR`, and the membership refusal kept its status but answered `code: INTERNAL_ERROR`.
+  
+  The body follows ADR-0112 D4, as every other door does for the same throw: `error.code` is the closed vocabulary (a registered code verbatim, otherwise the code the status derives, `VALIDATION_ERROR` for a 402), and the producer's own spelling rides `error.declaredCode`. A client branches on `error.declaredCode ?? error.code`. A 4xx message travels; a 5xx message travels only when the producer set `refusal: true`, and is withheld otherwise.
+  
+  Unchanged: a throw without both halves still answers `500 INTERNAL_ERROR`; `VALIDATION_FAILED` refusals, the vendor's own membership refusals (`body.code`), and the `503` answer for an unreadable authorization store keep their answers.
+- 38c528e: fix(plugin-auth): a refused IdP-initiated SAML sign-in lands on the platform's sign-in page with its error
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A SAML sign-in the identity provider starts on its own (an Okta or Entra app tile) carries no relay state, so `@better-auth/sso` redirected every refusal of it to the bare app origin, for example `/?error=unsolicited_response` when the provider's `allowIdpInitiated` option is off. The Console's root redirect drops the query string, so the sign-in page showed nothing. Such a refusal now lands on the platform's sign-in page (`/_console/login`), the same page a sign-in that names no `errorCallbackURL` lands on, with `error=` and `error_description` unchanged: `unsolicited_response`, and also `SELF_REGISTRATION_CLOSED`, `account_not_linked` or `saml_error` when the option is on. The refusal is unchanged otherwise, and nobody is signed in. An allowed IdP-initiated sign-in still lands on the app origin, and a provider whose stored SAML configuration names its own `idpInitiatedCallbackUrl` keeps sending its refusals there.
+- e267b96: fix(plugin-auth): Microsoft Entra ID registers and signs in over OIDC: Graph trusted for its discovery only, groups from the verified ID token, and a named refusal for a user without a mailbox
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **Registration.** Entra ID's discovery document names its `userinfo_endpoint` on `https://graph.microsoft.com`, so every Entra ID registration was refused `discovery_untrusted_origin` unless the operator widened `OS_TRUSTED_ORIGINS`, and with it the CSRF allow-list. A built-in table of companion origins (`login.microsoftonline.com` → `https://graph.microsoft.com`) now trusts Graph only while `/sso/register` validates the discovery document of a registration whose issuer is an `https://login.microsoftonline.com` URL. The CSRF allow-list does not change. A host named only by a discovery document is still never trusted: any other IdP whose discovery names a foreign host is refused as before, and the message now names the endpoint and the registration member that names it explicitly (`"userInfoEndpoint": "…"`). The Register SSO Provider bridge (`POST /api/v1/auth/admin/sso/register`) now takes `userInfoEndpoint` and `skipUserInfo`; the Setup form does not show them yet.
+  
+  **Groups.** When the userinfo answer does not carry the provider's groups claim, the groups are read from the ID token the vendor already verified. Userinfo wins where both carry it. A groups overage (`_claim_names`) grants nothing from groups, makes no Graph call, and logs one `warn` per provider naming the fix (emit only the groups assigned to the application, or use Entra ID app roles).
+  
+  **Users without a mailbox.** A provider can now read its claims from the verified ID token only: the new `skipUserInfo` option (column `skip_user_info` on `sys_sso_provider`, "Read Claims From the ID Token Only", off by default, set at registration or with Edit Sign-In Options). With it on and the email mapped to `preferred_username` or `upn`, an Entra ID user without a mailbox signs in. The stored userinfo endpoint is kept.
+  
+  **Refusal wording.** A sign-in whose claims carry no email address was redirected with `error_description=missing_user_info`. It now reads `error_description=email_claim_missing` (`error=invalid_provider` is unchanged), and the `warn` line names the missing claim and the mapping key (`mapping.email`). A client that matched `missing_user_info` should match `email_claim_missing`, exported as `SSO_OIDC_EMAIL_CLAIM_MISSING`.
+- 146d190: fix(plugin-auth): SCIM adopts an account that SSO just-in-time provisioning already created, under three conditions and never on an email match alone; the SCIM 409 no longer names the vendor
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  "Turn on SSO first, add SCIM later" is the usual rollout. A person who signed in
+  through the organization's SSO provider before SCIM was turned on had an account
+  the directory could not reach: Entra ID and Okta look the user up (nothing: the
+  account is not a SCIM resource yet), then create it, and the create answered
+  `409` because the email was taken. The identity provider marked the user failed,
+  so its later deactivation never reached that account.
+  
+  `POST /api/v1/auth/scim/v2/Users` now LINKS the existing account to the
+  connection, and answers `201` with a new SCIM resource the directory then
+  manages (lookups find it, a deactivation bans the account), when every part of
+  this holds:
+  
+  1. the account reads `sys_user.source = 'idp_provisioned'` and holds no local
+     password;
+  2. no SCIM directory already holds it (no `sys_scim_subject` row) — an account
+     one directory provisioned, or deleted, is never adopted by a second;
+  3. one of its `sys_account` rows names a `sys_sso_provider` of the organization
+     that owns the SCIM credential the request authenticated with
+     (`sys_scim_connection_credential.organization_id`; both unset counts as the
+     same environment-wide organization, one unset does not);
+  4. that provider's `domain_verified` is true (ADR-0135 D6 domain verification,
+     opt-in through `OS_SSO_DOMAIN_VERIFICATION`), and the account's email domain
+     is exactly one of the provider's domains.
+  
+  Anything else answers `409` as before. Adoption therefore needs SSO domain
+  verification turned on and the domain verified; without it nothing changes.
+  
+  The SCIM conflict text the vendor worded in its own name now reads in the
+  platform's words: "An account with this email already exists" (was "A Better
+  Auth User already uses this email"), and "account" for "Better Auth User" in the
+  three other `409` details. The status and `scimType` are unchanged.
+- 2b11a71: feat(platform-objects): add and remove an IdP group mapping from Setup
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Setup → IdP Group Mappings was a read-only list: the only writers of a group → permission-set mapping were plugin-auth's `POST /api/v1/auth/admin/scim/set-group-mapping` and `/admin/scim/delete-group-mapping`, posted by operator scripts. `sys_idp_group_mapping` now declares three actions that post those two doors, offered to platform administrators only (`current_user.isPlatformAdmin == true`) and gated on `manage_platform_settings` where the action doors read it:
+  
+  - **Map SSO Group** (list toolbar): an SSO provider's Provider ID, the group as its groups claim sends it (an external ID or a display name), and a permission set picked from the security catalog. It applies at each member's next sign-in through the provider.
+  - **Map SCIM Group** (list toolbar): the same for a SCIM connection; the group's current members are granted the set at once.
+  - **Delete Mapping** (each mapping row): asks for confirmation, then deletes the mapping; the grants it made are removed.
+  
+  Every refusal is the door's own sentence, shown in the action's dialog: a permission set outside the organization boundary (an administrator set, an agent ceiling), a same-group mapping left in another organization (naming the mapping to delete first), SCIM, SSO or the security service not enabled, an unknown mapping. The data API stays list-only and the object stays fully locked, so no generic create, edit or delete appears.
+  
+  `@objectstack/plugin-auth`: the set-group-mapping door now admits `organizationId` in its body and reads nothing from it. Every `type: 'api'` action aimed at an `/api/v1/auth/` path is forwarded with the caller's active organization stamped as `organizationId`, so the door's closed key set refused every action that posted it. The mapping's organization is still the source's (the SCIM connection's or the SSO provider's), never the stamped one; any other unknown key is still refused `400 VALIDATION_FAILED`.
+- 0208b68: fix(plugin-auth)!: the SSO domain check refuses a subdomain listed beside its parent's provider, and compares every domain in one spelling
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes. The new refusals are answers of the auth routes to a request; no stored provider row is rewritten or re-checked by the upgrade, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on SSO provider registration and provider domain edits (`@objectstack/plugin-auth`).
+  
+  `POST /api/v1/auth/sso/register`, the `register_sso_provider` / `register_saml_provider` actions behind `/api/v1/auth/admin/sso/register` and `/register-saml`, and `POST /api/v1/auth/sso/update-provider` with a `domain` already refuse `409 RESOURCE_CONFLICT` (`field: 'domain'`) a domain entry another SSO provider lists. Sign-in first looks for a provider whose whole `domain` value equals the address's domain, then takes the first provider, in the store's row order, whose list holds the domain or a parent of it. Three more shapes are now refused the same way: the first two because sign-in would not reliably reach the second provider by address, the third because its two spellings name one DNS domain. Each was accepted before this release and saved the provider; each is now refused `409 RESOURCE_CONFLICT` with `field: 'domain'`, and nothing is saved:
+  
+  - **A listed subdomain beside its parent's provider.** Before: `eng.acme.com, foo.com` (or `https://eng.acme.com`, or `Eng.Acme.com`), registered or written by a domain edit beside a provider for `acme.com`, was saved, and sign-in for `eng.acme.com` went to whichever of the two came first in row order. Now: refused, naming the parent entry (`through its entry 'acme.com'`) and, to a platform administrator, the provider that holds it (`heldBy`).
+  - **A parent beside a provider that lists the subdomain.** Before: `acme.com`, registered or written by a domain edit beside a provider whose list holds `eng.acme.com`, was saved. Now: refused, naming the subdomain entry and, to a platform administrator, its provider.
+  - **One domain in another spelling.** Two spelling legs are newly refused. First, a punycode entry requested beside the same name stored in Unicode (`xn--bcher-kva.de` beside a stored `bücher.de`): before, it was saved, because the store was narrowed by the raw text of the request. (The reverse internationalised leg, `MÜNCHEN.de` requested beside a stored `xn--mnchen-3ya.de`, was already refused: the request was parsed to punycode before the store was read.) Second, the trailing root dot, either way round (`acme.com.` beside a stored `acme.com`, and `acme.com` beside a stored `acme.com.`): before, both were saved, because each side kept its root dot when parsed. Now: every entry on both sides is compared as one lower-case ASCII host (punycode for an internationalised name, trailing root dot dropped), and both legs are refused because the two spellings are one DNS domain. Sign-in itself does not convert between Unicode and punycode, so each internationalised spelling routes only to a provider stored in that spelling; the refusal rests on the two being one DNS domain, which the platform gives one provider.
+  
+  A `domain` too long to be a list of hosts is refused before it is read: `400 VALIDATION_FAILED` with `field: 'domain'` (and `fields: [{ field: 'domain', code: 'max_length' }]`) for a value longer than the 255 characters `sys_sso_provider.domain` holds, or an entry longer than the 253 characters of a host name (one trailing root dot not counted; a scheme or path around the host counts). Before: this check measured no length, and such a value went on to the vendor's own handling (an entry of 254 or 255 characters fits the column, so a register carrying one could be saved). Only a signed-in caller is answered so; without a session the vendor answers as before, and the value is not parsed.
+  
+  Still accepted, either way round: a provider whose whole domain is exactly `eng.acme.com` beside one for `acme.com`, and entries that only look alike (`xacme.com` beside `acme.com`, `bucher.de` beside `bücher.de`). To register a refused provider, give the subdomain a provider whose only domain entry it is, or edit the parent (or the listed subdomain) off the provider that holds it.
+  
+  **Providers already stored are not touched.** A pair that already collides in one of these shapes stays stored, and this release does not change how sign-in routes between them; nothing re-checks the store at upgrade or at boot. The check runs only on a request that writes a domain: a register, or an `update-provider` that carries `domain`. An `update-provider` without `domain` (an OIDC or SAML settings edit) is not judged and passes. An `update-provider` that carries `domain` is judged even when it re-saves the provider's stored value unchanged, so either provider of a stored colliding pair is refused `409` on a domain write until one of them edits the colliding entry off; after that, both save cleanly. Deleting either provider is not affected.
+  
+  Two registers racing for one domain can still both pass: the check is a read before the vendor's insert, and the store holds no constraint that expresses the rule.
+- 4462b4d: fix(deps): `fast-xml-parser` is on its fixed release, 5.12.0 (#32386)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Both packages declare `fast-xml-parser` as a runtime dependency, so a downstream install now resolves the fixed release. `@objectstack/plugin-auth` keeps its exact pin, now `5.12.0`, the same release `@better-auth/sso` resolves (its `^5.8.0` admits it), so the SAML refusal-cause reader and the vendor still parse with one copy. `@objectstack/driver-odata` declares `^5.12.0`. No API, behaviour or export changes.
+- 724753d: fix(plugin-auth): SSO sign-in by email reads every provider, not the first 100
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `@better-auth/sso` reads the SSO provider table with no limit in three places and treats the answer as the whole table: `/sign-in/sso` by email (its second step, which matches an address to a provider whose domain list covers it, such as a subdomain of a listed domain or a non-first entry of a comma-separated list), `/sso/providers`, and the per-user quota check in `/sso/register`. better-auth's adapter factory turns a read with no limit into its default of 100 rows, so with more than 100 providers an address whose provider sat at row 101 or later was refused with `404 No provider found for the issuer`, and `/sso/providers` left out a caller's own providers past row 100. Those reads now see every row. Which provider an address routes to is unchanged: matching is still the vendor's own, in the same row order; every other better-auth model keeps the factory's 100-row default.
+- c5758b0: feat(plugin-auth): `runOAuthConsentRequestRead` and `oauthConsentRequestDepsFor` — a host that forwards `/api/v1/auth/*` to a kernel's `AuthManager` answers the OAuth consent page's request read
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The package root now exports `runOAuthConsentRequestRead(deps, request)` and `oauthConsentRequestDepsFor(manager)`, with the types `OAuthConsentRequestManager`, `OAuthConsentRequestDeps`, `OAuthConsentRequestResult`, `OAuthConsentRequestData` and `ConsentRequestClient`. Together they are the whole body of `POST /api/v1/auth/oauth-consent/request`, the same two calls AuthPlugin's own mount makes; nothing in the module changes, so every answer and refusal is as before.
+  
+  The Console's OAuth consent page keeps Authorize disabled until this route answers `200`. A host that serves no AuthPlugin routes and forwards the auth routes to an `AuthManager` it did not mount (a per-environment kernel with no HTTP server, AuthPlugin with `registerRoutes: false`) answered it `404`, so nobody could approve an MCP or other OAuth client there. Such a host now answers it for the manager it forwards to:
+  
+  ```ts
+  import { oauthConsentRequestDepsFor, runOAuthConsentRequestRead } from '@objectstack/plugin-auth';
+  
+  const answer = await runOAuthConsentRequestRead(oauthConsentRequestDepsFor(authManager), {
+    raw: request,          // the incoming Request, body unread
+    queries,               // the request's query parameters, name to values
+  });
+  // answer.status is 200, 400, 401, 403 or 404; send answer.body as JSON with answer.headers
+  ```
+- e47da23: fix(plugin-auth): a password sign-in refused because the identity provider deactivated the account says so in `details.cause`
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A SCIM `active: false` (or `DELETE /Users/{id}`) disables the account with the platform's ban, and the next password sign-in was refused `403 BANNED_USER` with better-auth's "You have been banned…" text, the same answer an administrator's ban gets. A client could not tell an organization's deactivation from a disciplinary ban. `POST /api/v1/auth/sign-in/email` now answers that refusal with `details: { cause: 'scim_deactivated' }` beside the unchanged status, code and message, when the ban is the one the SCIM deactivation placed (the same ban an `active: true` lifts). An administrator's ban answers exactly as before, with no `details`; a wrong password is still the ordinary `401 INVALID_EMAIL_OR_PASSWORD`. Whether the account may sign in is unchanged.
+  
+  `BANNED_USER` is now registered in `ERROR_CODE_LEDGER` under `@objectstack/plugin-auth`, which stamps it on this refusal.
+  
+  Clients: branch on `code === 'BANNED_USER'` and `details?.cause === 'scim_deactivated'`, never on the message. Nothing to migrate.
+- c249611: fix(plugin-auth): deleting a self-registrant's first organization is no longer refused over their self-registration grant
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a deployment whose audience lets people sign up themselves (`audience.posture` `open` or `email_domain`), the person's first membership lands the declared `audience.selfRegistrationPermissionSet` as a grant owned by that organization. `POST /auth/organization/delete` counted that grant as a record the organization still owned, so every self-registrant's first organization answered `409 DELETE_RESTRICTED` naming `sys_user_permission_set (1)`, while their second organization deleted normally.
+  
+  The delete now treats that grant as the organization's own auth structure, as it already treats the organization-admin grants: it is left out of the count and removed together with the organization. The set is the one the audience declares when the delete runs. Every grant of any other set in the organization is still counted and still refuses the delete, so an organization whose members were given other permission sets must have those removed first, as before. A grant only ever applies while its own organization is the active one, so removing it changes nothing the person can do in any other organization they belong to. The Default Organization's delete is unchanged.
+- b58beb8: fix(plugin-auth)!: an allowed IP range that names no range is refused at save and never matches at the gate
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: updated here — `content/docs/permissions/authentication.mdx` (the `allowed_ip_ranges` row, and the first two rules under "Saving, clearing and lockout recovery") and `docs/HARDENING.md` (the Network row); `skills/**` teaches no `allowed_ip_ranges`
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata an author writes changes and no stored row is rewritten: a value of the `auth.allowed_ip_ranges` setting that is not text, or an entry of it or of the auth plugin's `allowedIpRanges` option that names no range, is refused where it is saved or declared, and matches no address at the sign-in gate -->
+  
+  **BREAKING** for a deployment whose `auth.allowed_ip_ranges` (ADR-0069 D5), `OS_AUTH_ALLOWED_IP_RANGES` or declared `allowedIpRanges` holds an entry that is not an IP address or a CIDR range, or whose stored `auth.allowed_ip_ranges` value is not text.
+  
+  The setting holds its entries as text, one per line or comma-separated; a value that is not text (a list, a number, an object) names no list. An entry is an IPv4 or IPv6 address, or an address, `/` and a prefix length written in decimal digits: one or two digits, from 0 to 32, for an IPv4 base (an IPv4-mapped one included), and one to three digits, from 0 to 128, for an IPv6 base. Every such entry keeps its meaning. Any other entry names no range, and one reading of that rule now serves every door that judges or saves the list:
+  
+  - **The sign-in gate.** An entry that names no range matches no address, its own base address included, so a list holding one admits exactly what its other entries admit. `ipMatchesRange` answers `false` for it.
+  - **The settings save.** A value that is not a list of entries written as text is refused with `400 SETTINGS_VALIDATION`, `invalid_value` at `allowed_ip_ranges` and `constraint: { type: 'textarea' }`. A list holding an entry that names no range is refused the same way, the entries in `constraint.invalidEntries`, with a message in the caller's language that names them. Both are judged before the saving address, on every write: the console's `PUT /api/settings/auth` and writes made inside the server alike. Saving the value already in force again is not judged, as before.
+  - **The declared list.** An `allowedIpRanges` passed to `AuthPlugin` or `AuthManager`, or set by an `auth:configure` handler, that holds one, or that is not an array, is refused at construction with an error naming each such entry.
+  - **A list already stored, or pinned by `OS_AUTH_ALLOWED_IP_RANGES`.** It is applied, the entry matches no address, and the settings binding logs one `error` that names the entry and the fix. A stored value that is not text admits no address while it is in force, and the binding logs one `error` that says so and names the fix.
+  - **Who moves.** A deployment with such an entry corrects it to an address, or an address and a prefix length (`203.0.113.0/24`, `2001:db8::/32`), or removes it. A deployment whose stored value is not text saves the list again as text, or clears it. Locked out meanwhile, start the server with `OS_AUTH_ALLOWED_IP_RANGES` set to an empty value, sign in, clear the stored value (`PUT /api/settings/auth` with `allowed_ip_ranges: null`, the one write the override lets through), remove the variable and restart, then save the corrected list.
+- 19f9053: feat(plugin-auth)!: `auth.handleRequest` answers the plugin's whole `/api/v1/auth/*` surface, behind the same mount-layer checks as the self-hosted mount
+  
+  Clause-②: yes (narrowing) — a host that forwards to `AuthManager.handleRequest`, and the runtime dispatcher's `/auth` domain, now run the mount-layer checks (the IP allow-list, the one-account-per-request rule, the organization IP list and the platform-admin wrappers), so a request admitted today can be refused: for example `403 IP_NOT_ALLOWED` when `allowed_ip_ranges` is set and neither a transport peer nor a trusted proxy (`server.trustProxy`) is declared. The published surface also widens: `handleRequest` answers every objectstack-mount route, `AuthManager` gains `handleVendorRequest`, `ownsVendorRoute` and `bindRouteSurface`, `ownsRoute` answers `true` for more routes, and `OneTimeTokenHandoffServing.server` accepts `null`.
+  Metadata-protocol: none
+  Skills-docs: follow-up owed — content/docs/kernel/contracts/auth-service.mdx (its `handleRequest` section does not yet say that a forwarding host gains the whole surface and the mount-layer checks, nor name the optional transport argument); no file under `skills/**` teaches `auth.handleRequest`, `allowed_ip_ranges` or `trustProxy`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata an author writes changes and no stored row is rewritten: requests forwarded to the auth service are judged by the checks the self-hosted mount already applies -->
+  
+  **BREAKING** for a host that forwards auth requests to `auth.handleRequest` (a multi-tenant host, the `@objectstack/hono` embed, the dispatcher's `/auth` domain) on a deployment that sets `allowed_ip_ranges` or relies on the request reaching better-auth unjudged: those requests now pass the mount-layer checks first, and a request whose client address cannot be established is refused while an allow-list is set.
+  
+  - **Who moves.** The forwarding host. The fix is one line: pass the transport's peer as `handleRequest`'s second argument, `handleRequest(request, { remoteAddress })`, or declare `server.trustProxy` when the host sits behind a proxy that sets `X-Forwarded-For`. The `@objectstack/hono` embed and the dispatcher's `/auth` domain already pass the peer they have.
+  - **Self-hosted deployments** serving the auth routes from their own HTTP server see no change in which requests are admitted.
+  
+  `AuthPlugin` now runs its auth route registration twice: on the composed HTTP server's app, as before (`registerRoutes`), and once more in `init()` on a private route table it binds to the `auth` service. `AuthManager.handleRequest` answers every request under `basePath` through that table, so a host that forwards its auth path to the service (a multi-tenant host, the `@objectstack/hono` embed, the dispatcher's `/auth` domain) serves exactly the routes the self-hosted mount serves. Both tables come from one registration function, and the private one leaves out only the root-path discovery documents, which a host serves itself. Self-hosted deployments serve the same routes in the same order.
+  
+  What a host that forwards to `handleRequest` gets:
+  
+  - Every objectstack-mount route: `/config`, `/bootstrap-status`, the `/admin/*` doors, `/authorized-clients`, the service-account doors and the rest of the `objectstack` rows in the route ledger, where it used to get better-auth's 404.
+  - The mount-layer checks, for every host: the ADR-0069 D5 IP allow-list, the agent forward credential (ADR-0090 D10), the organization IP list at the mount, the one-account-per-request rule and the platform-admin wrappers. They judge the client address by the platform's trust rule, from the transport it passes: `handleRequest(request, { remoteAddress })`. The `@objectstack/hono` embed now passes the peer `@hono/node-server` reports, and the dispatcher's `/auth` domain passes the request's `remoteAddress`.
+  - Errors from the auth surface reach the host as a rejection of `handleRequest`; the host turns them into its own error body.
+  - The mobile sign-in hand-off answers a signed-out page navigation with 401: the private table declares that it serves no sign-in page (`OneTimeTokenHandoffServing.server` accepts `null` for that).
+  
+  Also:
+  
+  - A route's internal failure is answered with a generic message (`Internal server error`); the error itself goes to the server log. This holds on the self-hosted mount too.
+  - `AuthManager.handleVendorRequest` is better-auth's handler alone, the entry every in-process re-dispatch uses, and `AuthManager.ownsVendorRoute` asks better-auth's router alone. `AuthManager.ownsRoute` also answers `true` for a route the plugin mounts itself, judged by method and path, so a host that yields a disclaimed 404 keeps an objectstack route's own 404.
+  - A manager with no bound table (constructed on its own), and any path outside `basePath`, still go straight to better-auth.
+  - `@objectstack/plugin-auth` declares `hono` among its `dependencies` (it was a development dependency).
+  - `IAuthService.handleRequest`'s description now says an implementation answers its whole auth route surface there. Its shape is unchanged.
+- 133f75a: fix(plugin-auth): an auth request is judged and executed as one account
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A request whose session cookie and bearer token name two different signed-in accounts is refused before anything runs, with `401 CREDENTIALS_NAME_DIFFERENT_ACCOUNTS`, and nothing is read or written for either account. It applies to every better-auth endpoint (over HTTP and to the in-process session read every data door makes) and to the raw ObjectStack routes on the identity mount. One credential alone, two credentials that name the same account (two sessions of one user included), and a credential that names no signed-in account are unaffected. An API key is not a session credential for this rule; each door keeps its existing one-principal rule for keys. A session read that cannot answer refuses too, as an outage (`503 SERVICE_UNAVAILABLE`), and so does the identity mount when the judgment cannot be reached at all.
+  
+  `CREDENTIALS_NAME_DIFFERENT_ACCOUNTS` is registered in the `@objectstack/spec` error-code ledger under `@objectstack/plugin-auth`.
+  
+  A successful `/change-password` stamps `password_changed_at`, clears an administrator's forced change and appends the history entry on the account the change acted on, and only when the password checks before it ran for that account; otherwise none of them lands, and the operator is told.
+  
+  `/admin/revoke-user-session` refuses a token that identifies no session (`404 RESOURCE_NOT_FOUND`) for a caller signed in by bearer alone, as it already did on the cookie lane.
+  
+  The Console needs no change: its session read already treats any refused read as a stale token, retrying with the cookie alone and dropping the token.
+- f4cd4ec: fix(core)!: a banned user's credentials are refused while the ban holds, at every door that accepts an API key
+  
+  Clause-②: yes (narrowing) — while a user's ban holds, a request authenticated by an API key that user owns is answered as a key that does not exist (the generic `401 UNAUTHENTICATED`), at every door that accepts a key: the REST data door, the MCP door, and every other door that resolves a key through the shared key-admission seam. The widening half: `@objectstack/core` exports the one ban predicate, `isUserBanInForce` (with `USER_BAN_FIELDS` and the `UserBanFields` type), which the key-admission seam and plugin-auth's session-shaped refusals now share.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and nothing at rest changes: the ban columns are read where a key becomes its owner, and no key row is revoked or rewritten. -->
+  
+  **BREAKING** accept-set narrowing at every key-admitting door (`@objectstack/core`): a banned user's API keys are refused while the ban holds.
+  
+  - **The rule.** A ban holds every credential of the user. Banning a user already ends their sessions and refuses their sign-in; their API keys now answer as a key that does not exist for as long as the ban holds. A ban with an expiry stops binding once the expiry has passed, exactly as sign-in does — no sign-in is needed to lapse it.
+  - **Not a revocation.** No key row is revoked or rewritten. Lifting the ban (or letting it expire) admits the same keys again, with nothing reissued, each still judged by its own lifecycle: a key left unused past the inactivity window during the ban answers as inactive (`API_KEY_INACTIVE`), and its remedy is a new key.
+  - **One anonymous entry.** A key refused for its owner (a ban) or for the tenancy posture (no organization under `isolated`) resolves to the same entry as a key that does not exist, on every composition: the guest's grants on a face that serves the guest, nothing elsewhere. It never falls through to a session.
+  - **Who moves.** An integration running on a key whose owner is banned gets `401` until the ban is lifted or expires.
+  
+  **The remedy.** Lift the ban, or mint a replacement key under a user who is not banned.
+- b3d2f4b: fix(runtime,plugin-auth)!: a banned user's OAuth access tokens and refresh grants are refused while the ban holds
+  
+  Clause-②: yes (narrowing) — while a user's ban holds, an OAuth access token that user consented to is answered at the MCP door as a token that does not verify (the generic `401`, with the same body and `WWW-Authenticate` header), and so is an agent forward credential acting for that user; `/oauth2/userinfo` answers that token as an access token that does not verify (`401 invalid_token`), and `/oauth2/introspect` answers that user's access and refresh tokens as inactive (`{ "active": false }`); the token endpoint mints that user no token: a `refresh_token` grant answers as an invalid refresh token (`400 invalid_grant`), and an `authorization_code` exchange is refused, with the code spent: by the provider's own session answer (`400 invalid_request`) when the ban ended the user's sessions, as the ban routes do, and otherwise as an invalid code (`400 invalid_grant`). Those are the doors this change narrows.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and nothing at rest changes: the ban columns are read where an OAuth credential becomes its user or is read back, and no token, grant or consent row is revoked or rewritten. -->
+  
+  **BREAKING** accept-set narrowing at the MCP door and at the OAuth authorization server's token, userinfo and introspection endpoints: a banned user's OAuth access tokens and refresh grants are refused while the ban holds.
+  
+  - **The rule.** Banning a user already ends their sessions and refuses their sign-in and their API keys. While the ban holds, their OAuth access tokens are now also refused at the MCP door and read as not valid at userinfo and introspection, and the token endpoint mints them no new token (no refresh, no code exchange). A ban with an expiry stops binding once the expiry has passed, exactly as sign-in does.
+  - **Not a revocation.** No token, refresh token or consent row is revoked or rewritten. Lifting the ban (or letting it expire) admits the same access token at the MCP door and lets the same refresh token renew, with nothing reissued. An authorization code presented while the ban held is spent, so the client signs the user in again.
+  - **Cost.** One primary-key read of the user's ban columns per OAuth credential the MCP door resolves, and one read of the user row per active introspection answer that names a user; the token and userinfo endpoints read nothing extra. A store fault on the MCP door's read answers `503 SERVICE_UNAVAILABLE`, as every other authorization-input read on that door does; a store fault on the introspection read fails the request rather than answering active or inactive.
+  - **Who moves.** An MCP client or OIDC relying party connected over OAuth on behalf of a banned user gets `401` at the MCP door and at userinfo, `{ "active": false }` from introspection, and `400` from the token endpoint, until the ban is lifted or expires. The Ban User confirmation (`@objectstack/platform-objects`) and the administrator and authentication guides now say so.
+  
+  **The remedy.** Lift the ban, or connect the client as a user who is not banned.
+- 85c7374: fix(plugin-auth): a change-email request notifies the current address whatever way the caller is signed in
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The rule.** Every `POST /api/v1/auth/change-email` request that is accepted mails the account's current address the `auth.email_change_notice`, whatever way the caller is signed in. The notice goes to the account the request changes: its address is read from the session the endpoint itself acted on.
+  - **Unchanged.** The notice's template and text; the confirmation mail to the requested address; a refused request still mails nothing; the notice still never blocks the change.
+- 136eba4: feat(plugin-auth, console): the OAuth consent page names where the grant is sent and marks a client no platform administrator registered as unverified
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The OAuth consent page shows, beside the name and logo the client declared at registration, two facts the server establishes from the authorization request it signed, so the self-declared name is never the only identity a person approves:
+  
+  - **Where the grant goes.** A new session-required door, `POST /api/v1/auth/oauth-consent/request` with body `{ oauth_query }` (the signed query the provider sends the consent page), answers `{ clientId, redirectUri, registeredByAdministrator }`. `redirectUri` is read from the request only after the provider's own signature check, the check `/oauth2/consent` runs, so it is the redirect `/oauth2/authorize` validated and the one a consent sends the code to; it is never read from the client's registration metadata. A request this server did not sign, or whose signature expired, is `400 VALIDATION_ERROR`; a client the provider does not serve is `404 RESOURCE_NOT_FOUND`; the body takes `oauth_query` only and the route takes no query parameter. The page shows the redirect's host (with its port) for an `http(s)` redirect, a loopback one included, and any other redirect, such as a native app's custom scheme, as it is.
+  - **Whether a platform administrator registered the client.** `registeredByAdministrator` is `true` only when the account the stored client names as its registrant holds platform-admin standing (ADR-0068 D2). Every other client reads `false` and the page marks it as an unverified application, naming the destination in the mark: a dynamically registered client, with or without a session, and a client any other account registered through a self-service door. Whether dynamic registration itself is narrowed is not changed here.
+  - **Authorize waits for the destination.** Until the server has answered, and whenever it cannot, Authorize is disabled and the page says the destination could not be confirmed. Deny always works.
+  
+  The new strings ship in all 11 console locales (`en`, `zh-Hans`, `zh-Hant`, `ja`, `ar`, `de`, `es`, `fr`, `ko`, `pt-BR`, `ru`).
+- 7b2bb66: **Shipped in 18.3.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  fix(plugin-auth): a session a password reset ends leaves a revocation trail
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **A session a password reset ends leaves a revocation trail.** When a completed self-service password reset ends the account's sessions — the emailed link (`POST /api/v1/auth/reset-password`), and the phone OTP reset (`POST /api/v1/auth/phone-number/reset-password`); better-auth's email-OTP reset door, which the platform does not mount, is covered on its own path too — each `sys_session` row is now kept and stamped, `revoked_at` with `revoke_reason: password_reset`, the same kind of trail an interactive revoke leaves, instead of being deleted. The session is still refused (`401`).
+  - **The value says who ended the session.** `password_reset` is distinct from `user_revoked` (the owner revoking their own sessions) and from `admin_password_reset`, which an administrator's forced reset keeps writing.
+  - **`sys_session.revoke_reason`'s published vocabulary names `password_reset`** (`@objectstack/platform-objects`, the field's description and its translated help).
+  - **Unchanged.** Which sessions a reset ends; sign-out, which still deletes its row; the account's API keys, which a self-service reset does not revoke; and the audit log, which records no `logout` row for a reset.
+- c92b887: fix(plugin-auth): the phone-number password-reset request answers without waiting for the SMS send, as the emailed reset does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The rule.** `POST /api/v1/auth/phone-number/request-password-reset` answers at once, the same way for any number: the reset text is built and sent after the response, as the emailed reset (`POST /api/v1/auth/request-password-reset`) already sends its mail.
+  - **A send that fails is logged on the server**, at error (`phone password-reset text was not delivered`), and never reaches the caller, who is answered `{ status: true }` either way, as before. The one-time code is in the text only, never in that line.
+  - **Unchanged.** The answer's status and body; the per-number cooldown and hourly cap and the per-IP limit on the route; the text itself; and a server-side `auth.api.requestPasswordResetPhoneNumber` call, which carries no request and still awaits its send.
+- bb47215: fix(plugin-auth)!: an account with an enrolled second factor is signed in by no one-time code or sign-in link alone
+  
+  Clause-②: no (narrowing) — the one-time-code and link doors (`/phone-number/verify`, `/magic-link/verify`, and `/verify-email` when it signs the user in) answer an account with an enrolled second factor with the two-factor challenge password sign-in gives, and issue its session only after the second factor. No request, response or metadata shape is added, removed or re-shaped; an account with no enrolled factor signs in at these doors exactly as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes. What moves is which answer an enrolled account gets at three sign-in doors, the existing two-factor challenge, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** sign-in narrowing at the one-time-code and link doors (`@objectstack/plugin-auth`): a code or link door asks an enrolled account for its second factor, as password sign-in does.
+  
+  - **Now.** For an account with an enrolled second factor, `POST /phone-number/verify`, `GET /magic-link/verify` and `GET /verify-email` (with `emailVerification.autoSignInAfterVerification`) answer `{ "twoFactorRedirect": true, "twoFactorMethods": [...] }` with the pending two-factor cookie and no session, as `POST /sign-in/email` does; on the link doors' `callbackURL` redirect lane no session is issued either. The session is issued by `/two-factor/verify-totp`, `/two-factor/verify-otp` or `/two-factor/verify-backup-code`, and a valid trust-device cookie skips the challenge as it does at password sign-in. A call that issues no new session is unchanged: `/phone-number/verify` with `disableSession: true` or `updatePhoneNumber: true`, and `/verify-email` for a caller already holding the session it answers with.
+  - **Who moves.** A client of a code or link door that signs in an account with an enrolled second factor: it now completes the two-factor challenge (read `twoFactorRedirect`, then verify the second factor) before it holds a session. Accounts with no enrolled factor, and deployments with two-factor off, change nothing.
+  
+  `@objectstack/client`: the `AuthEmailVerificationResult.status` documentation now says a `/verify-email` request that would sign in an enrolled account answers the two-factor challenge instead of the receipt; no type changes.
+  
+  **Fails closed on vendor drift.** Building the auth instance throws when the installed two-factor plugin no longer exposes the password sign-in challenge these doors reuse, rather than starting with the doors open to a code or link alone.
+- a794e32: feat(platform-objects): mint and revoke SCIM connection credentials from the console
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_scim_connection_credential` gains two actions, so a platform administrator setting up SCIM provisioning no longer needs curl to get a bearer token:
+  
+  - **Mint Credential** (list toolbar) posts `POST /api/v1/auth/admin/scim/mint-credential` with a connection ID and the optional label, organization, provisioning domain and expiry, then shows the token once in a result dialog the administrator must close. Only the token's one-way digest is stored, so it cannot be shown again. Mint is not exposed to AI tools: an agent that ran it would hold a live SCIM bearer.
+  - **Revoke Credential** (a credential row or its record header) posts `POST /api/v1/auth/admin/scim/revoke-credential` for that row, after a confirmation. It is offered on an active credential only; the route's 404 and 409 answers show as the action's error. Revoke is exposed to AI tools and always asks the human to confirm first.
+  
+  Both are offered only to a platform administrator and declare the routes' own gate (`manage_platform_settings`). Who may mint or revoke is unchanged: the routes still decide.
+  
+  `@objectstack/plugin-auth`: a mint made on an impersonation session now names the administrator at the keyboard in its `sys_audit_log` row, as `metadata.impersonated_by` (the key the audit writers use). A mint on an ordinary session writes the same row as before.
+- 6dd2ca5: fix(plugin-security, plugin-auth)!: a person-to-permission-set assignment refuses an agent ceiling set at every write door, and so does the self-registration permission set
+  
+  Clause-②: no (narrowing) — a non-system insert or update of `sys_user_permission_set` that would store an assignment naming one of the three MCP agent ceiling sets (`mcp_agent_data_read`, `mcp_agent_data_write`, `mcp_agent_restricted`) is refused with `400 VALIDATION_FAILED` (`invalid_value` at `permission_set`), for every caller, a platform administrator included; and an audience configuration whose `selfRegistrationPermissionSet` names one is refused (`[audience] invalid audience configuration`), at construction and through the auth settings; nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped: a runtime write of an assignment row naming an agent ceiling set is refused and a stored one is left for an administrator to remove, and the runtime audience validation refuses one as the self-registration set, which takes a person's set chosen by hand, not a mechanical conversion -->
+  
+  **BREAKING** for a deployment whose administrators assign an MCP agent ceiling set to users through the permission-set assignment table, or whose audience names one as `selfRegistrationPermissionSet`.
+  
+  - **The rule (ADR-0090 D10).** The agent ceiling sets are an AI agent's own grants. The door that admits an agent connected over MCP derives its ceiling from the scopes its user consented to and puts it on the agent's request; no assignment row is read for it. A `sys_user_permission_set` row is a person's grant, so it never names one. Every door that writes the table refuses such a row: the data API's create and update, `createMany`, `updateMany`, the per-object and cross-object batch, and both import doors (the row fails with `code: 'invalid_value'` at `permission_set`). An update that keeps an assignment naming one in force (a new holder, a validity window, an echo of the set) is refused too.
+  - **The self-registration set (`@objectstack/plugin-auth`).** A self-registrant is a person, so the audience configuration that names the set every self-registrant receives refuses an agent ceiling set, beside its existing refusal of `admin_full_access`: `auth.audience.selfRegistrationPermissionSet` in the stack config stops the boot, and `audience_self_registration_permission_set` in the auth settings is refused while the standing audience keeps ruling. Both answer `[audience] invalid audience configuration: selfRegistrationPermissionSet must not be '...'`.
+  - **Unchanged.** Every other permission set stays assignable, and removing an assignment stays open. A system write is not judged: the platform's fixed-name grant writers name no ceiling, the self-registration grant writes only the validated set, and seed replay and the development-only demo-staff seed write the sets their stack declares. An agent connected over MCP holds its ceiling exactly as before. An organization administrator is still refused the same sets on the organization boundary first (`403 PERMISSION_DENIED`).
+  - **Who moves, and the fix.** An assignment stored before this release that names an agent ceiling set is left as it is, and can no longer be edited: delete it (`DELETE /api/v1/data/sys_user_permission_set/ID`), or rename it to a permission set meant for people. List them with `GET /api/v1/data/sys_user_permission_set?permission_set=mcp_agent_data_read` and the same query for the other two names. An audience that names an agent ceiling set as `selfRegistrationPermissionSet` declares a permission set meant for people instead (`member_default`, or the deployment's own).
+- f127b04: fix(plugin-auth)!: under invite_only, a self-serve sign-up is admitted only by the invitation it presents
+  
+  Clause-②: yes (narrowing) — under the `invite_only` audience posture an email-and-password sign-up for an invited address is admitted only when it presents that invitation's id as `invitationId`, and the address alone is refused `SELF_REGISTRATION_CLOSED`; a social OAuth creation is admitted by an invitation only when its identity provider verified the address. The sign-up request widens: `RegisterRequestSchema` and `RegisterRequest` gain `invitationId`, `SignUpData`, `RegisterForm` and the auth context's `signUp` gain it, and `os register` gains `--invitation`.
+  Metadata-protocol: added — RegisterRequest gains the optional invitationId key (packages/spec/authorable-surface/api.json)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key is removed, renamed or re-shaped and no stored row is rewritten: RegisterRequest gains an optional key, and a sign-up under invite_only that does not present its invitation is refused with the posture's existing code and message. -->
+  
+  **BREAKING** accept-set narrowing at the email-and-password sign-up door (`@objectstack/plugin-auth`), under the `invite_only` audience posture, the default.
+  
+  A sign-up under `invite_only` presents the invitation it is admitted by: the invitation's id, the last segment of the `/accept-invitation/` link the invitation mail carries, sent in the `/sign-up/email` body as `invitationId` beside `email`, `password` and `name`. The invitation must be pending, unexpired and addressed to that email. Anything else is refused `403 SELF_REGISTRATION_CLOSED` with the same message an uninvited sign-up gets, and nothing is written.
+  
+  **Upgrading.** A client that signs an invitee up sends `invitationId` beside the `email`, `password` and `name` it already sends. The one-line fix: send the id the invitation link carries as `invitationId`.
+  
+  **Who moves.** Nothing in this repository: the Console, the SDK, the CLI, the `@objectstack/verify` harness and the test fixtures all present the id; a client outside it that signs invitees up under `invite_only`, such as a custom front-end or a script, sends the accept link's last path segment as `invitationId`.
+  
+  **Operators.** Deploy the Console bundle together with the server; on a deployment with no mail transport, hand the invitee the link with the invitation's **Copy Invite Link** action; give an out-of-band recovery invitation row an `id` of your own, which the sign-up sends; and review accounts created before the upgrade that are unverified and hold or accepted an invitation.
+  
+  - **Unchanged:** the first account of a new deployment, and the operator's own provisioning (admin create, SCIM, the boot command's seed), need no invitation. The `open` and `email_domain` postures match an invitation by address as before. A magic-link or email-OTP creation, whose own flow answers from the mailbox, matches by address; an SSO provider's creation is unchanged.
+  - **Social OAuth under `invite_only`:** a creation through a social provider is admitted by an invitation only when the provider verified the address; otherwise it is refused with the same code as an uninvited sign-up.
+  - **No mail transport:** hand the invitee the link with the invitation's **Copy Invite Link** action; it carries the id.
+  - `@objectstack/spec`: `RegisterRequestSchema` declares the optional `invitationId`.
+  - `@objectstack/client`: `auth.register()` sends it through, typed by the widened `RegisterRequest`.
+  - `@objectstack/cli`: `os register --invitation ID`.
+  - `@objectstack/verify`: the harness's `signUp` presents the invitation it seeds.
+  - `@object-ui/auth`: `SignUpData.invitationId`, `RegisterForm`'s `invitationId` prop and the sixth argument of the context's `signUp` send it.
+  - `@object-ui/console`: `/register` opened from an invitation link sends that link's id with the sign-up; so does `@object-ui/app-shell`'s `DefaultRegisterPage`, whose package now also exports `invitationIdOf`.
+- a7293f7: fix(plugin-auth): a sign-up answers without waiting for any mail send, whether or not the address already has an account
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The rule.** `POST /api/v1/auth/sign-up/email` answers without waiting for any mail send, whether or not the address already has an account: the verification mail, and the notice to an address that already has an account, are built and sent after the response, as the password-reset mail already is.
+  - **A send that fails is logged on the server**, at error (`verification email was not delivered`; the notice keeps its own error line), and never reaches the caller, whose answer is the one a sent mail gets, as before.
+  - **Unchanged.** The answer's status and body; the sign-up rate limits; the mails themselves; a signed-in caller's `/send-verification-email` resend, which still awaits its send and still reports one that failed; and a server-side `auth.api.signUpEmail` call, which carries no request and still awaits its sends.
+- 545161b: fix(plugin-auth)!: with SSO domain verification on, a provider creates an account only for an email address at a domain it has proven
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches SSO domain verification or account creation through an SSO provider; `content/docs/permissions/sso.mdx` ("Domain verification (opt-in)") states the rule.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: sys_sso_provider keeps its columns, and no stored row changes shape. The rule is judged when an account is created, so there is nothing at rest for a metadata migration to rewrite and no tombstone. -->
+  
+  **BREAKING** — with SSO domain verification on (`OS_SSO_DOMAIN_VERIFICATION=true` or `plugins.ssoDomainVerification`), a new account created by a sign-in through an SSO provider (SAML or OIDC) is admitted only when the email address's domain is one of the provider's verified domains.
+  
+  - A provider's verified domains are the domains its `domain` value lists, when the provider's domain verification has succeeded. One verified flag covers the whole list. A listed entry counts only for the host the provider proved: an entry not written as a bare host name (a URL, a port, a path) proves nothing, and the list's other entries still count.
+  - The address's domain must equal a listed domain. A subdomain counts only when it is itself listed and verified; a parent never counts for a listed subdomain. Case, and the Unicode and punycode forms of an internationalised name, are one domain. An address whose domain part is not a bare host name in that one spelling (a port, a path, a trailing dot, full-width letters) is refused.
+  - The refusal is `EMAIL_DOMAIN_NOT_ALLOWED`, an existing code: the sign-in redirects to the error page with `error=EMAIL_DOMAIN_NOT_ALLOWED`, and no user, account, membership or session is created. No audience posture, pending invitation, `allowJit` setting or first-user carve-out relaxes the rule.
+  - Unchanged: environments with verification off; accounts that already exist; account linking; sign-ins through the cloud identity provider and enterprise OAuth providers.
+  
+  **Who moves.**
+  
+  - A deployment with verification on, whose people first sign in at a subdomain or at another domain than the ones its provider lists, lists each such domain on the provider and verifies it.
+  - A provider whose domain list writes an entry as a URL or with a port or path (`https://acme.com`, `acme.com:443`) rewrites it as the bare host name (`acme.com`) and verifies the provider again.
+  - Editing a provider's domain list clears its verified state until every listed domain is proven again, so verify the provider again after adding a domain.
+  - Accounts that already exist are not re-checked; their sign-ins continue as before.
+- 1f3e6fd: feat(auth)!: edit an SSO provider in place, see what deleting one removes, and keep one provider per email domain
+  
+  Clause-②: yes (narrowing) — registering an SSO provider, or editing a provider's domain, onto a domain entry another provider already serves is refused, where it was accepted before; registering a provider, or editing a provider's domain, is refused when the SSO providers cannot be read to check the domain; and deleting a provider is refused when the number of users it unlinks cannot be read. The edit actions and their door, the delete preview and the counts on a successful delete widen.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes. The refusals are new answers of the auth routes to a request; no stored provider, mapping or grant row is rewritten by the upgrade, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on SSO provider registration, provider domain edits and provider delete (`@objectstack/plugin-auth`).
+  
+  After the upgrade, `POST /api/v1/auth/sso/register`, the `register_sso_provider` / `register_saml_provider` actions behind `/api/v1/auth/admin/sso/register` and `/register-saml`, and a `domain` edit on `POST /api/v1/auth/sso/update-provider` are refused `409 RESOURCE_CONFLICT` with `field: 'domain'` when one of the domains named is an exact entry of another provider's domain list. Before, the second provider was saved, but sign-in routes an address to the first provider that serves it, so the second provider would not be reached by address. Providers already stored are not touched or re-checked; only a new claim of an entry is refused. A provider for a subdomain beside one for its parent (`eng.acme.com` beside `acme.com`) is still accepted. To serve a second IdP, register it under its own domain entry (a subdomain stays accepted), edit the domain off the provider that serves it, or delete that provider first. The same register and domain-edit requests are refused `503 SERVICE_UNAVAILABLE` when the SSO providers cannot be read to check the domain, and nothing is saved. `POST /api/v1/auth/sso/delete-provider` is refused `503 SERVICE_UNAVAILABLE` when the count of users it would unlink cannot be read, and nothing is deleted; retry once the data store answers.
+  
+  - **Edit instead of delete and re-register.** Two new SSO Providers actions, "Edit SAML Settings" (IdP entity ID, SSO URL, signing certificate, with an option to keep trusting the current certificate while the IdP switches over) and "Edit OIDC Settings" (client ID, client secret, scopes), post to a new platform-admin `POST /api/v1/auth/admin/sso/update-provider`. It writes through `@better-auth/sso`'s own `/sso/update-provider` with only the fields you changed; a blank field keeps what is stored, and the client secret is never shown back. A certificate or client secret changes while users are linked; the entity ID, SSO URL and client ID identify the IdP account each user signs in with, so they change only while no user is linked (`409`, with that reason).
+  - **Delete names its consequences.** "Delete SSO Provider" now shows, before you confirm, how many users the delete unlinks, how many of them have no other sign-in method linked (no password, no other provider), and the group mappings and grants removed with it (read from a new platform-admin `GET /api/v1/auth/admin/sso/delete-impact?providerId=`). The delete itself answers the same counts. After a delete, the provider's IdP group mappings and the permission-set grants its sign-ins projected are removed; a grant made by hand or by SCIM is never touched.
+  - **One email domain, one provider.** Registering a provider (either door), or editing a provider's domain, onto a domain another provider already serves is refused `409 RESOURCE_CONFLICT` with `field: 'domain'`, naming the provider that serves it to a platform administrator. A provider for a subdomain beside one for its parent is still accepted.
+- 4851668: fix(plugin-auth): a verification-email resend from a visitor who is not signed in answers the same whatever the send does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The rule.** `POST /api/v1/auth/send-verification-email` from a visitor who is not signed in answers the same whatever the send does. While the email transport is live it answers `{ "status": true }`: the verification mail is built and sent after the response, as the sign-up's verification mail is, and a send that fails is logged on the server at error (`verification email was not delivered`).
+  - **While the email transport is not live** (no email service, or one whose `isConfigured()` does not answer `true`, such as the `log` transport), every such resend is refused with `400 EMAIL_SERVICE_REQUIRED`, the code `/change-email` and the identity import already answer for a deployment with no email delivery. Its message names the fix (Settings → Mail), and the verify screens show it.
+  - **Unchanged.** A signed-in caller's resend for their own address, by session cookie or by bearer token, still awaits its send, still reports one that failed, and is not refused while the transport is not live. A server-side `auth.api.sendVerificationEmail` call, which carries no request, still awaits its send.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [f6a429b]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [82142ed]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [75bbebb]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [18112bf]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [63b86b3]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [fdad178]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [8fed00f]
+- Updated dependencies [25fea77]
+- Updated dependencies [06cccd3]
+- Updated dependencies [2fbddd4]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [1a3ea0c]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [4fae0be]
+- Updated dependencies [243eba1]
+- Updated dependencies [740edc5]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [fd749a4]
+- Updated dependencies [8eca18f]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [6a8f415]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [fb1ab89]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [a0c68ae]
+- Updated dependencies [ede9e6b]
+- Updated dependencies [eb68b98]
+- Updated dependencies [1ebe0c5]
+- Updated dependencies [2f05a46]
+- Updated dependencies [b126c13]
+- Updated dependencies [a11ef71]
+- Updated dependencies [deac7f4]
+- Updated dependencies [2ae3e30]
+- Updated dependencies [ca37605]
+- Updated dependencies [cabdfe8]
+- Updated dependencies [7145bf3]
+- Updated dependencies [739c972]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [ea41c49]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [022b4e7]
+- Updated dependencies [ed4b832]
+- Updated dependencies [8c9260f]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [f5e23e2]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [d36d4ad]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [e735425]
+- Updated dependencies [1f37085]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [f4b4c8a]
+- Updated dependencies [db50231]
+- Updated dependencies [0e1311d]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [b6e6545]
+- Updated dependencies [90457e7]
+- Updated dependencies [6f9f008]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [22ee4c4]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [d5fa237]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [59630d9]
+- Updated dependencies [5e85952]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [96b9350]
+- Updated dependencies [d9a232f]
+- Updated dependencies [3487ccc]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [5b7269f]
+- Updated dependencies [2735ca4]
+- Updated dependencies [6dd196d]
+- Updated dependencies [d834a36]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [b96b875]
+- Updated dependencies [c62e72a]
+- Updated dependencies [450bfb6]
+- Updated dependencies [5defbfe]
+- Updated dependencies [f56354c]
+- Updated dependencies [e55347d]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [36a8700]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [5a8dbc7]
+- Updated dependencies [fb94249]
+- Updated dependencies [98ba756]
+- Updated dependencies [e627eaa]
+- Updated dependencies [0243357]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [8fca8f7]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [d9f626b]
+- Updated dependencies [1a66fcf]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [f00fb1b]
+- Updated dependencies [c655af8]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [aad7d2f]
+- Updated dependencies [4f6fb53]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [f75466c]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [036a9fb]
+- Updated dependencies [91d88ec]
+- Updated dependencies [fb71296]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [9bff554]
+- Updated dependencies [1368536]
+- Updated dependencies [f97a2d9]
+- Updated dependencies [02498c9]
+- Updated dependencies [7aab601]
+- Updated dependencies [2830f31]
+- Updated dependencies [c419609]
+- Updated dependencies [e34723f]
+- Updated dependencies [9052363]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [e267b96]
+- Updated dependencies [1e474e3]
+- Updated dependencies [327ef0f]
+- Updated dependencies [7575116]
+- Updated dependencies [0763bf6]
+- Updated dependencies [2b11a71]
+- Updated dependencies [eefda1a]
+- Updated dependencies [3191e00]
+- Updated dependencies [de6d893]
+- Updated dependencies [c147fc2]
+- Updated dependencies [c6e709e]
+- Updated dependencies [5192297]
+- Updated dependencies [326453e]
+- Updated dependencies [6d6f86b]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [cc28407]
+- Updated dependencies [0115280]
+- Updated dependencies [3c1b8c7]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [cac0f1a]
+- Updated dependencies [3c18783]
+- Updated dependencies [e336a33]
+- Updated dependencies [3452dec]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [2166743]
+- Updated dependencies [5694bf5]
+- Updated dependencies [ada6a42]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [36f9477]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [070e879]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [fe9f59f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [28a1527]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [d4b14a8]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [e542831]
+- Updated dependencies [3299873]
+- Updated dependencies [7d13a33]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [2fc3fce]
+- Updated dependencies [a58fe66]
+- Updated dependencies [44a030b]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [1f3e6fd]
+- Updated dependencies [63a470a]
+- Updated dependencies [adb2b89]
+  - @objectstack/spec@18.4.0
+  - @objectstack/platform-objects@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/service-messaging@18.4.0
+  - @objectstack/rest@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

@@ -1369,13 +1369,29 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // would spread an unknown handler onto its DOM (objectstack#27483).
     ...(INVALID_INPUT_REPORTING_WIDGET_TYPES.has(normalizedType) ? { onInvalidInputChange } : {}),
     // Only a relationship pick fills sibling fields (`lookupAutofill`); every
-    // other widget would spread an unknown handler onto its DOM.
-    ...(LOOKUP_AUTOFILL_WIDGET_TYPES.has(normalizedType) ? { onAutofill } : {}),
+    // other widget would spread an unknown handler onto its DOM. A create-only
+    // writer gets it where the call site handed one, on a create form alone.
+    ...(LOOKUP_AUTOFILL_WIDGET_TYPES.has(normalizedType) ||
+    (CREATE_AUTOFILL_WIDGET_TYPES.has(normalizedType) && onAutofill)
+      ? { onAutofill }
+      : {}),
   };
 }
 
 /** The registered widgets whose pick writes `lookupAutofill` targets through `onAutofill`. */
 const LOOKUP_AUTOFILL_WIDGET_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
+
+/**
+ * objectstack#32770 — the registered widgets whose pick writes a sibling column
+ * on a CREATE form only. `permission-ref` writes the package of the
+ * permission-set holder it picked into the grant's package column, where more
+ * than one package holds the set's name (ADR-0150 D4/D8 R1). The server takes
+ * that column from an insert alone: an update's value is stripped and the
+ * column re-stamped by the server's rule. So an edit form hands the widget no
+ * writer, and the widget then lists a package's holder without letting it be
+ * picked. Every other widget, and every edit form, is unchanged.
+ */
+const CREATE_AUTOFILL_WIDGET_TYPES: ReadonlySet<string> = new Set(['permission-ref']);
 
 /**
  * The registered widgets that fire `onInvalidInputChange`: the date picker's two
@@ -4148,14 +4164,19 @@ ComponentRegistry.register('form',
                   // as edits of this form's record; the widget decides what the
                   // overwrite rule lets it fill. A target already showing an
                   // error is re-validated, so a filled required field clears.
-                  onAutofill: (patch: Record<string, unknown>) => {
-                    for (const [target, filled] of Object.entries(patch)) {
-                      form.setValue(target, filled, {
-                        shouldDirty: true,
-                        shouldValidate: !!form.getFieldState(target).error,
-                      });
-                    }
-                  },
+                  // A create-only writer (objectstack#32770) gets none on an
+                  // edit form: see `CREATE_AUTOFILL_WIDGET_TYPES`.
+                  onAutofill:
+                    !isCreateForm && CREATE_AUTOFILL_WIDGET_TYPES.has(normalizeFieldType(resolvedType))
+                      ? undefined
+                      : (patch: Record<string, unknown>) => {
+                          for (const [target, filled] of Object.entries(patch)) {
+                            form.setValue(target, filled, {
+                              shouldDirty: true,
+                              shouldValidate: !!form.getFieldState(target).error,
+                            });
+                          }
+                        },
                   // Required is a STATE, so it travels the state channel
                   // (objectui#3290). Until now the resolved `required` (static
                   // `required` + `requiredWhen` CEL) drove exactly one thing —

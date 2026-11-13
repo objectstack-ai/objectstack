@@ -4,12 +4,14 @@
  * Who may restore an API key revoked with a `revoked_reason`, and the one place
  * `sys_api_key.revoked_reason` is kept in step with `revoked`.
  *
- * The column carries three reasons, and each decides a different restorer: a
+ * The column carries four reasons, and each decides a different restorer: a
  * key an administrator's forced password reset revoked (`admin_password_reset`)
  * and a key a platform administrator revoked although it is not theirs
  * (`administrator_suspended`) are restored by a platform administrator only; a
  * key revoked because its owner's membership in the organization ended
- * (`organization_membership_ended`) is restored by no one from a user context.
+ * (`organization_membership_ended`), and a key revoked because the
+ * organization's directory deactivated or deleted its owner through SCIM
+ * (`scim_deactivated`), are restored by no one from a user context.
  *
  * ## Why the owner may not restore a key a forced reset revoked
  *
@@ -35,6 +37,21 @@
  * `revoked` flag is the only barrier left. The road back is a new key, minted by
  * a member. The reason is never stamped here or by any platform writer; the host
  * writes it in the system context, beside `revoked: true`.
+ *
+ * ## Why no one restores a key the directory's deactivation revoked
+ *
+ * Deactivating or deleting a user through SCIM revokes that user's API keys,
+ * and an administrator cannot restore them (the maintainer's ruling of record,
+ * comment 6787890900 on #32004, item "Directory deactivation"). The
+ * deactivation stamps `scim_deactivated` on every key the user owns
+ * (`scim-deactivation-key-revocation.ts`). The directory decides whether the
+ * person may come back, and a re-activation lifts the directory's ban; it
+ * re-arms no key, and nor does a Restore click: the owner is the account the
+ * directory stopped, and a platform administrator restoring such a key would
+ * hand back a credential minted before the person was offboarded, without the
+ * directory having decided it. The road back is a new key, minted by the
+ * re-activated user. The reason is never stamped here: the deactivation writes
+ * it in the system context, beside `revoked: true`.
  *
  * ## Why an administrator's revoke of someone else's key holds against its owner
  *
@@ -66,10 +83,10 @@
  * ## The rules
  *
  *  1. A user-context un-revoke (any `revoked` value that is not true) of a row
- *     whose stored `revoked_reason` is `organization_membership_ended` is
- *     refused `403 PERMISSION_DENIED` whoever the caller is, a platform
- *     administrator included. The refusal names the reason and the new-key
- *     road. It is judged first: no standing lifts it.
+ *     whose stored `revoked_reason` is `organization_membership_ended` or
+ *     `scim_deactivated` is refused `403 PERMISSION_DENIED` whoever the caller
+ *     is, a platform administrator included. The refusal names the reason and
+ *     the new-key road. It is judged first: no standing lifts it.
  *  2. A user-context un-revoke of a row whose stored `revoked_reason` is
  *     `admin_password_reset` or `administrator_suspended` is refused
  *     `403 PERMISSION_DENIED` unless the caller has platform-admin standing
@@ -84,14 +101,16 @@
  *     records none, and revoking a key that already carries a reason keeps
  *     that reason, so the owner cannot launder it away with `{ revoked: true }`
  *     and then restore, and an administrator's revoke never overwrites
- *     `organization_membership_ended` with a reason they could lift.
+ *     `organization_membership_ended` or `scim_deactivated` with a reason they
+ *     could lift.
  *  5. A system-context write is never refused and never stamped: the mint,
  *     the `last_used_at` stamp, the forced reset itself and a host's own
  *     revocation pass untouched, with the reason the host wrote.
  *
- * In this repository a reason is stamped in two places: the forced reset's
- * own write, and rule 4 here. `organization_membership_ended` is the host's to
- * write, and so is `administrator_suspended` when a host stops a key itself.
+ * In this repository a reason is stamped in three places: the forced reset's
+ * own write, the directory deactivation's (`scim_deactivated`), and rule 4
+ * here. `organization_membership_ended` is the host's to write, and so is
+ * `administrator_suspended` when a host stops a key itself.
  *
  * ## Order and shape
  *
@@ -117,6 +136,7 @@ import { hasPlatformAdminStanding } from '@objectstack/core';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { FORCED_RESET_REVOKE_REASON } from './forced-reset-revocation.js';
 import { MEMBERSHIP_ENDED_REVOKE_REASON } from './membership-ended-session.js';
+import { SCIM_DEACTIVATION_REVOKE_REASON } from './scim-deactivation-key-revocation.js';
 
 /** After the ADR-0092 D2 identity write guard (10), before default-priority hooks (100). */
 export const API_KEY_RESTORE_GUARD_PRIORITY = 15;
@@ -201,13 +221,17 @@ function mixedSuspensionRefused(): Error {
 }
 
 /** Rule 1's refusal, on the same envelope: no user-context caller lifts it. */
-function membershipEndedRestoreRefused(): Error {
-  const err = new Error(
-    'PERMISSION_DENIED: This API key was revoked because its owner\'s membership in the organization ended, '
+function noRestorerRefused(reason: unknown): Error {
+  const message = reason === SCIM_DEACTIVATION_REVOKE_REASON
+    ? 'PERMISSION_DENIED: This API key was revoked because the organization\'s directory deactivated its owner, '
+      + 'so it cannot be restored, not by its owner and not by an administrator: a re-activation does not bring '
+      + 'back a key minted before the deactivation. Its owner creates a new key instead (POST /api/v1/keys, or the '
+      + 'API Keys page) and replaces this one wherever it is configured.'
+    : 'PERMISSION_DENIED: This API key was revoked because its owner\'s membership in the organization ended, '
       + 'so it cannot be restored, not by its owner and not by an administrator: restoring it would give a '
       + 'non-member\'s key its access back. A member of the organization creates a new key instead '
-      + '(POST /api/v1/keys, or the API Keys page) and replaces this one wherever it is configured.',
-  ) as Error & { code?: string; status?: number; object?: string };
+      + '(POST /api/v1/keys, or the API Keys page) and replaces this one wherever it is configured.';
+  const err = new Error(message) as Error & { code?: string; status?: number; object?: string };
   err.code = 'PERMISSION_DENIED';
   err.status = 403;
   err.object = SystemObjectName.API_KEY;
@@ -264,9 +288,13 @@ export function registerApiKeyRestoreGuard(engine: any, opts: ApiKeyRestoreGuard
     if (isUserContextWrite(ctx.session)) {
       const previous = ctx.previous as Record<string, unknown> | null | undefined;
       // Rule 1, judged before any standing is read: no user-context caller
-      // restores a key whose owner's membership ended.
-      if (previous?.revoked_reason === MEMBERSHIP_ENDED_REVOKE_REASON) {
-        throw membershipEndedRestoreRefused();
+      // restores a key whose owner's membership ended, or whose owner the
+      // directory deactivated.
+      if (
+        previous?.revoked_reason === MEMBERSHIP_ENDED_REVOKE_REASON
+        || previous?.revoked_reason === SCIM_DEACTIVATION_REVOKE_REASON
+      ) {
+        throw noRestorerRefused(previous.revoked_reason);
       }
       // No pre-image in hand means the reason cannot be read, and an unread
       // reason is treated as the one that needs an administrator: never a
@@ -290,6 +318,6 @@ export function registerApiKeyRestoreGuard(engine: any, opts: ApiKeyRestoreGuard
   opts.logger?.info(
     '[ApiKeyRestoreGuard] sys_api_key restore guard registered: a key a forced password reset revoked, or a '
       + 'platform administrator suspended, is restored by a platform administrator only, and a key revoked '
-      + 'because its owner\'s membership ended by no one',
+      + 'because its owner\'s membership ended, or because the directory deactivated its owner, by no one',
   );
 }

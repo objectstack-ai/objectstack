@@ -1,5 +1,5 @@
 ---
-'@objectstack/metadata-protocol': patch
+'@objectstack/metadata-protocol': minor
 '@objectstack/rest': patch
 '@objectstack/runtime': patch
 ---
@@ -7,10 +7,10 @@
 fix(metadata-protocol)!: a name two enabled packages hold only as stored rows is refused by the plain read, never served by save order (ADR-0150 D3, #32607)
 
 Clause-②: yes (narrowing)
-Metadata-protocol: none
-Skills-docs: none — no skill or doc teaches the by-name answer for a name only stored rows of several packages hold; the refusal's own sentence says to address it by its package.
+Metadata-protocol: narrowed
+Skills-docs: none — no skill and no doc teaches what the read naming no package answers for a name only stored rows of several packages hold (`skills/**` and `content/docs/**` grepped: the `ambiguous-in-environment` mentions are about flow, queue and permission-set references, not `/meta` reads); the refusal's own sentence names the `?package=` remedy.
 
-<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are reads of stored rows, so there is nothing for a migration to rewrite and no tombstone. -->
+<!-- adr-0087: registered two-row-holders-bare-read-refused -->
 
 **BREAKING** answer narrowing at the `/meta` bare item reads: a name that two or more enabled packages hold only as stored rows, and that no package ships in code, answers 409 `RESOURCE_CONFLICT` naming each of them, where the plain read and `/published` served one of the rows. `/layers` already refused it.
 
@@ -24,4 +24,4 @@ Narrowing:
 - Bare `GET /meta/:type/:name/published`: 200 with a row (on `RestServer` the row saved first; on the runtime dispatcher the same package in every save order) → 409 `RESOURCE_CONFLICT` naming each holder.
 - The execution face (`getMetaItemForExecution`) of the same name: the row saved first → the same refusal.
 
-**Not moved.** Bare `GET /meta/:type/:name/layers` keeps its 409 `RESOURCE_CONFLICT`, the package-less writes' own refusal naming the same holders with its `?package=` prescription (#28337), on both transports: each transport's layered chain (`RestServer`'s and the runtime `HttpDispatcher`'s) reads the plain read first to find a disabled owner, and now leaves that read's refusal of row holders to the package-less refusal step, rethrowing every other refusal as before (two code holders, and two row holders beside a disabled one, keep the plain read's refusal). `?package=` naming either holder serves that holder's row. A name one package holds as a stored row is served as before. A name an enabled package ships in code, or one with a package-less row or an environment item, is judged as before. The paired customization addresses (`?package=HOLDER.custom`), which after a reboot follow the registry's one bare slot, are unchanged here (#32662 carries them).
+**Not moved.** Bare `GET /meta/:type/:name/layers` keeps its 409 `RESOURCE_CONFLICT`, the package-less writes' own refusal naming the same holders with its `?package=` prescription (#28337), on both transports: each transport's layered chain (`RestServer`'s and the runtime `HttpDispatcher`'s) reads the plain read first to find a disabled owner, and now leaves that read's refusal of row holders to the package-less refusal step, rethrowing every other refusal as before (two code holders, and two row holders beside a disabled one, keep the plain read's refusal). `?package=` naming either holder serves that holder's row. A name one package holds as a stored row is served as before. A row the reads decline (a shipped flow name's undeclared row, a sealed managed name's row) and a row bound to a holder's customization pair make no holder here, as they make none beside a disabled holder (#32354), so they never turn one holder into a refusal. A name an enabled package ships in code, or one with a package-less row or an environment item, is judged as before. The paired customization addresses (`?package=HOLDER.custom`), which after a reboot follow the registry's one bare slot, are unchanged here (#32662 carries them).

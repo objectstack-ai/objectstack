@@ -22,7 +22,8 @@ import { describe, it, expect } from 'vitest';
 import { FieldType } from '@objectstack/spec/data';
 import { enumOptions } from '@object-ui/test-support';
 import { mapFieldTypeToFormType } from '@object-ui/fields';
-import { isWideFieldType, applyAutoSpan } from '../autoLayout';
+import type { DetailViewField } from '@object-ui/types';
+import { isWideFieldType, applyAutoSpan, isWideDetailField } from '../autoLayout';
 
 /**
  * The spec's own `FieldType` vocabulary.
@@ -117,5 +118,51 @@ describe('detail WIDE_FIELD_TYPES — keyed on the spec vocabulary (#4250)', () 
     expect(out[0].span).toBeUndefined();
     expect(out[1].span).toBe(3);
     expect(out[2].span).toBe(3);
+  });
+});
+
+describe('detail auto layout — a multi-value file field is wide (objectstack#32746)', () => {
+  const objectFields = {
+    invoices: { type: 'file', multiple: true },
+    photos: { type: 'image', multiple: true },
+    receipt: { type: 'file' },
+    cover: { type: 'image', multiple: false },
+  };
+
+  it('spans a `file` / `image` field whose object field declares `multiple: true`', () => {
+    const fields = [
+      { name: 'invoices', type: 'file' },
+      { name: 'photos', type: 'image' },
+      { name: 'receipt', type: 'file' },
+      { name: 'cover', type: 'image' },
+      { name: 'notes', type: 'textarea' },
+      { name: 'subject', type: 'text' },
+    ] as unknown as DetailViewField[];
+    const out = applyAutoSpan(fields, 3, objectFields);
+    expect(out.map((f) => f.span)).toEqual([3, 3, undefined, undefined, 3, undefined]);
+  });
+
+  it('answers on both spellings — the spec type and the widget id it maps to', () => {
+    for (const type of ['file', 'image']) {
+      expect(SPEC_TYPES).toContain(type);
+      const field = { name: 'invoices', type: mapFieldTypeToFormType(type) } as unknown as DetailViewField;
+      expect(isWideDetailField(field, objectFields)).toBe(true);
+    }
+  });
+
+  it('CONTROL: without the object field, or without `multiple`, the spans are unchanged', () => {
+    const fields = [{ name: 'invoices', type: 'file' }, { name: 'notes', type: 'textarea' }] as unknown as DetailViewField[];
+    expect(applyAutoSpan(fields, 2).map((f) => f.span)).toEqual([undefined, 2]);
+    expect(isWideDetailField({ name: 'receipt', type: 'file' } as unknown as DetailViewField, objectFields)).toBe(false);
+  });
+
+  it('an authored span still wins', () => {
+    const out = applyAutoSpan([{ name: 'invoices', type: 'file', span: 1 }] as unknown as DetailViewField[], 3, objectFields);
+    expect(out[0].span).toBe(1);
+  });
+
+  it('the type-only answer stays the one the form gives: `file` alone is not wide', () => {
+    expect(isWideFieldType('file')).toBe(false);
+    expect(isWideFieldType('image')).toBe(false);
   });
 });

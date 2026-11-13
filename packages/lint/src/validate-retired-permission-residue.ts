@@ -62,6 +62,7 @@
 
 import { ObjectPermissionSchema } from '@objectstack/spec/security';
 import { recordsOf } from './object-graph.js';
+import type { UserTextParams } from './finding-user-text.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -73,6 +74,12 @@ export interface RetiredPermissionResidueFinding {
   hint: string;
   rule: string;
   severity: 'warning';
+  /**
+   * The names this finding's user sentence interpolates
+   * (`validate-retired-permission-residue.user-text.ts`): the permission set,
+   * the object and the retired key. See `AuthoringFinding.userTextParams`.
+   */
+  userTextParams?: UserTextParams;
 }
 
 export const PERMISSION_RETIRED_LIFECYCLE_RESIDUE = 'permission-retired-lifecycle-residue';
@@ -169,6 +176,7 @@ export function validateRetiredPermissionResidue(stack: AnyRec): RetiredPermissi
             `sets \`${key}: ${JSON.stringify(residue)}\`, the retired default of a key removed in ` +
             '@objectstack/spec 17, which the parse strips in silence, so this line grants nothing',
           hint: retiredKeyRemedy(prescription),
+          userTextParams: { permissionSet: setName, object: objectName, key },
         });
       }
     }

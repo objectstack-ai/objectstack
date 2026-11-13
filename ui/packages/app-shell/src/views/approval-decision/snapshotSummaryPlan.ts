@@ -13,6 +13,7 @@
  * in `RecordSnapshotSummary.tsx`'s header.
  */
 
+import { FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
 import { isExpandableFieldType } from '@object-ui/core';
 import { isSystemManagedField, type SummaryFieldMetadata } from '@object-ui/types';
 
@@ -26,6 +27,13 @@ type FieldDefs = Readonly<Record<string, FieldDef | undefined>>;
 export interface SnapshotSummaryPlan {
   lead: string | null;
   rows: string[];
+  /**
+   * The attachment fields the snapshot holds, in snapshot order: declared
+   * fields whose type is a `FILE_REFERENCE_TYPES` member (the spec's media
+   * family, `file` single and `multiple` included). Drawn after the rows and
+   * never cut by `max`: an attachment is what the approver decides on.
+   */
+  attachments: string[];
   /**
    * The object a `sum` summary ahead of the amount rolls up, whose definition
    * decides whether that summary is the amount (objectui#12534); null when no
@@ -43,6 +51,17 @@ function declaredSum(def: FieldDef | undefined): SummaryOperations | null {
   if (def?.type !== 'summary') return null;
   const ops = def.summaryOperations as SummaryOperations | undefined;
   return ops?.function === 'sum' ? ops : null;
+}
+
+/**
+ * Does an attachment field's stored value hold a file: a non-empty id or URL,
+ * a non-empty list, or an object with any member (the expanded or refused
+ * form). Each entry is the field cell's to read.
+ */
+function holdsAttachment(value: unknown): boolean {
+  if (typeof value === 'string') return value.trim() !== '';
+  if (Array.isArray(value)) return value.length > 0;
+  return !!value && typeof value === 'object' && Object.keys(value).length > 0;
 }
 
 /** How many business-field rows the summary draws below the amount. */
@@ -71,11 +90,18 @@ export function planSnapshotSummary(
   max: number = SNAPSHOT_SUMMARY_ROWS,
 ): SnapshotSummaryPlan {
   const candidates: string[] = [];
+  const attachments: string[] = [];
   for (const [key, value] of Object.entries(snapshot)) {
     const def = fields[key];
     if (!def || typeof def !== 'object') continue; // not a field of this object
     if (def.hidden === true) continue; // hidden from the default UI
     if (isSystemManagedField(key, def as { system?: boolean })) continue; // bookkeeping
+    if (typeof def.type === 'string' && FILE_REFERENCE_TYPES.has(def.type)) {
+      if (holdsAttachment(value)) attachments.push(key);
+      continue;
+    }
+    // Every other object or list value is left out (the rule is in
+    // `RecordSnapshotSummary.tsx`'s header).
     if (value == null || typeof value === 'object') continue;
     if (String(value).trim() === '') continue;
     if (!display?.[key] && isExpandableFieldType(def)) continue; // an unresolved reference id
@@ -106,7 +132,7 @@ export function planSnapshotSummary(
   }
   lead ??= leadZero;
 
-  return { lead, rows: candidates.filter((key) => key !== lead).slice(0, max), summed };
+  return { lead, rows: candidates.filter((key) => key !== lead).slice(0, max), attachments, summed };
 }
 
 /**

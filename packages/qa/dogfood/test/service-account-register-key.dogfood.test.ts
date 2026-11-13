@@ -18,6 +18,14 @@
  * its next call exactly as an unknown key is refused, and lifting the ban
  * lets it through again. The access matrix and the one-act write are pinned
  * on a real engine in plugin-auth `service-account-doors.test.ts`.
+ *
+ * [ADR-0151 D3 rule 3] The key, at the REST action door: an AI service account
+ * does not confirm an action for itself, so an action declaring
+ * `ai.requiresConfirmation: true` refuses it whatever the request carries,
+ * while its owner, a person, runs the same action. The other doors, and that a
+ * refusal runs nothing, reads no record and writes no invocation row, are
+ * pinned in `@objectstack/runtime` (`action-dispatch.test.ts`,
+ * `mcp-resume-run.test.ts`).
  */
 
 import { randomBytes } from 'node:crypto';
@@ -171,5 +179,28 @@ describe('[ADR-0151 D4] minting the account\'s key', () => {
     const unban = await stack.apiAs(adminToken, 'POST', '/auth/admin/unban-user', { userId: accountId });
     expect(unban.status, await unban.clone().text()).toBe(200);
     expect((await answerOf(await readAs(accountKey))).status).not.toBe(401);
+  });
+});
+
+describe('[ADR-0151 D3 rule 3] the account does not confirm an action for itself', () => {
+  /** A platform identity action its author gated on a person's confirmation. */
+  const GATED = '/actions/sys_session/revoke_my_other_sessions';
+
+  it('the account\'s key is refused 428 at REST /actions with the confirmation member and without it', async () => {
+    expect(accountKey).toBeTruthy();
+    for (const body of [{}, { confirm: true }]) {
+      const res = await postWithKey(GATED, accountKey, body);
+      const text = await res.text();
+      let error: any;
+      try { error = JSON.parse(text)?.error; } catch { error = undefined; }
+      expect({ status: res.status, code: error?.code }, text).toEqual({ status: 428, code: 'ACTION_CONFIRMATION_REQUIRED' });
+      expect(String(error?.message)).toContain('An AI service account does not confirm an action for itself');
+      expect(String(error?.message)).not.toMatch(/retry/i);
+    }
+  });
+
+  it('CONTROL: the account\'s owner, a person, runs the same action at REST', async () => {
+    const res = await stack.apiAs(ownerSession, 'POST', GATED, {});
+    expect(res.status, await res.clone().text()).toBe(200);
   });
 });
