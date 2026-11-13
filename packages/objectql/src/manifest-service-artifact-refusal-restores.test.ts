@@ -528,10 +528,10 @@ describe('a running install is asked the record-currency follow door once, at th
     expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
   });
 
-  it('a package upgraded under a tenant\'s overlay that holds the followed code installs: the overlay is what is served', async () => {
+  it('a package upgraded under the environment\'s own object of the parent\'s name, which holds the followed code, installs: that object is what is served', async () => {
     const { ql, manifest } = await boot();
     await manifest.register(ledger());
-    // The tenant's overlay of the packaged parent adds the code field, and a tenant's child follows it.
+    // The environment's own `suite_invoice` is served over the package's and holds the code field; its own child follows it.
     ql.registry.registerObject({ ...invoice('currency_code'), _provenance: 'org' } as never, 'sys_metadata', undefined, 'overlay');
     ql.registry.registerObject(line('invoice.currency_code') as never, 'sys_metadata');
 
@@ -599,10 +599,15 @@ describe('a running install is asked the record-currency follow door once, at th
     expect(followedBy(ql)).toBe('invoice.currency_code');
   });
 
-  it('an upgrade whose new child follows a code field the tenant\'s overlay does not hold is refused: the pair is judged against the served parent, as a single save judges it', async () => {
+  /** What the refusal adds when only the environment's own object of the name, served over the package's, earns it. */
+  const OVER_ENVIRONMENT_OBJECT = "On this server 'suite_invoice' is served from the environment's own object of that name, "
+    + "which lies over the one a package ships. Read against the package's own definition this pair is not refused, "
+    + 'so the correction above does not apply here, and the product has no remedy for it today.';
+
+  it('an upgrade whose new child follows a code field the environment\'s own object of the parent\'s name does not hold is refused, and the refusal says the package is not what is wrong', async () => {
     const { ql, manifest } = await boot();
     await manifest.register(ledger());
-    // The tenant customized the packaged parent before the package gave it a code field.
+    // The environment's own `suite_invoice` is served over the package's, and holds no code field.
     ql.registry.registerObject({ ...invoice(), label: 'Customer invoice', _provenance: 'org' } as never, 'sys_metadata', undefined, 'overlay');
 
     const err = await refusal(() => manifest.register({
@@ -610,13 +615,32 @@ describe('a running install is asked the record-currency follow door once, at th
       objects: [invoice('currency_code'), line('invoice.currency_code')],
     }));
 
-    // The served parent is the overlay's body, which holds no `currency_code`:
-    // every write of the amount would be refused for want of a code.
+    // The pair is judged against the served parent, as a single save judges
+    // it: every write of the amount would be refused for want of a code.
     expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'amount' });
     expect(String(err?.message)).toContain("'suite_invoice' declares no field 'currency_code'");
+    // The package's own parent holds the code: the sentence says so, and names no remedy.
+    expect(String(err?.message).endsWith(OVER_ENVIRONMENT_OBJECT)).toBe(true);
     expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('1.0.0');
     expect(ql.registry.getObject('suite_line')).toBeUndefined();
     expect((ql.registry.getObject('suite_invoice') as any)?.label).toBe('Customer invoice');
+  });
+
+  it('CONTROL: a pair the package\'s own parent does not hold either is refused in the door\'s words alone, the environment\'s object or not', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger());
+    ql.registry.registerObject({ ...invoice(), label: 'Customer invoice', _provenance: 'org' } as never, 'sys_metadata', undefined, 'overlay');
+
+    // The package's 2.0.0 parent holds `currency_code`; its child follows `currency`, which neither parent holds.
+    const err = await refusal(() => manifest.register({
+      ...ledger('currency_code'), version: '2.0.0',
+      objects: [invoice('currency_code'), line('invoice.currency')],
+    }));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'amount' });
+    expect(String(err?.message)).toContain("'suite_invoice' declares no field 'currency'");
+    expect(String(err?.message)).not.toContain('On this server');
+    expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('1.0.0');
   });
 
   it('a cold boot registers the same bad pair unasked, as before: the door is asked only once the boot has sealed the registry', async () => {

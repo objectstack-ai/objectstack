@@ -179,7 +179,12 @@ import {
 } from './package-scoped-resolver.js';
 import { standaloneActionOwnerKey, isObjectLessActionKey, GLOBAL_ACTION_OBJECT_KEY } from './action-governance.js';
 import { actionOwnerScopedRegistry, resolveActionByPackage } from './action-package-addressing.js';
-import { recordCurrencyFollowRefusal, recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
+import {
+  RecordCurrencyFollowRefusedError,
+  recordCurrencyFollowRefusal,
+  recordCurrencyFollowRefusalOverEnvironmentObjects,
+  recordCurrencySummaryRefusal,
+} from './record-currency-aggregate-door.js';
 
 /**
  * [#24400] A bound top-level action whose target object no package has
@@ -4336,13 +4341,15 @@ export class SchemaRegistry {
    * follows — so no registration inside it can ask. Its end can: each layer is
    * asked exactly as a single save of it would be, with the registry holding
    * the whole run. A pair with an end outside the run is judged against the
-   * object that is registered, as a single save judges it.
+   * object that is registered, as a single save judges it. Where that object
+   * is the environment's own, lying over a package's, and only it earns the
+   * refusal, the refusal says so ({@link followRefusalAsServed}).
    *
    * ⛔ Asked only of a layer the served object reads. An owner under a
    * tenant's overlay is not one: the overlay's body is the base that is
    * served ({@link resolveObject}), the run did not register it, and asking
-   * the owner beneath it would refuse a package whose tenant added the very
-   * code field a child follows. Nor is a layer a later write of the run took
+   * the owner beneath it would refuse a package over a code field the served
+   * object holds. Nor is a layer a later write of the run took
    * out again (the same package registered twice).
    *
    * Asked only once the cold boot has sealed the registry, for the reason the
@@ -4362,9 +4369,52 @@ export class SchemaRegistry {
       if (!sitting?.includes(contributor)) continue;
       if (contributor.ownership === 'own' && sitting.some((c) => c.ownership === 'overlay')) continue;
       const refusal = this.recordCurrencyFollowRefusalOf(schema, contributor.ownership, () => all);
-      if (refusal) return refusal;
+      if (refusal) return this.followRefusalAsServed(refusal, schema, contributor.ownership, all);
     }
     return undefined;
+  }
+
+  /**
+   * [ADR-0144 D2 and D6, amended] A run's follow refusal that the packages'
+   * own definitions would not earn, said as what it is.
+   *
+   * An object can be served from the environment's own object of the same
+   * name, lying over the definition a package ships ({@link resolveObject}'s
+   * base). The run's end judges a pair against what is served, so a package
+   * that is right in itself is refused when that served object lacks the other
+   * end, and the door's sentence then tells its author to correct a declaration
+   * that is not wrong. So the question is asked once more with each such
+   * object read through its package's definition ({@link resolveOwnerLayer}).
+   * Where that clears the refusal, the sentence gains the fact and the objects
+   * it is true of ({@link recordCurrencyFollowRefusalOverEnvironmentObjects});
+   * the refusal itself, its code and its status stand. Any other refusal is
+   * returned as it is. Only a refused run pays for the second question.
+   */
+  private followRefusalAsServed(
+    refusal: RecordCurrencyFollowRefusedError,
+    schema: ServiceObject,
+    ownership: ObjectOwnership,
+    all: readonly ServiceObject[],
+  ): RecordCurrencyFollowRefusedError {
+    const overPackage: string[] = [];
+    for (const [fqn, sitting] of this.objectContributors) {
+      const overlay = sitting.find((c) => c.ownership === 'overlay');
+      if (overlay && isTenantAuthored(overlay.definition) && sitting.some((c) => c.ownership === 'own')) overPackage.push(fqn);
+    }
+    if (overPackage.length === 0) return refusal;
+    /** Is the layer still refused with `throughPackage` read as their packages define them? */
+    const refusedReading = (throughPackage: ReadonlySet<string>): boolean => {
+      const read = (object: ServiceObject | undefined): ServiceObject | undefined => {
+        const fqn = object === undefined ? undefined : this.resolveObjectKey(object.name);
+        return fqn !== undefined && throughPackage.has(fqn) ? this.resolveOwnerLayer(fqn) ?? object : object;
+      };
+      const objects = all.map((object) => read(object) ?? object);
+      return this.recordCurrencyFollowRefusalOf(schema, ownership, () => objects, (name) => read(this.getObject(name))) !== undefined;
+    };
+    if (refusedReading(new Set(overPackage))) return refusal;
+    // The ones that decide it, each on its own; all of them when only together they do.
+    const deciding = overPackage.filter((fqn) => !refusedReading(new Set([fqn])));
+    return recordCurrencyFollowRefusalOverEnvironmentObjects(refusal, deciding.length > 0 ? deciding : overPackage);
   }
 
   /**
@@ -5592,14 +5642,17 @@ export class SchemaRegistry {
    * save ({@link judgeRegistrationDoors}) and a registration run
    * ({@link recordCurrencyFollowRefusalOfRun}) ask. `all` answers the
    * registered objects; a caller asking of several bodies reads them once.
+   * `lookup` answers one of them by name, and is the served object unless the
+   * caller reads an object another way ({@link followRefusalAsServed}).
    */
   private recordCurrencyFollowRefusalOf(
     schema: ServiceObject,
     ownership: ObjectOwnership,
     all: () => readonly ServiceObject[] = () => this.getAllObjects(),
-  ): Error | undefined {
+    lookup: (name: string) => ServiceObject | undefined = (name) => this.getObject(name),
+  ): RecordCurrencyFollowRefusedError | undefined {
     return recordCurrencyFollowRefusal(schema, {
-      lookup: (name) => this.getObject(name),
+      lookup,
       all,
       extensionFieldsOf: (name) => {
         const fqn = this.resolveObjectKey(name);

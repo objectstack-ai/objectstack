@@ -426,6 +426,30 @@ export class RecordCurrencyFollowRefusedError extends Error {
   }
 }
 
+/**
+ * [ADR-0144 D2 and D6, amended] `refusal`, saying that it holds only against
+ * what this server serves: `objects` are each served from the environment's
+ * own object of that name, lying over the definition a package ships, and
+ * against the packages' own definitions the pair is not refused. Asked by a
+ * registration run at its end (`SchemaRegistry.restoringOnRefusal`), which
+ * finds the objects; the one spelling of the sentence lives here, beside the
+ * door's own. The refused object and field, the code and the status are
+ * `refusal`'s. ⛔ It names no remedy: the product has none for this today.
+ */
+export function recordCurrencyFollowRefusalOverEnvironmentObjects(
+  refusal: RecordCurrencyFollowRefusedError,
+  objects: readonly string[],
+): RecordCurrencyFollowRefusedError {
+  const named = objects.map((name) => `'${name}'`).join(', ');
+  return new RecordCurrencyFollowRefusedError(
+    refusal.objectName,
+    refusal.fieldName,
+    `${refusal.message} On this server ${named} ${objects.length === 1 ? 'is' : 'are each'} served from the environment's own `
+    + 'object of that name, which lies over the one a package ships. Read against the package\'s own definition this '
+    + 'pair is not refused, so the correction above does not apply here, and the product has no remedy for it today.',
+  );
+}
+
 /** A `summary` field declaring `currencyConfig.currencyMode: 'record'`. */
 function declaresRecordCurrency(def: unknown): boolean {
   const config = (def as { currencyConfig?: unknown } | null)?.currencyConfig;

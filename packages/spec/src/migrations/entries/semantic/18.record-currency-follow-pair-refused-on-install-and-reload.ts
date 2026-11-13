@@ -44,7 +44,11 @@ export const entry: SemanticMigration = {
     + 'corrected. Packages installed before this release: a package holding such a pair still loads at every boot, '
     + 'which is not asked, and serves as it did; its next upgrade or reload is refused until the pair is corrected, '
     + 'and so is the next upgrade or reload of a package that holds only the other end of that pair, although nothing '
-    + 'in that package is wrong. '
+    + 'in that package is wrong. A pair is judged against the object the server serves. Where the server serves an '
+    + 'object from the environment\'s own object of the same name, lying over the one a package ships, and that '
+    + 'object lacks the other end of the pair, the install, upgrade or reload is refused although the package\'s own '
+    + 'definitions hold the pair: the refusal then ends by naming that object and saying so, and the product has no '
+    + 'remedy for this case today. '
     + 'There is no mechanical rewrite: only the author knows which parent field holds the code',
   acceptanceCriteria:
     'Run `objectstack validate` over the stack that holds both objects and confirm no record-currency path finding. '
