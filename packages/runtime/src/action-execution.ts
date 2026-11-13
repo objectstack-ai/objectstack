@@ -88,7 +88,7 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 // when the fallback runs.
 import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 // [#31697] The environment store's rows are the resync's: a legacy organization's rows left out off the physical column.
-import { readLegacyOrganizationRows } from '@objectstack/metadata-core';
+import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
@@ -5205,7 +5205,7 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
         if (!objectName) continue;
         for (const action of Array.isArray(obj?.actions) ? obj.actions : []) {
             if (!action || typeof action.name !== 'string') continue;
-            const packageId = declaringPackageOf(action) ?? declaringPackageOf(obj);
+            const packageId = embeddedActionPackageOf(action, obj);
             seen.add(holdingOf(packageId, `${objectName}:${action.name}`));
             out.push({ action, objectName, obj, ...(packageId !== undefined ? { packageId } : {}) });
         }
@@ -5241,6 +5241,26 @@ function declaringPackageOf(row: any): string | undefined {
 }
 
 /**
+ * [ADR-0150 D4, #33029] The holder an action found INSIDE an object's `actions`
+ * is filed under: its own stamp, else — for a declaration the object's own
+ * package wrote there (inline, or the same-stack merge) — the object's
+ * package. ⛔ A tenant-authored item (`_provenance: 'org'`,
+ * `isTenantAuthored`) with no stamp is the environment's own action, never
+ * the object's package's: the registry attaches an action the environment
+ * stored bound to the object (`attachBoundActions`, #28356) into the served
+ * object's `actions`, and filing that copy under the object's package listed
+ * the one action twice — once under a namespace that never shipped it — and
+ * refused its face as shared by two actions (measured on the stock showcase:
+ * `list_actions` rows under `showcase` and under none for one admin-authored
+ * action on `showcase_task`).
+ */
+function embeddedActionPackageOf(action: unknown, obj: unknown): string | undefined {
+    const own = declaringPackageOf(action);
+    if (own !== undefined) return own;
+    return isTenantAuthored(action) ? undefined : declaringPackageOf(obj);
+}
+
+/**
  * [ADR-0150 D3, #31696] The package whose item a resolved action is — the
  * package {@link collectActionDeclarations} files the row under: the
  * declaration's own stamp, else, for an action declared INSIDE its object's
@@ -5255,7 +5275,7 @@ export function actionDeclaringPackage(action: unknown, obj: unknown): string | 
     const own = declaringPackageOf(action);
     if (own !== undefined) return own;
     const actions = (obj as { actions?: unknown } | null | undefined)?.actions;
-    return Array.isArray(actions) && actions.includes(action) ? declaringPackageOf(obj) : undefined;
+    return Array.isArray(actions) && actions.includes(action) ? embeddedActionPackageOf(action, obj) : undefined;
 }
 
 
