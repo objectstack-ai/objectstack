@@ -182,7 +182,7 @@ function soleHolderOf(registry: { packageScopedHoldersOf?(type: string, name: st
  * Every holder counts, a disabled one included, since a binding must not move
  * with a reversible disable (ADR-0150 D3). A customization pair of a holder
  * (ADR-0146) is not such a package: its row is that holder's declared
- * override, read by `overlaySlotBinding`. With one holder the row keeps its
+ * override, wearing that holder's envelope ({@link pairRowEnvelopeHolder}). With one holder the row keeps its
  * reading as before: one holder is the only package it can mean.
  */
 function namesNoHolderAmongMany(
@@ -201,6 +201,43 @@ function namesNoHolderAmongMany(
     if (holders.length < 2) return false;
     const installed = installedManifestsOf(registry);
     return !holders.some((holder) => isPairOf(bound, holder, installed));
+}
+
+/** {@link pairRowEnvelopeHolder}'s answer for a row that is not a customization pair's row of a holder of its name. */
+const NOT_A_PAIR_ROW = Symbol('not-a-pair-row');
+
+/**
+ * [#32692, ADR-0150 D4, ADR-0146] The holder whose envelope a stored row of
+ * the package-scoped `type`, bound to `packageId`, wears when `packageId` is a
+ * customization pair of a holder of `name` and holds no item of the name
+ * itself: the holder the registry binds the row to (`overlayRowBinding`, the
+ * one owner rule the exact read and every overlay-slot reader follow), `null`
+ * when that rule binds it to none (a shared pair customizing several holders,
+ * with no declared `overrides.package`). The artifact lookup scoped to the
+ * pair id falls back to the package registered FIRST, so without this a pair
+ * row of the second holder wore the first holder's envelope and was served as
+ * the first holder's item, in one registration order and not the other.
+ * {@link NOT_A_PAIR_ROW} for any other row, which keeps its lookup.
+ */
+function pairRowEnvelopeHolder(
+    registry: {
+        packageScopedHoldersOf?(type: string, name: string, callerPackageId?: string | null, options?: { includeDisabledPackages?: boolean }): readonly string[] | undefined;
+        overlayRowBinding?(type: string, name: string, item: unknown): string | null | undefined;
+    },
+    type: string,
+    packageId: string | null | undefined,
+    name: string,
+    data: unknown,
+): string | null | typeof NOT_A_PAIR_ROW {
+    const bound = boundPackageOf(packageId);
+    if (bound === undefined || typeof registry.packageScopedHoldersOf !== 'function') return NOT_A_PAIR_ROW;
+    if ((registry.packageScopedHoldersOf(type, name, bound, { includeDisabledPackages: true }) ?? []).includes(bound)) return NOT_A_PAIR_ROW;
+    const installed = installedManifestsOf(registry);
+    const pairedHolders = holdersOfEvery(registry, type, name).filter((holder) => isPairOf(bound, holder, installed));
+    if (pairedHolders.length === 0) return NOT_A_PAIR_ROW;
+    if (typeof registry.overlayRowBinding !== 'function') return pairedHolders.length === 1 ? pairedHolders[0] : null;
+    const binding = registry.overlayRowBinding(type, name, { ...(data as Record<string, unknown>), _packageId: bound });
+    return typeof binding === 'string' && binding !== bound ? binding : null;
 }
 
 /** Every package holding `(type, name)`, a disabled one included (ADR-0150 D3: a binding never moves with a disable). */
@@ -244,8 +281,8 @@ function reportRowNamingNoHolder(
         `[Protocol] [metadata_stored_row_names_no_holder] the stored ${type} row '${name}' is bound to package `
         + `'${bound}', which holds no ${type} of that name, while ${holders.map((h) => `'${h}'`).join(' and ')} each hold one. `
         + `No registry reader serves it: a stored row is never laid into a holder's slot picked for it. To keep it, `
-        + `save it again under the holder it customizes (?package=<holder>); otherwise remove it with `
-        + `DELETE /api/v1/meta/${type}/${name}?package=${bound}.`,
+        + `save it as the declared override of the holder it customizes (?package=<holder>.custom with `
+        + `overrides: { package: <holder> }), then remove this row with DELETE /api/v1/meta/${type}/${name}?package=${bound}.`,
     );
 }
 
@@ -791,7 +828,16 @@ export class ProtocolRegistryHydrationFacet {
         // one holder's, and with two or more holders none, registering as the
         // environment's tenant row that each holder's exact read judges
         // (ADR-0150 D4). ⛔ Never a pick between two.
-        const envelopePackage = options.packageId ?? (scoped ? soleHolderOf(registry, canonicalType, rowName) : undefined);
+        // [#32692] A customization pair's row wears the envelope of the
+        // holder it customizes ({@link pairRowEnvelopeHolder}), never the
+        // first-registered holder's that a lookup scoped to the pair id falls
+        // back to.
+        const pairHolder = scoped && canonicalType !== 'flow'
+            ? pairRowEnvelopeHolder(registry, canonicalType, options.packageId, rowName, data)
+            : NOT_A_PAIR_ROW;
+        const envelopePackage = pairHolder !== NOT_A_PAIR_ROW
+            ? pairHolder
+            : options.packageId ?? (scoped ? soleHolderOf(registry, canonicalType, rowName) : undefined);
         const artifact = envelopePackage === null ? undefined : host.lookupArtifactItem(
             type, (data as any).name, envelopePackage ?? undefined, bundleMemberOf(type, data),
         );

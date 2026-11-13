@@ -195,6 +195,26 @@ describe('a stored row of a two-holder name at boot, beyond the webhook (#32692)
             expect([...registry.packageScopedHoldersOf('tool', N)].sort()).toEqual([A, B]);
         });
 
+        it(`tool (${first} first): a row of the second holder's customization pair is that holder's item, never the first-registered holder's`, async () => {
+            // FROM: the pair row wore the first-registered holder's envelope, so in one order alpha answered beta's override.
+            const body = (label: string) => ({ name: N, label, description: label });
+            const pair = (id: string) => (registry: SchemaRegistry) => registry.installPackage({ id: `${id}.custom`, name: `${id}.custom`, version: '1.0.0', type: 'app', namespace: `${id.split('.').pop()}_custom` } as never, 'code');
+            const { registry } = await boot('tool', order, (id) => body(`shipped:${id}`),
+                [{ packageId: `${B}.custom`, body: { ...body('row:beta-custom'), overrides: { package: B } } }], pair(B));
+            const label = (id: string) => (registry.getPackageScopedItem('tool', N, id) as { label?: string } | undefined)?.label;
+            expect([label(A), label(B)]).toEqual([`shipped:${A}`, 'row:beta-custom']);
+        });
+
+        it(`tool (${first} first): the first holder's own pair row stays the first holder's, whichever registered first`, async () => {
+            const body = (label: string) => ({ name: N, label, description: label });
+            const pair = (id: string) => (registry: SchemaRegistry) => registry.installPackage({ id: `${id}.custom`, name: `${id}.custom`, version: '1.0.0', type: 'app', namespace: `${id.split('.').pop()}_custom` } as never, 'code');
+            const { registry, lines } = await boot('tool', order, (id) => body(`shipped:${id}`),
+                [{ packageId: `${A}.custom`, body: { ...body('row:alpha-custom'), overrides: { package: A } } }], pair(A));
+            const label = (id: string) => (registry.getPackageScopedItem('tool', N, id) as { label?: string } | undefined)?.label;
+            expect([label(A), label(B)]).toEqual(['row:alpha-custom', `shipped:${B}`]);
+            expect(lines().some((line) => line.includes('metadata_stored_row_names_no_holder'))).toBe(false);
+        });
+
         it(`CONTROL — dashboard (${first} first): a row-served type keeps its reading: the row is the stray package's own at its address, and no new line is printed`, async () => {
             const body = (label: string) => ({ name: N, label, description: label });
             const { protocol, lines } = await boot('dashboard', order, (id) => body(`shipped:${id}`), [{ packageId: S, body: body('row:stray') }]);
