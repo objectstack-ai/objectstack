@@ -137,6 +137,10 @@ export type {
   TraversalConflictKind,
   TraversalSubject,
 } from './relationship-traversal';
+// [#33100] The order an object's formulas are computed in, and the formulas
+// on a cycle — one answer for the engine's read plan and the authoring lint.
+export { formulaReadOrder, formulaCycleMessage } from './formula-read-order';
+export type { FormulaReadOrder } from './formula-read-order';
 export { resolveSeed, resolveSeedRecord } from './seed-eval';
 export { normalizeExpression, normalizeExpressionTree } from './normalize';
 // ADR-0058 — canonical CEL → FilterCondition pushdown compiler (one AST,
