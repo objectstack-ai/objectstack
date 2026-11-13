@@ -1097,7 +1097,10 @@ export class AnalyticsServicePlugin implements Plugin {
       getObjectFields: (objectName) => dataEngine()?.getObject?.(objectName)?.fields,
       fetchRecordLabels: async (targetObject, ids, scope, context) => {
         const map = new Map<unknown, string>();
-        const displayField = pickDisplayField(dataEngine()?.getObject?.(targetObject)?.fields);
+        // The target's declared `nameField` first (ADR-0079), then the
+        // name/title/label/first-text convention — see `pickDisplayField`.
+        const target = dataEngine()?.getObject?.(targetObject);
+        const displayField = pickDisplayField(target?.fields, target?.nameField);
         if (!displayField || !executeAggregate || ids.length === 0) return map;
         // [#14329] The FOURTH read-scope door, and the same guard the other
         // three answer with. #13640 guarded the ObjectQL engine merge and

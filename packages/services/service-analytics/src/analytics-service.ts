@@ -3227,12 +3227,23 @@ export class AnalyticsService implements IAnalyticsService {
     // #3680 — hand the executor the sort-key label hook so an `order` on a
     // select/lookup dimension sorts by the label the user reads. Built over
     // the SAME capabilities (and read scope) as the display resolution below.
+    // A relationship-path dimension (`account.owner_id`) labels from its
+    // COLUMN's meta, on the object the path's last hop reaches — named by the
+    // one hop resolver the query joins it with (`columnObjectOf`, over the
+    // compiled cube's joins and the host's hop reference), so the object
+    // labelled is the object read. Both label passes take it from here.
+    const columnObjectOfField = (field: string) =>
+      columnObjectOf(compiled.cube, dataset.object, field, this.hopReference);
     const orderLabels = labelDeps && dataset.dimensions?.length
       ? createOrderLabelResolver(
           dataset.object,
           dataset.dimensions
             .filter((d) => !!d.field)
-            .map((d) => ({ name: d.name, field: d.field as string })),
+            .map((d) => ({
+              name: d.name,
+              field: d.field as string,
+              columnObject: columnObjectOfField(d.field as string),
+            })),
           labelDeps,
           resolveScope,
           context,
@@ -3489,6 +3500,7 @@ export class AnalyticsService implements IAnalyticsService {
         .map((d) => ({
           name: d.name,
           field: d.field,
+          columnObject: columnObjectOfField(d.field),
           type: d.type,
           dateGranularity: resolveDimensionGranularity(selection, d.name, d.dateGranularity),
         }));
