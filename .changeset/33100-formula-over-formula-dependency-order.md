@@ -2,6 +2,7 @@
 '@objectstack/objectql': minor
 '@objectstack/lint': minor
 '@objectstack/formula': minor
+'@objectstack/spec': minor
 ---
 
 fix(objectql): a formula that reads another formula field reads its computed value; a cycle of formulas is refused where it is authored (#33100)
@@ -10,7 +11,7 @@ Clause-②: no (narrowing) — `os build`, `os validate` and the object save and
 Metadata-protocol: narrowed
 Skills-docs: none — `skills/objectstack-formula` teaches no rule about one formula reading another; `content/docs/data-modeling/formulas.mdx` already said not to create circular references and now says they are refused.
 
-<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored shape changes. A formula on a cycle never had a value (it read null on every row), so there is nothing for a migration to rewrite; the author breaks the cycle. -->
+<!-- adr-0087: registered formula-cycle-refused -->
 
 **BREAKING** accept-set narrowing of `os build` / `os validate` / the object door (`validateStackExpressions`).
 
