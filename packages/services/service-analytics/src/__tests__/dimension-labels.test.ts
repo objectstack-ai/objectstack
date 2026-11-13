@@ -527,7 +527,7 @@ describe('AnalyticsService.queryDataset — label resolution (integration)', () 
 // reaches, named by the hop resolver the query joins with (`columnObjectOf`).
 // The label passes read the column's meta there; they walk no path themselves.
 describe('relationship-path dimensions — labelled from the column on the hop object', () => {
-  const HOP_FIELDS: Record<string, FieldMetaLite> = {
+  const HOP_FIELDS: Record<string, Record<string, FieldMetaLite>> = {
     task: { account: { type: 'lookup', reference: 'crm_account' } },
     crm_account: {
       name: { type: 'text' },
