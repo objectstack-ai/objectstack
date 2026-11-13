@@ -198,7 +198,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - `pr_create` 派不请;`pr_ready` 只补交棒漏;非例外 head 移 ⇒ 撤挂回等;脱中继 PR 自读请/派。
 - 速读「需要你做的」求批点名 PASS 评论 id+`Head-sha`;无 PASS ⇒ 写 contract review owed 不求批。
 - ④ 轮报单列 awaiting a human merge 并现读请审人;⛔ 未请审不在 chat 报「等你批」,先补请。
-- skills 车道自有 PR:纯代码面如 `scripts/pm/` 经子代理或卡线程达档复审(清单不减)后落地。
+- skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席自读(清单不减)后落地。
 - 受管面两层:Tier S = `.claude/**`+下行 S 面,余皆 Tier H 等人批;S 经达档 PASS 后 ready → 入队。
 - 本仓 `.github/workflows/**` 由 `readWorkflowDiff` 定档:发布路径、C2 触发、拒读或未读 ⇒ H,余 S。
 - 入队资格:每 check 绿或预期 skip,⛔ 非必查子集;名单 check-expected-skips.mjs 只判 objectstack。
