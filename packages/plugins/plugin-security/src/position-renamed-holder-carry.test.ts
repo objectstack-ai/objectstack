@@ -208,6 +208,9 @@ describe('condition 2: a package never claims an old name it did not own', () =>
     ['the ledger records it under the claiming package', CRM, CRM, 'crm_sales_rep', undefined],
     ['the ledger row names no package (no evidence either way)', CRM, null, 'crm_sales_rep', undefined],
     ['an environment position claims a name the ledger records under a package', null, CRM, 'sales_rep', 'owned-by-other'],
+    // The activation door stores the environment's sentinel for an item the environment authored.
+    ['the ledger records it as the environment\'s (`sys_metadata`), and a package claims it', CRM, 'sys_metadata', 'sales_rep', 'owned-by-other'],
+    ['the ledger records it as the environment\'s (`sys_metadata`), and an environment position claims it', null, 'sys_metadata', 'crm_sales_rep', undefined],
   ] as const)('a name that is no position now: %s', async (_label, claimant, recorded, after, reason) => {
     const engine = await boot();
     await seed(engine, 'sys_user_position', [holder('h1', 'u1', 'sales_rep', 'org_a')]);
@@ -355,11 +358,12 @@ describe('condition 2 over every installed package: a disabled package still hol
 });
 
 describe('a failure is one claim\'s: the others still run, and what moved before it is said', () => {
-  it('a write refused part-way: the rows moved before it are reported, the next claim is carried', async () => {
+  it('a row whose write is refused is named and skipped: the rows after it still move, and the next claim is carried', async () => {
     const engine = await boot();
     await seed(engine, 'sys_user_position', [
       holder('h1', 'u1', 'sales_rep', 'org_a'),
       holder('h2', 'u2', 'sales_rep', 'org_b'),
+      holder('h2b', 'u4', 'sales_rep', 'org_b'),
       holder('h3', 'u3', 'field_rep', 'org_a'),
     ]);
     const realUpdate = engine.update.bind(engine);
@@ -372,12 +376,15 @@ describe('a failure is one claim\'s: the others still run, and what moved before
       catalog: catalogOf(entry('crm_sales_rep', CRM, ['sales_rep']), entry('crm_field_rep', CRM, ['field_rep'])),
     });
 
-    expect(await positionsById(engine)).toEqual({ h1: 'crm_sales_rep', h2: 'sales_rep', h3: 'crm_field_rep' });
-    expect(report.failed).toEqual([expect.objectContaining({ from: 'sales_rep', rows: 1, byOrganization: { org_a: 1 }, error: 'refused by a write gate' })]);
+    expect(await positionsById(engine)).toEqual({ h1: 'crm_sales_rep', h2: 'sales_rep', h2b: 'crm_sales_rep', h3: 'crm_field_rep' });
+    expect(report.failed).toEqual([expect.objectContaining({
+      from: 'sales_rep', rows: 2, byOrganization: { org_a: 1, org_b: 1 }, error: 'refused by a write gate',
+      failedRows: [{ id: 'h2', organization: 'org_b', error: 'refused by a write gate' }],
+    })]);
     expect(report.carried).toEqual([expect.objectContaining({ from: 'field_rep', rows: 1 })]);
     const warn = vi.fn();
     logPositionRenameCarry(report, { warn, info: vi.fn() });
-    expect(warn.mock.calls.map(([m]) => String(m)).join('\n')).toMatch(/'sales_rep' → 'crm_sales_rep' .* did not finish: 1 holder row\(s\) were moved before it failed \(org_a: 1\)/);
+    expect(warn.mock.calls.map(([m]) => String(m)).join('\n')).toMatch(/'sales_rep' → 'crm_sales_rep' .* did not finish: 2 holder row\(s\) were moved \(org_a: 1, org_b: 1\), and 1 row\(s\) could not be written \(refused by a write gate\): h2/);
   });
 
   it('a row another replica moved after this one read it is neither moved again nor named as a twin', async () => {

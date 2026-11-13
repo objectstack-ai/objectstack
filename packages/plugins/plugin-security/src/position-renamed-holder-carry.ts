@@ -58,8 +58,10 @@
  *    ledger records it under ANOTHER package (or, for a position the
  *    environment authored, under any package): the only stored record of an
  *    old name's owner says it was not this one's (condition 2). A ledger row
- *    naming no package (or the environment's sentinel) is no evidence either
- *    way. With no current holder and no such record, the old name is carried
+ *    naming no package is no evidence either way (it may predate the column);
+ *    a row carrying the environment's sentinel (`sys_metadata`) records the
+ *    environment as the owner, so a package's claim is refused and an
+ *    environment position's is not. With no current holder and no such record, the old name is carried
  *    for its one claimant, whichever package that is: the platform keeps no
  *    other record of who owned a name that is no position now, and a package
  *    may already declare such a name outright (D7, one slot per name);
@@ -87,8 +89,9 @@
  * holders back. Not a metadata rewrite: Setup-authored bodies that name an
  * old position are not read. Not run on a hot install: a package installed or
  * upgraded into a running kernel is carried at the next boot. It never fails
- * the boot, and a claim that fails is said with the rows it moved before
- * failing; the other claims still run.
+ * the boot. A row whose write fails is named and skipped, so the rows after it
+ * still move; a read that fails ends that claim only, and the rows it moved
+ * are said. The other claims always run.
  *
  * ## Its one limit
  *
@@ -111,6 +114,12 @@ const ORGANIZATION_COLUMN = 'organization_id';
 
 /** The activation ledger (ADR-0126 §4), read for an old name's recorded owner. */
 const ACTIVATION_LEDGER_OBJECT = 'sys_metadata_activation';
+
+/** The `package_id` the activation door stores for an item the environment authored (`catalogEntryAddress`'s sentinel). */
+const OVERLAY_PROVENANCE_SENTINEL = 'sys_metadata';
+
+/** How a recorded owner that is the environment is keyed beside package ids (no package id is empty). */
+const ENVIRONMENT_OWNER = '';
 
 /** The position-name grammar (`PositionSchema.name`, `SnakeCaseIdentifierSchema`): two characters or more. */
 const POSITION_NAME_GRAMMAR = /^[a-z][a-z0-9_]+$/;
@@ -163,11 +172,13 @@ export interface LeftBehindReferences {
   readonly byName: Readonly<Record<string, { readonly rows: number; readonly organizations: readonly string[] }>>;
 }
 
-/** A claim whose carry failed part-way: what it moved before the failure stays moved. */
+/** A claim whose carry did not finish: what it moved stays moved; each row whose write failed is named. */
 export interface FailedPositionRename extends PositionRenameClaim {
+  /** The read's error, or the first failed row's. */
   readonly error: string;
   readonly rows: number;
   readonly byOrganization: Readonly<Record<string, number>>;
+  readonly failedRows: ReadonlyArray<{ readonly id: string; readonly organization: string; readonly error: string }>;
 }
 
 export interface PositionRenameCarryReport {
@@ -294,6 +305,8 @@ const holderLabel = (packageId: string | null | undefined, disabled?: boolean): 
 interface CarryProgress {
   readonly byOrganization: Record<string, number>;
   readonly alreadyHolds: Array<{ id: string; organization: string }>;
+  /** Rows whose write failed; the walk goes on past each, so one row never holds back the rows after it. */
+  readonly failedRows: Array<{ id: string; organization: string; error: string }>;
   rows: number;
 }
 
@@ -330,7 +343,10 @@ async function carryHolders(engine: PositionRenameCarryEngine, claim: PositionRe
     } catch (e: unknown) {
       // The unique key (user, position, organization) answered for a twin the
       // read above did not see: the same case, reported the same way.
-      if (!isUniqueViolationError(e)) throw e;
+      if (!isUniqueViolationError(e)) {
+        progress.failedRows.push({ id, organization, error: e instanceof Error ? e.message : String(e) });
+        continue;
+      }
       progress.alreadyHolds.push({ id, organization });
       continue;
     }
@@ -485,8 +501,12 @@ export async function carryRenamedPositionHolders(
     const rows = await readAll(engine, ACTIVATION_LEDGER_OBJECT, { metadata_type: 'position', name: { $in: olds } }, ['id', 'name', 'package_id']);
     for (const row of rows) {
       const name = text(row.name);
-      const pkg = name === null ? null : holderOf({ name, packageId: text(row.package_id) ?? undefined });
-      if (name === null || pkg === null) continue; // a row naming no package is no evidence
+      const raw = text(row.package_id);
+      // A row naming no package is no evidence (it may predate the column). A
+      // row carrying the environment's sentinel is: the environment authored
+      // the old name, so no package may claim it.
+      const pkg = raw === null ? null : raw === OVERLAY_PROVENANCE_SENTINEL ? ENVIRONMENT_OWNER : raw;
+      if (name === null || pkg === null) continue;
       const at = recordedOwners.get(name) ?? new Set<string>();
       at.add(pkg);
       recordedOwners.set(name, at);
@@ -521,9 +541,9 @@ export async function carryRenamedPositionHolders(
       refused.push({ ...claim, reason: 'claimant-disabled', detail: `${holderLabel(claim.packageId)} is disabled` });
       continue;
     }
-    const others = [...(recordedOwners.get(from) ?? [])].filter((pkg) => pkg !== claim.packageId);
+    const others = [...(recordedOwners.get(from) ?? [])].filter((pkg) => pkg !== (claim.packageId ?? ENVIRONMENT_OWNER));
     if (others.length > 0) {
-      refused.push({ ...claim, reason: 'owned-by-other', detail: `the activation ledger records '${from}' under ${others.map((p) => `package "${p}"`).join(', ')}` });
+      refused.push({ ...claim, reason: 'owned-by-other', detail: `the activation ledger records '${from}' under ${others.map((p) => (p === ENVIRONMENT_OWNER ? 'the environment' : `package "${p}"`)).join(', ')}` });
       continue;
     }
     if (switchedOff.has(from)) {
@@ -532,13 +552,18 @@ export async function carryRenamedPositionHolders(
     }
     if (!registers(engine, POSITION_ASSIGNMENT_OBJECT)) continue;
     carriedOlds.add(from);
-    const progress: CarryProgress = { byOrganization: {}, alreadyHolds: [], rows: 0 };
+    const progress: CarryProgress = { byOrganization: {}, alreadyHolds: [], failedRows: [], rows: 0 };
     try {
       await carryHolders(engine, claim, progress);
-      carried.push({ ...claim, byOrganization: progress.byOrganization, rows: progress.rows, alreadyHolds: progress.alreadyHolds });
     } catch (e: unknown) {
-      // One claim's failure is that claim's: the others still run.
-      failed.push({ ...claim, error: e instanceof Error ? e.message : String(e), rows: progress.rows, byOrganization: progress.byOrganization });
+      // A read that fails ends this claim only: the other claims still run.
+      failed.push({ ...claim, error: e instanceof Error ? e.message : String(e), rows: progress.rows, byOrganization: progress.byOrganization, failedRows: progress.failedRows });
+      continue;
+    }
+    if (progress.failedRows.length > 0) {
+      failed.push({ ...claim, error: progress.failedRows[0].error, rows: progress.rows, byOrganization: progress.byOrganization, failedRows: progress.failedRows });
+    } else {
+      carried.push({ ...claim, byOrganization: progress.byOrganization, rows: progress.rows, alreadyHolds: progress.alreadyHolds });
     }
   }
   const leftBehind = carriedOlds.size > 0 ? await readLeftBehind(engine, carriedOlds, notRead) : [];
@@ -578,8 +603,10 @@ export function logPositionRenameCarry(report: PositionRenameCarryReport, logger
   }
   for (const f of report.failed) {
     logger.warn(
-      `[security] position rename '${f.from}' → '${f.to}' (${holderLabel(f.packageId)}) did not finish: ${f.rows} holder row(s) were moved before it failed `
-        + `(${Object.entries(f.byOrganization).map(([org, n]) => `${org || '(no organization)'}: ${n}`).join(', ') || 'none'}); the rest stay on '${f.from}' until the next boot tries again.`,
+      `[security] position rename '${f.from}' → '${f.to}' (${holderLabel(f.packageId)}) did not finish: ${f.rows} holder row(s) were moved `
+        + `(${Object.entries(f.byOrganization).map(([org, n]) => `${org || '(no organization)'}: ${n}`).join(', ') || 'none'})`
+        + (f.failedRows.length > 0 ? `, and ${f.failedRows.length} row(s) could not be written (${f.error}): ${listIds(f.failedRows.map((r) => r.id))}` : `, then a read failed (${f.error})`)
+        + `; what is left stays on '${f.from}' until the next boot tries again.`,
       { failed: f },
     );
   }
