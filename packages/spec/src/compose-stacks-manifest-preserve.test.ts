@@ -324,11 +324,19 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
   // halves. Readers were converted first (every one resolves `packages[]`);
   // this is the emitter that stops feeding the flat copy.
 
-  const withObjects = (manifest: Record<string, unknown>, object: string, field = 'a'): ObjectStackDefinition =>
+  // `withApp: false` for a package composed beside another one's app under a
+  // flat manifest option, as a reference or control: two apps under the one
+  // manifest a flat composition keeps are refused (ADR-0019 D3 as amended).
+  const withObjects = (
+    manifest: Record<string, unknown>,
+    object: string,
+    field = 'a',
+    withApp = true,
+  ): ObjectStackDefinition =>
     raw({
       manifest,
       objects: [{ name: object, label: object, fields: { [field]: { type: 'text', label: field } } }],
-      apps: [{ name: `${object}_app`, label: object }],
+      ...(withApp ? { apps: [{ name: `${object}_app`, label: object }] } : {}),
     });
 
   /**
@@ -356,7 +364,7 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
   };
 
   it('a multi-package artifact carries its collections ONCE, in the package bodies', () => {
-    const stacks = [withObjects(crmManifest, 'crm_account'), withObjects(cpqManifest, 'cpq_quote')];
+    const stacks = [withObjects(crmManifest, 'crm_account'), withObjects(cpqManifest, 'cpq_quote', 'a', false)];
     const preserved = composeStacks(stacks, { manifest: 'preserve' });
 
     // Nothing flattened: the two package-owned collections these inputs carry
@@ -383,7 +391,7 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
       // bodies that each still declare the name — measured through a real
       // boot, that artifact is refused (DUPLICATE_ARTIFACT_OBJECT_NAME). The
       // composition is refused instead, under every strategy.
-      const stacks = [withObjects(crmManifest, 'crm_account', 'from_crm'), withObjects(cpqManifest, 'crm_account', 'from_cpq')];
+      const stacks = [withObjects(crmManifest, 'crm_account', 'from_crm'), withObjects(cpqManifest, 'crm_account', 'from_cpq', false)];
       let caught: { code?: string; status?: number } | undefined;
       try {
         composeStacks(stacks, { manifest: 'preserve', objectConflict: strategy });
