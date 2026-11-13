@@ -1,0 +1,36 @@
+{
+  "number": 33045,
+  "kind": "pull_request",
+  "title": "fix(skills): automation readonly callout names all four elevated-start doors and the api route's webhook cost",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T06:16:30Z",
+  "updated_at": "2026-11-13T08:09:47Z",
+  "closed_at": "2026-11-13T08:09:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-13T08:09:45Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33045",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao2neaipqkvhByk3GzSkZt3Q)_\n\nFixes #32923\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`objectstack-automation` 技能里「写只读字段」那段，现在点名全部四个会拒绝用户启动提权自触发流（`autolaunched` / `record_change` / `schedule` + `runAs: 'system'`）的入口：按钮、动作、端点、触发路由，与 `os explain flow-update-readonly-field` 原话一致；并说明只为按钮而用 `api` 流的代价（要配 webhook 密钥、多开一个入站端点），让 agent 选 `subflow` 路线。\n- 为什么改：原文只写「按钮或动作」，agent 接端点或触发路由会撞上无解释的 403；原文推荐的 `api` 路线不写密钥要求，照做会在 `os validate` / 注册时被拒。\n- 风险与回滚：只改已发布技能文字，无代码、无 lint 解释文本改动；token 6860，上限 6861（同文件删重复付账，不抬上限）。回滚即 revert。\n- 先看：`skills/objectstack-automation/SKILL.md` 第 170–178 行（四个入口 + `api` 代价）、第 193–197 行（Who may START 不再重复列入口，改指上面「四个入口」）、第 387 行（webhook 节去掉复述标题的一句）。\n- 两分钟验证：`node scripts/check-skills-token-ratchet.mjs | grep automation/SKILL`，预期 `6860 / 6861` 且退出 0。\n- 需要你做的：Tier H（`skills/**`）。契约复审在现 head 已 PASS（评论 6846152320，Head-sha `7cc4d8f8a2d4fbc54bb357af4c17b63938d8b086`），请以 os-zhuang 批准；批准后席位落地。\n- 席位意见：同意落地。四个入口与 `flowStartRefusal` 的三个调用点逐一核过；首轮复审的 should-fix（「every door above」指代不清）已在 r1 修掉；剩一个 nit（第 178 行与第 170 行都用 endpoint 一词）作为接受的偏差，不再移 head。\n\n## What changes\n\n- **Part 1 — four doors.** The readonly-field callout's elevated-start sentence now opens \"A button, an action, an endpoint or the trigger route does not let a user start …\", the words of `os explain flow-update-readonly-field` (`packages/lint/src/rule-explanations.ts`, `FLOW_UPDATE_READONLY_FIELD_EXPLANATION`). Verified on `main` c54a23d2: `flowStartRefusal` (`packages/runtime/src/flow-start-admission.ts`) answers `ELEVATED_START_REFUSAL` (403 `PERMISSION_DENIED`) first for a non-system caller and an `autolaunched` / `record_change` / `schedule` flow declared `runAs: 'system'`; its callers are the action door (`action-execution.ts`, REST actions route and MCP `run_action`), the trigger routes (`domains/automation.ts`) and declared endpoints (`endpoint-executor.ts`).\n- **Part 2 — the `api` route's cost (skill-side arm).** \"Elevate the write, not the flow\" now adds that an `api` flow brings a webhook secret and an inbound door a button never uses, so the `subflow` route is the pick. True on `main`: `flow-registration-checks.ts` refuses an `api` flow whose start node has neither `secretRef` nor a non-blank `secret`, and the skill's own Inbound webhook section says one is required at registration and `os validate`. The routes sentence keeps the explain text's words; the lint explain text is untouched (lint lane's fix line). The Flow Types `api` row needed no edit.\n- **Budget paid by same-file restatement cuts, no ratchet raise:** the Who-may-START callout's parenthetical door list (now named in the callout above it) and the Inbound webhook section's \"An `api` flow is bound to an inbound HTTP endpoint\" (restates its heading and the Flow Types row).\n\n## Tests\n\nTeaching text only; no tested behaviour changed, so no ablation.\n\n## Acceptance notes\n\n- Rework r1 (head `7cc4d8f8`, seat-patched readings): line 178 says \"an inbound endpoint\", lines 194–197 say \"the four entrances above … is not an entrance\"; tokens 6860 / 6861; the changeset body lists both paying cuts. Gates re-run at `7cc4d8f8`: `/mnt/project-files/skills-seat-2/r2026-11-13/out/32923-gates-ran-7cc4d8f8a2-r1.list` (15 skill-text and changeset gates, exit 0). Readings below marked fcff03d4 are the first head's.\n\n- Readings (published `skills/**`): `skills/objectstack-automation/SKILL.md` lines 475 → 474, tokens 6858 → 6861 (ceiling 6861); whole bundle, sum of all SKILL.md: lines 4597 → 4596, tokens 58697 → 58700.\n- No out-of-scope findings.\n\n## Verification\n\n<details><summary>Local gates at fcff03d4 (derived list, 46 families: 42 exit 0, 4 NOT MEASURED)</summary>\n\n- Derivation: `node scripts/pm/dispatch-gates.mjs --commands`, reconciled with `--ran`: 46 derived, 42 run, 4 NOT-MEASURED, 0 UNRUN.\n- Skill-text gates re-run on the final head fcff03d4, each exit 0: `check-skills-token-ratchet` (6861 / 6861), spec `check:skill-docs`, spec `check:skill-refs`, `check:skill-identifier-liveness`, `check:skill-links`, `check:nul-bytes`, `check:pm-skill-id-lint`, `check:skill-compatibility`, `check:skill-frame-sync`, lint `check:doc-formula-expressions` (after `@objectstack/lint...` build, lock VERDICT command-exit 0).\n- NOT MEASURED (exit 3, prerequisite: whole-workspace dists with `.d.ts`): `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`. Reason: the diff is one markdown file and a changeset; these read built package dists, which this diff cannot move. CI's Lint & Repo Gates runs them.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibzaHAtZWwifCxQJuEP)_\n\n<!-- signed: domain:skills#2 · os-tesla · session_01L9qibvXzthnUYrxzphgFgW -->\n"
+}

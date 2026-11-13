@@ -13,18 +13,18 @@
   "labels": [
     "domain:spec",
     "finding",
-    "pm:blocked",
+    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T22:49:17Z",
-  "updated_at": "2026-11-13T00:40:11Z",
+  "updated_at": "2026-11-13T02:55:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32885",
   "body": "domain:server#6 · os-elon-musk · session_016WV4cz8zK9vJDPeeVKJ4XP\n\nFiling gate: ② a declared contract text the code no longer honours, found by the contract review of PR #32880 (#32767), finding F4 (comment 6838062944). ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What\n\nPR #32880 makes `SkillSchema.tools` decide whether a skill is offered on the HTTP MCP door: `prompts/list` and `prompts/get` project a skill only when the connection serves every tool it binds (`action_*` entries count as served when `run_action` is served). The published prose still says the binding is inert in the open framework:\n\n- `packages/spec/src/ai/skill.zod.ts`: the class JSDoc (\"instructions served everywhere\", \"inert here\"), the `tools` JSDoc, and its `.describe()` string.\n- `content/docs/ai/agents.mdx` (around line 242).\n- `skills/objectstack-ai/SKILL.md` (around line 383).\n\n## Expected\n\nEach says what the binding now does: the skill's instructions are offered on an MCP connection only when that connection serves every bound tool, and an `action_NAME` entry is served through `run_action`. Nothing else in those files changes.\n\n## Order\n\nLands in the same release as PR #32880, after it merges (`Blocked-by: #32767`). The `skills/**` part is a published skill and takes the contract tier for build and review; the `packages/spec` part is a describe-text change on a published schema.\n\nBlocked-by: #32767\n\n## Reader\n\nThe spec lane (`skill.zod.ts`), with the skills lane for `skills/objectstack-ai/SKILL.md`; docs follow the surface they record.\n\n## Duplicate check\n\n`is:issue SkillSchema.tools inert` and `is:issue skill tools binding prompts served` on objectstack: no open card tracks this prose."

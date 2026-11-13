@@ -1,0 +1,30 @@
+{
+  "number": 33052,
+  "kind": "issue",
+  "title": "Studio Automations: a flow copy opened by \"New similar\" reads \"Status: Unpublished draft\" although it is stored live, until the page is reloaded",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T06:31:17Z",
+  "updated_at": "2026-11-13T06:46:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33052",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nQA-source: #33048 · automation.package-flow-override · observed beside the clauses\n\n## Reproduction (stock showcase @ ee9ad834, admin; seen twice)\n1. `/_console/studio/com.example.showcase/automations`, open a packaged flow, choose New similar, give a name, create.\n2. The copy opens; its header meta reads \"Status: Unpublished draft\".\n3. Server truth: `GET /api/v1/meta/flow/NAME?state=draft` → 404 (no draft; the copy is stored live) and `GET /api/v1/automation/_status` already holds its row (`enabled: false`).\n4. Reload: the header reads \"Status: Switched off\".\n\nExpected: the header reads the copy's runtime state (\"Switched off\") as soon as it opens.\n\nMechanism (from source, not instrumented): `deriveFlowRunStatus` returns `unpublished` when the pillar's loaded `_status` snapshot has no row for the flow, and the pillar does not re-read `_status` after `onFlowCopied`. Low severity (wording until reload)."
+}

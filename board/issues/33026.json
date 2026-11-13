@@ -1,0 +1,30 @@
+{
+  "number": 33026,
+  "kind": "issue",
+  "title": "An addressed /automation/:ns/:name/(runs|trigger) under an unserved verb answers the transport's 405 (Allow: GET, HEAD, details envelope), not the automation domain's 405 the bare path gives",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T05:04:19Z",
+  "updated_at": "2026-11-13T05:50:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33026",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\n## Reproduction (stock showcase at ee9ad834, admin session; reproduced twice)\n\n1. `DELETE /api/v1/automation/showcase_batch_reminders/runs` (bare) → 405, `Allow: GET`, dispatcher envelope `{…, \"httpStatus\": 405}`.\n2. `DELETE /api/v1/automation/showcase/showcase_batch_reminders/runs` (addressed, ADR-0150) → 405, `Allow: GET, HEAD`, transport envelope `{\"error\":{\"code\":\"METHOD_NOT_ALLOWED\",\"message\":\"DELETE is not supported for … Allowed: GET, HEAD.\",\"details\":{\"method\":…,\"path\":…,\"allowed\":…}}}`.\n3. Same split for POST/PUT on the addressed `/runs`, for GET on `/automation/showcase/FLOW/trigger`, and for GET on `/automation/trigger/showcase/FLOW`; each bare counterpart answers the domain's 405.\n\nExpected: ADR-0150 D5, an address is served exactly as the bare path, so the addressed shapes answer the automation domain's 405 (`automationRouteAllow`, `Allow: GET`, dispatcher envelope).\n\n## Mechanism\n\nThe dispatcher declares only the two-segment `/automation` patterns as domain-decides-every-verb (#24228, pinned by `packages/runtime/src/automation-every-verb.hono.integration.test.ts`). The addressed three-segment mounts (`/automation/:ns/:name/runs`, `/automation/:ns/:name/trigger`, `/automation/trigger/:ns/:name`) are not declared, so they fall through to Hono's method-not-allowed and `automationRouteAllow` (`packages/runtime/src/domains/automation-address.ts`) never answers. `automation-addressed-route.test.ts` drives the addressed rows on the bare dispatcher only, so no pin reaches this. This is the checklist item's own `dispatcher-vs-hono-route` trap.\n\nImpact: low. The transport's Allow is not false, because HEAD is served, but a client sees two envelopes and two Allow headers for one route depending on the address.\n\nFix direction: extend the every-verb declaration to the addressed shapes, and add a three-segment row to `automation-every-verb.hono.integration.test.ts`.\n\nQA-source: #33025 · api-backend.automation-namespace-address · A8"
+}

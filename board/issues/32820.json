@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T21:04:11Z",
-  "updated_at": "2026-11-13T01:11:04Z",
+  "updated_at": "2026-11-13T08:19:28Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32820",
   "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nFollow-up of #32568 (PR #32741), filed on the epic red-line delta read 6835864200 (must-fix 2, epic ruling: PR #32741 does not heal it; a p1 card under #32568, on the release line). Also measured by the card thread (#32752 comment 6835724023) and the contract delta review 6835663323 (S4). The re-enable half of #32752's scope moves here; #32752 keeps the pre-heal bare read.\n\n## 维护者速读\n\n- 改什么：两个包 A、B 持有同名可覆盖条目（email_template、dashboard）时，B 停用期间做一次不带包的列表读，读侧回填把环境的无包行按 A 的外壳放进 A 的槽位；B 重新启用后不会重新回填，A 的 registry 槽位、带 A 的列表和执行列表都把环境行当成 A 自己的答出来。精确读不受影响（409 列出两者）。\n- 为什么：违反专题红线 2（歧义被猜成某个持有者的）；直接读 registry 的地方（发送时的读取、带包列表、执行列表）会用错正文。main 上更糟：这行会落进第一个注册的持有者槽位，哪怕它已停用。\n- 风险：要动包启用路径或回填的 heal 时机；第一方计数需实测。\n- 先看：`packages/metadata-protocol/src/protocol-registry-hydration.ts`（`soleHolderOf`、heal walk），包启用路径，PR #32741 的 `[#32568]` 停用持有者 pin。\n- 验证：停用 B → 不带包列表读 → 启用 B 之后，A 的槽位、带 A 的列表、执行列表都答 A 自己的条目；两种注册顺序；email_template 与 dashboard；有消融。\n- 需要你做的：无，p1，在发版线上。\n\n## Do\n\n1. Reproduce on `main` after PR #32741 merges: disable B; one unscoped list read; re-enable B; read `getPackageScopedItem(type, name, A)`, the list scoped to A and the execution list for `email_template` and `dashboard`.\n2. Heal on enable (or on any change of the served holder set): a package-less overlay row laid into a holder's slot while it was the sole served holder is withdrawn once a second holder is served again. Pin all three readers, both registration orders, and ablate.\n\n**Clause-②:** expected `no (narrowing)` (a served answer that guessed a holder goes away). **Metadata-protocol:** narrowed expected; the dev measures.\n\nBlocked-by: #32568"

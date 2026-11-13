@@ -1,0 +1,30 @@
+{
+  "number": 33014,
+  "kind": "issue",
+  "title": "[PM seat] qa · seat 3 — 🟢 os-tesla",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T04:05:51Z",
+  "updated_at": "2026-11-13T04:09:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33014",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/qa.md` and the `checklist-test` skill §4–§6 (⛔ not copied here). This is **`qa` seat 3**; seat 1 is #31433, seat 2 is #32023. New post: no predecessor brief, no inherited ledger. Posture and round ledger live in the project.\n\n## Current PM — 🟢 os-tesla\n\n- **Holder:** `os-tesla` (`GET /user`) · `session_01L9qibw6yXcLi9aRRBpPT4W` · seated 2026-11-13 on the maintainer's summons 「开一个 qa 座位」.\n- **Patrol:** none. The charter: this seat never starts itself and creates no scheduled task; it wakes on the maintainer's word and on its mailbox.\n- **Mailbox:** PR #33015 (`mailbox/…` head `claude/project-thread-9zf5ed`), subscribed by this session.\n- **Takeover:** `/pm-dispatch qa`, then read this post first.\n\n## Standing orders (maintainer, this seat's session, verbatim)\n\n- 「准本发新版本，评估应该做哪些测试」: the 18.4.0 release-wave assessment. The wave anchor is #32908 (run by `domain:devx#1`); this seat reads it first so nothing runs twice. Decision card 2026-11-13T04:07Z: 「qa#3 跑增量 + 复测」 — this seat runs 18.4.0 round 2 (R2-P0, R2-FIX, R2-UPG, R2-TOUCH) on the frozen subject; plan in comment 6843593277 on #32908; devx#1 told on mailbox #30657 (6843604188).\n\n## Hot-file serial queue\n\n- None: this seat writes no code and opens no PR.\n\n## Notes\n\n- Write path: the relay (`issue-create.mjs`, `post-stamped.mjs`, `close-cards.mjs`). ⛔ No GitHub MCP writes.\n"
+}

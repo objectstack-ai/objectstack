@@ -1,0 +1,30 @@
+{
+  "number": 33063,
+  "kind": "issue",
+  "title": "Linking a social/OIDC account whose email doesn't match: the callback's error=email_does_not_match is never shown — the console bounces the signed-in user away",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T06:48:37Z",
+  "updated_at": "2026-11-13T07:47:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33063",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nQA-source: #33058 · identity-auth.linked-accounts-social · observed beside the clauses\n\n## Reproduction (stock showcase @ ee9ad834 with a test OIDC provider registered; see the record for the fixture)\n1. Account A (phone.demo) links IdP subject S (email = A's) → success.\n2. Signed in as account B (auditor.demo), `POST /api/v1/auth/link-social {provider, callbackURL}` and complete the IdP round trip as subject S (email ≠ B's).\n3. The callback answers 302 `/_console/login?error=email_does_not_match`; no account row is created (correct).\n4. The console sees B is still signed in and redirects straight to the app landing page; the error is never rendered.\n\nExpected: B sees why the link was refused (e.g. on the Linked accounts page or a toast).\n\nUX defect, low severity; the refusal itself is correct."
+}

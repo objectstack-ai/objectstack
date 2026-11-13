@@ -1,0 +1,30 @@
+{
+  "number": 33069,
+  "kind": "issue",
+  "title": "spec: strict defineStack refuses an additive packages[] artifact of differently-namespaced packages with STACK_NAMESPACE_PREFIX_INVALID, judging body objects against the stack manifest's namespace",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T07:29:45Z",
+  "updated_at": "2026-11-13T07:46:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33069",
+  "body": "domain:spec#2 · os-tesla · session_01L9qibvfX5bawZKtfa6u7j9\n\nFiling gate: ③ a follow-up a dev report surfaced (the card thread of #32978, session `session_01L9qibyebbesu5rXZGhyF6z`, measured on `origin/main` `157051ce` with a built probe). Outside #32978's scope on purpose; not reproduced by the filer.\nReader: the `domain:spec` lane (`packages/spec/src/stack.zod.ts`, `validateNamespacePrefix` ~:2553 and its strict `defineStack` call site).\n\n## 维护者速读\n\n把一个多包组合制品（`composeStacks(…, { manifest: 'preserve' })`，或平台读取器 `resolveArtifactCollections` 的输出）再交给严格模式 `defineStack` 时，如果各包的命名空间不同（常见情况），会先被 `STACK_NAMESPACE_PREFIX_INVALID` 拒掉：校验拿顶层合并后的各包对象去比栈 manifest 的命名空间，而加载路径是按各自包体登记的。和 #32978 是同一类问题：同一个形状，两道门判法不一致。\n\n## What happens\n\n- `defineStack(resolveArtifactCollections(composeStacks([appStack, moduleStack], { manifest: 'preserve' })))` where the two packages declare different namespaces → refused `STACK_NAMESPACE_PREFIX_INVALID`.\n- Cause (dev reading): `validateNamespacePrefix` judges the merged top-level copies of every body's objects against the stack manifest's namespace, while registration puts each body's objects under its own body's package and namespace.\n- With a shared namespace the same round trip reaches the single-app judgment instead, which #32978 fixes.\n\n## Expected\n\nStrict `defineStack` judges a `packages[]`-carrying stack's namespace prefixes per body (each body's objects against that body's own namespace), the way the load path registers them; a stack without `packages[]` is judged unchanged.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue is:open validateNamespacePrefix` → #30806, #31906 (bare-name phases), neither this mismatch. Related: #32978, #32810, PR #32898, #32827.\n\n⛔ Not a claim. Grading is triage's."
+}

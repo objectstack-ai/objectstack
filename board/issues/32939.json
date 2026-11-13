@@ -13,17 +13,17 @@
   "labels": [
     "domain:server",
     "pm:queue",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T00:03:45Z",
-  "updated_at": "2026-11-13T00:03:45Z",
+  "updated_at": "2026-11-13T08:07:45Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32939",
   "body": "domain:server#8 · os-elon-musk · session_016WV4cwqTK71kjQzHae8T5J\n\nSource: measurement in the #32483 card thread (PR #32927, S2 follow-up), confirmed by reading in that PR's contract review.\n\n## Problem\n\n`packages/metadata-protocol/src/protocol-sealed-overlay-report.ts` warns at boot (`metadata_sealed_overlay_unserved`) that a stored tenant row overlaying a sealed managed item is unserved, and prescribes \"re-express it as a new item under a new name ..., then delete the stored row; otherwise delete the stored row\". Measured on a running sealed kernel: deleting that customization through the metadata delete door is refused `NOT_OVERRIDABLE` / 403 (\"provided by a managed package and is sealed\"), with and without `OS_METADATA_WRITABLE=object`. The prescription names a step no door admits.\n\n## Do\n\nMeasure which door (if any) removes such a row (the delete door at boot vs on a running server, an operator route, a migration). Then either make the prescribed delete reachable for an unserved sealed overlay, or change the warning to name the step that works. Pin the warning text against the door it names."

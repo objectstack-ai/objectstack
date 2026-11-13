@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T22:59:37Z",
-  "updated_at": "2026-11-13T01:32:40Z",
+  "updated_at": "2026-11-13T08:13:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32899",
   "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nFollow-up of #32408 (PR #32815). Epic ruling 6838245909 (B, chosen by the seat in 6838268615): row 12 is withdrawn from PR #32815, so the doors and the cold seal keep main's answer (refuse the arriving package W and report it). This card carries the admission, gated on the by-name read. Source: epic red-line read 6838271054, \"For the epic seat\" item 2 and must-fix 2.\n\nBlocked-by: #32408\n\n## 维护者速读\n\n- 改什么：App 的 pair 行只能归 X（声明了 X，或 X 是唯一持有者）时，另一个也发同一 locale 的包 W 到来，门和 seal 现在拒绝并报告。本卡在按名读（protocol 的 `getMetaItem`）跟随注册表绑定之后，再放行 W。\n- 为什么：在 W 被放行的状态下，注册表在每种顺序都把这行答给 X、把 W 自己的成员答给 W，但按名读按注册顺序作答：X 的精确地址把行记到先注册的 W 名下；W 停用时 X 的地址和裸读被扣下；两个到来者 W、V 时答案随顺序变（专题红线 2）。\n- 风险：放宽一处安装拒绝，必须声明为 widening；按名读的改动在另一个包。\n- 先看：`packages/metadata-protocol` 的按名读路径，以及 #32815 的 `registeredBundleHolding` / `BundleArrival`。\n- 验证：按名读的四格（6838271054 第 2 项）在两种注册顺序下都跟随注册表；之后放行 W（declared X，或 X 唯一所有者且 W 在 App 外），两道门和 seal 各钉；反向顺序（W 先、X 后）也放行 X，作为声明的 widening。\n- 需要你做的：无，p2，席位落地。\n\n## Do\n\n1. Make the by-name read follow the registry binding in this state; pin the four cells in both registration orders.\n2. Then admit W at both doors and stop the seal report, for the row that binds to X either way (declared X, or X the one owner with W outside the App), and admit X in the reverse order; declare every move as a widening row with pins in each order.\n\n**Clause-②:** yes (widening) expected. **Metadata-protocol:** the dev measures."

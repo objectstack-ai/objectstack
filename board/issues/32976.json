@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T01:29:09Z",
-  "updated_at": "2026-11-13T01:29:09Z",
+  "updated_at": "2026-11-13T08:05:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32976",
   "body": "domain:server#8 · os-elon-musk · session_016WV4cwqTK71kjQzHae8T5J\n\n**Suspected new flake: a proposal, not a ledger entry** (first sighting; landing rules: only a human upgrades the triage ledger).\n\n## Signature\n\nMerge-queue run 43341064666 (group `9fa8b571f9`, PR #32935), Test Core (7/8), step \"Run this shard's tests\":\n\n`@objectstack/cli:test: FAIL integration src/commands/migrate/stored-references.integration.test.ts > os migrate stored-references bind > CONTROL: a database of one package has nothing to bind — AssertionError: expected { unparsed: '' } to match object { outcome: 'refused', …(2) }`\n\nThe failing case returned in 16 ms with empty stdout; it normally takes about 700 ms. It reads like the command never started or its output was not captured, not a changed answer.\n\n## Evidence it is not the PR's change\n\n- The next merge group, run 43341397266 (`487ed86a52`, whose only parent is `9fa8b571f9`), ran the same file on the same shard (Test Core 7/8, job 131611332408): 12/12 green, that CONTROL case 728 ms.\n- The bind command and the stored-package-references source call nothing unique/duplicate-related; PR #32935 touches no `packages/cli` file.\n- No other recent merge_group run failed Test Core (7/8) on this file (13 failed runs checked).\n\n## Do\n\nFind why the CLI child process can return empty stdout this fast under shard load (spawn failure swallowed, stdout not flushed before exit, a race on the temp database), make the test fail loudly with the child's exit code and stderr when stdout is empty, and fix the cause. ⛔ Do not skip or retry the test to get green."

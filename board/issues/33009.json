@@ -1,0 +1,36 @@
+{
+  "number": 33009,
+  "kind": "issue",
+  "title": "console: a record-button flow whose write step dropped a read-only field shows a warning toast naming the fields (console half of #32861)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T03:58:33Z",
+  "updated_at": "2026-11-13T07:41:41Z",
+  "closed_at": "2026-11-13T07:40:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33009",
+  "body": "domain:server#8 · os-elon-musk · session_016WV4cwqTK71kjQzHae8T5J\n\nPart of #32861\nBlocked-by: #33007\n\nFiling category: ① product defect, in-flight split (`references/execution-duties.md` in-scope sub-issue; priority inherited from #32861, p1). The server half is PR #33007 (`Part of #32861`); this card carries the card's Work 2, the console toast, and #32861 closes when this lands.\n\n## 维护者速读\n\n员工点按钮启动流程，流程想写的字段是只读的，写入被丢掉、按钮却答「成功」，员工什么都看不到。PR #33007 让流程的回答里带上「哪些字段没写进去、为什么」；这张卡让控制台把它弹成黄色警告，显示字段的中文名。\n\n## Business reason\n\nThe #32666 case: a member clicks 「提交审批」, the flow's `update_record` step writes `status`, which is `readonly: true`; the write is dropped, the run succeeds, the record stays 「草稿」, and the console says nothing. After PR #33007 the flow-action answer carries `droppedFields` (`DroppedFieldsEvent`: object, fields, reason; omit-when-empty) on REST and MCP. Nothing in the console reads it yet.\n\n## Expected\n\nA person who starts a flow from a record action (and from a screen flow's resume) sees a warning toast in their locale when the answer carries `droppedFields`: the step ran, these fields (by label) were not written because they are read-only. No toast when the answer carries none. The existing `detail.writeStripped*` wording fits it.\n\n## What the server half measured (PR #33007, Acceptance notes)\n\n1. The wire parse of a `droppedFields` entry (`isWireDroppedFieldsEntry`, `asDroppedFieldsNotice`, the skew arm for an unknown `reason`) is private to `ui/packages/data-objectstack`. The console's flow launch (`ui/packages/app-shell/src/utils/flowLaunch.ts`) does not go through the adapter: export the parser, ⛔ no second copy.\n2. `writeWarningToast.emitWriteWarning` needs the adapter (field labels), which neither launch host (`hooks/useConsoleActionRuntime.tsx`, `views/RecordDetailView.tsx`) holds today.\n3. A run that paused at a `screen` node delivers the drop on the resume answer, which `views/FlowRunner.tsx` reads: a third reader.\n4. The answer's `droppedFields` is complete only for the run's own write steps and a `subflow` child that completes without pausing. A `map` item's run and a `subflow` child that paused and resumed do not roll up yet (#33019, server lane). Until #33019 lands, the toast reads a present member as a drop, and ⛔ never reads an absent member as \"nothing was dropped\" for those shapes (contract review of PR #33007, record 6843734657, S1).\n\n## Work\n\n1. One shared reader of the answer's `droppedFields` for the three hosts above, through the existing parser and `writeWarningToast`.\n2. Pins: the #32666 shape (readonly `status`, flow behind a record action) yields the toast on the click with the field label; a clean click yields none; the resume path yields it. Ablate and show red.\n3. Declarations per AGENTS.md (console only: `Clause-②: none` expected; changeset per the ui packages' rule).\n\nReader: `domain:ui` lane, once PR #33007 merges.\nDedupe: `repo:objectstack-ai/objectstack is:issue droppedFields toast flow` → #32861 (parent) only.\n"
+}

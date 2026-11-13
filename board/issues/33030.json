@@ -1,0 +1,30 @@
+{
+  "number": 33030,
+  "kind": "issue",
+  "title": "MCP stdio get_record answers a missing or hidden id with uncoded error text, while the HTTP door answers RECORD_NOT_FOUND 404",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T05:07:14Z",
+  "updated_at": "2026-11-13T05:48:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33030",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\n## Reproduction (ee9ad834; reproduced twice)\n\n1. Start the server with stdio MCP: `os start` with `OS_MCP_STDIO_ENABLED=true` and `OS_MCP_STDIO_API_KEY=an admin osk_ key`.\n2. Over stdio, `tools/call get_record {objectName:\"showcase_task\", recordId:\"qa_missing_id_123\"}`.\n   - Actual: `result.isError` true and `content[0].text` = `Record \"qa_missing_id_123\" not found in \"showcase_task\"`. There is no `{error:{code,status}}`.\n   - An RLS-hidden id under a member key answers the same way.\n3. The same call on the HTTP door (/api/v1/mcp) answers `{error:{code:\"RECORD_NOT_FOUND\", status:404, message}}`. Stdio `update_record` on the same missing id also answers the coded RECORD_NOT_FOUND.\n\nExpected: the coded envelope on both doors, which is the #23509 contract: a stdio client branches on the code.\n\n## Mechanism\n\n`createStdioDataBridge.get` returns null by design (`packages/mcp/src/stdio-data-bridge.ts` ~1209: \"get_record owns the not-found wording on this path\"). `get_record`'s `record == null` branch then renders `errorResult(\\`Record \"…\" not found in \"…\"\\`)` (`packages/mcp/src/mcp-http-tools.ts` ~2633) instead of `errorResultWithCode`.\n\nImpact: low. This is a residual of the closed #23509.\n\nQA-source: #33025 · ai.mcp-coded-refusals-and-runtime-exposure · observed beside the clauses"
+}

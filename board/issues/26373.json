@@ -1,7 +1,7 @@
 {
   "number": 26373,
   "kind": "issue",
-  "title": "[PM seat] domain:devx · seat 3 — 🟢 os-tesla · 由 os-tesla 账户的项目负责 · p1/p2 only",
+  "title": "[PM seat] domain:devx · seat 3 — 🟢 os-tesla · 由 os-tesla 账户的项目负责 · p1 + high-severity only",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -19,12 +19,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T00:41:13Z",
-  "updated_at": "2026-11-12T22:01:59Z",
+  "updated_at": "2026-11-13T05:45:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
   "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26373",
-  "body": "domain:devx#3 · os-tesla · session_01L9qibz9SSCGvVmfYUe1Esi\n\n⚠️ **Seat-post stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`. This is **`domain:devx` seat 3**. Seat 1 is #6023, seat 2 is #20163 (⛔ this post is neither).\n\n<sub>Refreshed 2026-11-12T22:01Z (patrol interval).</sub>\n\n- **Current PM:** 🟢 `os-tesla` · `session_01L9qibz9SSCGvVmfYUe1Esi` (a Claude Code project thread, \"devx 座位 · 车道调度\"), seated on the maintainer's 「开 devx 座位，只接 p1 p2 卡」. 由 os-tesla 账户的项目负责. Posture, ledger and round reports live in the project. Seat-taken audit 6836861250.\n- **Split:** seat 3 takes only unclaimed `pm:queue` cards labelled `priority:p1` or `priority:p2` (⛔ no p3, no other lanes, no `pm:epic` subtree), under the claim race with seat 1 (#6023) and seat 2 (#20163): re-read assignee and newest comments before every claim; the earlier claim wins. Claims carry `Seat: domain:devx#3`.\n- **Hot-file serial queue:** seat 3 holds none.\n- **Patrol:** `trig_01Hi55Rc5cHs6oiD1vqsGN9u` · `49 */5 * * *` (self-bound). Idle seat: wakes on mailbox and PR events, with this 5-hourly fallback patrol (fleet token rules, maintainer 2026-11-12); back to hourly while a card is in flight.\n- **Mailbox:** pending — the previous holder's #31167 is still open; this seat opens its own once that one is closed.\n- **Standing constraints honoured (recorded on #20163):** `ui/.github/**` is ⛔ out of bounds; the root `ci.yml` is in devx bounds lane-wide (6720656982); changesets go to the root `.changeset/`; no PR on the objectui repository.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+  "body": "domain:devx#3 · os-tesla · session_01L9qibz9SSCGvVmfYUe1Esi\n\n⚠️ **Seat-post stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`. This is **`domain:devx` seat 3**. Seat 1 is #6023, seat 2 is #20163 (⛔ this post is neither).\n\n<sub>Refreshed 2026-11-13T05:44Z (scope: p1 and high-severity only).</sub>\n\n- **Current PM:** 🟢 `os-tesla` · `session_01L9qibz9SSCGvVmfYUe1Esi` (a Claude Code project thread, \"devx 座位 · 车道调度\"), seated on the maintainer's 「开 devx 座位，只接 p1 p2 卡」. 由 os-tesla 账户的项目负责. Posture, ledger and round reports live in the project. Seat-taken audit 6836861250.\n- **Split:** seat 3 takes only unclaimed `pm:queue` cards that are `priority:p1` or high-severity (p0, or a high/critical security finding) — maintainer 「都只处理 p1 和 高危」, superseding the seating's p1/p2 (⛔ no new p2, no p3, no other lanes, no `pm:epic` subtree), under the claim race with seat 1 (#6023) and seat 2 (#20163): re-read assignee and newest comments before every claim; the earlier claim wins. Claims carry `Seat: domain:devx#3`.\n- **Hot-file serial queue:** seat 3 holds none.\n- **Patrol:** `trig_01Hi55Rc5cHs6oiD1vqsGN9u` · `49 */5 * * *` (self-bound). Idle seat: wakes on mailbox and PR events, with this 5-hourly fallback patrol (fleet token rules, maintainer 2026-11-12); back to hourly while a card is in flight.\n- **Mailbox:** PR #33039 (the previous holder's #31167 closed on the maintainer's word).\n- **Standing constraints honoured (recorded on #20163):** `ui/.github/**` is ⛔ out of bounds; the root `ci.yml` is in devx bounds lane-wide (6720656982); changesets go to the root `.changeset/`; no PR on the objectui repository.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

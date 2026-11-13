@@ -1,0 +1,36 @@
+{
+  "number": 33024,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the model picked in the AI assistant composer is the model the chat request sends, from the first message on",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T04:53:27Z",
+  "updated_at": "2026-11-13T05:53:27Z",
+  "closed_at": "2026-11-13T05:53:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-13T05:53:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33024",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D3Q1eHG5rWmHCpf6WRoYAkT)_\n\nFixes #32994\n\nClause-②: no (a client defect; if a published prop of `@object-ui/plugin-chatbot` changes shape the dev reports `yes`)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:AI 助手里用户选的模型改由外层页面保存,不再存在聊天窗格内部;整页 /ai/build、/ai/ask,右侧助手和 Studio 助手三处都改了。\n- 为什么改:新会话的第一条消息发出时会创建会话,聊天窗格随之重建,选中的模型被清掉,于是请求带的是默认 haiku,选择器也跳回 Fast。付费用户选了高级模型却用不上。\n- 风险与回滚:只动前端状态的存放位置,请求格式和服务端都不变;没选模型时仍发默认模型,与以前一致。回滚即还原本 PR。\n- 先看:`ui/packages/app-shell/src/console/ai/AiChatPage.tsx`(ChatPane 读宿主传入的选择)、`ui/packages/app-shell/src/layout/ChatDockConversation.tsx`、新测试 `AiChatPage.modelPickSurvivesFirstSend-32994.test.tsx`。\n- 两分钟验证:在 `ui/` 下跑 `pnpm exec vitest run packages/app-shell/src/console/ai/__tests__/AiChatPage.modelPickSurvivesFirstSend-32994.test.tsx`,应见 4 passed。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nEvery chat host (`AiChatPage`, the console dock `ChatDockConversation`, the Studio copilot `StudioAiCopilot`) keys `ChatPane` on the conversation id. Since #32058 the first send creates the conversation, so the pane remounts in the middle of every first send of a new conversation. The composer's model pick was `useState` inside `ChatPane` (the `selectedModelId` / `effectiveModelId` pair beside the `useAiModels` call), so it died with the old pane: the replayed first message went out with `defaultModelId` and the picker showed the default again. Turns after it sent the default too, until the user picked again.\n\n`ChatPane` takes two optional props, `selectedModelId` and `onSelectedModelChange`. The three hosts own the pick in their own state (beside `pendingFirstMessageRef`, which survives the same remount for the same reason) and pass it down. Without the props the pane keeps the pick itself, as before. The picker and the request still read one value, `effectiveModelId`, so the picker cannot show a model other than the one the next request sends.\n\n**Cause:** `ui/packages/app-shell/src/console/ai/AiChatPage.tsx`, the pane-local `selectedModelId` state in `ChatPane`, combined with the `key` on conversation id at each host's `ChatPane` mount. `useObjectChat`'s per-send `modelRef` injection was correct; it was handed the default.\n\n**Responsibility:** 8523ef9ac (#32058, 2026-11-10) \"create the AI chat conversation on the first send, not on every visit\". Before it the conversation was minted on mount, so the remount happened before a user could pick. After it, every first send remounts the pane. `git merge-base --is-ancestor 8523ef9ac origin/main` exit 0.\n\n**Bounded in-place fix, declared:** `ui/packages/app-shell/src/views/studio-design/StudioAiCopilot.tsx` is outside the claim's named file surface. It is the third host with the same keyed mount and the same defect, and the fix is the same two props, so it is fixed here (same defect class, mechanical, no other claim on the file, same test and gate family). The seat amends the claim's file surface.\n\n## Tests\n\nNew `ui/packages/app-shell/src/console/ai/__tests__/AiChatPage.modelPickSurvivesFirstSend-32994.test.tsx`, run on both the full-page build composer (`AiChatPage` at `/ai/build`) and the console dock (`ChatDockConversation`), with the real `ChatPane`, `useChatConversation` and `useObjectChat` transport. The `model` is read from the JSON body of each chat POST captured off a `fetch` stub.\n\n- A pick (Sonnet) before the first message: the first request sends Sonnet, the conversation is created (pane remounts), the picker still shows Sonnet, the second request sends Sonnet and the picker still shows it.\n- CONTROL: no pick: Haiku (the default) is sent on both turns and shown.\n\nAblation (on the fix commit f3a19b471, before the main merge, through `scripts/ablation-replace.mjs`): `hostHoldsModel` forced false, so the pane ignores the host. Both pick cases go red with `expected 'anthropic/claude-haiku-5.5' to be 'anthropic/claude-sonnet-5.5'` (the defect as filed), both controls stay green. Restore proven: blob == HEAD, `git diff HEAD` empty.\n\n## Acceptance notes\n\n- The pick is held for the life of the host. Closing and reopening the dock, or reloading the page, starts again from the environment default. Persisting the pick across reloads is not in this card.\n- The staging re-check of `ai_traces.model` (card acceptance 2) is the seat's; this container has no cloud staging access. NOT MEASURED: a browser check. The dev stack was not booted in this container (it needs a whole-tree build first), and a model picker with more than one entry needs an AI model allowlist the local stack was not checked for. The test drives the real pane, conversation hook and transport instead.\n\n## Verification\n\n<details><summary>Local, head 501732ca6 (after one merge of main)</summary>\n\n- `pnpm exec vitest run packages/app-shell/src/console/ai packages/app-shell/src/layout/__tests__/ChatDock packages/app-shell/src/layout/__tests__/ConsoleChatbot packages/app-shell/src/views/studio-design` (from `ui/`, under the verify lock): Test Files 392 passed (392), Tests 2894 passed (2894), VERDICT command-exit 0.\n- `pnpm --filter @object-ui/app-shell run type-check` (src + tsconfig.test.json): exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 37 families, all exit 0, including `node scripts/check-sdui-manifest.mjs`. `--ran` reconciliation: 37 derived, 37 run, 0 NOT-MEASURED, 0 UNRUN.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4czLbpetCrYUqeRsq85)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4czLbpetCrYUqeRsq85\n"
+}

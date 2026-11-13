@@ -2,8 +2,8 @@
   "number": 32673,
   "kind": "issue",
   "title": "[Decision] Under ruling A (#32584), may the PR that adds a key raise the token ceiling of the published skill file its enumeration row lands in?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T09:43:32Z",
-  "updated_at": "2026-11-13T00:59:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T07:16:35Z",
+  "closed_at": "2026-11-13T07:15:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32673",
   "body": "domain:skills#2 · sunhaolin · session_017xRBcTAJajXtiVBRiECvT6\n\nFiling gate: ② a decision only the maintainer can make (a standing ceiling rule: `lanes/skills.md` 「改规则(归属、门禁、上限、车道边界)先立决策卡」). It came up while executing ruling A on #32584 (dev report 6820025512, open question 2). Per the protocol a new question goes on its own card, and the ruled card #32584 is not relabelled.\n\n## 维护者速读\n\n- **事情:** 您裁 A(#32584,「同意 A」)后,新增元数据键的 PR 同笔在已发布 skill 里加一行枚举。可这些 skill 文件各有 token 上限:`objectstack-platform/SKILL.md` 只剩 4 token 余量,两份枚举所在文件余量为 0。键名稍长,这一行就会让 token 门禁变红。按 A,这个 PR 又不许删 skill 里的别的文字来腾地方。\n- **A:** 加这一行的 PR 可以把该文件的 token 上限按实测增量抬高,PR 正文引您的裁决 A。只限这一行的字节数。\n- **B:** skills 车道先删重复文字、预留余量;加键的卡 `Blocked-by:` 这张预留卡。\n- **C:** 每次撞上都停下来交您裁。\n- **推荐 A。** 请回一字:A、B 或 C。\n\n## Governing text\n\n- `scripts/check-skills-token-ratchet.mjs` header: \"Going the other way has ONE gate-recognised path — the standing ruling … 「A:先削重复,余额按实测提高」 … a ruling of record that orders text into a file still authorises its own measured delta\".\n- `.claude/skills/pm-dispatch/references/lanes/skills.md`: 「改规则(归属、门禁、上限、车道边界)先立决策卡,裁后本域写」.\n- Ruling A on #32584 (record 6819475461): the adding PR \"carries the matching skills enumeration row in the same PR. Only that row; prose, examples and evals still go to the skills sub-card … no gate changes.\"\n\n**Protocol / contract change:** none. No gate changes under any option. A and B are lane rules on how a ceiling row moves; C changes nothing.\n\n## Premise (with re-check)\n\n- `node scripts/check-skills-token-ratchet.mjs` on `main` `958734cb`:\n  - `skills/objectstack-platform/SKILL.md` 6007/6011 (headroom 4);\n  - `skills/objectstack-data/rules/lifecycle.md` 1931/1931 (headroom 0);\n  - `skills/objectstack-query/rules/filters.md` 2482/2482 (headroom 0).\n- Re-check: run the same command and read the three lines; positive control, any other row prints.\n- By the script's formula, an entry of 18 bytes (a 12-character key name in its backticks and separator) adds 5 tokens and turns the platform file red (dev's computation in 6820025512, not a gate run).\n\n## The question\n\nRuling A sends the row with the product PR and bars that PR from other `skills/**` edits. The ratchet's standing path pays new text by deleting restatement in the same file. That deletion is exactly what ruling A forbids the product PR to do. The other path is \"a ruling of record that orders text into a file authorises its own measured delta\". Does ruling A count as that ordering ruling for every future row?\n\n## Options\n\n| Option | What happens | What a customer or author sees | Effort |\n|:--|:--|:--|:--|\n| A: the row's PR raises the ceiling by the row's measured delta, quoting ruling A | One more row in the ratchet's `CEILINGS` table, moved in the same PR, capped at that row's own bytes; the lane text gains one clause | The published skill lists the new key the day it ships, as ruling A intended; skill files grow by about one row per key | `domain:skills` · 1 PR (one clause in `lanes/skills.md`); precedent: the same delta path in this card's sibling PR for #32584 (+2/+1 lines, line ratchet) |\n| B: the skills lane pre-pays headroom | Before each key addition, a skills card deletes restatement in the target file; the adding card is `Blocked-by:` it | The key still ships with its row, but every addition waits on an extra skills PR | `domain:skills` · 1 extra PR per addition; no precedent |\n| C: stop each time | Each adding PR stops as `needs_decision` until you answer | Additions stall on the decision box | none up front; one ruling per addition |\n\n**Business meaning:**\n- A: the price list gains its new line the day the product launches, and the page grows by that line.\n- B: before each launch, someone first tightens the page to make room.\n- C: every launch waits for the boss to approve one more line.\n\n## Four axes (business stance)\n\n- **Long-term soundness:** A keeps the enumeration and the protocol in one commit, the state ruling A chose. B puts back an ordering between two cards, the shape ruling A removed. C turns a mechanical row into a recurring ruling. Two years out, a mainstream platform publishes its key list from the schema, so the list's size is a fact of the platform, not an editorial choice. A matches that; the ceiling still binds every line that is not a row.\n- **Real pull:** yes. Every authorable key or bound enum member added from now meets it. Protocol additions are frequent, and the platform file has 4 tokens of headroom.\n- **AI error prevention:** under A the gate stays strict. It turns red loudly the moment a PR grows a file by more than its row, and the published list never lags the schema. Under B and C an author agent, during the wait, reads a skill that does not list a key the platform accepts.\n- **No sprawl:** A adds no mechanism and uses the ratchet's existing delta path. B adds one card per addition. C adds one ruling per addition.\n\n**Recommendation: A.** Reading ① alone gives A; do ②③④ flip it? No. Confidence gap: A lets a product PR move a skills ceiling row. The cap (\"at most the row's own measured delta, ruling A quoted\") must be one grep-able sentence, checked by the seat's contract-review record, because the script cannot read rulings. Two costs of ruling A that analysis 6819422121 did not list, for your read:\n- Every key-adding PR now touches `skills/**`, so it is Tier H and lands by a human merge (`check-governed-merges --test` answers GOVERNED).\n- `.claude/skills/spec-property-retirement/SKILL.md` still bars any `skills/**` edit in a retirement PR, which a rename (retire one key, add its replacement) would need under A. That second one is text consistency, and the lane fixes it without a ruling.\n\n**After the ruling:**\n- A ⇒ the `domain:skills` lane adds one clause to `lanes/skills.md` beside ruling A's exception. The clause says the token-ceiling row moves by the row's measured delta, ruling A quoted. The same PR aligns the retirement playbook's line for renames.\n- B ⇒ the lane text names the pre-pay card.\n- C ⇒ the lane text says the adding PR stops as `needs_decision`.\n\nos-decision-facets\n- ① 长远:A 让枚举与协议同笔且不加机制;B 重新引入两卡顺序;C 把机械行变成反复裁决。\n- ② 拉动:今后每次新增可编写键或绑定枚举成员都会撞上;平台文件只剩 4 token。\n- ③ 防 AI:A 门禁照样严格、超出一行即红,发布清单不落后于协议;B、C 有窗口期让 AI 读不到已可写的键。\n- ④ 不扩散:A 不加机制;B 每次多一张卡;C 每次多一次裁决。\n\nPrior rulings read: `check-skills-token-ratchet` header (2026-10-27 「A:先削重复,余额按实测提高」, record 6513306068); `lanes/skills.md` 「改规则…先立决策卡」; ruling A on #32584 (6819475461); thread: 6820025512."

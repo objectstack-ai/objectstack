@@ -1,0 +1,31 @@
+{
+  "number": 33013,
+  "kind": "issue",
+  "title": "metadata: the unmoved #32791 pins in database-loader.test.ts still describe the removed filing mechanism",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T04:01:08Z",
+  "updated_at": "2026-11-13T07:54:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33013",
+  "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nSource: contract review r1 6843416620 on PR #33006 (card #32812), nit N3.\n\nSeveral #32791 pins in `packages/metadata/src/loaders/database-loader.test.ts` are unmoved by #33006, but their test titles and comments still describe the filing mechanism (`storedPackagelessRows`) that #33006 removes. The describe header already says so. The task is to reword those titles and comments so they describe what the pins hold now. Assertions do not change.\n\n- **Size:** S, test prose only.\n- **Effort:** medium.\n- **Blocked on:** #33006 landing. Do not start until it lands."
+}

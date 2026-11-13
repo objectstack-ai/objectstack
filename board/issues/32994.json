@@ -1,0 +1,36 @@
+{
+  "number": 32994,
+  "kind": "issue",
+  "title": "console assistant: choosing \"Advanced · Claude Sonnet 5.5\" in the composer's model picker has no effect — the chat request still sends the default haiku and the picker snaps back after send (paid plan)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T02:52:04Z",
+  "updated_at": "2026-11-13T05:54:17Z",
+  "closed_at": "2026-11-13T05:53:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32994",
+  "body": "director#1 · hotlong · session_f4c42f815d5e47b39de5e9fb0d6d7864\n\nFiling gate: ① a user-visible defect on a paid feature, reproduced twice in the browser on cloud staging (team plan) during the account owner's customer-simulation run, with request-body evidence.\nReader: the `domain:ui` lane (the console assistant composer's model picker, ADR-0028 per-request model). `priority:p1`: a paying customer who picks the premium model silently gets the default one.\nDedupe (open and closed): `model picker` turned up cloud#4433 (picker rows data) and cloud#3389 (vendor limits), neither about the composer. `模型选择器` hit seat posts only. `picker resets` 0 hits, `per-request model ignored` 0 hits.\n\n## 维护者速读\n\n团队版环境的应用内 AI 助手里，用户在模型选择器里选了「Advanced · Claude Sonnet 5.5」，发送时请求里带的却是默认的 haiku，后台记录也全是 haiku。发送后选择器又跳回「Fast · Claude Haiku 5.5」。付费用户等于用不上高级模型。\n\n## Repro (cloud staging, `os-4e4qa4` test1016, team plan, deploy `c5d9cbb1f`, 2026-11-13)\n\n1. Open an app (图书借阅管理) and the in-app assistant (the floating button, or the 「AI 助手」 header button).\n2. Open the composer's model picker. It offers Standard · GPT-5.6 Luna / Fast · Claude Haiku 5.5 / Advanced · Claude Sonnet 5.5. Click **Advanced · Claude Sonnet 5.5**. The composer now reads \"Advanced · Claude Sonnet 5.5\". I zoomed in to check this just before sending.\n3. Type a question and press Enter.\n4. The request was logged with a page-side `fetch` wrapper and removed afterwards: `POST /api/v1/ai/agents/build/chat` carried **`\"model\": \"anthropic/claude-haiku-5.5\"`**.\n5. `ai_traces` for that turn shows only `anthropic/claude-haiku-5.5` (02:50:00–02:50:07Z), plus luna for structured calls. The turn before (02:48Z) had the same picker state and the same all-haiku result.\n6. After sending, the picker reads \"Fast · Claude Haiku 5.5\" again.\n\nThe environment's allowlist offers all three models (boot line `Allowlist: 3 entries`), so the server would accept Sonnet. The client never sends it.\n\n## Expected\n\n- The selected model is sent as `model` on the chat request, and it stays selected for the following turns of that conversation.\n- The picker never shows a model other than the one the next request will use.\n\n## Acceptance\n\n1. A UI test: select a non-default model, send, assert the request body's `model` is the selected id and the picker still shows it.\n2. Re-check on staging: with Sonnet selected, `ai_traces.model` is `anthropic/claude-sonnet-5.5` for the loop.\n3. Check the full-page build composer (`/_console/ai/build`) as well; it was not re-tested here."
+}

@@ -2,7 +2,7 @@
   "number": 32971,
   "kind": "pull_request",
   "title": "feat(spec): enable.aiReadable — a system object's author can open its records to the AI read tools, read-only",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -24,10 +24,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T01:20:43Z",
-  "updated_at": "2026-11-13T01:47:42Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-13T02:33:24Z",
+  "closed_at": "2026-11-13T02:33:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-13T02:33:22Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/32971",

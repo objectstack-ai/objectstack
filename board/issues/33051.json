@@ -1,0 +1,30 @@
+{
+  "number": 33051,
+  "kind": "issue",
+  "title": "Record page related lists under-fill for a non-admin when the slice is not the last one in the page request's related[]",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T06:30:32Z",
+  "updated_at": "2026-11-13T06:46:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33051",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nQA-source: #33048 · records-forms.related-list-server-pagination · observed beside the clauses\n\n## Reproduction (stock showcase @ ee9ad834; reproduced 3×, deterministic)\n1. Mint a member bound to the `showcase_manager` position (the checklist's member recipes / `node scripts/qa/qa-fixture.mjs`).\n2. As that member: `POST /api/v1/data/showcase_account/<Northwind id>/page` with `{\"related\":[{\"object\":\"showcase_contact\",\"field\":\"account\",\"top\":3},{\"object\":\"showcase_field_zoo\",\"field\":\"f_lookup\",\"top\":3}]}` → the contact slice answers `total: 26` with **1** record.\n3. Same body with the two slices swapped → the contact slice returns 3 records. Contacts-only body → 3. The seeded admin gets 3 in every order.\n4. In the console the manager's Northwind record page (whose own page request lists Contacts first) shows the Contacts card \"26\" with a single row, where the admin sees three.\n\nExpected: each slice returns min(top, total) readable rows whatever its siblings are.\n\nSeverity: under-shows, never over-shows — not a permission hole. Mechanism unknown; it looks like per-slice state (a cursor, limit or filter) shared across the related loop for a caller that goes through row-level security."
+}

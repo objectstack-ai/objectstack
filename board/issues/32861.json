@@ -2,8 +2,8 @@
   "number": 32861,
   "kind": "issue",
   "title": "runtime: a record-button flow whose update step drops a read-only field answers success and the console says nothing; tell the person who clicked that the step did not take effect",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:automation",
     "domain:server",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T22:07:16Z",
-  "updated_at": "2026-11-12T22:12:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T07:42:44Z",
+  "closed_at": "2026-11-13T07:40:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32861",
   "body": "domain:spec#2 · os-sales · session_01L6bhgU7jN46DmQ6XFvz28s\n\nFiling gate: ③ a follow-up a maintainer ruling names. #32666 was ruled A (publish-time refusal) with option C filed as an ordinary card: maintainer 「其他都同意」 2026-11-12T22:00Z, accepting the review that recommended \"A, and file C as an ordinary card\". C is the second sentence of #32666's Expected; it changes no contract.\n\nReader: the lane that owns the flow run answer and the console record-action toast (`domain:server` for the automation run result, with the `ui/packages/app-shell` reader); triage routes.\n\n## 维护者速读\n\n管理员把字段设成只读后，背后写这个字段的流程照样能被按钮启动，写入被静默丢掉，按钮答「成功」，员工什么也看不到，单子还是草稿。#32666 已裁定在发布时拦住新造成的这种冲突，但已经处在这种状态的租户、以及发布门看不到的写法（钩子、动作、跨包流程）仍会静默失败。这张卡让点按钮的人当场知道「这一步没生效，哪些字段被丢了」。\n\n## Business reason\n\n- The case, measured on #32666 (hosted tenant, `pnpm dev:stack --with-ui`): a member clicks 「提交审批」, the flow's `update_record` step writes `status`, which the object marks `readonly: true`. The server logs `WARN Field 'status' … is read-only: the caller-supplied value was DROPPED and the update is being COMMITTED WITHOUT IT — the call returns success …` and the run ends `status=completed … acted=1 … failed=0`. The console shows no toast, no error; the record stays 「草稿」.\n- Why the #32666 ruling does not cover it: A refuses only conflicts an object publish newly causes, judged against the package's own flows. Tenants already in this state, hook and action bodies, and flows of another package that write the object are not judged by it (the review of #32666 lists these). This card is what makes them visible.\n\n## Expected\n\nA flow run started by a person (record action, screen or api flow) whose write step committed without some caller-supplied fields reports that to the caller, and the console's record-action toast shows it in the person's locale: the step ran, these fields were not written because they are read-only. The run keeps its current outcome semantics (a dropped field is not a failure of the run unless the reader judges otherwise and declares it).\n\n## Work\n\n1. Find where the dropped-field fact of a flow write step is recorded on the run (#3407 / #3413 made it observable in the run; the exact field is NOT MEASURED by the filer) and carry it on the answer the console reads for a `type: 'flow'` record action.\n2. The console record-action runtime shows it as a warning toast with the field labels, localized; no new silent path.\n3. Pin: the #32666 shape (readonly `status`, autolaunched `update_record` flow behind a record action) yields the warning on the click; a write that drops nothing yields no warning.\n4. Declarations per AGENTS.md: a new field on a public answer is a widening (`Clause-②: yes (widening)` if it reaches a spec schema), changeset level per AGENTS.md.\n\n## Dedupe\n\nSuggested words: `flow dropped readonly field toast`, `update_record readonly dropped success console`, `droppedFields run answer`. #32666 (parent, ruled A), #3407 / #3413 (run-side observability), #3425 (build-time rule).\n\nSuggested-grade: p2 · the publish-time refusal (#32666 A) closes the common path; this covers what it cannot see."

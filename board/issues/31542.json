@@ -2,8 +2,8 @@
   "number": 31542,
   "kind": "issue",
   "title": "Marketplace install dialog and install preview do not show which objects a package extends (objectExtensions), sys_* objects included: render the catalog's object_extensions",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T13:52:49Z",
-  "updated_at": "2026-11-13T00:19:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T04:49:16Z",
+  "closed_at": "2026-11-13T04:48:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31542",
   "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate ①: the framework half of cloud#3852. Serial: start after cloud PR #3859 merges. Once it does, the cloud catalog serves `object_extensions` on every version (`GET /api/v1/marketplace/packages` `latest_version`, `GET /api/v1/marketplace/packages/:id` `versions[]`, the R2 snapshot):\n\n```\nobject_extensions: null | Array<{\n  object: string;          // the extended object (extend)\n  platform: boolean;       // true for a sys_* object\n  fields: string[];        // fields it adds or redeclares (a redeclared field replaces the owner's definition)\n  field_patches: string[]; // owner fields whose display it patches\n  validations: string[];   // rules it adds or replaces by name (\"(unnamed)\" for an unnamed rule)\n  indexes: number;         // indexes it adds\n  relabels: boolean;       // overrides label / pluralLabel / description\n}>\n// [] = extends nothing; null = not measured (say so; never show as \"none\"). Platform targets come first.\n```\n\nThe console renders none of it. Measured at pin 3c380253 for a package that owns `ext_ticket` and extends `crm_account` and `sys_user`:\n\n- the local-install confirm (`installPreview.ts` / `install-preview-dialog`) shows `objects: 1, permissionSets: 0, sampleRecords: 0` and nothing about the two extensions;\n- the hosted install dialog (`MarketplacePackagePage.tsx`, `installOpen`) shows `PluginDisclosure` only when `contains_code`, so a metadata package's extensions are never shown.\n\nMeasured on cloud#3852 (real tenant kernel): an extension can redeclare `sys_user.name`, add a validation enforced on a member's own profile update, and an always-failing validation on `sys_session` blocks every sign-in to the environment. The admin consenting to the install is not told.\n\n**What to do**\n\n1. `MarketplacePackageVersion.object_extensions` in `marketplaceApi.ts` (type above).\n2. One disclosure component (beside `PluginDisclosure`) that lists each target with its added fields, patches, rules and indexes, and flags `platform: true` targets prominently (warning style, \"platform object\"). `null` reads as \"could not read what this package extends\", never as nothing.\n3. Render it in the hosted install dialog for every package (not only code plugins), with the acknowledgment checkbox required when any target is a platform object, and in the local-install confirm. For a catalog that does not serve the key, measure the served manifest the page already reads (`getServedPackageBody`), with the same surfaces cloud's `package-object-extensions.ts` reads (top level, `metadata`, nested `manifest`, each `packages[]` body).\n4. i18n for every app-shell locale; tests: a package extending a business and a sys_* object shows both with the platform flag; a no-extensions package shows none; `null` shows \"unknown\".\n\nThen a cloud pin round carries it into the console.\n\nRelated: cloud#3852, cloud#3859, cloud#3809.\n\nReader: the framework ui lane. Business reason: an admin consenting to an install must see when a package changes existing objects, especially platform objects. Dedup: searched open objectstack issues for \"object_extensions\", \"objectExtensions\" + \"install dialog\"; 0 hits. Priority: p2."

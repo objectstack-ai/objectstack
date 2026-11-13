@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T22:55:33Z",
-  "updated_at": "2026-11-12T23:23:39Z",
+  "updated_at": "2026-11-13T08:14:00Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32896",
   "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32572 (PR #32889). PR #32889 declares `Skills-docs: follow-up owed`: after it, the install-local door answers `422 VALIDATION_ERROR` for a package with two enabled jobs of one name (the refusal the binder already gives at bind), before any write. `content/docs/automation/jobs.mdx` does not say so; that file is outside the card's file surface.\n\n## Owed\n\nAdd one sentence (with the refusal's remedy) to `content/docs/automation/jobs.mdx` where it explains job names, after PR #32889 lands. Copy the refusal text from the landed code; do not paraphrase the status or the code.\n\nRestart-when: PR #32889 has merged."

@@ -1,0 +1,30 @@
+{
+  "number": 33032,
+  "kind": "issue",
+  "title": "checklist: re-point two api clauses to the shape #32935 landed, and fix the read-file CPU-budget step (QA 18.4.0 R2 api slice)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T05:08:37Z",
+  "updated_at": "2026-11-13T05:46:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33032",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nThree api-slice clauses failed at ee9ad834. In each, the product behaves as its current contract says and the item's text lags. Each fix is a checklist edit: revise the item, bump its `revision`, add a `history` row, and keep `node scripts/check-platform-checklist.mjs` green.\n\n1. **records-forms.field-unique-enforcement · acceptance[0]** (stale spec).\n   - 28a15270 (#32935, fixes #32711) changed the duplicate sentence to name the field: `A record with this SKU already exists` / `…a unique constraint on 'SKU' already holds this value. No record was written.`, and the details now carry `field`.\n   - Re-point acceptance[0]'s verify, and the matching sentence in `automated.ref`. The item's dogfood pin already asserts the new wording.\n2. **api-backend.error-sentences-and-unique-violation-wire-code · acceptance[2]** (stale spec).\n   - The same commit widened the 409 details to `{developerMessage, field, object}`.\n   - The clause's \"no `field` — … the driver names no single column\" must expect `field` = the duplicated column. The `error-sentences-live` pin already does.\n3. **ai.mcp-read-file-pdf-word-extraction · acceptance[3]** (assertion defect).\n   - At `OS_MCP_READ_FILE_CPU_BUDGET_MS=1` nothing is read before the budget ends, so the product answers `content:\"none\"` plus the budget note, by design (`packages/mcp/src/file-content.ts:574`).\n   - The step needs a budget that lets at least one page through (≈40 ms measured: `truncated:true`, \"after page 2 of 180\").\n   - The fixture should name `showcase_invoice_line.receipt`; `showcase_invoice` has no file field.\n\nQA-source: #33025 · records-forms.field-unique-enforcement · acceptance[0]\nQA-source: #33025 · api-backend.error-sentences-and-unique-violation-wire-code · acceptance[2]\nQA-source: #33025 · ai.mcp-read-file-pdf-word-extraction · acceptance[3]\n\n\nThe fourth stale fail of the slice, `api-backend.actions-namespace-address` acceptance[0], is already re-pointed by PR #32965 (merged 2026-11-13 04:21Z), so it is not in this card."
+}

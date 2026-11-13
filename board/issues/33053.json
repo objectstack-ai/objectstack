@@ -1,0 +1,32 @@
+{
+  "number": 33053,
+  "kind": "pull_request",
+  "title": "fix(pm): the leading-sigil near-miss regex refuses a long symbol run in linear time, so the live half-state sweep no longer hangs on a drawn rule",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T06:31:28Z",
+  "updated_at": "2026-11-13T08:07:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33053",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao9PQd2u5bJDrRzXPyw7pZaq)_\n\nFixes #32991\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:半状态巡查脚本里一条识别「符号开头的认领/释放行」的正则,换成等价但不会回溯爆炸的写法;工作流的 15 分钟上限不动。\n- 为什么改:超时不是看板变大,而是 #32929 上一条评论画了四行 40 个「─」的分隔线,旧正则在这种行上要尝试 2 的 40 次方种切分,CPU 卡死,巡查任务被 15 分钟上限取消。\n- 风险与回滚:新旧正则在 31 万多条字符串上匹配结果和捕获文本完全一致;只动一行正则加注释和两条自测。回滚即还原本 PR。\n- 先看:`scripts/pm/check-half-states.mjs` 的 `leading-sigil` 一行正则,以及 BATTERY68 新增的两条 #32991 自测。\n- 两分钟验证:`node scripts/pm/check-half-states.mjs --self-test`,应见 5255 cases pass,含两条 #32991 用例。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`OWNERSHIP_MARKER_NEAR_MISS_FORMS`' `leading-sigil` member spelled its sigil run as a repeated group that starts with a sigil and may also swallow the next one: `(?:S[S, marks]*[ \\t]*)+`. On a line that is a long symbol run with no `Claim`/`Release` after it, V8 tries every way to split the run before it refuses. The same language is now spelled unrolled, `S C*(?:[ \\t]+S C*)*[ \\t]*` (S = `So/Sm/Sk/Sc`, C = S plus `Mn/Me/Cf`), so each blank run must be followed by a new sigil and there is one way to split any line. A docblock paragraph states why the nested spelling is refused, and BATTERY68 gains two cases: the measured 40-`─` line plus three longer runs (`>`+backticks, bullet+sigils, 4,000 `═`) must give zero near misses in under a second, and a 40-sigil run in front of `Release:` is still named `leading-sigil`.\n\n`.github/workflows/half-state-patrol.yml` is untouched: `timeout-minutes: 15` stays.\n\n## Why\n\nThe card read the cancellations as board growth. Measurement says otherwise, so this is neither arm of the dispatch fork (cap raise or smaller read). The seat accepted it as a recorded deviation.\n\n- A local live sweep (same script, same env as the action) made 25 requests in 11 s, then made none and sat at ~96% CPU. Three debugger pauses all stopped in `ownershipMarkerNearMissCensus` at `form.re.exec(line)` (`check-half-states.mjs:1817`, called from `sweepInto`).\n- The last threads read before the stall were the `priority:p0` cards. #32929 comment 6840027098 carries four lines of 40 `─` (U+2500, `So`).\n- Old regex on `─` × n: 24 chars 37 ms, 28 chars ~3 s, doubling per char. At 40 chars that is far past any cap, so raising the cap could not fix it, and a smaller read would only skip the line until it shows up on another card.\n- Every one of the file's 73 exported regexes was run on 28-char runs of 21 hostile characters with 4 line prefixes. Only `leading-sigil` was slow (1 to 5 s per input), on `─`, `` ` ``, `>`, `🚨`, `=`, `|`. The other 72 stayed under 20 ms. After the fix, none was slow.\n- The earlier green runs had the same sweep-step cost as now: ~4.5 min of an ~11 min job (run 42567683150: sweep step 4m32s). The jump to cancelled came from one comment, not from the board growing.\n\n## Tests\n\n- `node scripts/pm/check-half-states.mjs --self-test`: exit 0, `5255 cases pass`, including `✓ #32991 ⭐ a long symbol run with no word after it (the 40-─ rule on #32929) is refused in linear time …` and `✓ #32991 control: …and a sigil run of the same length IN FRONT of the word is still named leading-sigil`.\n- Ablation: the same file with only the old regex put back, `--self-test` under `timeout 120`, exit 124 (still running at 120 s). The new fixture is what pins the fix.\n- Equivalence, old vs new regex, comparing the matched prefix (or no match) on every input: 13,630 string-literal lines from the file itself (24 of them match the form), 17 hand cases (sigil then word, sigil run then blanks then word, sigil with combining mark before and after a blank, `> >`, `1. ⭐`, a 20-`─` rule with and without a word after it, …), and 300,000 seeded random strings over a hostile alphabet (`🚨`, `⚠`, U+FE0F, U+0301, U+200D, `─`, `>`, a backtick, `*`, `_`, space, tab, `-`, `1.`, `Claim`, `Claimed`, `Release`, `:`, `：`, `x`, `#`, `=`). 313,647 compared, 0 differences.\n- Live sweep with the fix, run locally (same env as the action, through this container's proxy): exit 0 in 507 s, 1,074 requests (493 s of that waiting on the network), and the near-miss clause printed (12 lines on 8 of 260 threads).\n\n## Acceptance notes\n\n- The PR's own `Live half-state sweep` run on a real runner is the proof the card asks for. The seat records its run id and duration on the thread.\n- Changeset: none. `scripts/pm/**` is unpublished tooling, so this carries the `skip-changeset` label.\n- Governed path: `scripts/pm/check-half-states.mjs` is in the file surface the claim allows only for the reduced-read arm. It is touched for a reason outside that arm, and the seat accepted that as a deviation. `.github/workflows/**` and `.github/actions/half-state-patrol/**` are not touched.\n\n## Verification\n\n<details><summary>dispatch-gates: 47 derived, 47 run, all exit 0 (head 4b2b1069)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran FILE` → `✓ dispatch-gates --ran: 47 derived famil(ies) accounted for — 47 run, 0 NOT-MEASURED`. The list includes `pnpm check:pm-half-states`, `pnpm check:pm-dispatch-gates`, `pnpm check:commit-card-trailers`, `pnpm check:nul-bytes`, `pnpm check:issue-citations` and `node scripts/check-self-test-wired.mjs`. Change set: 1 path, +21/-1. Main merged once (c54a23d2) before opening.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibxu6hocBQwdu8NE3UW)_\n"
+}

@@ -1,7 +1,7 @@
 {
   "number": 18549,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 2 — ⏳ vacant",
+  "title": "[PM seat] domain:spec · seat 2 — 🟢 os-tesla · 由 os-tesla 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-sales"
+    "os-tesla"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T00:45:41Z",
-  "updated_at": "2026-11-13T01:39:14Z",
+  "updated_at": "2026-11-13T05:47:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 149,
+  "comments": 150,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18549",
-  "body": "domain:spec#2 · os-sales · session_01L6bhgU7jN46DmQ6XFvz28s\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 2**. Seat 1 is #6017, seat 3 is #18883, seat 4 is #18917 and seat 5 is #19357 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-13T01:34Z at clock-out.</sub>\n\n## Current PM\n\n⏳ vacant. Previous holder `os-sales` · `session_01L6bhgU7jN46DmQ6XFvz28s`, seated 6830853001 on 「开一个 spec 座位，只处理 p1 卡」, stood down on 「UI spec 处理完当前任务就下班」 (note 6836386268); `check-handover.mjs` exit 0 at clock-out. To take the seat: `/pm-dispatch 接手`, then read this post and the clock-out brief below it.\n\n## Handover ledger\n\n- **Pointer:** the clock-out brief (the newest comment on this post) carries the tenure's landings, rulings recorded and owed steps. ⛔ Not restated here.\n- **In flight:** none held by this seat. Parked with a resume point: #32810 (`pm:on-hold`, PR #32898 at `91fca555`, `Restart-when:` on the card).\n- **Ruled, waiting:** #32603 (`pm:on-hold`, `Restart-when: closed objectstack-ai/objectstack#31527`).\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. PR #32898 touches `packages/spec/src/stack.zod.ts`, `packages/spec/src/api/error-code-ledger.zod.ts` and a semantic migration entry; a seat dispatching on those paths before it lands reads that PR first.\n- `merge=os-regen` paths (`content/docs/references/**`, `packages/spec/authorable-surface/**`) and the hand-kept registration files merge with `bash scripts/pm/os-regen-merge.sh`.\n\n## Notes\n\n- **Mailbox:** PR #32786 closed at clock-out; the next holder opens a new one. Its head branch `claude/project-thread-wi26s7` is left for a human to delete. **Patrol:** none (deleted at clock-out).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n"
+  "body": "domain:spec#2 · os-tesla · session_01L9qibvfX5bawZKtfa6u7j9\n\n⚠️ **Seat-post stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 2**. Seat 1 is #6017, seat 3 is #18883, seat 4 is #18917 and seat 5 is #19357 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-13T05:46Z at seating.</sub>\n\n- **Current PM:** 🟢 `os-tesla` · `session_01L9qibvfX5bawZKtfa6u7j9` (a Claude Code project thread, \"spec 座位 · 车道调度\"), seated on the maintainer's 「开 Security 和 spec 各一个座位」 + 「都只处理 p1 和 高危」. 由 os-tesla 账户的项目负责. Posture, ledger and round reports live in the project. Seat-taken audit 6845268342; the previous holder's clock-out brief is 6841240165.\n- **Split:** seat 2 takes only unclaimed `domain:spec` cards labelled `priority:p1`, plus high-severity ones (`priority:p0`, or `security`); ⛔ no p2/p3, no other lanes, no `pm:epic` subtree. Claim race with seat 1 (#6017) and seat 3 (#18883): re-read assignee and newest comments before every claim; the earlier claim wins. Claims carry `Seat: domain:spec#2`.\n- **Parked, resumed by this seat on restart:** #32810 (`pm:on-hold`, PR #32898 at `91fca555`); #32603 (`pm:on-hold`, `Restart-when: closed objectstack-ai/objectstack#31527`).\n- **Hot-file serial queue:** seat 2 holds none. PR #32898 touches `packages/spec/src/stack.zod.ts` and `packages/spec/src/api/error-code-ledger.zod.ts`; a seat dispatching on those paths reads it first. `merge=os-regen` paths merge with `bash scripts/pm/os-regen-merge.sh`.\n- **Patrol:** `trig_01A6HjrNok62SupavsacbY21` · `23 */5 * * *` (self-bound). Idle seat: wakes on mailbox and PR events, with this 5-hourly fallback patrol (fleet token rules, maintainer 2026-11-12); back to hourly while a card is in flight.\n- **Mailbox:** PR #33042 (the previous holder's #32786 was closed at its clock-out).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes. Tier H: a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

@@ -14,18 +14,21 @@
     "bug",
     "domain:server",
     "finding",
+    "pm:dispatched",
     "priority:p1",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T08:05:16Z",
-  "updated_at": "2026-11-10T09:06:30Z",
+  "updated_at": "2026-11-13T05:58:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32115",
   "body": "## Edition / version\nObjectOS Enterprise, cloud `main` `de8d979` (framework pin `e24136c2`, `@better-auth/scim` 1.7.12), licensed. Local SCIM run for objectstack-ai/cloud#3667, sending Okta's request shapes.\n\n## Steps (measured)\n1. A SCIM user has a local password (admin Set Password in the UI) and two API keys created in the UI (Account → Developer → API Keys).\n2. Okta deactivates the user: `PATCH /Users/{id}` `{\"op\":\"replace\",\"value\":{\"active\":false}}`. Everything is refused within ~0.2 s, as designed:\n   - session 401;\n   - API key data door 401;\n   - API key MCP door 401;\n   - password sign-in 403 `BANNED_USER`;\n   - the group grant is removed.\n3. The key rows stay with `revoked = false`. They are refused only because `sys_user.banned = true`.\n4. Okta re-activates the user: `PATCH ... {\"active\":true}`. `reconcileUser` lifts the SCIM ban (by design, `auth-manager.ts` `identity.reconcileUser`). Results:\n   - **the old API key works again** on both the data door and the MCP door (200);\n   - **the old local password signs in** (200);\n   - the group grant comes back too (expected, since membership is the IdP's).\n\n## Why it matters\nA re-activation in Okta or Entra is often a rehire months later, or the undo of an accidental deactivation. In both cases, credentials minted before offboarding should not quietly come back to life. A key that sat on a departed employee's laptop, or in a script they left behind, works again without anyone deciding that it should. The admin Set Password dialog already treats this as a deliberate act: \"Sign Out Everywhere and Revoke API Keys … Revoked keys stay revoked after the password change\".\n\n## Proposal (needs a maintainer call)\nWhen SCIM `active:false` (or DELETE) disables an account, also **revoke** the user's API keys, the same write the Set Password dialog uses, with `revoked_reason` naming the SCIM deactivation. The rows stay, so \"the key row stays\" (ADR-0134 / the leaver e2e) still holds. Optionally, also drop the local `credential` password of a directory-managed user. Re-activation then restores access through SSO only, and the person mints new keys.\n\nIf keeping the current behaviour is intended, it should be written down in ADR-0134 and in cloud's `docs/enterprise/scim-okta.md` / `scim-entra-id.md`, which today describe only the deactivation half."

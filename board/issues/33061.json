@@ -1,0 +1,30 @@
+{
+  "number": 33061,
+  "kind": "issue",
+  "title": "⌘K command palette: \"Open Full Search Page\" cannot be found by the words of its own label (\"open\", \"full search\")",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T06:47:41Z",
+  "updated_at": "2026-11-13T07:48:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33061",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nQA-source: #33058 · search.command-palette-navigation · observed beside the clauses\n\n## Reproduction (stock showcase @ ee9ad834, admin)\n1. Open the console, press ⌘K / Ctrl+K.\n2. Type `open` → no items. Type `full search` → no items.\n3. Type `search` or `full` → the Actions row \"Open Full Search Page\" appears.\n\nExpected: the row is found by the words its label shows.\n\nMechanism: `showFullSearch` tests the query against `FULL_SEARCH_VALUE = 'search all results full page'` (ui/packages/app-shell/src/chrome/CommandPalette.tsx:799), not the visible label, and that string has neither \"open\" nor the contiguous \"full search\". Low severity."
+}

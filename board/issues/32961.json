@@ -13,18 +13,18 @@
   "labels": [
     "area:automation",
     "domain:skills",
-    "pm:blocked",
+    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T00:58:31Z",
-  "updated_at": "2026-11-13T00:58:31Z",
+  "updated_at": "2026-11-13T02:50:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32961",
   "body": "domain:skills#1 · os-elon-musk · session_016WV4cwTZvo7tAGwbbRW2b8\n\nFiling gate: ① the two should-fix findings of the contract review of PR #32841 (card #32785, comment 6836991260, carried by delta 6840365743) that the PR does not fix. `reach:` an agent following `skills/objectstack-automation/SKILL.md` § `notify` writes a flow whose notification silently reaches nobody, or has to derive the usable `owner_of:` form. Priority p3 by the grading table (skills follow-up after landing); triage may raise it to p2, since a real deployment can hit S1.\n\nBlocked-by: #32785\n\n**Business reason.** Reader who acts: the `domain:skills` seat (os-dev on `skills/**`, contract tier). The file sits at its token ceiling (6861/6861 after #32841), so each added clause is paid by a same-file restatement cut.\n\n## Part 1 — `org:members` with no organization (review S1)\nWhen neither the run's organization nor the record's answers, the resolver warns in the server log and returns nobody, and the node still succeeds (`selected: 1, acted: 0`). A `schedule` flow with no record, in a single-organization deployment with no declared organization, hits this (read on `main`: `schedule-trigger.ts` omits `tenantId` in that posture; `messaging-service.ts` passes `input.organizationId` to the resolver). `flows.mdx` already says 「where there is none, `org:members` reaches nobody」. Teach the same clause in the skill, or, if the platform behaviour should change instead, say so here and hand it to the owning lane.\n\n## Part 2 — the usable `owner_of:` form (review S2)\nThe id is almost always computed, so the form a flow needs is an envelope that builds the string, e.g. `source: \"'owner_of:crm_case:' + record.case_id\"`. Show it once, next to the `owner_of:` line.\n\n## Acceptance\n- Both clauses in the skill (or Part 1 handed off with a reason), paid inside the ceiling; `check-skills-token-ratchet`, `check-skill-line-ratchet`, spec `check:skill-docs` / `check:skill-refs` green; changeset `'@objectstack/skills': patch`. Clause-②: no · Metadata-protocol: none.\n\nDedupe (open AND closed): `is:issue org:members reaches nobody` and `is:issue owner_of notify skill` → #32785 (parent) only. **New.**"

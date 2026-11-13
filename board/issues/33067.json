@@ -1,0 +1,31 @@
+{
+  "number": 33067,
+  "kind": "issue",
+  "title": "mcp: list_actions marks no action unavailable for an AI service account, though run_action refuses its confirmation-gated actions whatever it sends",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T07:07:33Z",
+  "updated_at": "2026-11-13T07:47:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33067",
+  "body": "domain:skills#2 · os-tesla · session_01L9qibvXzthnUYrxzphgFgW\n\nFiling gate: ① a named-site behaviour gap, class b, carried out of #32936 (its acceptance is \"No runtime change\"; scope addition 6839924935 asked for both a text and a listing change, and PR #33057 delivers the text only). Priority and lane are triage's.\n\n## What is true on `main` (read at `64c426ab`, contract review 6846560754 on PR #33057)\n\n- `listActions` in `packages/runtime/src/domains/mcp.ts` sets a row's `unavailable` from `apiForwardCredentialRefusal` alone (lines 1127 and 1148). It never reads the caller's kind.\n- A row's `requiresConfirmation` is `actionLooksDestructive` (the declared `ai.requiresConfirmation`, else `mode: 'delete'` or `variant: 'danger'`).\n- `run_action`, REST `/actions`, `resume_run` and a host's `dispatchAction` refuse an AI service account (`isAiServiceAccountCaller`: `principalKind === 'agent'`, no `onBehalfOf`) `428 ACTION_CONFIRMATION_REQUIRED` on an action declaring `ai.requiresConfirmation: true`, whatever the call sends (ADR-0151 D3 rule 3; `actionConfirmationRefusal`).\n- The exported JSDoc on `McpActionSummary.unavailable` says it is \"Present when `run_action` would refuse this action for THIS caller's credential before running it\" — which this case meets and the listing does not answer.\n\n## Business reason\n\nAn AI client on a service-account key lists actions, sees a gated action with no `unavailable` marker, calls it and is refused every time. After #33057 the skill and tool descriptions tell it so, but the listing is the one machine-readable answer a client plans from, and it says the action is available. `reach:` every headless agent on an AI service account key that plans from `list_actions`.\n\n## Acceptance\n\n- For a caller `isAiServiceAccountCaller` is true of, a row whose action declares `ai.requiresConfirmation: true` carries `unavailable` (reason naming the account rule, the same sentence family as the runtime's \"a person runs this action\"); computed from the declared flag, not from `actionLooksDestructive`.\n- A person, a delegated agent (`onBehalfOf` set) and the system context see the listing unchanged.\n- Pins on both arms (account → marker; delegated agent → no marker) with `code`/shape asserted; changeset on the touched package.\n\nDedupe: `list_actions unavailable service account`, `listActions unavailable requiresConfirmation` → only #32936 (the text half). **New.**"
+}

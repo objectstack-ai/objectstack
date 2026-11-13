@@ -2,8 +2,8 @@
   "number": 32986,
   "kind": "issue",
   "title": "metadata: unregisterPackage of the host package deletes the environment's own object, view, app, hook and dashboard rows the boot pass stamped with the host (follow-up of #32198)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,7 @@
     "area:devpath",
     "bug",
     "domain:server",
-    "pm:dispatched",
-    "priority:p1"
+    "priority:p0"
   ],
   "assignees": [
     "os-sales"
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T02:04:42Z",
-  "updated_at": "2026-11-13T02:07:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T04:31:08Z",
+  "closed_at": "2026-11-13T04:30:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32986",
   "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32198. Source: #32812's step-0 design and the epic seat's ruling on it (scope B-all held a precondition that measurement refuted, so #32812 stays on the ten package-slotted types and this card takes the rest). Unreleased: #32198 has not shipped.\n\n## What happens\n\nOn a host that declares its package and wires a `DatabaseLoader`, the boot priming pass stamps package-less stored rows of the non-package-slotted types (`object`, `view`, `app`, `hook`, `dashboard`) with the host's package. Since #32198, `unregisterPackage(host)` removes by package, so it deletes those rows: the environment's own items are lost when the host package is unregistered. This is on `main` and survives #32812 (which stops the stamp only for the ten package-slotted types).\n\n## Why #32812 does not take it\n\nNot stamping these types moves who owns them: `packages/objectql/src/plugin.ts` (around L1942, and the reload path around L1865) reads `metadataService.getDiagnosed('object', name)` and registers the object as a contribution of `_packageId ?? 'metadata-service'`, so an environment `object` row on such a host registers today as the host package's contribution. #32198's card and PR describe only the package-slotted removal, not a use of the stamp on these types.\n\n## Owed\n\n1. Measure every reader of `_packageId` / `_provenance` on these five types on `main` (the object contribution kind above first) and what each answers for a stamped environment row.\n2. Stop `unregisterPackage(host)` from deleting environment rows of these types (either stop the stamp with the object-contribution move declared, or keep the stamp and exclude stamped environment rows from the removal); pins red on `main`, green after; FROM → TO for every moved answer.\n3. Land before the release that would ship #32198."

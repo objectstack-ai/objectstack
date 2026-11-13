@@ -1,0 +1,30 @@
+{
+  "number": 33031,
+  "kind": "issue",
+  "title": "OS_PROTOCOL_INCOMPATIBLE prescribes `objectstack migrate meta --from N` for a declared major below the migration floor, a command the CLI then refuses",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T05:07:54Z",
+  "updated_at": "2026-11-13T05:47:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33031",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\n## Reproduction (ee9ad834, admin; reproduced on two boots with fresh DBs)\n\n1. `POST /api/v1/packages {manifest:{id:'com.example.qa-floor-15', name:'x', version:'1.0.0', scope:'project', type:'app', engines:{protocol:'^15'}}}` → 422 OS_PROTOCOL_INCOMPATIBLE.\n   - `details` = `{targetMajor:15, migrateCommand:'objectstack migrate meta --from 15'}`.\n   - The message ends `… Run: objectstack migrate meta --from 15`.\n2. Run that command → `✗ Cannot migrate from protocol 15: the chain's support floor is 16 (ADR-0087 D3). Upgrade to protocol 16 by another path first, then re-run.` (exit 1).\n3. `^0` behaves the same, prescribing `--from 0`. `^16` correctly prescribes `--from 16`, the floor.\n\nExpected: below `MIGRATION_SUPPORT_FLOOR` (16), the diagnostic names the remedy that applies, as the AHEAD arm has done since #26480, instead of a command known to refuse.\n\n## Mechanism\n\n`packages/metadata-core/src/protocol-handshake.ts:507-516` builds `migrateCommand` for every major that is not ahead of the runtime, with no floor check. The floor is `MIGRATION_SUPPORT_FLOOR`, `packages/spec/src/migrations/registry.ts:79`.\n\nImpact: low. Diagnostic honesty for authors.\n\nRelated, closed: #26480, #26546.\n\nQA-source: #33025 · platform-core.manifest-install-contract · observed beside the clauses"
+}

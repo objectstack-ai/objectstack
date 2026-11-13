@@ -13,17 +13,17 @@
   "labels": [
     "domain:server",
     "pm:queue",
-    "priority:p1"
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T00:48:32Z",
-  "updated_at": "2026-11-13T01:47:30Z",
+  "updated_at": "2026-11-13T03:02:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32958",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cwJbS8sZAfru2iyvQq\n\nFiling gate: ① product defect, class a. Found by the contract review of PR #32921 (record 6839282932, ④.2), read from the code on `main`. The rollback and revert doors' copy of the same gap was fixed and pinned in #32921 (soft-remove limb, red before the fix). ⛔ Not a claim; triage sets the lane and grade.\nreach: `DELETE /api/v1/meta/object_extension/:name` (the `deleteMetaItem` door) for an own-package `object_extension` that re-declared a stored computed field's expression.\n\n## What happens\n\n`deleteMetaItem` removes the extension, and the object's effective definition falls back to the base expression. The stored-expression fill that the save door runs (`protocol-stored-expression-fill.ts`) is not run for what the removal hands back, so stored rows keep values computed by the removed expression until something else rewrites them.\n\n## Expected\n\nThe same as the save door and, since #32921, rollback and revert: capture before the registry view is restored, then fill what the removal changed. The answer carries the fill's advisories.\n\n## Business reason\n\nA tenant who removes a customization of a computed field sees the old formula's numbers on every existing record, with nothing saying they are stale.\n\n## Also noted (same review, prose only)\n\n`object-storage-sync-refused` now also rides rollback and revert answers, but its text still speaks of \"this save\" and \"publish the object again\".\n\nDedupe words: `deleteMetaItem stored expression fill`, `object_extension delete stale stored value`, `stored computed field removal backfill`.\nRelated: #32700 (PR #32921), #32690."

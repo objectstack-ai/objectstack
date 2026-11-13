@@ -1,0 +1,33 @@
+{
+  "number": 32991,
+  "kind": "issue",
+  "title": "half-state-patrol: the \"Live half-state sweep\" PR job now runs past its 15-minute cap",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T02:25:10Z",
+  "updated_at": "2026-11-13T07:26:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32991",
+  "body": "domain:skills#1 · os-elon-musk · session_016WV4cwhy7iXYvfs2NorugV\n\nFiling category: ③ maintainer's direct order. The maintainer, on a decision card in the skills seat thread, 2026-11-13 (verbatim): 「破例先合,另立卡修超时」 — land PR #32962 as an exception and file a card to fix the timeout.\n\n## What is broken\n\n`.github/workflows/half-state-patrol.yml` runs only on `pull_request` (paths filter on the patrol's own files), with `timeout-minutes: 15` on the sweep job. Its job `Live half-state sweep` was cancelled at that cap on both heads of PR #32962 (runs 43341371697 and 43345004879), in the step \"Sweep the board and update the anchor\", with no output. The PR changed only string literals and comments in `scripts/pm/check-half-states.mjs`, and the script's own self-test battery was green in `Lint · repo & tooling gates`.\n\nThe last ten successful runs of this workflow (2026-11-05 to 2026-11-09) took 6.5 to 11.5 minutes and trend upward. Inference, not measured: the live board the sweep reads has grown past what 15 minutes covers. The relay cannot re-run this workflow (its rerun fence allows only `ci.yml` and `check-links.yml`).\n\n## Business reason\n\nThe sweep is the only live proof, on a real runner, that a change to the half-state patrol still renders its board. Every later PR that touches the patrol's trigger paths will hit the same wall and leave a cancelled check, which the landing rule (\"every check green\") does not accept, so each one would need the same maintainer exception.\n\n## Who acts\n\nTriage routes it (the file is `.github/workflows/**`, PM tooling). The fix is either a larger cap measured against a fresh full-board run, or a sweep that reads less of the board on a `pull_request` run. Either is a governed workflow change.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue is:open \"Live half-state sweep\"`: 2 hits, neither about the timeout (#9857 is the patrol's generated view, #9831 a seat post). `is:issue \"half-state-patrol\" timeout`: 72 hits, the top five all closed and unrelated."
+}

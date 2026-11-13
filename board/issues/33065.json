@@ -1,0 +1,32 @@
+{
+  "number": 33065,
+  "kind": "issue",
+  "title": "QA run · approvals.account-app-entry (1/1) · 0216d002 · 2026-11-13 · 1 PASS / 0 PARTIAL / 0 FAIL / 0 BLOCKED / 0 NOT-RUN",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "qa-run"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T06:50:10Z",
+  "updated_at": "2026-11-13T06:51:13Z",
+  "closed_at": "2026-11-13T06:51:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33065",
+  "body": "domain:devx#1 · os-elon-musk · session_016WV4czj9tecb4nj5MfUyYk\n\n18.4.0 release acceptance, fix retest of the P0 regression #32955 on wave anchor #32908. One runner subagent dispatched by the maintainer's project session, in one cloud container; text only.\n\n**Result: 1/1 judged · 1 PASS / 0 PARTIAL / 0 FAIL / 0 BLOCKED / 0 NOT-RUN. #32955 HOLDS** (fixed by #32998, merge `8004529e`). No security finding.\n\n## Environment fingerprint\n\n- **Framework:** `main` @ `0216d0022b067f5c500d80fa824f1a716d5c0e75` (2026-11-13), which contains `8004529e`. Console built from `ui/` in the same tree; the served entry `index-B7Aib0CI.js` is byte-identical to `packages/console/dist` (sha256 `6b7d660d…`).\n- **Build:** `pnpm install --frozen-lockfile` 31 s; `pnpm build --concurrency=2` 119/119, 13m08s; `pnpm console:build` exit 0; showcase compiled once. One boot on port 41680 with `--no-compile --no-watch`, file DB, stopped by its own process group.\n- **Personas:** admin; a member bound `showcase_contributor` + `showcase_finance` (submitter of request A, pending approver on A and S); a contributor-only submitter of request S; a member with no positions; a contributor + finance member bound after every request was launched (party to none).\n- **Time:** 06:37Z → 06:49Z.\n\n## Scope\n\nItem `approvals.account-app-entry` r9, every clause and negative, plus the fix's own negatives by API. This is the item that failed in #32953 (clauses 3 and 4).\n\n## Verdict\n\n**approvals.account-app-entry r9 · PASS**, clauses 0–6 pass, both negatives hold.\n- Clause 3: a row click opens the request page with Approve, Reject, Reassign, Send back, Recall; one real Approve through the page moved the tally 0/2 → 1/2, removed the member from `pending_approvers`, and added an approve action row.\n- Clause 4: a cold `?request=` deep link lands on the request page with its decision actions (two requests, two fresh contexts).\n- The invoice's own record page shows the approval panel with Approve, Reject, Reassign, Send back, Request info.\n\n## The fix's boundaries (#32955)\n\n- Pending approver and submitter: `GET /api/v1/meta/object/sys_approval_request` and `…/sys_approval_action` → 200, both listed.\n- Rows still closed: their `/api/v1/data/sys_approval_request[/ID]`, `/data/sys_approval_action` and `POST …/page` → 403.\n- `sys_approval_approver` → 404 and unlisted for both.\n- Members party to no request (with and without positions): both meta reads 404 (also on the `/meta/objects/` alias), neither object listed, `/approvals/requests/:id` 404, console shows Object Not Found with no request data.\n- Admin control: everything 200; request page renders under all three app segments.\n- Not exercised: field-security masking of the served schema (admin and approver get identical field sets in this fixture), and a past-actor-only or override-only persona. The fix PR's HTTP pin covers both.\n\n## Off-clause probes (rule 8)\n\nAbout 3 minutes as the approver and a no-party member: case-changed, trailing-space and empty object names (404), the plural alias (same answers as the singular door), zero-uuid and blank request ids (404), filtered data reads and the `/page` door (403). Nothing filed.\n\n## Checklist-accuracy notes\n\nAlready parked on #32908 from #32953 and still true: clauses 3–4 land under the record's host app segment since #32667 / #32850; the language option is 简体中文. New: `GET /api/v1/approvals/requests` refuses `scope=` with 400 (use `approverId` / `submitterId` / `status`).\n\nThe runner's full record follows as a comment.\n"
+}

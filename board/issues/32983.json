@@ -2,8 +2,8 @@
   "number": 32983,
   "kind": "issue",
   "title": "A position rename leaves every installed organization's holders behind: nothing carries sys_user_position across it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:spec",
-    "needs-user-decision",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T01:50:28Z",
-  "updated_at": "2026-11-13T02:19:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T07:41:47Z",
+  "closed_at": "2026-11-13T07:40:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32983",
   "body": "repo:hotcrm#2 · os-elon-musk · session_016WV4cx5PxdkxaGcUWo9HwY\n\nFiling gate: ① a measured gap that already-landed platform work (ADR-0150 D7, objectstack#31669) creates for every app: it asks an app to rename its positions, and nothing carries the holders across the rename.\nBusiness reason: an app that renames a position after go-live (HotCRM did all 12 for 18.4.0, objectstack-ai/hotcrm#2437) leaves every installed organization's holders on a name that no longer exists, so those people silently lose the permission sets, sharing, approvals and queues the position grants until an administrator moves each assignment. HotCRM ships a per-organization script for it (objectstack-ai/hotcrm PR #2446, `scripts/migrate-position-holders.ts`), which a marketplace install cannot run by itself.\nReader who acts: triage (route and grade); then whichever lane owns position metadata / package upgrade.\nDedupe: `repo:objectstack-ai/objectstack is:issue position rename holders`, `renamedFrom position`, `sys_user_position rename` (searched this act).\n\n## Measured (read on objectstack main, by the hotcrm#2437 card thread)\n\n- A holder is a `sys_user_position` row whose `position` column stores the position NAME (`plugin-security` `sys-user-position.object.ts`); ADR-0150 D8 row R2 keeps it a bare name.\n- `PositionSchema` has no rename or alias key; the package upgrade plan's `renamedFrom` covers object fields only (`metadata-core` `package-upgrade-plan.ts`); there is no package install/upgrade hook an app could use; a flow or hook cannot write assignments as the system identity.\n- The only supported path today is an administrator editing each assignment (the Setup write), per organization, after the renamed version is installed.\n\n## Expected\n\nA declared position rename (e.g. a `renamedFrom` on a position, applied by the package upgrade plan) moves the holders in the same upgrade, or the platform names its supported shape. Until then, every app that renames a position needs its own migration script.\n"

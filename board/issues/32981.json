@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T01:31:49Z",
-  "updated_at": "2026-11-13T01:31:49Z",
+  "updated_at": "2026-11-13T08:05:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32981",
   "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nFollow-up of #32408 (PR #32815), filed on the epic seat's ruling item 1 in the delta red-line read 6841098779. Present on main (head equals BASE on each exact-address cell), not made worse by PR #32815; p2 by the downgrade rule of 6840318180, the same kind as #32900. Independent of the admission on #32899.\n\n## 维护者速读\n\n- 改什么：按名读（protocol 的 `getMetaItem`）在 App pair 行 L 声明给 X、另有包 W（及 V）也发 L 的状态下，X 的精确地址把行记到先注册的包名下；一个到来者停用时，答案随注册顺序变（停用先注册者则扣下，停用后注册者则给出）。注册表在每种顺序都把行答给 X，按名读不跟随。\n- 为什么：精确地址按注册顺序作答是静默挑选（专题红线 2）。main 上已可从门进入：X 的旧式按包 pair 行，或到来者同时发一个 X 也发的 locale（语义条目第一条补救），两道门都放行、seal 不报。\n- 风险：只改按名读；第一方计数需实测。\n- 先看：`packages/metadata-protocol` 的按名读路径；6838271054「For the epic seat」第 2 项的四格。\n- 验证：四格在两种注册顺序下都跟随注册表绑定；两种可达路径各钉；消融。\n- 需要你做的：无，p2，进队列不派单。\n\n## Do\n\n1. Measure on main the four by-name cells (attribution at X, W's address and lists, W disabled, W and V with one disabled) through both door-reachable paths and a cold boot.\n2. Make the by-name read follow the registry binding; pin each cell in both orders; one ablation per negative pin.\n\n**Clause-②:** the dev measures. **Metadata-protocol:** the dev measures."

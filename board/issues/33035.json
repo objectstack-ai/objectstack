@@ -1,0 +1,31 @@
+{
+  "number": 33035,
+  "kind": "issue",
+  "title": "runtime: pin that a disabled host package no longer hides a package-less stored row of a type stored per (package, name)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T05:33:26Z",
+  "updated_at": "2026-11-13T07:53:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33035",
+  "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nSource: contract review r2 6845067990 on PR #33006 (card #32812), should-fix S4.\n\n#33006 declares one widening under its BREAKING banner: on a host that declares its package, a package-less stored row of the ten types stored per `(package, name)` is no longer hidden when the host's own package is disabled. It now behaves as it does on a host that declares no package. #33006 pins the cause in `@objectstack/metadata` (the served row carries no `_packageId`), but no package pins the answer itself.\n\nTask: add a pin next to the reader in `@objectstack/runtime` (the disabled-package filter in `src/domains/meta.ts`). Do the same in `@objectstack/core` if its reader can be reached in a unit test. The pin should cover both hosts (declaring the package, declaring none) and expect the same answer on each. Tests only, no source change.\n\n- **Size:** S.\n- **Effort:** medium.\n- **Blocked on:** #33006 landing. Do not start until it lands."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 32992,
+  "kind": "issue",
+  "title": "plugin-auth: a refused /oauth2/authorize (ENV_ACCESS_DENIED) shows the browser a raw JSON 403 page — after signing out of an environment and signing in as a non-member, the user sees code instead of \"no access · switch account\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:auth",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T02:31:53Z",
+  "updated_at": "2026-11-13T08:00:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32992",
+  "body": "director#1 · hotlong · session_f4c42f815d5e47b39de5e9fb0d6d7864\n\nFiling gate: ① a user-visible defect with a named producer, reproduced twice by the account owner on cloud staging (2026-11-12 and 2026-11-13). The owner asked for it to be filed: 「刚才环境中注销切换之后登录报错了，这种应该记一个bug吧」.\nReader: the `domain:server` lane, auth area (`packages/plugins/plugin-auth/src/auth-manager-before-hook.ts:436-457`, the D5.1 `/oauth2/authorize` env-access gate). `priority:p2`.\nDedupe (open and closed, objectstack and cloud): `ENV_ACCESS_DENIED` hit cloud#3312 (single logout, a decision, closed), cloud#3390 (security pass, closed), objectstack#24368 (copy, closed) and #8102 (gate not running for bearer, closed). `oauth2/authorize raw JSON` 0 hits. None covers how the refusal is presented to a browser.\n\n## 维护者速读\n\n用户在某个环境里退出登录，换另一个账号登录。登录本身是成功的，但随后浏览器被带回刚才那个环境的授权地址。新账号不是那个组织的成员，于是整页显示一段 JSON：`{\"message\":\"You are not authorized to sign in to this environment.\",\"code\":\"ENV_ACCESS_DENIED\"}`（403）。拒绝本身是对的，问题在于给浏览器看的是原始报错：没有说明原因，也没有下一步（换账号或回控制台）。\n\n## Repro (cloud staging, 2026-11-13)\n\n1. In environment `os-1959re.objectos.app` (organization MultiOrg Test 0627; its only member is account A), sign out.\n2. On the sign-in page, sign in with account B (`jack@…`), which belongs to other organizations, not this one. The control-plane sign-in succeeds; B's console home opens when visited directly.\n3. The browser follows the environment's OIDC flow to `https://cloud.objectos.app/api/v1/auth/oauth2/authorize?response_type=code&redirect_uri=https://os-1959re.objectos.app/api/v1/auth/callback/objectstack-cloud&client_id=project_292a70ef-…&…`.\n4. The answer is **HTTP 403** with a JSON body rendered as the page: `{\"message\":\"You are not authorized to sign in to this environment.\",\"code\":\"ENV_ACCESS_DENIED\"}`.\n\nThe same page appeared on 2026-11-12 when the owner re-signed in as a non-member of `os-6hf1jq`.\n\n## Why\n\n`throw new APIError('FORBIDDEN', { code: 'ENV_ACCESS_DENIED' })` answers every caller the same way. A top-level browser navigation to `/oauth2/authorize` gets the JSON envelope as the document.\n\n## Expected\n\n- For an OIDC authorization request whose subject is refused, redirect to the validated `redirect_uri` with `error=access_denied`, plus `error_description` and the original `state`. This is the OAuth 2.0 / OIDC way, RFC 6749 §4.1.2.1.\n- The relying party (the environment's sign-in page) then shows a human sentence: you are signed in as B, B has no access to this environment, with actions to switch account or back to the console.\n- Where no safe `redirect_uri` exists, return an HTML page with the same sentence and actions, not JSON.\n- A non-browser caller (`Accept: application/json`) may keep the JSON envelope.\n\n## Acceptance\n\n1. A browser navigation that the gate refuses ends on a readable page with \"switch account\" and \"back to console\". It never shows a raw JSON body.\n2. A test pins the redirect shape (`error=access_denied` + `state`) for a refused authenticated subject, and pins that unauthenticated callers still fall through as today.\n3. The environment-side sign-in page renders the `access_denied` return. If that page is cloud's, the lane files the cloud half."
+}

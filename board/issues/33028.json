@@ -1,0 +1,30 @@
+{
+  "number": 33028,
+  "kind": "issue",
+  "title": "MCP query_dataset with an empty selection.measures reaches the SQL driver and answers 500 DATABASE_ERROR, while the REST twin refuses it 400",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T05:05:44Z",
+  "updated_at": "2026-11-13T05:49:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33028",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\n## Reproduction (stock showcase at ee9ad834, keyed MCP session over /api/v1/mcp with an admin osk_ key; reproduced twice)\n\n- `tools/call query_dataset {datasetName:\"showcase_invoice_metrics\", selection:{measures:[]}}` → `isError` `{error:{code:\"DATABASE_ERROR\", status:500, message:\"The database refused to run a raw statement…\"}}`. Server log: `[sql-driver] DATABASE_ERROR … SQLITE_ERROR … near \"FROM\": syntax error`.\n- With `measures:[]` and `dimensions:[\"status\"]`, the tool serves group rows that have no measures.\n- REST twin: `POST /api/v1/analytics/dataset/query` with the same selection → 400 VALIDATION_FAILED \"body.selection.measures must be a non-empty array of measure names.\"\n\nExpected: the MCP door refuses the empty measure list before dispatch, with the same answer as the REST door; never a 500.\n\n## Mechanism\n\nThe MCP input takes `DatasetSelectionSchema` by reference (`packages/spec/src/api/analytics.zod.ts:633`, `measures: shared.measures`), and that schema accepts an empty list. The REST route adds its own non-empty check (`packages/rest/src/analytics-routes.ts:489`), which the MCP door lacks. The executor therefore builds a SELECT with no projection.\n\nFix direction: put the non-empty rule in the shared selection schema, or give the MCP input the same guard, and pin it in `packages/mcp/src/mcp-dataset-tools.test.ts`.\n\nQA-source: #33025 · ai.mcp-dataset-tools · observed beside the clauses"
+}

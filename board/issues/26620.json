@@ -1,7 +1,7 @@
 {
   "number": 26620,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 4 — 🟢 os-tesla · 由 os-tesla 账户的项目负责 · p1/p2 only",
+  "title": "[PM seat] domain:ui · seat 4 — 🟢 os-tesla · 由 os-tesla 账户的项目负责 · p1 + high-severity only",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -19,7 +19,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T10:42:48Z",
-  "updated_at": "2026-11-12T22:14:10Z",
+  "updated_at": "2026-11-13T05:43:54Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

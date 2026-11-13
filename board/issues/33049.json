@@ -1,0 +1,30 @@
+{
+  "number": 33049,
+  "kind": "issue",
+  "title": "install-local package flows are missing from the automation engine after a restart (package still listed, objects still served)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T06:29:29Z",
+  "updated_at": "2026-11-13T06:47:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33049",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nQA-source: #33048 · platform-core.bare-name-one-holder-refusal · observed beside the clauses\n\n## What happens\nA package installed through install-local keeps its objects across a restart, but its flows are no longer registered with the automation engine: they cannot be triggered and the boot banner does not count them. The CLI promises such a package \"re-registers on every boot (survives restarts)\".\n\n## Reproduction (main @ ee9ad834; reproduced 3× on two scratch copies, plus once independently)\n1. Scratch copy of examples/app-showcase (never the shared tree), `objectstack dev --seed-admin --no-compile --no-watch -p PORT -d file:/tmp/RUN/v.db` with `OS_PORT` exported.\n2. As admin: `POST /api/v1/marketplace/install-local` with `{ \"manifest\": { \"id\": \"com.qa.solo\", \"namespace\": \"qa_solo\", \"name\": \"qa_solo\", \"version\": \"1.0.0\", \"type\": \"app\", \"scope\": \"project\", \"engines\": { \"protocol\": \"^18\" }, \"objects\": [ { \"name\": \"qa_solo_item\", \"label\": \"Solo\", \"sharingModel\": \"public_read_write\", \"fields\": { \"name\": { \"type\": \"text\", \"label\": \"Name\" } } } ], \"flows\": [ { \"name\": \"qa_solo_flow\", \"label\": \"Solo Flow\", \"type\": \"autolaunched\", \"status\": \"active\", \"nodes\": [ { \"id\": \"start\", \"type\": \"start\", \"label\": \"Start\" }, { \"id\": \"end\", \"type\": \"end\", \"label\": \"End\" } ], \"edges\": [ { \"id\": \"e1\", \"source\": \"start\", \"target\": \"end\", \"type\": \"default\" } ] } ] } }` → 200 `hotLoaded: true`.\n3. `POST /api/v1/automation/qa_solo_flow/trigger` `{}` → 200, a completed run.\n4. Stop the server (process group) and boot again on the same DB and cwd.\n5. `GET /api/v1/packages` still lists `com.qa.solo`; `GET /api/v1/data/qa_solo_item` → 200.\n6. `POST /api/v1/automation/qa_solo_flow/trigger` → **404** `RESOURCE_NOT_FOUND` \"Flow 'qa_solo_flow' not found\"; `GET /api/v1/automation/qa_solo_flow` → 404 \"Flow not found\"; `GET /api/v1/meta/flow/qa_solo_flow` → `registration.state: \"unregistered\"`; boot banner `33 flow(s)` (the showcase's alone).\n7. A later hot install of any other package re-syncs the engine, and the earlier package's flow triggers 200 again.\n\nExpected: after step 4 the flow is registered and triggerable, as before the restart.\n\n## Notes\n- The pin `packages/qa/dogfood/test/install-local-restart-connectors.dogfood.test.ts` asserts the opposite, but on an in-memory `bootShowcase`, never a real `os dev` restart over a file DB — so the pin stays green.\n- Not checked against 18.3.0; whether this is a regression is open.\n- Mechanism not traced: the cold boot appears to rehydrate the package's metadata (objects served) without handing its flows to the engine's sync, which a hot install does.\n\n## Against 18.3.0 and other apps (checked 06:23–06:35Z, same manifest, same install → trigger → restart → trigger steps)\n| app · build | after restart |\n|---|---|\n| 18.3.0 blank scaffold (`create-objectstack@18.3.0`, npm 18.3.0 packages, `objectstack dev`) | trigger 200, `registration.state: registered`, banner `2 flow(s)` |\n| ee9ad834 examples/app-todo scratch copy (`objectstack dev --no-watch`, compile on) | trigger 200, banner `5 flow(s)` |\n| ee9ad834 examples/app-showcase scratch copy, compile on | trigger **404**, banner `33 flow(s)` |\n| ee9ad834 examples/app-showcase scratch copy, `--no-compile` | trigger **404**, `unregistered` |\n\nSo at ee9ad834 the loss is specific to the showcase app (not to `--no-compile`), and a blank app keeps its installed flows on both 18.3.0 and ee9ad834. Whether the showcase lost them on 18.3.0 too was not checked (no published 18.3.0 showcase). Something the showcase boot does — its own 33 flows, its connectors, its packages — stops the cold-boot rehydration from reaching the engine."
+}

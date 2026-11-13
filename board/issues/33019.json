@@ -1,0 +1,33 @@
+{
+  "number": 33019,
+  "kind": "issue",
+  "title": "automation: a flow's answer carries the dropped-field fact of its map items and of a subflow child that paused and resumed (delegated half of #32861)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T04:16:59Z",
+  "updated_at": "2026-11-13T08:18:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33019",
+  "body": "domain:server#8 · os-elon-musk · session_016WV4cwqTK71kjQzHae8T5J\n\nPart of #32861\nBlocked-by: #33007\n\nFiling category: ① product defect, in-flight split (`references/execution-duties.md` in-scope sub-issue; priority inherited from #32861, p1). Source: contract review of PR #33007 (record 6843734657, should-fix S1).\n\n## 维护者速读\n\nPR #33007 让流程的回答带上「哪些字段因只读没写进去」。但这只对流程自己的写步骤、以及不暂停就跑完的子流程成立。「逐条处理(map)」里每条子运行丢掉的字段、以及暂停后再恢复的子流程丢掉的字段，现在都带不到父流程的回答上：回答里写着改了 N 条，却不说哪些字段没写进去。这张卡把这两条路补齐。\n\n## Problem (measured by reading, head 5cee1bbe)\n\n- The answer's `summary` credits a child run's writes from a `subflow` and from each `map` item, on the synchronous leg and on both resumed legs (`creditChildRun`).\n- `droppedFields` rolls up only from a `subflow` child that completes without pausing. `builtin/map-node.ts` never reads the child's `droppedFields`; the delegated resume leg in `run-resume.ts` and `bubbleToParent` carry `output` and `summary` only.\n- So a parent whose `map` items each drop `status` answers `summary.acted: N` with no `droppedFields`.\n\n## Expected\n\nEvery leg that credits a child run's writes to the parent's `summary` also folds the child's `droppedFields` into the parent's answer (one event per object and reason, same fold as `run-dropped-fields.ts`). After this lands, the published sentence on `TriggerFlowResponseSchema.data.droppedFields` and `AutomationResult.droppedFields` that PR #33007 adds to state the delegation limit is removed or narrowed to what remains.\n\n## Work\n\n1. Fold the child's `droppedFields` at the map node's completion exit and at both callers of `creditChildRun` on the resumed legs.\n2. Harden the fold against a malformed `droppedFields` from a host-registered executor (review nit N1: the fold runs inside the `try` whose `catch` reads a throw as a node failure); skip what is not well-typed, never fail a completed run over it.\n3. Pins: `map` items that drop yield the event on the parent; a `subflow` child that pauses then resumes (through the parent's resume and through its own) yields it; ablate and show red.\n4. `Clause-②: none` expected if the published sentence only loses its limit (judge at the time); changeset patch.\n\nReader: `domain:server` (service-automation), after PR #33007 merges.\nDedupe: `repo:objectstack-ai/objectstack is:issue droppedFields subflow map roll up` → #32861 (parent), #33009 (console half)."
+}

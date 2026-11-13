@@ -13,18 +13,18 @@
   "labels": [
     "area:devpath",
     "domain:server",
-    "pm:blocked",
-    "priority:p1"
+    "pm:queue",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T10:20:49Z",
-  "updated_at": "2026-11-12T23:26:08Z",
+  "updated_at": "2026-11-13T06:49:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32692",
   "body": "epic:#31527#1 · os-bill · session_01Utp6CZu9RRx2o8sFUUpEPU\n\nParent: #31699. Filed under epic ruling R3-D.1 on PR #32577 (6820856607; Q1 ruled B). Found by: the #31699 PR 2 dev (round-2 report 6819956572, open question 1). Reproduced by the contract review 6820826396 (R2-B) in both registration orders.\n\nBlocked-by: #32577\n\n## Premise\n\nPR #32577 admits two packages of two namespaces holding one webhook name. After a restart, `loadMetaFromDb` hands each stored `sys_metadata` webhook row to `hydrateOverlayIntoRegistry` (`packages/metadata-protocol/src/protocol-registry-hydration.ts`), which grafts on the envelope of the artifact that `lookupArtifactItem` finds by name. With two holders, measured in both registration orders over a real `SchemaRegistry`:\n\n- A stored row naming no package, or naming a package that does not declare the name, is registered into the FIRST-registered holder's slot. The dispatcher then sends that holder's events to the row's URL.\n- Two rows, each naming one holder, leave only the last one loaded. The other holder reverts to its shipped declaration.\n\nThe registry's own binding refuses to guess: `overlaySlotBinding` (`packages/objectql/src/registry.ts`) binds a package-less row under two holders to no package. The order comes from the by-name artifact lookup. The boot census warns `metadata_sealed_overlay_unserved` (\"No read serves them\") for these rows, which is false for the first case.\n\nSuch rows are residue: a declared webhook is read-only (ADR-0131 D6). Reaching the state takes a row an older release stored, then a package of a second namespace installing the name.\n\n## Fix shape\n\n- Key the hydration's artifact lookup by (package, name). A row naming a holder takes that holder's envelope and lands in its slot only.\n- Under two or more holders, a row naming no package or a non-holder lands in no holder's slot (ADR-0150 D4). It is reported, never grafted onto a holder picked for it.\n- Two rows, each naming a holder, each land in their own slot.\n- Make the census text say what is served.\n- Consider `declinesBorrowedEnvelope` in the same file, the list #29600, #29613 and #30062 grew for this borrowed-envelope shape.\n\n## Acceptance\n\n- Both registration orders, booted through `loadMetaFromDb` with a real `SchemaRegistry`. The harness is `packages/objectql/src/webhook-stored-row-boot-hydration.test.ts`, added by PR #32577.\n- Cases: a package-less row, a stray-package row, and one row per holder. Each moved answer is a declared FROM → TO row, pinned, and red under ablation.\n- CONTROLs: one holder, where a package-less row is the holder's (ADR-0150 D8); a row naming its holder, which lands in its own slot.\n- Under two holders, the dispatcher sends nothing to a residue row's URL.\n\n## Order\n\n- Server lane (epic-dispatched). Start after PR #32577 lands.\n- This card blocks #31699's close-out, and lands before #31699's PR 3 (connector)."

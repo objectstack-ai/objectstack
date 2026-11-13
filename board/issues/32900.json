@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T23:00:00Z",
-  "updated_at": "2026-11-13T00:44:20Z",
+  "updated_at": "2026-11-13T08:13:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32900",
   "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nOlder defect found by the epic red-line read 6838271054 on PR #32815 (#32408), present on main; not caused by that PR. Routed as p1 by epic ruling 6838245909: it is an answer by save order (red line 2).\n\n## 维护者速读\n\n- 改什么：注册表的裸槽每个成员只留一行，就是最后回填的那行。App 的 pair 行（locale L，声明 X）和一条无包行（L）同时存储时，两道门按最后保存的那行作答；两种保存顺序互换答案。在 #32815 的 head 上，seal 的报告也跟着保存顺序走；main 上则两种顺序都报。\n- 为什么：同一个存储状态因保存顺序不同而给出不同答案，是「按顺序猜」（专题红线 2）。\n- 风险：改注册表回填与门的判定；需实测第一方计数。\n- 先看：`packages/metadata-protocol` 注册表回填裸槽的位置，以及两道门读裸槽的地方。\n- 验证：两行都存储时，两种保存顺序下两道门和 seal 都给同一个答案；钉住两种顺序，消融一次。\n- 需要你做的：无，p1，席位落地。\n\n## Do\n\n1. Measure on main after #32408 merges: store the App pair row of L declared for X and a package-less row of L, in both save orders; read both doors and the seal.\n2. Keep both rows (or judge both) so the answer does not depend on save order; pin both orders; one ablation per negative pin.\n\n**Clause-②:** the dev measures. **Metadata-protocol:** the dev measures."

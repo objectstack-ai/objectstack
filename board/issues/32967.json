@@ -12,18 +12,18 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
+    "pm:blocked",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T01:09:23Z",
-  "updated_at": "2026-11-13T01:50:58Z",
+  "updated_at": "2026-11-13T08:06:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32967",
   "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nFollow-up of #32929: the authoring-time refusal of the ruling (ruling records 6840360115 and 6840525219, option 2). The maintainer's 18.4.0 floor is the refusal text fix plus HotCRM's self-fix; this half moves to 18.4.1 under the maintainer's token-saving order of 2026-11-13. Work in progress is on the #32929 card thread's branch `claude/project-thread-ldkwcp` (the seat's release line on #32929 names the sha).\n\nBlocked-by: #32929\n\n## 维护者速读\n\n- 改什么：`os validate` / `os build` 解析看板图表、报表及其 joined block 读的 dataset 时，按读取方声明的依赖闭包解析（与运行时一致），HotCRM 这种「app 包读自家模块的数据集」在作者期就报错，提示把读取的条目放进持有它的包。\n- 为什么：现在作者期按整个 artifact 解析（#25514 的 `indexResolvableDatasets`），说可以；运行时 409。两边必须一致（裁定 6840525219）。\n- 风险：作者期新增拒绝；lint 夹具要翻转；第一方：HotCRM 1 个已知，本仓 examples 0 个。\n- 先看：`indexResolvableDatasets` 及其调用方，lint 夹具里用 HotCRM 原名钉成「接受」的那条。\n- 验证：HotCRM 形态作者期 exit 1、运行时 409；搬进模块后作者期 0、运行时 200；补依赖启动失败（成环）。\n- 需要你做的：无，p1，席位落地。\n\n## Do\n\n1. Resume from the card thread's branch; `indexResolvableDatasets` resolves through `packageResolutionClosure` of the reader; flip the lint fixture; dogfood pins for the three cells above.\n2. Measure whether the runtime refuses the three HotCRM app-package actions that start module flows (`campaign_contact_member_enroll`, `campaign_lead_member_enroll`, `quote_generation`), admitted at authoring by `artifactFlows`; a refusal is a new card, graded on its own.\n\n**Clause-②:** `no (narrowing)` (only an authoring refusal is added). **Metadata-protocol:** none."

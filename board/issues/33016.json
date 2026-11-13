@@ -1,0 +1,30 @@
+{
+  "number": 33016,
+  "kind": "issue",
+  "title": "plugin-webhooks: follow-ups of PR #32577 — pin and door for two webhook holders that still meet in one namespace, the disabled co-holder pin, two checklist items, liveness and impact-report nits, GET /meta step 2 (ADR-0150 D4)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T04:07:08Z",
+  "updated_at": "2026-11-13T07:53:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33016",
+  "body": "epic:#31527#1 · os-sales · session_01L6bhgXQnNkXTT1Wu7i7Y3i\n\nFiling gate ①: product defects with named landing points, owed by PR #32577 under epic ruling 6842178655 on that PR (\"Follow-up card (p2), not this PR\").\n\nParent: #31699 (source card). Found by: contract review 6841104065 on PR #32577, items S1, S3, S5 and nits 1 to 3. Ruling: 6842178655. Open question 1 of dev report 6842933276 on #31699 adds GET /meta step 2.\n\n- **Why:** an operator with two webhook holders that still meet in one namespace cannot switch either through the activation door; a checklist run fails a correct product on two items; the upgrade-impact report names a door that some findings cannot use.\n- **Reader:** the server lane's next seat for the epic #31527 line, after PR #32577 lands.\n- **Duplicate search** (issues, open and closed, 2026-11-13): `\"ambiguous-in-namespace\"` 3 hits, `\"not-held-by-qualifier\"` 11, `webhook \"6841104065\"` 1 (#31699 itself), `\"declared:showcase_task_changed\"` 11 (QA runs and landed cards), `webhook cold-boot sealed namespace` 13. None covers these items. #32692 (boot hydration by registration order) and #32695 (a departed co-holder's row) are separate and stay separate.\n\n## What is owed\n\n1. **S1 pin and door.** Two holders that still meet under the narrowed rule (two co-owners of one namespace, two packages of a shareable namespace, or a package with no namespace beside another holder), each declaring one webhook name. Install refuses the state; the cold boot seals it with a warning (`BARE_NAME_COLD_BOOT_MODE` is `'warn'`).\n   - Built and declared in PR #32577: `slotsOf` (`packages/plugins/plugin-webhooks/src/declared-webhooks.ts`) lists one slot per served holder, so both are dispatched (FROM neither). The namespace address answers `409 ambiguous-in-namespace` and the bare address `409` naming both (`resolveQualifiedWebhook`, `packages/runtime/src/domains/catalog-activation.ts`), so neither can be switched through the door. Only a package disable or a ledger row written directly stops one.\n   - Owed: a pin of that state (both dispatched, both doors `409` naming both), in both registration orders, and an exact-qualifier address on the activation door that switches one of the two holders. A new door is a protocol addition: declare it as a FROM → TO row.\n2. **S3 co-holder pin.** A namespace whose packages are all disabled, beside an enabled holder of another namespace, answers `409 not-held-by-qualifier` naming the enabled holder (`resolveQualifiedWebhook`). Only the lone case (\"B disabled and alone\", `404`) is pinned. Pin the co-holder case.\n3. **S5, two platform-checklist items.** `docs/qa/platform-checklist/areas/integration-system.json` (the item at line 618) and `docs/qa/platform-checklist/areas/cli.json` (the item at line 2148) expect a new delivery's `ref_id` to be `declared:showcase_task_changed`. The dogfood pins they point at expect `declared:com.example.showcase/showcase_task_changed` since PR #32577. Bring both items to the new reference.\n4. **Nit 1.** `packages/spec/liveness/webhook.json`, the `name` evidence, still reads \"the first registration of a name holds it\" and `declaredWebhookRefId(wh.name)`. Bring it to per-holder slots and `declaredWebhookRefId(name, packageId)`.\n5. **Nit 2.** `SWITCH_DOORS` and the withheld-webhook line in `packages/plugins/plugin-security/src/upgrade-impact-report.ts` name the namespace address for every finding. The environment's own webhook and a package with no namespace have only the bare address. Name the door each finding can use.\n6. **Nit 3.** `webhookShippers` (same file) counts a disabled holder only when the bare artifact lookup answers it, so a disabled second holder gets no withheld finding. `main` reported one holder, so nothing regresses; report each disabled holder.\n7. **GET /meta step 2 (dev report open question 1, unmeasured).** Shape: one holder, its package's stored row and a package-less stored row of one webhook name. The protocol's by-name read (`packages/metadata-protocol/src/protocol-meta-item-reads.ts`) calls the metadata service's `getDiagnosed` at its step 2, only when steps 1 and 1b answer nothing; step 1 declines package-less stored rows. PR #32577 moved that service read (its Clause-② (7)). Probe in a booted stack whether bare `GET /meta/webhook/NAME` reaches step 2 in this shape. If it does and its answer moved, declare it.\n8. **Nit 4's pin, if absent.** The activation door's one-holder widening (a row naming no package beside the holder's own row: FROM `409` TO the holder's own row written) is declared in the changeset. Pin it if no test does.\n\n## Acceptance\n\n- Each code item is pinned, red under ablation where it pins a moved answer, and in both registration orders where order applies.\n- Any answer this card moves is a declared FROM → TO row (Clause-② when it narrows).\n- The two checklist items pass against the showcase run that their dogfood pins describe.\n\n## Order\n\n- Server lane, epic #31527 line. Start after PR #32577 lands; this card reads its code."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 33005,
+  "kind": "issue",
+  "title": "Publish: a seed load right after publishPackageDrafts can hit OBJECT_NOT_FOUND for objects the data door serves a minute later — the registry write-through swallows a registerObject failure",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T03:40:11Z",
+  "updated_at": "2026-11-13T03:45:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33005",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ① a defect with a named producer, reproduced twice on cloud staging by the AI build path. Measured by the dev of objectstack-ai/cloud#4446 (PR objectstack-ai/cloud#4454, report on cloud#4446 comment 6843064792) at framework pin `c5758b0d`. Cloud ships a bounded, honest recovery: seeds that did not land are loaded again once their tables answer. The race itself is framework-side, so it lands here (cross-repo rule 1).\n\n## 维护者速读\n\n托管上 AI 搭建应用时，发布显示「成功」，但紧接着写入示例数据时，引擎报「找不到这张表」。一分钟后再查，这些表都能正常访问。cloud 先做了「等表能用后再补写」的兜底。根本原因在框架：发布时往注册表写对象失败了，但这个错误被吞掉了，只打了一条警告。\n\n## What happens\n\n- Staging repros: `os-1959re` conversation `conv_4f2a19ba`, and `os-4e4qa4` conversation `conv_a09f45a2`. The publish answered `published`. Its seed load then got `Object '<name>' not found` from `objectNotFoundError` in `resolveObjectName` (`packages/objectql/src/engine-secrets-and-routing.ts` ~134-140). The data door served the same tables with 200 a minute later.\n- Publish Phase 2's registry write-through swallows `registerObject` failures with `console.warn` (metadata-protocol `protocol-registry-hydration.ts` ~166-169). That is the likely window.\n- **Not reproduced** on an in-memory hosted kernel in three variants (with and without the real `metadata:reloaded` announce). The sequence was a refused first publish that rolled back, then a successful re-publish.\n\n## Expected\n\nWhen `publishPackageDrafts` answers `published`, every published object resolves on the running engine. Otherwise the publish answers that it did not fully register; it never says `published` silently. A registry write-through failure is loud, not swallowed.\n\n## Acceptance\n\nA test reproduces a registry write-through failure during publish and pins the loud answer. After a successful publish, an immediate seed load resolves every published object.\n\nDedupe: `publishPackageDrafts seed OBJECT_NOT_FOUND`, `registry write-through swallowed`: no open issue."
+}

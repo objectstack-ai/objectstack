@@ -12,18 +12,18 @@
   },
   "labels": [
     "domain:spec",
-    "needs-user-decision",
+    "pm:on-hold",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T01:31:07Z",
-  "updated_at": "2026-11-13T01:46:32Z",
+  "updated_at": "2026-11-13T05:20:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32979",
   "body": "Filing category: ② a decision only the maintainer can make.\n\n## 维护者速读\n\n- 现象：加班申请里，和一张已批准加班**完全相同时段**的新申请照样能建、能提交；如果再批一次，调休就记了两遍。请假单同理（同一天请两次）。校验规则只能看当前这一条记录，读不到同一个人的其他记录，所以 AI 和人都写不出\"时间不能重叠\"的规则。\n- 要你裁：平台是否提供\"同一人时间段不重叠\"的声明式约束。\n- 推荐：A：对象级 `exclusion` 约束（分组字段 + 起止字段 + 状态过滤），写入时由服务端查询判定，与唯一索引同一层。\n\n## One-sentence problem\n\nEvery time-booking app (overtime, leave, room booking, shifts) needs \"no two of mine overlap\", and the platform's rules cannot see the other records.\n\n## Evidence (reach)\n\nHosted tenant (`pnpm dev:stack --with-ui`, Team plan; cloud `ff373e02`, framework `d7c3d44e`), member's MCP OAuth token:\n- `el5z_ot_req` \"11月10日版本上线加班\" 18:30–21:30, approved, 3 h credited.\n- `create_record el5z_ot_req { start_time: '2026-11-10T18:30:00+08:00', end_time: '2026-11-10T21:30:00+08:00', compensation: 'comp_leave', … }` → created (draft), submittable.\n- A validation `condition` sees `record`, `previous`, one-hop references; no query over sibling rows. Unique indexes (`indexes[].unique`) compare equal values only.\n\n## Options\n\n| Option | What it does | What the customer sees | Effort |\n|---|---|---|---|\n| A | Object-level declarative constraint, e.g. `exclusions: [{ name, groupBy: ['owner_id'], range: ['start_time', 'end_time'], where: { status: { $ne: 'rejected' } }, message }]`, checked on insert/update by the data layer with a range query | \"该时段已有加班申请\" on save, from AI or form | data + spec seats · 2–3 PRs · precedent: unique indexes |\n| B | Let validation scripts call a bounded aggregate, e.g. `count('el5z_ot_req', { owner_id: record.owner_id, … }) > 0` | Same message; authors write the query | formula + data seats · 2 PRs · opens queries inside every validation |\n| C | Keep as is; approvers catch duplicates | Double credit unless a person notices | none |\n\nBusiness reading: A covers the common case with one declared line; B is general but every rule becomes a query; C leaves money/time to human attention.\n\n## Recommendation\n\nA. It is the pattern behind every booking app, it stays declarative (lintable, explainable to an agent), and it lives where unique indexes already live. Confidence gap: whether `where` should be a status filter only or a full filter; recommend the same filter shape summaries use.\nSelf-check: ① A; ② A or B; ③ A (an agent cannot write B wrong in a way that silently passes); ④ A smaller than B.\n\n## After the ruling\n\nA: spec key on the object, data-layer check on write with a range query over the group, lint for unknown fields, AI authoring rule; e2e: second overlapping overtime is refused, an adjacent one (21:30–23:00) is accepted.\n\nos-decision-facets\n① 项目长远合理性: A 与唯一索引同层、声明式，可被 lint 与 AI 规则覆盖。\n② 实际业务拉动: 加班、请假、会议室、排班都需要；本次实测重复加班可提交。\n③ 防 AI 犯错: A 由平台判定；B 让 agent 写查询，易写错且难核验。\n④ 创业阶段不扩散: A 一个新约束类型；B 给所有校验开查询能力。\nPrior rulings read: none found; thread: none\n\nReader who acts: the data seat and the spec seat, after the ruling.\nDedupe: `repo:objectstack-ai/objectstack is:issue overlapping time range validation cross-record` → 11 hits, none on this; `validation query other records uniqueness overlap` → 14 hits (#8413 closed, turso unique) — none on this."

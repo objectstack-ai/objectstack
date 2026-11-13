@@ -2,9 +2,9 @@
   "number": 32965,
   "kind": "pull_request",
   "title": "qa(checklist): re-point three stale clauses from the 18.4.0 acceptance",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -14,15 +14,21 @@
     "size/s",
     "skip-changeset"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T01:03:48Z",
-  "updated_at": "2026-11-13T01:04:22Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-11-13T04:21:24Z",
+  "closed_at": "2026-11-13T04:21:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-13T04:21:22Z",
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/32965",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoBUynMkjgbwqyH62Kcdh5pa)_\n\nFixes #32946\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：平台测试清单里三个条目（actions 命名空间地址、裸名单持有者拒绝、命名空间共有者重名拒绝）各升到 r3，改写已过期的验收条款。\n- 为什么改：18.4.0 验收跑（#32940）发现这三处条款描述的是旧行为，产品本身是对的；不改的话每次发版验收都会误报红。\n- 风险与回滚：只改清单 JSON 文本，不动产品代码、不发布任何包；回滚即 revert 本 PR。\n- 先看：`docs/qa/platform-checklist/areas/platform-core.json`（bare-name 条目换成 webhook，改动最大），`docs/qa/platform-checklist/areas/api-backend.json`。\n- 两分钟验证：`pnpm check:platform-checklist`，预期输出 `OK — 16 areas, 427 items`，锚点全部解析。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nChecklist text only; no product code, no pins, no changeset (`skip-changeset`: nothing under any package's `files[]` moves).\n\n1. **`api-backend.actions-namespace-address` r2 → r3** — acceptance[0] and negative[2] (plus the title, steps[0] and negative[0] that described the same answer). A bare `POST /api/v1/actions/OBJECT/ACTION/ID` while two packages hold the action on one object is now refused **409 RESOURCE_CONFLICT** naming both, and runs neither handler. The old negative calling that refusal unlanded becomes: a 200 with qa_a's result while qa_b binds `escalate` is a FAIL.\n2. **`platform-core.bare-name-one-holder-refusal` r2 → r3** — acceptance[0] and [3]. `flow` is namespace-scoped now, so both clauses drive a **webhook `qa_hook`**, a covered type that is still one holder per deployment. acceptance[1] gains flow beside agent (both install 200 across two namespaces). acceptance[3] drops the trigger leg: in `warn` mode the boot changes nothing about which holder a caller is served. Title, fixtures, steps, negatives, variants and source follow.\n3. **`platform-core.namespace-co-owner-name-refusal` r2 → r3** — acceptance[1]. The install door never reaches the co-owner refusal. Without a dependency the namespace gate answers 422 `PLUGIN_REGISTER_FAILED`; with `com.qa.n-one` declared as a dependency the override write gate answers 403 `NOT_OVERRIDABLE`. The clause now names the gate that answers for each build. The co-owner refusal stays with the CLI legs and its registry pin. acceptance[2] is untouched (it belongs to #32945).\n\nEach item gets a `history` row citing the evidence and `ref: #32946`.\n\n## Verification\n\nEach new shape was read against `main` @ `25ee5076`. These are the source lines the clauses are scored from:\n\n- **409 on two holders of one object's action.** `packages/runtime/src/action-execution.ts` `pickActionHolder`. Its doc says: \"On an OBJECT-BOUND key the platform is not judged: only two packages are refused (ruling record 6729825528, letter A)\". When the resolution is refused it runs `if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);`. In `packages/core/src/package-scoped-resolution.ts` `PackageScopedNameRefusedError` sets `readonly code = 'RESOURCE_CONFLICT'; readonly status = 409;`. Pinned by `packages/runtime/src/action-package-addressing.test.ts` (\"the bare call is refused on REST and MCP, 409 naming both packages … (epic ruling record 6729825528, letter A)\").\n- **flow is narrowed and webhook is not.** `packages/core/src/package-scoped-resolution.ts` `NAMESPACE_SCOPED_BARE_NAME_TYPES = ['agent', 'skill', 'action', 'email_template', 'flow', 'picklist', 'mapping', 'dataset', 'api', 'function']`. `webhook`, `connector` and `tool` are absent. The control case in `packages/objectql/src/registry-bare-name-one-holder-flow-family.test.ts` says \"CONTROL — a %s has not narrowed: a package of another namespace is still refused its name\" for `['webhook', 'connector']`.\n- **Cold-boot warning.** `packages/objectql/src/bare-name-one-holder.ts` `BARE_NAME_COLD_BOOT_MODE: BareNameColdBootMode = 'warn'`. `packages/objectql/src/registry.ts` `bareNameColdBootWarning` prints \"Bare-name conflict at boot: … The boot continues and changes nothing about which holder each caller is served\".\n- **Install door gates.** `packages/objectql/src/registry.ts` `NamespaceConflictError` (status 422) prints `Namespace conflict: namespace \"${namespace}\" is already owned by package \"${existingPackageId}\"`. Install-local wraps it as `PLUGIN_REGISTER_FAILED`. `packages/cloud-connection/src/marketplace-install-local-plugin.ts` step 2d returns `overrideGateRefusalBody(...)` with status 403 and code `'NOT_OVERRIDABLE'` (\"refused by the override write gate (ADR-0146 D2)\").\n- **Live evidence.** QA run #32940 recorded F-7, F-9 and F-10, with two reproductions each. The R4 and R5 comments carry the 409, 200, 422 and 403 bodies.\n\n<details><summary>Derived gates (local, at head fe4b80ce)</summary>\n\n```text\nnode scripts/check-adr-links.mjs :: exit 0\nnode scripts/check-adr-links.mjs --self-test :: exit 0\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/ci/plan-test-core-shards.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0   (first run exit 3 = prerequisite not built; rerun after building formula + lint)\npnpm check:ci-filter-parity :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:platform-checklist :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:watch-hint-literal :: exit 0\ndispatch-gates --ran: 16 derived, 16 run, 0 NOT-MEASURED, 0 UNRUN\ncheck-platform-checklist: OK — 16 areas, 427 items; symbol anchors 1613/1623 resolved, 10 on the named residual\n```\n\n</details>\n\n## Acceptance notes\n\n- No live run was made for the re-pointed clauses. They are scored from source at `25ee5076` and from the #32940 run bodies. The webhook leg (acceptance[0] and [3] of the bare-name item) has not been driven live yet; the next release run is its first.\n- The bare-name item's fixtures now ask both scratch packages for a webhook `qa_hook` declared `isActive: false`, so the run never posts anywhere.\n- `platform-core.namespace-co-owner-name-refusal` acceptance[2] (the `packages[]` residual) is #32945's, dispatched after this lands. This PR leaves it alone.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibzsv4aamZYiYev1tgC)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibzsv4aamZYiYev1tgC\n\n<!-- signed: domain:devx#3 · os-tesla · session_01L9qibzsv4aamZYiYev1tgC -->\n"

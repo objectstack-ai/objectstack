@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T22:23:58Z",
-  "updated_at": "2026-11-12T22:23:58Z",
+  "updated_at": "2026-11-13T08:16:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32871",
   "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32791 (PR #32802). Source: PR #32802's contract review r2 (6837557059), findings N6 to N9. Review nits go to a follow-up card, not another round. Low priority; parked.\n\n## Owed\n\n1. **N6: pin the \"stamped with its slot's package\" condition.** Its ablation is 0 red on PR #32802's head. The cells that separate it all sit on a host that declares no package: review B2's two compositions after a second boot pass, and one stale-row shape. Add a pin that goes red when the condition is removed.\n2. **N7: the moved-answer table omits shapes of its own two classes.** The `Clause-②:` sentence covers them, but the table should list them:\n   - ALPHA's row on one object, a package-less row on another;\n   - ALPHA's rows on two objects, an object-less package-less row;\n   - ALPHA's and BETA's items both in memory after the pass;\n   - BETA's row and a package-less row, ALPHA's item in memory after the pass;\n   - row 7's shape with the item registered after the pass.\n   Carry them in the changeset of the next card that touches this surface.\n3. **N8: candidate order.** PR #32802's body says no cell's candidate order moves against `main`; two cells of the review's probe do. The changeset already says order is not promised; align any later text with that.\n4. **N9 (near #32812): an item registered in memory after the pass.** With a package-less row and a package's item registered in memory after the pass, a host declaring no package (or that package) answers the in-memory item, while a host declaring another package answers the row. The first answer is older than PR #32802 and not moved by it. Measure and decide together with #32812.\n\nRestart-when: the release that carries the epic #31527 release line is published (ruling 6824949405 on #31527)"

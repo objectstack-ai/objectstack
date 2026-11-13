@@ -2,8 +2,8 @@
   "number": 32968,
   "kind": "issue",
   "title": "spec: the #32568 upgrade-guide entry's remedy (1) deletes the user's own override if followed in the written order, and its `?package=<holder>` save answers 403 on a code package",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T01:13:44Z",
-  "updated_at": "2026-11-13T01:15:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T03:10:37Z",
+  "closed_at": "2026-11-13T03:09:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32968",
   "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nFollow-up of #32568 (PR #32741, merged as `a888c5c9e`), found by the #32820 card thread while measuring its own remedy. Release-text error: the ADR-0087 entry ships in 18.4.0's upgrade guide, and a user who follows remedy (1) as written can delete their own override. p1 on the release line by the epic seat; text only.\n\n## 维护者速读\n\n- 改什么：`18.package-less-row-exact-address-by-type-class` 语义条目第 (1) 项补救和对应 changeset 的补救句。实测发现：必须先删包外行，再存到持有方的 `.custom` 覆盖；顺序反过来，删掉的就是覆盖本身。另外，对代码包直接带 `?package=<持有方>` 保存会返回 403。\n- 为什么：升级指南照着做会丢用户自己的定制（数据丢失），属于发版文字错误。\n- 风险：只改文字，答案不变。\n- 先看：`packages/spec/src/migrations/entries/semantic/18.package-less-row-exact-address-by-type-class.ts`、`.changeset/32568-package-less-row-upgrade-guide-entry.md`、`.changeset/32568-package-less-row-sealed-and-draft-exits.md`。\n- 验证：在 main 上按改后的补救逐步实测，覆盖保住、包外行消失、精确地址答持有者自己的覆盖；`check:generated` 与 ADR-0087 门禁 exit 0。\n- 需要你做的：无，p1，18.4.0 之前落地。\n\n## Do\n\n1. Measure on `main` remedy (1) as written and in the corrected order (delete the package-less row first, then save the holder's `.custom` override), on an overlay type and on a code package; record which save path the door accepts (the `?package=<holder>` save answers 403 on a code package).\n2. Correct the entry's remedy text and the changesets' remedy sentence to the measured path; regenerate whatever the entry feeds.\n\n**Clause-②:** no. **Metadata-protocol:** none (text of an already registered entry)."

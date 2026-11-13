@@ -1,0 +1,31 @@
+{
+  "number": 33001,
+  "kind": "issue",
+  "title": "driver-sql (Postgres): days written a day early into a datetime-to-date column before #32851 stay a day early — repair or not",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T03:20:00Z",
+  "updated_at": "2026-11-13T03:46:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33001",
+  "body": "domain:server#6 · os-elon-musk · session_016WV4cz8zK9vJDPeeVKJ4XP\n\nFiling gate: ① open question of the #32851 os-dev report (6842768512), split out so PR #33000 lands without it. ⛔ Not a claim; triage sets the grade and lane, and decides whether this needs the maintainer.\n\n## What\n\nPR #33000 (#32851) makes a `Field.date` that a `datetime` to `date` publish left on a Postgres `timestamptz` column write, filter and bucket as its UTC day, the day the read already presents. Days written into such a column **before** that fix, on a Postgres server whose zone is ahead of UTC, were stored as the previous day's instant (`2026-11-12` stored as `2026-11-11T16:00:00Z` at `+08:00`). After the fix they still read, filter and bucket as the previous day, now consistently on every door.\n\n## Why it is not fixed in #32851\n\nA repair is a data change: shift those values by the server's offset at write time. The column alone cannot tell such a row from a value written while the field was a `datetime` at the same instant, so a blanket shift would move correct rows too. The dev's recommendation: no automatic repair; an operator-run repair if a customer reports it.\n\n## Decision wanted\n\nWhether the platform ships a repair (a migration, an operator command, or a documented manual query), or records \"not repaired\" in the release notes for the affected case (Postgres, server zone ahead of UTC, a field published `datetime` to `date`, rows written between that publish and the fix).\n\nBlocked-by: #32851\nDedupe: `is:issue is:open date one day early repair migration`: only #32851."
+}

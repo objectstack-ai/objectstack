@@ -1,0 +1,30 @@
+{
+  "number": 33055,
+  "kind": "issue",
+  "title": "Docs portal: a section cross-link through a flat permalink loses its #fragment on the redirect, so the doc opens at the top",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T06:32:35Z",
+  "updated_at": "2026-11-13T06:45:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33055",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nQA-source: #33048 · platform-core.docs-portal-render · observed beside the clauses\n\n## Reproduction (stock showcase @ ee9ad834)\n1. Open `/_console/docs/manual/showcase_index`.\n2. Click the \"cross-reference section\" link (href `/_console/docs/showcase_docs_guide#cross-references`, a flat permalink with a fragment).\n3. Final URL: `/_console/docs/manual/showcase_docs_guide` with no `#cross-references`; the page renders at its top.\n\nExpected: the flat → canonical redirect keeps the fragment and the page scrolls to the section.\n\nLow severity."
+}

@@ -1,7 +1,7 @@
 {
   "number": 19287,
   "kind": "issue",
-  "title": "[PM seat] domain:skills · seat 2 — ⏳ vacant",
+  "title": "[PM seat] domain:skills · seat 2 — 🟢 os-tesla",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,16 +14,18 @@
     "domain:skills",
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-20T09:45:20Z",
-  "updated_at": "2026-11-12T17:14:13Z",
+  "updated_at": "2026-11-13T05:57:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 49,
+  "comments": 50,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19287",
-  "body": "domain:skills#2 · os-sales · session_01L6bhgW8hTkKksL7dcS4MSk\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:skills` seat 2**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here).\n- The other skills seats: seat 1 objectstack-ai/objectstack#7623, seat 3 objectstack-ai/objectstack#29747. ⛔ This post is neither.\n\n<sub>Refreshed 2026-11-12T17:11Z at clock-out.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Holder:** none. Last PM: `os-sales` · `session_01L6bhgW8hTkKksL7dcS4MSk`, seated 2026-11-12 11:15Z, clocked out on the maintainer order 「skills 当前任务处理完就下班」. See the clock-out brief 6830516034.\n- **Mailbox:** PR #32710, closed at clock-out. Its head `claude/project-thread-d3k8e3` (one empty commit, the session's own branch) is left for a person to delete. **Patrol:** `trig_01JzJ63Rp4uRB63nK1H4iEPF`, deleted at clock-out.\n- **Pointer:** lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#2` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none. `check-handover.mjs --session=session_01L6bhgW8hTkKksL7dcS4MSk --account=os-sales` exit 0.\n- **Landed this shift:** #32539 (PR #32745), #31982 (PR #32775).\n- **Left in the lane, not claimed (p1/p2):** #32703 `pm:blocked` on #32529; #32584, #25583 `pm:awaiting-maintainer`; #32522, #32065 `pm:on-hold`; #29471 held by `zhuangjianguo`.\n\n## Hot-file serial queue\n\n- None held.\n\n## Notes\n\n- **Successor:** run `/pm-dispatch 接手`, then read this post and the latest brief.\n\n<!-- signed: domain:skills#2 · os-sales · session_01L6bhgW8hTkKksL7dcS4MSk -->\n"
+  "body": "domain:skills#2 · os-tesla · session_01L9qibvXzthnUYrxzphgFgW\n\n⚠️ **Seat-post stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 2**. Seat 1 is #7623 (⏳ vacant), seat 3 is #29747 (🟢 `os-bill`).\n\n<sub>Refreshed 2026-11-13T05:56Z after the p2 widening.</sub>\n\n- **Current PM:** 🟢 `os-tesla` · `session_01L9qibvXzthnUYrxzphgFgW` (a Claude Code project thread, \"skills 座位 · 车道调度\"), seated on the maintainer's 「skills 也开一个」. 由 os-tesla 账户的项目负责. Posture, ledger and round reports live in the project. Seat-taken audit 6845268179.\n- **Split:** seat 2 takes only unclaimed `domain:skills` `pm:queue` cards that are `priority:p1`, `priority:p2` or high-severity (`priority:p0`, `security`): the maintainer's 「都只处理 p1 和 高危」, widened by 「可以派发 p2?」 (⛔ no p3, no other lanes, no `pm:epic` subtree), under the claim race with seats 1 and 3: re-read assignee and newest comments before every claim; the earlier claim wins. Claims carry `Seat: domain:skills#2`.\n- **Hot-file serial queue:** seat 2 holds none. ⛔ Re-derive from the live `Claim:` comments of every `domain:skills` seat and each open PR's file list before any dispatch.\n- **Patrol:** `trig_01UnEKLZwGb4963xUMievWZU` · `27 */5 * * *` (self-bound). Idle seat: wakes on mailbox and PR events, with this 5-hourly fallback patrol (fleet token rules, maintainer 2026-11-12); back to hourly while a card is in flight.\n- **Mailbox:** PR #33041.\n- **Standing constraints:** a `skills/**` PR owes an `'@objectstack/skills': patch` changeset, never `skip-changeset`; `.claude/**` is Tier S, `skills/**` and `docs/adr/**` are Tier H (os-zhuang requested as reviewer). Published `skills/**` cards are built and reviewed at the contract tier.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

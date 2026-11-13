@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T20:48:19Z",
-  "updated_at": "2026-11-12T23:07:10Z",
+  "updated_at": "2026-11-13T08:20:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32814",
   "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nFollow-up of #32408, from its card thread's out-of-scope finding (dev report 6835504440). Not caused by #32408's change: the ablated tree answers the same. Filed under the maintainer's rule of 2026-11-12 09:41Z (findings get their own card). Parked with the epic's release-line ruling.\n\nBlocked-by: #32408\nRestart-when: the release that carries the epic #31527 release line is published (ruling on #31527, comment 6824949405)\n\n## 维护者速读\n\n- 改什么：某个 email_template 成员只以 App 的 pair 存储行存在、它唯一的持有包被停用后，裸读（不带 `?package=`）仍把这行返回。#32497 已规定停用包的条目不算持有者，这条路径没跟上。\n- 为什么：裸读在 `protocol-meta-item-face` 里只要 `answer.item` 非空就跳过 `disabledOnlyHolderOf`，所以停用持有者的定制行照样被读出（专题红线 1：停用包不应再被服务）。\n- 风险：只改裸读的判定顺序；第一方 0 处（需实测）。\n- 先看：`packages/metadata-protocol/src/protocol-meta-item-face.ts` 的 `disabledOnlyHolderOf` 判定点；#32497 的 served 集规则。\n- 验证：唯一持有者停用时裸读不再给出该 pair 行（与没有存储行时一致），启用时照旧；两种注册顺序都钉，加一个两持有者 CONTROL。\n- 需要你做的：无，p2。\n\n## Do\n\n1. Measure on `main`: an App pair row for an `email_template` member, the member's only holder disabled, bare read. Expected after the fix: the same answer as with no row stored for a disabled-only name.\n2. Judge `disabledOnlyHolderOf` before the stored-row shortcut in the bare read, pin both registration orders, ablate.\n\n**Clause-②:** expected `no (narrowing)` if the premise holds. **Metadata-protocol:** narrowed expected; the dev measures."

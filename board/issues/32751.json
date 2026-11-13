@@ -2,8 +2,8 @@
   "number": 32751,
   "kind": "issue",
   "title": "runtime action route: an environment action on an object neither of two holders binds cannot run through the bare route once #32568 lands",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -21,9 +20,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T14:38:23Z",
-  "updated_at": "2026-11-13T02:11:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T04:20:50Z",
+  "closed_at": "2026-11-13T04:20:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

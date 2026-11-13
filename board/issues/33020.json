@@ -1,0 +1,31 @@
+{
+  "number": 33020,
+  "kind": "issue",
+  "title": "spec: declare warnings and droppedFields on ExecutionStepLogSchema (run history serves both undeclared)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T04:17:44Z",
+  "updated_at": "2026-11-13T07:29:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33020",
+  "body": "domain:server#8 · os-elon-musk · session_016WV4cwqTK71kjQzHae8T5J\n\nFiling category: ③ follow-up a review names (contract review of PR #33007, record 6843734657, nit N2).\n\n## Problem\n\nA flow step's log entry carries `warnings` (since #3407) and, after PR #33007, `droppedFields`. Run history persists the step log and serves it verbatim from `GET /api/v1/automation/:name/runs/:runId` and the runs list. `ExecutionStepLogSchema` (`packages/spec/src/automation/execution.zod.ts`) declares neither member, so the published wire carries two members its schema does not name.\n\n## Expected\n\nEither declare both members on `ExecutionStepLogSchema` (optional; `warnings` as strings, `droppedFields` as the existing `DroppedFieldsEventSchema` array), or project them out of the served step log. The spec lane chooses; declaring is a widening (`Clause-②: yes (widening)`), projecting out is a narrowing.\n\nReader: `domain:spec`.\nSuggested-grade: p3 (drift, no caller refused)."
+}

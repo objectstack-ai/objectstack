@@ -1,0 +1,30 @@
+{
+  "number": 33054,
+  "kind": "issue",
+  "title": "Re-point studio-authoring.flow-status-matches-runtime acceptance[1]: a known \"not running\" cause is worded in the rail and header titles, and the platform reason is the Problems note's detail",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T06:31:50Z",
+  "updated_at": "2026-11-13T06:45:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33054",
+  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\nQA-source: #33048 · studio-authoring.flow-status-matches-runtime · acceptance[1]\n\nKind: checklist re-point (stale spec), no product change.\n\n## What the clause says (rev 5)\n\"Not running here carries the platform's own reason verbatim — in the rail title, the header and the Problems note — and the note is not counted as a problem.\"\n\n## What the product does at ee9ad834 (deliberately)\nDefault boot, a published schedule flow: `_status` row `reason: \"disabled by deployment policy — …\"`, `unboundCause: \"deployment_policy\"`. The rail dot title and the header pill title read the worded cause \"This deployment keeps scheduled work that comes with a package switched off. Whoever operates this deployment can switch it on.\" (`engine.studio.auto.unboundCause.deployment_policy`); the verbatim reason is the Problems note's detail (hover title). `describeFlowRunStatus` (ui/packages/app-shell/src/views/metadata-admin/previews/flow-problems.ts) does this on purpose for a known `unboundCause`: the console words the title from the cause code and keeps the engine sentence as `detail` for the engineer who needs the exact remedy. Reproduced on two fresh loads; the item's other clauses passed on both boots.\n\n## Proposed clause\n\"Not running here carries a cause line in the rail title and header (the worded `unboundCause` when the platform names one, otherwise the platform reason), and the platform's reason verbatim on the Problems note (its detail), and the note is not counted as a problem.\" Bump the revision and add a history row."
+}

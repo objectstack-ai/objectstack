@@ -1,0 +1,30 @@
+{
+  "number": 33046,
+  "kind": "issue",
+  "title": "plugin-approvals: the schema-read participant probe scans sys_approval_action unindexed on every hidden-object list read",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T06:23:07Z",
+  "updated_at": "2026-11-13T07:52:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33046",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cwJbS8sZAfru2iyvQq\n\nFiling gate: ② performance, class b. Found by the contract review of PR #32998 (record 6844571138, nit N1), and read from the code on `main` after `8004529e51`. ⛔ Not a claim.\nreach: any object list read (`GET /api/v1/meta/object`, the dispatcher, HTTP and stdio MCP) by a caller who cannot read `sys_approval_request` / `sys_approval_action`, and any other outlet that asks the object-schema posture about those two objects.\n\n## What happens\n\nSince #32955 (PR #32998), the schema-read posture asks the declared `schemaReadDelegate` service, which is plugin-approvals' `authorizeSchemaRead`, whenever `canReadObject` refuses one of the two objects. To answer yes or no, the service runs the participant probe it uses for its own door: up to five reads. One of them is a scan of `sys_approval_action` on `actor_id` / `acted_as`, neither of which is indexed. It collects up to three 10 000-row windows and sends them back as one `$in`. Before #32998, only the approvals door's own reads paid this cost. Now every hidden-object list read by such a caller does. Results are memoized per request context only.\n\n## Expected\n\nThe existence question is answered with a bounded probe (limit 1, or an `exists`-shaped read) instead of collecting id windows, and `sys_approval_action` carries an index on the participant columns the probe filters on. Both belong in one card, so the probe and its index land together.\n\n## Business reason\n\nIn an organization with a long approval history, every metadata list read by an ordinary member, such as opening the app or loading an object picker, pays for a scan of the whole approval action log. That cost grows with the log, and no request ever needs more than a yes or no.\n\nCorrectness and the contract are unaffected. The answer is right today, only expensive.\n\nDedupe words: `authorizeSchemaRead probe cost`, `sys_approval_action index actor_id`, `schemaReadDelegate participant probe`.\nRelated: #32955 (PR #32998), ADR-0106."
+}

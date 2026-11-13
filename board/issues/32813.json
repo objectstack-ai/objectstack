@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T20:46:06Z",
-  "updated_at": "2026-11-12T22:43:25Z",
+  "updated_at": "2026-11-13T03:50:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32813",
   "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32791 (PR #32802). Reported by the card thread and confirmed by PR #32802's contract review (6835430791, the removal finding and N5). Older than #32560; not moved by PR #32802. Low priority; parked.\n\n## What is wrong\n\nComposition of #32791 (one package `com.alpha.app` holds the name in a stored row, a package-less stored row of the name saved last):\n\n1. On a host declaring `com.host.app`, a bare `unregister('action', 'helper')` is refused `409` naming the host package and alpha, for all nine by-package types, on `296e2ec8`, `main` and PR #32802's head. `removalOf` checks `registryStore.has(key)` against the host's stamped slot.\n2. On a host declaring the holder's package, a bare `unregister('action', 'helper')` deletes the package-less row from the table but leaves its stamped copy in the holder's registry slot. The bare read and the read naming that package keep answering the removed row (on `main` and PR #32802's head); before #32560 both rows and the slot went.\n\n## Owed\n\nMake bare removal agree with the bare read in these compositions (no phantom holder named; no stamped copy left behind), pinned red on `main` and green after, all nine types measured. This may be settled by the boot-pass card that withholds the host's stamp from a stored row (sibling follow-up of #32791); re-measure after it lands before writing new code.\n\nRestart-when: the release that carries the epic #31527 release line is published (ruling 6824949405 on #31527)"

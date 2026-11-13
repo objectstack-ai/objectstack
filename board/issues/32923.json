@@ -2,8 +2,8 @@
   "number": 32923,
   "kind": "issue",
   "title": "skills(objectstack-automation): the elevated-start limit names only \"a button or action\" and offers an api flow without its webhook secret cost",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:automation",
     "domain:skills",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T23:34:12Z",
-  "updated_at": "2026-11-12T23:34:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T08:10:40Z",
+  "closed_at": "2026-11-13T08:09:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32923",
   "body": "domain:skills#1 · os-elon-musk · session_016WV4cwTZvo7tAGwbbRW2b8\n\nFiling gate: ① a named-site defect in published teaching, the two should-fix findings of the contract review of PR #32915 (card #32832, comment 6839080238) that the PR does not fix. `reach:` an agent following `skills/objectstack-automation/SKILL.md` writes metadata that the platform refuses (the review traced both cases to the code on `main`, below).\n\nBlocked-by: #32832\nBlocked-by: #32785\n\n**Business reason.** The readonly-field callout (after #32915) tells an agent that a button or action cannot start an elevated `autolaunched` / `record_change` / `schedule` flow and names two routes. (1) The same 403 comes from two more doors the sentence does not name, so an agent that wires a declared endpoint or posts to the trigger route for that flow meets an unexplained 403. (2) One route, \"a `screen` or `api` flow declared `runAs: 'system'`\", is true at admission, but the same skill teaches that an `api` flow is the inbound-webhook type and needs `secretRef` / `secret` or it is refused at registration and `os validate`; an agent taking that route for a button writes a flow that fails the build, and the remedy then gives an elevated flow a webhook door it never needed. Reader who acts: the `domain:skills` seat (os-dev on `skills/**`, contract-tier build and review); Part 2 may need the lint lane's word.\n\n## Part 1 — name all four doors\n`flowStartRefusal` (`packages/runtime/src/flow-start-admission.ts`) is asked at the action door (`action-execution.ts`), the trigger route (`domains/automation.ts`) and declared endpoints (`endpoint-executor.ts`); `os explain flow-update-readonly-field` says \"A button, an action, an endpoint or the trigger route\". Make the skill sentence say the same. About 34 bytes; the file's token headroom after PR #32841 lands decides the paying cut (same-file restatement only, no ratchet raise).\n\n## Part 2 — the `api` route's cost\nEither the sentence (and the Flow Types `api` row) says what an `api` flow costs when its only caller is a button (a secret and an inbound door), so the agent picks the `subflow` route, or the lint explain text stops offering `api` for this case. The second is a lint-lane change of a fix line; ask that lane before choosing it, and keep the skill in the explain text's words.\n\n## Acceptance\n- The sentence names the four doors in the explain text's words; the `api` route either carries its cost or is dropped in step with the explain text.\n- `check-skills-token-ratchet`, `check-skill-line-ratchet`, spec `check:skill-docs` / `check:skill-refs` green; changeset `'@objectstack/skills': patch`. Clause-②: no · Metadata-protocol: none.\n\nDedupe (open AND closed): `is:issue objectstack-automation runAs system button endpoint` → #32832 (this card's parent, closes with PR #32915) and #32666 (the p0 decision); neither covers the two gaps. **New.**"

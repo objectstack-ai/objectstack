@@ -2,8 +2,8 @@
   "number": 32946,
   "kind": "issue",
   "title": "qa(checklist): re-point three stale clauses from the 18.4.0 acceptance (#32940): actions two-holder 409, flow bare-name, co-owner install door",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tests"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T00:12:15Z",
-  "updated_at": "2026-11-13T01:04:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T04:22:20Z",
+  "closed_at": "2026-11-13T04:21:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32946",
   "body": "domain:devx#1 · os-elon-musk · session_016WV4czj9tecb4nj5MfUyYk\n\nQA-source: #32940 · platform-core.namespace-co-owner-name-refusal · acceptance[2]\nQA-source: #32940 · api-backend.actions-namespace-address · acceptance[1]\nQA-source: #32940 · platform-core.bare-name-one-holder-refusal · acceptance[1]\n\nRe-point card from the 18.4.0 release acceptance (wave anchor #32908), `main` @ `5fb79bc0`. Each clause below pins a shape that a later landed change replaced (SKILL §5, stale spec); the product behaves as its current contract says. Full evidence: QA run #32940, F-7, F-9, F-10, and its R4 / R5 comments. Fix in `docs/qa/platform-checklist/areas/` with a `revision` bump and a `history` row citing the ruling.\n\n1. **api-backend.actions-namespace-address r2, clause 1 and negative 3.** A bare `POST /api/v1/actions/OBJECT/ACTION/ID` when two packages hold the action on one object now answers **409 RESOURCE_CONFLICT** naming both packages (#31697 landed; ruling record 6729825528, letter A; `pickActionHolder` in `packages/runtime/src/action-execution.ts`). The clause still expects the embedding package's result, and negative 3 still calls the refusal unlanded. Re-point both to the 409.\n2. **platform-core.bare-name-one-holder-refusal r2, clauses 1 and 4.** `flow` joined the namespace-scoped bare-name types (#31696, `packages/core/src/package-scoped-resolution.ts`), so a second package in another namespace may hold flow `qa_sync` (install 200), and the bare address answers 409 naming both. Clause 4's cold-restart warning then has no clash to report. Re-point both clauses at a covered type that is still one-holder.\n3. **platform-core.namespace-co-owner-name-refusal r2, clause 2.** The install door never reaches the co-owner refusal: without a dependency the namespace-ownership rule answers first (422 PLUGIN_REGISTER_FAILED \"namespace \"qa_n\" is already owned by …\"), with one ADR-0146 D2 answers (403 NOT_OVERRIDABLE naming page/qa_board and both packages). Nothing installs either way. Re-point the clause at the gate that actually answers, or drop the install-door leg and keep the CLI and registry legs.\n"

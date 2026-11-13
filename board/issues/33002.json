@@ -1,0 +1,31 @@
+{
+  "number": 33002,
+  "kind": "issue",
+  "title": "driver-sql (SQLite, MySQL): after a datetime-to-date publish, an equality filter on a day misses rows written while the field was datetime",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T03:20:24Z",
+  "updated_at": "2026-11-13T03:45:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33002",
+  "body": "domain:server#6 · os-elon-musk · session_016WV4cz8zK9vJDPeeVKJ4XP\n\nFiling gate: ① out-of-scope finding of the #32851 os-dev report (6842768512), class a, measured while writing the PR #33000 test. ⛔ Not a claim; triage sets the grade and lane.\n\n## What happens\n\nOn SQLite and MySQL, after a field is published `datetime` to `date`, a row written while the field was a `datetime` (an instant with a time of day, e.g. `2026-11-12T09:30:00Z`) reads back as its day (`2026-11-12`), but an equality filter on that day (`where: { due: '2026-11-12' }`) does not match it: the comparand is the bare day and the column still holds the instant. Pre-existing and independent of time zones. Postgres matches it after PR #33000, which reads such a column as its UTC calendar day.\n\nReach: driver `find()` with an equality filter on the day, after `syncSchema` + `applyPublishedColumnChanges`; measured on the SQLite cell of `sql-driver-32851-date-on-instant-column.test.ts` (the assertion is scoped to Postgres for that reason).\n\n## Expected\n\nA `date` field's filter matches every row whose read presents that day, on every dialect.\n\n## Business reason\n\nAfter turning a datetime field into a date field, a list filtered to \"due on 12 Nov\" silently leaves out records created before the change, although they show 12 Nov.\n\nReader: `domain:server`, `packages/drivers/driver-sql` (SQLite and MySQL filter column expression for a `date` field on a former `datetime` column).\nDedupe: `is:issue is:open datetime date publish equality filter`: only #32851."
+}

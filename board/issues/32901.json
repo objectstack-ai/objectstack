@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T23:00:29Z",
-  "updated_at": "2026-11-12T23:00:29Z",
+  "updated_at": "2026-11-13T08:12:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32901",
   "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nOlder defect found by the epic red-line read 6838271054 on PR #32815 (#32408), present on main; not caused by that PR. p2 by epic ruling 6838245909.\n\n## 维护者速读\n\n- 改什么：条目门逐个成员判定，于是包自己的成员顺序决定结果。一条未声明的 L 行、App 内的 W 先发 L 再发 en-US：条目门拒、包门放行；en-US 在前则两道门都放行。main 上声明行也一样。\n- 为什么：同一个包因成员顺序不同而被不同地接纳，两道门答案不一致（68 组成对构建里唯一的门对门差异）。\n- 风险：只改条目门的判定顺序；需实测第一方计数。\n- 先看：`packages/metadata-protocol` 条目门逐成员判定的位置。\n- 验证：两种成员顺序下条目门与包门答案一致；钉住两种顺序，消融一次。\n- 需要你做的：无，p2，席位落地。\n\n## Do\n\n1. Measure on main after #32408 merges: W of the App ships L then en-US, and en-US then L, beside an undeclared row of L (and a declared one); read both doors.\n2. Judge the package's whole holding once at the item door, as the package door does; pin both member orders.\n\n**Clause-②:** the dev measures. **Metadata-protocol:** the dev measures."
