@@ -1941,7 +1941,12 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
       }
     };
 
-    for (const type of ['action', 'queue']) {
+    // [#31985, epic ruling 3 on 6840825374] `tool` is sealed too (its registry
+    // entry has `allowEnvironmentOverlay: false`), and its narrowing makes two
+    // namespaces' holders of one name reachable, so the sealed-type rule is
+    // pinned for it by name: each holder's exact address serves its own, in
+    // every hydration state and both registration orders.
+    for (const type of ['action', 'queue', 'tool']) {
       for (const order of [[A, B], [B, A]]) {
         for (const state of STATES) {
           it(`${type}, two holders (${order.map((p) => p.split('.').pop()).join(' then ')}), ${state}: each exact address serves its own; the layered read reports no overlay (BASE: in the describe header)`, async () => {

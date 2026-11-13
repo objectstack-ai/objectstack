@@ -41,8 +41,12 @@
 //     registers every package body's items into the metadata service), the
 //     metadata service keeps each package's agent, skill and tool ([#31985]),
 //     and the layered read `/meta/TYPE/NAME/layers?package=` serves each
-//     package's own code layer (it served the package registered last for
-//     both).
+//     package's own code layer (it served the package registered last for the
+//     agent and the skill; a tool's was already its own, and stays pinned);
+//   - [#31985, #32741] a package-less tool row saved before two namespaces'
+//     packages install the name is declined at each holder's exact address
+//     (a tool is sealed: no environment overlay), both install orders,
+//     before and after the read-side hydrator.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -361,6 +365,47 @@ describe('agent, skill and tool names held per namespace, on a booted showcase',
     expect(await promptText(`alpha-${SKILL}`)).toContain('alpha skill instructions');
     expect(await promptText(`gamma-${SKILL}`)).toContain('gamma skill instructions');
   });
+
+  /**
+   * [#31985, epic ruling 3 on 6840825374; #32741's sealed-type rule, epic
+   * ruling 6817768147] A `tool` is a sealed managed type (no environment
+   * overlay), so a package-less row saved under a name two namespaces' packages
+   * then install is declined at each holder's exact address: each serves its
+   * own item, plain and layered (`overlay: null`), before and after the
+   * read-side hydrator, and the bare read refuses naming both. Both install
+   * orders: `kappa` then `lambda` for one name, `lambda` then `iota` for the
+   * other. FROM (this branch before `main`'s #32741 was merged in): the
+   * first-installed holder's exact address served the package-less row as its
+   * own; the second served its own.
+   */
+  it('[#31985] a package-less tool row saved before two namespaces\' packages install the name is declined at each holder\'s exact address, both install orders, before and after the hydrator; the bare read refuses naming both', async () => {
+    const UP = 'qa_row_tool_up';
+    const DOWN = 'qa_row_tool_down';
+    for (const name of [UP, DOWN]) {
+      const saved = await stack.apiAs(admin, 'PUT', `/meta/tool/${name}`, tool('env', name));
+      expect(saved.status, await saved.text()).toBeLessThan(300);
+    }
+    for (const [p, tools] of [['kappa', [UP]], ['lambda', [UP, DOWN]], ['iota', [DOWN]]] as const) {
+      const { status, body } = await installLocal(inline(p, { tools: tools.map((n) => tool(p, n)) }));
+      expect(status, `${p}: ${JSON.stringify(body)}`).toBeLessThan(300);
+    }
+    const layeredAt = async (name: string, pkg: string) => {
+      const r = await stack.apiAs(admin, 'GET', `/meta/tool/${name}/layers?package=${pkg}`);
+      const body = (await r.json()) as any;
+      return [r.status, body?.overlay ?? null, body?.effective?.label];
+    };
+    for (const when of ['before the hydrator', 'after the hydrator']) {
+      if (when === 'after the hydrator') expect((await stack.apiAs(admin, 'GET', '/meta/tool')).status).toBe(200);
+      for (const [name, holders] of [[UP, ['kappa', 'lambda']], [DOWN, ['lambda', 'iota']]] as const) {
+        for (const p of holders) {
+          const pkg = `com.qa.bare.${p}`;
+          expect(await metaAt('tool', name, pkg), `${when}: ${name} at ${p}`).toEqual([pkg, `${p} tool`]);
+          expect(await layeredAt(name, pkg), `${when}: ${name} layered at ${p}`).toEqual([200, null, `${p} tool`]);
+        }
+        await expectMetaRefused('tool', name, holders.map((p) => `com.qa.bare.${p}`));
+      }
+    }
+  });
 });
 
 /**
@@ -376,7 +421,9 @@ describe('agent, skill and tool names held per namespace, on a booted showcase',
  * `get` of the name, the one naming the other package included, answered the
  * survivor, and `GET /meta/TYPE/NAME/layers?package=<the other>` served the
  * survivor's body as both the code and the effective layer, under the
- * survivor's `packageId`.
+ * survivor's `packageId`. (For a tool the layered read already served each
+ * package's own: it judges the code layer at the exact address, and its pin
+ * stays green with `tool` taken back out of the slotted store.)
  *
  * The one narrowing the slots bring is a read of the metadata service naming
  * a package that holds no slot of the name: it was answered the stored item
@@ -439,7 +486,7 @@ describe('the artifact door keeps each namespace\'s agent, skill and tool in the
     return { status: r.status, code: body?.code?.label, effective: body?.effective?.label, packageId: body?.packageId, body };
   };
 
-  it.each(TYPES)('%s: `/layers?package=` serves each package\'s own code and effective layer (BASE: both were the package registered last)', async (type) => {
+  it.each(TYPES)('%s: `/layers?package=` serves each package\'s own code and effective layer (BASE: agent and skill served the package registered last; a tool was already served its own)', async (type) => {
     const name = SHARED[type];
     for (const p of ['alpha', 'beta'] as const) {
       const read = await layers(type, name, `com.qa.bare.${p}`);
