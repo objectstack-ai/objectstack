@@ -53,11 +53,12 @@
 // (`UNIQUE_VIOLATION` at the REST door, `DUPLICATE_RECORD` at the system door,
 // naming the probed object) AND it is this field's: either the refusal names
 // the probed field, or it names none and a TWIN — the same record with only the
-// probed value changed — is admitted. The twin is needed because a
-// per-organization constraint is an expression index, and the driver names the
-// index, not the column, so the refusal carries no `field` (that is
-// `uniqueViolationColumn`'s contract: an index name is never reported as a
-// column). Any other refusal — a hook's own dedupe, a validation rule, a
+// probed value changed — is admitted. The twin is needed wherever the refusal
+// carries no `field`: a key of more than one authored column, an index the
+// driver names by its name rather than its columns, or a legacy expression
+// index (`uniqueViolationField`'s contract: a name that is not one field's
+// column is never reported as a field). A per-organization field's own
+// composite `(organization_id, field)` names the field (#32711). Any other refusal — a hook's own dedupe, a validation rule, a
 // permission, a constraint on another field — is `unattributed`: an engine
 // that refused every write would otherwise prove every scope.
 //
