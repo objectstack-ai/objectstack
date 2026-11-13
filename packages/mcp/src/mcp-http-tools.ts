@@ -3371,7 +3371,8 @@ export function registerFileTools(
           'as an attachment (attachments: true). Give the link to the user to open in a browser where they are ' +
           'signed in to this deployment as themselves; it works only for them, once, for this record and field ' +
           'only, and expires (see expiresAt). The upload is stored as the user, so they must be able to edit the ' +
-          'record (and the field): a record a pending approval locks, or a read-only field, gets no link, and an ' +
+          'record (and the field): a record a pending approval locks, a read-only field, or a field read-only on ' +
+          'this record in its current state (readonlyWhen), gets no link, and an ' +
           'upload the field cannot take when it arrives is refused with the reason, attaching nothing.',
         inputSchema: strictToolInput(
           {
