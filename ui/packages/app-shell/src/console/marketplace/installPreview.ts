@@ -26,7 +26,14 @@
  * - Suggested grants: each permission set declaring `isDefault: true`, which
  *   the install turns into a suggestion to grant it to the Everyone position
  *   (ADR-0090 D5). Nothing is granted until an administrator accepts it.
+ * - Object extensions: each body's `objectExtensions` list, and the one under
+ *   the body's `metadata`, read the way the catalog's `object_extensions`
+ *   reports them (`InstallPreview.objectExtensions`). The install surfaces read the
+ *   catalog's field first; this reading serves a catalog that does not serve
+ *   the key yet.
  */
+
+import type { MarketplaceObjectExtension } from './marketplaceApi.js';
 
 /** What the confirm says a package adds. */
 export interface InstallPreview {
@@ -37,6 +44,8 @@ export interface InstallPreview {
   sampleRecordsAtMost: boolean;
   /** Permission-set names the install will suggest granting to Everyone. */
   suggestedGrants: string[];
+  /** The existing objects the package extends, platform (`sys_*`) targets first; `[]` = none. */
+  objectExtensions: MarketplaceObjectExtension[];
 }
 
 const ALL_ENVS = ['prod', 'dev', 'test'];
@@ -70,6 +79,56 @@ function scoped(dataset: Record<string, any>): boolean {
   return false;
 }
 
+/** Every package body the served value carries: the top one first, then each `packages[]` entry's. */
+function bodiesOf(top: Record<string, any>): Record<string, any>[] {
+  const bodies: Record<string, any>[] = [top];
+  if (Array.isArray(top.packages)) {
+    for (const entry of top.packages) {
+      if (isRecord(entry) && isRecord(entry.manifest)) bodies.push(flatten(entry.manifest));
+    }
+  }
+  return bodies;
+}
+
+const names = (value: unknown): string[] => (isRecord(value) ? Object.keys(value) : []);
+
+/**
+ * The objects the bodies extend, one entry per target object (two extensions
+ * of one object read as one), platform (`sys_*`) targets first, each group in
+ * the order the bodies declare them.
+ */
+function objectExtensionsIn(bodies: Record<string, any>[]): MarketplaceObjectExtension[] {
+  const byObject = new Map<string, MarketplaceObjectExtension>();
+  const add = (list: string[], more: string[]) => { for (const n of more) if (!list.includes(n)) list.push(n); };
+  for (const body of bodies) {
+    const lists = [body.objectExtensions, isRecord(body.metadata) ? body.metadata.objectExtensions : undefined];
+    for (const list of lists) {
+      if (!Array.isArray(list)) continue;
+      for (const ext of list) {
+        if (!isRecord(ext) || typeof ext.extend !== 'string' || ext.extend.length === 0) continue;
+        let entry = byObject.get(ext.extend);
+        if (!entry) {
+          entry = {
+            object: ext.extend, platform: ext.extend.startsWith('sys_'),
+            fields: [], field_patches: [], validations: [], indexes: 0, relabels: false,
+          };
+          byObject.set(ext.extend, entry);
+        }
+        add(entry.fields as string[], names(ext.fields));
+        add(entry.field_patches as string[], names(ext.fieldPatches));
+        if (Array.isArray(ext.validations)) {
+          add(entry.validations as string[], ext.validations.filter(isRecord).map((v) =>
+            (typeof v.name === 'string' && v.name.length > 0 ? v.name : '(unnamed)')));
+        }
+        if (Array.isArray(ext.indexes)) entry.indexes += ext.indexes.filter(isRecord).length;
+        if (ext.label !== undefined || ext.pluralLabel !== undefined || ext.description !== undefined) entry.relabels = true;
+      }
+    }
+  }
+  const all = [...byObject.values()];
+  return [...all.filter((e) => e.platform), ...all.filter((e) => !e.platform)];
+}
+
 /**
  * The preview of the served manifest value (`data.manifest` of the catalog's
  * manifest answer). `null` when it is not a package body, so the confirm says
@@ -78,12 +137,7 @@ function scoped(dataset: Record<string, any>): boolean {
 export function installPreviewOf(served: unknown): InstallPreview | null {
   if (!isRecord(served)) return null;
   const top = flatten(served);
-  const bodies: Record<string, any>[] = [top];
-  if (Array.isArray(top.packages)) {
-    for (const entry of top.packages) {
-      if (isRecord(entry) && isRecord(entry.manifest)) bodies.push(flatten(entry.manifest));
-    }
-  }
+  const bodies = bodiesOf(top);
 
   let objects = 0;
   let permissionSets = 0;
@@ -103,5 +157,8 @@ export function installPreviewOf(served: unknown): InstallPreview | null {
   const sampleRecords = datasets.reduce((sum: number, d: Record<string, any>) => sum + d.records.length, 0);
   const sampleRecordsAtMost = datasets.some((d: Record<string, any>) => d.records.length > 0 && scoped(d));
 
-  return { objects, permissionSets, sampleRecords, sampleRecordsAtMost, suggestedGrants };
+  return {
+    objects, permissionSets, sampleRecords, sampleRecordsAtMost, suggestedGrants,
+    objectExtensions: objectExtensionsIn(bodies),
+  };
 }

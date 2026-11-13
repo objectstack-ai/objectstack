@@ -50,9 +50,10 @@
  *    FIRST-registered package's declaration, so the body the designer opens
  *    and the body that runs can come from two packages (since narrowed to the
  *    namespace: "The narrowing");
- *  - `webhook` — the dispatcher's declared-webhook reader keeps the
- *    FIRST-registered package's declaration per name and never subscribes
- *    the other, and `/meta/webhook/NAME` serves the same one;
+ *  - `webhook` — the dispatcher's declared-webhook reader kept the
+ *    FIRST-registered package's declaration per name and never subscribed
+ *    the other, and `/meta/webhook/NAME` served the same one (both since
+ *    narrowed to the namespace: "The narrowing");
  *  - `connector` — `/meta/connector/NAME` (the by-name door the designer's
  *    connector picker reads) serves the FIRST-registered package's
  *    declaration; a provider-bound instance is the engine's one connector
@@ -72,7 +73,7 @@
  *    and every reference to a tool carries its bare name alone: a skill's
  *    `tools` list admits only a snake_case name, an AI tool definition and a
  *    tool call carry a name and no package, and an MCP server registers one
- *    tool per name.
+ *    tool per name (since narrowed to the namespace: "The narrowing").
  *
  * Every one of them flips with registration order, and none says so (the
  * object-less action's handler bind warns that it replaces one, and names
@@ -187,6 +188,24 @@
  * a plugin or the host registers is the platform's holder: never judged at
  * the bind, and refused beside a package holder at the read (ADR-0150 D2,
  * epic seat ruling 6729484996).
+ *
+ * `webhook` followed (#31699 PR 2): the dispatcher subscribes each holder's
+ * declaration in its own slot (`declared:PKG/NAME`), each switched by its own
+ * activation row (`(package, name)`), and the redelivery veto judges a
+ * delivery by the slot its `ref_id` names. `/meta/webhook/NAME`, the
+ * activation door's bare `webhook/NAME` and the dispatcher's by-name read
+ * refuse a name two packages hold, naming both; the door's
+ * `webhook/NS/NAME` reaches each.
+ *
+ * `tool` followed (#31985): `/meta/tool/NAME` reads through
+ * `readPackageScopedItem` (child E8), and a package's `tool` record has no
+ * other reader and no AI face to carry. Every tool an MCP client or a model is
+ * shown comes from the AI service's live tool registry (platform tools and
+ * action-backed tools), never from a `tool` record, and a skill's `tools`
+ * names resolve against that registry. Once tool records become live, the
+ * resolver of a skill's `tools` resolves from the skill's package (ADR-0150
+ * D3) and refuses two holders, naming them (`packages/spec/liveness/tool.json`
+ * records that precondition).
  *
  * Two holdings still meet under a narrowed type, whatever the namespaces:
  *
@@ -318,7 +337,10 @@ const COLLECTION_KEY: Readonly<Record<BareNameRegistryType, string>> = Object.fr
  *   `409`. The census found no other fixed-name action request in the
  *   platform's own code (`packages/**` and `ui/**` sources).
  * - every other covered type: none — the platform ships no item of it under
- *   a name a package could take.
+ *   a name a package could take. For `tool` (#31985) the platform requests no
+ *   tool record by name (ADR-0150 D3's exception list holds none): the tools
+ *   the AI service registers by name (`PLATFORM_PROVIDED_TOOL_NAMES`) live in
+ *   its own tool registry, not in this registry, so none is a built-in here.
  */
 export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, ReadonlySet<string>>> = Object.freeze({
   picklist: new Set<string>(),

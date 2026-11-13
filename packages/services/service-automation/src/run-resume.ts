@@ -17,6 +17,7 @@
 
 import { withFlowRunSlot } from './flow-slots.js';
 import type { FlowParsed, FlowRunSummary } from '@objectstack/spec/automation';
+import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { AutomationContext, AutomationResult, ResumeSignal } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { runIsUnscopedUserMode, flowTouchesData, runAccessibleOrgIds, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
@@ -24,6 +25,7 @@ import { refuseNode } from './guard-refusal.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
+import { dropEventsOf, foldDropEvents } from './run-dropped-fields.js';
 import { noteTenantCurrencyReadFault } from './builtin/template.js';
 import { mapItemCancelledVariable, type MapItemCancelledMarker } from './builtin/map-node.js';
 // The values below (`buildRunTrigger`, `FlowRefusalSignal`, `isRefusalSignal`,
@@ -231,7 +233,13 @@ export async function seedRunGrants(
     // throws, answers nothing, or is not wired) carries none.
     if (needsGrants) {
         delete (runContext as SeededRunContext).posture;
-        delete (runContext as SeededRunContext).principalKind;
+        // [ADR-0151 Non-goals; ruling record 6812617393] The kind is dropped
+        // with the grants it stood beside wherever the resolution below
+        // re-seeds it. A `runAs:'system'` run resolves nothing (elevation
+        // reads no grants), so the kind its launch door forwarded is the only
+        // one it will carry, and it is kept: who started the elevated run
+        // (`resolveRunDataContext`'s system arm), where it narrows nothing.
+        if (runContext.runAs !== 'system') delete (runContext as SeededRunContext).principalKind;
         delete (runContext as SeededRunContext).permissionSetAddresses;
     }
     if (
@@ -779,10 +787,24 @@ export async function loadSuspendedRunStrict(this: Pick<RunResumeHost, 'store' |
 }
 
 /** The body of {@link AutomationEngine.creditChildRun}, moved unedited; that method's docblock is its contract. */
-export function creditChildRun(steps: StepLogEntry[], nodeId: string, child: FlowRunSummary | undefined): void {
-    if (!child) return;
+export function creditChildRun(
+    steps: StepLogEntry[],
+    nodeId: string,
+    child: FlowRunSummary | undefined,
+    childDroppedFields?: readonly DroppedFieldsEvent[],
+): void {
+    if (!child && !childDroppedFields?.length) return;
     for (let i = steps.length - 1; i >= 0; i--) {
         if (steps[i].nodeId !== nodeId) continue;
+        // #33019 — the child's drop events land on the same awaiting step its
+        // totals do, through the one fold, so the terminal answer's
+        // `droppedFields` (folded from the steps) credits every child run
+        // `summary` does.
+        const droppedFields = childDroppedFields?.length
+            ? foldDropEvents([steps[i].droppedFields, childDroppedFields])
+            : undefined;
+        if (droppedFields) steps[i] = { ...steps[i], droppedFields };
+        if (!child) return;
         const prior = steps[i].metrics ?? {};
         steps[i] = {
             ...steps[i],
@@ -1267,6 +1289,7 @@ export async function resumeInternal(
     skipBubble: boolean,
     childSummary?: FlowRunSummary,
     childRefusal?: ChildRunRefusal,
+    childDroppedFields?: readonly DroppedFieldsEvent[],
 ): Promise<AutomationResult> {
     // Idempotency guard (set synchronously, before any await): reject a
     // concurrent duplicate resume of the same run so side effects can't run
@@ -1409,7 +1432,7 @@ export async function resumeInternal(
         // #4354 — up-bubble: the child that just finished did work this run
         // is accountable for. Credit it to the step that suspended awaiting
         // it, before traversal appends anything further.
-        this.creditChildRun(run.steps, run.nodeId, childSummary);
+        this.creditChildRun(run.steps, run.nodeId, childSummary, childDroppedFields);
 
         // [#18714] The refusal this run must end on instead of continuing
         // past its `subflow` / `map` node, if any. Seeded from the UP-BUBBLE
@@ -1573,7 +1596,8 @@ export async function resumeInternal(
                 signal = this.buildSubflowResumeSignal(childRun.context, childRes.output);
                 // #4354 — down-delegation is the other way a child's work
                 // lands under a parent step written at suspend time.
-                this.creditChildRun(run.steps, run.nodeId, childRes.summary);
+                // #33019 — and its drop events, onto the same step.
+                this.creditChildRun(run.steps, run.nodeId, childRes.summary, childRes.droppedFields);
             } else if (carriesSubflowChildOutput(signal)) {
                 // The engine-built UP-BUBBLE — the HEALTHY path, and the
                 // one this `else` used to describe as a degradation. The
@@ -1940,8 +1964,12 @@ export async function resumeInternal(
             // Skipped when the DELEGATION path drives the chain (it
             // continues the parent itself). Best-effort: the child's own
             // completion stands even if the parent continuation fails.
+            // #33019 — with this run's drop events, the ones its own answer
+            // below carries, so the parent credits them where it credits
+            // `summary`.
+            const droppedFields = dropEventsOf(steps);
             if (!skipBubble) {
-                await this.bubbleToParent(run, output, summary);
+                await this.bubbleToParent(run, output, summary, undefined, droppedFields);
             }
 
             // Surface the flow's friendly completion message so a screen-flow
@@ -1959,6 +1987,9 @@ export async function resumeInternal(
                 ),
                 flowLabel: flow.label,
                 summary,
+                // #32861 — like `summary`, over the WHOLE run: a drop before
+                // the pause reaches the answer the run finally gives.
+                ...(droppedFields ? { droppedFields } : {}),
             };
         } catch (err: unknown) {
             // [#15788] A resumed run reached a refusing `end` — the SECOND

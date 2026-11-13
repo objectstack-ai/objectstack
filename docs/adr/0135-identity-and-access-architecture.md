@@ -256,12 +256,31 @@ records why the bridge sits there and not on the plugin's `schema` option).
 
 **Domain verification is opt-in** — `cloud ADR-0024`'s clause ②, which this repository's code now
 cites as `ADR-0135 D6`. When the environment turns it on, `@better-auth/sso` mounts a DNS-TXT
-proof-of-ownership challenge and refuses a login through a provider whose email domain is not
-proven, which stops an organization admin from registering a provider for a domain they do not
-control. It is off by default, because turning it on changes the register-then-login flow. The
-surface is
+proof-of-ownership challenge covering every domain a provider lists, and signs nobody in through a
+provider until that list is proven; editing the list clears the proof. With it on, where the
+platform admits a new account, a provider creates an account only for an email address at a domain it has proven,
+compared exactly (a subdomain counts only when it is itself listed and verified, and a listed entry
+counts only for the host the provider proved), failing closed, and relaxed by no audience posture,
+invitation or JIT toggle (plugin-auth's rule at better-auth's `user.validateUserInfo` gate,
+`packages/plugins/plugin-auth/src/sso-account-at-proven-domain.ts#refuseSsoAccountOutsideProvenDomain`).
+Accounts that already exist are not re-checked. With the rule that a domain is claimed by one
+provider at most, held where a provider is registered and where its domain list is edited
+(`packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts#findSsoDomainClaim`), an SSO provider
+creates a new account at a domain only when it is the one provider that claims that domain and has
+proven it. Domain verification is off by default, because turning it on changes the
+register-then-login flow. The surface is
 `packages/platform-objects/src/identity/sys-sso-provider.object.ts#request_domain_verification`,
 `#verify_domain` and `#domain_verified`.
+
+> **Note (2026-11-13, objectstack) — the proven-domain account rule is this repository's own.**
+> Cloud ADR-0024 clause ② decides that domain verification exists and is opt-in. The account rule
+> in the paragraph above (exact comparison, failing closed, relaxed by no audience posture,
+> invitation or JIT toggle) is not a clause of cloud ADR-0024: it is a rule made in this
+> repository, like the repository-side facts the D4 notes record. It was approved by the
+> maintainer on 2026-11-13, on the security lane's decision card, with no carve-out, and with a
+> provider's domain entry counting only when it is written as a bare host name (an entry written
+> as a URL or with a port proves nothing). That ruling, not this file, is its authority; #32669
+> implements it. Cloud ADR-0024's own text is not amended here.
 
 ⚠️ **The SCIM half of "SSO + SCIM per production environment" is not restated here.** Its
 mechanism record is `cloud ADR-0071`, mirrored into this repository by its own card; this file
@@ -312,7 +331,8 @@ spelling. The re-pointing is per-site and semantic.
 
 ## What this record does NOT settle
 
-- **Anything cloud ADR-0024 did not decide.** This file adds no clause. Where the mechanism in
+- **Anything cloud ADR-0024 did not decide.** This file adds no clause, except the one the D6
+  note on the proven-domain account rule names as this repository's own. Where the mechanism in
   this tree is richer than the decision (the ADR-0092 write guard, the ADR-0095 tenant wall, the
   ADR-0091 validity window), that richness belongs to those records, and is cited here only as the
   thing D4 and D5 lean on.

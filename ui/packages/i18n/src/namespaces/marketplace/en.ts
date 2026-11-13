@@ -202,6 +202,24 @@ const en = {
       // ADR-0090 D5/D9 — a package's isDefault permission set is an
       // install-time suggestion to bind it to the everyone/guest position;
       // the admin confirms here, the server never auto-binds.
+      // objectstack#31542 — the existing objects a package changes, shown before
+      // the install (ObjectExtensionDisclosure.tsx).
+      objectExtensions: {
+        title: "Changes existing objects",
+        intro: "Installing changes these objects that already exist in this environment:",
+        platformBadge: "Platform object",
+        platformWarning: "Platform objects are shared by every app in this environment. Changing them can affect sign-in, user profiles and other apps.",
+        fields: "Adds or replaces fields",
+        fieldPatches: "Changes how fields display",
+        validations: "Adds or replaces validation rules",
+        indexes: "Adds {{count}} indexes",
+        indexes_one: "Adds {{count}} index",
+        indexes_other: "Adds {{count}} indexes",
+        relabels: "Changes its label or description",
+        reading: "Reading which existing objects this package changes…",
+        unknown: "Which existing objects this package changes could not be read. It may change some, platform objects included.",
+        acknowledge: "I understand this package changes platform objects.",
+      },
       suggestedBindings: {
         promptEveryone: 'This app suggests granting "{{set}}" to all signed-in users (the Everyone position).',
         promptGuest: 'This app suggests granting "{{set}}" to unauthenticated visitors (the Guest position).',

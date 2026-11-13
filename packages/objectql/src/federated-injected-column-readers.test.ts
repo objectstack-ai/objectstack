@@ -374,6 +374,10 @@ const READERS: Record<string, Row> = {
     disposition: 'writer',
     why: 'stamps the acting user onto a record the caller writes; it reads nothing',
   },
+  'engine-compatibility-api.ts#applyPublishedColumnChanges :: isFederatedObject()': {
+    disposition: 'not-a-read',
+    why: "[#32590] leaves a federated object's columns to the remote that owns its schema; it reads no row",
+  },
   'engine-compatibility-api.ts#syncObjectSchema :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'engine-compatibility-api.ts#syncSchemas :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'engine-secret-internal-fields.ts#encryptSecretFields :: created_at': { disposition: 'not-a-read', why: PLATFORM_ROW },

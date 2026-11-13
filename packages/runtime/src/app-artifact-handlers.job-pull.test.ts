@@ -46,7 +46,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { CronJobAdapter, IntervalJobAdapter } from '@objectstack/service-job';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
-import { collectJobsWithoutBody, jobDeclaringPackages, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
+import { collectJobNameCollisions, collectJobsWithoutBody, jobDeclaringPackages, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
 // The source under test reaches `@objectstack/metadata` by dynamic import
 // (`app-plugin.ts`); paid here, at collection, not inside a case's clock.
 import '@objectstack/metadata';
@@ -1181,5 +1181,54 @@ describe('[#32412] the residual-twin job refusal names the residual as a holder 
         // No residual job: met by name, the #32071 refusal names the two bodies and nothing else.
         expect((jobDeclaringPackages(twoBodies, 'com.example.beta')(pullJob('sync', 'alpha_map')) as { candidates?: unknown }).candidates)
             .toEqual([ALPHA, { kind: 'package', packageId: 'com.example.beta' }]);
+    });
+});
+
+/**
+ * [#32572, ADR-0150 D3] `collectJobNameCollisions` — what the install-local door refuses a package by — is the
+ * binder's own judgement of a shared job name, not a second copy: for every arrangement the bind refuses, it
+ * answers exactly the refusals the binder logs (name, reason, candidates, message), one per shared name; for
+ * distinct names and for a disabled twin it answers none, as the binder schedules them.
+ */
+describe('[#32572] collectJobNameCollisions answers the refusals the binder refuses a shared job name by', () => {
+    withPosture(undefined);
+
+    /** The coded refusals the binder logged at `error`, in order. */
+    const loggedRefusals = (logger: { error: { mock: { calls: unknown[][] } } }) => logger.error.mock.calls
+        .map(([, err]) => (err as { refusal?: unknown } | undefined)?.refusal)
+        .filter((refusal) => refusal !== undefined);
+
+    const ARRANGEMENTS = [
+        ['a package body and the residual (the residual runs as no declaring body)',
+            () => ({ bundle: jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]), appId: 'com.example.beta' })],
+        ['a package body and the residual (the residual runs as that body)',
+            () => ({ bundle: jsonLoaded([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]), appId: 'com.example.alpha' })],
+        ['a single-package artifact listing two names twice',
+            () => ({ bundle: { id: APP_ID, version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [
+                { ...PULL_JOB, name: 'twice' }, { ...PULL_JOB, name: 'again' }, { ...PULL_JOB, name: 'twice' }, { ...PULL_JOB, name: 'again' },
+            ] }, appId: APP_ID })],
+    ] as const;
+
+    for (const [arrangement, compose] of ARRANGEMENTS) {
+        it(`${arrangement}: the same refusals the binder logs, one per name`, async () => {
+            const { bundle, appId } = compose();
+            const { logger } = await scheduleAndRun(bundle, appId);
+            const logged = loggedRefusals(logger);
+            expect(logged.length).toBeGreaterThan(0);
+            expect(collectJobNameCollisions(bundle, appId)).toEqual(logged);
+        });
+    }
+
+    it('CONTROLS: distinct names, and a disabled twin, answer no refusal — and the binder refuses none', async () => {
+        const distinct = { bundle: jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('host_sync', 'host_map')]), beta]), appId: 'com.example.beta' };
+        const disabled = { bundle: { id: APP_ID, version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [
+            { ...PULL_JOB, name: 'twice' }, { ...PULL_JOB, name: 'twice', enabled: false },
+        ] }, appId: APP_ID };
+        for (const { bundle, appId } of [distinct, disabled]) {
+            expect(collectJobNameCollisions(bundle, appId)).toEqual([]);
+            const { out, logger } = await scheduleAndRun(bundle, appId);
+            expect(out.refused).toEqual([]);
+            expect(loggedRefusals(logger)).toEqual([]);
+        }
     });
 });

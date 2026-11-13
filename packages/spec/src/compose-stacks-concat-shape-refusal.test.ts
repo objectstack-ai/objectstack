@@ -105,7 +105,15 @@ describe('composeStacks refuses a non-array concatenated collection', () => {
       });
 
       it('the control — the same key authored as an array composes the entries of BOTH stacks', () => {
-        const composed = composeStacks([a(), b([{ name: 'b_item' }])]) as Record<string, unknown>;
+        // On `apps`, the selected (last) manifest is a `plugin` package because
+        // the single-app rule (ADR-0019 D3 as amended) refuses two apps under
+        // one `app` or `module` package id and does not judge `plugin`; this
+        // control's subject is the concat pass. If a ruling holds `plugin` to
+        // one app too, retype it.
+        const last = key === 'apps'
+          ? handBuilt({ manifest: { ...mf('com.example.b'), type: 'plugin' }, [key]: [{ name: 'b_item' }] })
+          : b([{ name: 'b_item' }]);
+        const composed = composeStacks([a(), last]) as Record<string, unknown>;
         expect(composed[key]).toEqual([{ name: 'a_item' }, { name: 'b_item' }]);
       });
     });

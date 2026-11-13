@@ -768,10 +768,13 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
     // authenticated user). Requires the `organization` plugin — on by default.
     // `domainVerification.enabled` (ADR-0135 D6, opt-in via OS_SSO_DOMAIN_VERIFICATION):
     // when on, @better-auth/sso mounts /sso/request-domain-verification +
-    // /sso/verify-domain (DNS TXT proof-of-ownership) AND enforces that an
-    // external IdP's email domain be DNS-verified before it may complete a
-    // login — preventing an org admin from registering a provider for a domain
-    // they don't control. Off by default to preserve the register→login flow.
+    // /sso/verify-domain (DNS TXT proof-of-ownership of every domain the
+    // provider lists) and signs nobody in through a provider until its domain
+    // list is verified; editing the list clears it. A new account is limited
+    // to an email address at a domain the provider has proven, by plugin-auth's
+    // own rule at the `validateUserInfo` gate (`sso-account-at-proven-domain.ts`),
+    // asked through the same decision (`AuthManager.isSsoDomainVerificationEnabled`).
+    // Off by default to preserve the register→login flow.
     //
     // Per-provider sign-in options (ruling record 6718355623, `sso-sign-in-options.ts`):
     // `allowIdpInitiated` and `allowJit` are provider additional fields, both

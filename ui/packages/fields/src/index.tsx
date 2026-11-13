@@ -5374,6 +5374,10 @@ export * from './widgets/lookupAutofill.js';
 // form. `@object-ui/plugin-form`'s create payload reads it to keep that one
 // column. The widget's holder readings stay module-private.
 export { PERMISSION_SET_GRANT_COLUMNS } from './widgets/permissionSetHolders.js';
+// objectstack#32795 — the record form stamps the object it edits on a
+// `permission-ref` field's definition, so the widget recognises the grant's
+// name column by its object and its column, not by its column name alone.
+export { FORM_OBJECT_KEY, withFormObject } from './widgets/permissionSetHolders.js';
 // New widgets according to @objectstack/spec
 export * from './widgets/ColorField.js';
 export * from './widgets/SliderField.js';

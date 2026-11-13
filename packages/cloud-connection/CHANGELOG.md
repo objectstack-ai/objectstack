@@ -1,5 +1,1098 @@
 # @objectstack/cloud-connection
 
+## 18.4.0
+
+### Minor Changes
+
+- bcdf8d3: feat(metadata-protocol,objectql): a package's action can be customized by a declared override in its paired `.custom` package (ADR-0146 D9 `action`), and an override that widens who may run the action is refused
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **A declared action override is admitted.** An `action` saved, published or installed in a base's paired `<base>.custom` package with `overrides: { package: '<base>', basedOn: '<version>' }` was refused `403 NOT_OVERRIDABLE` ("action customization is not yet available"). It is now admitted by the save, publish and install doors, `os validate` and `os build`, like a flow override. It replaces the base's action whole, and every read of the base's action serves it under the base's name: the by-name and execution reads, the layered read's `effective` (with `code` still the base's), both lists, the object read's `actions` (what the list toolbar, row menu and record header are drawn from) and the engine's schema, which the REST `/actions` door and the MCP `run_action` bridge read the action from. Deleting the override serves the base's action again everywhere. The action activation switch keyed by the action's name turns the override off while it is armed, and the switch stays where it was when the base is restored. Only the pair declares: a dependent's declaration and the pair's undeclared same-named save stay refused, and a dependent's row is never served.
+  - **A script action's body is rebound.** The override's `body` runs in place of the base's handler after one resync (`kernel:ready`, `metadata:reloaded`, or the publish itself). Removing the override binds the base's handler again on the next resync, without re-registering the base. `@objectstack/objectql` adds `ObjectQL#registerActionOverride(objectName, actionName, handler, packageName)`, which binds a handler over the one registered under the key and keeps it beneath. `removeActionsByPackage(packageName)` now removes the package's entries from each key's stack, so the handler beneath is bound again. `registerAction` of another package's handler under a key an override holds takes the place beneath the override instead of replacing it: a marketplace-installed base binds its handlers in the install plugin's `kernel:ready` rehydrate, after the boot's resync bound the override, and after a restart the override still runs (and a restore runs the base's body).
+  - **An override may add a gate and never remove one (ADR-0066 D4).** The write gate refuses, with the new rule `declared_action_widens_access` (`403 NOT_OVERRIDABLE`), an action override that drops a capability the base's `requiredPermissions` names, sets `ai.exposed: true` on an action the base keeps off the agent surface, or drops the base's `ai.requiresConfirmation: true`. The refusal names each widened gate. Adding a capability or turning a gate on is admitted. Everything else (`label`, `type`, `target`, `body`, `params`, `visible` and the rest) is replaced whole, so an override can still change what runs, including a body that runs system-elevated, but only for people who could already run the action. `@objectstack/metadata-protocol` exports `actionOverrideWidening(baseItem, overrideItem)`, which returns the widened gates as clauses, and `OverrideWriteClosure.baseItemOf`, through which a door hands the judge the base's own item. `@objectstack/cli` (`os validate`) and `@objectstack/cloud-connection` (the managed install) pass it.
+  - The action switch route in the packaged-base refusal sentences is now spelled `POST /api/v1/actions/_activation/:object_or_global/:action`, which keeps the declared-save sentence within the REST door's 500-character message bound for long action names.
+  
+  Skills-docs: follow-up #30505
+- fc869c2: feat(spec)!: a seed is create-only by default — an omitted `mode` is `ignore`, so a restart, an install or an upgrade never writes a seeded value back over a customer's edit (#30081)
+  
+  Clause-②: yes (narrowing) — the declared default of `Seed.mode` (and of `SeedLoaderConfig.defaultMode`, now the same field) moves from `upsert` to `ignore`. The accept set is unchanged and every authored `mode` parses exactly as before; what narrows is what a replay does for a dataset that declares no mode: it no longer updates an existing row.
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered seed-mode-default-create-only -->
+  
+  **BREAKING** for a seed dataset that declares no `mode` and relies on a replay to write its values back onto existing rows.
+  
+  - **Before.** A seed with no `mode` replayed as `upsert`. A seed loads again on every single-tenant boot (production included, under `os start` and `os serve`), on every package install or upgrade and on every publish, so each replay wrote the shipped value back over a customer's edit to a seeded row, with no warning. Measured on a production boot before the change (card comment 6633189577): an API edit to a seeded row went back to the shipped value on the next restart, after a boot-artifact upgrade, and after an `os package install` upgrade.
+  - **Now.** `SeedSchema.mode` defaults to `ignore`: a replay inserts a record whose row is missing and leaves an existing row exactly as it is. A row nobody edited is not rewritten either, so its `updated_at` does not move, and a value changed in a later seed version reaches only a row the load creates. Maintainer ruling 6631016988 (option A).
+  - **One default, stated once.** `SeedLoaderConfig.defaultMode` is `SeedSchema`'s own `mode` field, default included. The six replay sites (`@objectstack/runtime`: the inline boot seed, the per-organization replayer, the dev hot reload and the published-seed apply; `@objectstack/metadata-protocol`: the publish batch; `@objectstack/cloud-connection`: install, reseed and the rehydrate healer) stop restating `defaultMode: 'upsert'`, and the save door reads the schema's default for a seed item that declares no mode.
+  - **Compiled artifacts.** `os build` stores the parsed seed, so a package built before this change carries a written `mode: "upsert"` on every dataset. The loader cannot tell that value from an authored one, and nothing converts it: such a package keeps today's replay until it is rebuilt.
+  - **Installed packages.** A package installed with `os package install` (`@objectstack/cloud-connection`'s install-local) keeps the body it was installed with in its install ledger, and the sample-data reseed (`POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data`) replays that body's datasets in their stored mode. So an entry installed from a pre-change artifact keeps writing the shipped values back over edited rows on every reseed until the **rebuilt artifact is re-installed**; rebuilding alone changes nothing for it. An entry installed from a rebuilt artifact reseeds create-only: it puts back the rows that are missing and leaves an edited row as it is. The ledger's other replays never overwrite: the boot rehydrate seeds nothing, the heal seeds only when every seeded object is empty, and the per-organization replay runs only for a new organization.
+  - **Stored `seed` items.** A `seed` metadata item stored with no `mode` is not rewritten either. Its next publish parses it to `ignore`, so that publish inserts only the rows it is missing where it used to write its values back over existing rows, with no signal.
+  - **Unchanged.** An explicit `mode: 'upsert'` still writes every declared column back on each replay, and `columns: { FIELD: { applyOn: 'create' } }` still exempts the columns a customer or a job owns. `insert`, `update` and `replace` behave as before.
+  
+  **The remedy.** Rebuild every package so its compiled artifact carries the mode its source declares, and re-install the rebuilt artifact wherever the package was installed with `os package install`, so its install ledger carries that mode too. To put an installed package's sample data back to the shipped values, purge it (`…/purge-sample-data`) and then reseed. For a dataset that is reference data the package must keep current, declare `mode: 'upsert'`, and mark the columns the customer or a job owns `applyOn: 'create'`. Leave `mode` unset for business and starter data the customer owns once it is loaded.
+- 8589756: feat(runtime,cloud-connection): the marketplace install, the sample-data reseed, the restart heal and the per-organization seed replay pick `Seed.locale` datasets by the organization's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  An app that ships one demo dataset per language market (`locale: ['zh-CN']` beside `locale: ['en-US']`) now gets the right one on every path that seeds an organization, not only on the boot path. Before, the install paths passed no locale, so a Chinese organization received the English rows and a page of refused-insert warnings for the Chinese twins (or both sets, where no unique key stopped the second), and one server's per-organization replay gave every new organization the boot app's `i18n.defaultLocale`.
+  
+  The locale is resolved for the organization the rows land in. The first answer wins:
+  
+  1. the organization's `localization.locale` setting, through the settings service's own cascade (an env override, the organization's row, the deployment-wide `global` row). Only a value somebody set counts: the manifest's built-in `en-US` default (`source: 'default'`) is not the organization's choice;
+  2. `sys_user.locale` of the person installing, reseeding or founding the organization;
+  3. the app's declared `i18n.defaultLocale`.
+  
+  Nothing answers ⇒ no locale is sent, and every dataset loads as before (the loader still warns, naming each locale-scoped dataset it let through). A dataset without `locale` loads whatever the answer is. When no dataset in a load declares `locale`, neither the setting nor the user is read.
+  
+  - **The per-organization replay** resolves the locale per organization, at replay time, instead of once at boot. At founding the organization has no setting of its own yet, so its founder's language decides; an organization inserted with no person behind it takes the app's default. The replayer (`seed-replayer` service) now takes an optional second argument, `(organizationId, { userId })`; a caller passing only the organization id works as before.
+  - **`@objectstack/organizations`**: the org-scoping middleware hands the replayer the insert's attributed user (better-auth's create runs as system with the signed-in creator attributed) as the founder.
+  - **`@objectstack/cloud-connection`**: the install and the reseed pass the installing user and the package's own `i18n.defaultLocale`; the restart heal passes the package's default only (no person starts it); the replayer this plugin registers when the host has none passes the founder and no app default, because it replays every installed package at once.
+  - **`@objectstack/runtime`** exports the shared producer: `resolveSeedLocaleForLoad(host, { seeds, organizationId, userId, appDefaultLocale })`, `appDefaultSeedLocale(body)`, `seedsDeclareLocale(seeds)`, `describeSeedLocale(resolved)` and the `ResolvedSeedLocale` / `SeedLocaleQuestion` / `SeedLocaleSource` types.
+  - A settings or user read that throws is not skipped over: the seed reports the failure (the install's seed summary, the reseed's `RESEED_SKIPPED`, the replay's warning) and writes nothing, rather than seeding another language over a choice that could not be read. A host with no `settings` service skips step 1.
+  
+  Unchanged: the boot seed and the dev hot-reload seeder still filter on the app's `i18n.defaultLocale`; package apply and draft publish still pass no locale.
+- a91ad42: fix(metadata-protocol,cli,cloud-connection)!: an object extension that re-declares an owner's field in `fields` beyond its display properties is refused at the save and publish doors, at `os validate` and at the install door, with a prescription naming `fieldPatches` (ADR-0146 D10) (#30610)
+  
+  Clause-②: no (narrowing) — the `object_extension` save, publish and restore doors, `os validate` and `POST /api/v1/marketplace/install-local` refuse an `objectExtensions[].fields` entry naming a field the extended object's owner declares when it changes anything outside the display-property whitelist, a body they accepted before. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: no move — `skills/**` and `content/docs/**` already teach `fieldPatches` as the way to change a base field's display, and no page teaches taking an owner field over through `fields`; the prescription ships in the refusal text.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A refused shape with no mechanical rewrite: which keys of a re-declared field were meant as display and which as a takeover is a judgement about the field, and no first-party artifact (examples, HotCRM) writes the shape. A stored row that already re-declares an owner field keeps registering with the registry's warning, and is judged when it is next saved or published. -->
+  
+  **BREAKING** accept-set narrowing at the metadata save and publish doors (`PUT /api/v1/meta/object_extension/NAME`, draft and live, the per-item and package publish, and the restore doors), at `os validate`, and at the marketplace install door.
+  
+  - **Before.** An extension written into `fields` with the name of a field the extended object's owner declares replaced the owner's field whole when the registry folded the object: a module package could turn the owner's `amount: number` into `text`, drop its `required`, or make it `readonly`, and every reader judged the field on the extension's definition. Only the registry's warning named it.
+  - **Now.** Such an entry is refused when it changes anything outside the display-property whitelist (`label`, `description`, `inlineHelpText`, `placeholder`, an option's `label`): `400 VALIDATION_ERROR` at the save and publish doors (located in `issues[]` at `fields.FIELD`), `422 VALIDATION_ERROR` at the install door (every entry in `details.refusals`), and exit 1 with the entry on `errors` at `os validate`. Each refusal names the keys the entry changes and prescribes `fieldPatches`. Both bodies are read through the field schema first, so a default the parse stamps is no change; options are compared by stored value, so a relabel or reorder is no change.
+  - **Unchanged.** A re-declaration that changes only display properties is admitted. An extension of an object its own package owns is not judged, nor is an added field. `os validate` judges an owner declared by another package of the same artifact; a target outside the artifact is judged at install, against the installed owner. The registry's warning on a re-declared field stays. `os build` does not yet run the check.
+  
+  **The remedy.** Move a display change of an owner's field into the extension's `fieldPatches` (the field name as its key, the whitelisted properties as its body), and add a behaviour of your own as a new field under a new name.
+- 45916c9: feat(cloud-connection): the install-local door carries a declared rename instead of refusing it `501`
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  An upgrade whose version declares `renamedFrom` on a field no longer answers `501 NOT_IMPLEMENTED`. Before any write, each declaration is read against the physical table by the driver's own rule; one that cannot be carried answers `422 VALIDATION_ERROR` with `details.refusals` (object, field, old key, reason), and a table that cannot be read answers `503`. The door's own refusals: an extension's field naming a key its own package never contributed to that object (`outside_package`), a renamed field turned to a type that stores no column (`destructive_type`), and a driver that renames no column while a rename is pending (`transport`). The carry runs right before the new version registers; a carry that fails puts back the tables already carried (`500`), and a register that fails puts them back too. The success answer lists each carry in `renamesCarried` (`object`, `table`, `from`, `to`), omitted when there is none.
+- 84aabea: feat(sync-in): a job pulls a mapping's `datasourceSource` — the federated object it names is read in windows and copied into the `synced` target (ADR-0153 D1, D2, D8)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  Skills-docs: none — no published skill teaches `connectorSource` or `datasourceSource` today (`git grep` over `skills/` finds neither); the hand-written guide this change made false, `content/docs/automation/jobs.mdx` ("Pulling a mapping"), is corrected in the same change, and the sync-in guide and skills are ADR-0153's P3 guide + skills child
+  
+  A mapping's `datasourceSource` now does what it declares. A `job` whose `pull` names such a mapping is scheduled, and each run reads the federated object the mapping names and writes its rows into the mapping's `synced` target through the import runner, as a connector pull does. Before this release that job was not scheduled, and the key warned its author that nothing read it.
+  
+  - **Two read paths (ADR-0153 D1).** A built-in driver (the SQL dialects, `memory`, `mongodb`, `turso`) is read in aligned windows, each whole and paged by the key the object's `external.columnMap` maps onto `id`. A plugin driver is read through the engine's floor in windows bounded on both sides and halved while they come back over the datasource's row cap. Every read names its own `limit`, so a deployment's default page size never cuts a window.
+  - **Judged again before the first read.** The target is `managedBy: 'synced'`; the source is a federated object on a non-managed datasource; its `columnMap` maps a column onto `id` (`source_key_missing`); `watermark.field` is a `datetime`, `date` or `scale: 0` number field; a `fieldMapping` entry copies it unchanged onto a target field of its type (`watermark_field_unmapped`). The build already refuses each of these; the run-time judgment covers a stack the build never saw. Each refusal is a `ConnectorPullError` with `code`, `status` and `reason`.
+  - **Whose rows (ADR-0153 D8, the read half).** Under a walled tenancy posture (`isolated`, `group`), a source that declares its own `organization_id` is read for the job's organization only, on every read. A shared source (`tenancy: { enabled: false }` or `systemFields: { tenant: false }`) is read whole. A source that states no scope is refused (`source_organization_scope_unstated`), and so is a walled source pulled in no organization (`job_organization_missing`). Under `single` the source is read as configured.
+  - **Where a run starts.** Each run reads on from the read position the last run of the same mapping (its package and name) committed in the same organization, stored on `sys_sync_run` (ADR-0153 D7, in the same release: see its own entry), so it reads only the rows written since, plus the rows sharing that position, which the keyed upsert writes again harmlessly. The first run, every run of a mapping that declares `full: true`, and a run whose mapping now reads another source object or field or writes another target, read from `watermark.start`. `deletePolicy` and `deletedField` still warn their author that they change nothing yet.
+  - **The pull result names its source.** `ConnectorSourcePullResult` (`@objectstack/spec/contracts`) is now a union told apart by `source`: the connector arm (`connector`, `action`, `watermark`; `source` optional, read as `'connector'`), and the datasource arm (`source: 'datasource'`, `object`, `datasource`, `readPath`, and `watermark: { field, from, committed? }`). An implementation that answers the connector shape still compiles. A caller that reads `connector` or `action` narrows on `source` first. `ConnectorSourcePullConnectorResult`, `ConnectorSourcePullDatasourceResult` and `ConnectorSourcePullResultBase` are new exports.
+  - **The windowed read**, two corrections: on a window read in several pages, an absent high-water value reads as the window's own start, and a commit never goes below where the run started. An unreadable watermark value in an over-cap answer is refused as `watermark_not_exact`, the data's fault, rather than `sync_bounds_not_pushed`.
+  - `@objectstack/objectql` exports `resolveExternalRowCap`. `@objectstack/service-automation` now depends on `@objectstack/plugin-security` at run time, to read a federated object's organization scope with the one reading the organization wall uses.
+  - A pull job whose mapping declares no source is refused at bind naming both keys, `connectorSource` and `datasourceSource`, and the install-local door's remedy names both.
+
+### Patch Changes
+
+- 769adff: feat(metadata-protocol, metadata-core)!: the ensure door creates no customization pair for a kernel package, and every pair question carries the installed manifests
+  
+  Clause-②: yes (narrowing) — both arms. Narrowing: `POST /api/v1/packages/:id/ensure-customization` (and the protocol's `ensureCustomizationPackage`) answers a kernel base, a package of scope `system` or `cloud`, with `409 RESOURCE_CONFLICT` and a sentence saying kernel objects are not customizable in this version, where it created `<id>.custom`; `POST /api/v1/automation/:name/clone` of a flow a kernel package ships, with no `package` named, answers that `409` where it answered `200` with the copy in `<id>.custom`; and the exported `pairOf`, `isPairOf` and `appOf` (`@objectstack/metadata-core`), `isServedOverrideRowOf` and the `installed` member of `OverrideWriteClosure` (`@objectstack/metadata-protocol`), and `resolveFlowPrecedence` / `describeFlowContender` (`@objectstack/service-automation`) take the installed-manifest lookup as a required argument. Widening: five new exports, `installedManifestsOf`, `InstalledManifestLookup`, `AppLookupManifest` and `InstalledPackageSource` (`@objectstack/metadata-core`) and `kernelPackageScope` (`@objectstack/metadata-protocol`), and one new `noticeCode` value on the permission-set clone answer, `PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE`, for a copy of a kernel-shipped set that now lands environment-wide.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped and no stored row is read differently, converted or dropped: the narrowing is one runtime refusal at one door, for one kind of base, whose remedy is that no pair exists to create; the existing pairs and the overrides in them stay served exactly as before. The retyped exports are runtime functions with no metadata surface, and the compiler names every caller that has not passed the new argument, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for a caller that ensures the customization pair of a kernel package — a platform package of scope `system` (users, organizations, security, settings and the rest of the platform suite) or `cloud` — and for a TypeScript importer of the pair helpers named above.
+  
+  - **Why (ruling records 6691022506 and 6691217245 on ADR-0146 D3).** The customization unit is the App, and the kernel is not an App a customer owns: it ships with the runtime, at the runtime's version (installing it whole is the goal ruling 6691022506 records, not yet what every `serve` tier does). In this version no kernel object is customizable, so the door creates no pair for one. Which kernel objects a later version opens (a whitelist) is that version's decision.
+  - **What the door answers.** `409 RESOURCE_CONFLICT`, the status and code the door already answers when a base's state rules the pair out (a writable base, no namespace, a version that is not SemVer). Nothing is created or written. Every other base is answered exactly as before.
+  - **A kernel pair that already exists stays.** An earlier version of the door may have created `<kernel id>.custom` on a deployment. It stays installed, the overrides inside it stay served by every read of the kernel item's name, and a further save into it is still admitted. Only the ensure call is refused.
+  - **A copy of a platform permission set.** `POST /api/v1/security/permission-sets/:name/clone` with no `package` named landed the copy of a kernel-shipped set (`member_default` and the platform's other sets) in `<kernel id>.custom`. It now saves the copy environment-wide, as it already does for a set authored in the environment, with the notice code `PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE` and a sentence naming the kernel package and `package`. A Console that does not know the new code shows that sentence as sent. Naming a writable package with `package` still lands the copy there. The flow clone door answers a kernel-shipped flow with the ensure door's sentence.
+  - **The closes stay shut on a kernel item.** A package-less write, or a write naming the kernel package, onto an item a kernel package ships is still refused `403 NOT_OVERRIDABLE` exactly where it was refused before (ADR-0146 D11). The sentence no longer names the pair as the fix, since there is none to ensure: it says kernel objects are not customizable in this version. A later version's kernel whitelist is what opens such an item.
+  - **The lookup.** Which pair customizes a package is asked through the installed manifests of the registry the caller serves (`installedManifestsOf(registry)`). Today the answer is unchanged for every package: `appOf` is still the identity. The argument is threaded through every site now so that resolving a module to its App is one change in `appOf`.
+  - **`os validate`'s customization-namespace advisory** now skips a package that is itself a pair through `isCustomizationPackage`, the one spelling of that question. An id ending in `.custom` that no base derives (`a.custom.custom`, a bare `.custom`) is now judged like any other package.
+  - **Who moves, and the fix.** A script or client that ensured a kernel package's pair drops that call: the kernel item is served as it ships, and an existing pair keeps serving what it holds. A vendor package that declares `scope: 'system'` or `'cloud'` in its own manifest is read as kernel here, as `isWritablePackage` already reads it; its remedy is to drop the scope, which belongs to the platform's own packages. A TypeScript importer of the helpers passes `installedManifestsOf(engine.registry)`, or `installedManifestsOf(undefined)` where it holds no registry.
+- 97e4249: feat(service-push)!: push sends through the hosted push relay, authenticated by the server's cloud binding
+  
+  Clause-②: yes (narrowing) — the relay transport (`transport: 'relay'`, and the default `{}`), refused at init until now, is served; the relay wire narrows: `PushRelayPayloadSchema.data` refuses a key `PushDeliveryDataSchema` does not declare instead of stripping it, and a `RATE_LIMIT_EXCEEDED` relay error must not answer `retryable: false`; `PUSH_RELAY_NOT_SERVED_MESSAGE` leaves `@objectstack/service-push`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/service-push#PUSH_RELAY_NOT_SERVED_MESSAGE) the retired export is the text of an init refusal that no longer happens; no packages/spec schema, registered node type, ADR-0087 conversion surface or stored shape names it. The two wire narrowings are on the server-to-relay request and the relay's error answer, which no metadata author writes and nothing stores, so there is nothing for objectstack migrate meta to rewrite -->
+  
+  **The hosted push relay is served.** A stack that requires `push` with a relay configuration (`transport: 'relay'`, `push: {}`, or no `push` key) now boots and sends each push to the cloud's push relay at `/api/v1/cloud/push/send` under the control-plane URL (`OS_CLOUD_URL`, else `https://cloud.objectos.ai`); a relay block's `endpoint` overrides it. Each request carries one ID-only delivery (the notification id, its same-server route, the server's origin and one generic line in the recipient's language); the title and body never leave the server.
+  
+  - **Authentication.** `@objectstack/cloud-connection` registers a new kernel service, `cloud-binding` (`ICloudBindingService` in `@objectstack/spec/contracts`: `credential()`, `bound()`, `controlPlaneUrl()`), and its own control-plane routes read the credential through it. The push service reads it on every send and puts it in the `Authorization` header only.
+  - **An unbound server boots.** It logs one warning at `kernel:ready`; until the server is bound on the Cloud connection setup page, the push service lists no vendor, so the push channel is suppressed as `transport_not_configured` and notifications reach users in the in-app inbox. The bind takes effect without a restart.
+  - **A deployment with no control plane** (`OS_CLOUD_URL=off`, `none`, `local` or `disabled`) refuses a relay configuration at boot, naming the in-app inbox and the direct transport as the two ways out. The direct transport is unchanged.
+  - **Answers.** `ok` is sent, `invalid` retires the device row, `retry` is retryable; a 401 fails the push without a retry, naming the lapsed binding; a 429 rate limit is retryable and a used-up quota is not.
+  - **The notice line.** The push channel picks the generic line by the recipient's language (`sys_user.locale`, then the deployment default, then English) and hands it to the push service as `PushMessage.notice`.
+  - `isControlPlaneDeclined` and the "no control plane" spellings move to `@objectstack/core`; `@objectstack/cloud-connection` re-exports `isControlPlaneDeclined` unchanged.
+  
+  **BREAKING — what narrows, and what to do:**
+  
+  - FROM `PUSH_RELAY_NOT_SERVED_MESSAGE` TO `PUSH_RELAY_AIR_GAPPED_MESSAGE` (both exported by `@objectstack/service-push`): the relay is no longer refused for being unserved, only on a deployment that declared it has no control plane. A test that matched the old text matches the new constant, or asserts that the relay boots.
+  - The relay payload's `data` is judged strictly: a sender puts only `notificationId`, `route` and `origin` in it. A content key such as `title` was stripped before and is now refused with the ID-only guidance.
+  - A relay's `RATE_LIMIT_EXCEEDED` error answers `retryable: true`, or leaves `retryable` out (it defaults to `true`). A relay that answered `retryable: false` on a rate limit is now refused by the wire schema.
+- afc761c: fix(cloud-connection,cli): an exported `<base>.custom` installed on another environment lands in that environment's writable pair, and its overrides are served (ADR-0146 D2 / D3)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `os package install <export>/objectstack.json` of a base's paired customization package answered success and printed "Package installed into the running kernel", but the install registered the pair as code. None of its overrides was served, `GET /packages/<base>/customizations` listed none of them, and the pair turned read-only, so `ensure-customization` answered `writable: false` and every further save into it was refused `WRITABLE_PACKAGE_REQUIRED`.
+  - **Now.** `POST /api/v1/marketplace/install-local` installs a pair as what it is. The target's own pair is answered by its ensure door, which creates it when absent. Every item of the body is then written into it through the save door a Studio edit takes, with `mode: 'publish'` and the installer as actor, in load order. The overrides are served at once, the customization read lists them, and the pair stays editable. Nothing is registered as code or written to the cached-manifest directory. The answer carries `customizationPair` (`basePackageId`, `packageId`, `created`, `writable`), `writtenCount` and `written`, and the CLI prints them.
+  - **Refusals, nothing written.** A body key with no item form (code, a `translations` bundle, a key the install-key table does not classify), a nameless item, or two items claiming one name: `422`, every problem listed. A pair manifest the ensure door would not write: `400 PLUGIN_MANIFEST_INVALID`. A pair inside a multi-package artifact: `422`. A pair already read-only on the target: `409 RESOURCE_CONFLICT`, asked before the ensure door. If an earlier install registered it as code, the message names the uninstall and the restart that clear it. The ensure door's own refusal is relayed with its status and code.
+  - **A save refused part-way.** The answer is a failure with the save's code and status, naming the item and where it sits in the body. A pair this install created is deleted again. A pair that existed before is kept, and the answer lists the items written and the ones not written.
+  - **The CLI.** A runtime that predates this answers a pair as a managed install. The CLI now prints that as an error with the way back (uninstall, upgrade and restart, install again) and exits 1, instead of printing success.
+- bc254be: fix(cloud-connection,cli): the install-local ledger follows `OS_HOME`, so `os dev --fresh` and a second instance under another `OS_HOME` start without an earlier run's installs
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Now.** With no `storageDir`, the install-local ledger (`LocalManifestSource`, and so `MarketplaceInstallLocalPlugin`) lives at `$OS_HOME/installed-packages` when `OS_HOME` is set, and at `CWD/.objectstack/installed-packages` when it is not. Before, it was always the working directory, so `os dev --fresh` (a fresh `OS_HOME` and database) rehydrated a package an earlier run installed, and so did a second instance under another `OS_HOME`.
+  - **Unchanged.** `os dev` without `OS_HOME` keeps the ledger in the project, beside its database. `os start` in project mode sets `OS_HOME` to `CWD/.objectstack`, which is the same directory as before. An explicit `storageDir` is used as given.
+  - **Existing installs.** When the ledger moved (an `OS_HOME` other than `CWD/.objectstack`) and its new directory does not exist yet, the boot copies the `.json` files of the working-directory ledger into it once, and logs a warning naming both directories. The old files are left in place and are not read again; remove them. A copy that fails is logged as an error, and the next boot tries again. Under `os dev --fresh` nothing is copied.
+  - **`os doctor`** reads the same directory the runtime does, `OS_HOME` included.
+  - **The widening.** `@objectstack/cloud-connection` exports `resolveInstalledPackagesDir({ env?, cwd? })` (returns `{ dir, legacyDir }`), `INSTALLED_PACKAGES_HOME_SUBDIR`, and `LocalManifestSource.legacyDir` / `adoptLegacyEntries()`. `os doctor` takes the ledger directory from `resolveInstalledPackagesDir`; a `@objectstack/cloud-connection` without it is reported as a reader that does not declare the ledger directory. Align the two packages' versions.
+- 6e8ec73: feat(cloud-connection): `GET /api/v1/marketplace/install-local/:manifestId/sample-data` answers how many of an installed app's sample records a purge would delete now
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **New read-only route.** `GET /api/v1/marketplace/install-local/:manifestId/sample-data` answers `{ success: true, data: { manifestId, count, unidentified } }`. `count` is the number of rows `POST …/purge-sample-data` would delete if it ran now, found by the purge's own matcher with nothing deleted. A record a user added is not counted, and neither is a sample record whose key field (its dataset's `externalId`) was edited, because the purge deletes neither. A sample record edited only in other fields is still a sample row: the purge deletes it and the count includes it. `unidentified` counts the sample records the purge would report in `errors` and leave in place (no usable key value, or a key two rows carry). Before this, the count was known only from the install answer's `data.seeded`, so after a reload no API could say how much sample data was left; the installed-apps listing's `withSampleData` says only whether any is left.
+  - **Same rules as the purge.** It requires `manage_metadata`, answers `404` for a package that is not installed and `422 OS_PROTOCOL_INCOMPATIBLE` for an entry this runtime refused to load, and counts in the purge's scope (the caller's active organization under an organization wall, every row without one). A walled session with no active organization gets `count: 0`, the same answer as the listing's `withSampleData: false` for that session. A package with no seed datasets gets `count: 0`. With no data engine or metadata service it answers `500 DRIVER_UNAVAILABLE`, never `0`.
+  - **It cannot delete.** It is a `GET` and accepts no query parameter: any parameter (`dryRun`, `confirm`, …) is refused with `400 VALIDATION_ERROR` before any row is read.
+  - **Unchanged.** What the purge deletes, its permission and its answer; the listing's `withSampleData`.
+  - `@objectstack/cloud-connection` now depends on `@objectstack/rest`, for the shared closed-query-set refusal message.
+- 4e8bbbf: fix(cloud-connection): an installed package's sample rows are owned by the person who seeded them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A package installed through `POST /api/v1/marketplace/install-local` used to seed its sample rows with no `owner_id` and no `created_by`: the seed loader writes as the system, and the boot seed's first-admin hand-over never reaches an install's seed. Rows nobody owns are invisible to every `readScope: 'own'` grant and editable by nobody below Modify All, so even the administrator who installed the app saw them only through Modify All, and "My" views stayed empty.
+  
+  Each seeding door now writes the person it has into `owner_id` and `created_by` of the rows its load created, right after the load:
+  
+  - an install, and a reseed: the person who called it;
+  - the boot heal of emptied tables: the installer the install ledger records (`installedBy`), when that is still a user; otherwise the rows keep no owner and the log says why;
+  - the per-organization replay: the organization's founder, when the replay is handed one; otherwise the rows keep no owner and the log says so.
+  
+  From then on a sample row is an ordinary record under the ordinary permission rules. Nothing is added for sample data: under `private` sharing a colleague who holds the package's default permission set does not see the installer's sample rows, as they would not see any other record the installer owns; share them, or reassign them, the way you would any record.
+  
+  Only rows the load created are written (the loader's `insertedIds`), never a pre-existing row a seed record's key matched, and only where the field is still empty, so an owner a seed record authors (for example `owner_id: cel\`os.user.id\``) is kept. The write runs as the system with automations off, like the boot seed's own ownership hand-over: no app hook, flow, approval or notification fires for it. Platform (`sys_*`), managed and federated objects are left alone. A row the engine refuses to update keeps what the seed wrote, and the door logs a warning naming the object.
+  
+  Rows seeded before this release keep no owner: a reseed leaves rows that are already there alone, so purge the sample data and reseed it to have it written again, owned by the person who reseeds. The purge's sample-row identification is unchanged.
+- 60fe44f: feat(cloud-connection,metadata-core): an install the protocol handshake admitted without checking says so in its answer, not only in the server log
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/cloud-connection`: `POST /api/v1/marketplace/install-local` answers `data.protocolCheckSkipped`** when the ADR-0087 handshake admitted the package without checking it: `{ reason, packageId, protocolVersion, message }`, plus `requiredRange` and `rangeSource` for `reason: 'unparsed-range'`. `reason` is the handshake's own verdict: `no-range` (the package declares no `engines.protocol`) or `unparsed-range` (it declares a range the handshake cannot read). `protocolVersion` is the protocol the package was installed under unchecked, and `message` says so in plain words for the person who pressed Install. It is on all three success answers (managed, `unmanaged`, and a paired customization package), and omitted, not nulled, when the range was checked, so that answer's key set is unchanged. The `warn` log line stays as it was.
+  - **`@objectstack/metadata-core`: `assertProtocolCompat` returns the verdict it admitted the package under** (new exported type `ProtocolCompatAdmitted`; it returned `void`), and the `no-range` and `unparsed-range` verdicts of `checkProtocolCompat` carry `protocolVersion`, the version they were judged against. A door that answers a caller reads the skipped check from the handshake itself instead of judging the range a second time.
+- 7d11067: Clause-②: no
+  Metadata-protocol: none
+  
+  The one-time copy of the working-directory install ledger into its `OS_HOME` location (#30217) now creates its staging directory with an exclusive `mkdirSync` of a randomly named sibling instead of `mkdtempSync`. Behaviour is unchanged: the copy still lands in a unique sibling of the ledger directory, is renamed into place, and is removed if the copy fails. This repairs the red `main` build (#30467), where the repository's in-tree scratch scan could not read the `mkdtempSync` base.
+- 63de248: fix(objectql, metadata-protocol, cloud-connection)!: a declared `.custom` action override is keyed and judged the same way at every door, and only its declared base's handler slots beneath it
+  
+  Clause-②: yes (narrowing) — the protocol door (save and publish) now refuses a declared action override whose `objectName` is not the base action's, with `403 NOT_OVERRIDABLE` and rule `declared_package_ships_no_such_item`, the refusal `os validate` and the managed install already gave it; the save door used to admit it. The managed install now admits a re-install of the pair whose override relaxes an earlier tightening back to the base's own gates, which it used to refuse with `declared_action_widens_access` while the save door admitted it. Every other input answers as before.
+  Metadata-protocol: none
+  Skills-docs: follow-up #30505 — the declared action override's docs card; it owes one sentence that an override keeps the base action's `objectName`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the action schema and the `overrides` declaration keep their shapes. What moves is which door admits one declared override shape, so all three doors give one answer, and the refusal carries its own remedy; nothing at rest is rewritten. -->
+  
+  **BREAKING** accept-set narrowing at the protocol door (`@objectstack/metadata-protocol`, ADR-0146 D2/D9): a declared action override names its base's action by `<objectName>:<name>`, the identity `os validate` and the managed install key it on.
+  
+  - **Before.** The save and publish doors matched a declared action override's base by name alone, so an override in the base's `.custom` pair could move the base's action to another object. Its handler was not rebound there, and `os validate` and the install door refused the same body.
+  - **Now.** The save door refuses it as the other two doors do: the base ships no action of that name on that object. Keep the base action's `objectName` in the override, or remove `overrides` and add the action under the pair's own name.
+  
+  `@objectstack/cloud-connection`: the managed install judges a declared action override against the installed base's code artifact (`SchemaRegistry#getArtifactItem`), as the save door does. The protocol's per-package listing it read before serves an armed override under the base's envelope, so a re-install of the pair was judged against its own previous version.
+  
+  `@objectstack/objectql`: `ObjectQL#registerActionOverride` takes the package the override declares (`overrides.package`) as an optional fifth argument, and the authored-action resync passes it. `registerAction` under a key such an override holds slots the handler beneath it only when the registry's code artifact of the action belongs to that package, on that object; any other registration, one with no package included, replaces the override and is warned like every other handler collision. Before, any other package's registration slotted beneath it, so a row of another base's pair bound before the real base registered kept running after the real base's handler arrived, while every read served the real base's action; and a registration with no package slotted beneath it at `debug`, where the method's docblock promises a warning.
+- 1030a80: fix(metadata-protocol, cli, cloud-connection): a declared action override moved to another object is told which object the base ships the action on
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `declared_package_ships_no_such_item` refusal (`403 NOT_OVERRIDABLE`) for a `.custom` action override whose `objectName` differs from the base action's used to say the base "ships no action named 'X'" and to "correct the name", though the name was right. It now names both objects and tells the author to keep the base action's `objectName`, at all three doors (the save and publish door, `os validate`, the managed install), from one sentence builder in `judgeOverrideWrite`. A name the base does not ship at all reads as before. The rule, code and status are unchanged.
+- 000a4c0: fix(cloud-connection): name the `cloud-binding` service once, in its contract, and read an empty `controlPlaneUrl` one way
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `@objectstack/spec/contracts` now exports `CLOUD_BINDING_SERVICE` (`'cloud-binding'`) beside `ICloudBindingService`, the way the sibling contracts export their service names. `@objectstack/cloud-connection` registers the binding under it and `@objectstack/service-push`'s relay sender reads it, so the registrar and the reader can no longer spell the name two ways. `@objectstack/service-push` keeps exporting `CLOUD_BINDING_SERVICE`, now a re-export of the contract's constant with the same value.
+  
+  `CloudConnectionPlugin`'s routes now take their control-plane URL from the `cloud-binding` service they register, so the routes and the binding read the `controlPlaneUrl` option the same way:
+  
+  - An explicit empty (or blank) `controlPlaneUrl` means "cloud not configured" for both: the routes answer `CLOUD_UNCONFIGURED` as before, and `controlPlaneUrl()` now answers `''` instead of the production default.
+  - A declined `OS_CLOUD_URL` (`off`, `none`, `local`, `disabled`) under an absent option is "cloud not configured" for the routes too, as it already was for the binding.
+  - An absent option falls through to `OS_CLOUD_URL`, then the ObjectStack-operated default, for the routes too, as it already did for the binding and for the marketplace plugins.
+  
+  `objectstack serve` and the showcase app are unchanged: they compose the plugin only with `resolveCloudUrl()`'s non-empty answer, which both readings return as is.
+- f4d9c09: feat(metadata-protocol,cloud-connection): an unmanaged install can take a target namespace
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **An unmanaged copy can be installed under a namespace of its own.** `importUnmanagedPackage` and `POST /api/v1/marketplace/install-local` (with `installMode: 'unmanaged'`) take an optional `targetNamespace`. The copy's base takes it as its `namespace`, every copied object name takes it in place of the package's (a name without the package's prefix takes it in front), and every reference to a renamed name follows. Absent, the copy keeps the package's namespace exactly as before.
+  - **One rename, two doors.** The copy is renamed by the rules `duplicatePackage` already applies, now one function both doors call: view items and view containers follow their object, translations are named `<targetNamespace>_<locale>` with the object keys inside them renamed, a field keeps its key, and free text is renamed only at a whole prefixed object name.
+  - **Refused before anything is installed.** A `targetNamespace` the `manifest.namespace` rule refuses, or a platform-reserved one (`base`, `system`, `sys`), answers `400 INVALID_REQUEST`. So does a copy the names cannot make: an object whose copy name another object's copy takes, a copy name that is not a legal item name or is longer than its storage allows (63 characters for an object's table, 255 for an item name), and a renamed key that meets a key the item already holds — each item named. The same-name check (`409 RESOURCE_CONFLICT`) is judged on the renamed names, and a `targetNamespace` another package owns is refused `409`.
+  - **A managed install is never renamed.** `targetNamespace` beside a managed install (or no `installMode`) answers `400 INVALID_REQUEST` before anything is fetched.
+  - **The rename is recorded.** The import's answer carries `sourceNamespace`, and the install-local answer's `installedFrom` carries the package's own `namespace` beside its id and version. Neither appears when the copy kept the package's namespace.
+  - **A bare object's view container follows it on a duplicate too.** A view named by an object of the package takes that object's copy name, so `duplicatePackage` no longer leaves a bare object's container under the name the source's container holds.
+- 1ff9944: feat(cloud-connection,metadata-protocol): an unmanaged install can copy the package's sample data, when asked (`seedSampleData: true`), owned by the installer and purged by its seed receipt
+  
+  Clause-②: yes (widening) — `POST /marketplace/install-local` accepts `seedSampleData` beside an unmanaged install (and its answer may carry `copyRecord` when the door's record of the copy was not kept), `POST /marketplace/install-local/:id/purge-sample-data` now reaches an unmanaged copy this door made (it answered 404 for every id without a ledger entry), and `importUnmanagedPackage` takes a door-stated `seedData`
+  Metadata-protocol: none
+  
+  - **`POST /marketplace/install-local` accepts `seedSampleData`** beside `installMode: 'unmanaged'`. It is off by default: without it an unmanaged copy loads no row, as before, and answers the same `seeded: { mode: 'skipped' }`. With `true`, the copy loads the package's `data` datasets once, inline, and answers `seeded: { mode: 'inline', inserted, updated, skipped, errors }` beside `copied`. Every row is owned by the person who installed it (`owner_id` and `created_by`). Rows the package wrote under different personas all collapse to that one owner, so per-role answers in the customer's environment differ from the gallery's per-persona transcripts. Lookups between the copied rows resolve in load order, exactly as on a managed install. `seedSampleData` that is not a boolean, or one sent with a managed install (which always loads its data), answers 400 `INVALID_REQUEST` before anything is written.
+  - **The seed receipt.** The copy writes each dataset as a `seed` item of the new base (`<object>_seed`, then `<object>_seed_2` for a second dataset of the same object), in the environment's own metadata. Under `targetNamespace` only the dataset's `object` follows the rename; its records and `externalId` are copied verbatim, so the values a lookup or a purge matches never change. A dataset's `files` map is kept in the receipt verbatim and handed to the same loader a managed install uses; loading those bytes on a copy is not exercised by a test here. A dataset the copy cannot write (no `object`, no `records` array) is refused with 400 before any write, and a `seed` item the save door refuses rolls the whole copy back, as every other copied item does. A re-run is still refused with 409.
+  - **The door's record of its copies.** The install-local door records each unmanaged copy it makes (with or without sample data) in its own storage directory, under `unmanaged-copies/` beside the install ledger, in the same act as the copy. The ledger never reads it as an install entry. The record is removed when the copy's base is uninstalled (through the protocol's uninstall cleanups), and it is lost with the ledger directory, as ledger entries are. A copy made before this release has no record. The record is tied to the base instance, not only to its id: it keeps the `version` and `created_at` of the base's row in the package store (`sys_packages`), and the purge answers 404 when that row is gone or carries another `created_at`, so a later base under the same id (a Studio duplicate also defaults to `<id>-copy`) never inherits the purge, even when the record outlived the copy. Two conditions stay open: a runtime with no `package` service persists no base row, so its record holds no instance and the purge's reach there is by id alone; and `created_at` has one-second resolution, so a base uninstalled and re-created under the same id within the same second shares it. When the record cannot be kept (its file cannot be written, or the package store does not answer with the new base's row), the install still answers 200 and says so in `copyRecord: { written: false, message }`; that copy is then out of the purge's reach, and no door records it later (re-recording is follow-up #31425). The answer carries no `copyRecord` when the record was kept. The package store's read answers an ordinary database error (a lock timeout, a dropped connection) with "no row", logging it; it throws only when its query seam ran no read at all. So a passing store error leaves the copy unrecorded at install, and answers 404 at purge. Both fail closed: no row is deleted and no base is reached by mistake.
+  - **The uninstall answers carry one more cleanup outcome.** The door registers the uninstall cleanup `install-local:unmanaged-copy-record`, so every uninstall answer's `cleanups` list now includes its outcome (`{ name: 'install-local:unmanaged-copy-record', success: true, removed: 0 }` for a base that is no recorded copy): the install-local `DELETE`, the protocol's `deletePackage`, and `DELETE /packages/:id` (`persisted.cleanups`, and the partial-failure 400). The shape of those answers is unchanged.
+  - **`POST /marketplace/install-local/:id/purge-sample-data` on a copy** reaches only a base in that record; every other writable base, a Studio-authored one included, keeps the 404. For a recorded copy it reads the receipt and deletes exactly the rows it names, matched by `externalId` (a row the person wrote survives). A copy made without the sample data answers 400 `NOTHING_TO_PURGE` saying no sample data was copied. A base that is no longer installed answers 404 before its record is read. A record that cannot be read answers 503 naming the local record file to repair; a receipt that cannot be read, or a package store whose query seam ran no read, answers 503 asking for a retry. An ordinary package-store error answers 404, as above. None of these deletes anything. Purge before uninstalling the copy: an uninstall removes the receipt and the record with the base, and leaves the rows.
+  - **`importUnmanagedPackage`** (metadata-protocol) takes the door-stated `seedData: true`, read off before the request is parsed, like `actor`. The published `ImportUnmanagedPackageRequestSchema` is unchanged.
+  
+  A boot never applies the receipt, so a restart after the copy or after the purge inserts no row, and a plain save of a copied `seed` item loads nothing. Drafted and published, a copied `seed` item behaves as every environment `seed` item does: create-only, matched by `externalId`. Published after a purge, it loads its rows again under the publish rule, not the installer's: the publish names no person, so those rows carry no `owner_id` or `created_by`.
+- 8847e09: feat: the package upgrade plan — one comparison of an installed package version with the incoming one, a dry run of the install door, and `os package install --dry-run`
+  
+  Clause-②: yes (widening) — new exports from `@objectstack/metadata-core` (`comparePackageVersions` and its types, `typeChangeCategory`, `isEmptyPackageUpgradePlan`, `upgradePlanSeedDatasets`, `seedModeOverwritesMatchedRows`), a new `planUpgrade` method on objectql's `manifest` service, a new `dryRun` key on the `POST /api/v1/marketplace/install-local` body, a new `--dry-run` flag on `os package install`, and new `os diff` entries (declared and suspected renames, seed datasets). Nothing a request did before answers differently.
+  Metadata-protocol: none
+  
+  **One comparison.** `comparePackageVersions(installed, incoming)` (`@objectstack/metadata-core`) lists what an upgrade from one version of a package to the next changes: objects and fields added and removed; type changes, each with the drift category `schema-drift.ts` uses (`safe`, `needs_confirm`, `destructive`); renames a field declares with `renamedFrom`; suspected renames, where one object loses a stored field and gains one with nothing linking them; and seed datasets added, removed and changed, each with its mode. A declared rename whose type changes is also listed as a type change. It is pure and decides nothing.
+  
+  **What the environment knows.** The `manifest` service's `planUpgrade(installed, incoming)` (`@objectstack/objectql`) answers the comparison with two readings of the installed data: the rows holding a value in each column the upgrade removes, renames or retypes (and the rows of each object it removes), and, for each `upsert` or `update` dataset both versions declare, the rows a customer edited that the seed replay would write over. A reading that fails is `null`, never `0`.
+  
+  **A dry run.** `POST /api/v1/marketplace/install-local` with `dryRun: true` answers `200` with the plan of the installed version (its ledger entry) against the one sent, and installs and writes nothing. A dry run of an `unmanaged` install or of a customization pair is refused `400 INVALID_REQUEST`, as is a `dryRun` that is not a boolean. `os package install … --dry-run` sends it and prints the plan. A runtime that predates the key ignores it and installs; the command then says so and exits 1.
+  
+  **`os diff`** reads its object and field changes from the same comparison, so the CLI and an install cannot disagree. Its output for every shape it reported before is unchanged. New: a field renamed with `renamedFrom` prints as one rename instead of a removal and an addition (`renamedFrom` is new in this release), a suspected rename prints beside its removal and addition, and seed datasets print under `data`.
+- 40eaae7: feat(cloud-connection)!: a managed upgrade that renames or retypes a stored field is refused until it is declared or confirmed
+  
+  Clause-②: yes (narrowing) — a managed re-install through install-local that installed before is refused `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED` when its package upgrade plan lists an undeclared suspected rename or a `needs_confirm` / `destructive` type change, and `501 NOT_IMPLEMENTED` when it declares a field rename (`renamedFrom`) this runtime cannot carry yet. The widening half: the error-code ledger registers `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED` under `@objectstack/cloud-connection`, install-local takes `confirmSchemaUpgrade`, and `os package install` and `os deploy` take `--confirm-upgrade`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no export is removed: the refusal judges two package bodies at the install door, so there is nothing for a migration to rewrite and no tombstone. The way through is a token the refusal itself prints. -->
+  
+  **BREAKING** accept-set narrowing at the install-local door (`POST /api/v1/marketplace/install-local`, `@objectstack/cloud-connection`) for a managed re-install over an installed package.
+  
+  Before any write, after the access upgrade check, the door compares the installed version (its ledger entry) with the incoming one through `comparePackageVersions` (`@objectstack/metadata-core`), the comparison the dry run and `os diff` read:
+  
+  - **A suspected rename** (in one object, a stored field removed while a stored field is added, with no `renamedFrom` linking them) or **a type change** the drift categories call `needs_confirm` (both columns stored) or `destructive` (the new type stores no column) answers `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`. `error.details.findings` names each with a one-line `describe` (and, when the runtime's `manifest` service answers `planUpgrade`, the rows the installed column holds); `error.details.findingSet` is the token. The same request with `"confirmSchemaUpgrade": "<findingSet>"` installs, as the additive schema sync leaves the fields, and the ledger entry records `schemaUpgradeConfirmation` (the token, who, when). A token from another finding set is refused again with the fresh one. A type change riding on a declared rename is judged on its own.
+  - **The installed side** is the ledger entry's body; an orphaned install (the registry still serves the package, the ledger holds no record) is compared against the body the registry serves. When there is no installed body to compare — the ledger file will not parse, or neither the ledger entry nor the orphan's registry row carries a body — the same `409` names that as its one finding (`installed_record_unreadable` with the file and the cause, or `installed_record_missing`), and its token admits the re-install, which rewrites the record; a rename the incoming version declares still answers the `501` below.
+  - **A declared rename** (`renamedFrom` on a field of the new version) answers `501 NOT_IMPLEMENTED`, naming each rename: this runtime cannot yet move a renamed field's values to its new key, and no token answers it.
+  - A `safe` type change (the installed field had no stored column), a removed field or object and a seed dataset change are refused by nothing; `dryRun: true` reports them.
+  
+  A first install, an `unmanaged` install and a re-install whose plan lists none of these answer as before.
+  
+  **Migration.** A package author whose upgrade is refused either declares the rename on the new field — `renamedFrom: ['<old key>']` — and rebuilds, or confirms the findings as listed: `os package install <artifact> --confirm-upgrade <findingSet>` (`os deploy --confirm-upgrade <findingSet>` against a self-hosted runtime), or `"confirmSchemaUpgrade": "<findingSet>"` in the install-local body. A host that calls install-local itself reads `error.details.findingSet` off the 409 and sends it back. Preview the refusal first with `os package install <artifact> --dry-run`.
+- 58f66b9: feat(cloud-connection,plugin-audit): the hosted install door forwards the install mode and the installing user, an unmanaged grant is copied by the environment's own install-local door, and every unmanaged copy writes a `package_unmanaged_import` audit row
+  
+  Clause-②: yes (widening) — `POST /api/v1/cloud-connection/install` accepts `install_mode` (or `installMode`) and sends the control plane's `sys_package.install_package` action `install_mode` and `installer_user_id`; on an unmanaged grant it answers the install-local door's answer; the install-local plugin registers the in-process `marketplace-install-local` service; `sys_audit_log.action` gains `package_unmanaged_import`, and plugin-audit's package lifecycle writer accepts that event; `@objectstack/plugin-audit` newly exports `PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION`, `PackageUninstallAuditEvent` and `PackageUnmanagedImportAuditEvent`, `PackageLifecycleAuditEvent` is now the union of the two event types (narrow it on `action`), and `PackageLifecycleAuditAction` gains `package_unmanaged_import`
+  Metadata-protocol: none
+  
+  - **The install mode, forwarded.** `POST /api/v1/cloud-connection/install` reads `install_mode` (the control plane's spelling) or `installMode` (the install-local door's), parsed against `InstallModeSchema`. A value the schema refuses, or two spellings that disagree, answers 400 `INVALID_REQUEST` before the control plane is called. When the caller names a mode, it is sent as the action's `install_mode` body param; when the caller names none, nothing is sent, and the control plane reads that as `managed`, as before.
+  - **The installing user, forwarded.** Every install now sends `installer_user_id`, a body param on the same action, never a header. Its value is the id of the session this door admitted, never a value from the request body. The control plane reads it only for a member of the environment's organization, and records its service principal otherwise (the cloud half, cloud#3624).
+  - **An unmanaged grant is copied by the environment.** When the control plane grants an unmanaged install, this door hands the copy to the environment's own install-local door: `installMode: 'unmanaged'`, the granted `version_id`, `seedSampleData` only when the caller asked for it, and the caller's own headers, so the door admits and gates the same person. The answer is that door's answer. The copy keeps every gate the install-local door applies: the installer's install capability, the protocol handshake, the namespace holds, the copy record, and sample rows owned by the installer. A grant this door cannot read (no `install_mode: 'unmanaged'` echoed, or no `version_id`) answers 502 and copies nothing; a `data.manifest` in the answer is never read. When the answer has no `install_mode` at all, the 502 adds that a control plane that does not read the param may already have installed the package managed, and to check Installed before retrying. An environment without the install-local plugin answers 503 and copies nothing. A control-plane refusal, and every managed install, is answered exactly as before.
+  - **Cross-repo, not measured here.** The grant's shape (the control plane skips its own install on an unmanaged grant and answers `data.install_mode: 'unmanaged'` with `data.version_id`) is assumed from the cloud half's design; cloud PR #3683 is not readable from this repository. So is the install-local plugin being mounted in a hosted environment's kernel at all: this repo's hosted Console reads a cloud base as having no install-local door (the 30963 changeset), and without the door an unmanaged grant answers 503 (#31482). The namespace a copy is renamed into (`targetNamespace`, #30794) is not forwarded to the control plane yet (#31482): whether its action accepts an unknown param is not known here.
+  - **The in-process install door.** The install-local plugin registers the `marketplace-install-local` service at `init`. Its `install(request)` runs `POST /api/v1/marketplace/install-local` for a Fetch `Request` and answers that route's `Response`, through the same handler.
+  - **New plugin-audit exports.** `@objectstack/plugin-audit` exports `PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION`, `PackageUninstallAuditEvent` and `PackageUnmanagedImportAuditEvent`. `PackageLifecycleAuditEvent` is now `PackageUninstallAuditEvent | PackageUnmanagedImportAuditEvent`, so a reader narrows it on `action`; `PackageLifecycleAuditAction` gains `package_unmanaged_import`.
+  - **The environment's audit row of each unmanaged copy.** The install-local door's unmanaged branch hands the `audit` slot one `package_unmanaged_import` event per copy it attempted, whether it landed or not, from both doors that reach it. plugin-audit's package lifecycle writer stores it as a deployment-level `sys_audit_log` row (no record, no organization), with `metadata` naming the source package and version, the new base, its namespace, the namespace a rename came from, the items copied and `outcome` (`success` or `failure`; a failure adds its error code and HTTP status, never its message). `environment_id` is null on this row: the door does not know it. The ledger's `action` select gains the value writer-first, with its labels regenerated by `os i18n extract`; the new label is filled from English in every locale until a translator replaces it. An audit slot that throws changes no answer.
+- 8f4e8fb: feat(cloud-connection)!: the marketplace catalog list filters by business function, industry, solution type and maturity on the server, and the `?category=` filter is retired
+  
+  Clause-②: no (narrowing) — the facets are declared by the published `MarketplaceSearchRequestSchema` (`businessFunctions`, `industries`, `solutionTypes`, `maturity`), so implementing them widens no contract; refusing the retired `?category=` filter, and a facet the catalog cannot answer, narrows what the proxy honours. No export, type or error code of the package is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type of the package changes: the catalog list door reads query-string names the spec already declares and refuses one the spec already retired, with the spec's own prescription. Nothing at rest records a catalog query, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **The facet filters.** `GET /api/v1/marketplace/packages` reads `businessFunctions`, `industries` and `solutionTypes`, each one comma-separated value (`?businessFunctions=sales,marketing`), and `maturity`, one value. Values inside one facet are OR-ed, facets are AND-ed with each other, with `maturity` and with `q`, and `limit` / `offset` page the filtered set, so `total` counts every matching listing. A listing that declares no solution type is the spec's default `app`, and one that declares no maturity is `stable`. On the public snapshot path (`OS_MARKETPLACE_PUBLIC_BASE_URL`) the proxy filters and pages the snapshot itself; on the cloud path it forwards the query string to the cloud unchanged, as before.
+  
+  **BREAKING** accept-set narrowing at the catalog list (`@objectstack/cloud-connection`).
+  
+  - **Before.** `?category=crm` filtered the public snapshot by the listing's retired `category` column.
+  - **Now.** `?category=` is refused with `400` and the spec's retirement prescription for `MarketplaceSearchRequest.category` (`retiredCategoryGuidance`, the text a parse of `MarketplaceSearchRequestSchema` gives the same key), on the snapshot and the cloud path alike, before either is asked. A facet value the spec does not declare (`?businessFunctions=crm`), a facet supplied twice (`?industries=retail&industries=logistics`) and a facet naming no value (`?solutionTypes=`) are refused with `400` and `{ "success": false, "error": { "code": "VALIDATION_ERROR", "message" } }` before the snapshot or the cloud is asked; the message names the parameter and the values it takes.
+  - **Who moves.** Nothing in the workspace sends `?category=` or a facet today; the Console filters the loaded catalog itself. A script still sending `?category=` gets the 400 instead of a filtered list.
+  
+  **The remedy.** Replace `?category=X` with the facet that says what you mean (`?businessFunctions=`, `?industries=`, `?solutionTypes=`), and send several values of one facet as one comma-separated value.
+- 6fcecb2: fix(cloud-connection,metadata-protocol)!: install-local's uninstall door asks the uninstall verb's guards and writes its audit row (#31283)
+  
+  Clause-②: yes (narrowing) — both arms. Narrowing: `DELETE /api/v1/marketplace/install-local/:manifestId` refuses, with the uninstall verb's guard refusal (today the runtime's `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`), an uninstall it answered `200` before: one that would withdraw a field an active validation rule of another enabled package reads. Widening: two new public members of `ObjectStackProtocolImplementation` (`@objectstack/metadata-protocol`), `runUninstallGuards` and `recordPackageUninstall`, and one new exported type, `PackageUninstallRecord`.
+  Metadata-protocol: none
+  Skills-docs: one move — `content/docs/deployment/marketplace-handbook.mdx` (Uninstalling) states the refusal and the audit row; no `skills/**` page teaches this door's uninstall.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped and no stored row is read differently: the narrowing is one runtime refusal at one door, the refusal `DELETE /api/v1/packages/:id` already answers for the same package, and its remedy is the rule it names (switch the rule off or change it, or keep the package installed); the two protocol members are additions, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for a caller of install-local's uninstall door that uninstalled a package another package's active validation rule depends on.
+  
+  - **Before.** `DELETE /api/v1/marketplace/install-local/:manifestId` withdrew the package and ran the protocol's uninstall cleanups, but never went through the uninstall verb (`deletePackage`), so it skipped what the verb does before and after: the pre-uninstall guards (the runtime's dependent-rule refusal) and the package's own `package_uninstall` audit row. Uninstalling a package whose `objectExtensions` field an active rule of another package reads answered `200`; the field left the served object and the rule then failed closed on every write to it. No uninstall through this door was audited.
+  - **Now.** The door asks the verb's guards before anything moves, through the protocol's one runner of them (`runUninstallGuards`, which `deletePackage` asks too), and answers a refusal as the guard spelled it — code, status and message — with the ledger entry, the registration and the served fields as they were. A completed uninstall writes one `package_uninstall` row through the protocol's one writer of it (`recordPackageUninstall`, which `deletePackage` calls too), naming the package, the version removed and the operator.
+  - **Unchanged.** `deletePackage` asks the same guards and writes the same row as before. A runtime with no audit plugin writes no row; a protocol from a build without the two members is not asked, and the door behaves as before.
+  
+  **The remedy.** Switch off or change the rule the refusal names, or keep the package installed.
+- 3a0aa91: fix(cloud-connection)!: install-local's cloud branch refuses a package declaring a bare name another package holds (#31296)
+  
+  Clause-②: no (narrowing) — `POST /api/v1/marketplace/install-local` with a cloud-fetched package (`packageId` + `versionId`) whose register the registry refuses for a bare-name clash answers `422 PLUGIN_REGISTER_FAILED` where it answered `200` with `hotLoaded: false` and wrote the ledger entry. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped and no stored row is read differently: the narrowing is one runtime refusal at one door, for one registry refusal the inline branch of the same door already answers 422, and its remedy is the rename the refusal names, so there is nothing for `objectstack migrate meta` to rewrite. A ledger entry an earlier build wrote this way keeps loading at boot, beside the cold boot's warning. -->
+  
+  **BREAKING** for a cloud-branch install that relied on the lenient answer for a bare-name clash.
+  
+  - **Before.** The cloud branch refused only the security catalog's environment-held refusal (#25366). A package declaring an item of a bare-name type (a flow, a webhook, a connector, an email template, a dataset, a mapping, a picklist, an API, an object-less action) under a name another installed package or the platform holds was refused by the registry and then ledgered anyway, answering `200` with `hotLoaded: false`. At the next restart the entry loaded before the cold boot sealed the holders, so the boot admitted the clash with one warning, and every consumer resolving the name was served one of the two packages' items by registration order.
+  - **Now.** That refusal is answered `422 PLUGIN_REGISTER_FAILED` with the registry's sentence naming both holders and the rename, as the inline branch answers it. Nothing is registered or written, and an installed earlier version stays registered and ledgered. The door recognises the registry's refusal by its own brand, never by a list of types, so a type the rule covers later is refused the same way.
+  - **Unchanged.** Any other register failure on the cloud branch keeps the lenient answer (`200`, `hotLoaded: false`, `hotLoadError`). An environment-held security catalog name is still refused `422`.
+  
+  **The remedy.** Rename the item in the incoming package (the refusal names the namespaced rename), rename it in the package that holds it, or uninstall that package, then install again.
+- 595311b: fix(cloud-connection)!: install-local's cloud branch refuses a package whose namespace or security catalog name another package or a built-in holds (#31392)
+  
+  Clause-②: no (narrowing) — `POST /api/v1/marketplace/install-local` with a cloud-fetched package (`packageId` + `versionId`) whose register the registry refuses because another installed package owns its namespace, or because another package or a built-in holds a position, permission set or capability name it ships, answers `422 PLUGIN_REGISTER_FAILED` where it answered `200` with `hotLoaded: false` and wrote the ledger entry. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped and no stored row is read differently: the narrowing is one runtime refusal at one door, for two registry refusals the inline branch of the same door already answers 422, and its remedy is the rename or uninstall the refusal names, so there is nothing for `objectstack migrate meta` to rewrite. A ledger entry an earlier build wrote this way is read as before at boot. -->
+  
+  **BREAKING** for a cloud-branch install that relied on the lenient answer for a held namespace or a held security catalog name.
+  
+  - **Before.** The cloud branch refused two of the registry's held-name refusals: a security catalog name the environment catalog holds (#25366) and a bare name another package holds (#31296). A package whose `manifest.namespace` another installed package owns (with no declared dependency on it), or that ships a position, permission set or capability name another package or a built-in holds, was refused by the registry and then ledgered anyway, answering `200` with `hotLoaded: false`, "loads at the next restart". It does not: both checks run again at every load with no seal, so the next boot refuses the registration again.
+  - **Now.** Both refusals are answered `422 PLUGIN_REGISTER_FAILED` with the registry's sentence naming both holders, as the inline branch answers them. Nothing is registered or written, and an installed earlier version stays registered and ledgered. The door recognises the registry's three held-name refusals by their own code and `name`, never by a list of types or holders.
+  - **Unchanged.** Any other register failure on the cloud branch keeps the lenient answer (`200`, `hotLoaded: false`, `hotLoadError`). Under `OS_METADATA_COLLISION=warn` the registry throws nothing for a held namespace, so the install proceeds as before. A namespace held by a writable base is still refused `409 RESOURCE_CONFLICT` before the register.
+  
+  **The remedy.** Rename the item (or choose another namespace) in the incoming package, declare the holding app in its `manifest.dependencies` when it extends that app, rename the item in the holding package, or uninstall that package, then install again. A built-in name is never available to a package.
+- 210ef60: feat(cloud-connection): install-local's reseed and sample-data count reach an unmanaged copy, and retry a failed first load (#31425)
+  
+  Clause-②: yes (widening) — `POST /api/v1/marketplace/install-local/:id/reseed-sample-data` and `GET …/:id/sample-data` now serve the base of an unmanaged copy this door made with `seedSampleData: true`, which they answered `404` before. Nothing is narrowed.
+  Metadata-protocol: none
+  
+  - **Reseed.** For a copy, the reseed loads the sample data again from the copy's seed receipt, through the same read of it the purge uses: the rows it creates are owned by the caller, it answers the same four counts, and a run over an intact baseline succeeds with `inserted: 0`. A copy made without the sample data answers `400 RESEED_SKIPPED`, and a receipt that could not be read answers `503 SERVICE_UNAVAILABLE`, never "no sample data".
+  - **Retry.** A copy whose first load failed at install (`seeded.mode: 'skipped'` with `seed-receipt-unread` or `seed-error`) is loaded by the reseed from the stored receipt, instead of a re-run of the install that the import refuses `409`.
+  - **Count.** For a copy, the count is the rows a purge of the copy would delete now; `count: 0` for a copy made without the sample data.
+  - **Unchanged.** Any other base, a Studio-authored one with published seed items included, still answers `404` on all three doors. Uninstalling a copy is `DELETE /api/v1/packages/:baseId`, which drops its tables with their rows unless `keepData: true` keeps them all; this door does not purge on uninstall.
+- 645ed3d: fix(cloud-connection)!: install-local's cloud branch refuses every register the engine refuses, and keeps the lenient answer only for a fault (#31478)
+  
+  Clause-②: no (narrowing) — `POST /api/v1/marketplace/install-local` with a cloud-fetched package (`packageId` + `versionId`) whose `manifest.register` throws a refusal declaring a 4xx status answers `422 PLUGIN_REGISTER_FAILED` where it answered `200` with `hotLoaded: false` and wrote the ledger entry. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped and no stored row is read differently: the narrowing is one runtime refusal at one door, for register refusals the inline branch of the same door already answers 422, and its remedy is the correction the engine's sentence names, so there is nothing for `objectstack migrate meta` to rewrite. A ledger entry an earlier build wrote this way is read as before at boot. -->
+  
+  **BREAKING** for a cloud-branch install that relied on the lenient answer for a register the engine refuses.
+  
+  - **Before.** The cloud branch refused only the registry's three held-name refusals (#25366, #31296, #31392). Every other register refusal was ledgered and answered `200` with `hotLoaded: false`, "loads at the next restart": a default record page another package holds, `isDefault: true` on a page that is not a record page, an object another package owns, an object name two packages of one artifact (or of one namespace shared through a declared dependency) define, a picklist no loaded package declares, a bound action whose object no loaded package registers. The next boot refused each again and loaded nothing.
+  - **Now.** Each is answered `422 PLUGIN_REGISTER_FAILED` with the engine's sentence, as the inline branch answers it. Nothing is ledgered, and an installed earlier version stays registered and ledgered. The door recognises a refusal by the status the throw declares (any 4xx), never by a list of classes or codes, so the held-name refusals are answered by the same rule.
+  - **Unchanged.** A register failure that declares no 4xx — an undeclared throw or a declared 5xx, the runtime's own fault — keeps the lenient answer (`200`, `hotLoaded: false`, `hotLoadError`) and loads at the next restart. A namespace held by a writable base is still refused `409 RESOURCE_CONFLICT` before the register.
+  
+  **The remedy.** Make the correction the refusal names, then install again: rename or un-default the page, rename the object or `extend` the owner's, declare the picklist or the bound object (or install the package that brings it, and declare it in `manifest.dependencies`), or uninstall the holding package.
+- 827b193: fix(cloud-connection): an unmanaged grant refused after the control plane granted it writes the environment's `package_unmanaged_import` failure row
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  cloud#3624 ruling A has both sides audit an unmanaged install. Before this, the environment wrote its `package_unmanaged_import` row only when the copy's import ran. A grant refused before the import left the control plane's grant row with no environment outcome. That covers the install-local door's install capability (403), the manifest fetch, the walled catalog and the protocol handshake, and the cloud-connection door's own two refusals.
+  
+  - **The install-local door's refusals of a grant.** The cloud-connection door now hands the in-process door the grant beside the request: `install(request, { grant })`, with the package, version, environment and installer. When the door answers a grant with a refusal that its unmanaged copy did not already audit, it hands the `audit` slot one `package_unmanaged_import` event. The event has `outcome: 'failure'` and the answer's code and HTTP status. A throw is audited with the status it resolves to, then rethrown. The import's own success and failure events are unchanged and are never written twice.
+  - **The cloud-connection door's own refusals.** A grant it cannot read (502) and an environment without the install-local door (503) each hand the environment's `audit` slot the same failure event. The multi-tenant slot is the environment kernel's; the single-environment slot is the host's.
+  - **What is not audited.** A plain `POST /api/v1/marketplace/install-local` call, which no grant started, writes no row for a refusal. Nor do a control-plane refusal, a managed install, and the cloud-connection door's checks before the control plane is called. No grant exists for any of them.
+  - The events go through the `audit` slot, never as a hand-built row. An audit slot that throws changes no answer, and the failure is logged at `error`. The row's metadata keys are the ones #30964 shipped. The refusal row names the granted marketplace package id, and carries `environment_id`, because the grant names its environment.
+- bfe5282: fix(cloud-connection)!: a hosted unmanaged install copies into the namespace the control plane's grant names, and `target_namespace` beside a managed install is refused
+  
+  Clause-②: yes (narrowing) — `POST /api/v1/cloud-connection/install` gains an optional `target_namespace` (or `targetNamespace`) beside an unmanaged install, forwarded to the control plane and, as the grant echoes it, to the install-local door's copy; the same key beside a managed install (or no `install_mode`), which the route ignored until now, is refused 400, as are the two spellings naming different values.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped and no stored row is rewritten. What moves is the answer an HTTP request gets: an install request that names target_namespace beside a managed install is refused where it was ignored, and nothing at rest holds that request, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING.** `POST /api/v1/cloud-connection/install` used to ignore a `target_namespace` or `targetNamespace` key. Beside a managed install, or with no `install_mode`, either spelling is now refused `400 INVALID_REQUEST` with the install-local door's own sentence, before the control plane is asked: a managed install is never renamed, so a request that names a namespace for one is asking for something that cannot happen. A body that names both spellings with different values is refused `400 INVALID_REQUEST` naming both. No first-party caller sends either key today: the Console's marketplace, the CLI and `@objectstack/client` hold none. To fix a request that is refused, drop the key, or send `install_mode: 'unmanaged'` to take a copy under that namespace.
+  
+  What the key does beside an unmanaged install:
+  
+  - It is read in either spelling, `target_namespace` (the control plane's) or `targetNamespace` (the install-local door's), as the route reads `install_mode` / `installMode`. It is trimmed, then parsed by the manifest's own `namespace` declaration, and a value it refuses is `400 INVALID_REQUEST` with `details.targetNamespace`, before the control plane is asked. Otherwise it is sent to the control plane's install request as `params.target_namespace`.
+  - The copy takes the namespace the grant names in `data.target_namespace`, handed to the install-local door as `targetNamespace`. The grant governs it: a namespace in the caller's body never reaches the door on its own. A grant that names a namespace when none was asked passes it through too.
+  - A request that asked for a namespace the grant does not echo (none, or a different one) copies nothing and answers `502 PLUGIN_INSTALL_FAILED`, audited in the environment like the other grants this door cannot read. Copying into the source's namespace instead would not be what was asked. The audit row (`@objectstack/plugin-audit`'s `package_unmanaged_import`) records both namespaces in its metadata, as `requested_namespace` and `granted_namespace` (null when the grant named none); no other row carries the two keys.
+  - With no ask and no echo, nothing changes: the copy keeps the source's namespace.
+  - What the door says about the name itself keeps its own answer on this path: a namespace another package owns is `409 RESOURCE_CONFLICT` with `details { namespace, owners }`, and a reserved name, or one the copied names cannot take, is `400 INVALID_REQUEST` with `details.targetNamespace`.
+  
+  Cross-repo, not measured here: the control plane's spelling (`params.target_namespace` in, `data.target_namespace` echoed) is cloud PR #4206's. Until the control plane echoes it, an unmanaged install that names a namespace answers the `502` above, and nothing is copied.
+- 3b7219e: feat(metadata-core): export the schema upgrade verdict and its finding set token, so a host's install door forwards the platform's own verdict
+  
+  Clause-②: yes (widening) — `@objectstack/metadata-core` gains exports and nothing else: `schemaUpgradeVerdict`, `installedRecordUnavailableVerdict`, `schemaUpgradeFindingSet`, `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, `SCHEMA_UPGRADE_CONFIRMATION_STATUS`, `SCHEMA_UPGRADE_TOPIC`, `SCHEMA_UPGRADE_CONFIRMED_CATEGORIES` and the types `SchemaUpgradeFinding`, `SchemaUpgradeUnavailableFinding` and `SchemaUpgradeVerdict`. No request, answer, key or code changes on any door.
+  Metadata-protocol: none
+  
+  The verdict that decides which findings of a package upgrade plan stop a managed upgrade until the installer confirms them (a suspected rename; a type change in the `needs_confirm` or `destructive` drift category, on a declared rename too) and the token that confirmation must echo were private to the install-local door. They now live in `@objectstack/metadata-core` beside `comparePackageVersions`, and the install-local door imports them. A host that installs a package version from its own stored versions, such as the hosted control plane installing into an environment, applies the same rule and mints the same token, so the same pair of versions is refused with the same findings and the same token whichever door installs it.
+  
+  - **`@objectstack/metadata-core`:** the exports above. `schemaUpgradeVerdict(packageId, plan)` answers `{ findings, findingSet }`; `installedRecordUnavailableVerdict(packageId, finding)` is the verdict of a door with no installed side to compare (one confirmable finding, never "no finding"), the finding's sentence being the door's own.
+  - **`@objectstack/spec`:** one `PROVENANCE_WAIVERS` entry: `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED` is now defined in metadata-core and still registered under `@objectstack/cloud-connection`, the package whose door puts it on the wire (the `UPDATE_ID_MISMATCH` shape). No row is added or moved.
+  - **`@objectstack/cloud-connection`:** the install-local door's `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED` refusal, its findings, its sentences and its token are unchanged. The token for a given plan is byte-identical before and after, pinned by a test with values the door's own digest minted.
+- dced781: fix(cloud-connection): an unmanaged copy is recorded from the row the import wrote, not from a store re-read at install
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Before this, the install-local door tied an unmanaged copy's record to the environment base's `sys_packages` row by reading the package store right after the import. That read swallows an ordinary fault and answers null, so a passing store fault at that moment left the copy with no record, and the purge, reseed and count doors answered 404 for a copy that was installed.
+  
+  - **`publish` states the stamp it writes.** The package service now makes one UTC stamp per write, in the shape the column already stores (`YYYY-MM-DD HH:MM:SS`, what `CURRENT_TIMESTAMP` and `UTC_TIMESTAMP()` produced), and binds it as the row's `created_at` and `updated_at` in both dialects' upserts. `publish` answers `{ success: true, version, createdAt }`, where `createdAt` is the value the row holds after the write. On a re-publish of an existing (id, version) row the stored `created_at` stays the earlier one, as before (the update arm sets only `updated_at`), so `publish` reads that row's `created_at` before its upsert and answers it. When that read faults, the answer names no `createdAt`. The table DDL and the latest index are unchanged.
+  - **The import carries the base row, door-only.** The in-process `importUnmanagedPackage` answer gains `baseInstance: { version, createdAt }` when the package store stated them. It is outside the published `ImportUnmanagedPackageResponse`: the schema's parse strips it, and no REST answer carries it.
+  - **install-local ties the record from that answer.** The install no longer reads the package store. A package store that states no stamp fails closed as before: `copyRecord.written: false`, and the copy doors answer 404. The purge-time re-read and its comparison are unchanged.
+- 3fed8ce: fix(cloud-connection): every replica reads the cloud binding credential when several are declared over a shared cluster driver
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A self-hosted server kept its cloud binding credential only in `<cwd>/.objectstack/cloud-connection.json`. With several replicas behind a load balancer, the bind ran on one replica and the others held no credential: their online licence checks reported no control plane, and their control-plane calls went without a bearer.
+  
+  **When several replicas are declared** (`OS_CLUSTER_REPLICAS` above 1, or `OS_EXPECT_MULTI_NODE=true`) **and the cluster driver is Redis** (`OS_CLUSTER_DRIVER=redis`), the credential now lives in the database, as the one row of the new `sys_cloud_binding_credential` object:
+  
+  - The row lives on the engine's default datasource, the same database as `sys_secret` (no datasource of its own, so a deployment that also registers a `cloud` datasource never splits the row from its secret). `runtime_token` is a secret field, sealed by the host crypto provider into `sys_secret`; the row holds only the handle. With no crypto provider the bind is refused with `503 ENVIRONMENT_BIND_FAILED` and a message naming the fix, never stored in clear text. A replica on another secret key refuses to read it and says to give every replica the same `OS_SECRET_KEY`.
+  - Connect and disconnect work from any replica and write that one row. Every `/api/v1/cloud-connection/*` request re-reads it first; the synchronous `cloud-binding` service re-reads it every 30 seconds (`sharedCredentialRefreshMs`).
+  - The row, not the cluster store, is the system of record: a cluster store flush, or one that does not persist, never disconnects the server.
+  - **Before the kernel.** `readCloudBindingCredentialBeforeBoot({ openDriver, cryptoProvider })` reads the row once from the host's config, for the multi-node licence gate that runs before boot. It opens nothing unless replicas are declared over Redis; otherwise it opens the one driver the host supplies, reads the row through the engine's own secret-field path with no schema sync and no write, and initiates the disconnect on every path (also when the open lands late, the moment it lands). Open, read and close share one deadline, `timeoutMs` from the call (default 3000, `PREBOOT_CREDENTIAL_TIMEOUT_MS`): the close is waited for only with what is left of it, at least 50 ms, and on the timeout path the disconnect is initiated and not awaited. So the call returns within `timeoutMs` plus that 50 ms close floor, however long a disconnect hangs. Any failure answers `{ status: 'unavailable', reason }` and never throws, so the replica boots as an unbound one does today.
+  - **Migration.** The first start with replicas declared moves an existing `cloud-connection.json` into the row when the row is empty, and logs the path it moved. The file is left in place and not read while replicas are declared. Scaling back to one replica reads the file again, which does not follow connects or disconnects made meanwhile: disconnect and connect again after scaling down.
+  - Replicas declared over a shared driver with no data engine composed log one `error` at start (each replica keeps its own file; compose ObjectQL on every replica or declare one replica). A read of the row that fails later logs one `error` per distinct failure and keeps the binding last read.
+  
+  **A single node is unchanged**: no declaration, the `memory` driver or any driver other than Redis, or no cluster service keeps the same file, bytes and `0600` mode, and registers nothing.
+  
+  New exports from `@objectstack/cloud-connection`: `SysCloudBindingCredential`, `SharedConnectionCredentialLedger`, `SharedCredentialUnavailableError`, `fileCredentialLedger`, `CLOUD_BINDING_CREDENTIAL_OBJECT`, `CLOUD_BINDING_CREDENTIAL_SERVICE` (the `cloud-binding-credential` service, whose async `load()` reads the row on demand), `SHARED_CREDENTIAL_REFRESH_MS`, `CLOUD_BINDING_SHARED_CLUSTER_DRIVER`, `sharesCloudBindingCredential`, `readCloudBindingCredentialBeforeBoot`, `PREBOOT_CREDENTIAL_TIMEOUT_MS`, and the types `BindingCredentialEngine`, `CloudBindingCredentialReader`, `ConnectionCredentialLedger`, `CloudBindingCredentialBeforeBoot` and `CloudBindingCredentialBeforeBootOptions`. `@objectstack/spec` lists `sys_cloud_binding_credential` under `cloud-connection` in `PLATFORM_OBJECTS_BY_PACKAGE`, and `@objectstack/cli`'s organization ownership inventory records it as tenant-free (`systemFields.tenant: false`).
+- d866fdd: fix(cloud-connection): an installed app whose register the engine refuses at boot is listed as not loaded, with the refusal's code and sentence
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An earlier build could ledger a cloud-fetched install whose register the engine refuses (a default page that is not a record page, an object another package owns, two packages of one artifact defining one object, and the like). At every boot the rehydrate meets the same refusal, logs `rehydrate failed`, loads nothing of the package and keeps its ledger entry. `GET /api/v1/marketplace/install-local` listed such an entry as installed, with `withSampleData` and no `notLoaded` marker, so Installed Apps showed an app that the runtime does not hold.
+  
+  The rehydrate now records a register refusal (a throw declaring a 4xx status, the rule the install door uses to refuse it) where it records the protocol-range refusal. The listing then marks the entry `notLoaded: { code, message }` in place of `withSampleData`: `code` is the refusal's ADR-0112 code and `message` is the engine's sentence, the same one the boot logs. The `notLoaded` marker is now a closed union of two arms. The protocol arm `{ code: 'OS_PROTOCOL_INCOMPATIBLE', requiredRange }` is unchanged. A healthy entry is listed as before. DELETE and a compatible reinstall still act on the marked entry. A register fault that declares no 4xx is not marked, because the next boot can load it. A failure after a successful register is not marked either, because the package is loaded. The console's Installed Apps already shows a non-protocol code as "not loaded".
+- 8aaa69f: feat(cloud-connection)!: marketplace install-local refuses to install or uninstall a package when the deployment declares several replicas on the Redis cluster driver, instead of changing the one replica that served the request
+  
+  Clause-②: yes (narrowing) — narrowed: `POST /api/v1/marketplace/install-local` and `DELETE /api/v1/marketplace/install-local/:manifestId` now answer `409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED`, right after the caller is admitted and before the body or the ledger is read, when the deployment declares several replicas (`OS_CLUSTER_REPLICAS` greater than 1, or `OS_EXPECT_MULTI_NODE=true`) and the composed cluster service runs the `redis` driver. Nothing is written, registered or withdrawn. On a single node, on the in-process driver or with no cluster service composed, both doors answer exactly as before. Widened: two published faces gain members, `ERROR_CODE_LEDGER` (`@objectstack/spec`) registers `MULTI_REPLICA_PACKAGE_CHANGE_REFUSED` under `@objectstack/cloud-connection`, and the `@objectstack/service-cluster` root exports `declaresMultiReplicaOnRedis`, `composedClusterDriver`, `MULTI_REPLICA_CLUSTER_DRIVER` and `MULTI_REPLICA_PACKAGE_CHANGE_REFUSED`; nothing is removed or renamed.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no export is removed: a request that changed one replica's install ledger and kernel is now refused, with a new registered error code, only on a deployment that declares replicas on the Redis driver. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a multi-replica deployment on the Redis cluster driver that installs or uninstalls packages through install-local (the Console's marketplace, `os package install`, or the HTTP door).
+  
+  - **Before.** The install wrote the ledger under the serving process's own `OS_HOME` and hot-loaded the package into that process's kernel alone; the uninstall withdrew it from that one replica. The other replicas never saw the change, and each replica rehydrates its own ledger at boot, so the divergence was permanent.
+  - **Now.** Both doors refuse with `MULTI_REPLICA_PACKAGE_CHANGE_REFUSED` (409) and name the maintenance-window recipe: run the install script, then restart every replica. A `POST` with `dryRun: true` is refused too: the refusal comes before the body is read, and the preview reads the serving replica's own ledger.
+  - **Unchanged.** A single node, or replicas declared on any driver other than `redis`, install and uninstall as before. The split-brain guard is untouched: replicas declared on the in-process driver still refuse the boot unless `OS_ALLOW_MEMORY_CLUSTER_MULTINODE=true`.
+  - **Who sees it.** An operator or administrator of a multi-replica deployment on the Redis cluster driver who installs or uninstalls a package at runtime.
+  
+  `@objectstack/service-cluster` exports the condition, `declaresMultiReplicaOnRedis(env, clusterDriver)`, with `MULTI_REPLICA_CLUSTER_DRIVER` (`'redis'`), `composedClusterDriver(services)` and the code constant `MULTI_REPLICA_PACKAGE_CHANGE_REFUSED`, so every multi-replica refusal keys on one predicate; the cloud binding credential's `sharesCloudBindingCredential` now delegates to it, with the same answers. `@objectstack/spec` registers the code under `@objectstack/cloud-connection` in the error-code ledger.
+- 35a9c69: fix(cloud-connection): keep a single node's cloud binding credential under `OS_HOME`, so recreating the container does not disconnect it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A self-hosted server kept its cloud binding credential in `.objectstack/cloud-connection.json` under its working directory, even with `OS_HOME` set. In a container the working directory is the image's own layer, so a restart kept the connection but a recreate (a compose recreate, an image upgrade) lost it: the server read as not connected and an online licence fell back to Community until someone connected it again.
+  
+  - **Where it lives now.** With `OS_HOME` set, the file is `OS_HOME/cloud-connection.json`, beside the rest of the instance's state. With `OS_HOME` unset it stays at `.objectstack/cloud-connection.json` under the working directory, as before. The `credentialPath` option still wins over both.
+  - **Upgrading.** The first start with `OS_HOME` set moves the old working-directory file into `OS_HOME`, keeps mode `0600`, and logs both paths once. When a file is already in `OS_HOME`, that one is the connection and the old file is left untouched. Nothing to do by hand.
+  - **`os dev --fresh`.** The connection stays inside the run's temporary home, and the project's file is neither moved nor read.
+  - Several replicas declared over the Redis cluster driver still keep the credential in the shared database row; the file the first scaled-out start moves into that row is now the `OS_HOME` one.
+- b6fa08e: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An in-environment marketplace install can name the package version to install. `POST /api/v1/cloud-connection/install` now accepts `version` and forwards it to the control plane's install action, which installs that version or refuses it as it does today. Leaving `version` out still installs the latest version, and the request sent to the control plane is unchanged.
+  
+  A `version` that is not a SemVer 2.0.0 string (for example `latest`, `1.2` or `^1.2.3`) is refused with `400 INVALID_REQUEST` before anything is sent.
+- 2e9121e: feat(cloud-connection): the install door's declared-rename planner is reachable read-only on a kernel service
+  
+  Clause-②: yes (widening) — a new read-only kernel service, `marketplace-install-rename-planner` (`INSTALL_RENAME_PLANNER_SERVICE`), registered by `MarketplaceInstallLocalPlugin` beside its install door, and new root exports of `@objectstack/cloud-connection`: the service name, its contract (`InstallRenamePlanner`, `InstallRenamePlanRequest`, `InstallRenamePlan`, `InstallRenamePlannedCarry`) and the result types (`InstallRenameCarry`, `InstallRenameRefusal`, `InstallRenameRefusalReason`). Nothing is narrowed: the install door answers every request as before.
+  Metadata-protocol: none
+  
+  A host that installs a package by another route, such as a hosted control plane, can now ask the environment, before anything is written, what an install of a version would do with the fields that version declares `renamedFrom` on:
+  
+  - `plan({ manifestId, incoming, installed })` takes the incoming and the installed version's bodies as published (`installed: null` for a fresh install) and answers `{ carries, refusals }`: each column the install would carry (`object`, `table`, `from`, `to`, the shape of the door's `renamesCarried`), and each declaration the door would refuse, with the door's reasons (`platform_column`, `live_key`, `claimed_twice`, `both_columns`, `several_old_columns`, `destructive_type`, `index_cannot_follow`, `transport`, `outside_package`) and its words.
+  - It is the install door's own planning step, not a copy: `POST /api/v1/marketplace/install-local` and the service call the same entry, so a non-empty `refusals` is exactly the door's `422 VALIDATION_ERROR` `details.refusals` for the same versions.
+  - It writes nothing: no column is renamed, no ledger entry or record is written, and nothing is held for an install. A table that cannot be read rejects the call, as the door answers `503`, never "nothing to carry".
+  - It is a service of its own, not a member of the install door's `marketplace-install-local` service, so a reader is never handed the install.
+- a57a007: fix(cloud-connection): a catalog list query the public marketplace snapshot cannot evaluate is answered by the cloud
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  With `OS_MARKETPLACE_PUBLIC_BASE_URL` set, the marketplace proxy answers `GET /api/v1/marketplace/packages` from the public snapshot and filters and pages it itself. It evaluates `q`, `limit`, `offset`, `maturity` and the `businessFunctions`, `industries` and `solutionTypes` facets, and it used to ignore every other key: a `?languages=zh-CN` read answered the whole catalog with 200 (or, with `limit`/`offset`, a page filtered by everything except the languages), and the cloud's facet counts were dropped from the re-serialized page. Nothing told that answer apart from a filtered one.
+  
+  A list request that carries any key the snapshot does not evaluate now takes the cloud path, which receives the query string verbatim: the same answer, counts included, as a runtime without the snapshot configured. Requests made only of the keys above are still answered from the snapshot. Nothing to do on upgrade; a `languages` read on such a runtime now needs the cloud to be reachable, and answers the existing `502 MARKETPLACE_PROXY_FAILED` when it is not.
+- e0c2720: feat(cloud-connection): mount the declared-rename planner without the install door
+  
+  Clause-②: yes (widening) — one new root export of `@objectstack/cloud-connection`, `MarketplaceInstallRenamePlannerPlugin`. The planner signature, its result types and the service name are unchanged, and nothing is narrowed.
+  Metadata-protocol: none
+  
+  The read-only declared-rename planner (`INSTALL_RENAME_PLANNER_SERVICE`, `marketplace-install-rename-planner`) was registered only by `MarketplaceInstallLocalPlugin`, so a kernel that serves no install-local door, such as a hosted environment's, could not reach it. `MarketplaceInstallRenamePlannerPlugin` registers that one service and nothing else: no route, no install ledger, no rehydrate. The planner reads the kernel's data engine (`objectql`) and its driver when it is asked.
+  
+  ```ts
+  import { MarketplaceInstallRenamePlannerPlugin, INSTALL_RENAME_PLANNER_SERVICE, type InstallRenamePlanner } from '@objectstack/cloud-connection';
+  
+  await kernel.use(new ObjectQLPlugin());
+  await kernel.use(new MarketplaceInstallRenamePlannerPlugin());
+  // in a plugin's start(): ctx.getService<InstallRenamePlanner>(INSTALL_RENAME_PLANNER_SERVICE).plan({ manifestId, incoming, installed })
+  ```
+  
+  - One implementation: the plugin and the install door both register the planner from one shared module, and the door's own install step plans through the same entry.
+  - A host that mounts only the install door keeps the service as before.
+  - Mounting both is safe in either order: whichever initializes first registers the service and the other leaves it, so the kernel never sees a second registration.
+- f00fb1b: fix(core)!: every door that admits an API key records where the use came from on the `credential_use` row (#31898)
+  
+  Clause-②: yes (narrowing) — `RequestExecutionContextInput.transport` in `@objectstack/core` becomes a required key, typed `{ remoteAddress } | undefined`: a caller of `resolveRequestExecutionContext` now states the transport's peer address, or states that it hands none.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/request-execution-context.ts#RequestExecutionContextInput) the narrowed member is an input key of a runtime TypeScript interface, which the compiler names at every caller (TS2741); no packages/spec schema, registered node type, stored row or ADR-0087 conversion surface names it, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a TypeScript caller of `resolveRequestExecutionContext`.
+  
+  Since #31821 the `credential_use` audit row records the client address and user agent of the use that opened the window, but only REST, the runtime dispatcher (its `/mcp` face included) and the stdio MCP transport handed their client facts over. An API key admitted at any other door wrote `metadata.ip_address_absent: 'not_supplied'`. Every door that can admit an API key now hands them over, so no door writes `not_supplied`:
+  
+  - the storage family (its sign-in gate reader, the parent-governed download authorizer and the upload attacher), the settings routes, the sharing-rule shareable-objects list, the share-link routes, the notification preference options, the datasource admin routes, the print route, the own-row delete routes, the organization settings door, the cloud-connection status and setup doors, and the marketplace local-plugin install.
+  
+  Each door hands only its transport's own peer address and the request headers. The address recorded is the one the deployment establishes under its one client-address trust rule (`IAuthService.resolveClientAddress`): `X-Forwarded-For` / `X-Real-IP` only when `server.trustProxy` is declared, otherwise the peer. No door reads a forwarded header itself. `@objectstack/core` exports the one helper the doors use, `credentialUseClientFor(authService, { headers, remoteAddress })`, and `transportPeerAddressOf(c)` for a Hono door's socket peer.
+  
+  Which credentials a door admits does not change. Doors that read only a session (`credentials: 'session-only'`) read no key and write no row; they state `transport: undefined`.
+  
+  What to do on upgrade:
+  
+  - A caller of `resolveRequestExecutionContext` that omitted `transport` no longer compiles (`TS2741: Property 'transport' is missing`). Pass `transport: { remoteAddress }` with the transport's own peer address (`undefined` when it has none), or `transport: undefined` for a call that hands no client facts, such as a `'session-only'` call. Never pass a forwarded header as `remoteAddress`: the auth service applies the trust rule.
+- 8031f49: fix(cloud-connection): an unmanaged grant of an organization's private package copies from the grant's own manifest
+  
+  Clause-②: yes — a granted unmanaged copy of a private package that answered `404 CLOUD_FETCH_FAILED` now copies when the control plane's grant says which manifest it granted; every refusal of the copy stays, and a granted copy whose manifest is not the granted package and version is refused before any write.
+  Metadata-protocol: none
+  
+  On a hosted environment, `POST /api/v1/cloud-connection/install` with `install_mode: 'unmanaged'` hands the copy to the environment's install-local door. That door fetched the granted version's manifest from the catalog with the environment's shared service key, which the catalog does not serve an organization's private manifest to, so nothing was copied.
+  
+  - The grant's own `data.manifest` is now handed to the door inline when the answer says which manifest it granted: the requested `package_id` when that is itself a manifest id (`com.acme.crm`), otherwise the answer's `data.manifest_id` (the Console names the catalog record id, which is not a manifest id).
+  - The door copies that manifest only when it declares exactly that id and the granted `data.version`; otherwise it answers `502 PLUGIN_MANIFEST_INVALID`, copies nothing, and leaves the environment's `package_unmanaged_import` failure row. A grant carrying its manifest but no `data.version` answers `502 PLUGIN_INSTALL_FAILED` and copies nothing.
+  - Every check the fetched manifest gets runs on the inline one (the id rule, the walled catalog, the ADR-0087 protocol handshake, the ADR-0141 dependency check, the `installModes` gate, sample data and the copy's audit rows), with the fetched manifest's statuses (`502` where a caller's file import answers `400`).
+  - A grant answer with no `data.manifest`, or one that does not say which manifest it granted, keeps the catalog fetch, as before. The manifest comes only from the control plane's answer: a `manifest` in the caller's request body never reaches the door, and the `install-local` route's own file import is unchanged.
+  
+  A private package named by its catalog record id copies end to end once the control plane echoes `data.manifest_id` in its unmanaged grant.
+- 77aeb3f: feat(cloud-connection): a same-origin read of the control plane's default install namespace
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `GET /api/v1/cloud-connection/install-namespace?package_id=PACKAGE_ID` answers the namespace the control plane would give an unmanaged copy of a package in this environment, so the Console's hosted install dialog can show it as an editable default and send it back as `target_namespace` on `POST /api/v1/cloud-connection/install`. A tenant console could not read it before: the control plane's route is cross-origin, and the console does not know its own environment id.
+  
+  - **Gate.** The same as `POST /install`: the environment is resolved from the request host (or the single-environment configuration), the caller needs a signed-in session of it (`401 UNAUTHENTICATED` otherwise), and a session the authentication policy holds is refused `403` with the gate's own code. The control plane is asked nothing before these pass.
+  - **Closed query set.** `package_id` only. Any other parameter (including the `packageId` spelling and an `environment_id` the caller names) is refused `400 VALIDATION_ERROR`, and so is `package_id` supplied twice. A missing or blank `package_id` is `400 INVALID_REQUEST`.
+  - **Answer.** The control plane's status and body are relayed unchanged. A runtime not connected to a cloud account answers `503 CLOUD_UNCONFIGURED`, and an unreachable control plane answers `502 EXTERNAL_SERVICE_ERROR`, so the dialog reads "no default" and leaves the field empty. The route never answers a namespace it made up.
+- a6ffada: fix(cloud-connection): the multi-replica install-local refusal names a recipe that works, instead of "run the install script", which posts to the same refused door
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Under declared replicas (`OS_CLUSTER_REPLICAS` greater than 1, or `OS_EXPECT_MULTI_NODE=true`) on the Redis cluster driver, `POST` and `DELETE /api/v1/marketplace/install-local` still refuse `409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED` before anything is written. Only the message changes. It used to tell the operator to "run the install script, then restart every replica", but that script runs `os package install`, which posts to this same door and is refused the same way.
+  
+  The message now says that every client of the door is refused while the declaration stands, and gives the steps that work:
+  
+  1. Scale the deployment to one replica and restart it with `OS_CLUSTER_REPLICAS=1` and `OS_EXPECT_MULTI_NODE` unset.
+  2. Run the install or uninstall against that replica.
+  3. Restore the replica count and the declaration, and restart every replica.
+  
+  It also states the condition those steps depend on. Each replica loads the packages its install ledger lists when it starts (`installed-packages` under `OS_HOME`, unless the host configures another directory). So the change reaches every replica only when they all read that one directory.
+  
+  `os package install` prints the door's message verbatim, as before. The text is now exported once as `multiReplicaInstallLocalRefusalMessage(subject)`, so the command and the door are pinned against the same sentence.
+- ade13d3: fix(cloud-connection, runtime)!: install-local refuses a package with two enabled jobs of one name, as the binder refuses the name at bind
+  
+  Clause-②: yes (narrowing) — the install-local install route (`POST /api/v1/marketplace/install-local`) refuses a package with two or more enabled jobs of one name with `422 VALIDATION_ERROR`, where it answered `200` and none of those jobs ran: on a deployment that runs package-authored scheduled work the binder then refused the name at bind, and on one that does not (the default) the package installed with every job withheld. The door judges the package whatever the deployment's scheduled-work switch, as it already judges a job with no `body`. The widening half: `@objectstack/runtime` exports `collectJobNameCollisions(bundle, appId)`, the binder's own judgement of a shared job name, which the door refuses by.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and nothing at rest moves: what moves is the install door's answer to a package whose enabled jobs share a name, a name no deployment runs a job of: with scheduled work on the binder refuses it at bind, and with scheduled work off (the default) no job of the package is scheduled at all. A package installed before keeps rehydrating, and its jobs are bound as before (withheld with scheduled work off, the shared name refused at bind with it on), so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the install-local door (`@objectstack/cloud-connection`): a package whose enabled jobs share a name is refused instead of installed.
+  
+  - **Before, scheduled work off (the default).** `os package install` (and any client of `POST /api/v1/marketplace/install-local`) answered `200` for a package declaring two enabled jobs of one name. With `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` unset, as in every posture by default, or with no job service registered, the binder judges no job name: the package was registered and recorded in the ledger whole, every job of it was withheld (one `info` line, or a `warn` line without a job service), nothing was refused, and an upgrade to such a version landed. The shared name was refused only once the deployment turned scheduled work on, at bind.
+  - **Before, scheduled work on.** The same request answered `200`, and the binder then refused the name at `error` (the job service keys a job by its name and would keep only the later one): none of those jobs was scheduled, and the job of that name the previously installed version ran was cancelled. The door said the install succeeded.
+  - **Now.** The install is refused with `422 VALIDATION_ERROR`, the refusal this door gives every job it cannot run, before anything is registered, persisted or scheduled, whatever the deployment's scheduled-work switch (as this door already refuses a job with no `body` with the switch off). The installed version stays installed and recorded, and with scheduled work on its jobs keep running. The message quotes the binder's own refusal of the name: every job of it by how it runs, and every holder that declares it — each package body, and the artifact's top level outside every package body (its residual) when that carries the name too. A disabled twin collides with nothing and installs as before, and so do jobs of distinct names.
+  - **Who moves.** An author whose package declares one job name twice among its enabled jobs, on every deployment. With scheduled work off (the default) such a package, or an upgrade to such a version, installed whole with its jobs withheld, and is now refused whole. A package installed before this release still loads after a restart, and its jobs are bound as before: withheld with scheduled work off, its shared name refused at bind and logged with it on.
+  
+  **The remedy.** Rename all but one of the jobs so each job name is declared once in the artifact, or set `enabled: false` on the ones that should not run, then install again.
+  
+  `collectJobNameCollisions(bundle, appId)` (`@objectstack/runtime`): the job names two or more enabled jobs of `bundle` share, each with the `PackageScopedRefusal` the binder (`scheduleAppArtifactJobs`) refuses it by when it schedules the artifact as `appId`. A door that pre-judges a package reads it so it cannot disagree with the binder.
+- Updated dependencies [31fe289]
+- Updated dependencies [7d0b47c]
+- Updated dependencies [f6a429b]
+- Updated dependencies [eb96480]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [de24d17]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [abc7a94]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [e8dc483]
+- Updated dependencies [82142ed]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [3b8c724]
+- Updated dependencies [75bbebb]
+- Updated dependencies [88cd0ab]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [5f47410]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [314ad95]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [665db00]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [18112bf]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [cd5f554]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [07685ae]
+- Updated dependencies [eee4149]
+- Updated dependencies [63b86b3]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [dce213e]
+- Updated dependencies [13aa6a3]
+- Updated dependencies [391d748]
+- Updated dependencies [af3451b]
+- Updated dependencies [ddcdc80]
+- Updated dependencies [000e773]
+- Updated dependencies [7fc401f]
+- Updated dependencies [991d627]
+- Updated dependencies [4013e30]
+- Updated dependencies [3a27208]
+- Updated dependencies [343ddb2]
+- Updated dependencies [0c666c3]
+- Updated dependencies [f672e0d]
+- Updated dependencies [38717d3]
+- Updated dependencies [bfbdeec]
+- Updated dependencies [43faa22]
+- Updated dependencies [4adc890]
+- Updated dependencies [fdad178]
+- Updated dependencies [15f808a]
+- Updated dependencies [bcdf8d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [59bcd22]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [2fbddd4]
+- Updated dependencies [bd81a7a]
+- Updated dependencies [26f5719]
+- Updated dependencies [0837fdc]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [1a3ea0c]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [fd749a4]
+- Updated dependencies [a26abbc]
+- Updated dependencies [8eca18f]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [a545a04]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [8fad7b1]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [8589756]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [8cc709d]
+- Updated dependencies [8fa738f]
+- Updated dependencies [60fe44f]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [7b80724]
+- Updated dependencies [1de7def]
+- Updated dependencies [fb1ab89]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [4bf6e8f]
+- Updated dependencies [d8ed2e1]
+- Updated dependencies [7145bf3]
+- Updated dependencies [739c972]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [63de248]
+- Updated dependencies [a59d00a]
+- Updated dependencies [a2437b5]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [ea41c49]
+- Updated dependencies [a91ad42]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [1030a80]
+- Updated dependencies [55a00ba]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [e2bcd5c]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [adf6ee0]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [9052337]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [bd5a443]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [da3c742]
+- Updated dependencies [4a3b186]
+- Updated dependencies [a2826a1]
+- Updated dependencies [2a6a28d]
+- Updated dependencies [902f162]
+- Updated dependencies [1ff9944]
+- Updated dependencies [c77dd17]
+- Updated dependencies [555eb1b]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [60dac8b]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [704efef]
+- Updated dependencies [78eb352]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [022b4e7]
+- Updated dependencies [ed4b832]
+- Updated dependencies [d9f8f7f]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [f6199a8]
+- Updated dependencies [57675a2]
+- Updated dependencies [4c31821]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [4bf30da]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [8ef2523]
+- Updated dependencies [c09ffc1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [e735425]
+- Updated dependencies [71d094c]
+- Updated dependencies [4363945]
+- Updated dependencies [8b16445]
+- Updated dependencies [6ee8c61]
+- Updated dependencies [f4b4c8a]
+- Updated dependencies [6fcecb2]
+- Updated dependencies [db50231]
+- Updated dependencies [0e1311d]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [1f029a7]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [b6e6545]
+- Updated dependencies [90457e7]
+- Updated dependencies [ec29753]
+- Updated dependencies [1f30be1]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [4d165ac]
+- Updated dependencies [22ee4c4]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [d5fa237]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [dced781]
+- Updated dependencies [c0fb794]
+- Updated dependencies [dc79e38]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [bafbc68]
+- Updated dependencies [0ebb080]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [34a30e8]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [529e535]
+- Updated dependencies [9e1f1f9]
+- Updated dependencies [01cbbba]
+- Updated dependencies [41106b5]
+- Updated dependencies [00205e1]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [698e8d4]
+- Updated dependencies [59630d9]
+- Updated dependencies [fe88ecd]
+- Updated dependencies [5e85952]
+- Updated dependencies [ef4af73]
+- Updated dependencies [ae31539]
+- Updated dependencies [bdfed89]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [d655caf]
+- Updated dependencies [1cd0e01]
+- Updated dependencies [3487ccc]
+- Updated dependencies [cc16008]
+- Updated dependencies [f2abd47]
+- Updated dependencies [cfe3563]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [5b7269f]
+- Updated dependencies [ca3629f]
+- Updated dependencies [da1a01a]
+- Updated dependencies [6dd196d]
+- Updated dependencies [d834a36]
+- Updated dependencies [a74856d]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [b96b875]
+- Updated dependencies [c62e72a]
+- Updated dependencies [aab20c1]
+- Updated dependencies [351c22c]
+- Updated dependencies [450bfb6]
+- Updated dependencies [5defbfe]
+- Updated dependencies [f56354c]
+- Updated dependencies [e55347d]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [9046e02]
+- Updated dependencies [f647430]
+- Updated dependencies [36a8700]
+- Updated dependencies [69db709]
+- Updated dependencies [ad622d3]
+- Updated dependencies [ff8ef4c]
+- Updated dependencies [31ae944]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [5a8dbc7]
+- Updated dependencies [fb94249]
+- Updated dependencies [e627eaa]
+- Updated dependencies [0243357]
+- Updated dependencies [7231dc7]
+- Updated dependencies [074a014]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [8fca8f7]
+- Updated dependencies [26d30d7]
+- Updated dependencies [a15b544]
+- Updated dependencies [3684d18]
+- Updated dependencies [d9f626b]
+- Updated dependencies [1a66fcf]
+- Updated dependencies [17606e4]
+- Updated dependencies [64b46fe]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [f00fb1b]
+- Updated dependencies [c655af8]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [1934918]
+- Updated dependencies [99992dd]
+- Updated dependencies [fc4af7f]
+- Updated dependencies [33ab84f]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [aad7d2f]
+- Updated dependencies [4f6fb53]
+- Updated dependencies [4b23a46]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [7ac0479]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [9526041]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [0561e60]
+- Updated dependencies [45f0f81]
+- Updated dependencies [fa4cb68]
+- Updated dependencies [036a9fb]
+- Updated dependencies [91d88ec]
+- Updated dependencies [fb71296]
+- Updated dependencies [aac03d9]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [9bff554]
+- Updated dependencies [1368536]
+- Updated dependencies [f97a2d9]
+- Updated dependencies [7aab601]
+- Updated dependencies [5c5f382]
+- Updated dependencies [3fc30d8]
+- Updated dependencies [c419609]
+- Updated dependencies [eeb6cc1]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [b2f03a0]
+- Updated dependencies [225e179]
+- Updated dependencies [0bc0774]
+- Updated dependencies [e765a09]
+- Updated dependencies [1e474e3]
+- Updated dependencies [327ef0f]
+- Updated dependencies [7575116]
+- Updated dependencies [0763bf6]
+- Updated dependencies [eefda1a]
+- Updated dependencies [3191e00]
+- Updated dependencies [de6d893]
+- Updated dependencies [5192297]
+- Updated dependencies [326453e]
+- Updated dependencies [6d6f86b]
+- Updated dependencies [a95cb06]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [b3a5554]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [cc28407]
+- Updated dependencies [8420864]
+- Updated dependencies [36f0c6a]
+- Updated dependencies [3c1b8c7]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [d8a2f0d]
+- Updated dependencies [cac0f1a]
+- Updated dependencies [7d82b2d]
+- Updated dependencies [3c18783]
+- Updated dependencies [067349b]
+- Updated dependencies [0c8097e]
+- Updated dependencies [306bae9]
+- Updated dependencies [279f559]
+- Updated dependencies [e336a33]
+- Updated dependencies [e336a33]
+- Updated dependencies [1a17e96]
+- Updated dependencies [3452dec]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [35929be]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [2ddd2e0]
+- Updated dependencies [6bbdf30]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [c50d10c]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [af90f30]
+- Updated dependencies [245afc1]
+- Updated dependencies [ee9ad83]
+- Updated dependencies [070e879]
+- Updated dependencies [a888c5c]
+- Updated dependencies [a888c5c]
+- Updated dependencies [ade13d3]
+- Updated dependencies [9ae8291]
+- Updated dependencies [a2cb3aa]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [fe9f59f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [ca1ddc3]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [28a1527]
+- Updated dependencies [b811f6a]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [d4b14a8]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [2d04cd2]
+- Updated dependencies [0f7389c]
+- Updated dependencies [6739719]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [04127cc]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [7193160]
+- Updated dependencies [6aa658a]
+- Updated dependencies [8941669]
+- Updated dependencies [3631d11]
+- Updated dependencies [cbf6956]
+- Updated dependencies [904dab2]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [24bc259]
+- Updated dependencies [e542831]
+- Updated dependencies [3299873]
+- Updated dependencies [7d13a33]
+- Updated dependencies [4cd48e2]
+- Updated dependencies [976770c]
+- Updated dependencies [30dcd8a]
+- Updated dependencies [e06d04f]
+- Updated dependencies [2fc3fce]
+- Updated dependencies [a58fe66]
+- Updated dependencies [44a030b]
+- Updated dependencies [9020358]
+- Updated dependencies [713beba]
+- Updated dependencies [33bad96]
+- Updated dependencies [43a51b5]
+- Updated dependencies [c8c76f8]
+- Updated dependencies [21510bb]
+- Updated dependencies [8304b08]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [eb92a48]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [bb67b98]
+- Updated dependencies [cad764d]
+- Updated dependencies [63a470a]
+- Updated dependencies [adb2b89]
+  - @objectstack/objectql@18.4.0
+  - @objectstack/spec@18.4.0
+  - @objectstack/runtime@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/rest@18.4.0
+  - @objectstack/metadata-protocol@18.4.0
+  - @objectstack/metadata-core@18.4.0
+  - @objectstack/types@18.4.0
+  - @objectstack/service-cluster@18.4.0
+  - @objectstack/observability@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

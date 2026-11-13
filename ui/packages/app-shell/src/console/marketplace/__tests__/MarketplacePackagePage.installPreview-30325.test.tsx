@@ -85,7 +85,7 @@ const answer = (status: number, body: unknown) => ({
 
 let calls: string[] = [];
 
-async function boot(manifest: { status: number; body?: unknown }) {
+async function boot(manifest: { status: number; body?: unknown }, catalog: unknown = CATALOG_PACKAGE) {
   calls = [];
   resetRuntimeConfigForTesting();
   vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: { method?: string }) => {
@@ -106,7 +106,7 @@ async function boot(manifest: { status: number; body?: unknown }) {
         ? answer(200, { success: true, data: { manifest: manifest.body, version: '6.0.0', version_id: 'ver_6' } })
         : answer(manifest.status, { success: false, error: { code: 'NOT_FOUND', message: 'no manifest' } });
     }
-    if (path === '/api/v1/marketplace/packages/pkg_crm') return answer(200, { success: true, data: CATALOG_PACKAGE });
+    if (path === '/api/v1/marketplace/packages/pkg_crm') return answer(200, { success: true, data: catalog });
     return answer(404, { success: false, error: { code: 'NOT_FOUND', message: `no route ${method} ${path}` } });
   }));
   await initRuntimeConfig();
@@ -193,5 +193,86 @@ describe('the local Install confirms what it adds first (objectstack#30325)', ()
     expect(within(dialog).queryByTestId('install-preview')).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByTestId('install-preview-confirm'));
     await waitFor(() => expect(posts()).toHaveLength(1));
+  });
+});
+
+describe('the local confirm says which existing objects the install changes (objectstack#31542)', () => {
+  const EXTENSIONS = [
+    { object: 'sys_user', platform: true, fields: ['name'], field_patches: [], validations: ['name_required'], indexes: 0, relabels: false },
+    { object: 'crm_account', platform: false, fields: ['ticket_count'], field_patches: ['industry'], validations: [], indexes: 2, relabels: true },
+  ];
+  /** The catalog answer with `object_extensions` on the latest version; `undefined` serves no key. */
+  const catalogWith = (objectExtensions: unknown) => ({
+    ...CATALOG_PACKAGE,
+    package: {
+      ...CATALOG_PACKAGE.package,
+      latest_version: { ...CATALOG_PACKAGE.package.latest_version, ...(objectExtensions === undefined ? {} : { object_extensions: objectExtensions }) },
+    },
+  });
+  const listed = (dialog: HTMLElement) =>
+    within(dialog).getAllByTestId('object-extension').map((el) => `${el.getAttribute('data-object')}:${el.getAttribute('data-platform')}`);
+
+  it('a business and a platform object: both listed, the platform one first and flagged, and Install waits for the acknowledgment', async () => {
+    await boot({ status: 200, body: BUNDLE }, catalogWith(EXTENSIONS));
+    const dialog = await openConfirm();
+
+    expect(listed(dialog)).toEqual(['sys_user:true', 'crm_account:false']);
+    expect(within(dialog).getByTestId('object-extensions-platform-warning')).toBeInTheDocument();
+    expect(within(dialog).getAllByText('«marketplace.objectExtensions.platformBadge»')).toHaveLength(1);
+    const [platformRow, businessRow] = within(dialog).getAllByTestId('object-extension');
+    expect(platformRow).toHaveTextContent('name');
+    expect(platformRow).toHaveTextContent('name_required');
+    expect(businessRow).toHaveTextContent('ticket_count');
+    expect(businessRow).toHaveTextContent('industry');
+    expect(businessRow).toHaveTextContent('«marketplace.objectExtensions.indexes|count=2»');
+    expect(businessRow).toHaveTextContent('«marketplace.objectExtensions.relabels»');
+
+    const confirm = within(dialog).getByTestId('install-preview-confirm');
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    await act(async () => {});
+    expect(posts()).toHaveLength(0);
+
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: '«marketplace.objectExtensions.acknowledge»' }));
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(posts()).toHaveLength(1));
+  });
+
+  it('`[]`: no extension section, and Install is not held', async () => {
+    await boot({ status: 200, body: BUNDLE }, catalogWith([]));
+    const dialog = await openConfirm();
+
+    expect(within(dialog).queryByTestId('object-extensions')).not.toBeInTheDocument();
+    expect(within(dialog).queryByTestId('object-extensions-unknown')).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId('install-preview-confirm')).toBeEnabled();
+  });
+
+  it('`null`: says what the package changes could not be read, never that it changes nothing', async () => {
+    await boot({ status: 200, body: BUNDLE }, catalogWith(null));
+    const dialog = await openConfirm();
+
+    expect(within(dialog).getByTestId('object-extensions-unknown')).toHaveTextContent('«marketplace.objectExtensions.unknown»');
+    expect(within(dialog).queryByTestId('object-extensions')).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId('install-preview-confirm')).toBeEnabled();
+  });
+
+  it('CONTROL: a catalog without the key reads the served manifest, and the same rule holds Install', async () => {
+    await boot({
+      status: 200,
+      body: { ...BUNDLE, objectExtensions: [{ extend: 'crm_account', fields: { ticket_count: {} } }, { extend: 'sys_session', validations: [{ name: 'deny' }] }] },
+    }, catalogWith(undefined));
+    const dialog = await openConfirm();
+
+    expect(listed(dialog)).toEqual(['sys_session:true', 'crm_account:false']);
+    expect(within(dialog).getByTestId('install-preview-confirm')).toBeDisabled();
+  });
+
+  it('CONTROL: a catalog without the key and a manifest that cannot be read: "could not read"', async () => {
+    await boot({ status: 404 }, catalogWith(undefined));
+    const dialog = await openConfirm();
+
+    expect(within(dialog).getByTestId('object-extensions-unknown')).toBeInTheDocument();
+    expect(within(dialog).getByTestId('install-preview-confirm')).toBeEnabled();
   });
 });

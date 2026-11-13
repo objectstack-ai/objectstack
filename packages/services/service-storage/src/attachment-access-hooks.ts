@@ -26,11 +26,13 @@ import { findReferenceableFile, unreadableFileMessage, type FileReferenceReadAut
  * sys_attachment access enforcement (#2755, ADR-0049 enforce-or-remove).
  *
  * `sys_attachment` rows are written through the generic data path, and the
- * default member permission sets grant wildcard CRUD with no row scoping —
- * without these hooks any member can attach files to records they cannot
- * see and rewrite or delete any other user's attachments. Salesforce
- * semantics (ContentDocumentLink): an attachment's access is derived from
- * its PARENT record.
+ * object grant scopes no rows: every member holds read and create on the
+ * object through the storage service's own baseline set (contributed beside
+ * these gates, `attachment-member-grant.ts`), and an app may grant more —
+ * without these hooks any member could attach files to records they cannot
+ * see, and a holder of edit or delete could rewrite or delete any other
+ * user's attachments. Salesforce semantics (ContentDocumentLink): an
+ * attachment's access is derived from its PARENT record.
  *
  *  - beforeInsert: the caller must be able to EDIT the parent record (see
  *    "Parent EDIT" below; Salesforce parity, #2970 item 3 — v1 asked read

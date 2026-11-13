@@ -275,10 +275,14 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
     }
 
     // [#30892] The file pair is taught where the bridge would carry it.
-    const fileTools = (await resolveMcpRecordFileService(deps, context)) !== undefined;
+    const recordFiles = await resolveMcpRecordFileService(deps, context);
+    const fileTools = recordFiles !== undefined;
+    // [#32686] …and the upload link for a record not yet created, where the
+    // storage plugin serves it.
+    const newRecordUploadLinks = typeof recordFiles?.createUploadLinkForNewRecordAs === 'function';
     // [ADR-0149 D2] …and the dataset pair, with the D3 selection rule.
     const datasetTools = (await resolveMcpDatasetToolsService(deps, context)) !== undefined;
-    const markdown: string = mcp.renderSkill({ mcpUrl, fileTools, datasetTools });
+    const markdown: string = mcp.renderSkill({ mcpUrl, fileTools, newRecordUploadLinks, datasetTools });
     // Raw text must NOT ride the `response` channel — `sendResult` JSON-
     // encodes those bodies unconditionally. The `result` stream channel is
     // the one raw pipe through every adapter (string events are written
@@ -1371,6 +1375,16 @@ export interface McpRecordFileService {
         target: { field: string } | { attachments: true },
         context: unknown,
     ): Promise<{ path: string; expiresAt: string }>;
+    /**
+     * [#32686] A link for a file field of a record not yet created, with the
+     * file id(s) the upload is stored under. Optional: a storage plugin that
+     * predates it serves links for existing records only.
+     */
+    createUploadLinkForNewRecordAs?(
+        object: string,
+        target: { field: string },
+        context: unknown,
+    ): Promise<{ path: string; expiresAt: string; fileIds: string[] }>;
 }
 
 /**
@@ -1455,6 +1469,8 @@ function recordFileMembers(
             });
         }
     };
+    const newRecordLinkAs =
+        typeof service.createUploadLinkForNewRecordAs === 'function' ? service.createUploadLinkForNewRecordAs.bind(service) : undefined;
     return {
         listRecordFiles: async (object: string, recordId: string) => {
             await readRecordFirst(object, recordId);
@@ -1479,6 +1495,20 @@ function recordFileMembers(
             const grant = await service.createUploadLinkAs(object, recordId, target, ec);
             return { url: absoluteUrl(grant.path, await publicOrigin(deps, context)), expiresAt: grant.expiresAt };
         },
+        // [#32686] No record to read first: the storage service asks the
+        // object's create verdict and the field's writability for the caller.
+        ...(newRecordLinkAs
+            ? {
+                createUploadLinkForNewRecord: async (object: string, target: { field: string }) => {
+                    const grant = await newRecordLinkAs(object, target, ec);
+                    return {
+                        url: absoluteUrl(grant.path, await publicOrigin(deps, context)),
+                        expiresAt: grant.expiresAt,
+                        fileIds: [...grant.fileIds],
+                    };
+                },
+            }
+            : {}),
     };
 }
 
@@ -1665,7 +1695,9 @@ function notResumableRunMessage(runId: string): string {
  *     was not started by a flow action, and the call is refused 403.
  *     The confirmation gate applies here too because the flow's writes happen
  *     after the screen, so on resume. A run started with `confirm: true` still
- *     needs `confirm: true` to resume.
+ *     needs `confirm: true` to resume. An AI service account never confirms
+ *     an action for itself (ADR-0151 D3 rule 3), so its resume of a gated
+ *     action is refused whatever it sends.
  *  4. **The subject record, read again as the caller.** This is #16370's rule,
  *     with the same two shared functions: `loadActionSubjectRecord` and
  *     `refuseDeniedSubjectLoad`. A record the caller could read when the run
@@ -1903,7 +1935,9 @@ function resumeAdmissionRefusal(
     if (permission) return resumeDoorError(deps, permission, 403);
     const disabled = actionExec.disabledActionRefusal(deps, activationEngine, action);
     if (disabled) return resumeDoorError(deps, disabled.message, disabled.status, { code: disabled.code });
-    const confirmation = actionExec.actionConfirmationRefusal(deps, action, request, objectName);
+    // [ADR-0151 D3 rule 3] The caller's envelope rides along: an AI service
+    // account never confirms for itself, so it is refused whatever it sends.
+    const confirmation = actionExec.actionConfirmationRefusal(deps, action, request, objectName, ec);
     if (confirmation) {
         return resumeDoorError(deps, confirmation.message, confirmation.status, {
             code: confirmation.code,

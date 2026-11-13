@@ -1522,6 +1522,7 @@ const ru = {
     saving: "Сохранение…",
     lockedByApproval: "Заблокировано для согласования",
     lockedTooltip: "У этой записи есть ожидающий запрос на согласование; редактирование заблокировано",
+    lockedByState: "Недоступно для редактирования в текущем состоянии",
     writeStrippedTitle: "Сохранено, но часть полей не применена",
     writeWarningsTitle: "Сохранено, но есть предупреждения",
     writeStrippedReadonly: "Поля только для чтения, поэтому не применены: {{fields}}",
@@ -2873,6 +2874,7 @@ const ru = {
         invalidCredentials: "Неверный email или пароль. После нескольких неудачных попыток вход приостанавливается на некоторое время. Забыли пароль? Сбросьте его, чтобы сразу войти.",
         invalidCredentialsNoMail: 'Неверный email или пароль. После нескольких неудачных попыток вход приостанавливается на некоторое время. Забыли пароль? Попросите администратора сбросить его.',
         emailNotVerified: "Пожалуйста, подтвердите email перед входом.",
+        accountDeactivated: "Ваша организация деактивировала вашу учётную запись. Обратитесь к администратору.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -4178,6 +4180,7 @@ const ru = {
       get_authoring_rules: "Прочитать правила разработки",
       get_metadata_schema: "Изучить формат метаданных",
       get_package: "Посмотреть сведения о пакете",
+      get_record_history: "Прочитать историю этой записи",
       list_metadata: "Перечислить имеющиеся метаданные",
       list_objects: "Перечислить имеющиеся объекты",
       list_packages: "Перечислить имеющиеся пакеты",

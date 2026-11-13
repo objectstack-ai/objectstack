@@ -1218,6 +1218,10 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   // remount that the id-resolution triggers; the freshly-mounted pane replays it
   // via useDeferredFirstSend. See that hook for the full race.
   const pendingFirstMessageRef = useRef<PendingFirstMessage | null>(null);
+  // ADR-0028 — the composer's picked model, owned by the PAGE for the same
+  // reason: it must survive the keyed <ChatPane> remount, or the pane that
+  // replays the first message sends (and shows) the default instead.
+  const [selectedModelId, setSelectedModelId] = useState<string | undefined>(undefined);
   // Bumped whenever the pending ref is set OUT OF BAND (the handoff seed below).
   // ChatPane's deferred-send replay lists this in its deps, so it re-runs and
   // fires the seed even when the conversation id was ALREADY minted. Without it a
@@ -1659,6 +1663,8 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
             pendingFirstMessageRef={pendingFirstMessageRef}
             pendingFirstMessageSeq={pendingFirstMessageSeq}
             ensureConversation={ensureConversation}
+            selectedModelId={selectedModelId}
+            onSelectedModelChange={setSelectedModelId}
             onSent={handleSent}
             onShare={() => setShareOpen(true)}
             onDebug={() => setDebugOpen(true)}
@@ -1733,6 +1739,17 @@ interface ChatPaneProps {
    *  `useChatConversation().ensureConversation`); no row exists before it.
    *  See {@link useDeferredFirstSend}. */
   ensureConversation?: () => unknown;
+  /**
+   * ADR-0028 — the model the user picked in the composer, held by the HOST.
+   * The pane is keyed on the conversation id and remounts when the first send
+   * mints it, so a pick kept inside the pane would be dropped right then: the
+   * replayed first message and every later turn would go out with the default
+   * while the picker had shown the pick. A host that keys the pane passes this
+   * pair; absent, the pane holds the pick itself for its own lifetime.
+   */
+  selectedModelId?: string;
+  /** ADR-0028 — records a pick; paired with {@link ChatPaneProps.selectedModelId}. */
+  onSelectedModelChange?: (modelId: string) => void;
   onSent: (firstUserMessage?: string) => void;
   onShare: () => void;
   /** Opens the Build Doctor drawer (build agent only). */
@@ -1762,6 +1779,8 @@ export function ChatPane({
   pendingFirstMessageRef,
   pendingFirstMessageSeq,
   ensureConversation,
+  selectedModelId: hostSelectedModelId,
+  onSelectedModelChange,
   onSent,
   onShare,
   onDebug,
@@ -2016,7 +2035,12 @@ export function ChatPane({
   // AI service answers that catalog empty and `/models` with a 501.
   const { models: aiModels, defaultModelId } = useAiModels({ apiBase, enabled: agents.length > 0 });
   const selectedApp = activeAppPackageId || editPackageId || undefined;
-  const [selectedModelId, setSelectedModelId] = useState<string | undefined>(undefined);
+  // The pick outlives this pane only when the host holds it (see the props).
+  const [paneSelectedModelId, setPaneSelectedModelId] = useState<string | undefined>(undefined);
+  const hostHoldsModel = onSelectedModelChange !== undefined;
+  const selectedModelId = hostHoldsModel ? hostSelectedModelId : paneSelectedModelId;
+  const setSelectedModelId = hostHoldsModel ? onSelectedModelChange : setPaneSelectedModelId;
+  // The one value both the picker shows and the request sends.
   const effectiveModelId = selectedModelId ?? defaultModelId;
 
   const {

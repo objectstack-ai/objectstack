@@ -14,7 +14,7 @@
  *    (`action-execution.ts`);
  *  - a declared endpoint of `type: 'flow'` (`endpoint-executor.ts`).
  *
- * Two rules, asked in this order through ONE entry, {@link flowStartRefusal}:
+ * Three rules, asked in this order through ONE entry, {@link flowStartRefusal}:
  *
  *  1. **The elevated self-triggered rule** (the maintainer's ruling, letter B at
  *     the trigger door, extended to every door that starts a flow by name by
@@ -25,7 +25,22 @@
  *     never an entry, so a button, an action or an endpoint that happens to name
  *     one is wiring, not a design. No capability opens it, which is why it
  *     answers first.
- *  2. **The flow's own `requiredPermissions`** (ruling record 6377848497,
+ *  2. **The AI service account rule** (ADR-0151 Non-goals; ruling record
+ *     6812617393, letter C): an AI service account (ADR-0151 D3,
+ *     {@link isAiServiceAccount}) starts a flow declared `runAs: 'system'`
+ *     only through an action whose author opted it into the AI surface,
+ *     `ai: { exposed: true, … }` (ADR-0011) — the opt-in the MCP `run_action`
+ *     door already asks of every action. The account holds its explicit
+ *     grants and never runs as the system (ADR-0151 D3); an elevated flow
+ *     runs past them, so the author's word that AI may start it is asked
+ *     before the run exists. Each door states whether what starts the flow
+ *     THERE carries that opt-in ({@link FlowStartDoor}): the action door hands
+ *     its action's, and the trigger routes and a declared endpoint start a
+ *     flow by name with no action in hand — neither a flow nor an endpoint
+ *     declares an AI opt-in — so at those two an account's start of an
+ *     elevated flow is refused, and the refusal names the door that admits
+ *     it. No capability opens it either, so it answers before rule 3.
+ *  3. **The flow's own `requiredPermissions`** (ruling record 6377848497,
  *     letter A): `screen` and `api` flows stay the doors their author designed,
  *     elevated or not, and the flow says who may walk through them. A caller
  *     that is not the system principal must hold EVERY capability the flow
@@ -40,7 +55,9 @@
  *
  * ## The third question: the row a start addresses
  *
- * The two rules above judge the caller against the FLOW. A start that names a
+ * The rules above judge the caller against the FLOW; this question keeps the
+ * name it has at every door that asks it, and answers after all of them. A
+ * start that names a
  * record also hands the run a row, and a `runAs: 'system'` run reads and
  * writes that row past the caller's own access; a user run is asked the same,
  * as the action door's load asks it of every run, so a persisted run is built
@@ -77,9 +94,9 @@
  *
  * The same reason `flow-dispatch-status.ts` is one: a rule each door spells
  * for itself is a rule that drifts, and a door left out is the defect, not a
- * gap. The type set, the capability check, the refusals' code and status, and
- * their words live here once, so a caller refused at one door is refused alike
- * at the other two —
+ * gap. The type set, the account rule, the capability check, the refusals'
+ * code and status, and their words live here once, so a caller refused at one
+ * door is refused alike at the other two —
  * an MCP agent and a person are judged at the same door by the same rule.
  * ⛔ A second copy of the type set or the refusal, at any door, is the defect
  * by construction.
@@ -88,7 +105,8 @@
  *
  * Admission only. Elevation stays the engine's: the check reads three
  * declared keys (`type`, `runAs`, `requiredPermissions`) off the definition the
- * service serves and never re-implements the engine's run-as policy. A door's own gates are untouched and keep their
+ * service serves, and the one fact a door states about itself
+ * ({@link FlowStartDoor}), and never re-implements the engine's run-as policy. A door's own gates are untouched and keep their
  * place: the action's declared `requiredPermissions` (ADR-0066 D4) still
  * answers first at the action door, and a declared endpoint's policy chain
  * (`authRequired`, `rateLimit`) still runs before its executor. This check
@@ -156,11 +174,66 @@ export function requiredPermissionsRefusal(required: readonly string[], missing:
     };
 }
 
+/**
+ * The refusal a door answers when an AI service account starts a flow declared
+ * `runAs: 'system'` and what starts the flow at that door carries no AI
+ * opt-in (rule 2; ADR-0151 Non-goals, ruling record 6812617393, letter C) —
+ * the same code and status as the two refusals beside it (ADR-0112). ⛔ No new
+ * code is minted here.
+ *
+ * The message names the rule and the opt-in the author adds, and nothing else
+ * about THIS flow: not its name, its type or its definition, and not the
+ * door, so it reads the same at every door. It names the action route and the
+ * MCP tool because those are the doors where the opt-in can stand.
+ */
+export const AI_ACCOUNT_ELEVATED_START_REFUSAL = Object.freeze({
+    code: 'PERMISSION_DENIED',
+    status: 403,
+    message:
+        'An AI service account starts a flow that runs as the system only through an action its author opted '
+        + "into AI. Declare `ai: { exposed: true, description: … }` on an action of type 'flow' that targets the "
+        + 'flow, and have the account run that action (the REST actions route or the MCP `run_action` tool).',
+} as const);
+
 /** The ADR-0112 refusal a door answers for a start it does not admit. */
 export interface FlowStartRefusal {
     code: 'PERMISSION_DENIED';
     status: 403;
     message: string;
+}
+
+/**
+ * Whether `executionContext` is an AI service account's (ADR-0151 D3): the
+ * agent principal that is its own subject, `principalKind: 'agent'` with no
+ * `onBehalfOf`. An OAuth-delegated agent names the person it acts for and is
+ * not one; neither is a person, the guest or the system principal.
+ *
+ * ONE reading, asked by rule 2 ({@link flowStartRefusal}) and by the two
+ * builders that forward the account's kind onto the run it starts
+ * (`buildAutomationContext`, `dispatchFlowAction`), so the caller a door
+ * judges as an account is the caller whose run carries the kind.
+ */
+export function isAiServiceAccount(
+    executionContext: { principalKind?: unknown; onBehalfOf?: unknown } | null | undefined,
+): boolean {
+    return executionContext?.principalKind === 'agent' && !executionContext?.onBehalfOf;
+}
+
+/**
+ * What a door that starts a flow by name states about ITSELF for rule 2. A
+ * required argument of {@link flowStartRefusal}, so a door that never
+ * considered the rule does not compile.
+ */
+export interface FlowStartDoor {
+    /**
+     * Whether what starts the flow at this door carries its author's
+     * `ai.exposed: true` opt-in (ADR-0011). The action door hands its action's
+     * (`actionIsAiExposed`, the reading the MCP `run_action` gate makes). The
+     * trigger routes and a declared endpoint state `false`: they start a flow
+     * by name with no action in hand, and neither a flow nor an endpoint
+     * declares an AI opt-in.
+     */
+    aiExposed: boolean;
 }
 
 /**
@@ -445,7 +518,8 @@ async function declaredReadsOf(
  * THE CHECK every door that starts a flow by name asks: the refusal it
  * answers for this caller starting `flowName`, or `null` when the start is
  * admitted. Rule 1 ({@link isElevatedSelfTriggered}) answers first, then rule 2
- * (the flow's `requiredPermissions`).
+ * (an AI service account at an elevated flow, {@link FlowStartDoor}), then
+ * rule 3 (the flow's `requiredPermissions`).
  *
  * What stays exactly as it was, and why each is outside this check:
  *
@@ -456,10 +530,17 @@ async function declaredReadsOf(
  *    `isSystem: false` and is judged like any other caller.
  *  - **A parent flow's `subflow` node** starts its child through the engine
  *    (`engine.execute`), never through a door, so a sub-flow called from its
- *    parent is untouched by both rules — the check lives at the doors
+ *    parent is untouched by every rule — the check lives at the doors
  *    precisely so that path stays open. The parent's own start was the door.
  *  - **A flow that declares no `requiredPermissions`** (or an empty list) and is
- *    not elevated-and-self-triggered: admitted, as before.
+ *    not elevated-and-self-triggered: admitted, as before — for every caller
+ *    but an AI service account at an elevated flow, which rule 2 judges.
+ *  - **A person, and an OAuth-delegated agent**, are not judged by rule 2: it
+ *    reads the account alone ({@link isAiServiceAccount}). The delegated
+ *    agent's token is honoured on the MCP endpoint only, where `run_action`
+ *    asks the opt-in of every action.
+ *  - **A flow that runs as the user**: an account starts it as before, and the
+ *    run holds the account's own grants under the agent ceiling (ADR-0151 D3).
  *
  * Reads the flow through the automation service's own `getFlow` — the probe
  * `flowIsUnknown` (`flow-dispatch-status.ts`) uses, which serves the same
@@ -471,7 +552,11 @@ async function declaredReadsOf(
 export async function flowStartRefusal(
     automation: unknown,
     flowName: string,
-    executionContext: { isSystem?: boolean; systemPermissions?: readonly string[] } | null | undefined,
+    executionContext:
+        | { isSystem?: boolean; systemPermissions?: readonly string[]; principalKind?: unknown; onBehalfOf?: unknown }
+        | null
+        | undefined,
+    door: FlowStartDoor,
 ): Promise<FlowStartRefusal | null> {
     if (executionContext?.isSystem === true) return null;
     const svc = automation as { getFlow?: (name: string) => Promise<unknown> } | null | undefined;
@@ -482,6 +567,11 @@ export async function flowStartRefusal(
         | undefined;
     if (!flow) return null;
     if (isElevatedSelfTriggered(flow)) return ELEVATED_START_REFUSAL;
+    // [ADR-0151 Non-goals; ruling record 6812617393, letter C] Rule 2: the
+    // account starts an elevated flow only where the author's AI opt-in stands.
+    if (flow.runAs === 'system' && isAiServiceAccount(executionContext) && door.aiExposed !== true) {
+        return AI_ACCOUNT_ELEVATED_START_REFUSAL;
+    }
     const missing = missingCapabilities(flow.requiredPermissions, executionContext);
     if (missing.length > 0) return requiredPermissionsRefusal(flow.requiredPermissions as string[], missing);
     return null;

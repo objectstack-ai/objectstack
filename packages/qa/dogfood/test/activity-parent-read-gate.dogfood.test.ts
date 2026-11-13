@@ -47,6 +47,7 @@ describe('sys_activity: a member reads the activity of records it can read, and 
   let memberTok: string;
   let privateId: string; // cmt_private, owned by the admin — the member cannot read it
   let openId: string; // cmt_open, created by the member — the member reads it
+  const sealedId = 'act_gate_sealed_resource'; // sys_oauth_resource — the data door serves it to no one
 
   beforeAll(async () => {
     stack = await bootStack(commentsFixtureStack as never, {
@@ -94,6 +95,16 @@ describe('sys_activity: a member reads the activity of records it can read, and 
     expect((await stack.apiAs(memberTok, 'GET', `/data/cmt_open/${openId}`)).status).toBe(200);
     const stored = await ql.find('sys_activity', { where: { object_name: 'cmt_private', record_id: privateId }, context: SYS });
     expect(stored.length, 'the CRUD mirror wrote activity about the private record').toBe(2);
+
+    // A parent the data door does not serve (`enable` refuses `get` for every
+    // persona): a system-context write to the object itself, which the CRUD
+    // mirror records like any other write. Seeded here, so the per-row
+    // invariant in the list case below judges its row too.
+    await ql.insert(
+      'sys_oauth_resource',
+      { id: sealedId, identifier: 'https://act-gate.verify.test/sealed', name: 'activity gate sealed resource' },
+      { context: { ...SYS } },
+    );
   }, 120_000);
 
   afterAll(async () => {
@@ -150,6 +161,18 @@ describe('sys_activity: a member reads the activity of records it can read, and 
     expect(groups.some((g: Row) => g.object_name === 'cmt_private')).toBe(false);
     const listTotal = ((await (await stack.apiAs(memberTok, 'GET', '/data/sys_activity?limit=1000')).json()) as any).total;
     expect(groups.reduce((sum: number, g: Row) => sum + Number(g.n), 0)).toBe(listTotal);
+  });
+
+  it('a parent the data door does not serve: neither the member nor the admin is served its activity row', async () => {
+    const stored = await ql.find('sys_activity', { where: { object_name: 'sys_oauth_resource', record_id: sealedId }, context: SYS });
+    expect(stored.length, 'the CRUD mirror wrote activity about the sealed record').toBeGreaterThanOrEqual(1);
+    // The parent's own door, for the persona that reads every record.
+    expect((await stack.apiAs(adminTok, 'GET', `/data/sys_oauth_resource/${sealedId}`)).status).toBe(404);
+    for (const [who, tok] of [['member', memberTok], ['admin', adminTok]] as const) {
+      const rows = await rowsOf(await stack.apiAs(tok, 'GET', '/data/sys_activity?limit=1000'));
+      expect(rows.some((r) => r.object_name === 'sys_oauth_resource' && r.record_id === sealedId), `${who} list`).toBe(false);
+      expect((await stack.apiAs(tok, 'GET', `/data/sys_activity/${stored[0].id}`)).status, `${who} by id`).toBe(404);
+    }
   });
 
   it('an admin still reads the activity of both records', async () => {

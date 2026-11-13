@@ -100,6 +100,17 @@ const REASON_PHRASE: Record<DroppedFieldsEvent['reason'], string> = {
 };
 
 /**
+ * [#32768] How the strict refusal names `reason` to a human — the phrase
+ * {@link ReadonlyFieldRejectedError}'s per-reason sentence speaks. Exported
+ * for the write-free lock judgement (`engine-field-write-lock.ts`), so a door
+ * that refuses ahead of the write names the lock in the write's own words
+ * rather than re-spelling them. Not re-exported from the package entry.
+ */
+export function readonlyDropReasonPhrase(reason: DroppedFieldsEvent['reason']): string {
+  return REASON_PHRASE[reason] ?? reason;
+}
+
+/**
  * The per-reason breakdown sentence, e.g.
  * `id — the primary key, …; amount — read-only in the target record's …`.
  * Fields keep the order they were dropped in, de-duplicated per reason.

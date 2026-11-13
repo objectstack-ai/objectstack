@@ -94,6 +94,10 @@ export {
 // (objectui#4109 / PR #4279), which is the "two readers of one prose contract"
 // shape #3367 / #3842 record. `./utils/appRoute` is the contract.
 export { resolveHostAppSegment, appRouteSegment, filterActiveApps } from './utils/index.js';
+// objectstack#32667 — which app OWNS a record of an object (the app a link to
+// the record, or to a page about it, opens under), as opposed to which app
+// hosts an app-independent page. `./utils/objectHostApp` is the contract.
+export { objectHostAppSegment } from './utils/objectHostApp.js';
 // objectstack#29750 — the inbox's notification-link resolver, and the table of
 // console routes served outside an app. The console's native-shell navigate
 // listener and its unmatched-route guard host an app-relative push route

@@ -1,5 +1,159 @@
 # @object-ui/collaboration
 
+## 18.4.0
+
+### Patch Changes
+
+- 96b5dab: refactor(collaboration, components)!: retire two zero-consumer type exports from the package entries (`CollaborationTranslate`, `MobileDialogContentProps`)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/collaboration#CollaborationTranslate, @object-ui/components#MobileDialogContentProps) the retired operands are two TypeScript type aliases, the translate-function type of the collaboration package's i18n hook and the props type of the components package's mobile dialog content; nothing in the workspace or in hotcrm imports or names either outside its package, and no packages/spec schema, registered node type, conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports `CollaborationTranslate` from `@object-ui/collaboration` or `MobileDialogContentProps` from `@object-ui/components`. Neither had an importer or a mention anywhere outside its package, in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected. Nothing renders differently.
+  
+  Both stay in their modules, which their package's own code still reads; only the entries stop publishing them:
+  
+  - `CollaborationTranslate` types the `t` that `CommentThread` and `PresenceAvatars` pass to their timestamp and status helpers.
+  - `MobileDialogContentProps` is the props type of `MobileDialogContent`, and the props stay recoverable as `React.ComponentPropsWithoutRef<typeof MobileDialogContent>`.
+  
+  Every other name the two entries exported stays exported unchanged, among them `useCollaborationTranslation`, `COLLAB_DEFAULT_TRANSLATIONS`, `CommentThread`, `PresenceAvatars` and `MobileDialogContent`.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `CollaborationTranslate` TO `ReturnType<typeof useCollaborationTranslation>['t']`, the expression the type was defined as.
+  - FROM `MobileDialogContentProps` TO `React.ComponentPropsWithoutRef<typeof MobileDialogContent>`.
+- Updated dependencies [b5fd350]
+- Updated dependencies [ac5d0ce]
+- Updated dependencies [2cf269f]
+- Updated dependencies [604a2b3]
+- Updated dependencies [e396095]
+- Updated dependencies [f810c34]
+- Updated dependencies [7a5f73e]
+- Updated dependencies [2e33533]
+- Updated dependencies [2a32bd4]
+- Updated dependencies [ba875d2]
+- Updated dependencies [bb61872]
+- Updated dependencies [4211f50]
+- Updated dependencies [a1d243e]
+- Updated dependencies [9728ab1]
+- Updated dependencies [1e6f542]
+- Updated dependencies [b379262]
+- Updated dependencies [7945a3b]
+- Updated dependencies [9049be2]
+- Updated dependencies [a52761f]
+- Updated dependencies [f0ad1f7]
+- Updated dependencies [03be565]
+- Updated dependencies [7e9fa4b]
+- Updated dependencies [bc8945f]
+- Updated dependencies [42afac7]
+- Updated dependencies [a9fb14b]
+- Updated dependencies [6f095b9]
+- Updated dependencies [5f80129]
+- Updated dependencies [0c7e95a]
+- Updated dependencies [aa57c76]
+- Updated dependencies [c8e6d38]
+- Updated dependencies [d99cd3b]
+- Updated dependencies [b6caa14]
+- Updated dependencies [a77c2e9]
+- Updated dependencies [ea5807e]
+- Updated dependencies [ff12aed]
+- Updated dependencies [6c48d48]
+- Updated dependencies [ef2ad31]
+- Updated dependencies [18870c9]
+- Updated dependencies [fa9c0aa]
+- Updated dependencies [fd749a4]
+- Updated dependencies [6a8f415]
+- Updated dependencies [56cac5e]
+- Updated dependencies [77c203a]
+- Updated dependencies [648089d]
+- Updated dependencies [10ecafd]
+- Updated dependencies [b6f4c0e]
+- Updated dependencies [b4f4781]
+- Updated dependencies [042efb7]
+- Updated dependencies [48231b0]
+- Updated dependencies [0d54279]
+- Updated dependencies [8e5fabe]
+- Updated dependencies [ac56acf]
+- Updated dependencies [a91409c]
+- Updated dependencies [ab12a3b]
+- Updated dependencies [2b35374]
+- Updated dependencies [7b10a30]
+- Updated dependencies [5bca14f]
+- Updated dependencies [a058413]
+- Updated dependencies [062236c]
+- Updated dependencies [d996c38]
+- Updated dependencies [47c457b]
+- Updated dependencies [5268f50]
+- Updated dependencies [115a43a]
+- Updated dependencies [c1da957]
+- Updated dependencies [b631573]
+- Updated dependencies [78d4fe9]
+- Updated dependencies [78eb352]
+- Updated dependencies [a0b40f2]
+- Updated dependencies [6ddf827]
+- Updated dependencies [d9d3eb7]
+- Updated dependencies [2ce2646]
+- Updated dependencies [bd1b768]
+- Updated dependencies [0f920b9]
+- Updated dependencies [1c66988]
+- Updated dependencies [584f7b8]
+- Updated dependencies [065bba7]
+- Updated dependencies [d8d0791]
+- Updated dependencies [66b17a3]
+- Updated dependencies [f5e23e2]
+- Updated dependencies [3f61e4f]
+- Updated dependencies [51992df]
+- Updated dependencies [1f37085]
+- Updated dependencies [9a63ecb]
+- Updated dependencies [eff90af]
+- Updated dependencies [ce965cf]
+- Updated dependencies [f88ca70]
+- Updated dependencies [f67f3b3]
+- Updated dependencies [1ff1d45]
+- Updated dependencies [2c6b936]
+- Updated dependencies [46ec2ec]
+- Updated dependencies [e728d7a]
+- Updated dependencies [3224545]
+- Updated dependencies [ac8fede]
+- Updated dependencies [60996d4]
+- Updated dependencies [2715a09]
+- Updated dependencies [6180c87]
+- Updated dependencies [f6b8985]
+- Updated dependencies [94019a6]
+- Updated dependencies [60f8149]
+- Updated dependencies [f75466c]
+- Updated dependencies [a127a45]
+- Updated dependencies [49bc3be]
+- Updated dependencies [36b216b]
+- Updated dependencies [cc8c4b0]
+- Updated dependencies [33c3b5e]
+- Updated dependencies [c04aa29]
+- Updated dependencies [c4b6160]
+- Updated dependencies [8a3eeef]
+- Updated dependencies [ee230a2]
+- Updated dependencies [967822a]
+- Updated dependencies [fa1134c]
+- Updated dependencies [386891e]
+- Updated dependencies [d094752]
+- Updated dependencies [6aa95dc]
+- Updated dependencies [6cde924]
+- Updated dependencies [5b1fe45]
+- Updated dependencies [1a6c330]
+- Updated dependencies [8ce5827]
+- Updated dependencies [f84205b]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [614e831]
+- Updated dependencies [767f110]
+- Updated dependencies [341448e]
+- Updated dependencies [136eba4]
+- Updated dependencies [b463ec6]
+  - @object-ui/types@18.4.0
+  - @object-ui/i18n@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

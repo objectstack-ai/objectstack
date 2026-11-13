@@ -751,3 +751,138 @@ describe('[#32086] the attribute mapping decides the email and name a SAML sign-
     expect(rp.engine.tables.get('sys_user')?.map((u: any) => u.email).sort()).toEqual(['admin@acme.com', 'mia.chen@acme.com']);
   });
 });
+
+// ── With SSO domain verification on, a provider creates an account only at a domain it has proven ──
+//
+// `sso-account-at-proven-domain.ts` states the rule. Every case runs with
+// verification on, the provider's `domain_verified` on and its JIT toggle on,
+// and one human already present, so the audience gate would admit each
+// newcomer: the rule alone decides.
+
+describe('with SSO domain verification on, a SAML provider creates an account only at a domain it has proven', () => {
+  const VERIFICATION_ON = { plugins: { sso: true, ssoDomainVerification: true } };
+  const verifiedRp = async (domain = 'acme.com', provider: Record<string, unknown> = {}) => {
+    const rp = await makeRp({ config: VERIFICATION_ON, provider: { domain, domainVerified: true, allowJit: true, ...provider } });
+    await seedAdmin(rp);
+    return rp;
+  };
+  /** What a sign-in left behind besides the seeded admin. */
+  const written = (rp: Rp) => ({
+    users: (rp.engine.tables.get('sys_user') ?? []).map((u: any) => u.email).filter((e: string) => e !== 'admin@acme.com'),
+    accounts: (rp.engine.tables.get('sys_account') ?? []).length,
+    members: (rp.engine.tables.get('sys_member') ?? []).length,
+    sessions: (rp.engine.tables.get('sys_session') ?? []).length,
+  });
+  const NOTHING = { users: [], accounts: 0, members: 0, sessions: 0 };
+
+  const expectAdmitted = (res: Response) => {
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location'), res.headers.get('location') ?? '').toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=[^;]/);
+  };
+  const expectRefused = (rp: Rp, res: Response) => {
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: FAILED, error: 'EMAIL_DOMAIN_NOT_ALLOWED' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(written(rp)).toEqual(NOTHING);
+  };
+
+  it('admits an address exactly at the single listed domain', async () => {
+    const rp = await verifiedRp();
+    expectAdmitted(await signInThroughIdp(rp, 'bob@acme.com'));
+    expect(written(rp).users).toEqual(['bob@acme.com']);
+  });
+
+  it('admits an address exactly at the second entry of a multi-entry list', async () => {
+    const rp = await verifiedRp('acme.com, acme.co.uk');
+    expectAdmitted(await signInThroughIdp(rp, 'bob@acme.co.uk'));
+  });
+
+  const refused: Array<[string, string, string?]> = [
+    ['another domain', 'bob@other.example'],
+    ['a subdomain of a listed domain', 'bob@eng.acme.com'],
+    ['a parent of a listed domain', 'bob@acme.com', 'eng.acme.com'],
+    ['a look-alike of a listed domain', 'bob@acme.com.other.example'],
+    ['an asserted email that is not an address', 'bob.acme.com'],
+    ['a domain part with a port', 'bob@acme.com:443'],
+    ['a domain part with a path', 'bob@acme.com/x'],
+    ['a domain part with a trailing dot', 'bob@acme.com.'],
+    ['a full-width spelling of a listed domain', 'bob@\uFF41\uFF43\uFF4D\uFF45.com'],
+    ['an address at a listed entry that is not written as a bare host', 'ceo@victim.example', 'victim.example\\@evil.example'],
+  ];
+  for (const [what, email, domain] of refused) {
+    it(`refuses ${what}, and writes no user, account, membership or session`, async () => {
+      const rp = await verifiedRp(domain);
+      expectRefused(rp, await signInThroughIdp(rp, email));
+    });
+  }
+
+  it('case, and punycode against Unicode for an internationalised name, are one domain', async () => {
+    for (const [domain, email] of [
+      ['acme.com', 'Bob@ACME.com'],
+      ['bücher.de', 'bob@xn--bcher-kva.de'],
+      ['xn--bcher-kva.de', 'bob@bücher.de'],
+    ]) {
+      const rp = await verifiedRp(domain);
+      expectAdmitted(await signInThroughIdp(rp, email));
+    }
+  });
+
+  it('no carve-out: the first human of a deployment, at an outside domain, is refused', async () => {
+    // JIT off: without the rule, the first-human carve-out alone would admit.
+    const rp = await makeRp({ config: VERIFICATION_ON, provider: { domainVerified: true, allowJit: false } });
+    const email = 'bob@other.example';
+    expectRefused(rp, await signInThroughIdp(rp, email));
+    expect(rp.engine.tables.get('sys_user') ?? []).toEqual([]);
+  });
+
+  it('no carve-out: an outside-domain address holding a pending invitation is refused', async () => {
+    // JIT off: without the rule, the invitation alone would admit.
+    const rp = await verifiedRp('acme.com', { allowJit: false });
+    const email = 'bob@other.example';
+    await inviteForAudienceGate(rp.engine, email);
+    expectRefused(rp, await signInThroughIdp(rp, email));
+  });
+
+  it('CONTROL (stays green under ablation): a provider whose domain is not verified signs nobody in', async () => {
+    // The vendor refuses this before any account is judged, so it does not
+    // pin the rule above.
+    const rp = await makeRp({ config: VERIFICATION_ON, provider: { domainVerified: false, allowJit: true } });
+    await seedAdmin(rp);
+    const start = await rp.manager.handleRequest(
+      new Request(`${AUTH}/sign-in/sso`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE },
+        body: JSON.stringify({ providerId: PROVIDER_ID, callbackURL: AFTER, errorCallbackURL: FAILED }),
+      }),
+    );
+    expect(start.status).toBe(401);
+    expect(written(rp)).toEqual(NOTHING);
+  });
+
+  it('CONTROL: with verification off, the outside-domain account is created as today', async () => {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(rp);
+    expectAdmitted(await signInThroughIdp(rp, 'bob@other.example'));
+    expect(written(rp).users).toEqual(['bob@other.example']);
+  });
+
+  it('CONTROL: an existing linked account at an outside domain still signs in', async () => {
+    const rp = await verifiedRp();
+    // The account is made while the environment reports verification off (as
+    // it was before it was turned on); the vendor's own provider gate stays on.
+    const off = vi.spyOn(rp.manager, 'isSsoDomainVerificationEnabled').mockReturnValue(false);
+    expectAdmitted(await signInThroughIdp(rp, 'bob@other.example'));
+    off.mockRestore();
+    expect(rp.manager.isSsoDomainVerificationEnabled()).toBe(true);
+    expectAdmitted(await signInThroughIdp(rp, 'bob@other.example'));
+    expect(written(rp).users).toEqual(['bob@other.example']);
+  });
+
+  it('CONTROL: invite_only without allowJit still answers SELF_REGISTRATION_CLOSED for an on-domain stranger', async () => {
+    const rp = await verifiedRp('acme.com', { allowJit: false });
+    const res = await signInThroughIdp(rp, 'bob@acme.com');
+    expect(landing(res)).toEqual({ base: FAILED, error: 'SELF_REGISTRATION_CLOSED' });
+    expect(written(rp)).toEqual(NOTHING);
+  });
+});

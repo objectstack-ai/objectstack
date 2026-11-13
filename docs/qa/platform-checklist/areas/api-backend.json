@@ -3421,10 +3421,10 @@
     },
     {
       "id": "api-backend.actions-namespace-address",
-      "title": "An action call names its holder: POST /api/v1/actions/:ns/:object/:action[/:recordId], /actions/:ns/global/:action and the _env forms run that namespace's (or the environment's) declaration, an action another package binds to an object is reachable by its namespace, and the bare call is unchanged",
+      "title": "An action call names its holder: POST /api/v1/actions/:ns/:object/:action[/:recordId], /actions/:ns/global/:action and the _env forms run that namespace's (or the environment's) declaration, an action another package binds to an object is reachable by its namespace, and the bare call is refused 409 naming both when two packages hold the action on one object",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin (the seeded admin): every call"],
@@ -3436,7 +3436,7 @@
         ]
       },
       "steps": [
-        "POST /api/v1/actions/qa_a_ticket/escalate/RID (bare); record which handler ran",
+        "POST /api/v1/actions/qa_a_ticket/escalate/RID (bare); record the status and body, and whether any handler ran",
         "POST /api/v1/actions/qa_a/qa_a_ticket/escalate/RID and POST /api/v1/actions/qa_b/qa_a_ticket/escalate/RID; record which handler ran for each",
         "POST /api/v1/actions/qa_a/global/qa_a_ping, then POST /api/v1/actions/qa_b/global/qa_a_ping",
         "POST /api/v1/actions/_env/global/qa_env_ping, then POST /api/v1/actions/_env/global/qa_a_ping",
@@ -3444,10 +3444,10 @@
       ],
       "acceptance": [
         {
-          "clause": "the bare call is unchanged: /actions/qa_a_ticket/escalate/RID runs the object's own embedded action (qa_a's)",
+          "clause": "the bare call names no holder: while qa_a embeds escalate on qa_a_ticket and qa_b binds its own escalate to the same object, /actions/qa_a_ticket/escalate/RID is refused 409 RESOURCE_CONFLICT naming both packages, and runs neither handler",
           "oracle": "api",
-          "verify": "the answer carries qa_a's result. A first segment that is no installed namespace reads as the bare grammar (packages/spec/src/kernel/address-grammar.ts#readNamespacePositionSegment)",
-          "evidence": "the bare answer"
+          "verify": "the answer is 409 RESOURCE_CONFLICT whose message names the action escalate, com.qa.addr-a and com.qa.addr-b, and carries no handler result: two package holders of one object-bound action key are refused, never picked (packages/runtime/src/action-execution.ts#pickActionHolder, #31697, ruling record 6729825528 letter A; the refusal is packages/core/src/package-scoped-resolution.ts#PackageScopedNameRefusedError, code RESOURCE_CONFLICT, status 409). A first segment that is no installed namespace reads as the bare grammar (packages/spec/src/kernel/address-grammar.ts#readNamespacePositionSegment)",
+          "evidence": "the 409 body"
         },
         {
           "clause": "a namespace segment runs that namespace's declaration: qa_a's embedded escalate for /actions/qa_a/…, and qa_b's standalone escalate bound to qa_a's object for /actions/qa_b/…",
@@ -3475,21 +3475,21 @@
         }
       ],
       "negative": [
-        "the bare call running qa_b's standalone action is a FAIL: #31993 changed the qualified call only",
+        "the bare call running either package's escalate is a FAIL while both hold it on qa_a_ticket: the bare door refuses two package holders of one object-bound key, it never picks one by package or by listing order (ruling record 6729825528, letter A)",
         "an addressed call that runs another namespace's declaration when its own has none is a FAIL: a miss is 404, never a fallback",
-        "reading a missing 409 for two packages binding one action name to one object as a defect is wrong: that refusal is not landed and stays with #31697"
+        "the bare call answering 200 with qa_a's result while qa_b binds escalate to qa_a_ticket is a FAIL: that was the answer before #31697. With qa_b's escalate removed, one holder is left and the same bare call answers 200 with qa_a's result"
       ],
       "traps": ["dispatcher-vs-hono-route"],
       "automated": {
         "kind": "unit",
-        "ref": "packages/runtime/src/domains/actions-addressed-route.test.ts and packages/runtime/src/action-execution-addressed-exposure-refusal.test.ts; no live spec drives the scratch-package pair"
+        "ref": "packages/runtime/src/domains/actions-addressed-route.test.ts, packages/runtime/src/action-package-addressing.test.ts (the bare two-holder 409) and packages/runtime/src/action-execution-addressed-exposure-refusal.test.ts; no live spec drives the scratch-package pair"
       },
       "source": [
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D5 (the actions row, the router order, _env)",
         "packages/runtime/src/action-execution.ts#resolveAddressedRouteActionDeclaration and #addressedActionHits (holder resolution and the 404 sentences)",
         "packages/runtime/src/domains/actions.ts (the addressed-path arm, the _activation 404 and the three-segment limit)",
         "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (the three addressed rows: POST /actions/:ns/:object/:action, /actions/:ns/global/:action, /actions/:ns/:object/:action/:recordId)",
-        "#31979 (G1 /actions), #31993 (a standalone action bound to another package's object)"
+        "#31979 (G1 /actions), #31993 (a standalone action bound to another package's object), #31697 (the bare call refused 409 when two packages hold one object's action; ruling record 6729825528, letter A)"
       ],
       "history": [
         {
@@ -3503,6 +3503,12 @@
           "date": "2026-11-10",
           "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
           "ref": "#32330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-13",
+          "change": "stale-spec re-point of acceptance[0] and negative[2] (and the title, steps[0] and negative[0] that described the same answer). #31697 landed: a bare POST /actions/OBJECT/ACTION/ID while two packages hold the action on one object is refused 409 RESOURCE_CONFLICT naming both (ruling record 6729825528, letter A; packages/runtime/src/action-execution.ts#pickActionHolder), so the clause no longer expects the embedding package's result and the negative no longer calls the refusal unlanded. Found by the 18.4.0 acceptance run #32940 (F-9, R4 F4; wave anchor #32908): 409 naming com.qa.addr-a and com.qa.addr-b, 2 reproductions, and 200 with qa_a's result once qa_b's escalate was removed. Re-read at main 25ee5076. Card #32946",
+          "ref": "#32946"
         }
       ]
     },

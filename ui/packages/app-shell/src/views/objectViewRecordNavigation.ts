@@ -20,7 +20,9 @@
  * `viewport: 'mobile'` answers `page`), a row tap navigates to the record
  * route with the list as its origin, and the pane is never mounted, so the
  * reader's Open records preference and the drawer's `?recordId=` state do not
- * apply: a `?recordId=` link opened on a phone lands on that record's page.
+ * apply: a `?recordId=` link opened on a phone lands on that record's page,
+ * and the record form the link carries (`?form=`, `?formObject=`,
+ * `?formLink=`) opens over that page (objectstack#32750).
  */
 
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
@@ -28,7 +30,8 @@ import type { NavigateFunction, Location, SetURLSearchParams } from 'react-route
 import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view';
 import { useNavigationOverlay } from '@object-ui/react';
 import type { ViewNavigationConfig } from '@object-ui/types';
-import { RECORD_DRAWER_PARAM } from '../urlParams.js';
+import { RECORD_DRAWER_PARAM, RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
+import { RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { viewTabLabel } from './viewTabLabel.js';
 import { listRecordDetailUrl, listRecordActionsValue } from './objectViewRecordLinks.js';
 import { RECORD_PAGE_PUSHED_STATE } from './recordPagePush.js';
@@ -89,6 +92,26 @@ export function listSiblingSetOf(
         return group ? { siblings: group.ids, scope: group.label } : undefined;
     }
     return rows.ids.includes(recordId) ? { siblings: rows.ids } : undefined;
+}
+
+/** The URL parameters the record-form overlay reads (`AppContent`, `urlParams.ts`). */
+const RECORD_FORM_PARAMS = [RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM] as const;
+
+/**
+ * The record-form task a list URL carries, split from the list
+ * (objectstack#32750): `form` is the record-form overlay's search — the
+ * reserved `form`, `formObject` and `formLink` parameters, in the URL's order
+ * — and `origin` is the list's own search without them. A URL that carries no
+ * form answers `form: ''` and its search unchanged.
+ */
+function splitRecordFormSearch(search: string): { form: string; origin: URLSearchParams } {
+    const origin = new URLSearchParams(search);
+    const form = new URLSearchParams();
+    for (const [key, value] of origin) {
+        if ((RECORD_FORM_PARAMS as readonly string[]).includes(key)) form.append(key, value);
+    }
+    for (const key of RECORD_FORM_PARAMS) origin.delete(key);
+    return { form: form.toString(), origin };
 }
 
 type OverlaySizeBucket = 'sm' | 'md' | 'lg' | 'xl' | 'full';
@@ -222,14 +245,25 @@ export function useObjectViewRecordNavigation({
             // (objectui#9874). Nothing here changes behaviour: this branch
             // already treated the name and the token identically, which is
             // exactly what made the substitution inaudible on this surface.
-            const { pathname, search } = locationRef.current;
+            const { pathname, search, state } = locationRef.current;
             // The rows the list shows go along when the record is one of
             // them: the page's top bar counts and steps through them
             // (objectstack#27524, Target 7).
             const set = listSiblingSetOf(listRowsRef.current, String(recordId));
+            // The drawer link a phone answers moves the record form it
+            // carries onto the record's page, where the form opens over the
+            // page as it opens over the drawer on a desktop (objectstack#32750),
+            // with the seeded create values its history entry holds. The
+            // list, as the page's origin, keeps no form of its own.
+            const movesForm = phone && replace === true;
+            const split = movesForm ? splitRecordFormSearch(search) : null;
+            const formSearch = split?.form ? `?${split.form}` : '';
+            const createValues = formSearch && state && typeof state === 'object'
+                ? (state as Record<string, unknown>)[RECORD_FORM_CREATE_VALUES_STATE]
+                : undefined;
             // The list as the page's origin, without the drawer's
             // `?recordId=` a phone redirect leaves behind (objectstack#27058).
-            const originParams = new URLSearchParams(search);
+            const originParams = split?.form ? split.origin : new URLSearchParams(search);
             originParams.delete(RECORD_DRAWER_PARAM);
             const originSearch = originParams.toString();
             const originState = {
@@ -245,11 +279,12 @@ export function useObjectViewRecordNavigation({
               // replace: the drawer link a phone answers takes the list's
               // place, so there is no list entry below to go back to.
               ...(phone && !replace ? { [RECORD_PAGE_PUSHED_STATE]: true } : {}),
+              ...(createValues !== undefined ? { [RECORD_FORM_CREATE_VALUES_STATE]: createValues } : {}),
             };
             if (viewId) {
-                navigate(`../../record/${encodeURIComponent(String(recordId))}`, { relative: 'path', state: originState, replace });
+                navigate(`../../record/${encodeURIComponent(String(recordId))}${formSearch}`, { relative: 'path', state: originState, replace });
             } else {
-                navigate(`record/${encodeURIComponent(String(recordId))}`, { state: originState, replace });
+                navigate(`record/${encodeURIComponent(String(recordId))}${formSearch}`, { state: originState, replace });
             }
         },
         [navigate, viewId, listLabel, phone]

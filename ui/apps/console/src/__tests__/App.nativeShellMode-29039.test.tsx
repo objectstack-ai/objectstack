@@ -60,6 +60,10 @@ const { passthrough, stub, shellState, authState } = vi.hoisted(() => {
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ConsoleShell: passthrough,
+  // The organization gate over `/home`, `/apps` and `/forms` sits beside the
+  // stubbed `ProtectedRoute` now, not inside it (objectstack#32633); auth and
+  // organizations are not the question here either.
+  RequireOrganization: ({ children }: { children?: ReactNode }) => <>{children}</>,
   ConsoleToaster: () => null,
   LoadingScreen: stub('loading-screen'),
   // Records where it would go, so the catch-all's answer is readable.

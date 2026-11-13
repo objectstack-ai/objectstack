@@ -7,15 +7,13 @@ import {
     evaluateAuthGate,
     isApiKeyLifecycleRefusalError,
     isAuthzStoreUnavailableError,
-    resolveRequestExecutionContext,
     shouldDenyAnonymous,
-    type RequestAuthService,
-    type TenancyServiceResolver,
 } from '@objectstack/core';
 import type { ErrorCode } from '@objectstack/spec/api';
 import type { IHttpRequest, IHttpResponse, IHttpServer } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { sendError, sendOk, sendServerFault } from '@objectstack/types';
+import { resolveMessagingCaller, type MessagingCallerSources } from './messaging-request-caller.js';
 import { readPreferenceOptions, type PreferenceOptionsSources } from './preference-options.js';
 
 /**
@@ -60,14 +58,7 @@ import { readPreferenceOptions, type PreferenceOptionsSources } from './preferen
 export const PREFERENCE_OPTIONS_ROUTE = '/api/v1/messaging/preference-options';
 
 /** What the door is composed over — every service read when a request arrives. */
-export interface PreferenceOptionsRoutesDeps extends PreferenceOptionsSources {
-    /** The data engine the caller's grants are read through; `undefined` when none is registered. */
-    getEngine(): unknown;
-    /** The auth service the caller's session is read through; `undefined` when none is registered. */
-    getAuth(): RequestAuthService | undefined;
-    /** How this door reaches the `tenancy` service; `undefined` on a host with no async service accessor. */
-    tenancy: TenancyServiceResolver | undefined;
-}
+export type PreferenceOptionsRoutesDeps = PreferenceOptionsSources & MessagingCallerSources;
 
 /** Mount the door on `http`. Nothing on `deps` is called until a request arrives. */
 export function registerPreferenceOptionsRoutes(http: IHttpServer, deps: PreferenceOptionsRoutesDeps): void {
@@ -82,7 +73,7 @@ async function handlePreferenceOptions(
     // ① The caller.
     let context: ExecutionContext | undefined;
     try {
-        context = await resolveCaller(req, deps);
+        context = await resolveMessagingCaller(req, deps);
     } catch (err) {
         if (isAuthzStoreUnavailableError(err) || isApiKeyLifecycleRefusalError(err)) {
             sendError(res, err.status, err.code, err.message);
@@ -129,39 +120,4 @@ async function handlePreferenceOptions(
             path: PREFERENCE_OPTIONS_ROUTE,
         });
     }
-}
-
-/**
- * Resolve the caller through the one composition. This door's differences, as
- * its named parameters: anonymous fails closed (the door answers its floor);
- * the held-sign-in posture is the one the resolver decided for the credential
- * that admitted the caller; an API key admits its owner with no session read;
- * no locale, bearer or OAuth token is carried — the list is the same in every
- * language, and nothing downstream acts as the caller.
- */
-async function resolveCaller(req: IHttpRequest, deps: PreferenceOptionsRoutesDeps): Promise<ExecutionContext | undefined> {
-    const headers = new Headers();
-    for (const [name, value] of Object.entries(req.headers ?? {})) {
-        if (value == null) continue;
-        headers.set(name, Array.isArray(value) ? value.join(',') : String(value));
-    }
-    return await resolveRequestExecutionContext({
-        headers,
-        ql: deps.getEngine(),
-        authService: deps.getAuth(),
-        tenancy: deps.tenancy,
-        anonymous: 'fail-closed',
-        authGate: 'resolved',
-        credentials: 'api-key-and-session',
-        sessionApi: 'optional',
-        session: 'request',
-        localization: 'withhold',
-        requestLocale: undefined,
-        accessToken: 'withhold',
-        oauth: undefined,
-        onAdmission: undefined,
-        // [#31898] The transport's own peer address, for the `credential_use` row
-        // an admitted API key writes; the auth service applies the trust rule.
-        transport: { remoteAddress: req.remoteAddress || undefined },
-    });
 }

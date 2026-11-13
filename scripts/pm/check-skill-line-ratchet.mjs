@@ -1451,7 +1451,16 @@ export const CEILINGS = new Map([
   // file-surface line naming the exception lanes/skills.md defines. Ordered by
   // ruling record 6819475461 (maintainer, verbatim: 「同意 A」); authorized under
   // ruling record 6184799323 (letter B). Measured delta +1; headroom 0.
-  ['.claude/skills/pm-dispatch/references/execution-duties.md', 189],
+  // Raised 189 → 190 by the effort-step-down ruling (card #32784) — an ORDINARY
+  // raise, ⛔ not a cross-file move. The 〈派发〉 effort line now names three
+  // kinds of would-be-M card that dispatch at `medium` (review-nit follow-up,
+  // same-family edge card, copy- or changeset-only touch-up), adds epic child
+  // cards to the `xhigh` list, and says the `xhigh` list outranks the three.
+  // Ordered by ruling record 6830795926 (maintainer, verbatim: 「同意，立卡更新
+  // skills」); authorized under ruling record 6184799323 (letter B). Measured:
+  // the old line was already 120 B, the added content alone is over 40 B, so the
+  // rule lands as two lines (115 B and 116 B). Delta +1; headroom 0.
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 190],
   // New file, landed at its own count (headroom 0, same convention as every
   // entry above): the filing gate and the grading/reading criteria the triage
   // seat applies. A new pm-dispatch references file belongs in this map by the
@@ -1495,7 +1504,15 @@ export const CEILINGS = new Map([
   // the possible-data-leak reach exception left the exceptions line in place,
   // so the measured delta is +1.
   // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 67],
+  // 67 → 79 (#32997): an ordinary ruled raise under letter B (record
+  // 6184799323). The ruling of record is the maintainer's 2026-11-13 grading
+  // ruling quoted verbatim in the card body (「只是读代码得出的最高 p2。这个没必要吧，
+  // 我们的客户不多。」 and 「不需要限额，也不需要自动关。其他同意。」; triage audit
+  // 6846766675), which orders the nine adopted grading rules into 〈定级判据〉.
+  // Under the 120-byte line cap they take 14 lines; the old focus-raise and
+  // reach-cap lines fold into rules 8 and 2 and are deleted, so the measured
+  // delta is +12. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 79],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
@@ -1656,7 +1673,8 @@ export const CEILINGS = new Map([
   // repo's business-rationale first touch. Measured +1, ceiling moved by +1;
   // recorded under the move below as a `ruledRaises` record.
   // 88 → 87 (#26765, main's governed-draft rule) → 86 (#25753): the objectui pin-chain line retired; landed count.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 86],
+  // 86 → 82 (#32869): the daily digest and its external-demand rows retired; landed count.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 82],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
   // is oldest-first, with a 4-hour starvation guard). A seat charter is read per
   // seat session like every entry above. Set at the landed line count read from

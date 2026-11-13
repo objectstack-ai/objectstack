@@ -41,6 +41,7 @@
  */
 
 import type { SqlDriver } from './sql-driver.js';
+import { isDateOnInstantColumn, utcCalendarDaySql } from './date-on-instant-column.js';
 
 /**
  * The `SqlDriver` members the function below reads — every one of them, and
@@ -50,6 +51,8 @@ import type { SqlDriver } from './sql-driver.js';
  * the module header for which members are getters.
  */
 export interface DateBucketHost {
+  readonly dateFields: SqlDriver['dateFields'];
+  readonly dateFieldsOnInstantColumn: SqlDriver['dateFieldsOnInstantColumn'];
   readonly dateGranularityCapabilities: SqlDriver['dateGranularityCapabilities'];
   readonly isMysql: SqlDriver['isMysql'];
   readonly isOracle: SqlDriver['isOracle'];
@@ -60,7 +63,7 @@ export interface DateBucketHost {
 }
 
 /** The body of `SqlDriver#buildDateBucketExpr`; the method's docblock there is its contract. */
-export function buildDateBucketExpr(this: Pick<DateBucketHost, 'dateGranularityCapabilities' | 'isMysql' | 'isOracle' | 'isPostgres' | 'isSqlite' | 'sqliteTemporalArg' | 'temporalFieldKind'>, field: string, granularity: 'day' | 'week' | 'month' | 'quarter' | 'year', table?: string | null, column: string = field): { sql: string; bindings: any[] } | null {
+export function buildDateBucketExpr(this: Pick<DateBucketHost, 'dateFields' | 'dateFieldsOnInstantColumn' | 'dateGranularityCapabilities' | 'isMysql' | 'isOracle' | 'isPostgres' | 'isSqlite' | 'sqliteTemporalArg' | 'temporalFieldKind'>, field: string, granularity: 'day' | 'week' | 'month' | 'quarter' | 'year', table?: string | null, column: string = field): { sql: string; bindings: any[] } | null {
   if (!this.dateGranularityCapabilities[granularity]) return null;
 
   // `field` is the FIELD — the registries (`temporalFieldKind`, the SQLite
@@ -89,7 +92,11 @@ export function buildDateBucketExpr(this: Pick<DateBucketHost, 'dateGranularityC
   }
 
   if (this.isPostgres) {
-    const arg = calendarDay ? `(??)::date::timestamp` : `(??)::timestamptz AT TIME ZONE 'UTC'`;
+    // [#32851] A `Field.date` still on a `timestamptz` column (a `datetime` →
+    // `date` publish) is bucketed as its UTC day, the day the read presents;
+    // a bare `::date` would read it in the session's zone.
+    const dayArg = isDateOnInstantColumn(this, table, field) ? `${utcCalendarDaySql('??')}::timestamp` : `(??)::date::timestamp`;
+    const arg = calendarDay ? dayArg : `(??)::timestamptz AT TIME ZONE 'UTC'`;
     switch (granularity) {
       case 'year':    return { sql: `to_char(${arg}, 'YYYY')`, bindings: [field] };
       case 'month':   return { sql: `to_char(${arg}, 'YYYY-MM')`, bindings: [field] };

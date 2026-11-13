@@ -151,6 +151,12 @@ export interface LoginFormProps {
    * carries a known code (e.g. `INVALID_EMAIL_OR_PASSWORD`), the mapped string
    * is shown instead of the raw English server message. Unknown codes fall
    * back to the server message.
+   *
+   * A refusal whose body names a cause in `details.cause` is looked up first
+   * under `CODE:cause` (e.g. `BANNED_USER:scim_deactivated`, the sign-in of an
+   * account its identity provider deactivated), then under its code alone, so
+   * one code can carry a sentence per cause while a refusal with no cause, or
+   * a cause the map has no entry for, answers as before.
    */
   errorMessages?: Record<string, string>;
   /** Hide the icon disc above the form title. Defaults to false. */
@@ -163,6 +169,22 @@ export interface LoginFormProps {
    * otherwise carry, renders as one muted line above the federated buttons.
    */
   hideHeader?: boolean;
+}
+
+/**
+ * The text a refused sign-in shows: the host's sentence for the refusal's
+ * `CODE:cause` (`details.cause`, objectstack#32432), else for its `code`, else
+ * the server's message. The server tells a client to branch on `code` and
+ * `details.cause`, never on the message, so the message is only the fallback.
+ */
+function refusalText(error: Error, errorMessages: Record<string, string> | undefined): string {
+  const { code, details } = error as Error & { code?: string; details?: { cause?: unknown } };
+  const cause = typeof details?.cause === 'string' && details.cause !== '' ? details.cause : undefined;
+  return (
+    (code && cause && errorMessages?.[`${code}:${cause}`]) ||
+    (code && errorMessages?.[code]) ||
+    error.message
+  );
 }
 
 const DefaultLink = ({ href, className, children }: AuthLinkComponentProps) => (
@@ -459,8 +481,7 @@ export function LoginForm({
       onSuccess?.();
     } catch (err) {
       const authError = err instanceof Error ? err : new Error(String(err));
-      const code = (authError as Error & { code?: string }).code;
-      setError((code && errorMessages?.[code]) || authError.message);
+      setError(refusalText(authError, errorMessages));
       onError?.(authError);
     }
   };
@@ -480,8 +501,7 @@ export function LoginForm({
       setOtpCooldown(60);
     } catch (err) {
       const authError = err instanceof Error ? err : new Error(String(err));
-      const code = (authError as Error & { code?: string }).code;
-      setError((code && errorMessages?.[code]) || authError.message);
+      setError(refusalText(authError, errorMessages));
       onError?.(authError);
     } finally {
       setOtpSending(false);

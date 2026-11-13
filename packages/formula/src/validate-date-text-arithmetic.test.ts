@@ -152,3 +152,195 @@ describe('date subtraction the runtime cannot answer (#28944)', () => {
     expect(r.errors).toEqual([]);
   });
 });
+
+/**
+ * #32595 — the same split on two more shapes, judged the same way: by the gate
+ * and by the evaluator over the row a read door serves.
+ *
+ *  - A call handed a date field's text that no overload accepts: the Timestamp
+ *    typing hands `isoDate(record.start_at)` the Timestamp it asks for and
+ *    passes it; the evaluator faults on every row
+ *    (`found no matching overload for 'isoDate(string)'`), so a formula reads
+ *    null and an `error` validation rule refuses every write. Refused at the
+ *    gate (`date-text-call*`), prescribing the field parsed by `date(…)` first.
+ *  - Concatenating a date field with text, or ordering it against a text
+ *    literal: the evaluator answers both (string concatenation, string-lex),
+ *    which the Timestamp typing read as `string + Timestamp` /
+ *    `Timestamp < string` and reported as a type mismatch — a refusal on a
+ *    fail-closed site. Accepted, as `firstTypeMismatch`'s docblock and the
+ *    `DateText` overload table declare.
+ */
+describe('a date field\'s text handed to a call, concatenated or ordered against text (#32595)', () => {
+  /** The card's object: a date-time read as its ISO text, a year to match it against. */
+  const LEAVE: ExprSchemaHint = {
+    scope: 'record',
+    objectName: 'c982_leave_request',
+    fields: ['title', 'other', 'flag', 'amount', 'start_time', 'start_day', 'end_day'],
+    fieldTypes: {
+      title: 'text', other: 'text', flag: 'boolean', amount: 'number',
+      start_time: 'datetime', start_day: 'date', end_day: 'date',
+    },
+  };
+  const ROW_2026 = {
+    title: 'Leave', other: 'x', flag: true, amount: 3,
+    start_time: '2026-11-16T01:00:00.000Z', start_day: '2026-11-16', end_day: '2026-11-20',
+  };
+  const ROW_2025 = { ...ROW_2026, start_time: '2025-11-16T01:00:00.000Z', start_day: '2025-11-16' };
+  type Outcome = ExprSchemaHint['faultOutcome'];
+  /** Every code the gate answers, errors and warnings alike. */
+  function gate(role: 'value' | 'predicate', source: string, faultOutcome?: Outcome): string[] {
+    const r = validateExpression(role, source, faultOutcome ? { ...LEAVE, faultOutcome } : LEAVE);
+    return [...r.errors, ...r.warnings].map((e) => e.code);
+  }
+  /** What the evaluator answers over `row`: the value, or `fault`. */
+  /** A fixed evaluation clock, so a row reading `today()` does not read the wall clock. */
+  const NOW = new Date('2026-11-12T09:00:00.000Z');
+  function evaluated(source: string, row: Record<string, unknown> = ROW_2026): unknown {
+    const r = celEngine.evaluate({ dialect: 'cel', source }, { record: row, now: NOW });
+    // Only an overload fault (a call or an operator the bound text cannot
+    // take) reads as 'fault'; any other fault (an unbound name, a typo) is
+    // returned as itself and fails the row.
+    if (r.ok) return r.value;
+    return /no (matching|such) overload/.test(r.error.message) ? 'fault' : r.error;
+  }
+
+  // [role, source, faultOutcome, the codes the gate answers, what the evaluator reads over ROW_2026]
+  const ROWS: ReadonlyArray<readonly ['value' | 'predicate', string, Outcome, readonly string[], unknown]> = [
+    // The card's rule and formula: every check passed them, every row faults.
+    ['predicate', "!startsWith(isoDate(record.start_time), '2026')", 'fail-closed', ['date-text-call-fail-closed'], 'fault'],
+    ['predicate', "!startsWith(isoDate(record.start_time), '2026')", 'fail-open', ['date-text-call-fail-open'], 'fault'],
+    ['value', "record.title + ' ' + isoDate(record.start_time)", undefined, ['date-text-call'], 'fault'],
+    ['value', 'isoDatetime(record.start_time)', undefined, ['date-text-call'], 'fault'],
+    ['value', 'isoDate(record.start_day)', undefined, ['date-text-call'], 'fault'],
+    ['predicate', 'record.start_time.getFullYear() == 2026', 'fail-closed', ['date-text-call-fail-closed'], 'fault'],
+    // The prescribed rewrites check clean and read the day.
+    ['predicate', "!startsWith(isoDate(date(record.start_time)), '2026')", 'fail-closed', [], false],
+    ['value', "record.title + ' ' + isoDate(date(record.start_time))", undefined, [], 'Leave 2026-11-16'],
+    ['value', 'isoDatetime(date(record.start_time))', undefined, [], '2026-11-16T01:00:00.000Z'],
+    ['value', 'isoDate(date(record.start_day))', undefined, [], '2026-11-16'],
+    ['predicate', 'date(record.start_time).getFullYear() == 2026', 'fail-closed', [], true],
+    // Concatenation and ordering against a literal: the evaluator answers them.
+    ['value', "record.title + ' ' + record.start_time", undefined, [], 'Leave 2026-11-16T01:00:00.000Z'],
+    ['predicate', "record.title + ' ' + record.start_time != ''", 'fail-closed', [], true],
+    ['value', '"Due: " + record.end_day', undefined, [], 'Due: 2026-11-20'],
+    ['value', 'record.end_day + " (due)"', undefined, [], '2026-11-20 (due)'],
+    ['predicate', 'record.start_day < "2026-12-01"', 'fail-closed', [], true],
+    ['predicate', '"2026-01-01" <= record.start_time', 'fail-closed', [], true],
+    // Calls the evaluator answers on a string stay clean.
+    ['predicate', "startsWith(record.start_time, '2026')", 'fail-closed', [], true],
+    ['predicate', "record.start_time.startsWith('2026')", 'fail-closed', [], true],
+    ['predicate', 'size(record.start_day) == 10', 'fail-closed', [], true],
+    ['value', 'string(record.start_time)', undefined, [], '2026-11-16T01:00:00.000Z'],
+    ['value', 'daysBetween(record.start_day, record.end_day)', undefined, [], 4],
+    ['value', 'isoDate(today())', undefined, [], evaluated('isoDate(today())')],
+    // Kept as they were: a real fault, and a date field ordered against a text
+    // counterpart that is not a literal, which no declared text names — a text
+    // field read directly or through a ternary, or text computed by `+`,
+    // `upper`, `string` or `isoDate` (the evaluator compares them string-lex).
+    ['predicate', 'record.title < today()', 'fail-closed', ['type-mismatch-fail-closed'], 'fault'],
+    ['predicate', 'record.title < record.start_time', 'fail-closed', ['type-mismatch-fail-closed'], false],
+    ['predicate', 'record.start_day < (record.flag ? record.title : record.other)', 'fail-closed', ['type-mismatch-fail-closed'], true],
+    ['predicate', '(record.flag ? record.start_day : record.end_day) < record.title', 'fail-closed', ['type-mismatch-fail-closed'], true],
+    ['predicate', "record.start_day < record.title + 'x'", 'fail-closed', ['type-mismatch-fail-closed'], true],
+    ['predicate', 'record.start_day < upper(record.title)', 'fail-closed', ['type-mismatch-fail-closed'], true],
+    ['predicate', 'record.start_day < string(record.amount)', 'fail-closed', ['type-mismatch-fail-closed'], true],
+    // '2026-11-16' against today() on the fixed clock, '2026-11-12': string-lex, false.
+    ['predicate', 'record.start_day < isoDate(today())', 'fail-closed', ['type-mismatch-fail-closed'], false],
+    // A macro-bound variable proves nothing on its own: the comparison keeps its verdict.
+    ['predicate', '[record.title].exists(x, record.start_day < x)', 'fail-closed', ['type-mismatch-fail-closed'], true],
+  ];
+
+  for (const [role, source, outcome, codes, reads] of ROWS) {
+    it(`${role}${outcome ? ` (${outcome})` : ''} \`${source}\` → ${codes.join(', ') || 'clean'} (the evaluator reads ${String(reads)})`, () => {
+      expect(evaluated(source)).toEqual(reads);
+      expect(gate(role, source, outcome)).toEqual(codes);
+    });
+  }
+
+  it('the card\'s rule, rewritten as prescribed, passes a 2026 write and refuses a 2025 one', () => {
+    const rule = "!startsWith(isoDate(date(record.start_time)), '2026')";
+    expect(gate('predicate', rule, 'fail-closed')).toEqual([]);
+    // A validation condition that is true refuses the write.
+    expect(evaluated(rule, ROW_2026)).toBe(false);
+    expect(evaluated(rule, ROW_2025)).toBe(true);
+  });
+
+  it('a guarded call is refused too: it faults on every row whose value reaches the call', () => {
+    const guarded = "record.start_time != null && isoDate(record.start_time) == '2026-11-16'";
+    expect(gate('predicate', guarded, 'fail-closed')).toEqual(['date-text-call-fail-closed']);
+    // A row the guard stops never reaches the call; a row with a value does, and faults.
+    expect(evaluated(guarded, { ...ROW_2026, start_time: null })).toBe(false);
+    expect(evaluated(guarded)).toBe('fault');
+    // The prescribed rewrite keeps the guard and reads the day.
+    const rewritten = "record.start_time != null && isoDate(date(record.start_time)) == '2026-11-16'";
+    expect(gate('predicate', rewritten, 'fail-closed')).toEqual([]);
+    expect(evaluated(rewritten, { ...ROW_2026, start_time: null })).toBe(false);
+    expect(evaluated(rewritten)).toBe(true);
+  });
+
+  it('the prescribed rewrite reads the same value where a date-time arrives as a JS Date', () => {
+    // A server-side writer handing a `Date`, or a driver that reads a date-time
+    // back as one (MongoDB stores it as a BSON Date): the refused call
+    // evaluates there, and the rewrite reads the same value as on the text.
+    const asDate = { ...ROW_2026, start_time: new Date(ROW_2026.start_time) };
+    expect(evaluated('isoDate(record.start_time)', asDate)).toBe('2026-11-16');
+    for (const [rewrite, reads] of [
+      ['isoDate(date(record.start_time))', '2026-11-16'],
+      ['isoDatetime(date(record.start_time))', '2026-11-16T01:00:00.000Z'],
+      ['date(record.start_time).getFullYear()', 2026],
+      ['date(record.start_time).getHours()', 1],
+    ] as const) {
+      expect(evaluated(rewrite, asDate)).toBe(reads);
+      expect(evaluated(rewrite)).toBe(reads);
+    }
+  });
+
+  it('names the call and the field, and prescribes the rewrite the check proved clean', () => {
+    const [refused] = validateExpression(
+      'predicate',
+      "!startsWith(isoDate(record.start_time), string(int(record.leave_year)))",
+      { ...LEAVE, fields: [...LEAVE.fields!, 'leave_year'], faultOutcome: 'fail-closed' },
+    ).errors;
+    expect(refused.code).toBe('date-text-call-fail-closed');
+    expect(refused.params).toEqual({
+      call: 'isoDate(record.start_time)',
+      reference: 'record.start_time',
+      rewrite: 'isoDate(date(record.start_time))',
+    });
+    expect(refused.message).toMatch(/fails closed: the write .* is refused/);
+    // The prescription is what the evaluator answers.
+    expect(evaluated('isoDate(date(record.start_time))')).toBe('2026-11-16');
+  });
+
+  it('a fault the check meets first does not mask the call', () => {
+    // The check stops at the first call, handed the field through a ternary (no
+    // field to name, so not this check's verdict); each call is judged on its own.
+    const source =
+      "isoDate(record.title == '' ? record.end_day : record.start_day) != '' || isoDate(record.end_day) == '2026-11-20'";
+    const [refused] = validateExpression('predicate', source, { ...LEAVE, faultOutcome: 'fail-closed' }).errors;
+    expect(refused.code).toBe('date-text-call-fail-closed');
+    expect(refused.params).toMatchObject({ call: 'isoDate(record.end_day)', reference: 'record.end_day' });
+    expect(evaluated(source)).toBe('fault');
+  });
+
+  it('judges a flattened (flow) condition the same way, under the flow codes', () => {
+    const flattened: ExprSchemaHint = { fields: ['start_time'], fieldTypes: { start_time: 'datetime' } };
+    const source = "isoDate(start_time) == '2026-11-16'";
+    expect(validateExpression('predicate', source, flattened).errors.map((e) => e.code)).toEqual(['date-text-call-run-may-fail']);
+    expect(validateExpression('predicate', source, { ...flattened, faultOutcome: 'run-fails' }).errors.map((e) => e.code))
+      .toEqual(['date-text-call-run-fails']);
+    expect(celEngine.evaluate({ dialect: 'cel', source }, { extra: { start_time: ROW_2026.start_time } })).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining("no matching overload for 'isoDate(string)'") },
+    });
+    expect(validateExpression('predicate', '"Due: " + start_time != ""', flattened).warnings).toEqual([]);
+    // A macro-bound variable is `dyn` here: it still proves nothing, so the comparison keeps its verdict.
+    const withTitle: ExprSchemaHint = { fields: ['title', 'start_time'], fieldTypes: { title: 'text', start_time: 'datetime' } };
+    expect(validateExpression('predicate', '[title].exists(x, start_time < x)', withTitle).warnings.map((e) => e.code))
+      .toEqual(['type-mismatch-run-may-fail']);
+  });
+
+  it('without field types the check does not run, as before', () => {
+    expect(validateExpression('value', 'isoDate(record.start_time)', { scope: 'record' }).errors).toEqual([]);
+  });
+});

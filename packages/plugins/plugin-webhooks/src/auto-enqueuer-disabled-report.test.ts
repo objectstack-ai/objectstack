@@ -222,8 +222,9 @@ describe('[#24910] the auto-enqueuer disabled on a stack that declares webhooks'
 
         await writeRecord();
         expect(outbox.enqueued.map((d) => [d.refId, d.label])).toEqual([
-            [declaredWebhookRefId(HOOK), 'data.record.created'],
-            [declaredWebhookRefId(HOOK), 'data.record.updated'],
+            // [#31699] The package's own slot: `declared:my_app/NAME`.
+            [declaredWebhookRefId(HOOK, 'my_app'), 'data.record.created'],
+            [declaredWebhookRefId(HOOK, 'my_app'), 'data.record.updated'],
         ]);
     });
 

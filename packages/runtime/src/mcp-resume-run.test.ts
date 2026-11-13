@@ -219,6 +219,8 @@ function makeHarness(
         /** [ADR-0106 D1] The object's fields, and the `security` service judging the caller's view of them. */
         fields?: Record<string, unknown>;
         security?: unknown;
+        /** The `audit` slot, so a pin can read the invocation rows the door writes. */
+        audit?: boolean;
         /** [ADR-0150 D3, #31696] The package that ships the object (its embedded actions inherit it). */
         objectPackage?: string;
         /** [ADR-0150 D3, #31696] The registry's holder table, merged into the ObjectQL registry double. */
@@ -257,8 +259,11 @@ function makeHarness(
         getObject: vi.fn(async () => object),
         loadMany: vi.fn(async () => (opts.merged ? [] : opts.standalone ?? [])),
     };
+    const invocations: any[] = [];
+    const audit = { recordActionInvocation: vi.fn(async (event: any) => { invocations.push(event); }) };
     const services: Record<string, unknown> = {
         objectql: ql, data: ql, metadata, automation: engine, ...(opts.security ? { security: opts.security } : {}),
+        ...(opts.audit ? { audit } : {}),
     };
     const protocol = {
         getMetaItems: vi.fn(async (request: { type: string }) => {
@@ -293,6 +298,11 @@ function makeHarness(
         disable: (name: string) => { disabled = new Set([...disabled, name]); },
         bridgeFor: (userId: string, systemPermissions: string[] = []) =>
             (dispatcher as any).buildMcpBridge(ctxFor(userId, systemPermissions)),
+        /** The bridge for a caller whose whole envelope the pin states. */
+        bridgeAs: (executionContext: Record<string, unknown>) =>
+            (dispatcher as any).buildMcpBridge({ request: {}, environmentId: 'platform', executionContext }),
+        ql,
+        invocations,
     };
 }
 
@@ -462,6 +472,49 @@ describe('MCP resumeRun — (b) a caller who may not resume is refused before th
         const refused = await refusalOf(h.bridgeFor('u1').resumeRun(runId, {}));
         expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
         expect(h.engine.resume).not.toHaveBeenCalled();
+    });
+});
+
+describe('[ADR-0151 D3 rule 3] MCP resumeRun — an AI service account does not confirm an action for itself', () => {
+    /** An AI service account: an agent principal acting for itself. */
+    const ACCOUNT_EC = { userId: 'bot_1', principalKind: 'agent', systemPermissions: [] as string[] };
+    /** An OAuth-delegated agent: it acts for the person it names. */
+    const DELEGATED_EC = { userId: 'u1', principalKind: 'agent', onBehalfOf: { userId: 'u1', principalKind: 'human' }, systemPermissions: [] as string[] };
+
+    it('an account\'s resume of a confirmation-gated action is refused 428 with the confirmation member and without it: nothing resumed, no record read, no invocation row', async () => {
+        const h = makeHarness({ audit: true });
+        h.leads[0].owner = 'bot_1';
+        const started: any = await h.engine.execute(CONFIRMED.target, { userId: 'bot_1', object: OBJECT, record: { id: 'lead_1' } });
+        for (const input of [{ values: { subject: 'x' }, confirm: true }, { values: { subject: 'x' } }]) {
+            const refused = await refusalOf(h.bridgeAs(ACCOUNT_EC).resumeRun(started.runId, input));
+            expect(refused, JSON.stringify(input)).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+            expect(refused.details).toEqual({ actionName: CONFIRMED.name, objectName: OBJECT, confirmationMember: 'confirm' });
+            expect(refused.message).not.toMatch(/retry/i);
+        }
+        expect(h.engine.resume).not.toHaveBeenCalled();
+        expect(h.engine.runs.get(started.runId)?.status).toBe('paused');
+        expect(h.ql.find).not.toHaveBeenCalled();
+        expect(h.invocations).toHaveLength(0);
+        expect(h.engine.tasks).toHaveLength(0);
+    });
+
+    it('CONTROL: an account resumes a run of an action that declares no confirmation, as before', async () => {
+        const h = makeHarness({ audit: true });
+        h.leads[0].owner = 'bot_1';
+        const started: any = await h.engine.execute(SCHEDULE.target, { userId: 'bot_1', object: OBJECT, record: { id: 'lead_1' } });
+        const done = await h.bridgeAs(ACCOUNT_EC).resumeRun(started.runId, { values: { subject: 'x' } });
+        expect(done).toMatchObject({ ok: true, action: SCHEDULE.name });
+        expect(h.engine.tasks).toEqual([expect.objectContaining({ by: 'bot_1' })]);
+        expect(h.invocations).toHaveLength(1);
+    });
+
+    it('CONTROL: a delegated agent resumes a gated action as before — refused without the member, completed with it', async () => {
+        const h = makeHarness();
+        const started: any = await h.engine.execute(CONFIRMED.target, { userId: 'u1', object: OBJECT, record: { id: 'lead_1' } });
+        const refused = await refusalOf(h.bridgeAs(DELEGATED_EC).resumeRun(started.runId, { values: { subject: 'x' } }));
+        expect(refused).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+        await h.bridgeAs(DELEGATED_EC).resumeRun(started.runId, { values: { subject: 'x' }, confirm: true });
+        expect(h.engine.tasks).toHaveLength(1);
     });
 });
 

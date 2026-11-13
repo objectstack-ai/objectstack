@@ -68,9 +68,14 @@
  *
  * Accepted: a provider whose whole `domain` is exactly `eng.acme.com` beside
  * one for `acme.com`, either way round. Step 1 sends `eng.acme.com` to the
- * subdomain's provider, and the parent serves its other subdomains. (A deeper
- * name such as `x.eng.acme.com` matches both lists at step 2; that is the
- * ruled-accepted configuration, left as it is.)
+ * subdomain's provider, and the parent is routed its other subdomains. (A
+ * deeper name such as `x.eng.acme.com` matches both lists at step 2; that is
+ * the ruled-accepted configuration, left as it is.)
+ *
+ * Routing is not admission. With domain verification on, a provider creates
+ * an account only for an address at a domain it lists and has verified,
+ * compared exactly: a subdomain the provider is routed but does not list
+ * itself gets no new account through it (`sso-account-at-proven-domain.ts`).
  *
  * Every entry is compared as one spelling: the bare lower-case ASCII host,
  * with an internationalised name in its punycode form (`bücher.de` and

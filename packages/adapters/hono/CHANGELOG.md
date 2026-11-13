@@ -1,5 +1,176 @@
 # @objectstack/hono
 
+## 18.4.0
+
+### Patch Changes
+
+- f714b0a: The `/auth/config` arm hands the incoming request to the auth service's `getPublicConfig()`, as plugin-auth's own `/config` route does, so a host's organization-create choices (`features.organizationEditions`) come back in the language the request asked for.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 19f9053: feat(plugin-auth)!: `auth.handleRequest` answers the plugin's whole `/api/v1/auth/*` surface, behind the same mount-layer checks as the self-hosted mount
+  
+  Clause-②: yes (narrowing) — a host that forwards to `AuthManager.handleRequest`, and the runtime dispatcher's `/auth` domain, now run the mount-layer checks (the IP allow-list, the one-account-per-request rule, the organization IP list and the platform-admin wrappers), so a request admitted today can be refused: for example `403 IP_NOT_ALLOWED` when `allowed_ip_ranges` is set and neither a transport peer nor a trusted proxy (`server.trustProxy`) is declared. The published surface also widens: `handleRequest` answers every objectstack-mount route, `AuthManager` gains `handleVendorRequest`, `ownsVendorRoute` and `bindRouteSurface`, `ownsRoute` answers `true` for more routes, and `OneTimeTokenHandoffServing.server` accepts `null`.
+  Metadata-protocol: none
+  Skills-docs: follow-up owed — content/docs/kernel/contracts/auth-service.mdx (its `handleRequest` section does not yet say that a forwarding host gains the whole surface and the mount-layer checks, nor name the optional transport argument); no file under `skills/**` teaches `auth.handleRequest`, `allowed_ip_ranges` or `trustProxy`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata an author writes changes and no stored row is rewritten: requests forwarded to the auth service are judged by the checks the self-hosted mount already applies -->
+  
+  **BREAKING** for a host that forwards auth requests to `auth.handleRequest` (a multi-tenant host, the `@objectstack/hono` embed, the dispatcher's `/auth` domain) on a deployment that sets `allowed_ip_ranges` or relies on the request reaching better-auth unjudged: those requests now pass the mount-layer checks first, and a request whose client address cannot be established is refused while an allow-list is set.
+  
+  - **Who moves.** The forwarding host. The fix is one line: pass the transport's peer as `handleRequest`'s second argument, `handleRequest(request, { remoteAddress })`, or declare `server.trustProxy` when the host sits behind a proxy that sets `X-Forwarded-For`. The `@objectstack/hono` embed and the dispatcher's `/auth` domain already pass the peer they have.
+  - **Self-hosted deployments** serving the auth routes from their own HTTP server see no change in which requests are admitted.
+  
+  `AuthPlugin` now runs its auth route registration twice: on the composed HTTP server's app, as before (`registerRoutes`), and once more in `init()` on a private route table it binds to the `auth` service. `AuthManager.handleRequest` answers every request under `basePath` through that table, so a host that forwards its auth path to the service (a multi-tenant host, the `@objectstack/hono` embed, the dispatcher's `/auth` domain) serves exactly the routes the self-hosted mount serves. Both tables come from one registration function, and the private one leaves out only the root-path discovery documents, which a host serves itself. Self-hosted deployments serve the same routes in the same order.
+  
+  What a host that forwards to `handleRequest` gets:
+  
+  - Every objectstack-mount route: `/config`, `/bootstrap-status`, the `/admin/*` doors, `/authorized-clients`, the service-account doors and the rest of the `objectstack` rows in the route ledger, where it used to get better-auth's 404.
+  - The mount-layer checks, for every host: the ADR-0069 D5 IP allow-list, the agent forward credential (ADR-0090 D10), the organization IP list at the mount, the one-account-per-request rule and the platform-admin wrappers. They judge the client address by the platform's trust rule, from the transport it passes: `handleRequest(request, { remoteAddress })`. The `@objectstack/hono` embed now passes the peer `@hono/node-server` reports, and the dispatcher's `/auth` domain passes the request's `remoteAddress`.
+  - Errors from the auth surface reach the host as a rejection of `handleRequest`; the host turns them into its own error body.
+  - The mobile sign-in hand-off answers a signed-out page navigation with 401: the private table declares that it serves no sign-in page (`OneTimeTokenHandoffServing.server` accepts `null` for that).
+  
+  Also:
+  
+  - A route's internal failure is answered with a generic message (`Internal server error`); the error itself goes to the server log. This holds on the self-hosted mount too.
+  - `AuthManager.handleVendorRequest` is better-auth's handler alone, the entry every in-process re-dispatch uses, and `AuthManager.ownsVendorRoute` asks better-auth's router alone. `AuthManager.ownsRoute` also answers `true` for a route the plugin mounts itself, judged by method and path, so a host that yields a disclaimed 404 keeps an objectstack route's own 404.
+  - A manager with no bound table (constructed on its own), and any path outside `basePath`, still go straight to better-auth.
+  - `@objectstack/plugin-auth` declares `hono` among its `dependencies` (it was a development dependency).
+  - `IAuthService.handleRequest`'s description now says an implementation answers its whole auth route surface there. Its shape is unchanged.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [769adff]
+- Updated dependencies [82142ed]
+- Updated dependencies [3b8c724]
+- Updated dependencies [665db00]
+- Updated dependencies [59bcd22]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fd749a4]
+- Updated dependencies [9d939c5]
+- Updated dependencies [a545a04]
+- Updated dependencies [8589756]
+- Updated dependencies [8cc709d]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [7b80724]
+- Updated dependencies [1de7def]
+- Updated dependencies [38d416f]
+- Updated dependencies [9052337]
+- Updated dependencies [7569fb5]
+- Updated dependencies [da3c742]
+- Updated dependencies [60dac8b]
+- Updated dependencies [704efef]
+- Updated dependencies [78eb352]
+- Updated dependencies [b48490e]
+- Updated dependencies [293a85b]
+- Updated dependencies [d9f8f7f]
+- Updated dependencies [57675a2]
+- Updated dependencies [4c31821]
+- Updated dependencies [4bf30da]
+- Updated dependencies [fd3ab0a]
+- Updated dependencies [7fe019f]
+- Updated dependencies [4363945]
+- Updated dependencies [f4b4c8a]
+- Updated dependencies [db50231]
+- Updated dependencies [0e1311d]
+- Updated dependencies [1f029a7]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [b6e6545]
+- Updated dependencies [4d165ac]
+- Updated dependencies [22ee4c4]
+- Updated dependencies [c0fb794]
+- Updated dependencies [34a30e8]
+- Updated dependencies [41106b5]
+- Updated dependencies [00205e1]
+- Updated dependencies [698e8d4]
+- Updated dependencies [1cd0e01]
+- Updated dependencies [f2abd47]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [ca3629f]
+- Updated dependencies [da1a01a]
+- Updated dependencies [6dd196d]
+- Updated dependencies [d834a36]
+- Updated dependencies [a74856d]
+- Updated dependencies [b96b875]
+- Updated dependencies [aab20c1]
+- Updated dependencies [351c22c]
+- Updated dependencies [e55347d]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [5a8dbc7]
+- Updated dependencies [fb94249]
+- Updated dependencies [074a014]
+- Updated dependencies [26d30d7]
+- Updated dependencies [a15b544]
+- Updated dependencies [64b46fe]
+- Updated dependencies [f00fb1b]
+- Updated dependencies [c655af8]
+- Updated dependencies [99992dd]
+- Updated dependencies [4b23a46]
+- Updated dependencies [7ac0479]
+- Updated dependencies [9526041]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [91d88ec]
+- Updated dependencies [9bff554]
+- Updated dependencies [88282a7]
+- Updated dependencies [be75078]
+- Updated dependencies [0bc0774]
+- Updated dependencies [1e474e3]
+- Updated dependencies [0763bf6]
+- Updated dependencies [3dee601]
+- Updated dependencies [3191e00]
+- Updated dependencies [5192297]
+- Updated dependencies [326453e]
+- Updated dependencies [6d6f86b]
+- Updated dependencies [b3a5554]
+- Updated dependencies [90106d6]
+- Updated dependencies [8420864]
+- Updated dependencies [36f0c6a]
+- Updated dependencies [3c1b8c7]
+- Updated dependencies [d8a2f0d]
+- Updated dependencies [7d82b2d]
+- Updated dependencies [1a17e96]
+- Updated dependencies [3452dec]
+- Updated dependencies [35929be]
+- Updated dependencies [ee9ad83]
+- Updated dependencies [ade13d3]
+- Updated dependencies [ca1ddc3]
+- Updated dependencies [28a1527]
+- Updated dependencies [8004529]
+- Updated dependencies [2d04cd2]
+- Updated dependencies [0f7389c]
+- Updated dependencies [6739719]
+- Updated dependencies [04127cc]
+- Updated dependencies [19f9053]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [6aa658a]
+- Updated dependencies [8941669]
+- Updated dependencies [3631d11]
+- Updated dependencies [cbf6956]
+- Updated dependencies [904dab2]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [24bc259]
+- Updated dependencies [e542831]
+- Updated dependencies [3299873]
+- Updated dependencies [7d13a33]
+- Updated dependencies [4cd48e2]
+- Updated dependencies [30dcd8a]
+- Updated dependencies [e06d04f]
+- Updated dependencies [33bad96]
+- Updated dependencies [43a51b5]
+- Updated dependencies [c8c76f8]
+- Updated dependencies [8304b08]
+- Updated dependencies [4123865]
+- Updated dependencies [eb92a48]
+- Updated dependencies [adb2b89]
+  - @objectstack/runtime@18.4.0
+  - @objectstack/plugin-hono-server@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Patch Changes

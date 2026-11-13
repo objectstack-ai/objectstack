@@ -17,6 +17,7 @@ import {
     normalizeIfNoneMatch,
     objectFieldVisibilityFingerprint,
     objectSchemaFieldPosture,
+    objectSchemaReadDelegateSource,
     resolveObjectSchemaMaskPosture,
     resolveObjectSchemaRuntimeView,
     OBJECT_SCHEMA_MASK_DISABLE_ENV,
@@ -25,6 +26,7 @@ import {
     OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES,
     OBJECT_SCHEMA_WRITE_CAPABILITIES,
     type ObjectSchemaMaskPosture,
+    type ObjectSchemaReadDelegateSource,
 } from './object-schema-fls.js';
 
 const OBJECT = {
@@ -589,5 +591,133 @@ describe('[ruling record 6787890900] what the object-level rule says, and when',
         const notices = warns.filter(([, meta]) => meta.decision === 'object-visibility-not-narrowed');
         expect(notices).toHaveLength(1);
         expect(notices[0][0]).toContain('canReadObject');
+    });
+});
+
+describe('[decision 6840464379] an object whose owner declares a schemaReadDelegate', () => {
+    const base = { objectName: 'sys_request', context: { userId: 'u' }, enabled: true };
+    const fields = () => ['id', 'status', 'internal_note'];
+    const refused = { getMetadataReadableFields: fields, canReadObject: () => false };
+    /** A source over one declared object and one registered service. */
+    const sourceFor = (
+        delegate: unknown,
+        declared: Record<string, string> = { sys_request: 'requests' },
+        asked: string[] = [],
+    ): ObjectSchemaReadDelegateSource => ({
+        declaredDelegate: (object) => declared[object],
+        service: (name) => { asked.push(name); return name === 'requests' ? delegate : undefined; },
+    });
+
+    it('is served, projected by the caller\'s own field posture, to the caller its delegate admits', async () => {
+        const verdicts: Array<[string, unknown]> = [];
+        const delegate = { authorizeSchemaRead: (object: string, context: unknown) => { verdicts.push([object, context]); return true; } };
+        const posture = await resolveObjectSchemaMaskPosture({
+            ...base,
+            security: { getMetadataReadableFields: () => ['id', 'status'], canReadObject: () => false },
+            schemaReadDelegates: sourceFor(delegate),
+        });
+        expect(posture.kind).toBe('project');
+        expect(posture.kind === 'project' && [...posture.readable]).toEqual(['id', 'status']);
+        // Asked with the object's name and the caller's own context.
+        expect(verdicts).toEqual([['sys_request', base.context]]);
+        const masked = applyObjectSchemaMask(
+            { name: 'sys_request', fields: { id: {}, status: {}, internal_note: {} } },
+            posture,
+        );
+        expect(masked.hidden).toBe(false);
+        expect(Object.keys((masked.document as { fields: object }).fields)).toEqual(['id', 'status']);
+    });
+
+    it('stays hidden when the delegate refuses, or answers anything but `true`', async () => {
+        for (const answer of [false, undefined, 'yes', 1]) {
+            const posture = await resolveObjectSchemaMaskPosture({
+                ...base, security: refused, schemaReadDelegates: sourceFor({ authorizeSchemaRead: () => answer as any }),
+            });
+            expect(posture.kind, String(answer)).toBe('hidden');
+        }
+    });
+
+    it('is never asked for a caller the read check admits, nor for an exempt caller or with D8 off', async () => {
+        const asked: string[] = [];
+        const source = sourceFor({ authorizeSchemaRead: () => true }, undefined, asked);
+        const readable = await resolveObjectSchemaMaskPosture({
+            ...base, security: { getMetadataReadableFields: fields, canReadObject: () => true }, schemaReadDelegates: source,
+        });
+        expect(readable.kind).toBe('project');
+        expect((await resolveObjectSchemaMaskPosture({
+            ...base, context: { userId: 'a', systemPermissions: ['manage_metadata'] }, security: refused, schemaReadDelegates: source,
+        })).kind).toBe('passthrough');
+        expect((await resolveObjectSchemaMaskPosture({ ...base, enabled: false, security: refused, schemaReadDelegates: source })).kind)
+            .toBe('passthrough');
+        expect(asked).toEqual([]);
+    });
+
+    it('opens nothing for an object that declares no delegate, nor on an outlet that hands no source', async () => {
+        const undeclared = await resolveObjectSchemaMaskPosture({
+            ...base, objectName: 'sys_other', security: refused, schemaReadDelegates: sourceFor({ authorizeSchemaRead: () => true }),
+        });
+        expect(undeclared.kind).toBe('hidden');
+        const noSource = await resolveObjectSchemaMaskPosture({ ...base, security: refused });
+        expect(noSource.kind).toBe('hidden');
+    });
+
+    it('is never served on an undetermined field posture (it would be unmasked): it stays hidden, the delegate unasked', async () => {
+        const asked: string[] = [];
+        const posture = await resolveObjectSchemaMaskPosture({
+            ...base,
+            security: { getMetadataReadableFields: () => undefined, canReadObject: () => false },
+            schemaReadDelegates: sourceFor({ authorizeSchemaRead: () => true }, undefined, asked),
+        });
+        expect(posture).toEqual({ kind: 'hidden', fields: { kind: 'undetermined' } });
+        expect(asked).toEqual([]);
+    });
+
+    it('fails closed, said once at warn, when the declared service is missing or lacks the method', async () => {
+        const warns: Array<[string, any]> = [];
+        const telemetry = { warn: (m: string, meta: Record<string, unknown>) => warns.push([m, meta]) };
+        for (const delegate of [undefined, {}, { authorizeSchemaRead: 'yes' }]) {
+            for (let i = 0; i < 2; i++) {
+                const posture = await resolveObjectSchemaMaskPosture({
+                    ...base, objectName: 'sys_missing', security: refused, telemetry,
+                    schemaReadDelegates: sourceFor(delegate, { sys_missing: 'requests' }),
+                });
+                expect(posture.kind, JSON.stringify(delegate)).toBe('hidden');
+            }
+        }
+        expect(warns).toHaveLength(1);
+        expect(warns[0][1]).toMatchObject({ object: 'sys_missing', delegate: 'requests', decision: 'answer-absent' });
+    });
+
+    it('a delegate, or a lookup, that throws is the D6 fault — never a false absence', async () => {
+        const boom = new Error('approvals down');
+        const throwing = await resolveObjectSchemaMaskPosture({
+            ...base, security: refused, schemaReadDelegates: sourceFor({ authorizeSchemaRead: () => { throw boom; } }),
+        }).catch((e) => e);
+        expect(throwing).toBeInstanceOf(ObjectSchemaMaskEvaluationError);
+        expect(throwing.evaluationError).toBe(boom);
+        const lookup = await resolveObjectSchemaMaskPosture({
+            ...base, security: refused,
+            schemaReadDelegates: { declaredDelegate: () => { throw boom; }, service: () => undefined },
+        }).catch((e) => e);
+        expect(lookup).toBeInstanceOf(ObjectSchemaMaskEvaluationError);
+    });
+
+    it('the source reads the declaration from the live registry on every call, and resolves the engine once', async () => {
+        let engines = 0;
+        const declarations: Record<string, unknown> = { sys_request: { schemaReadDelegate: 'requests' }, plain: {} };
+        const source = objectSchemaReadDelegateSource({
+            engine: () => { engines++; return { getSchema: (name: string) => declarations[name] }; },
+            service: (name) => `service:${name}`,
+        });
+        expect(await source.declaredDelegate('sys_request')).toBe('requests');
+        expect(await source.declaredDelegate('plain')).toBeUndefined();
+        expect(await source.declaredDelegate('unknown')).toBeUndefined();
+        declarations.sys_request = {};
+        expect(await source.declaredDelegate('sys_request')).toBeUndefined();
+        expect(engines).toBe(1);
+        expect(await source.service('requests')).toBe('service:requests');
+        // An engine with no registry read declares nothing.
+        const bare = objectSchemaReadDelegateSource({ engine: () => undefined, service: () => undefined });
+        expect(await bare.declaredDelegate('sys_request')).toBeUndefined();
     });
 });

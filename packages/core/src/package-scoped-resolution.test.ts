@@ -76,6 +76,24 @@ describe('ADR-0150 D3 over a supplied holder set — a caller that belongs to a 
   });
 });
 
+describe('[#32929] the outside-closure sentence names both fixes', () => {
+  it('keeps the dependency fix and adds the move for a holder that already depends on the reader', () => {
+    const answer = resolvePackageScopedHolders({ type: 'dataset', name: 'n', callerPackageId: P }, packageScopedHolderSource([[A, 'a']]), closure([]));
+    expect(answer).toMatchObject({ status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'package', packageId: A }] });
+    expect((answer as { message: string }).message).toBe(
+      `The dataset "n" is held outside the declared dependency closure of package "${P}": package "${A}". `
+      + 'Declare a dependency on the package that holds it (ADR-0141). '
+      + `If that package already depends on "${P}", the dependency would be a cycle: move what reads it into that package, `
+      + `or move the dataset into "${P}" (ADR-0150 D3).`,
+    );
+  });
+
+  it('names the type in its own words', () => {
+    const answer = resolvePackageScopedHolders({ type: 'email_template', name: 'n', callerPackageId: P }, packageScopedHolderSource([[A, 'a']]), closure([]));
+    expect((answer as { message: string }).message).toContain(`or move the email template into "${P}"`);
+  });
+});
+
 describe('ADR-0150 D3 over a supplied holder set — a caller with no package', () => {
   it("answers the environment's own item first, then the unique package holder", () => {
     expect(resolve([[A, 'a'], [null, 'env']], [])).toMatchObject({ status: 'resolved', item: 'env', via: 'environment', holder: { kind: 'environment' } });
@@ -242,9 +260,10 @@ describe('the types narrowed to the namespace (ADR-0150 D2/D9)', () => {
       expect(isPackageScopedType(type), type).toBe(type !== ENGINE_FUNCTION_TYPE);
       expect(isNamespaceScopedBareNameType(type), type).toBe(true);
     }
-    // [#31696] The flow has narrowed (it is in the set above); a webhook has not.
+    // [#31696, #31699 PR 2] The flow and the webhook have narrowed (they are in the set above); a connector has not.
     expect(isNamespaceScopedBareNameType('flow')).toBe(true);
-    expect(isNamespaceScopedBareNameType('webhook')).toBe(false);
+    expect(isNamespaceScopedBareNameType('webhook')).toBe(true);
+    expect(isNamespaceScopedBareNameType('connector')).toBe(false);
     expect(isNamespaceScopedBareNameType(undefined)).toBe(false);
   });
 

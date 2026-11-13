@@ -1,5 +1,9 @@
 # @objectstack/console
 
+## 18.4.0
+
+No changes in this release.
+
 ## 18.3.0
 
 No changes in this release.

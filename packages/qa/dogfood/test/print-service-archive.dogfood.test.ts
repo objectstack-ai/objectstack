@@ -245,12 +245,12 @@ describe('print service on a real showcase boot', () => {
       expect(await ql.findOne('showcase_invoice', { where: { id: ownInvoice } }, { context: ctx })).not.toBeNull();
       mint.mockClear();
       renderPdf.mockClear();
-      // The showcase grants the auditor no attachment create at all: the insert's
-      // own CRUD answer, asked before the render. (The attach-rule leg,
-      // ATTACHMENT_PARENT_ACCESS, is pinned against the real insert gate in
-      // service-storage's file-attachment-service.test.ts.)
+      // The auditor holds attachment create through the member baseline (the
+      // storage service's own set, `attachment-member-grant.ts`), so the
+      // insert passes the object grant and the attach rule answers: the
+      // auditor may read the invoice but not edit it. Asked before the render.
       expect(await refusalOf(service.printRecordToFile(request(ownInvoice), ctx))).toEqual({
-        code: 'PERMISSION_DENIED',
+        code: 'ATTACHMENT_PARENT_ACCESS',
         status: 403,
       });
       expect(mint).not.toHaveBeenCalled();

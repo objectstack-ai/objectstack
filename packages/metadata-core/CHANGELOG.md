@@ -1,5 +1,431 @@
 # @objectstack/metadata-core
 
+## 18.4.0
+
+### Minor Changes
+
+- 486b0a9: feat(metadata-core, metadata-protocol, objectql, lint, runtime)!: an App and the modules that declare it share one customization pair
+  
+  Clause-②: yes (narrowing) — the ensure door refuses two asks it accepted: a package that reaches several Apps and whose namespace picks none of them (was `201` with its own pair, now `409`, merge question 11), and a module whose earlier per-package pair holds the App's pair namespace (was `201`/`200`, now `409 RESOURCE_CONFLICT` naming that pair, merge question 12); `appOf` now returns `string | undefined`. The widening half: a module of an App gets the App's pair (`200`, where it was `422 NAMESPACE_CONFLICT` when the App held the namespace), and `@objectstack/metadata-core` exports `pairsOf`, `AppOfRefusal` and `PairOfRefusal`. Ruling 6691022506; ADR-0146 D3 as amended by #31027.
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and nothing at rest changes: a pair the ensure door created stays installed and served, and the two new refusals answer an ask without writing anything, so there is nothing for a migration to rewrite. -->
+  
+  The customization unit is the App (ADR-0146 D3 as amended, ruling record 6691022506). `appOf` in `@objectstack/metadata-core` now reads the installed manifests: a `type: 'app'` package is its own App; any other package's App is the installed `type: 'app'` package it declares in `manifest.dependencies`, directly or through its declared parents (where it reaches several, the one holding its namespace); a package that declares no App is its own unit; a kernel package (scope `system` / `cloud`) keeps its own answer, because no platform pair is created in this version.
+  
+  What changes for a caller:
+  
+  - `POST /api/v1/packages/:id/ensure-customization` asked for a module of an App answers the App's one pair, `<app id>.custom` (namespace `<app namespace>_custom`, a dependency on the App at `^<major>`): `201` on the first ask from any member, `200` after, never `422` for a package of the same App. The answer's `basePackageId` is the App. HotCRM: the App and its modules all answer `app.objectstack.hotcrm.custom`.
+  - `422 NAMESPACE_CONFLICT` stays for the pair namespace held by a package outside the App.
+  - A per-package pair an earlier version created for a module (`<module id>.custom`) stays installed and honoured as before: its declared overrides are served at the module's address (by name, in the list and in the layered read), its list rows, translations, bundle members it added, object extensions and the served-overrides census are read beside the App's pair (`pairsOf` / `isPairOf`), it may still declare and remove its own overrides of the module's items ("Restore package original" included, for a type with no overlay channel too), and the customizations read (`GET /api/v1/packages/:id/customizations`) does not list it as another package's contribution. No reader is App-pair-only. While it holds the App's pair namespace, the ensure door answers `409 RESOURCE_CONFLICT` naming it instead of creating the App's pair beside it (merge question 12).
+  - A package that reaches several Apps and whose namespace picks none of them has no pair: the ensure door answers `409` (merge question 11).
+  - The App's pair's write closure reaches every member of the App, so an override or an object extension of a module's item saved into the App's pair is admitted.
+  - The uninstall refusal for an installed pair reads the pair named for the package: uninstalling the App is refused while the App's pair is installed, uninstalling a module is not (its customizations are the App pair's), and a module whose own earlier per-package pair is installed is still refused naming that pair.
+  - `os validate`'s `namespace-no-customization-pair` warning skips a member of a delivered App: its customizations land in the App's pair.
+  
+  TypeScript: `appOf` now answers `string | undefined` (`undefined` = no single App), and `pairOf`'s refusal union gains `no_single_app` (`PairOfRefusal`); `pairsOf` and the `AppOfRefusal` / `PairOfRefusal` types are new exports of `@objectstack/metadata-core`.
+  
+  **BREAKING** accept-set narrowing at `POST /api/v1/packages/:id/ensure-customization` (`@objectstack/metadata-protocol`) and a return-type change in `@objectstack/metadata-core`.
+  
+  - **A package that reaches several Apps and whose namespace picks none.** Before: `201` with its own pair `<package id>.custom`. Now: `409 RESOURCE_CONFLICT` saying the package declares several Apps and its namespace picks no single one of them, and nothing is created. Remedy: declare the one App the package belongs to in `manifest.dependencies`, or give it the namespace of the App it belongs to.
+  - **A module whose earlier per-package pair holds the App's pair namespace.** Before: the module's own `<module id>.custom` (`201`, then `200`). Now: `409 RESOURCE_CONFLICT` naming that pair, from the App and from every member; the pair stays installed and its customizations stay served. Remedy: keep customizing in the existing pair (its id is in the refusal), or export it (`GET /api/v1/packages/<pair>/export`), delete it, and ensure again to get the App's pair.
+  - **`appOf` returns `string | undefined`** (was `string`). `undefined` means no single App. Remedy: handle `undefined` (`appOf(id, installed) ?? id` keeps the old reading); `pairOf`'s refusal reason may now also be `'no_single_app'` (`PairOfRefusal`).
+- 2b3e3eb: feat(objectql, cli, metadata-protocol, spec, runtime)!: a namespace never equals an object name, at every door that makes a namespace or an object live — and no object is short-named `custom` (`NS_custom`, the namespace the ADR-0146 paired package of `NS` takes).
+  
+  Clause-②: no (narrowing) — `defineStack`, `os validate` / `os build`, the package door (`SchemaRegistry.installPackage`, and so `POST /api/v1/packages`), the Studio object doors (publish-mode save, per-item publish, `publishPackageDrafts`) and `POST /api/v1/packages/:id/publish` each refuse what they accepted before: a namespace equal to an object name in either direction, or an object `NS_custom`. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/**` does not teach a namespace spelled like an object name, or an object named `NS_custom`; the rule ships in the refusal text and in ADR-0150 D6.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the refusal removes no key, export or field and changes the shape of no stored body; what an author does about a refused name is rename the namespace or the object, which no conversion can choose for them -->
+  
+  **BREAKING** accept-set narrowing for ADR-0150 D6 (Q3 = A): the AI face spells `NS-NAME` and `OBJECT-ACTION`, so a namespace spelled like an object name made one address name two things. Measured first-party: 0 first-party namespaces equal an object name, and 0 objects are named `NS_custom`.
+  
+  - **Why.** ADR-0150 D6 rules that a namespace never equals an object name. The spec's predicate (`findNamespaceObjectNameClashes`, `@objectstack/spec/kernel`) existed, and no door asked it.
+  - **Before.** A package of namespace `crm_lead` installed beside an object `crm_lead`, in either order; an object `crm_custom` installed and published under namespace `crm`.
+  - **Now.** Every door asks the one predicate and answers with its sentence, which names both spellings and both packages. `defineStack` and `os validate` / `os build` judge every namespace and object ONE artifact holds (its own manifest and top-level objects, and each `packages[]` body's); the package door judges the incoming package against every installed namespace and registered object (`NAMESPACE_CONFLICT`, 422, `clashes[]`); the Studio object doors and the package publish door judge each object about to go live against every installed package's namespace and its own `NS_custom` (`NAMESPACE_CONFLICT`, 422; the publish pre-flight's audit row spells it `namespace_conflict`). The draft's verdict tells the author the same sentence before any publish. A deployment that already holds such a pair no longer boots: the boot names both.
+  - **Who moves.** An author whose namespace equals an object name another package (or the same artifact) ships, or whose object is named `<namespace>_custom`. **The one-line fix: rename the namespace or the object.**
+  - **Unchanged.** An object whose name only STARTS with a namespace (`crm_lead_note` beside namespace `crm_lead`); `NS_custom_*` objects; a package's own objects under its own prefix; the same package registering again; a stack with no namespace; the namespace-prefix rule (`NAMESPACE_PREFIX`) and N's namespace name rule, which answer as before. `defineStack` and `os validate` / `os build` do not judge packages outside the artifact: a declared dependency carries an id and a range, never a namespace, so its namespace is not guessed — the install door judges it.
+- 8004529: fix(approvals): a non-admin approver can open an approval request again — the request definitions are served to the callers the approvals door admits, declared by the object's owner as `schemaReadDelegate`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — `schemaReadDelegate` is a plugin-owned delegate key like `fileAccessDelegate`, which no published skill teaches; it names a kernel service, and only plugin code can provide one
+  
+  Since the metadata API began answering an object the caller may not read as absent (ADR-0106 as amended by ruling record 6787890900), a non-admin approver got `404` on `GET /api/v1/meta/object/sys_approval_request` and `…/sys_approval_action`. Both objects are closed on the data side on purpose, and their rows reach a member who may not read them only through `/api/v1/approvals/*`, so the console request page lost its definition: every inbox row, `?request=` link and record panel showed "Object Not Found" with no decision actions. The maintainer's decision (6840464379) keeps that rule and makes these two definitions visible to the callers the approvals door admits, declared by the owning plugin.
+  
+  - **`@objectstack/spec`: `ObjectSchema.schemaReadDelegate`.** An optional service name, beside `fileAccessDelegate`. The named kernel service implements `authorizeSchemaRead(objectName, context)` and is asked only after the object read check refused the caller; a `true` verdict serves the object's definition, and only the definition, exactly as to a reader of the object: in the object list and by name, projected by the caller's own field-level security. The data door's answer about the rows does not move. A declared service that is missing or does not implement the method leaves the object absent; one that throws is a 5xx fault, never a false absence.
+  - **`@objectstack/metadata-core`:** `resolveObjectSchemaMaskPosture` takes an optional `schemaReadDelegates` source and asks the object's declared delegate after `canReadObject` refused, never on an undetermined field posture (that would serve the schema unmasked). `objectSchemaReadDelegateSource` builds the source from a transport's engine and service lookups; `ObjectSchemaReadDelegate` is the method's shape. An outlet that hands no source applies no exception.
+  - **`@objectstack/rest`, `@objectstack/runtime` and `@objectstack/mcp`:** every object-schema masker hands the posture resolution a source over the request's environment, so every schema-serving outlet (item, layered, published, diff, object state, app bundle, list, the HTTP MCP object tools, and the stdio MCP object tools and resources) gives one answer. `RestServer` takes a by-name service lookup as a new last constructor argument, which `RestApiPlugin` wires; `createStdioDataBridge` and `callerObjectView` take an optional `schemaReadDelegates` source, which `MCPServerPlugin` wires.
+  - **`@objectstack/plugin-approvals`:** `sys_approval_request` and `sys_approval_action` declare `schemaReadDelegate: 'approvals'`, and `ApprovalService.authorizeSchemaRead` admits the callers its door serves at least one request to in their organization, by the rule its request read applies: a current approver, the submitter, a past actor or commenter, or the override holder. A member party to no request in their organization keeps the `404`, and every other object keeps its answer. The verdict is asked once per request.
+
+### Patch Changes
+
+- 9ed2ee1: refactor(metadata-core): the customization pair of a package is looked up through the App that carries it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `@objectstack/metadata-core` exports `pairOf(base)`, `isPairOf(pairId, base)` and `appOf(packageId)`: the pair of a package is `customizationPackageId(appOf(base))` (ADR-0146 D3, with the customization unit being the App per ruling record 6691022506). `appOf` is the identity today, so every package is still its own App for customization and every answer is the one `customizationPackageId` / `isCustomizationPairOf` gave before: the same pair ids, the same refusals, the same served overrides, write gates, list and layered reads, uninstall refusal, flow precedence remedy and datasource import landing.
+  
+  The served `/meta` reads and writes, the ensure-customization door and the package routes answer exactly as before. Code that asks "which pair customizes this package?" should call `pairOf` / `isPairOf` instead of the spec id rule directly; the parse direction (`customizationBasePackageId`, `isCustomizationPackage`) is unchanged.
+- 769adff: feat(metadata-protocol, metadata-core)!: the ensure door creates no customization pair for a kernel package, and every pair question carries the installed manifests
+  
+  Clause-②: yes (narrowing) — both arms. Narrowing: `POST /api/v1/packages/:id/ensure-customization` (and the protocol's `ensureCustomizationPackage`) answers a kernel base, a package of scope `system` or `cloud`, with `409 RESOURCE_CONFLICT` and a sentence saying kernel objects are not customizable in this version, where it created `<id>.custom`; `POST /api/v1/automation/:name/clone` of a flow a kernel package ships, with no `package` named, answers that `409` where it answered `200` with the copy in `<id>.custom`; and the exported `pairOf`, `isPairOf` and `appOf` (`@objectstack/metadata-core`), `isServedOverrideRowOf` and the `installed` member of `OverrideWriteClosure` (`@objectstack/metadata-protocol`), and `resolveFlowPrecedence` / `describeFlowContender` (`@objectstack/service-automation`) take the installed-manifest lookup as a required argument. Widening: five new exports, `installedManifestsOf`, `InstalledManifestLookup`, `AppLookupManifest` and `InstalledPackageSource` (`@objectstack/metadata-core`) and `kernelPackageScope` (`@objectstack/metadata-protocol`), and one new `noticeCode` value on the permission-set clone answer, `PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE`, for a copy of a kernel-shipped set that now lands environment-wide.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed or re-shaped and no stored row is read differently, converted or dropped: the narrowing is one runtime refusal at one door, for one kind of base, whose remedy is that no pair exists to create; the existing pairs and the overrides in them stay served exactly as before. The retyped exports are runtime functions with no metadata surface, and the compiler names every caller that has not passed the new argument, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for a caller that ensures the customization pair of a kernel package — a platform package of scope `system` (users, organizations, security, settings and the rest of the platform suite) or `cloud` — and for a TypeScript importer of the pair helpers named above.
+  
+  - **Why (ruling records 6691022506 and 6691217245 on ADR-0146 D3).** The customization unit is the App, and the kernel is not an App a customer owns: it ships with the runtime, at the runtime's version (installing it whole is the goal ruling 6691022506 records, not yet what every `serve` tier does). In this version no kernel object is customizable, so the door creates no pair for one. Which kernel objects a later version opens (a whitelist) is that version's decision.
+  - **What the door answers.** `409 RESOURCE_CONFLICT`, the status and code the door already answers when a base's state rules the pair out (a writable base, no namespace, a version that is not SemVer). Nothing is created or written. Every other base is answered exactly as before.
+  - **A kernel pair that already exists stays.** An earlier version of the door may have created `<kernel id>.custom` on a deployment. It stays installed, the overrides inside it stay served by every read of the kernel item's name, and a further save into it is still admitted. Only the ensure call is refused.
+  - **A copy of a platform permission set.** `POST /api/v1/security/permission-sets/:name/clone` with no `package` named landed the copy of a kernel-shipped set (`member_default` and the platform's other sets) in `<kernel id>.custom`. It now saves the copy environment-wide, as it already does for a set authored in the environment, with the notice code `PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE` and a sentence naming the kernel package and `package`. A Console that does not know the new code shows that sentence as sent. Naming a writable package with `package` still lands the copy there. The flow clone door answers a kernel-shipped flow with the ensure door's sentence.
+  - **The closes stay shut on a kernel item.** A package-less write, or a write naming the kernel package, onto an item a kernel package ships is still refused `403 NOT_OVERRIDABLE` exactly where it was refused before (ADR-0146 D11). The sentence no longer names the pair as the fix, since there is none to ensure: it says kernel objects are not customizable in this version. A later version's kernel whitelist is what opens such an item.
+  - **The lookup.** Which pair customizes a package is asked through the installed manifests of the registry the caller serves (`installedManifestsOf(registry)`). Today the answer is unchanged for every package: `appOf` is still the identity. The argument is threaded through every site now so that resolving a module to its App is one change in `appOf`.
+  - **`os validate`'s customization-namespace advisory** now skips a package that is itself a pair through `isCustomizationPackage`, the one spelling of that question. An id ending in `.custom` that no base derives (`a.custom.custom`, a bare `.custom`) is now judged like any other package.
+  - **Who moves, and the fix.** A script or client that ensured a kernel package's pair drops that call: the kernel item is served as it ships, and an existing pair keeps serving what it holds. A vendor package that declares `scope: 'system'` or `'cloud'` in its own manifest is read as kernel here, as `isWritablePackage` already reads it; its remedy is to drop the scope, which belongs to the platform's own packages. A TypeScript importer of the helpers passes `installedManifestsOf(engine.registry)`, or `installedManifestsOf(undefined)` where it holds no registry.
+- 60fe44f: feat(cloud-connection,metadata-core): an install the protocol handshake admitted without checking says so in its answer, not only in the server log
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/cloud-connection`: `POST /api/v1/marketplace/install-local` answers `data.protocolCheckSkipped`** when the ADR-0087 handshake admitted the package without checking it: `{ reason, packageId, protocolVersion, message }`, plus `requiredRange` and `rangeSource` for `reason: 'unparsed-range'`. `reason` is the handshake's own verdict: `no-range` (the package declares no `engines.protocol`) or `unparsed-range` (it declares a range the handshake cannot read). `protocolVersion` is the protocol the package was installed under unchecked, and `message` says so in plain words for the person who pressed Install. It is on all three success answers (managed, `unmanaged`, and a paired customization package), and omitted, not nulled, when the range was checked, so that answer's key set is unchanged. The `warn` log line stays as it was.
+  - **`@objectstack/metadata-core`: `assertProtocolCompat` returns the verdict it admitted the package under** (new exported type `ProtocolCompatAdmitted`; it returned `void`), and the `no-range` and `unparsed-range` verdicts of `checkProtocolCompat` carry `protocolVersion`, the version they were judged against. A door that answers a caller reads the skipped check from the handshake itself instead of judging the range a second time.
+- f108e6d: feat(spec): a field declares the key or keys it was renamed from — `renamedFrom` on `FieldSchema`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #30885 — `skills/**` does not teach the key yet: it is declared ahead of the upgrade step that carries the data (rename execution, #30885), and that step owns the skills line; this diff documents it in `content/docs/data-modeling/fields.mdx` and the generated references
+  
+  A package author can now say that a field was renamed, so that an upgrade knows a rename from a drop-and-add. On the new field, write the old key: `account_name: Field.text({ label: 'Account Name', renamedFrom: ['company'] })`. A field renamed twice lists both earlier keys. This is the manifest half of the rename mapping ruled on epic objectstack-ai/cloud#3652 (Q3 「默认拒绝，需显式映射（推荐）」, and on where the mapping lives, 「写进清单 renamedFrom」), and it supersedes item 5 of objectstack#24443's ruling A ("No rename spelling is added to the spec").
+  
+  - **`@objectstack/spec`: `FieldSchema.renamedFrom: string[]`, optional.** Each entry is an earlier key of this same field, in the field-key grammar (lowercase snake_case). The parse refuses, in one located issue naming the object, the field and the old key: an entry that is not a field key (judged by `FieldSchema`), and, in `ObjectSchema`'s refinement beside the stage-field check, an entry that is the field's own key, an entry repeated within one list, an entry that another field of the same object still declares (the old name is still in use), and an old key that two fields of the same object both claim. Type compatibility between the old column and the new field is not judged at parse: it depends on the installed version, so the upgrade plan judges it. An object that does not write the key parses exactly as before; nothing materializes.
+  - **Declared ahead of its readers.** Nothing in this release reads the key at upgrade or anywhere else. The upgrade plan (#30884) and the rename execution (#30885) read it; until the execution ships, no upgrade carries a column on this declaration. The liveness ledger records the row as `planned`, naming #30885 as the reader that flips it to `live`.
+  - **Publish-time consequence.** `FieldSchema` is strict, so an artifact that carries `renamedFrom` is refused, as an unrecognized key, by every runtime older than this release. A package that adds the key needs an installing runtime at this release or later; a package that does not write it is unaffected.
+  - **`@objectstack/driver-sql` and `@objectstack/metadata-core`: the key is classified in the two maps pinned exhaustive over `FieldSchema`.** The SQL driver's builtin-column classification files it as `storage` (on `id`, `created_at` or `updated_at` the platform's own column takes no data from an old one, so the builtin-column diagnostic reports it as discarded there). The field-level security scrub keeps it: the parse refuses any entry that names a live field, so no entry can name a field a caller is denied.
+- 8847e09: feat: the package upgrade plan — one comparison of an installed package version with the incoming one, a dry run of the install door, and `os package install --dry-run`
+  
+  Clause-②: yes (widening) — new exports from `@objectstack/metadata-core` (`comparePackageVersions` and its types, `typeChangeCategory`, `isEmptyPackageUpgradePlan`, `upgradePlanSeedDatasets`, `seedModeOverwritesMatchedRows`), a new `planUpgrade` method on objectql's `manifest` service, a new `dryRun` key on the `POST /api/v1/marketplace/install-local` body, a new `--dry-run` flag on `os package install`, and new `os diff` entries (declared and suspected renames, seed datasets). Nothing a request did before answers differently.
+  Metadata-protocol: none
+  
+  **One comparison.** `comparePackageVersions(installed, incoming)` (`@objectstack/metadata-core`) lists what an upgrade from one version of a package to the next changes: objects and fields added and removed; type changes, each with the drift category `schema-drift.ts` uses (`safe`, `needs_confirm`, `destructive`); renames a field declares with `renamedFrom`; suspected renames, where one object loses a stored field and gains one with nothing linking them; and seed datasets added, removed and changed, each with its mode. A declared rename whose type changes is also listed as a type change. It is pure and decides nothing.
+  
+  **What the environment knows.** The `manifest` service's `planUpgrade(installed, incoming)` (`@objectstack/objectql`) answers the comparison with two readings of the installed data: the rows holding a value in each column the upgrade removes, renames or retypes (and the rows of each object it removes), and, for each `upsert` or `update` dataset both versions declare, the rows a customer edited that the seed replay would write over. A reading that fails is `null`, never `0`.
+  
+  **A dry run.** `POST /api/v1/marketplace/install-local` with `dryRun: true` answers `200` with the plan of the installed version (its ledger entry) against the one sent, and installs and writes nothing. A dry run of an `unmanaged` install or of a customization pair is refused `400 INVALID_REQUEST`, as is a `dryRun` that is not a boolean. `os package install … --dry-run` sends it and prints the plan. A runtime that predates the key ignores it and installs; the command then says so and exits 1.
+  
+  **`os diff`** reads its object and field changes from the same comparison, so the CLI and an install cannot disagree. Its output for every shape it reported before is unchanged. New: a field renamed with `renamedFrom` prints as one rename instead of a removal and an addition (`renamedFrom` is new in this release), a suspected rename prints beside its removal and addition, and seed datasets print under `data`.
+- 3b7219e: feat(metadata-core): export the schema upgrade verdict and its finding set token, so a host's install door forwards the platform's own verdict
+  
+  Clause-②: yes (widening) — `@objectstack/metadata-core` gains exports and nothing else: `schemaUpgradeVerdict`, `installedRecordUnavailableVerdict`, `schemaUpgradeFindingSet`, `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, `SCHEMA_UPGRADE_CONFIRMATION_STATUS`, `SCHEMA_UPGRADE_TOPIC`, `SCHEMA_UPGRADE_CONFIRMED_CATEGORIES` and the types `SchemaUpgradeFinding`, `SchemaUpgradeUnavailableFinding` and `SchemaUpgradeVerdict`. No request, answer, key or code changes on any door.
+  Metadata-protocol: none
+  
+  The verdict that decides which findings of a package upgrade plan stop a managed upgrade until the installer confirms them (a suspected rename; a type change in the `needs_confirm` or `destructive` drift category, on a declared rename too) and the token that confirmation must echo were private to the install-local door. They now live in `@objectstack/metadata-core` beside `comparePackageVersions`, and the install-local door imports them. A host that installs a package version from its own stored versions, such as the hosted control plane installing into an environment, applies the same rule and mints the same token, so the same pair of versions is refused with the same findings and the same token whichever door installs it.
+  
+  - **`@objectstack/metadata-core`:** the exports above. `schemaUpgradeVerdict(packageId, plan)` answers `{ findings, findingSet }`; `installedRecordUnavailableVerdict(packageId, finding)` is the verdict of a door with no installed side to compare (one confirmable finding, never "no finding"), the finding's sentence being the door's own.
+  - **`@objectstack/spec`:** one `PROVENANCE_WAIVERS` entry: `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED` is now defined in metadata-core and still registered under `@objectstack/cloud-connection`, the package whose door puts it on the wire (the `UPDATE_ID_MISMATCH` shape). No row is added or moved.
+  - **`@objectstack/cloud-connection`:** the install-local door's `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED` refusal, its findings, its sentences and its token are unchanged. The token for a given plan is byte-identical before and after, pinned by a test with values the door's own digest minted.
+- 36a8700: feat(core, metadata-core, objectql): the package-scoped resolution rule and its closure walk move where every reader reaches them, and engine functions resolve in their referrer's package (ADR-0150 D3/D4)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/core`** exports `resolvePackageScopedHolders`, the ADR-0150 D3 rule as a pure function: a caller of package P is answered P's own item, else the unique holder in P's resolution closure, else a refusal naming every candidate; a caller with no package the environment's own item, else the unique package holder, else the refusal. The holders come from a `PackageScopedHolderSource` the caller supplies (`packageScopedHolderSource` builds one from `(package, item)` pairs, a `null` package being the environment's own item), and the closure from a function the caller supplies. The refusal vocabulary moves with it: `PACKAGE_SCOPED_TYPES`, `ENGINE_FUNCTION_TYPE`, `PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE`, `OVERRIDABLE_BASELINE_PACKAGES`, `BARE_NAME_ONE_HOLDER_TYPES`, `describeBareNameHolder` and the refusal and resolution types.
+  - **`@objectstack/metadata-core`** exports the one closure walk: `resolvePackageClosure` (moved from `@objectstack/lint`), `widenPairClosureToAppMembers` and `packageDependencyClosure` (moved from `@objectstack/metadata-protocol`), and `packageResolutionClosure` with `KERNEL_NAMESPACE` (moved from `@objectstack/objectql`): the declared dependency closure plus every `sys` package.
+  - **`@objectstack/lint`**, **`@objectstack/metadata-protocol`** and **`@objectstack/objectql`** re-export every moved name under the name they published, so no import changes. objectql's `resolvePackageScopedName` keeps its signature and answers, now as the rule's call over the registry's holders.
+  - **`@objectstack/objectql`** adds `resolvePackageScopedFunction`, the rule's call over the engine's function holders, and `ObjectQL#functionHoldersOf(name)`: every package that registered a function of that name (the owner `app:PACKAGE_ID` read as the package id), with its own entry. An owner-less registration is the platform's item (`platformItem`, holder kind `platform`, step `platform`): code a plugin or the host registers, in every caller's reach like a `sys` package, so a package caller holding none counts it beside its closure's holders and two or more refuse naming each.
+  - **`@objectstack/objectql`**: `SchemaRegistry#packageScopedHoldersOf` no longer counts a bundle addition as a holder (#28802). A dependent package's email template locale its base does not ship stays under the dependent, so it is no second holder of the base's name for a bare read, and a package-less resolve of the base's template answers the base. The dependent's own bare read still answers its own item (step 1, `packageScopedHoldersOf(type, name, callerPackageId)`), and a read naming the dependent (`getPackageScopedItem`) still reaches the addition. A dependent holding a member its base also holds, and a package that does not declare the holder, are still holders, and the bare read refuses them.
+  - **`@objectstack/core`** exports `RUNTIME_COMPATIBILITY_PACKAGE_ID` (`'__runtime__'`), the package id `ObjectQL#registerObject` stamps when its caller gives none, and reads a caller carrying it as a caller with no package (beside the `sys_metadata` sentinel), so it is not refused environment items. How an item stamped with it counts as a holder is unchanged. objectql's compatibility API takes its default from this one spelling.
+  - **`@objectstack/metadata-core`**: the one closure walk reads a residual owner (ADR-0130 D4, the id a multi-package stack's top-level items are owned by, which has no package record) through the dependencies it declared, via the optional `PackageClosureRegistry#residualOwnerDependenciesOf`. **`@objectstack/objectql`** records them when the manifest service registers a stack's residual (`SchemaRegistry#recordResidualOwnerDependencies` / `residualOwnerDependenciesOf`), with no package record added. A residual then reaches what it declares through every reader of the walk, and the save door's write scope for a residual owner is that declared closure, where before it narrowed nothing.
+  
+  Nothing changes for a running deployment: no reader calls the rule yet, `resolveFunction` and `resolveFunctionEntry` keep answering the one last-registered function per name, the save door admits and refuses exactly what it did, and phase 1's one-holder refusal stays in force.
+- cac0f1a: fix(metadata)!: history, diff and rollback of a type stored per package address one package's row, and a removed package's version is no longer written into the remaining holder's row
+  
+  Clause-②: no (narrowing) — for a type stored per `(package, name)` (the types in `PACKAGE_SLOTTED_STORE_TYPES`; at this release `api`, `agent`, `skill`, `action`, `email_template`, `permission`, `flow`) read through `DatabaseLoader`: `MetadataManager.getHistory` / `diff` and `DatabaseLoader.queryHistory` / `getHistoryRecord` of a name two row slots hold (two packages', or a package's beside the package-less row), naming no address, answered every holder's versions and now answer `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming every holder), and so do `rollback` and `diff` there of a version that does not exist, which answered "Version N not found"; `MetadataManager.rollback` to the version of a package that holds no row of the name (one since removed) wrote that version's body into the remaining holder's row and now answers `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`, naming that package). A rollback to a version recorded under no package (a history row written before this release) on a name two row slots hold answered `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`) and answers it still, at every door and under every address, since no address reads it. A name one row slot holds, and every other type, answer as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any authorable schema is added, removed or re-shaped. The one stored-shape change is a nullable `package_id` column on `sys_metadata_history`, which the history object's schema sync adds without rewriting any row; a row written before it reads exactly as it did, its package being the one its stored body names, as for a `sys_metadata` row. The two refusals answer a request without writing anything, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for a caller of `MetadataManager` (or `DatabaseLoader`) history on a database-backed loader that reads the history of a name two packages hold without naming a package, or that rolls back to a version of a package removed since. No first-party door reaches `DatabaseLoader` history today: the REST `/meta/:type/:name/history`, `/rollback` and `/diff` doors go through the protocol's own repository.
+  
+  ADR-0150 D3/D4: such a type keeps a row per package of a name, its versions numbered per name across those rows. Until now its history rows did not say whose row they were taken of, so a rollback by name could not tell which row a version belongs to.
+  
+  - **Each history row names its package.** `sys_metadata_history` gains a nullable `package_id` column. `DatabaseLoader` fills it on a save and a rollback of such a type with the package of the row written, including a package-less customization saved into a package's row (D4). A snapshot of the package-less row records the `sys_metadata` sentinel. NULL means "not attributed", never the environment: it stays NULL for every other type and on every row `SysMetadataRepository` writes. The unique `(type, name, version)` is unchanged. Upgrade path: the boot's schema sync adds the column on every driver (`ALTER TABLE … ADD COLUMN package_id`, nullable, no default, no row rewritten). A row written before it is read as the package its stored body names (the `_packageId` stamp), else as attributed to none. No row is backfilled; a later backfill attributes a legacy row only on a name one row slot holds, and writes the sentinel for the environment's.
+  - **Name the package.** `getHistory(type, name, { packageId })`, `diff(type, name, v1, v2, { packageId })` and `rollback(type, name, version, { packageId })` on `MetadataManager`, and `queryHistory(…, { packageId })`, `getHistoryRecord(…, { packageId })` and `registerRollback(…, { packageId })` on `DatabaseLoader`, read or write that package's versions and row only. `total` and `hasMore` count that package's versions. Another package's version answers "not found". A rollback writes that package's row and leaves every other package's row untouched. A package that holds no row of the name is refused `409` (`not-held-by-qualifier`), and a name with no row left answers "not found for rollback". The new options type is exported as `MetadataHistoryAddress`.
+  - **The environment.** `{ packageId: null }` addresses the name's package-less row and the versions recorded of it (`''` and the `sys_metadata` sentinel name no package, so they address it too). A package-less save of a name two packages hold writes that row, and its versions stay readable and restorable this way. A rollback by this address restores that row and the registry's package-less entry, never a package's.
+  - **Naming none.** One holder answers as before. Two or more row slots, two packages' or a package's beside the package-less row, are refused `409` naming every holder. The rollback was already refused this way.
+  - **A version lands only in its own package's row.** A rollback to a version whose history row names a package that no longer holds a row is refused `409` naming that package, and one naming a package that still holds a row is refused saying the version is that package's. Nothing is written either way. An environment version is refused into a package's row the same way while the name has several row slots; on a name one row slot holds (a package took over the package-less row, or saved after it was removed) it lands in that row, as before. A version attributed to none (a row written before the column, or one `SysMetadataRepository` wrote) is in no address's history; a rollback to it lands in the name's row only when one row slot holds the name, as before, and with several is refused `409` (`ambiguous-in-environment`) naming every holder, addressed or not. Before, after package B's item was removed, `rollback(name, <B's version>)` wrote B's body into package A's row.
+  
+  **Who moves, and the fix.** A caller reading the history of a name two packages hold names the package: `getHistory(type, name, { packageId })`, once per package. A rollback names the package whose version it restores: `rollback(type, name, version, { packageId })`. The package-less row's versions are addressed with `{ packageId: null }`. A removed package's version cannot be restored into another package's row: reinstall that package, or save the body you want into the remaining package's item.
+- 3299873: fix(rest, runtime)!: the /meta action doors and MCP list_actions serve an action entry as the object door projects it (ADR-0106)
+  
+  Clause-②: no (narrowing) — the `/meta` `action` reads (the list, the item read, `/layers` with its `?layers=true` spelling, and `/published`, on both transports) and MCP `list_actions` now answer a caller only the action entries the `/meta` object door's projection serves that caller, which ADR-0106 D1 ("a field the caller cannot read does not exist for that caller, on any plane") already promises, so no stated contract is narrowed; what narrows is the answer to a caller with a `readable: false` field. Nothing is widened: no answer member, error code or status is added; the new exports are the shared projection the doors ask.
+  Metadata-protocol: none
+  Skills-docs: no move — `skills/**` teaches no `/meta` action read; `content/docs/ai/connect-mcp.mdx` and `content/docs/deployment/environment-variables.mdx` state the projection.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema and no stored shape changes: the action doors answer a field-restricted caller the action entries the metadata object door already serves them. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a field-restricted caller of the `/meta` `action` reads and of MCP `list_actions` over HTTP (`/api/v1/mcp`).
+  
+  - **Now.** Each standalone `action` entry the `/meta` doors serve is projected through the object door's ADR-0106 posture and projection for this caller, as its own object's only action (`projectMetaActionForCaller` in `@objectstack/rest`, the one rule every action door asks). Each param is judged on the object it names: its `objectOverride` when set, else the action's `objectName`. An entry that projection withholds is left out of `GET /api/v1/meta/action`, and `GET /api/v1/meta/action/:name`, its `/layers` (and `?layers=true`) and its `/published` answer it exactly as they answer a name with nothing behind it. A layered read with any layer withheld is answered that way too. The cached item arm judges a conditional request after that projection, so a withheld entry is never answered `304`.
+  - **Object-less actions.** An action with no own object (a `global` action) whose `objectOverride` param binds a field the caller cannot read on the object it names is withheld the same way, on the `/meta` doors and in MCP `list_actions`.
+  - **Param summaries.** MCP `list_actions` summarises a param bound through `objectOverride` with the field of the object it names (its label and type), not the action's own object's field of the same name; a target that names no object the bridge holds is summarised as before.
+  - **Refusal.** Where the caller's field visibility on an action's own object cannot be evaluated, or the projection would leave that object with no field, the read is refused as the object door refuses it: `FIELD_VISIBILITY_UNRESOLVED` / 503.
+  - **Unchanged.** A caller who may read every field, a D4-exempt caller (`manage_metadata`, the system context) and a deployment with no `security` service or with the mask switched off are answered byte for byte as before; so is every action whose params bind only readable fields, or none. The run doors (MCP `run_action`, `POST /actions`) and their param validation and refusal text are unchanged.
+- 7d13a33: fix(meta)!: every schema-serving outlet answers an object the caller may not read as an object that does not exist
+  
+  Clause-②: yes (narrowing) — the metadata plane's object schemas narrow to the objects the caller may read: an object the caller may not read is left out of every object list and is read as an unknown name.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and nothing an author writes changes meaning. The object-schema posture gains one member and the security surface it reads gains the existing object-level read admission, so there is no stored shape for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** — the metadata plane now applies object-level read access as well as field-level read access (ADR-0106, amended by ruling record 6787890900).
+  
+  After the upgrade, every outlet that serves object schemas — `GET /meta/object` and `GET /meta/object/:name` (cached, uncached, layered, published and diff reads), the object state-machine read `GET /meta/object/:name/state/:field`, the runtime `/metadata` catch-all, MCP `list_objects`, `describe_object` and `validate_expression`, and the stdio MCP bridge — treats an object the caller may not read (the security service's `canReadObject` does not admit them) as an object that does not exist:
+  
+  - an object list leaves it out;
+  - a read of it answers exactly as that outlet answers a name that names no object, so every outlet reaches the same answer. The metadata API's reads of one object by name — `GET /meta/object/:name` (cached, uncached, layered, published and diff reads), the state-machine read, and the runtime `/metadata` catch-all's read of one object — give that answer before the store or any validator is consulted, so no `304` and no store answer about that object is returned for it.
+  
+  A caller with no principal, or with no resolved permission set, is served no object. The D7 fallback permission set decides which fields are served, never which objects exist for the caller.
+  
+  What does not change:
+  
+  - callers exempt under ADR-0106 D4 (system context, `manage_metadata`, `studio.access`, `setup.access`) are served every object whole;
+  - the D8 switch (`OS_ALLOW_UNMASKED_OBJECT_METADATA`, or `metadata.maskObjectFields: false`) now also governs object visibility: with it set, every caller is served every object, as before;
+  - a security service that answers field visibility but offers no object-level read admission narrows no object; the runtime says so once, at warn;
+  - a readable object's reference field still names its target object;
+  - the action doors (`GET /meta/action`, MCP `list_actions`, and the run doors) judge an action on its object's field projection as before, whether or not the object itself is served to the caller;
+  - a deployment with no security service is served as before.
+  
+  What is enforced when a read cannot be evaluated: a fault in the field question answers `503 FIELD_VISIBILITY_UNRESOLVED`, as before, and is asked first; an object admission that throws answers the same `503`, never an empty list; a fault the security service's object admission folds into "not admitted" is answered as the object not existing, which fails closed.
+  
+  Known residuals, not narrowed by this change: outlets that carry only object names and labels (the API description document, label bundles), navigation entries that name an object, and the object state-machine read's field level — that read applies the object-level rule, not the field projection.
+  
+  To restore an object for a caller, grant them read access to it (`allowRead` in one of their permission sets); the data plane's read access and the metadata plane's visibility are the same grant.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [f56354c]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [1368536]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [de6d893]
+- Updated dependencies [326453e]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [e336a33]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

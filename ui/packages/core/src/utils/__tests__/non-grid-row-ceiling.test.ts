@@ -35,6 +35,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  GANTT_ROW_CEILING,
   NON_GRID_ROW_CEILING,
   nonGridRowCeilingQuery,
   applyNonGridRowCeiling,
@@ -79,5 +80,42 @@ describe('objectui#7210 / #7508 — the non-grid row ceiling', () => {
     expect(capped.truncated).toBe(true);
     expect(capped.total).toBeUndefined();
     expect(capped.rows).toHaveLength(NON_GRID_ROW_CEILING);
+  });
+});
+
+/**
+ * objectstack#32421, ruling B — the gantt's own ceiling rides the SAME
+ * mechanism through the helpers' `ceiling` argument, and leaving it out is
+ * the shared ceiling. The default is the CONTROL: calendar, map and tree pass
+ * nothing, so a default that moved would move all three.
+ */
+describe('objectstack#32421 — the gantt ceiling through the same mechanism', () => {
+  it('the shared ceiling stays 2,000, and the gantt one sits above it', () => {
+    expect(NON_GRID_ROW_CEILING).toBe(2000);
+    expect(GANTT_ROW_CEILING).toBeGreaterThan(NON_GRID_ROW_CEILING);
+  });
+
+  it('CONTROL: with no ceiling argument both helpers keep the shared one', () => {
+    expect(nonGridRowCeilingQuery()).toEqual({ $top: NON_GRID_ROW_CEILING + 1 });
+    const capped = applyNonGridRowCeiling({ data: rows(4999), total: 4999 });
+    expect(capped.truncated).toBe(true);
+    expect(capped.rows).toHaveLength(NON_GRID_ROW_CEILING);
+  });
+
+  it('asks for the gantt ceiling plus the probe row', () => {
+    expect(nonGridRowCeilingQuery(GANTT_ROW_CEILING)).toEqual({ $top: GANTT_ROW_CEILING + 1 });
+  });
+
+  it('keeps every row between the two ceilings, untruncated', () => {
+    const capped = applyNonGridRowCeiling({ data: rows(4999), total: 4999 }, GANTT_ROW_CEILING);
+    expect(capped.truncated).toBe(false);
+    expect(capped.rows).toHaveLength(4999);
+  });
+
+  it('one row past the gantt ceiling is truncated, and the probe row is sliced back off', () => {
+    const top = nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top;
+    const capped = applyNonGridRowCeiling(rows(top), GANTT_ROW_CEILING);
+    expect(capped.truncated).toBe(true);
+    expect(capped.rows).toHaveLength(GANTT_ROW_CEILING);
   });
 });

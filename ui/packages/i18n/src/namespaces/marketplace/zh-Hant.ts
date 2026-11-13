@@ -192,6 +192,22 @@ const zhHant = {
       },
       // ADR-0090 D5/D9 — 安裝時建議：包宣告 isDefault 的權限集建議繫結到
       // everyone/guest 崗位，由管理員在此確認，服務端絕不自動繫結。
+      objectExtensions: {
+        title: "會修改已有物件",
+        intro: "安裝會修改本環境中以下已有的物件：",
+        platformBadge: "平台物件",
+        platformWarning: "平台物件由本環境中的所有應用共用。修改它們可能影響登入、使用者資料以及其他應用。",
+        fields: "新增或替換欄位",
+        fieldPatches: "修改欄位的顯示方式",
+        validations: "新增或替換校驗規則",
+        indexes: "新增 {{count}} 個索引",
+        indexes_one: "新增 {{count}} 個索引",
+        indexes_other: "新增 {{count}} 個索引",
+        relabels: "修改其標籤或描述",
+        reading: "正在讀取此軟體包會修改哪些已有物件…",
+        unknown: "無法讀取此軟體包會修改哪些已有物件。它可能會修改一些物件，包括平台物件。",
+        acknowledge: "我瞭解此軟體包會修改平台物件。",
+      },
       suggestedBindings: {
         promptEveryone: '此應用建議將「{{set}}」授予所有已登入使用者（Everyone 崗位）。',
         promptGuest: '此應用建議將「{{set}}」授予未登入訪客（Guest 崗位）。',

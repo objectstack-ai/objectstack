@@ -218,3 +218,48 @@ describe('cold-boot bind survives the read path annotations (cloud#971)', () => 
         await kernel.shutdown();
     });
 });
+
+/**
+ * A package registered in ANOTHER plugin's own `kernel:ready` handler, after
+ * this plugin's bind ran — the order a host gets when a plugin that depends on
+ * the automation plugin (every connector plugin does) is listed before the
+ * install-local plugin, whose rehydrate re-registers every installed package in
+ * `kernel:ready` and announces no reload. Its flow is in the protocol's view
+ * from then on, and must be registered once the boot settles.
+ */
+describe('a flow registered by a later plugin\'s kernel:ready handler is registered after the boot', () => {
+    async function bootWithLateRegistrar(early: unknown[], late: unknown[]) {
+        const served = [...early];
+        const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
+        kernel.use(new AutomationServicePlugin());
+        kernel.use({
+            name: 'test.late-registrar',
+            type: 'standard' as const,
+            version: '1.0.0',
+            dependencies: [] as string[],
+            async init(ctx: any) {
+                ctx.registerService('protocol', fakeProtocolService(served));
+            },
+            async start(ctx: any) {
+                // Registered after the automation plugin's: runs after its bind.
+                ctx.hook('kernel:ready', async () => {
+                    served.push(...late);
+                });
+            },
+        } as never);
+        await kernel.bootstrap();
+        return kernel;
+    }
+
+    it('registers the late flow, and keeps the one the kernel:ready bind registered', async () => {
+        const kernel = await bootWithLateRegistrar(
+            [recordTriggeredFlow('host_flow', 'task')],
+            [{ ...recordTriggeredFlow('installed_flow', 'task'), _packageId: 'com.example.installed' }],
+        );
+        await flush();
+        const engine = kernel.getService<AutomationEngine>('automation');
+        expect(await engine.getFlow('host_flow')).not.toBeNull();
+        expect(await engine.getFlow('installed_flow'), 'registered after a later kernel:ready handler added it').not.toBeNull();
+        await kernel.shutdown();
+    });
+});

@@ -158,9 +158,13 @@ const CALLERS: Record<string, Classification> = {
     calls: { resolveAuthzContext: 1 },
     pin: 'packages/plugins/plugin-sharing/src/share-link-routes.api-key-account-posture.pin.test.ts',
   },
-  'packages/services/service-messaging/src/preference-options-routes.ts': {
+  // [#32445] The messaging doors' one caller resolution, moved out of the
+  // preference options route unchanged: that route and the in-app message
+  // door (`in-app-message-routes.ts`) both resolve their caller through it, so
+  // the pin that holds the preference door's facts holds the shared call.
+  'packages/services/service-messaging/src/messaging-request-caller.ts': {
     kind: 'door',
-    door: 'the notification preference options route',
+    door: 'the messaging doors\' caller resolution (the notification preference options route and the in-app message door)',
     calls: { resolveRequestExecutionContext: 1 },
     pin: 'packages/services/service-messaging/src/preference-options-routes.integration.test.ts',
   },

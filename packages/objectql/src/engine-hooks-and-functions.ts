@@ -328,6 +328,12 @@ export class HooksAndFunctionsFacet {
     for (const [name, holders] of this.functionHolders) {
       for (const [holder, entry] of holders) if (entry.packageId === packageId) holders.delete(holder);
       if (holders.size === 0) this.functionHolders.delete(name);
+      // [#32534] The bare entry left with the last registration while ONE
+      // holder of the name remains: that holder's entry is the bare answer, as
+      // a one-holder name's always is. Two or more remaining holders get no
+      // pick (the bare read of two packages' name stays refused, naming them),
+      // and an owner-less registration never leaves with a package.
+      else if (holders.size === 1 && !this.functions.has(name)) this.functions.set(name, [...holders.values()][0]);
     }
     if (removed > 0) {
       this.logger.debug('Unregistered functions by package', { packageId, removed });

@@ -188,10 +188,10 @@ let cachedCollectionKeys: readonly string[] | undefined;
  * `ArtifactPackageSchema` — which embeds `AssembledPackageBodySchema` — so the
  * shapes are built by the time the first call needs them.
  *
- * ⚠️ `export` here is MODULE scope, not package surface: this module is not
- * named by `packages/runtime/src/index.ts`, so neither this function nor
- * {@link resolveArtifactCollections} appears in `dist/index.d.ts` and neither is
- * importable from `@objectstack/runtime`. The keyword is here because
+ * ⚠️ `export` here is MODULE scope, not package surface: `packages/runtime/src/index.ts`
+ * names {@link resolveArtifactCollections} from this module (#32827) and NOT
+ * this function, so it is absent from `dist/index.d.ts` and not importable from
+ * `@objectstack/runtime`. The keyword is here because
  * `artifact-collections.test.ts` imports it by module path — the derivation is
  * the part of this file that fails silently if it ever stops being a
  * derivation, so it is pinned directly rather than inferred from a merge.
@@ -417,6 +417,32 @@ function mergeCollection(key: string, top: unknown, fromBodies: readonly Contrib
 /**
  * Read `artifact` with every package-owned collection resolved across BOTH
  * artifact shapes — the flattened top level and `packages[]` (ADR-0130 D4).
+ *
+ * ## Public reader (`@objectstack/runtime`, #32827)
+ *
+ * This is the ONE reader of "every collection of a composed suite", exported
+ * from the package entry so an app's own tooling (a test view of the whole
+ * suite, a lint pass, a generator) reads a multi-package artifact the way the
+ * boot does instead of re-implementing the merge:
+ *
+ * ```ts
+ * import { composeStacks } from '@objectstack/spec';
+ * import { resolveArtifactCollections } from '@objectstack/runtime';
+ *
+ * // Each package keeps its own id and its own app; the suite's collections
+ * // (objects, apps, flows, translations, hooks, …) are read across every body.
+ * const suite = resolveArtifactCollections(composeStacks(packageStacks, { manifest: 'preserve' }));
+ * suite.objects; // every input's objects
+ * suite.apps;    // every input's apps, each still owned by its own package
+ * ```
+ *
+ * A `manifest: 'preserve'` composition carries each collection once, in its
+ * package's body, and no flattened copy — so reading `artifact.objects`
+ * directly sees none of it. A FLAT composition (the default `manifest: 'last'`)
+ * is not the way to get one view: it puts every input's apps under one package
+ * id, which `composeStacks` refuses for a suite (`STACK_SINGLE_APP_VIOLATION`,
+ * ADR-0019 D3 as amended). Merge order is the top level first, then each body
+ * in `resolveArtifactPackageOrder`'s registration order, as at boot.
  *
  * The returned value is a shallow copy whose envelope keys (`manifest`, `api`,
  * `server`, `i18n`, `runtimeModule`, `onEnable`, `packages`) are the caller's

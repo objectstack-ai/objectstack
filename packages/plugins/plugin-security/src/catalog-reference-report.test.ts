@@ -625,8 +625,11 @@ describe('[ADR-0131 D3/D4] SecurityPlugin runs the report at kernel:bootstrapped
     ]);
 
     const handlers = b.hooks.get('kernel:bootstrapped') ?? [];
-    // This report alone: the grant-name backfill that ran ahead of it is retired (ADR-0131 D10).
-    expect(handlers).toHaveLength(1);
+    // The platform baseline seam's window close (it re-derives the everyone
+    // anchor only when a set joined after the derivation began — none here),
+    // then this report, last. The grant-name backfill that ran ahead of it is
+    // retired (ADR-0131 D10).
+    expect(handlers).toHaveLength(2);
     for (const handler of handlers.slice(0, -1)) await handler();
     const writes = [
       vi.spyOn(b.engine, 'insert'), vi.spyOn(b.engine, 'update'), vi.spyOn(b.engine, 'delete'),

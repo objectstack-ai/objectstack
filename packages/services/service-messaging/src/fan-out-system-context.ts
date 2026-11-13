@@ -29,6 +29,12 @@
  * the one read per emit that tells which recipients are a user, for the
  * delivery rows' `recipient_user_id`.
  *
+ * [#32445] And by the in-app message door's recipient check
+ * (`in-app-message-routes.ts`, `sys_member` of the sender's current
+ * organization and the picked ids, projected to `user_id`), which tells
+ * whether each picked user is a member before anything is sent. The door has
+ * decided the sender may send before it reads.
+ *
  * `emit()` takes no caller context. The door in front of an emitting caller
  * has already decided whether it may notify, and every row these calls read or
  * write belongs to a RECIPIENT, not to the emitter — so no caller's grants

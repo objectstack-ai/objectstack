@@ -45,6 +45,15 @@ export const SysApprovalRequest = ObjectSchema.create({
   isSystem: true,
   managedBy: 'engine-owned',
   description: 'Live approval instance tracked per submission',
+  // [decision 6840464379] The rows reach a member only through the approvals
+  // door (`/api/v1/approvals/*`); the data side is closed to ordinary members on
+  // purpose. The metadata API answers an object the caller may not read as
+  // absent (ADR-0106, ruling record 6787890900), yet the request page that door
+  // links to needs this definition to render, so the approvals service answers
+  // who else is served it: the callers its door serves a request to
+  // (`ApprovalService.authorizeSchemaRead`). Field security still projects it,
+  // and the rows stay closed.
+  schemaReadDelegate: 'approvals',
   // [ADR-0079, ADR-0085] The record title is the flow's label, `process_label`:
   // a STORED column, so every door that serves the row serves its title. The
   // approvals get (`rowFromRequest`) serves it by the display-label chain — the
@@ -583,6 +592,27 @@ export const SysApprovalRequest = ObjectSchema.create({
   // leaf `has()` plus the `== true` comparison is the MINIMAL safe form here,
   // not a longer one: `== true` is load-bearing (a bare truthy read of a null
   // leaf faults the logical operator), the parent `!= null` is not.
+  //
+  // [#32442, ruling A] The four approver decisions — approve, reject, reassign,
+  // send back — are exposed to AI (`ai.exposed`, ADR-0011), so an agent can
+  // decide for the approver it acts for over MCP `run_action`. Nothing here
+  // decides WHO may: each is a same-origin `type: 'api'` action, so the action
+  // door forwards the call to its approvals route under the caller's own
+  // identity, and `ApprovalService` admits only a current approver of the
+  // request (and, for approve/reject/reassign, the override holder) — the
+  // gate the console's buttons reach.
+  // `visible` is not that gate and the door does not read it. Each declares
+  // `requiresConfirmation: true`, ADR-0011's bucket C for a consequential,
+  // bounded act (`sys_user.ban_user` is the precedent), so `run_action`
+  // refuses until the call carries the confirmation.
+  //
+  // [#32993] The submitter's side of the same process: recall and resubmit
+  // are exposed the same way, so the submitter's agent can withdraw a request
+  // to fix the record and send a returned one back into review. Same door,
+  // same gate: `ApprovalService.recall` admits the submitter (and, on a
+  // pending request, the override holder) and refuses anyone else with
+  // `approval_recall_not_submitter`; `ApprovalService.resubmit` admits the
+  // submitter alone. Remind, request-info and the thread reply stay unexposed.
   actions: [
     {
       name: 'approval_approve',
@@ -623,6 +653,14 @@ export const SysApprovalRequest = ObjectSchema.create({
       // routes answers `{ request, … }` with that same read-back row.
       successMessage: 'Approved "{{ result.request.record_title }}"',
       refreshAfter: true,
+      // [#32442, ruling A] Exposed to AI for the request's current approvers.
+      // See the note above the actions array.
+      ai: {
+        exposed: true,
+        description:
+          'Approve a pending approval request (the record: a sys_approval_request id) on behalf of the user, with an optional comment. Only a current approver of the request, or an administrator who may override a stuck request, may decide it; anyone else is refused and the request stays pending. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       name: 'approval_reject',
@@ -653,6 +691,12 @@ export const SysApprovalRequest = ObjectSchema.create({
       locations: ['record_section', 'list_item'],
       successMessage: 'Rejected "{{ result.request.record_title }}"',
       refreshAfter: true,
+      ai: {
+        exposed: true,
+        description:
+          'Reject a pending approval request (the record: a sys_approval_request id) on behalf of the user, with an optional comment. A rejection is final for every approver. Only a current approver of the request, or an administrator who may override a stuck request, may decide it; anyone else is refused. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       name: 'approval_reassign',
@@ -676,6 +720,15 @@ export const SysApprovalRequest = ObjectSchema.create({
       locations: ['record_section'],
       successMessage: 'Reassigned "{{ result.request.record_title }}"',
       refreshAfter: true,
+      ai: {
+        exposed: true,
+        description:
+          'Hand the user\'s pending step on an approval request (the record: a sys_approval_request id) to another person (param: to, that person\'s user id), with an optional comment. Only a current approver of the request, or an administrator who may override a stuck request, may reassign it. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+        paramHints: {
+          to: { description: 'The user id of the person who takes over this approval step.' },
+        },
+      },
     },
 
     // ── Approver secondary decisions ────────────────────────────────
@@ -696,6 +749,12 @@ export const SysApprovalRequest = ObjectSchema.create({
       locations: ['record_section'],
       successMessage: 'Sent "{{ result.request.record_title }}" back for revision',
       refreshAfter: true,
+      ai: {
+        exposed: true,
+        description:
+          'Send a pending approval request (the record: a sys_approval_request id) back to its submitter for revision, with an optional reason. Only a current approver of the request may send it back. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       name: 'approval_request_info',
@@ -780,6 +839,15 @@ export const SysApprovalRequest = ObjectSchema.create({
       locations: ['record_section'],
       successMessage: 'Recalled "{{ result.request.record_title }}"',
       refreshAfter: true,
+      // [#32993] Exposed to AI for the request's submitter. See the note above
+      // the actions array. The tool description is its own text, never the
+      // dialog question in `description`.
+      ai: {
+        exposed: true,
+        description:
+          'Withdraw an approval request (the record: a sys_approval_request id) that the user submitted, with an optional comment, while it is pending or was sent back for revision. Approvers can no longer act on it and the record is unlocked for editing; a recalled request is closed, so sending the record for approval again goes through the app\'s own submit action. Only the submitter of the request, or an administrator who may override a stuck pending request, may recall it; anyone else is refused. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       name: 'approval_resubmit',
@@ -795,6 +863,14 @@ export const SysApprovalRequest = ObjectSchema.create({
       locations: ['record_section'],
       successMessage: 'Resubmitted "{{ result.request.record_title }}"',
       refreshAfter: true,
+      // [#32993] Exposed to AI for the request's submitter. See the note above
+      // the actions array.
+      ai: {
+        exposed: true,
+        description:
+          'Send an approval request (the record: a sys_approval_request id) that an approver sent back for revision (status returned) into review again, after the user revised the record, with an optional note on what changed. It applies only to a returned request. Only the submitter of the request may resubmit it; anyone else is refused. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
 
     // ── Thread reply ────────────────────────────────────────────────

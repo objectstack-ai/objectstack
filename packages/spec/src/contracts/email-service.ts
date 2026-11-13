@@ -102,6 +102,15 @@ export interface SendEmailInput {
    * two silently dropped.
    */
   identityMail?: boolean;
+  /**
+   * The message is sent only if the mail log records it. `true`: when the
+   * log row cannot be written (no persistence, or the insert fails), the send
+   * is refused with `SERVICE_UNAVAILABLE` and nothing is delivered. Absent or
+   * `false` keeps the default, where a message whose row could not be written
+   * is still delivered, with a warning. A script body's `ctx.email.send` sets
+   * it.
+   */
+  requireLogRow?: boolean;
 }
 
 /**

@@ -4884,7 +4884,7 @@
       "title": "A permission set travels as (package, name) from the grant to every request's evaluation: the execution context carries permissionSetAddresses, the evaluator reads each set at its holder, the activation ledger switches a set off per holder, and an OAuth client acting for a user carries none",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -4904,7 +4904,7 @@
       },
       "steps": [
         "as M: GET /api/v1/auth/me/permissions and GET /api/v1/data/qa_a_ticket. As admin: POST /api/v1/security/explain {\"userId\": M, \"object\": \"qa_a_ticket\", \"operation\": \"read\"}, and read M's grant row (GET /api/v1/data/sys_user_permission_set) for its permission_set_package",
-        "stop the server. In the database file, INSERT one sys_metadata_activation row: metadata_type 'permission', package_id 'com.qa.addr-b', name 'qa_a_reader', active false, with a fresh id and the audit columns as an existing row carries them. That row is a holder of the name M does not hold. Restart and repeat step 1. Then stop, DELETE that row and restart",
+        "stop the server. In the database file, INSERT one sys_metadata_activation row: metadata_type 'permission', package_id 'com.qa.addr-b', name 'qa_a_reader', active false, with a fresh id and the audit columns as an existing row carries them. com.qa.addr-b holds no qa_a_reader, so the row's package_id is a stale column: it names no holder of the name. Restart and repeat step 1. Then stop, DELETE that row, restart and repeat step 1",
         "as admin: POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": false}; read the row it wrote (GET /api/v1/data/sys_metadata_activation); repeat step 1",
         "stop the server; UPDATE that row's package_id to NULL (a package-less row, the shape an earlier release wrote); restart and repeat step 1. Then POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": true} and repeat step 1 once more"
       ],
@@ -4916,10 +4916,10 @@
           "evidence": "the effective-permissions body, the data read and the grant row"
         },
         {
-          "clause": "a ledger row for another holder of the name switches nothing off for the holder M's grant names",
+          "clause": "a ledger row whose package_id names a package holding no set of the name is a stale column: it switches off the holder the name resolves to, never nothing; a real second holder's row switching nothing off for M's is the pin's case",
           "oracle": "api",
-          "verify": "after step 2's restart M still lists qa_a_reader and still reads the record, and explain lists qa_a_reader as a contributor with no 'held — deactivated' entry (packages/core/src/security/resolve-authz-context.ts#permissionSetSwitchedOff, per holder since #32027)",
-          "evidence": "the three answers after the restart"
+          "verify": "after step 2's restart M no longer lists qa_a_reader, the data read no longer returns the record (record its status), and explain carries qa_a_reader 'held — deactivated': the ledger reads a stale package_id by the D3 rule with no caller and keeps disabling the holder that rule answers, here com.qa.addr-a, and a holder outside the stale package's namespace is switched off too, because a switch-off is never read as none (packages/core/src/security/resolve-authz-context.ts#ledgerRowHolders, #31698). After the row is deleted and the server restarted, step 1's answers are back. The case this clause first meant, a real second holder of the name whose row switches nothing off for M's, is not reachable through install (knownGaps): score it from packages/plugins/plugin-security/src/permission-set-address.test.ts, 'a holder of a grant the user does not hold switches nothing off for the one they do', which reports ≥1 test and 0 failed at the run subject sha (packages/core/src/security/resolve-authz-context.ts#permissionSetSwitchedOff, per holder since #32027)",
+          "evidence": "the three answers after the restart and after the delete, and the pin file's vitest summary line with the subject sha"
         },
         {
           "clause": "the holder's own row switches the set off, and explain names it deactivated",
@@ -4941,7 +4941,7 @@
         }
       ],
       "negative": [
-        "the foreign row of step 2 switching off M's set is a FAIL: the ledger is judged per holder",
+        "the stale row of step 2 leaving M's set granting is a FAIL: a row naming a package that holds no set of the name is read by the D3 rule, never as no switch-off. A real second holder's row switching M's set off is a FAIL too (the pin's case): the ledger is judged per holder",
         "⛔ leaving step 2's foreign row in place before step 3 makes the door switch that row instead of writing com.qa.addr-a's: setActive finds its row by (metadata_type, name) (packages/core/src/utils/metadata-activation-store.ts, FOLLOW-UPS §16b). That is a fixture error, never a verdict on this item"
       ],
       "traps": ["cache-staleness", "wrong-persona"],
@@ -4970,6 +4970,12 @@
           "date": "2026-11-10",
           "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures, steps, acceptance and negative), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
           "ref": "#32330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-13",
+          "change": "assertion-defect correction of acceptance[1] (with steps[1], a negative and acceptance[1]'s evidence). Step 2's row names com.qa.addr-b, which holds no qa_a_reader: that is a stale column, not a second holder, and the ledger reads it by the D3 rule with no caller, switching off the holder the name resolves to (packages/core/src/security/resolve-authz-context.ts#ledgerRowHolders, #31698: a switch-off is never read as none), so M loses the set. The clause now asserts that stale-column contract live, and scores the true two-holder case, which install cannot reach (knownGaps), from the pin in permission-set-address.test.ts. Found by the 18.4.0 acceptance run #32940 (F-4 to F-8 and its R4/R5 comments; wave anchor #32908). Re-read at main cf1b55c0. Card #32945",
+          "ref": "#32945"
         }
       ]
     },

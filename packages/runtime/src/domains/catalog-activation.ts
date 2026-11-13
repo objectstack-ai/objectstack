@@ -75,7 +75,8 @@
  * a permission set's row is package-aware (core's `readDisabledCatalogNames`
  * and `ledgerRowSwitchesOff` read a row's `package_id` as its holder), so two
  * packages each keep their own row of one name, and switching one never
- * re-addresses the other's. Every other type keeps the name-addressed store.
+ * re-addresses the other's. The webhook's store is addressed the same way
+ * (below); every other type keeps the name-addressed store.
  * A row naming no package, or naming a package that no longer serves the name,
  * is a holder's switch only while the name has that one holder (D8), so only
  * then does a write take it over (`adoptPackageless`, or the stale row's
@@ -91,6 +92,21 @@
  * `permission`, nothing for every other type — a name outside it is refused
  * `400 VALIDATION_ERROR` before any lookup, where it used to be dropped
  * without a word ({@link catalogActivationQueryParams}).
+ *
+ * ## A declared webhook two packages declare (ADR-0150 D3/D4/D5, #31699)
+ *
+ * Two packages of two namespaces may each declare a webhook of one name, and
+ * the dispatcher reads each one's switch from its own row,
+ * `(webhook, package_id, name)`. So the webhook store is addressed by
+ * `(package, name)` ({@link WEBHOOK_LEDGER_ADDRESSING}): switching one
+ * holder's webhook never touches the other's row. The bare
+ * `webhook/:name` answers a name two packages declare `409
+ * RESOURCE_CONFLICT`, naming both (it was a `503`: the reader's refusal
+ * carried no `refusal`), and `POST /security/_activation/webhook/:ns/:name`
+ * addresses the holder in namespace `:ns` ({@link resolveQualifiedWebhook}).
+ * A row naming no package becomes the holder's own when the name has that one
+ * holder (`adoptPackageless`, ADR-0150 D8), as the name-addressed store wrote
+ * it before; under two holders it is neither's and is never written for one.
  */
 
 import { AUDIENCE_ANCHOR_POSITIONS, GUEST_POSITION } from '@objectstack/spec/identity';
@@ -197,6 +213,80 @@ function declaredSharingRuleReaderOf(service: unknown): DeclaredSharingRuleReade
  */
 interface DeclaredWebhookReader {
     declaredWebhookNamed(name: string): Promise<{ webhook: { name: string }; packageId?: string } | null>;
+    /** Every declaration, one per `(package, name)` slot (#31699): read by the qualified door. */
+    list?(): Promise<Array<{ webhook: { name: string }; packageId?: string }>>;
+    /**
+     * Every holder of a name, a DISABLED package's included (#31699 round 2).
+     * The declaration reads above answer the served set; `adoptPackageless`
+     * is a durable write and counts this one.
+     */
+    holdersOf?(name: string): Promise<ReadonlyArray<string | null>>;
+}
+
+/**
+ * [ADR-0150 D8, #31699 round 2] Whether the write for a declared webhook may
+ * bind the name's row naming no package to its package: only while that
+ * package is the name's ONE holder, counting every holder, a disabled
+ * package's included. A ledger row outlives a disable, so the row a disabled
+ * co-holder shares is no holder's own (D4) and is never re-attributed to the
+ * enabled one. A reader that cannot count every holder answers by its served
+ * slots, `served`.
+ */
+async function webhookAdoptsPackageless(reader: DeclaredWebhookReader | undefined, name: string, served: number): Promise<boolean> {
+    const every = typeof reader?.holdersOf === 'function' ? (await reader.holdersOf(name)).length : served;
+    return every === 1;
+}
+
+/**
+ * [ADR-0150 D4, #31699] The webhook type's ledger rows are addressed by
+ * `(package, name)`, as flows' are (`flow-activation-store.ts`): the
+ * dispatcher reads each holder's switch from its own row. Only this type and
+ * the stores that already were; every other type's store stays name-addressed.
+ */
+export const WEBHOOK_LEDGER_ADDRESSING = { addressing: 'package-and-name' } as const;
+
+/**
+ * [ADR-0150 D5, #31699] The declared webhook `POST /security/_activation/
+ * webhook/:ns/:name` addresses: among the packages of namespace `namespace`
+ * (the registry's `getNamespaceOwners`), the one that declares `name`. Two —
+ * a shareable namespace's co-owners — are refused naming each
+ * (`ambiguous-in-namespace`); none is refused naming the holders there are
+ * (`not-held-by-qualifier`), or answered `404` when nothing declares the name
+ * or no package declares the namespace. `holders` is how many slots the name
+ * is served in; the write's `adoptPackageless` counts every holder
+ * ({@link webhookAdoptsPackageless}). The slots are the served set: a
+ * DISABLED package's declaration is not one, so a namespace whose packages
+ * are all disabled is answered as one that declares nothing.
+ */
+async function resolveQualifiedWebhook(
+    reader: DeclaredWebhookReader,
+    ql: any,
+    namespace: string,
+    name: string,
+): Promise<
+    | { readonly entry: { name: string; packageId: string }; readonly holders: number }
+    | { readonly refusal: PackageScopedRefusal }
+    | { readonly missing: string }
+> {
+    const owners: string[] = typeof ql?.registry?.getNamespaceOwners === 'function'
+        ? ql.registry.getNamespaceOwners(namespace) ?? []
+        : [];
+    if (owners.length === 0) return { missing: `no installed package declares the namespace '${namespace}'` };
+    const slots = (await reader.list!()).filter((d) => d.webhook.name === name);
+    const holding = slots.flatMap((d) => (d.packageId !== undefined && owners.includes(d.packageId) ? [d.packageId] : []));
+    if (holding.length === 1) return { entry: { name, packageId: holding[0] }, holders: slots.length };
+    if (holding.length === 0 && slots.length === 0) return { missing: `nothing declares it in namespace '${namespace}'` };
+    const candidates: PackageScopedHolder[] = (holding.length > 1 ? holding : slots.map((d) => d.packageId))
+        .map((packageId) => (packageId === undefined ? { kind: 'environment' as const } : { kind: 'package' as const, packageId }));
+    const base = {
+        status: 'refused' as const,
+        reason: holding.length > 1 ? 'ambiguous-in-namespace' as const : 'not-held-by-qualifier' as const,
+        type: 'webhook' as const,
+        name,
+        callerPackageId: holding.length > 1 ? null : owners[0],
+        candidates,
+    };
+    return { refusal: { ...base, message: packageScopedRefusalMessage(base) } };
 }
 
 function declaredWebhookReaderOf(service: unknown): DeclaredWebhookReader | undefined {
@@ -660,7 +750,8 @@ function ledgerUnregistered(ql: any): boolean {
  *     type is refused with the position wording, which says nothing a refused
  *     caller could not read off the route ledger.
  *  2. **Shape**: `['_activation', type, name]`, `type` a catalog type, and
- *     not an audience anchor (`everyone` / `guest`), which this door refuses.
+ *     not an audience anchor (`everyone` / `guest`), which this door refuses;
+ *     or `['_activation', 'webhook', ns, name]` (#31699).
  *     Then the **query**: the type's closed set
  *     ({@link catalogActivationQueryParams}), and `?package=` for a
  *     permission set ({@link readPermissionSetPackageQuery}).
@@ -694,18 +785,24 @@ export async function handleCatalogActivationWrite(
     if (postureRefusal) return postureRefusal;
 
     // ── 2. shape ────────────────────────────────────────────────────────────
-    if (parts.length !== 3 || !isCatalogActivationType(requestedType) || !parts[2]) {
+    // [ADR-0150 D5, #31699] A declared webhook is also addressed by its
+    // namespace: `['_activation', 'webhook', ns, name]`.
+    const qualified = parts.length === 4 && requestedType === 'webhook' && !!parts[2] && !!parts[3];
+    if (!qualified && (parts.length !== 3 || !isCatalogActivationType(requestedType) || !parts[2])) {
         return {
             handled: true,
             response: deps.error(
                 `Path must be /security/_activation/:type/:name, with :type one of ` +
-                `${Object.keys(CATALOG_ACTIVATION_SUBJECTS).map((t) => `\`${t}\``).join(', ')}`,
+                `${Object.keys(CATALOG_ACTIVATION_SUBJECTS).map((t) => `\`${t}\``).join(', ')}` +
+                (requestedType === 'webhook' ? ', or /security/_activation/webhook/:namespace/:name' : ''),
                 400,
             ),
         };
     }
-    const type: CatalogActivationType = requestedType;
-    const name = parts[2];
+    const type = requestedType as CatalogActivationType;
+    const namespace = qualified ? parts[2] : undefined;
+    const name = qualified ? parts[3] : parts[2];
+    let adoptPackageless = false;
 
     // ── 2b. the audience anchors ────────────────────────────────────────────
     // [ADR-0090 D5/D9] `everyone` is the authenticated baseline every signed-in
@@ -750,7 +847,48 @@ export async function handleCatalogActivationWrite(
         return { handled: true, response: deps.error('Data engine not available', 503) };
     }
     let entry: { name: string; packageId?: string } | undefined;
-    if (isDeclarationType(type)) {
+    if (namespace !== undefined) {
+        const reader = declaredWebhookReaderOf(await deps.resolveService(context, 'declaredWebhooks'));
+        if (!reader || typeof reader.list !== 'function') {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Cannot verify the declaration of webhook '${name}' — no declared-webhook reader is bound to this ` +
+                    `deployment. Refusing rather than writing an activation row for a name nobody can confirm exists.`,
+                    503,
+                    { code: 'SERVICE_UNAVAILABLE' },
+                ),
+            };
+        }
+        let address: Awaited<ReturnType<typeof resolveQualifiedWebhook>>;
+        try {
+            address = await resolveQualifiedWebhook(reader, ql, namespace, name);
+        } catch (err: any) {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Cannot verify the declaration of webhook '${name}' — the declared webhooks could not be read ` +
+                    `(${err?.message ?? String(err)}). Refusing rather than writing an activation row for a name nobody ` +
+                    `can confirm exists.`,
+                    503,
+                    { code: 'SERVICE_UNAVAILABLE' },
+                ),
+            };
+        }
+        if ('refusal' in address) return refusedNameAnswer(deps, address.refusal);
+        if ('missing' in address) {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Webhook '${name}' is not declared in namespace '${namespace}': ${address.missing}. There is nothing ` +
+                    `to switch ${enabled ? 'on' : 'off'}. ${DECLARATION_LOOKUPS.webhook.authoredRemedy}`,
+                    404,
+                ),
+            };
+        }
+        entry = address.entry;
+        adoptPackageless = await webhookAdoptsPackageless(reader, name, address.holders);
+    } else if (isDeclarationType(type)) {
         const declaration = DECLARATION_LOOKUPS[type];
         const service = declaration.service ? await deps.resolveService(context, declaration.service) : undefined;
         let pending: Promise<{ name: string; packageId?: string } | null> | undefined;
@@ -787,6 +925,12 @@ export async function handleCatalogActivationWrite(
                 ),
             };
         }
+        // [ADR-0150 D8] A bare name resolves to a package only while that
+        // package is its one holder: its row naming no package is its own.
+        // [#31699 round 2] One holder among EVERY holder: the served answer
+        // can name the enabled one of two while the other is disabled.
+        adoptPackageless = type === 'webhook' && entry?.packageId !== undefined
+            && await webhookAdoptsPackageless(declaredWebhookReaderOf(service), name, 1);
         if (!entry) {
             const noun = declaration.noun.charAt(0).toUpperCase() + declaration.noun.slice(1);
             return {
@@ -871,8 +1015,9 @@ export async function handleCatalogActivationWrite(
         //
         // [ADR-0150 D4, MF1 on #32164] A permission set's row is its holder's
         // own, addressed by `(package, name)` ({@link planPermissionSetLedgerWrite});
+        // a webhook's by `(package, name)` too ({@link WEBHOOK_LEDGER_ADDRESSING},
+        // #31699), with `adoptPackageless` judged at the declaration step above;
         // every other type's row is addressed by `(type, name)`, as before.
-        let adoptPackageless = false;
         let bindStale = false;
         let rebindRowId: unknown;
         if (type === 'permission' && reader) {
@@ -896,7 +1041,7 @@ export async function handleCatalogActivationWrite(
         // name-addressed store writes (`bindStale`, {@link planPermissionSetLedgerWrite}).
         const store = type === 'permission' && !bindStale
             ? new ObjectStoreMetadataActivationStore(ql, type, PERMISSION_LEDGER_ADDRESSING)
-            : new ObjectStoreMetadataActivationStore(ql, type);
+            : new ObjectStoreMetadataActivationStore(ql, type, type === 'webhook' ? WEBHOOK_LEDGER_ADDRESSING : undefined);
         await store.setActive(
             {
                 name: entry.name,
@@ -914,5 +1059,13 @@ export async function handleCatalogActivationWrite(
         // declares no status is a store failure, 503 SERVICE_UNAVAILABLE.
         return { handled: true, response: deps.errorFromThrown(err, 503) };
     }
-    return { handled: true, response: deps.success({ type, name: entry.name, enabled }) };
+    return {
+        handled: true,
+        response: deps.success({
+            type,
+            name: entry.name,
+            ...(namespace !== undefined ? { packageId: entry.packageId } : {}),
+            enabled,
+        }),
+    };
 }

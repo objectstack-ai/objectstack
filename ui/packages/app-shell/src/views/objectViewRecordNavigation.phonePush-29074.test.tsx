@@ -45,6 +45,7 @@ import { useObjectViewRecordNavigation } from './objectViewRecordNavigation';
 import { useObjectViewPluginSchema } from './objectViewPluginSchema';
 import { isRecordPagePushed, recordPagePushState, RECORD_PAGE_PUSHED_STATE } from './recordPagePush';
 import { RecordDetailView } from './RecordDetailView';
+import { RECORD_FORM_CREATE_VALUES_STATE, readRecordFormCreateValues } from '../utils/recordFormNavigation';
 
 const ROWS = [{ id: 'r-1' }, { id: 'r-2' }];
 const LIST = { pathname: '/apps/crm/crm_lead', search: '?view=all', state: null, hash: '', key: 'k' } as Location;
@@ -129,6 +130,64 @@ describe('a list marks the record page it pushes on a phone (objectstack#29074)'
     const state = lastState(navigate);
     expect(state.from.pathname).toBe('/apps/crm/crm_lead?view=all');
     expect(isRecordPagePushed(state)).toBe(true);
+  });
+});
+
+/**
+ * objectstack#32750 — a drawer link that also carries a related-record form
+ * (`?recordId=…&form=new&formObject=…&formLink=…`), answered on a phone: the
+ * page that replaces the list carries the form's parameters, so the form opens
+ * over the record page, and the seeded create values of the entry go with it.
+ * The list, as the page's origin, keeps neither the drawer's `recordId` nor
+ * the form. CONTROLS: a drawer link with no form is answered exactly as before
+ * (no search), and a desktop row click on a URL that names a form moves
+ * nothing.
+ */
+describe('a phone carries the record form of a drawer link to the record page (objectstack#32750)', () => {
+  const FORM = 'form=new&formObject=crm_contact&formLink=account%3Ar-1';
+
+  it('the page that replaces the list carries form, formObject and formLink; the origin keeps neither them nor recordId', () => {
+    const navigate = vi.fn();
+    renderHook(() => useObjectViewRecordNavigation(hookInputs(navigate, true, `view=all&recordId=r-1&${FORM}`)), { wrapper });
+    expect(navigate).toHaveBeenCalledTimes(1);
+    const [to, options] = navigate.mock.calls[0];
+    expect(to).toBe(`record/r-1?${FORM}`);
+    expect(options.replace).toBe(true);
+    expect(options.state.from.pathname).toBe('/apps/crm/crm_lead?view=all');
+  });
+
+  it('a list under a view route carries them the same way', () => {
+    const navigate = vi.fn();
+    renderHook(() => useObjectViewRecordNavigation({ ...hookInputs(navigate, true, `recordId=r-1&${FORM}`), viewId: 'all' }), { wrapper });
+    expect(navigate.mock.calls[0][0]).toBe(`../../record/r-1?${FORM}`);
+    expect(navigate.mock.calls[0][1].relative).toBe('path');
+  });
+
+  it('the seeded create values the entry holds for the form go with it', () => {
+    const navigate = vi.fn();
+    const values = { close_date: '2026-11-12' };
+    renderHook(() => useObjectViewRecordNavigation({
+      ...hookInputs(navigate, true, 'view=all&recordId=r-1&form=new'),
+      location: { ...LIST, search: '?view=all&recordId=r-1&form=new', state: { [RECORD_FORM_CREATE_VALUES_STATE]: values } } as Location,
+    }), { wrapper });
+    expect(navigate.mock.calls[0][0]).toBe('record/r-1?form=new');
+    expect(readRecordFormCreateValues(lastState(navigate))).toEqual(values);
+  });
+
+  it('CONTROL: a drawer link with no form is answered with no search and the list as its origin', () => {
+    const navigate = vi.fn();
+    renderHook(() => useObjectViewRecordNavigation(hookInputs(navigate, true, 'view=all&recordId=r-1')), { wrapper });
+    const [to, options] = navigate.mock.calls[0];
+    expect(to).toBe('record/r-1');
+    expect(options.state).toEqual({ from: { pathname: '/apps/crm/crm_lead?view=all', label: 'All leads' } });
+  });
+
+  it('CONTROL: a desktop row click on a URL that names a form moves nothing', () => {
+    const navigate = vi.fn();
+    const { result } = renderHook(() => useObjectViewRecordNavigation(hookInputs(navigate, false, `view=all&${FORM}`)), { wrapper });
+    act(() => result.current.handleRowClick({ id: 'r-2' }));
+    expect(navigate.mock.calls[0][0]).toBe('record/r-2');
+    expect(lastState(navigate).from.pathname).toBe(`/apps/crm/crm_lead?view=all&${FORM}`);
   });
 });
 

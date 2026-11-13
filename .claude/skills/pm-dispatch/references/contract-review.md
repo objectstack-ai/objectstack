@@ -17,8 +17,8 @@
 - 面读 PR 已提交树的文件清单(同队列守卫判 governed 路径)与申报行;⛔ 不读席位自述。
 - 已发布面以包的 `exports` 映射为准:从入口类型图不可达、且 `exports` 不可寻址的 `.d.ts` 是
   出货字节,⛔ 不是已发布接受集,改它不触发 `Clause-②: yes`;legacy node10 深引用在契约之外。
-- 四面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,达档者席内审。
-- 派发席席内达档审;被配额拒(HTTP 429)⇒ ⛔ 不降档,留标记落交接行,点复核席,无则兄弟席:
+- 四面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,档经子代理或卡线程取。
+- 取档被配额拒(HTTP 429)⇒ ⛔ 不降档,留标记落交接行,点复核席,无则兄弟席:
 - `Contract-review-handoff: <review#N|domain:<lane>#N> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`
 - 欠审 PR(含 draft)现 head 无记录无活认领且 (a)(b)(c) 之一 ⇒ 复核席先接,车道次之,⛔ 非分诊
 - (a) 交接行点名现 head 或带等复核标记,同轮由所点席接;(b) 现 head 已等满一轮(约 60 分钟);

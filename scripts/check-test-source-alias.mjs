@@ -587,8 +587,7 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
     '@objectstack/spec', '@objectstack/types',
   ],
   '@objectstack/plugin-webhooks': [
-    '@objectstack/metadata-core', '@objectstack/objectql', '@objectstack/service-messaging',
-    '@objectstack/spec',
+    '@objectstack/metadata-core', '@objectstack/objectql', '@objectstack/spec',
   ],
   '@objectstack/rest': [
     '@objectstack/core', '@objectstack/driver-sql', '@objectstack/metadata', '@objectstack/metadata-core',
