@@ -5963,6 +5963,8 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
                 return routeOwnerOfRefusedRead(refusal, {
                     obj, actionName, ownsRoute, objectName,
                     readAt: (packageId) => byName.call(protocol, { type: 'action', name: actionName, packageId }),
+                    // [#32751] …and when no holder owns it, the environment's own.
+                    readEnvironment: () => environmentOwnerOfUnheldRoute({ ql, objectName, actionName, obj }),
                 });
             }
             return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
@@ -6034,8 +6036,10 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
  *
  * The refusal stands when a candidate is not a package (the platform's or the
  * environment's item has no address of its own) or two candidates own the
- * route on one rung. No candidate owning the route is no declaration, as when
- * the bare read served another object's action. A candidate its own address
+ * route on one rung. No candidate owning the route is the environment's own
+ * declaration when it has one there ({@link environmentOwnerOfUnheldRoute}),
+ * never read at a holder's address (#32751), else no declaration, as when the
+ * bare read served another object's action. A candidate its own address
  * says it does not hold (`not-held-by-qualifier`) owns nothing, so another
  * candidate that owns the route answers; with none, the bare read's refusal
  * stands, since the unread candidate may own it. Any other refusal of a
@@ -6051,9 +6055,11 @@ async function routeOwnerOfRefusedRead(
         objectName: string;
         ownsRoute: (action: any) => boolean;
         readAt: (packageId: string) => Promise<unknown>;
+        /** [#32751] The route's declaration when no candidate owns it ({@link environmentOwnerOfUnheldRoute}). */
+        readEnvironment: () => Promise<RouteActionDeclaration>;
     },
 ): Promise<RouteActionDeclaration> {
-    const { obj, actionName, objectName, ownsRoute, readAt } = args;
+    const { obj, actionName, objectName, ownsRoute, readAt, readEnvironment } = args;
     if (refusal.candidates.length < 2 || refusal.candidates.some((c) => c.kind !== 'package')) {
         return { action: undefined, obj, refusal };
     }
@@ -6090,8 +6096,75 @@ async function routeOwnerOfRefusedRead(
     if (rung.length === 1) return { action: rung[0], obj };
     // A candidate that could not be read may own the route: with no other
     // owner, the bare read's refusal stands rather than "no declaration".
-    if (rung.length === 0) return unread ? { action: undefined, obj, refusal } : { action: undefined, obj };
+    if (rung.length === 0) return unread ? { action: undefined, obj, refusal } : readEnvironment();
     return { action: undefined, obj, refusal };
+}
+
+/**
+ * [#32751] The declaration of a route no holder of a refused name owns
+ * ({@link routeOwnerOfRefusedRead}): the environment's own item, bound to the
+ * routed object first and object-less after (the order the router reaches a
+ * handler in). Never read at a holder's exact address, and never served as a
+ * holder's: the answer carries no package, so the dispatch is unqualified, as
+ * the bare call's always was.
+ *
+ * The environment's own item is a package-less registry item whose row the
+ * environment's store holds bound to no package ({@link environmentStoredActionNames},
+ * the test {@link packagelessOriginOf} applies): the row's source, never a
+ * byte of the definition. A package-less item with no such row is the
+ * platform's (host code or a plugin) and is not served here. The protocol's
+ * reads cannot answer this: beside two package holders its bare read refuses
+ * the name, and its merged listing folds the package-less item into the
+ * holders' slots as their stand-in.
+ *
+ * Only when no package holds the name on this route's key, a DISABLED one
+ * included (ruling 6824698376, letter A: a disabled package is still a
+ * holder). The protocol's reads withhold a disabled package's item, so they
+ * cannot tell; the registry's listing of every holder can
+ * (`includeDisabledPackages`). A route a disabled package's action binds
+ * stays no declaration, never handed to the environment's item, and so does
+ * a route on a host whose registry cannot list every holder or whose engine
+ * has no store to read (no `find`, or no `sys_metadata` object). Any other
+ * store read that throws is the plane failing to answer (ADR-0110 D3):
+ * `degraded`, never "no row".
+ */
+async function environmentOwnerOfUnheldRoute(
+    args: { ql: any; objectName: string; actionName: string; obj: any },
+): Promise<RouteActionDeclaration> {
+    const { ql, objectName, actionName, obj } = args;
+    const none: RouteActionDeclaration = { action: undefined, obj };
+    const registry: any = ql?.registry;
+    if (typeof registry?.listItems !== 'function') return none;
+    let named: any[];
+    try {
+        named = (registry.listItems('action', undefined, { includeDisabledPackages: true }) ?? [])
+            .filter((item: any) => item?.name === actionName);
+    } catch {
+        return none;
+    }
+    const ownsRoute = (item: any): boolean => {
+        const owner = standaloneActionOwnerKey(item);
+        return owner === objectName || isObjectLessActionKey(owner);
+    };
+    const packaged = (item: any): boolean => typeof item?._packageId === 'string' && item._packageId !== '';
+    if (named.some((item) => packaged(item) && ownsRoute(item))) return none;
+    const packageless = named.filter((item) => !packaged(item) && ownsRoute(item));
+    if (packageless.length === 0) return none;
+    const store = environmentStoredActionNames(ql);
+    if (store === undefined) return none;
+    let stored: ReadonlySet<string>;
+    try {
+        stored = (await store()).actions;
+    } catch (err: any) {
+        // An engine that registers no metadata store has no environment row:
+        // nothing here is the environment's ({@link listingNotServed}).
+        if (listingNotServed(err)) return none;
+        return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
+    }
+    const own = packageless.filter((item) => stored.has(`${standaloneActionOwnerKey(item)}:${actionName}`));
+    const bound = own.filter((item) => !isObjectLessActionKey(standaloneActionOwnerKey(item)));
+    const rung = bound.length > 0 ? bound : own;
+    return rung.length === 1 ? { action: rung[0], obj } : none;
 }
 
 /**

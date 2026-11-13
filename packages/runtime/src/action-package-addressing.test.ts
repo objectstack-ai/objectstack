@@ -700,8 +700,8 @@ describe('[#32244] the bare read of an action name two packages hold on any obje
  * declaration of the holder that owns it, read at that holder's exact
  * address. [#32568] A sealed type's package-less copy is declined there
  * (epic ruling 6817768147), so beside two packages the environment's item is
- * no route's declaration (case 2); the execution face reading the
- * environment's own item is #32751.
+ * no holder's declaration (case 2); [#32751] a route no holder binds reads
+ * the environment's own item itself, never at a holder's address.
  *
  * BASE (main 89d815c5; #32497's head 1483899c measured the same): (1) the
  * layered read answered the package's item, the in-process store the one
@@ -796,12 +796,103 @@ describe('[#32365] the bare action read weighs the package-less holder and serve
             // `?package=alpha` served the environment's package-less item
             // there (the first holder's slot, not beta's). A sealed type's
             // package-less copy is declined at a holder's exact address (epic
-            // ruling 6817768147), so neither holder owns `lead` and the route
-            // answers no declaration, not a refusal. FROM the environment's
-            // item TO none; the execution face reading the environment's own
-            // item is #32751.
+            // ruling 6817768147), so neither holder owns `lead`. This engine
+            // registers no metadata store, so no row says the item is the
+            // environment's own: the route answers no declaration, not a
+            // refusal and never `degraded`. With the store, the environment's
+            // own item answers (#32751, below).
             const onLead = await routeTo('lead');
-            expect([onLead.action, onLead.refusal]).toEqual([undefined, undefined]);
+            expect([onLead.action, onLead.refusal, onLead.degraded]).toEqual([undefined, undefined, undefined]);
+        });
+
+        /**
+         * [#32751] The route sees the object, and no holder binds `lead`: the
+         * environment's own item there is the route's declaration — read from
+         * the environment's own row and registry item, never at a holder's
+         * exact address (epic red line 2), and served with no package, so the
+         * dispatch is unqualified. The engine reads the same store the
+         * protocol does (the row store double), as one kernel's engine does.
+         *
+         * BASE (main a7c97297, after #32741): `lead` answered no declaration
+         * in both registration orders, and its handler never ran.
+         */
+        describe('[#32751] the bare route on an object neither holder binds serves the environment\'s own item there', () => {
+            const engineReadsStore = () => {
+                (engine as any).find = async (object: string, query: any) => (object !== 'sys_metadata' ? [] : storedRows.filter(
+                    (row) => Object.entries(query?.where ?? {}).every(([field, want]) => row[field] === want),
+                ));
+            };
+            const twoHoldersAndEnvironment = (envFirst: boolean, envObject: string | undefined = 'lead') => {
+                engine = new ObjectQL();
+                engine.registry.logLevel = 'silent';
+                (protocol as any).engine.registry = engine.registry;
+                engineReadsStore();
+                install(A);
+                install(B);
+                if (envFirst) shipPackageless('env', envObject);
+                ship(A, 'account');
+                ship(B, 'contact');
+                if (!envFirst) shipPackageless('env', envObject);
+                storeEnvironmentRow(envObject);
+            };
+
+            it('the environment\'s item on `lead` beside A\'s on `account` and B\'s on `contact`: `lead` serves it with no package and runs its handler, in either registration order', async () => {
+                for (const envFirst of [false, true]) {
+                    twoHoldersAndEnvironment(envFirst);
+                    engine.registerAction('lead', 'approve', () => 'ran env');
+                    const order = `env registered ${envFirst ? 'first' : 'last'}`;
+                    const onLead = await routeTo('lead');
+                    expect([onLead.refusal, onLead.degraded, onLead.packageId], order).toEqual([undefined, undefined, undefined]);
+                    expect(onLead.action, order).toMatchObject({ name: 'approve', label: 'env', objectName: 'lead' });
+                    expect(await executeRegisteredAction(deps, engine, 'lead', ['approve'], {}, undefined), order)
+                        .toEqual({ dispatched: true, result: 'ran env' });
+                }
+            });
+
+            it('CONTROL — each holder\'s own route is unchanged: `account` answers A\'s, `contact` B\'s, in either registration order', async () => {
+                for (const envFirst of [false, true]) {
+                    twoHoldersAndEnvironment(envFirst);
+                    const order = `env registered ${envFirst ? 'first' : 'last'}`;
+                    const onAccount = await routeTo('account');
+                    const onContact = await routeTo('contact');
+                    expect([onAccount.refusal, onAccount.action?.label], order).toEqual([undefined, 'alpha']);
+                    expect([onContact.refusal, onContact.action?.label], order).toEqual([undefined, 'beta']);
+                }
+            });
+
+            it('the environment\'s object-less item answers `lead` too, in either registration order', async () => {
+                for (const envFirst of [false, true]) {
+                    twoHoldersAndEnvironment(envFirst, undefined);
+                    const onLead = await routeTo('lead');
+                    expect([onLead.refusal, onLead.packageId, onLead.action?.label]).toEqual([undefined, undefined, 'env']);
+                }
+            });
+
+            it('[ruling 6824698376, A] a DISABLED package binding `lead` is still a holder: `lead` stays no declaration, never the environment\'s item', async () => {
+                const D = 'com.acme.delta';
+                for (const envFirst of [false, true]) {
+                    twoHoldersAndEnvironment(envFirst);
+                    install(D);
+                    ship(D, 'lead');
+                    engine.registry.disablePackage(D);
+                    const onLead = await routeTo('lead');
+                    expect([onLead.action, onLead.refusal, onLead.degraded]).toEqual([undefined, undefined, undefined]);
+                }
+            });
+
+            it('the platform\'s item on `lead` (a package-less item with no row behind it) is not the environment\'s: `lead` stays no declaration', async () => {
+                twoHoldersAndEnvironment(false);
+                storedRows = [];
+                const onLead = await routeTo('lead');
+                expect([onLead.action, onLead.refusal, onLead.degraded]).toEqual([undefined, undefined, undefined]);
+            });
+
+            it('a store read that fails is the plane failing to answer: `degraded`, never no declaration (ADR-0110 D3)', async () => {
+                twoHoldersAndEnvironment(false);
+                (engine as any).find = async () => { throw new Error('store unreachable'); };
+                const onLead = await routeTo('lead');
+                expect([onLead.action, onLead.degraded, onLead.reason]).toEqual([undefined, true, 'store unreachable']);
+            });
         });
 
         it('all three object-less: refused naming A, B and the environment', async () => {
