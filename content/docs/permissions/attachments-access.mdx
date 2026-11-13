@@ -46,10 +46,12 @@ The set reaches no one else:
   gets no more than that member, within its own scope;
 - a deployment that declares no member baseline (`fallbackPermissionSet: null`)
   hands it to no one;
-- a host that registers `sys_attachment` without the storage service, or whose
-  composition lacks any of the four gates, gets no set, and a member's attach
-  is refused `PERMISSION_DENIED` (403); where the storage service runs, the
-  boot log names the missing gate.
+- a host that registers `sys_attachment` without the storage service gets no
+  set, and a member's attach is refused `PERMISSION_DENIED` (403). All four
+  gates are the storage service's own, so wherever it runs they are present,
+  unless its data engine cannot carry them (no hook or middleware seam) or no
+  auth service is composed for the download check; then it contributes no set
+  either, and the boot log names the missing gate and what to add.
 
 The set carries **no edit and no delete** (ADR-0090 D5: a set every member holds
 carries no delete bit). Editing or deleting attachments still needs an explicit
@@ -64,10 +66,13 @@ Attachments panel renders only for such objects. Any other target is rejected:
 
 | Code | Status | When |
 | --- | --- | --- |
-| `FILES_DISABLED` | 403 | Creating a `sys_attachment` whose `parent_object` is a registered object that does not declare `enable.files: true` |
+| `FILES_DISABLED` | 403 | Creating a `sys_attachment` whose `parent_object` does not declare `enable.files: true` (an object that is not registered included), or re-pointing an existing one onto such an object |
 
-This is enforced by a `beforeInsert` hook on `sys_attachment` and is
-independent of the record-level checks below.
+The storage service enforces it on every `sys_attachment` insert and re-point,
+wherever it runs, for every caller, the system path and an administrator
+included. It reads the object's current definition on each write, so an object
+switched to `files: true` is attachable at once. It is independent of the
+record-level checks below, and answers before them.
 
 ## Create — parent-edit access & provenance
 

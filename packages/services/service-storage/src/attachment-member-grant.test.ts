@@ -57,6 +57,10 @@ describe("the members' attachment grant service-storage contributes", () => {
     expect(log.warn).toHaveBeenCalledTimes(1);
     expect(String(log.warn.mock.calls[0][0])).toContain(named);
     expect(String(log.warn.mock.calls[0][0])).toContain('members are NOT granted attachments');
+    // and what an operator does about it
+    expect(String(log.warn.mock.calls[0][0])).toContain(
+      'run the storage service on a data engine that offers hooks and middleware, beside an auth service',
+    );
   });
 
   it('no security service: no object grant is enforced, nothing to contribute — quiet', () => {

@@ -12,8 +12,9 @@ import type { AttachmentLifecycleLogger } from './attachment-lifecycle.js';
  * (`installAttachmentReadVisibility`), the download door serves an
  * attachments-scope file only to its uploader or a reader of a record it is
  * attached to, and an insert or re-point onto an object that has not opted in
- * to attachments (`enable.files`) is refused by the opt-in gate, which the
- * audit service installs. The object grant only opens the door to those gates. Since the
+ * to attachments (`enable.files`) is refused by the opt-in gate
+ * (`installAttachmentFilesOptInGate`). The object grant only opens the door to
+ * those gates. Since the
  * platform baseline (`member_default`) carries no line for this object, a
  * member who could edit a record still could not attach a file to it, nor see
  * the files already attached to it, without an app granting the object
@@ -40,10 +41,11 @@ import type { AttachmentLifecycleLogger } from './attachment-lifecycle.js';
  *    acting for a member is bounded by that member and by its own scope
  *    (ADR-0090 D10), so it reaches what the member reaches here, within that
  *    scope.
- *  - Where the set is contributed, an object that has not opted in to
- *    attachments (`enable.files`) still refuses every attachment, and a parent
- *    record the caller cannot edit still refuses the attach
- *    (`ATTACHMENT_PARENT_ACCESS`).
+ *  - Wherever the set is contributed, an object that has not opted in to
+ *    attachments (`enable.files`) refuses every attachment
+ *    (`FILES_DISABLED`), and a parent record the caller cannot edit refuses
+ *    the attach (`ATTACHMENT_PARENT_ACCESS`): both gates are this plugin's,
+ *    installed before the set is contributed.
  *
  * The seam is `contributePlatformBaselineSet` on the `security` service,
  * feature-detected because this package does not depend on plugin-security.
@@ -63,8 +65,8 @@ export const ATTACHMENT_MEMBER_PERMISSION_SET = Object.freeze({
 export const ATTACHMENT_MEMBER_GRANT_CONTRIBUTOR = 'com.objectstack.service.storage';
 
 /**
- * Which of the attachment gates this kernel has. All four must be `true` for
- * the grant to be contributed.
+ * Which of the attachment gates this kernel has, each as its installation
+ * answered. All four must be `true` for the grant to be contributed.
  */
 export interface AttachmentRowGates {
   /** The write rule: the insert, update and delete gates on `sys_attachment` rows. */
@@ -73,7 +75,7 @@ export interface AttachmentRowGates {
   readonly readVisibility: boolean;
   /** The download door's parent-record check, which needs an auth service and a queryable engine. */
   readonly downloadCheck: boolean;
-  /** The per-object opt-in gate (`enable.files`) on the insert and re-point, which the audit service installs. */
+  /** The per-object opt-in gate (`enable.files`) on the insert and re-point: `installAttachmentFilesOptInGate`'s answer. */
   readonly filesOptIn: boolean;
 }
 
@@ -107,7 +109,7 @@ function missingGates(gates: AttachmentRowGates): string[] {
   if (!gates.downloadCheck) {
     missing.push("the download door's parent-record check (no auth service, or an engine that cannot be queried)");
   }
-  if (!gates.filesOptIn) missing.push('the per-object attachment opt-in gate, enable.files (no audit service)');
+  if (!gates.filesOptIn) missing.push('the per-object attachment opt-in gate, enable.files (the engine has no hook seam)');
   return missing;
 }
 
@@ -132,7 +134,8 @@ export function contributeAttachmentMemberGrant(
     logger.warn(
       '[storage] members are NOT granted attachments (read and create on sys_attachment): this kernel lacks ' +
         `${missing.join('; ')}, so the rows would be judged by the object grant alone. A member's attach is refused ` +
-        'until every gate is installed.',
+        'until every gate is installed: run the storage service on a data engine that offers hooks and middleware, ' +
+        'beside an auth service.',
     );
     return 'gates-incomplete';
   }

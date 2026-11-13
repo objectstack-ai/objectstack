@@ -23,9 +23,12 @@
 // MCP `create_upload_link` tool mints with `attachments: true` — minted on the
 // member's session and by an agent acting for the member on an OAuth token,
 // which reaches what the member and its own scope both allow. The explainer
-// names the storage set as the baseline that grants the object. And a host
-// that composes `sys_attachment` WITHOUT the storage service, or without one of
-// the attachment gates, hands a member no grant: the same member is refused 403.
+// names the storage set as the baseline that grants the object. A host that
+// composes `sys_attachment` WITHOUT the storage service hands a member no
+// grant: the same member is refused 403. And a composition of the storage
+// service and the security plugin alone hands the grant out, with the opt-in
+// (`enable.files`) still refusing: every gate the grant relies on is the
+// storage service's own.
 
 import { createHash, randomBytes } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -136,17 +139,6 @@ describe('a member attaches to the records they edit and sees the files of the r
   }
 
   /** The tool names an MCP caller is offered. */
-  async function mcpToolNames(token: string): Promise<string[]> {
-    const res = await stack.api('/mcp', {
-      method: 'POST',
-      headers: { ...json, Accept: 'application/json, text/event-stream', ...bearer(token) },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
-    });
-    expect(res.status, 'tools/list').toBe(200);
-    const rpc: any = await res.json();
-    return ((rpc.result?.tools ?? []) as Array<{ name: string }>).map((t) => t.name);
-  }
-
   /** Presign in the attachments scope and PUT the bytes: the panel's first two steps. */
   async function presignAndPut(token: string, name = 'notes.txt'): Promise<string> {
     const presign = await stack.api('/storage/upload/presigned', {
@@ -305,9 +297,24 @@ describe('a member attaches to the records they edit and sees the files of the r
     expect(onReadonly.isError).toBe(true);
     expect(onReadonly.json.error?.code).toBe('ATTACHMENT_PARENT_ACCESS');
 
-    // The scope does not allow it: a read-only token is not offered the tool.
-    expect(await mcpToolNames(agentWriteTok)).toContain('create_upload_link');
-    expect(await mcpToolNames(agentReadTok)).not.toContain('create_upload_link');
+    // The scope does not allow it: the same call on a read-only token, on the
+    // same record the member edits, is refused at the door and mints nothing.
+    const before = (await linksOn(caseId)).length;
+    const onReadScope = await stack.api('/mcp', {
+      method: 'POST',
+      headers: { ...json, Accept: 'application/json, text/event-stream', ...bearer(agentReadTok) },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'create_upload_link', arguments: { objectName: 'att_case', recordId: caseId, attachments: true } },
+      }),
+    });
+    expect(onReadScope.status).toBe(200);
+    const refused: any = await onReadScope.json();
+    expect(refused.result?.isError, JSON.stringify(refused)).toBe(true);
+    expect(JSON.stringify(refused.result?.content ?? [])).not.toContain('"url"');
+    expect((await linksOn(caseId)).length).toBe(before);
   });
 
   it('a record they can read but not edit refuses the attach with ATTACHMENT_PARENT_ACCESS, and keeps nothing', async () => {
@@ -413,20 +420,26 @@ describe('a host composing sys_attachment without the storage service hands memb
   });
 });
 
-// A host that runs the storage service and the security plugin but whose
-// composition lacks the per-object attachment opt-in gate: one of the four
-// gates is missing, so no grant is handed out, and the same member is refused
-// before any attachment row is judged.
-describe('a host lacking one of the attachment gates hands members no attachment grant', () => {
+// A composition of the storage service and the security plugin alone, with no
+// other optional capability: every attachment gate is the storage service's
+// own, so the grant is handed out here too, and an object that has not opted
+// in to attachments refuses them for everyone, the administrator included.
+describe('the storage service and the security plugin alone: members are granted attachments, and the opt-in still refuses', () => {
   let stack: VerifyStack;
   let rootDir: string;
+  let adminTok: string;
+  let memberTok: string;
+  let ql: any;
 
   beforeAll(async () => {
-    rootDir = mkdtempSync(join(tmpdir(), 'att-member-baseline-nogate-'));
+    rootDir = mkdtempSync(join(tmpdir(), 'att-member-baseline-alone-'));
     stack = await bootStack(attachmentsFixtureStack as never, {
       security: appSecurity(),
       extraPlugins: [new StorageServicePlugin({ adapter: 'local', local: { rootDir }, bindToSettings: false })],
     });
+    ql = await stack.kernel.getServiceAsync('objectql');
+    adminTok = await stack.signIn();
+    memberTok = await stack.signUp('att-baseline-alone@verify.test');
   }, 120_000);
 
   afterAll(async () => {
@@ -434,19 +447,11 @@ describe('a host lacking one of the attachment gates hands members no attachment
     if (rootDir) await fs.rm(rootDir, { recursive: true, force: true });
   });
 
-  it('the member is refused the attach (403 PERMISSION_DENIED), and explain names no storage set', async () => {
-    // Control: the storage service runs here, so this is the missing gate and not a missing service.
-    expect(stack.kernel.getService('storage')).toBeTruthy();
-    expect(() => stack.kernel.getService('audit')).toThrow();
-    await stack.signIn();
-    const tok = await stack.signUp('att-baseline-nogate@verify.test');
-    const caseRes = await stack.apiAs(tok, 'POST', '/data/att_case', { name: 'missing gate here' });
-    expect(caseRes.status).toBeLessThan(300);
-    const caseId = await createdId(caseRes);
-
+  /** Presign, PUT and complete onto one record as `token`. */
+  async function attachAs(token: string, parentObject: string, parentId: string) {
     const presign = await stack.api('/storage/upload/presigned', {
       method: 'POST',
-      headers: { ...json, ...bearer(tok) },
+      headers: { ...json, ...bearer(token) },
       body: JSON.stringify({ filename: 'notes.txt', mimeType: 'text/plain', size: 5, scope: 'attachments' }),
     });
     expect(presign.status, 'presign').toBe(200);
@@ -459,14 +464,50 @@ describe('a host lacking one of the attachment gates hands members no attachment
     expect(put.status, 'raw PUT').toBeLessThan(300);
     const complete = await stack.api('/storage/upload/complete', {
       method: 'POST',
-      headers: { ...json, ...bearer(tok) },
-      body: JSON.stringify({ fileId: data.fileId, attachTo: { parentObject: 'att_case', parentId: caseId } }),
+      headers: { ...json, ...bearer(token) },
+      body: JSON.stringify({ fileId: data.fileId, attachTo: { parentObject, parentId } }),
     });
     const body = (await complete.json()) as any;
-    expect([complete.status, body.error?.code ?? body.code]).toEqual([403, 'PERMISSION_DENIED']);
+    return { status: complete.status, code: body.error?.code ?? body.code, body };
+  }
 
-    const explain = (await (await stack.apiAs(tok, 'GET', '/security/explain?object=sys_attachment&operation=create')).json()) as any;
-    expect(explain.allowed).toBe(false);
-    expect(explain.principal.permissionSets).not.toContain(STORAGE_SET);
+  const linksOn = (parentId: string) => ql.find('sys_attachment', { where: { parent_id: parentId }, context: SYS }) as Promise<any[]>;
+
+  it('control: the storage service runs, and no other capability that enforces the opt-in is composed', () => {
+    expect(stack.kernel.getService('storage')).toBeTruthy();
+    expect(() => stack.kernel.getService('audit')).toThrow();
+  });
+
+  it('the member attaches to a record they edit, and explain names the storage set', async () => {
+    const caseRes = await stack.apiAs(memberTok, 'POST', '/data/att_case', { name: 'storage alone' });
+    expect(caseRes.status).toBeLessThan(300);
+    const caseId = await createdId(caseRes);
+    const out = await attachAs(memberTok, 'att_case', caseId);
+    expect(out.status, JSON.stringify(out.body)).toBe(200);
+    expect(await linksOn(caseId)).toHaveLength(1);
+    const explain = (await (await stack.apiAs(memberTok, 'GET', '/security/explain?object=sys_attachment&operation=create')).json()) as any;
+    expect(explain.allowed).toBe(true);
+    expect(explain.principal.permissionSets).toContain(STORAGE_SET);
+  });
+
+  it('an object without enable.files refuses the attach with FILES_DISABLED, for the member and the administrator alike', async () => {
+    const plainRes = await stack.apiAs(memberTok, 'POST', '/data/att_nofiles', { name: 'not opted in' });
+    expect(plainRes.status).toBeLessThan(300);
+    const plainId = await createdId(plainRes);
+    expect(await attachAs(memberTok, 'att_nofiles', plainId)).toMatchObject({ status: 403, code: 'FILES_DISABLED' });
+    expect(await attachAs(adminTok, 'att_nofiles', plainId)).toMatchObject({ status: 403, code: 'FILES_DISABLED' });
+    expect(await linksOn(plainId)).toEqual([]);
+  });
+
+  it('a re-point onto an object without enable.files is refused too, even on the system path', async () => {
+    const caseId = String((await ql.insert('att_case', { name: 'repoint source' }, { context: SYS })).id);
+    const plainId = String((await ql.insert('att_nofiles', { name: 'repoint target' }, { context: SYS })).id);
+    const out = await attachAs(adminTok, 'att_case', caseId);
+    expect(out.status, JSON.stringify(out.body)).toBe(200);
+    const attachmentId = String(out.body.data.attachmentId);
+    await expect(
+      ql.update('sys_attachment', { id: attachmentId, parent_object: 'att_nofiles', parent_id: plainId }, { context: SYS }),
+    ).rejects.toMatchObject({ code: 'FILES_DISABLED' });
+    expect((await ql.findOne('sys_attachment', { where: { id: attachmentId }, context: SYS }))?.parent_object).toBe('att_case');
   });
 });

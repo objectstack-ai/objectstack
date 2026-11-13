@@ -3,5 +3,5 @@
   "adrs": [
     "ADR-0090"
   ],
-  "invariant": "The members' attachment set (read and create on sys_attachment, no edit, no delete) is contributed to the additive member baseline (ADR-0090 D5) only when all three attachment row gates are installed — the write rule, the read-visibility gate and the download door's parent-record check. A kernel missing any of them grants nothing and says which gate is missing, so the object stays refused rather than ungated."
+  "invariant": "The members' attachment set (read and create on sys_attachment, no edit, no delete) is contributed to the additive member baseline (ADR-0090 D5) only when all four attachment gates are installed — the per-object opt-in (enable.files), the write rule, the read-visibility gate and the download door's parent-record check, each the storage service's own and each flag its installation's own answer. A kernel missing any of them grants nothing and says which gate is missing, so the object stays refused rather than ungated."
 }

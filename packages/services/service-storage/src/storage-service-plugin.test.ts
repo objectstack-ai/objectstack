@@ -486,7 +486,8 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
     //
     // The second `beforeInsert`/`beforeUpdate` pair is the file half of the
     // write gate (`installAttachmentFileReferenceGate`): the `file_id` a row
-    // names must be a file its caller may open.
+    // names must be a file its caller may open. The third is the per-object
+    // opt-in (`enable.files`, `attachment-files-opt-in.ts`, #32754 route A).
     expect(hookEvents.sort()).toEqual([
       'afterDelete',
       'afterInsert',
@@ -494,6 +495,8 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
       'beforeDelete',
       'beforeInsert',
       'beforeInsert',
+      'beforeInsert',
+      'beforeUpdate',
       'beforeUpdate',
       'beforeUpdate',
     ]);
@@ -589,7 +592,7 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
       objects: { sys_attachment: { allowRead: true, allowCreate: true } },
     };
 
-    async function bootWith(engine: Record<string, unknown>, opts: { auth?: boolean; audit?: boolean } = {}) {
+    async function bootWith(engine: Record<string, unknown>, opts: { auth?: boolean; auditService?: boolean } = {}) {
       const dir = await fs.mkdtemp(join(tmpdir(), 'oss-member-grant-'));
       const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir: dir }, registerRoutes: false });
       const ctx = makeCtx();
@@ -603,7 +606,9 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
         ...engine,
       });
       if (opts.auth !== false) ctx.registerService('auth', { api: {} });
-      if (opts.audit !== false) ctx.registerService('audit', {});
+      // A service registered under the name of another capability that also
+      // enforces the opt-in decides nothing here: only an installed gate does.
+      if (opts.auditService) ctx.registerService('audit', {});
       ctx.registerService('security', {
         contributeOwnershipFloorAlternates: () => {},
         contributePlatformBaselineSet: (...args: unknown[]) => {
@@ -618,22 +623,73 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
       return { ctx, order, contributions };
     }
 
-    const gateHook = (order: string[]) => (event: string, _fn: unknown, opts: any) => {
-      if (opts?.object === 'sys_attachment' && event === 'beforeInsert') order.push('write rule');
-    };
+    /** Objects by name: `opted` declares the attachment opt-in, `plain` does not. */
+    const getSchema = (name: string) =>
+      name === 'opted' ? { name, enable: { files: true } } : name === 'plain' ? { name, enable: {} } : undefined;
 
-    it('contributes the set exactly once, after the write rule and the read-visibility middleware', async () => {
-      const order: string[] = [];
-      const booted = await bootWith({
-        registerHook: gateHook(order),
-        registerMiddleware: (_fn: unknown, opts: any) => {
-          if (opts?.object === 'sys_attachment') order.push('read visibility');
+    /** A context-less insert naming `parentObject`: only the opt-in gate has anything to say to it. */
+    const probe = (parentObject: string) => ({ input: { data: { parent_object: parentObject } } });
+
+    /** The `sys_attachment` insert gates, in installation order, each labelled by how it answers the probe. */
+    async function insertGates(handlers: Array<(ctx: unknown) => unknown>): Promise<string[]> {
+      const labels: string[] = [];
+      for (const fn of handlers) {
+        try {
+          await fn(probe('plain'));
+          labels.push('write rule');
+        } catch (err) {
+          labels.push((err as { code?: string }).code === 'FILES_DISABLED' ? 'opt-in' : `refused ${String(err)}`);
+        }
+      }
+      return labels;
+    }
+
+    function recordingEngine(order: string[]) {
+      const inserts: Array<(ctx: unknown) => unknown> = [];
+      const updates: Array<(ctx: unknown) => unknown> = [];
+      return {
+        inserts,
+        updates,
+        engine: {
+          getSchema,
+          registerHook: (event: string, fn: (ctx: unknown) => unknown, opts: any) => {
+            if (opts?.object !== 'sys_attachment') return;
+            if (event === 'beforeInsert') {
+              order.push(`insert gate ${inserts.length}`);
+              inserts.push(fn);
+            }
+            if (event === 'beforeUpdate') updates.push(fn);
+          },
+          registerMiddleware: (_fn: unknown, opts: any) => {
+            if (opts?.object === 'sys_attachment') order.push('read visibility');
+          },
         },
-      });
+      };
+    }
+
+    it('contributes the set exactly once, after the opt-in gate, the write rule and the read-visibility middleware', async () => {
+      const order: string[] = [];
+      const rec = recordingEngine(order);
+      const booted = await bootWith(rec.engine);
       expect(booted.contributions).toEqual([['com.objectstack.service.storage', expect.objectContaining(MEMBER_SET)]]);
       // The grant comes last; it never exists without the gates before it.
-      expect([...order, ...booted.order]).toEqual(['write rule', 'write rule', 'read visibility', 'grant']);
+      expect([...order, ...booted.order]).toEqual(['insert gate 0', 'insert gate 1', 'insert gate 2', 'read visibility', 'grant']);
+      // The opt-in answers first, before any question about the caller.
+      expect(await insertGates(rec.inserts)).toEqual(['opt-in', 'write rule', 'write rule']);
       expect(booted.ctx._logs.warn.filter((w: string) => w.includes('NOT granted attachments'))).toEqual([]);
+    });
+
+    it('a kernel without any other capability that enforces the opt-in: the gate is this service\'s own, so the grant is handed out and the opt-in still refuses', async () => {
+      const rec = recordingEngine([]);
+      const booted = await bootWith(rec.engine);
+      expect(() => booted.ctx.getService('audit')).toThrow();
+      expect(booted.contributions).toHaveLength(1);
+      // insert and re-point alike
+      for (const gate of [rec.inserts[0], rec.updates[0]]) {
+        await expect(gate(probe('plain'))).rejects.toMatchObject({ code: 'FILES_DISABLED', status: 403, object: 'plain' });
+        await expect(gate(probe('unknown_object'))).rejects.toMatchObject({ code: 'FILES_DISABLED', status: 403 });
+        await expect(gate(probe('opted'))).resolves.toBeUndefined();
+      }
     });
 
     it('an engine without the middleware seam: no read-visibility gate, so no grant — said at warn', async () => {
@@ -652,8 +708,9 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
       expect(warned[0]).toContain("download door's parent-record check");
     });
 
-    it('a kernel without the per-object attachment opt-in gate: no grant — said at warn', async () => {
-      const booted = await bootWith({ registerHook: () => {}, registerMiddleware: () => {} }, { audit: false });
+    it('a kernel that registers a service by the name of another opt-in enforcer, on an engine without the hook seam: no opt-in gate, so no grant — the name counts for nothing', async () => {
+      const booted = await bootWith({ registerMiddleware: () => {} }, { auditService: true });
+      expect(booted.ctx.getService('audit')).toBeDefined();
       expect(booted.contributions).toEqual([]);
       const warned = booted.ctx._logs.warn.filter((w: string) => w.includes('NOT granted attachments'));
       expect(warned).toHaveLength(1);

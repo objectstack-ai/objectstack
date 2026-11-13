@@ -88,6 +88,7 @@ import {
 } from './attachment-access-hooks.js';
 import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
 import { contributeAttachmentMemberGrant } from './attachment-member-grant.js';
+import { installAttachmentFilesOptInGate } from './attachment-files-opt-in.js';
 import {
   FileAttachmentService,
   type FileAttachmentEngine,
@@ -537,6 +538,12 @@ export class StorageServicePlugin implements Plugin {
         // that name a `sys_file` id — a file-class field and a
         // `sys_attachment` row — so a reference and the door cannot diverge.
         const authorizeFileReference = buildFileReferenceReadAuthorizer(toGateRegistry(ctx), engine);
+        // The per-object attachment opt-in (`enable.files`) on every write that
+        // makes a row target an object, enforced by this service itself so it
+        // holds wherever the object does (maintainer ruling on #32754, route
+        // A). Installed first, so an object that has not opted in answers with
+        // its own refusal before any question about the caller.
+        const filesOptInInstalled = installAttachmentFilesOptInGate(engine as any);
         // Parent-derived access on the join rows (#2755, ADR-0049) — the
         // sharing service resolves lazily so plugin order doesn't matter.
         installAttachmentAccessHooks(
@@ -604,24 +611,22 @@ export class StorageServicePlugin implements Plugin {
         }
         // Every member's object grant on sys_attachment (read and create),
         // handed to the member baseline HERE, after the last of the row gates
-        // it relies on, and only when all four are in place: the write rule
-        // above, the read-visibility gate just installed, the download door's
-        // parent-record check, which binds wherever an auth service and a
-        // queryable engine exist (`buildFileReadAuthorizer`, the same binding
-        // `composeStorageRoutes` makes), and the per-object opt-in gate
-        // (`enable.files`), which the audit service installs on this engine —
-        // its service is registered at init, before any `kernel:ready`
-        // handler runs, so its presence is known here whichever order the two
-        // plugins' handlers run in. On a kernel lacking any of them the object
-        // grant would judge the rows alone, so nothing is contributed and
-        // members stay refused (maintainer ruling; the reasoning is in
+        // it relies on, and only when all four are in place: the opt-in gate
+        // and the write rule above, the read-visibility gate just installed,
+        // and the download door's parent-record check, which binds wherever an
+        // auth service and a queryable engine exist (`buildFileReadAuthorizer`,
+        // the same binding `composeStorageRoutes` makes). Each flag is the
+        // installation's own answer, and every gate is this service's, so no
+        // other plugin's order is involved. On a kernel lacking any of them the
+        // object grant would judge the rows alone, so nothing is contributed
+        // and members stay refused (maintainer ruling; the reasoning is in
         // `attachment-member-grant.ts`).
         contributeAttachmentMemberGrant(
           {
             writeRule: true,
             readVisibility: readVisibilityInstalled,
             downloadCheck: buildFileReadAuthorizer(toGateRegistry(ctx), engine) !== undefined,
-            filesOptIn: hasService(ctx, 'audit'),
+            filesOptIn: filesOptInInstalled,
           },
           () => ctx.getService<unknown>('security'),
           ctx.logger,
@@ -726,7 +731,8 @@ export class StorageServicePlugin implements Plugin {
             writeRule: false,
             readVisibility: false,
             downloadCheck: buildFileReadAuthorizer(toGateRegistry(ctx), engine) !== undefined,
-            filesOptIn: hasService(ctx, 'audit'),
+            // The installer's own answer here too: it needs the hook seam this engine lacks.
+            filesOptIn: installAttachmentFilesOptInGate(engine as any),
           },
           () => ctx.getService<unknown>('security'),
           ctx.logger,
@@ -1093,15 +1099,6 @@ interface StorageSettingsSlot {
  * → noop). Local helper to avoid making `service-storage` depend on
  * `@objectstack/runtime`.
  */
-/** Whether `name` is a registered service on this kernel; a lookup that throws reads as absent. */
-function hasService(ctx: PluginContext, name: string): boolean {
-  try {
-    return ctx.getService<unknown>(name) != null;
-  } catch {
-    return false;
-  }
-}
-
 function resolveMetrics(
   ctx: PluginContext,
   override: MetricsRegistry | undefined,
