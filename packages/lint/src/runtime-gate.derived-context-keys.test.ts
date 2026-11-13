@@ -75,7 +75,10 @@ describe('the derived context-collection set (#13977)', () => {
     // being relaxed to a subset check: naming the whole set in order is the
     // only thing this pin does, so a removal has to be written here the same
     // way #13216's addition was.
-    expect(carriedStackKeys()).toEqual(['objects', 'permissions', 'books', 'datasets']);
+    //
+    // [#32666] `flows` joins LAST, as judged subjects of an object write; the
+    // four ahead of it keep their positions.
+    expect(carriedStackKeys()).toEqual(['objects', 'permissions', 'books', 'datasets', 'flows']);
   });
 
   it('derives the same set whatever the write is, since the write does not choose it', () => {
@@ -114,9 +117,13 @@ describe('the derived context-collection set (#13977)', () => {
       permissions: [{ name: 'sales' }],
       books: [{ name: 'handbook' }],
       datasets: [{ name: 'revenue' }],
+      flows: [{ name: 'acme_flow' }],
       pages: [{ name: 'home' }],
     };
-    const baseline = buildRuntimeWriteSnapshots({ type: 'flow', item: { name: 'f1' }, context })!.baseline;
+    // [#32666] A `view` write, a type outside every context collection: on a
+    // `flow` write the gate drops the context's flows by design
+    // (`SUBJECT_ONLY_CONTEXT_KEYS`), which is not the validity question here.
+    const baseline = buildRuntimeWriteSnapshots({ type: 'view', item: { name: 'v1' }, context })!.baseline;
 
     for (const key of carriedStackKeys()) {
       expect(context).toHaveProperty(key);
