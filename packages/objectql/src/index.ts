@@ -373,7 +373,16 @@ export {
   UnscopedHookApi,
   hookRunAs,
   deriveHookApi,
+  // The second step of a `runAs: 'user'` derivation, and its fail-safe: the
+  // runtime's body doors read a record in the hook's calling user's scope
+  // through the same two steps the hook wrapper takes.
+  seedHookUserGrants,
+  seedHookUnreadMembership,
 } from './hook-run-as.js';
+// Whether a write runs inside a transaction a write beside it joins, or one it
+// cannot reach: read by the runtime's script-body doors.
+export { openTransactionKind } from './open-transaction.js';
+export type { OpenTransactionKind } from './open-transaction.js';
 export type { HookRunAs, HookRunAsRef, RunAsDerivableApi } from './hook-run-as.js';
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to

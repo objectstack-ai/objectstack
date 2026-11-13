@@ -136,8 +136,9 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * `email_template` (#31699), then `flow` (#31696: the engine holds a flow per
  * `(package, name)`, and its doors, flow actions and flow endpoints resolve a
  * name by package), then the picklist family (#31700): `picklist`,
- * `mapping` and `dataset`, the `api` and the engine's `function` registry. A
- * type not listed here keeps one package holder per deployment.
+ * `mapping` and `dataset`, the `api` and the engine's `function` registry,
+ * then `webhook` (#31699 PR 2). A type not listed here keeps one package
+ * holder per deployment.
  *
  * Every member but {@link ENGINE_FUNCTION_TYPE} is a metadata type ADR-0150
  * addresses by package ({@link PACKAGE_SCOPED_TYPES}). The function registry
@@ -163,6 +164,8 @@ export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] 
   'dataset',
   'api',
   'function',
+  // #31699 PR 2
+  'webhook',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */

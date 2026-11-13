@@ -1553,6 +1553,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.hook.capabilities': 'Capabilities',
   'engine.inspector.hook.capabilitiesHint': 'The ctx APIs this body may call. A call it is not granted throws when the hook runs.',
   'engine.inspector.hook.capabilityUnknown': '(not a capability the sandbox grants)',
+  'engine.inspector.hook.capabilityNotForHook': '(a hook body cannot be granted this; send mail from an action, a job or a flow)',
   'engine.inspector.hook.options': 'Options',
   'engine.inspector.hook.priority': 'Priority',
   'engine.inspector.hook.async': 'Run asynchronously (after commit)',

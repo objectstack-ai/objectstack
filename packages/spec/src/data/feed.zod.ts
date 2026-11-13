@@ -70,8 +70,11 @@ export type FeedFilterMode = z.input<typeof FeedFilterMode>;
  * and offers in pickers/filters, never the ceiling of legal values. An app may
  * contribute its own values — the sanctioned authoring channel is
  * `activityMilestones[].type` (ADR-0052 §5b.2, `z.string()`, forwarded
- * verbatim), and an app's server-side action can insert one directly — and an
- * undeclared value is stored verbatim, not rejected.
+ * verbatim), and a script body adds one through `ctx.activity.append`
+ * (capability `activity.append`, input `BodyActivityAppendInputSchema`)
+ * — and an undeclared value is stored verbatim, not rejected. The door refuses
+ * only the values in {@link SYS_ACTIVITY_PLATFORM_TYPES}, which name what the
+ * platform itself recorded.
  *
  * What that binds for a consumer of this constant:
  *
@@ -113,3 +116,25 @@ export const SYS_ACTIVITY_BUILTIN_TYPES = [
  * the known-built-in narrowing only.
  */
 export type SysActivityBuiltinType = (typeof SYS_ACTIVITY_BUILTIN_TYPES)[number];
+
+/**
+ * The `sys_activity.type` values only the platform records: what happened to a
+ * record (`created` / `updated` / `deleted`), the collaboration events the
+ * platform writes (`commented` / `mentioned` / `shared` / `assigned`), sign-in
+ * events and `system`. An app adds timeline entries through the activity door
+ * (`ctx.activity.append`), which refuses these values, so an entry an app wrote
+ * cannot read as one the platform recorded. Every other value, built-in
+ * (`completed`, `scheduled`) or author-contributed, stays open to apps.
+ */
+export const SYS_ACTIVITY_PLATFORM_TYPES = [
+  'created',
+  'updated',
+  'deleted',
+  'commented',
+  'mentioned',
+  'shared',
+  'assigned',
+  'login',
+  'logout',
+  'system',
+] as const satisfies readonly SysActivityBuiltinType[];

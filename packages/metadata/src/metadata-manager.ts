@@ -98,7 +98,6 @@ import {
   readStoreEntry,
   inheritStoreWriteOrder,
   judgesLoaderSlots,
-  packagelessWriteKeyOf,
   platformSlotsOf,
   recordStoreWrite,
   slotPackageOf,
@@ -648,13 +647,6 @@ export class MetadataManager implements IMetadataService {
   /** [#31699 R5-A] The loader {@link loadMany} read each item object from ({@link MetadataRegisterOptions}). */
   private readonly loadedFrom = new WeakMap<object, MetadataLoader>();
   /**
-   * [ADR-0150 D4, #32791] The items of a type stored per `(package, name)`
-   * that {@link loadMany} read from a stored-row loader (`datasource:`) held
-   * for no package: the environment's rows. The boot priming pass may stamp
-   * one with the host's package before it registers it ({@link slotViewOf}).
-   */
-  private readonly storedPackagelessRows = new WeakSet<object>();
-  /**
    * [#32986] The items of every OTHER type (one not stored per
    * `(package, name)`: `object`, `view`, `app`, `hook`, `dashboard` …) that
    * {@link loadMany} read from a stored-row loader (`datasource:`) naming no
@@ -665,13 +657,6 @@ export class MetadataManager implements IMetadataService {
    * ({@link isStampedEnvironmentRow}).
    */
   private readonly storedEnvironmentRows = new WeakSet<object>();
-  /**
-   * [ADR-0150 D4, #32791] The {@link storedPackagelessRows} whose registration
-   * replaced an item no loader handed out (one registered in memory or by
-   * code): that item's package held the name before the row took its slot, so
-   * the slot is a holder, not only the row ({@link slotViewOf}).
-   */
-  private readonly storedRowsOverOwnItems = new WeakSet<object>();
   // Protected so subclasses can access serializers if needed
   protected serializers: Map<MetadataFormat, MetadataSerializer>;
   protected logger: Logger;
@@ -1309,13 +1294,6 @@ export class MetadataManager implements IMetadataService {
     const { key, replaces } = slot === undefined ? storeWriteKey(typeStore, type, name, data) : { key: slot, replaces: [] };
     if (!typeStore) this.registry.set(type, (typeStore = new Map()));
     const existed = typeStore.has(key) || replaces.length > 0;
-    if (data !== null && typeof data === 'object' && this.storedPackagelessRows.has(data)) {
-      const before = typeStore.get(key);
-      // [review S3] A row that replaces a marked row (the pass run again) carries its mark.
-      if (before !== null && typeof before === 'object' && before !== data && (!this.loadedFrom.has(before) || this.storedRowsOverOwnItems.has(before))) {
-        this.storedRowsOverOwnItems.add(data);
-      }
-    }
     for (const replaced of replaces) typeStore.delete(replaced);
     typeStore.set(key, data);
     recordStoreWrite(typeStore, key);
@@ -1485,10 +1463,7 @@ export class MetadataManager implements IMetadataService {
     // stores it — judged only over loaders that all answered: with one down,
     // the slot is read as the environment's, as before.
     const platformKeys = errors.length === 0 ? platformSlotsOf(this.registry.get(type), type, name, loaderStore) : undefined;
-    // [#32791] A read naming none counts a stored row the boot pass stamped
-    // with the host's package once, as the loaders store it.
-    const view = this.slotViewOf(type, name, loaderStore, !isPackageCaller(packageId));
-    const entry = readStoreEntry(view, type, name, packageId, platformKeys);
+    const entry = readStoreEntry(this.slotViewOf(type, name, loaderStore), type, name, packageId, platformKeys);
     return entry.found
       ? { data: entry.data, degraded: false, errors }
       : { data: null, degraded: errors.length > 0, errors };
@@ -1529,71 +1504,26 @@ export class MetadataManager implements IMetadataService {
    * registry's slots of the name, then the loaders' stored items keyed as the
    * store keys them ({@link slotStoreOf}), what the registry (then an earlier
    * loader) holds kept over a later item of the same slot. Reads and removals
-   * judge a name the registry cannot answer alone over this view.
-   *
-   * [ADR-0150 D4, #32791] `asStored`, for a read naming no package: a
-   * registry slot of a package whose item is a stored package-less row
-   * ({@link storedPackagelessRows}) stamped with that same package (the boot
-   * pass stamps it with the host's package before it registers it), while a
-   * loader still stores the row, is that row, not a holder of its own. It is
-   * filed in the view as the store files a write that carries no package
-   * ({@link packagelessWriteKeyOf}: the name's one holder's customization,
-   * else the environment's own item) in place of the loader's copy of the
-   * row, and keeps the write order of the registry slot it came from, so one
-   * row is counted once, never as the host's package and as the environment.
-   * A package's own item, a host's own item that no stored row is, an
-   * unstamped row the registry's own write rule filed in its one holder's
-   * slot (that holder's customization), and a row whose registration replaced
-   * an item no loader handed out ({@link storedRowsOverOwnItems}: that item's
-   * package holds the name) keep their slots. A removal judges
-   * the view without `asStored`, so in that composition the read and the
-   * removal naming no package do not count the same holders.
+   * judge a name the registry cannot answer alone over this view, so they
+   * agree on who holds it.
    */
   private slotViewOf(
     type: string,
     name: string,
     loaderStore: ReadonlyMap<string, unknown>,
-    asStored = false,
   ): Map<string, unknown> {
     const registryStore = this.registry.get(type);
     const view = new Map<string, unknown>();
-    const storedRows: Array<{ key: string; data: unknown }> = [];
-    const storedKeys = new Set<string>();
     // [#32517] Each slot's member written last first: a slot no key of which
     // came from the registry answers its first member (`latestMemberOf`).
     if (registryStore) {
-      for (const key of latestMembersFirst(registryStore, storeKeysNamed(registryStore, type, name))) {
-        const data = registryStore.get(key);
-        const stampedWith = slotPackageOf(key);
-        if (
-          asStored && stampedWith !== undefined && data !== null && typeof data === 'object'
-          && this.storedPackagelessRows.has(data) && indexedItemPackageId(data) === stampedWith
-          && !this.storedRowsOverOwnItems.has(data)
-        ) {
-          const stored = storeSlotKey(type, name, undefined, data);
-          if (loaderStore.has(stored)) {
-            storedRows.push({ key, data });
-            storedKeys.add(stored);
-            continue;
-          }
-        }
-        view.set(key, data);
-      }
+      for (const key of latestMembersFirst(registryStore, storeKeysNamed(registryStore, type, name))) view.set(key, registryStore.get(key));
     }
     for (const [key, data] of loaderStore) {
-      if (!view.has(key) && !storedKeys.has(key)) view.set(key, data);
-    }
-    // [#32791] The row the boot pass primed, over the loader's copy of the
-    // slot it fills (its holder's row: the customization shadows it, D4),
-    // written when the registry's slot it came from was.
-    const aliases = new Map<string, string>();
-    for (const { key, data } of storedRows) {
-      const at = packagelessWriteKeyOf(view, type, name, data);
-      view.set(at, data);
-      aliases.set(at, key);
+      if (!view.has(key)) view.set(key, data);
     }
     // [#32560] "Written last" over the view is the registry's own order.
-    inheritStoreWriteOrder(view, registryStore, aliases);
+    inheritStoreWriteOrder(view, registryStore);
     return view;
   }
 
@@ -3816,6 +3746,18 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * [#32812] The protocol of the loader {@link loadMany} read `item` — that
+   * very object — from (`'datasource:'` for a loader of stored rows,
+   * `DatabaseLoader` or another that declares the protocol under its own
+   * name); `undefined` for an object it did not hand out. The boot priming
+   * pass asks it to keep the host's package off a package-less stored row
+   * (`MetadataPlugin`'s pass).
+   */
+  sourceLoaderProtocolOf(item: object): string | undefined {
+    return this.loadedFrom.get(item)?.contract.protocol;
+  }
+
+  /**
    * Load multiple metadata items from loaders.
    * Aggregates results from all loaders.
    */
@@ -3877,11 +3819,10 @@ export class MetadataManager implements IMetadataService {
         results.push(item);
         if (item !== null && typeof item === 'object') {
           this.loadedFrom.set(item, loader);
-          // [#32791] Read here, before any caller stamps it.
-          if (loader.contract.protocol === 'datasource:' && indexedItemPackageId(item) === undefined) {
-            if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) this.storedPackagelessRows.add(item);
-            // [#32986] Read here too, before the boot pass stamps it.
-            else this.storedEnvironmentRows.add(item);
+          // [#32986] Read here, before the boot pass stamps it. A type stored
+          // per `(package, name)` is not stamped on such a row (#32812).
+          if (loader.contract.protocol === 'datasource:' && !PACKAGE_SLOTTED_STORE_TYPES.has(type) && indexedItemPackageId(item) === undefined) {
+            this.storedEnvironmentRows.add(item);
           }
         }
     });

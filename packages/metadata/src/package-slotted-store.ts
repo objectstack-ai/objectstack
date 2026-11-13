@@ -134,10 +134,13 @@ import { peelStoredEnvelope } from './stored-envelope.js';
  * ADR-0150 child B), which joins in the same change that adds it to
  * `NAMESPACE_SCOPED_BARE_NAME_TYPES`; then `permission` (#32162); then `flow`
  * (#31696), which joins in the same change that adds it to that set; then the
- * picklist family's `picklist`, `mapping` and `dataset` (#31700).
+ * picklist family's `picklist`, `mapping` and `dataset` (#31700); then
+ * `webhook` (#31699 PR 2), so a host with no registry lists each package's
+ * declaration of one name.
  */
 export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set([
   'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset',
+  'webhook',
 ]);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
@@ -264,15 +267,9 @@ function writtenLast(store: ReadonlyMap<string, unknown>, keys: readonly string[
  * [ADR-0150 D3, #32560] Give `view` (a store assembled from `from`'s slots and
  * others) `from`'s write order for the keys it took from it, so a read over
  * the view answers "written last" as the read over `from` does. A key `from`
- * does not hold counts as written before every key it does. [#32791] A view
- * key `aliases` maps to the key of `from` its item was taken from (the view
- * filed that item under another key) takes that key's order.
+ * does not hold counts as written before every key it does.
  */
-export function inheritStoreWriteOrder(
-  view: ReadonlyMap<string, unknown>,
-  from: ReadonlyMap<string, unknown> | undefined,
-  aliases?: ReadonlyMap<string, string>,
-): void {
+export function inheritStoreWriteOrder(view: ReadonlyMap<string, unknown>, from: ReadonlyMap<string, unknown> | undefined): void {
   const order = from ? writeOrder.get(from) : undefined;
   if (!order) return;
   // [#32517] A slot none of whose members came from `from` still answers its
@@ -280,9 +277,8 @@ export function inheritStoreWriteOrder(
   inheritedViews.add(view);
   const inherited = new Map<string, number>();
   for (const key of view.keys()) {
-    const fromKey = aliases?.get(key) ?? key;
-    const at = order.get(fromKey);
-    if (at !== undefined && view.get(key) === from!.get(fromKey)) inherited.set(key, at);
+    const at = order.get(key);
+    if (at !== undefined && view.get(key) === from!.get(key)) inherited.set(key, at);
   }
   writeOrder.set(view, inherited);
 }
@@ -654,39 +650,14 @@ function slottedWriteKey(
     const packageId = storedItemPackageId(data);
     return { key: keyed(packageId === undefined ? identity : slotKey(packageId, identity)), replaces: [] };
   }
-  const packageId = storedItemPackageId(data);
-  if (packageId === undefined) return { key: keyed(packagelessSlotOf(store, identity)), replaces: [] };
   const holders = packageSlotsOf(store, identity);
+  const packageId = storedItemPackageId(data);
+  if (packageId === undefined) {
+    return { key: keyed(holders.length === 1 ? slotKey(holders[0]!, identity) : identity), replaces: [] };
+  }
   const others = holders.filter((holder) => holder !== packageId);
   const bare = keyed(identity);
   return { key: keyed(slotKey(packageId, identity)), replaces: others.length === 0 && store.has(bare) ? [bare] : [] };
-}
-
-/**
- * [ADR-0150 D4] The slot a write that carries no package fills under
- * `identity`: the holder's slot under a name exactly one package holds (a
- * package-less row bearing a package-held name is that holder's
- * customization, never a second item), else the identity's bare slot (the
- * environment's own item).
- */
-function packagelessSlotOf(store: ReadonlyMap<string, unknown>, identity: string): string {
-  const holders = packageSlotsOf(store, identity);
-  return holders.length === 1 ? slotKey(holders[0]!, identity) : identity;
-}
-
-/**
- * [ADR-0150 D4, #32791] The key {@link storeWriteKey} gives `data` written to
- * `store` as an item that carries no package, whatever package its body is
- * stamped with now: the name's one holder's slot (its customization), else
- * the identity's bare slot (the environment's own item); [#32517] a bundled
- * type's member keyed under it. The manager files a stored package-less row
- * the boot pass registered under the host's package by this rule when it
- * judges a read naming no package over its view of the registry and the
- * loaders, so the row is one holder of the name, as the loaders store it.
- */
-export function packagelessWriteKeyOf(store: ReadonlyMap<string, unknown>, type: string, name: string, data: unknown): string {
-  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return name;
-  return memberKeyOf(type, packagelessSlotOf(store, slotIdentityOf(type, name, data)), data);
 }
 
 /**

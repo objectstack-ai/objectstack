@@ -45,6 +45,15 @@ export const SysApprovalRequest = ObjectSchema.create({
   isSystem: true,
   managedBy: 'engine-owned',
   description: 'Live approval instance tracked per submission',
+  // [decision 6840464379] The rows reach a member only through the approvals
+  // door (`/api/v1/approvals/*`); the data side is closed to ordinary members on
+  // purpose. The metadata API answers an object the caller may not read as
+  // absent (ADR-0106, ruling record 6787890900), yet the request page that door
+  // links to needs this definition to render, so the approvals service answers
+  // who else is served it: the callers its door serves a request to
+  // (`ApprovalService.authorizeSchemaRead`). Field security still projects it,
+  // and the rows stay closed.
+  schemaReadDelegate: 'approvals',
   // [ADR-0079, ADR-0085] The record title is the flow's label, `process_label`:
   // a STORED column, so every door that serves the row serves its title. The
   // approvals get (`rowFromRequest`) serves it by the display-label chain — the
