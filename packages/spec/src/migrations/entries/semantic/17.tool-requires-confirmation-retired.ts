@@ -16,9 +16,11 @@ export const entry: SemanticMigration = {
     + 'doors that enforce the author\'s `ai.exposed` opt-in, today the action door reached '
     + 'from the MCP `run_action` tool, while REST `/actions` reads `ai.exposed` only of an AI '
     + 'service account starting a `runAs: \'system\'` flow action (asking for the opt-in, '
-    + 'not a confirmation) and otherwise sits outside the gate; and `confirm: true` is an '
-    + 'unverifiable caller claim, so the '
-    + 'gate makes forgetting loud without proving a human approved',
+    + 'not a confirmation) and sits outside the gate for a person\'s call or one an agent '
+    + 'makes on a person\'s behalf, while an AI service account acting for itself is '
+    + 'refused a gated action at every action door, REST `/actions` included; and '
+    + '`confirm: true` is an unverifiable caller claim, so the gate makes forgetting loud '
+    + 'without proving a human approved',
   reason:
     '`ToolSchema.requiresConfirmation` accepted `true` and no execution path ever read it: '
     + 'not the LLM tool set (a tool reaches the model as name / description / parameters '
@@ -61,7 +63,7 @@ export const entry: SemanticMigration = {
     + '— while REST `/actions` reads `ai.exposed` only of an AI service account starting a '
     + '`runAs: \'system\'` flow action, and asks it for the opt-in, not a confirmation; the '
     + 'confirmation gate is not enforced there, so a person or an agent acting on a '
-    + 'person\'s behalf with an API key on that route is still yours to put a human in '
+    + 'person\'s behalf on that route is still yours to put a human in '
     + 'front of (an AI service account acting for itself is refused a gated action at '
     + 'every action door); '
     + 'and `confirm: true` is an unverifiable caller claim, so the gate makes forgetting '
