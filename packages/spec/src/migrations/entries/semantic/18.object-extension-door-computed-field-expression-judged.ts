@@ -27,11 +27,12 @@ export const entry: SemanticMigration = {
     'The publish door ran only the vocabulary freeze on an extension, so a computed field `os build` refuses '
     + 'published with a 200 and then read null, or failed, on every row. The door now runs the build\'s '
     + 'field-formula pass on each field the written extension adds, against the extended object as the door '
-    + 'serves it, and refuses with the build\'s rule id and location '
-    + '(`422 INVALID_METADATA`, issue `expression-invalid` at `object \'TARGET\' · objectExtensions[0] · field '
-    + '\'FIELD\' expression`).',
+    + 'serves it without the package\'s own stored extension (which the write replaces), and refuses with '
+    + 'the build\'s rule id (`422 INVALID_METADATA`, issue `expression-invalid` at `object \'TARGET\' · '
+    + 'objectExtensions[0] · field \'FIELD\' expression`; the door judges the written entry alone, so the index '
+    + 'matches the build\'s exactly for a package with one extension entry).',
   acceptanceCriteria:
-    'Publish each extension that adds a computed field again (or run `os validate` on the package that ships '
-    + 'it): the publish answers 200 with no `expression-invalid` issue located at an `objectExtensions[0] · field` '
-    + 'site, and a record of the extended object holds a value in every computed field the extension adds.',
+    'Publish each extension that adds a computed field again: the publish answers 200 with no '
+    + '`expression-invalid` issue located at an `objectExtensions[0] · field` site, and a record of the extended '
+    + 'object holds a value in every computed field the extension adds.',
 };
