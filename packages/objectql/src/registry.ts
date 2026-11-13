@@ -9137,7 +9137,10 @@ export class SchemaRegistry {
    * bundle-addition rule ({@link ownersHoldingAName}) is settled over EVERY
    * holder, so a disable never promotes a dependent's addition to an owner
    * (a package that adds only to a disabled holder's bundle stays an
-   * addition, as the exact read counts it). {@link overlaySlotBinding}
+   * addition, as the exact read counts it). The holders are the ones
+   * {@link packageScopedHoldersOf} counts: every composite slot, then the
+   * package a bare-slot entry binds to, so a package holding the name only
+   * through its own stored row is a holder here too. {@link overlaySlotBinding}
    * itself counts every holder, so a disable never moves the binding the
    * registry's own readers answer.
    */
@@ -9145,16 +9148,24 @@ export class SchemaRegistry {
     const collection = this.metadata.get(type);
     if (!collection) return undefined;
     const composite = new Set(this.compositeHoldersOf(collection, name));
-    const served = new Set([...composite].filter((id) => !this.isPackageDisabled(id)));
+    const servedComposite = new Set([...composite].filter((id) => !this.isPackageDisabled(id)));
     const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
-    if (typeof stamped === 'string' && stamped !== '' && stamped !== 'sys_metadata' && !served.has(stamped)) {
+    if (typeof stamped === 'string' && stamped !== '' && stamped !== 'sys_metadata' && !composite.has(stamped)) {
+      const holders = new Set(composite);
+      for (const { item: entry } of this.bareSlotEntriesOf(type, collection, name)) {
+        const bound = this.overlaySlotBinding(type, entry, name, collection, composite);
+        if (typeof bound === 'string') holders.add(bound);
+      }
+      // The pair's own rows bind to it when no composite slot pairs it; it holds no name of its own here.
+      const served = new Set([...holders].filter((id) => id !== stamped && !this.isPackageDisabled(id)));
       const settled = this.settledPairRowBinding(stamped, item, served);
       if (Array.isArray(settled)) {
         const named = this.ownersHoldingAName(type, name, collection, settled as readonly string[], item, composite, stamped);
         return named.length === 1 ? named[0] : undefined;
       }
+      if (settled !== NOT_A_PAIR_ROW_OF_A_HOLDER) return settled as string | undefined;
     }
-    return this.overlaySlotBinding(type, item, name, collection, served);
+    return this.overlaySlotBinding(type, item, name, collection, servedComposite);
   }
 
   /**

@@ -1062,6 +1062,40 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
       expect(await listed(X)).not.toContain('pair de-DE');
     });
 
+    // [#32561 contract review n1] The adoption counts the holders as
+    // `packageScopedHoldersOf` counts the exact read's owner: every composite
+    // slot, then the package a bare-slot entry binds to. X holding the name
+    // only through its own stored row (a row with `package_id` X hydrated
+    // into the bare slot, no composite slot) is still X's holding, so the
+    // App's undeclared de-DE pair row is X's member on X's address, as on
+    // main. Counting composite slots only leaves X out, the row binds to the
+    // pair, and X's address would lose it: ablation.
+    for (const holding of ['its own stored row in the bare slot', 'CONTROL: its composite slot'] as const) {
+      it.each([['holding first', true], ['pair row first', false]] as const)(`${holding === 'CONTROL: its composite slot' ? 'CONTROL' : 'UNCHANGED'} — X holds the name through ${holding} (%s): X's address and lists keep the App's undeclared pair row`, async (_order, holdingFirst) => {
+        const xEn = { name: 'welcome', label: 'suitex en-US', locale: 'en-US', subject: 'suitex en-US', bodyHtml: '<p>x</p>' };
+        const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
+        const registerHolding = () => {
+          if (holding === 'CONTROL: its composite slot') { tpl('en-US', X); return; }
+          rows.push({ id: 'row_x', type: 'email_template', name: 'welcome', state: 'active', package_id: X, bundle_member: 'en-US', metadata: JSON.stringify(xEn) });
+          registry.registerItem('email_template', { ...xEn, _packageId: X, _provenance: 'org' }, 'name' as never);
+        };
+        const registerPairRow = () => {
+          rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+          registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+        };
+        if (holdingFirst) { registerHolding(); registerPairRow(); } else { registerPairRow(); registerHolding(); }
+        expect(registry.overlayRowBinding('email_template', 'welcome', { ...pairDe, _packageId: PAIR }), 'the adoption counts X as the exact read does').toBe(X);
+        expect(labelOf(await read(X, 'de-DE'))).toBe('pair de-DE');
+        expect(labelOf(await read(X, 'en-US'))).toBe('suitex en-US');
+        // The lists are pinned for the composite slot only: with X holding through its stored row alone, X's
+        // lists leave the row out on main and here alike (the list door's own count, outside this card).
+        if (holding === 'CONTROL: its composite slot') {
+          expect(await listed(X)).toContain('pair de-DE');
+          expect(await forSend(X)).toContain('pair de-DE');
+        }
+      });
+    }
+
   });
 
   it('a sole owner keeps its member: another package of the pair does not serve it (delta review S2; through the doors the qualifier refuses the non-holder first)', async () => {
