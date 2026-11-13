@@ -13,12 +13,18 @@ export const entry: SemanticMigration = {
   surface:
     'composeStacks(stacks) under a flat manifest option (manifest: \'last\', the default, \'first\' or an index) '
     + 'whose selected manifest is an \'app\' or \'module\' package while the inputs bring two or more apps, e.g. '
-    + 'composeStacks([serviceModule, appPackage]) where each defineStack carries one app; and a packages[] body '
-    + 'of type \'app\' or \'module\' that defines two or more apps, handed to defineStack or carried into a '
-    + 'composition',
+    + 'composeStacks([serviceModule, appPackage]) where each defineStack carries one app; a composition under any '
+    + 'option whose result carries packages[] and an app that no package body declares (an input with no '
+    + 'manifest, or a nested artifact with an app of its own) while the package of the artifact\'s manifest id '
+    + 'already defines one; and a packages[] body of type \'app\' or \'module\' that defines two or more apps, '
+    + 'handed to defineStack or carried into a composition',
   replacement:
     'Compose the packages of a suite with composeStacks(stacks, { manifest: \'preserve\' }): each input keeps '
-    + 'its own package id and its own app, and the artifact\'s manifest is still the last input\'s. Code that '
+    + 'its own package id and its own app. Under \'preserve\' the artifact\'s manifest is the last input\'s, so a '
+    + 'composition that selected another input\'s manifest with \'first\' or an index reorders its inputs to keep '
+    + 'the same artifact identity. An input that defines an app needs a manifest of its own (a \'module\' package) '
+    + 'for preserve to assemble it into its own package body, and a nested artifact declares its apps inside one '
+    + 'of its bodies. Code that '
     + 'composed flat only to read every collection at the top level (a test view of the whole suite, say) '
     + 'composes under \'preserve\' and reads each packages[] body for its collections instead. A package body '
     + 'that itself defines two apps keeps one and moves each other app into a \'module\' package of its own, or '
@@ -36,7 +42,8 @@ export const entry: SemanticMigration = {
     + 'package id the package answers as absent; and the apps can no longer be disabled one module at a time. '
     + 'composeStacks now refuses such a composition with STACK_SINGLE_APP_VIOLATION (422), naming the package, '
     + 'each app with the input it came from, and the remedy, and defineStack and composeStacks judge every '
-    + 'packages[] body by the same rule. Not convertible: whether the inputs are one package or several, and '
+    + 'packages[] body by the same rule, and the apps no package body declares, which the load path registers '
+    + 'under the artifact\'s manifest id, together with that package\'s own. Not convertible: whether the inputs are one package or several, and '
     + 'which app stays where, is a fact only the author holds.',
   acceptanceCriteria:
     'os validate and os build, and every config or test helper that calls composeStacks, run without a '

@@ -1848,7 +1848,8 @@ export const ERROR_CODE_LEDGER = {
     'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
     // [ADR-0019 D3 as amended · #32810] Two raise sites, one rule: `defineStack`
     // (the stack's own package and each `packages[]` body) and `composeStacks`
-    // (a flat composition's one selected manifest and each `packages[]` body).
+    // (a flat composition's one selected manifest, each `packages[]` body, and
+    // the artifact's manifest id with the top-level apps no body declares).
     // `door: 'none'` on the same reading as the rows around it.
     'STACK_SINGLE_APP_VIOLATION',                // an `app` or `module` package declares more than one app (ADR-0019 D3 as amended)
     'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers` or `automation` (the pair installs its trigger)

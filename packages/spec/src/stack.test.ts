@@ -1644,6 +1644,69 @@ describe('composeStacks — at most one App per package, judged on what the comp
     }
   });
 
+  // An input with no manifest is assembled into no package body, so its apps
+  // stay at the top level, and the load path's residual rule
+  // (`unclaimedTopLevel`, `@objectstack/metadata`) registers them under the
+  // artifact's manifest id.
+  const notesWithApp = () =>
+    defineStack({ objects: [objectOf('crm_note')], apps: [appOf('crm_notes', 'crm_note')] });
+  const notesWithoutApp = () => defineStack({ objects: [objectOf('crm_note')] });
+  const marketing = () =>
+    defineStack({
+      manifest: pkg('com.example.crm.marketing', 'module'),
+      objects: [objectOf('crm_campaign')],
+      apps: [appOf('crm_marketing', 'crm_campaign')],
+    });
+
+  it('refuses a preserve composition whose input with no manifest brings an app, which the load path registers under the artifact\'s manifest id beside that package\'s own app', () => {
+    const finding = singleAppFinding(
+      refusalOf(() => composeStacks([sales(), notesWithApp()], { manifest: 'preserve' })),
+      'composeStacks single-app validation failed',
+    );
+    expect(finding).toMatch(/^An 'app' package must define at most one app/);
+    expect(finding).toContain("composeStacks with manifest: 'preserve' gives package 'com.example.crm' 2");
+    expect(finding).toContain("'crm_sales' from its package body (packages[0])");
+    expect(finding).toContain("'crm_notes' from stack #1, which no package body declares");
+    expect(finding).toContain('give each input that defines an app a manifest of its own');
+  });
+
+  it('accepts a flat composition of a nested artifact whose flattened copy repeats its bodies\' apps: those register under each body\'s id, not under the kept manifest', () => {
+    // A preserve composition with a manifest-less input keeps its flattened
+    // copy, so its top-level `apps` repeats the body's app.
+    const nested = composeStacks([sales(), notesWithoutApp()], { manifest: 'preserve' });
+    expect((nested.apps ?? []).map((a) => a.name)).toEqual(['crm_sales']);
+    const flat = composeStacks([nested, service()]);
+    expect(flat.manifest?.id).toBe('com.example.crm.service');
+    expect((flat.apps ?? []).map((a) => a.name)).toEqual(['crm_sales', 'crm_service']);
+    expect((flat.packages ?? []).map((p) => (p.manifest as { id: string }).id)).toEqual(['com.example.crm']);
+  });
+
+  it('refuses a flat composition with a nested artifact among its inputs when the other inputs\' apps, which no body declares, come to two or more under the kept manifest', () => {
+    const nested = composeStacks([sales(), notesWithoutApp()], { manifest: 'preserve' });
+    const finding = singleAppFinding(
+      refusalOf(() => composeStacks([nested, service(), marketing()])),
+      'composeStacks single-app validation failed',
+    );
+    expect(finding).toMatch(/^A 'module' package must define at most one app/);
+    expect(finding).toContain("composeStacks with manifest: 'last' gives package 'com.example.crm.marketing' 2");
+    expect(finding).toContain("'crm_service' from 'com.example.crm.service' (stack #1), which no package body declares");
+    expect(finding).toContain("'crm_marketing' from 'com.example.crm.marketing' (stack #2), which no package body declares");
+    expect(finding).not.toContain("'crm_sales'");
+  });
+
+  it('names a package with no id by its name (strict: false)', () => {
+    const unjudged = defineStack({
+      manifest: { name: 'crm_service_pkg', version: '1.0.0', type: 'module' },
+      apps: [appOf('crm_service', 'crm_case'), appOf('crm_field_service', 'crm_case')],
+    } as never, { strict: false });
+    const finding = singleAppFinding(
+      refusalOf(() => composeStacks([unjudged, defineStack({ manifest: pkg('com.example.crm.tools', 'plugin') })], { manifest: 0 })),
+      'composeStacks single-app validation failed',
+    );
+    expect(finding).toContain("gives package 'crm_service_pkg' 2");
+    expect(finding).not.toContain("'undefined'");
+  });
+
   it('control: a single-input composition is handed back untouched, and a flat composition whose inputs bring one app is accepted', () => {
     const one = sales();
     expect(composeStacks([one])).toBe(one);
