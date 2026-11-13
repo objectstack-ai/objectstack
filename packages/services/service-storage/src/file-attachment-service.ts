@@ -54,6 +54,7 @@ import {
   type RecordFileRead,
   type RecordFileTarget,
   type UploadLinkDoor,
+  type UploadLinkFilesOutcome,
   type UploadLinkGrant,
   type UploadLinkOutcome,
   type UploadLinkTarget,
@@ -377,6 +378,15 @@ export class FileAttachmentService
 
   async consumeUploadLink(token: string, upload: UploadLinkUpload, callerUserId: string): Promise<UploadLinkOutcome> {
     return this.recordFilesOrRefuse().consumeUploadLink(token, upload, callerUserId);
+  }
+
+  /** [#32747] One submit carrying several files, for a link to a multi-file field. */
+  async consumeUploadLinkFiles(
+    token: string,
+    uploads: UploadLinkUpload[],
+    callerUserId: string,
+  ): Promise<UploadLinkFilesOutcome> {
+    return this.recordFilesOrRefuse().consumeUploadLinkFiles(token, uploads, callerUserId);
   }
 
   async attachFile(input: AttachFileInput): Promise<AttachedFile> {
