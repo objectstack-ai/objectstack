@@ -9117,6 +9117,58 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#32561] The package a stored row `item` of `(type, name)` binds to, read
+   * by the one rule every overlay-slot reader asks ({@link overlaySlotBinding},
+   * {@link pairRowBinding} for a customization pair's row), over the holders
+   * the exact read serves: a package id, `null` for the environment's own
+   * item, or `undefined` for no package. The exact read (`pairRowOnAddress`,
+   * `@objectstack/metadata-protocol`) adopts it for an undeclared pair row, so
+   * `?package=X` never serves a row this binds to no package: one a bundle
+   * addition that ships the row's member could own too, or one whose count
+   * would read another shared pair's undeclared row (epic ruling on #32561,
+   * red line 2). Read-only.
+   *
+   * A disabled package holds no name (ADR-0150 D3, as
+   * {@link packageScopedHoldersOf} counts by default), so it is left out of
+   * this count, as the exact read leaves it out of its own: with one of two
+   * holders disabled, the enabled one's address keeps the row (#32183, epic
+   * ruling R4-A). It is left out in the order {@link packageScopedHoldersOf}
+   * uses: the pair's owners are the served holders it customizes, but the
+   * bundle-addition rule ({@link ownersHoldingAName}) is settled over EVERY
+   * holder, so a disable never promotes a dependent's addition to an owner
+   * (a package that adds only to a disabled holder's bundle stays an
+   * addition, as the exact read counts it). The holders are the ones
+   * {@link packageScopedHoldersOf} counts: every composite slot, then the
+   * package a bare-slot entry binds to, so a package holding the name only
+   * through its own stored row is a holder here too. {@link overlaySlotBinding}
+   * itself counts every holder, so a disable never moves the binding the
+   * registry's own readers answer.
+   */
+  overlayRowBinding(type: string, name: string, item: unknown): string | null | undefined {
+    const collection = this.metadata.get(type);
+    if (!collection) return undefined;
+    const composite = new Set(this.compositeHoldersOf(collection, name));
+    const servedComposite = new Set([...composite].filter((id) => !this.isPackageDisabled(id)));
+    const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (typeof stamped === 'string' && stamped !== '' && stamped !== 'sys_metadata' && !composite.has(stamped)) {
+      const holders = new Set(composite);
+      for (const { item: entry } of this.bareSlotEntriesOf(type, collection, name)) {
+        const bound = this.overlaySlotBinding(type, entry, name, collection, composite);
+        if (typeof bound === 'string') holders.add(bound);
+      }
+      // The pair's own rows bind to it when no composite slot pairs it; it holds no name of its own here.
+      const served = new Set([...holders].filter((id) => id !== stamped && !this.isPackageDisabled(id)));
+      const settled = this.settledPairRowBinding(stamped, item, served);
+      if (Array.isArray(settled)) {
+        const named = this.ownersHoldingAName(type, name, collection, settled as readonly string[], item, composite, stamped);
+        return named.length === 1 ? named[0] : undefined;
+      }
+      if (settled !== NOT_A_PAIR_ROW_OF_A_HOLDER) return settled as string | undefined;
+    }
+    return this.overlaySlotBinding(type, item, name, collection, servedComposite);
+  }
+
+  /**
    * [ADR-0150 D4, epic ruling 6761802819 on #31699 F2, #32408] The holder a
    * customization pair's row `item` (stored under `pairId`, which holds no
    * composite slot of the name) binds to, read as the exact read's one owner
@@ -9148,14 +9200,17 @@ export class SchemaRegistry {
    * it naming both). A row that declares an addition's package as its base is
    * still that package's. When the count would read an undeclared row of
    * another shared pair (a binding that waits on that pair's own count), the
-   * row binds to no package (epic seat 1's ruling; #32561 carries the shapes
-   * where the exact read answers otherwise).
+   * row binds to no package (epic seat 1's ruling). The exact read adopts
+   * this binding ({@link overlayRowBinding}, #32561), so it never serves such
+   * a row on a package's address.
    *
    * Every holder is counted, a disabled one included (`composite` is the
    * holder set before {@link packageScopedHoldersOf} filters the served
    * ones): a binding never moves with a reversible disable (ADR-0150 D3,
    * #32183). The exact read counts the served holders, so with one of two
-   * owners disabled it serves a row this binds to no package (#32561).
+   * owners disabled it serves a row this binds to no package: it adopts this
+   * binding over the served holders only ({@link overlayRowBinding}, #32561),
+   * as the enabled holder's address keeps the row (epic ruling R4-A).
    *
    * {@link NOT_A_PAIR_ROW_OF_A_HOLDER} when no holder of the name is a package
    * `pairId` customizes: the row keeps the per-package reading of
@@ -9205,11 +9260,11 @@ export class SchemaRegistry {
    * declaring the holder, an App's own pair row (#28390 ruling A), a
    * per-package pair's row, the holder's own stored row. The undeclared rows
    * of `pairId`, the pair this arm decides, are left out, since the members
-   * they add are what it answers (the accepted residual, #32561). An
+   * they add are what it answers (the exact read adopts the answer, #32561). An
    * undeclared row of ANOTHER shared pair would make this count wait on that
    * pair's, which may wait on this one: then `owners` is answered whole, so
-   * the row binds to no package (never a guess; epic seat 1's ruling, the
-   * shapes where the exact read answers otherwise carried by #32561). An
+   * the row binds to no package (never a guess; epic seat 1's ruling, which
+   * the exact read adopts, #32561). An
    * addition that ships the member `row` is ITS member too, so it stays an
    * owner: the row may customize that package's member, and two owners bind
    * it to no package. `owners` unchanged for a type that is no bundle, or with
