@@ -3036,3 +3036,175 @@ describe('[#32986] unregisterPackage of the host package keeps the environment\'
     expect(await state(bare)).toEqual(ITEMS.map(([type]) => [type, null, 'env', 1]));
   });
 });
+
+/**
+ * [#33003; follow-up of #32986, review S1 of PR #32999] The boot pass's mark
+ * on an environment row it stamped with the host rode the registry object, so
+ * a later write that registered a COPY still stamped with the host dropped it
+ * — and stored the stamp in the row's body, so the next boot read the row as
+ * the host's own too. `unregisterPackage(host)` then deleted the row again, in
+ * that process and after a restart. The writers measured, each driven here
+ * through the call it makes on this manager:
+ *
+ *  - ObjectQL's late-manifest bridge, the `ownPreviousCopy` arm: another
+ *    package extends the environment's object and the bridge re-registers the
+ *    merged object stamped with its owner, the host (`register`, `notify:
+ *    false`); its withdrawal counterpart `restoreExtendedObjectCopies` puts the
+ *    owner's body back the same way;
+ *  - ObjectQL's object-copy follow (`putObjectCopy` → `registerInMemory`);
+ *  - `publishPackage(host)` and `revertPackage(host)`, over
+ *    `collectPackageMembers`, which counts a stamped environment row as the
+ *    host's;
+ *  - `importMetadata` with `conflictResolution: 'merge'` (`{ ...existing, ...item }`).
+ *
+ * A copy that replaces such a row and still names the host by the stamp alone
+ * now keeps the row's mark, and the row is stored without the host stamp: the
+ * environment's own row, read as such at the next boot. The registry entry
+ * keeps the stamp (ObjectQL's owner does not move).
+ *
+ * Also pinned (review nits N1/N2 of PR #32999): a `state: 'draft'` row is
+ * treated like an `active` one, and the rule holds for non-slotted types
+ * beyond the five #32986 names (`page`, `report`; `flow` is stored per
+ * `(package, name)` and is not under this rule).
+ *
+ * BEFORE (#32999's head): every case below not marked CONTROL lost the row.
+ */
+describe('[#33003] a write that rewrites an environment row the boot pass stamped keeps it the environment\'s: unregisterPackage(host) keeps it in process and after a reboot', () => {
+  const HOST = 'com.host.app';
+  const EXT = 'com.ext.app';
+  /** [type, name, state]: one draft row (N1), and two non-slotted types beyond the five (N2). */
+  const ITEMS: ReadonlyArray<readonly [type: string, name: string, state: 'active' | 'draft']> = [
+    ['object', 'env_account', 'active'], ['object', 'env_draft', 'draft'], ['view', 'env_account.all', 'active'],
+    ['app', 'env_app', 'active'], ['hook', 'env_hook', 'active'], ['dashboard', 'env_dashboard', 'active'],
+    ['page', 'env_page', 'active'], ['report', 'env_report', 'active'],
+  ];
+  const OBJECTS = ITEMS.filter(([type]) => type === 'object');
+  let driver: IDataDriver;
+
+  const seed = (type: string, name: string, state: string, body: Record<string, unknown>) =>
+    driver.create('sys_metadata', {
+      id: `${type}_${name}`, type, name, state, version: 1, checksum: `${type}_${name}`,
+      source: 'database', package_id: null, metadata: JSON.stringify({ name, label: 'env', ...body }),
+    });
+  const bootPass = async () => {
+    const plugin = new MetadataPlugin({ packageId: HOST, watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  /** Per item: the registry's stamp, whether a read answers it, and how many stored rows it has. */
+  const state = async (m: MetadataManager, items: ReadonlyArray<readonly [string, string, string]> = ITEMS) => {
+    const out: unknown[] = [];
+    for (const [type, name] of items) {
+      const held = (m as any).registry.get(type)?.get(name) as { _packageId?: string } | undefined;
+      const rows = await driver.find('sys_metadata', { where: { type, name } } as never);
+      out.push([type, name, held?._packageId ?? null, (await m.get(type, name)) !== undefined, rows.length]);
+    }
+    return out;
+  };
+  const kept = (items: ReadonlyArray<readonly [string, string, string]> = ITEMS) => items.map(([type, name]) => [type, name, HOST, true, 1]);
+  const gone = (items: ReadonlyArray<readonly [string, string, string]> = ITEMS) => items.map(([type, name]) => [type, name, null, false, 0]);
+
+  /** Each writer, driven through the call it makes on the manager; `items` = the rows it rewrites. */
+  const WRITES: ReadonlyArray<{ writer: string; items: typeof ITEMS; write: (m: MetadataManager) => Promise<unknown> }> = [
+    {
+      writer: 'ObjectQL\'s late-manifest bridge, ownPreviousCopy arm (an extender\'s field merged, re-registered stamped with the owner)',
+      items: OBJECTS,
+      write: async (m) => {
+        for (const [, name] of OBJECTS) {
+          const current = (m as any).registry.get('object').get(name) as Record<string, unknown>;
+          await m.register('object', name, { ...current, fields: { ext_score: { type: 'number' } }, _packageId: HOST }, { notify: false });
+        }
+      },
+    },
+    {
+      writer: 'the bridge, then restoreExtendedObjectCopies (the owner\'s body put back, stamped with the owner)',
+      items: OBJECTS,
+      write: async (m) => {
+        for (const [, name] of OBJECTS) {
+          await m.register('object', name, { name, label: 'env', fields: { ext_score: { type: 'number' } }, _packageId: HOST }, { notify: false });
+          await m.register('object', name, { name, label: 'env', _packageId: HOST }, { notify: false });
+        }
+      },
+    },
+    {
+      writer: 'ObjectQL\'s object-copy follow (registerInMemory of the served body, stamped with the owner)',
+      items: OBJECTS,
+      write: async (m) => {
+        for (const [, name] of OBJECTS) m.registerInMemory('object', name, { name, label: 'served', _packageId: HOST });
+      },
+    },
+    { writer: 'publishPackage(host)', items: ITEMS, write: (m) => m.publishPackage(HOST, { validate: false }) },
+    {
+      writer: 'publishPackage(host), then revertPackage(host)',
+      items: ITEMS,
+      write: async (m) => {
+        expect((await m.publishPackage(HOST, { validate: false })).success).toBe(true);
+        await m.revertPackage(HOST);
+      },
+    },
+    {
+      writer: 'importMetadata, conflictResolution merge',
+      items: ITEMS,
+      write: (m) => m.importMetadata(
+        Object.fromEntries(ITEMS.map(([type]) => [type, ITEMS.filter(([t]) => t === type).map(([, name]) => ({ name, description: 'imported' }))])),
+        { conflictResolution: 'merge' },
+      ),
+    },
+  ];
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  for (const { writer, items, write } of WRITES) {
+    it(`${writer}: unregisterPackage(host) in the same process keeps each rewritten row, registry entry and stored row (BEFORE: deleted)`, async () => {
+      for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
+      const m = await bootPass();
+      await write(m);
+      expect(await state(m, items), 'the stamp stays on the registry entry: the owner does not move').toEqual(kept(items));
+      await m.unregisterPackage(HOST);
+      expect(await state(m)).toEqual(kept());
+    });
+
+    it(`${writer}: after a reboot from the same database, unregisterPackage(host) keeps each rewritten row (BEFORE: the stored stamp made it the host's, and it was deleted)`, async () => {
+      for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
+      await write(await bootPass());
+      const rebooted = await bootPass();
+      expect(await state(rebooted)).toEqual(kept());
+      await rebooted.unregisterPackage(HOST);
+      expect(await state(rebooted)).toEqual(kept());
+    });
+
+    it(`CONTROL ${writer}: the host's own rows (stored bodies carrying its stamp) are still removed, in the same process and after a reboot`, async () => {
+      for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, { _packageId: HOST });
+      const m = await bootPass();
+      await write(m);
+      const rebooted = await bootPass();
+      expect(await state(rebooted)).toEqual(kept());
+      await rebooted.unregisterPackage(HOST);
+      expect(await state(rebooted)).toEqual(gone());
+      // The same rows, removed by the first process too (already gone from storage).
+      await m.unregisterPackage(HOST);
+      expect(await state(m)).toEqual(gone());
+    });
+  }
+
+  it('CONTROL a copy that names the host by its own key (packageId) is the host\'s item: unregisterPackage(host) removes it', async () => {
+    for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
+    const m = await bootPass();
+    await m.register('object', 'env_account', { name: 'env_account', label: 'env', packageId: HOST, _packageId: HOST });
+    await m.unregisterPackage(HOST);
+    expect(await state(m)).toEqual(ITEMS.map(([type, name]) => name === 'env_account' ? [type, name, null, false, 0] : [type, name, HOST, true, 1]));
+  });
+
+  it('CONTROL unregisterPackage of the extender leaves the environment\'s object the bridge rewrote, and of another package nothing moves', async () => {
+    for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
+    const m = await bootPass();
+    await WRITES[0].write(m);
+    await m.unregisterPackage(EXT);
+    expect(await state(m)).toEqual(kept());
+  });
+});
