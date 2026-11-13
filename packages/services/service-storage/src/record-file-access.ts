@@ -253,7 +253,7 @@ export interface UploadLinkDoor {
 }
 
 /** The data-engine surface these verbs use: the reads and writes every engine has, plus its schema read. */
-export type RecordFileEngine = IDataEngine & {
+export interface RecordFileEngine extends IDataEngine {
   getObject?(objectName: string): unknown;
   /**
    * [#32768] The engine's write-free verdict on whether `field` takes the
@@ -268,7 +268,7 @@ export type RecordFileEngine = IDataEngine & {
     field: string,
     options?: { context?: ExecutionContext },
   ): Promise<{ reason: string; phrase: string } | null>;
-};
+}
 
 /** What {@link RecordFileAccess} is composed over — each read at call time. */
 export interface RecordFileAccessDeps {
