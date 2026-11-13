@@ -820,4 +820,55 @@ describe('[#32666] an object write that makes a field readonly is judged against
         expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
         expect(rulesOf(res, 'shyx_leave_req')).not.toContain('flow-update-readonly-field');
     });
+    it('a flow redrafted UNFIXED in the same batch is refused on its own flow write, naming the flow', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await liveWritableWithFlow(protocol);
+        // The object staged first and the flow redrafted with only a label
+        // edit, still runAs:'user'. The object write leaves a redrafted flow
+        // to its own write; that write meets the readonly draft in the batch.
+        await stageDraft(protocol, 'object', leaveRequest());
+        await stageDraft(protocol, 'flow', submitFlow('shyx_leave_submit', { label: 'Submit (renamed)' }));
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0 });
+        const causal = res.failed.find((f: any) => f.code !== 'BATCH_ABORTED')!;
+        expect(causal, JSON.stringify(res.failed)).toMatchObject({ name: 'shyx_leave_submit', code: 'INVALID_METADATA' });
+        const issues = ((causal as any).issues ?? []).filter((i: any) => i.rule === 'flow-update-readonly-field');
+        expect(issues, JSON.stringify((causal as any).issues)).toHaveLength(1);
+        // The flow write's own spelling: the written flow is `flows[0]`.
+        expect(issues[0]).toMatchObject({ path: 'flows[0].nodes[1].config.fields.status' });
+    });
+
+    it('confined: an object draft that breaks a live sibling under an UNRELATED rule publishes exactly as before', async () => {
+        // A master draft drops `code`, which a live detail's lookup names in
+        // `lookupColumns`. In a batch the written draft is folded into the
+        // object universe, so the sibling's finding cancels and the draft
+        // publishes; it must still, with a live flow in the package carried
+        // as a subject. Only the readonly-flow-writes judgment leaves the
+        // written draft out.
+        const master = () => ({
+            name: 'shyx_master', label: 'Master', sharingModel: 'private',
+            fields: { name: { type: 'text', label: 'Name' }, code: { type: 'text', label: 'Code' } },
+        });
+        const detail = () => ({
+            name: 'shyx_detail', label: 'Detail', sharingModel: 'private',
+            fields: { m: { type: 'lookup', label: 'Master', reference: 'shyx_master', lookupColumns: ['code'] } },
+        });
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await liveWritableWithFlow(protocol);
+        await stageDraft(protocol, 'object', master());
+        await stageDraft(protocol, 'object', detail());
+        expect(await protocol.publishPackageDrafts({ packageId: PKG })).toMatchObject({ outcome: 'published' });
+
+        const { code: _code, ...fields } = master().fields;
+        const withoutCode = { ...master(), fields };
+        await stageDraft(protocol, 'object', withoutCode);
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 1 });
+    });
 });

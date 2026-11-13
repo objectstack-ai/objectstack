@@ -355,6 +355,14 @@ export interface AuthoringRuleContext {
    */
   runtimeWriteType?: string;
   /**
+   * [#32666] Set by the runtime gate on its SUBJECT pass only, which judges
+   * the subject collections it withholds from every other pass
+   * (`RuntimeStackContext.flows` on an object write). Read by the
+   * reference-integrity suite, the one entry whose members declare a subject;
+   * the gate runs no other entry on that pass.
+   */
+  subjectPass?: boolean;
+  /**
    * [#16546] `hooks[*].handler` ref strings whose metadata `body` was minted
    * by `lowerCallables` from the author's inline `handler` function, rather
    * than authored directly. Set by the CLI commands that lower before they

@@ -86,7 +86,8 @@
  * `ReferenceIntegrityRule.runtimeTypes`, default `['flow']` — because the
  * snapshot deliberately carries only the measured context collections
  * (objects / permissions / books / datasets, and [#32666] on an object write
- * the written package's flows), and a member resolving against
+ * the written package's flows, which only a member declaring `subjects` sees,
+ * on the gate's separate subject pass), and a member resolving against
  * any other collection would read every reference into it as dead. The CLI
  * commands ignore the axis entirely: a whole-stack run is always the full
  * suite.
@@ -167,7 +168,8 @@ export interface ReferenceIntegrityRule {
    * are safe to judge that per-write snapshot. The two axes differ because the
    * snapshot is partial by design (`RuntimeStackContext` carries objects /
    * permissions / books / datasets — plus [#32666] the written package's flows
-   * on an object write — and nothing else): a member that resolves
+   * on an object write, judged only by the members declaring them in
+   * {@link ReferenceIntegrityRule.subjects} — and nothing else): a member that resolves
    * against a collection the snapshot does not carry would not go quiet — it
    * would report every reference into that collection as dead. Measured on the
    * `view` widening: `validateActionNameRefs` resolves the action names in
@@ -187,6 +189,15 @@ export interface ReferenceIntegrityRule {
    * {@link validateReferenceIntegrity}).
    */
   runtimeTypes?: readonly string[];
+  /**
+   * [#32666] The context collections this member judges as SUBJECTS — entries
+   * the written item can break without touching them (`RuntimeStackContext.flows`
+   * on an object write). The runtime gate withholds those collections from its
+   * ordinary pass and judges them in a separate subject pass, which runs only
+   * the members declaring them (see {@link ReferenceIntegrityRunOptions.subjectPass}),
+   * so no other rule of the door ever reads a carried subject. ABSENT = none.
+   */
+  subjects?: readonly string[];
   /**
    * `ctx` is the same {@link ReferenceIntegrityRunOptions} `validateReferenceIntegrity`
    * received — optional because most members read only `stack`; the two hook
@@ -766,8 +777,15 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // object write only with the findings it ADDS — a flow already broken on the
   // tenant sits in the stored universe and cancels. MEASURED over the shipped
   // corpus: 0 findings on any object write (the PR carries the census).
-  // `flow` for the floor, unchanged.
-  { name: 'validateReadonlyFlowWrites', runtimeTypes: ['flow', 'object'], run: validateReadonlyFlowWrites },
+  // `flow` for the floor, unchanged. `subjects: ['flows']` is what lets it, and
+  // only it, see the carried flows: the gate's subject pass runs the members
+  // declaring a subject and nothing else.
+  {
+    name: 'validateReadonlyFlowWrites',
+    runtimeTypes: ['flow', 'object'],
+    subjects: ['flows'],
+    run: validateReadonlyFlowWrites,
+  },
   // [commit 36d287803] The SAME question as the member above, on the surface that had no
   // answer for it: a hook body's `ctx.api.object('x').update({ readonlyField })`.
   // A hook's `ctx.api` is a ScopedContext over the TRIGGERING operation's
@@ -854,6 +872,12 @@ export interface ReferenceIntegrityRunOptions {
    */
   runtimeWriteType?: string;
   /**
+   * [#32666] Set by the runtime gate on its SUBJECT pass only: run just the
+   * members declaring a {@link ReferenceIntegrityRule.subjects} collection.
+   * Spells the same key as `AuthoringRuleContext.subjectPass`.
+   */
+  subjectPass?: boolean;
+  /**
    * [#16546] `hooks[*].handler` ref strings whose metadata `body` was minted
    * by `lowerCallables` from the author's inline `handler` function — spells
    * the same key as `AuthoringRuleContext.loweredHookRefs` (see this
@@ -895,6 +919,8 @@ export function validateReferenceIntegrity(
   for (const rule of REFERENCE_INTEGRITY_RULES) {
     if (writeType !== undefined
       && !(rule.runtimeTypes ?? DEFAULT_MEMBER_RUNTIME_TYPES).includes(writeType)) continue;
+    // [#32666] The subject pass judges the carried subjects and nothing else.
+    if (options?.subjectPass === true && !(rule.subjects && rule.subjects.length > 0)) continue;
     findings.push(...rule.run(stack, options));
   }
   return findings;

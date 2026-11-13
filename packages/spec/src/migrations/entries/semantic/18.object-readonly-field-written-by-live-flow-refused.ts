@@ -20,7 +20,10 @@ export const entry: SemanticMigration = {
     + 'flow\'s node, or keep the field writable. A field made readonlyWhen publishes with the '
     + 'flow-update-readonly-when-field advisory instead; derive its value in a beforeUpdate hook. Objects whose '
     + 'readonly fields no live user-run flow writes, and conflicts already on the tenant before this write, are '
-    + 'unchanged.',
+    + 'unchanged. Limits: only flows of the SAME package are judged (a flow of another package that writes the '
+    + 'field is not, and still fails silently at run time). A tenant overlay save that carries no package meets '
+    + 'only package-less flows, so locking a field of a packaged object through such an overlay is not judged '
+    + 'against that package\'s flows. Hook and action bodies that write the field are not judged here.',
   reason:
     'A runAs:\'user\' flow that writes a readonly field is a silent no-op at run time: the engine strips the '
     + 'field and the step still reports success, so the button the flow backs changes nothing and says nothing. '

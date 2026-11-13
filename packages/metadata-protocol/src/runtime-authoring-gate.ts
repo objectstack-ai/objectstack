@@ -1347,16 +1347,19 @@ export function evaluateRuntimeAuthoringGate(args: {
     const objects = mergePendingDeclarations(args.objects ?? [], args.pending?.objects);
     // [#32666] The flows an object write judges as subjects; none on any other type.
     const objectWriteFlows = objectWriteFlowSubjects(args.type, args.flows, args.pending?.flows);
-    // [#32666] …and, on that write, the object universe the RULES judge with
-    // the written object's own draft left out of the fold: the item IS that
-    // draft, so folding it in made the gate's stored universe the candidate
-    // itself, and every finding the write adds on another entry — a carried
-    // flow's — cancelled against its own copy. Left out, the written object's
-    // stored self is its LIVE body (none for a new object), the universe the
-    // single-item door judges against. Every other object stays folded.
-    const ruleObjects = objectWriteFlows !== undefined
+    // [#32666] …and, on that write, the objects the SUBJECT differential judges
+    // them against: the fold WITHOUT the written object's own draft. The item
+    // IS that draft, so with it folded in the gate's stored universe was the
+    // candidate itself, and a conflict the write adds on a carried flow
+    // cancelled against its own copy. Left out, the written object's stored
+    // self is its LIVE body (none for a new object), the universe the
+    // single-item door judges against. ⛔ Handed as `subjectObjects` only: the
+    // ordinary differential keeps the full fold, so every other object-door
+    // rule judges exactly what it judged before (a draft that breaks a live
+    // sibling under them still cancels, as it always has).
+    const subjectObjects = objectWriteFlows !== undefined && objectWriteFlows.length > 0
         ? mergePendingDeclarations(args.objects ?? [], withoutWrittenItem(args.pending?.objects, args.name))
-        : objects;
+        : undefined;
 
     const result = runRuntimeAuthoringRules({
         type: args.type,
@@ -1369,12 +1372,13 @@ export function evaluateRuntimeAuthoringGate(args: {
         // had been threaded, `datasets` had not, and the difference was
         // invisible until an error-severity rule landed on the un-threaded one.
         context: {
-            objects: ruleObjects,
+            objects,
             permissions: mergePendingDeclarations(args.permissions ?? [], args.pending?.permissions),
             books: mergePendingDeclarations(args.books ?? [], args.pending?.books),
             datasets: mergePendingDeclarations(args.datasets ?? [], args.pending?.datasets),
             ...(objectWriteFlows !== undefined ? { flows: objectWriteFlows } : {}),
         },
+        ...(subjectObjects !== undefined ? { subjectObjects } : {}),
         ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
         ...(args.judgeFilter !== undefined ? { judgeFilter: args.judgeFilter } : {}),
         ...(args.restoredCredentialPaths !== undefined

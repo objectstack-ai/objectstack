@@ -18,7 +18,8 @@ A `runAs: 'user'` flow that writes a `readonly` field is a silent no-op at run t
 
 - The `validateReadonlyFlowWrites` member of the reference-integrity suite now judges `object` writes as well as `flow` writes (`flow-update-readonly-field` at `error`, `flow-update-readonly-when-field` at `warning`).
 - On an object write the host carries the written package's live flows (`RuntimeStackContext.flows`, a new optional key) as the subjects that rule judges. Flows of other packages are not carried. A flow the same batch redrafts is judged on its own write, not as a subject. The finding is located on the flow by name, e.g. `flows.leave_submit.nodes[1].config.fields.status`.
+- The carried flows are judged in a separate subject pass that runs only the suite members declaring them (`ReferenceIntegrityRule.subjects`, new; `runRuntimeAuthoringRules` gains `subjectObjects`). Every other rule of the object door judges exactly the snapshot it judged before, so no other refusal or advisory moves.
 - A flow write is unchanged: it is handed no flows, and its findings keep the positional `flows[0]` path.
-- Cost: one more indexed `sys_metadata` read per object publish (issued together with the four the gate already makes), and on a package publish one draft read per flow draft in the batch. Not measured on a production store.
+- Cost: one more indexed `sys_metadata` read per object publish (issued together with the four the gate already makes), and on a package publish holding an object draft one draft read per flow draft in the batch; a batch with no object draft reads none. Not measured on a production store.
 
 Migration: before making a field readonly, publish the flow that writes it with `runAs: 'system'` (a button or action starts an elevated flow only as a `screen` or `api` flow, or through a `subflow` node), remove the field from the flow's node, or keep the field writable.

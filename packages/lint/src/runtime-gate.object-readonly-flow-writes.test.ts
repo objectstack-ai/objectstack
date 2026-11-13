@@ -17,7 +17,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { runRuntimeAuthoringRules } from './runtime-gate.js';
+import { validateReferenceIntegrity } from './reference-integrity-suite.js';
+import { runRuntimeAuthoringRules, SUBJECT_PASS_ENTRIES } from './runtime-gate.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -142,5 +143,71 @@ describe('[#32666] an object write re-judges the package\'s live flows for reado
 
     const errors = readonlyFindings(result.errors);
     expect(errors.map((f) => f.path)).toEqual(['flows[0].nodes[1].config.fields.status']);
+  });
+  it('the carried flows reach ONLY the readonly-flow-writes members — no other rule judges them', () => {
+    // `validatePresetComparands` walks `stack.flows` and judges a bare preset
+    // name as an equality comparand on a declared `date` field. The object
+    // write below turns `period` into a date while a carried flow filters on
+    // `period: 'last_30_days'`; were the flows in the ordinary differential,
+    // that rule would charge the object write with a finding on the flow.
+    // The subject differential runs only the members declaring a subject.
+    const withPeriod = (type: string): AnyRec => ({
+      ...leaveRequest(),
+      fields: { ...(leaveRequest().fields as AnyRec), period: { type, label: 'Period' } },
+    });
+    const flow = submitFlow({
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        {
+          id: 'mark',
+          type: 'update_record',
+          label: 'Mark pending',
+          config: { objectName: 'el5z_leave_req', filter: { period: 'last_30_days' }, fields: { name: 'x' } },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+    });
+    const result = objectWrite(withPeriod('date'), { objects: [withPeriod('text')], flows: [flow] });
+
+    expect([...result.errors, ...result.advisories].filter((f) => f.path.startsWith('flows'))).toEqual([]);
+    expect([...SUBJECT_PASS_ENTRIES]).toEqual(['validateReferenceIntegrity']);
+  });
+
+  it('subjectObjects: the subject pass judges against them, the ordinary pass keeps context.objects', () => {
+    // The publish batch folds the written object's own draft into
+    // `context.objects`; the stored self is then the candidate and the
+    // conflict cancels. The host hands the fold WITHOUT the written draft as
+    // `subjectObjects`, which the subject differential judges against.
+    const draft = leaveRequest({ readonly: true });
+    const folded = objectWrite(draft, { objects: [draft], flows: [submitFlow()] });
+    expect(readonlyFindings(folded.errors)).toEqual([]);
+
+    const result = runRuntimeAuthoringRules({
+      type: 'object',
+      item: draft,
+      context: { objects: [draft], flows: [submitFlow()] },
+      subjectObjects: [leaveRequest()],
+    });
+    expect(readonlyFindings(result.errors).map((f) => f.path)).toEqual([
+      'flows.el5z_leave_submit.nodes[1].config.fields.status',
+    ]);
+  });
+  it('on its subject pass the suite runs only the members declaring a subject', () => {
+    // A lookup naming a column its target lacks: `validateObjectFieldRefs`,
+    // an object-dispatched member that declares no subject, finds it on an
+    // ordinary pass and is not run on the subject pass.
+    const stack = {
+      objects: [
+        { name: 'el5z_master', label: 'Master', fields: { name: { type: 'text', label: 'Name' } } },
+        {
+          name: 'el5z_detail',
+          label: 'Detail',
+          fields: { m: { type: 'lookup', label: 'Master', reference: 'el5z_master', lookupColumns: ['code'] } },
+        },
+      ],
+    };
+    const ordinary = validateReferenceIntegrity(stack as never, { runtimeWriteType: 'object' });
+    expect(ordinary.map((f) => f.rule)).toContain('object-field-ref-unknown');
+    expect(validateReferenceIntegrity(stack as never, { runtimeWriteType: 'object', subjectPass: true })).toEqual([]);
   });
 });
