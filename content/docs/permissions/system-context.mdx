@@ -223,8 +223,8 @@ One of the largest consumers of the flag;
 
 ### 6. Reads that only carry the flag onward
 
-Not behaviours: these four sites read the flag solely to copy it into another
-context or envelope. They are listed because the census counts them, and because
+Not behaviours: these five sites read the flag solely to copy it into another
+context or envelope, or to take it off one. They are listed because the census counts them, and because
 a reader tracing where elevation travels needs them.
 
 | # | Symbol | Package | What it does |
@@ -232,6 +232,7 @@ a reader tracing where elevation travels needs them.
 | 63 | `buildSession` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
 | 64 | `isSystem` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
 | 65 | `executionContextFromHook` | runtime | Rebuilds an `ExecutionContext` from a hook session, carrying the flag across |
+| 65b | `callerScopeOf` | runtime | Takes a script body's own elevation off its caller's envelope (the app-automation mark and the flag it came with), so `ctx.email.send` and `ctx.activity.append` read the record a body points at in the caller's scope. It removes the flag and grants nothing |
 | 66 | `toolCallPrincipalOf` | mcp | Projects the host's resolved `ExecutionContext` into the frozen principal an installed MCP tool-call interceptor reads, carrying `isSystem: true` only for a system caller. It decides nothing: the tool still runs under its own context |
 
 ---
@@ -682,6 +683,7 @@ and CI refuses one that differs from what the tree produces.
 | `packages/runtime/src/domains/permission-set-clone.ts#handlePermissionSetCloneWrite` | 2 | 50 |
 | `packages/runtime/src/domains/security.ts#handleSecurityRequest` | 1 | 52 |
 | `packages/runtime/src/flow-start-admission.ts#flowStartRefusal` | 1 | 57 |
+| `packages/runtime/src/sandbox/body-doors.ts#callerScopeOf` | 1 | 65b |
 | `packages/runtime/src/sandbox/body-runner.ts#executionContextFromHook` | 1 | 65 |
 | `packages/services/service-automation/src/runtime-identity.ts#stampSystemInsertOwner` | 1 | 60 |
 | `packages/services/service-knowledge/src/knowledge-service.ts#applyPermissionFilter` | 1 | 46 |

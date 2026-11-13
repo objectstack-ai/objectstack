@@ -380,11 +380,13 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // (`agent`, `field`, `hook`, `object`, `position`, `skill`, `tool`) do not
     // gain it, and their counts stay.
     // [#28979] `page` 27 → 28: `apps`, the app scope of a record page.
+    // [#32955] `object` 49 → 50: `schemaReadDelegate`, the service an object's
+    // owner names to serve its definition to callers its own door admits.
     // [#32983] `position` 13 → 14: `renamedFrom`, the earlier names whose
     // holders the security plugin moves to the renamed position at boot.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
         agent: 24, app: 24, dashboard: 21, dataset: 17, field: 83, flow: 23,
-        hook: 23, object: 49, page: 28, position: 14, report: 24, skill: 16, tool: 14,
+        hook: 23, object: 50, page: 28, position: 14, report: 24, skill: 16, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(

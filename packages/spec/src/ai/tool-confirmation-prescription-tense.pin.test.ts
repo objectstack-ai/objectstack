@@ -48,9 +48,16 @@
  * An unbounded "the platform refuses unconfirmed calls" would be this same
  * defect in the first direction. The door's enforced set is bounded by
  * `ai.exposed`, so the prose must carry that bound, and the REST `/actions`
- * door must still be outside it — asserted here against
- * `runtime/src/domains/actions.ts` rather than trusted. If REST ever joins the
- * gate, the sentence saying it sits outside becomes false and this pin says so.
+ * door must still be outside it FOR A PERSON — asserted here against
+ * `runtime/src/domains/actions.ts` and the admitted sequence rather than
+ * trusted. If REST ever joins the gate for a person, the sentence saying it
+ * sits outside becomes false and this pin says so.
+ *
+ * [ADR-0151 D3 rule 3] One caller meets the gate at every door: an AI service
+ * account, which never confirms an action for itself. The admitted sequence
+ * asks the gate for an account under BOTH postures and hands it the caller's
+ * envelope, and the prose states that rule beside the REST carve-out; both
+ * halves are pinned below.
  *
  * ⛔ Scope: the RELATION and the two load-bearing facts, never the wording.
  * Rewording these prescriptions freely is fine. What they may not do is deny
@@ -79,6 +86,22 @@ const GATE_SOURCE = join(REPO_ROOT, 'packages', 'runtime', 'src', 'action-execut
 const REST_ACTIONS_SOURCE = join(REPO_ROOT, 'packages', 'runtime', 'src', 'domains', 'actions.ts');
 /** [#31923] The one admitted sequence the REST door, MCP `run_action` and `dispatchAction` share. */
 const SEQUENCE_SOURCE = join(REPO_ROOT, 'packages', 'runtime', 'src', 'action-dispatch.ts');
+/** [ADR-0151 D3 rule 3] The published request/refusal contract the prescription cites as enforced. */
+const CONTRACT_SOURCE = join(HERE, '..', 'contracts', 'ai-service.ts');
+
+/**
+ * One contract docblock's prose, its comment gutters folded into spaces: from
+ * the `/**` opening the docblock above `start` to the first `end` after it.
+ */
+function contractProse(start: string, end: string): string {
+  const source = readFileSync(CONTRACT_SOURCE, 'utf8');
+  const at = source.indexOf(start);
+  expect(at, `\`${start}\` moved — re-anchor this pin`).toBeGreaterThan(-1);
+  const open = source.lastIndexOf('/**', at);
+  const close = source.indexOf(end, at);
+  expect(close, `\`${end}\` moved — re-anchor this pin`).toBeGreaterThan(at);
+  return source.slice(open, close).replace(/\n\s*\*\s?/g, ' ').replace(/\s+/g, ' ');
+}
 
 /** One top-level function's text, from its signature to the next top-level declaration. */
 function topLevelBody(file: string, signature: string): string {
@@ -180,6 +203,14 @@ describe('the confirmation-gate prescriptions match the door that runs', () => {
     expect(body, 'the gate stopped requiring the confirmation member').toMatch(
       /AI_ACTION_CONFIRMATION_MEMBER\] === true/,
     );
+    // [ADR-0151 D3 rule 3] It reads the caller, and the member never attests
+    // for an AI service account.
+    expect(body, 'the gate stopped reading the caller for an AI service account').toMatch(
+      /const account = isAiServiceAccountCaller\(caller\)/,
+    );
+    expect(body, 'the confirmation member attests for an AI service account again').toMatch(
+      /if \(!account && request\?\.\[AI_ACTION_CONFIRMATION_MEMBER\] === true\) return undefined/,
+    );
     // The envelope the prose names, by value.
     expect(source).toMatch(/ACTION_CONFIRMATION_REQUIRED_CODE = 'ACTION_CONFIRMATION_REQUIRED'/);
     expect(source).toMatch(/ACTION_CONFIRMATION_REQUIRED_STATUS = 428/);
@@ -196,10 +227,14 @@ describe('the confirmation-gate prescriptions match the door that runs', () => {
     expect(door, '`invokeBusinessAction` no longer runs the sequence under the `ai` posture' + stale).toMatch(/posture: 'ai'/);
 
     const admit = topLevelBody(SEQUENCE_SOURCE, 'async function admitResolvedAction(');
+    // [ADR-0151 D3 rule 3] Under `ai` for every caller, and under BOTH
+    // postures for an AI service account — with the caller's envelope.
     expect(
       admit,
-      'the admission half no longer calls `actionConfirmationRefusal` under the `ai` posture' + stale,
-    ).toMatch(/if \(posture === 'ai'\) \{\s*const confirmationRefusal = actionExec\.actionConfirmationRefusal\(/);
+      'the admission half no longer calls `actionConfirmationRefusal` under the `ai` posture and for an AI service account' + stale,
+    ).toMatch(
+      /if \(posture === 'ai' \|\| actionExec\.isAiServiceAccountCaller\(wiring\.ec\)\) \{\s*const confirmationRefusal = actionExec\.actionConfirmationRefusal\(\s*deps, actionDef, call\.confirmation \?\? \{\}, objectName, wiring\.ec,\s*\)/,
+    );
     // Pre-dispatch: the admission half runs nothing itself …
     expect(admit, 'the admission half now dispatches').not.toMatch(/dispatchAdmittedAction\(|executeAction\(|dispatchFlowAction\(/);
     // … and the sequence returns its refusal before it dispatches.
@@ -213,7 +248,7 @@ describe('the confirmation-gate prescriptions match the door that runs', () => {
     ).toBe(true);
   });
 
-  it('REST `/actions` is still OUTSIDE the gate, which is what the bound claims', () => {
+  it('REST `/actions` is still OUTSIDE the gate for a person, which is what the bound claims', () => {
     // The over-claim guard. The prose tells an author to arrange their own
     // human in front of REST; if that door joins the gate, the sentence is
     // false and this is where it is caught.
@@ -279,8 +314,37 @@ describe('the confirmation-gate prescriptions match the door that runs', () => {
       // defect in the other direction.
       expect(text, `${name} dropped the \`ai.exposed\` bound`).toMatch(/`ai\.exposed`/);
       expect(text, `${name} dropped the REST \`/actions\` carve-out`).toMatch(/REST `\/actions`/);
+      // [ADR-0151 D3 rule 3] The carve-out is a person's; the account rule
+      // rides beside it, or the prose tells an account REST is open to it.
+      expect(text, `${name} dropped the AI service account rule`).toMatch(
+        /An AI service account \(an agent acting for itself[^)]*\) does not confirm an action for itself/,
+      );
+      expect(text, `${name} no longer says the account is refused at REST too`).toMatch(/REST `\/actions` included/);
       expect(text, `${name} dropped the unverifiable-claim caveat`).toMatch(/unverifiable caller claim/);
     }
+  });
+
+  it('the published contract states the account rule beside the member it gates', () => {
+    // [ADR-0151 D3 rule 3] `AIActionConfirmation` and
+    // `ActionConfirmationRequiredDetails` are the normative text the door is
+    // cited against. They may not say the member is the ONLY predicate, or
+    // promise every caller a retry that succeeds, now that the door refuses an
+    // AI service account whatever it sends.
+    const confirmation = contractProse('export interface AIActionConfirmation', 'confirm?: boolean;');
+    expect(confirmation.length, '`AIActionConfirmation` docblock read empty').toBeGreaterThan(2000);
+    expect(confirmation, 'the contract dropped the AI service account rule').toMatch(
+      /AI service account[^.]*does not confirm an action for itself/,
+    );
+    expect(confirmation, 'the contract makes the member the only predicate again').not.toMatch(/when, and only when/i);
+    expect(confirmation, 'the contract promises every always-confirming client success again').not.toMatch(
+      /a client that always confirms/i,
+    );
+
+    const details = contractProse(
+      'export interface ActionConfirmationRequiredDetails',
+      'confirmationMember: typeof AI_ACTION_CONFIRMATION_MEMBER',
+    );
+    expect(details, 'the refusal details promise every caller a retry again').toMatch(/AI service account/);
   });
 
   it('moves NO accept set — the same metadata is accepted and refused as before', () => {

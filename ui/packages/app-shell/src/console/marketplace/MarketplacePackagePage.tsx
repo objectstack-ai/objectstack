@@ -62,6 +62,7 @@ import { useAdapter, useHasNotificationProvider } from '@object-ui/react';
 import { PackageIcon } from './PackageIcon.js';
 import { MarkdownText } from './MarkdownText.js';
 import { PluginDisclosure } from './PluginDisclosure.js';
+import { ObjectExtensionDisclosure, needsPlatformAcknowledgment, type ObjectExtensionsReading } from './ObjectExtensionDisclosure.js';
 import { MarketplaceAccessDenied } from './MarketplaceAccessDenied.js';
 import { MarketplaceResolving } from './MarketplaceResolving.js';
 import { MarketplaceDisabled } from './MarketplaceDisabled.js';
@@ -275,6 +276,9 @@ function MarketplacePackagePageBody() {
   // PD4: a code-bearing package requires explicit acknowledgement of its
   // requested permissions before the install button is enabled.
   const [acknowledged, setAcknowledged] = useState(false);
+  // objectstack#31542 — a package that changes a platform (`sys_*`) object
+  // waits for this acknowledgment, in the install dialog and the local confirm.
+  const [extensionsAcknowledged, setExtensionsAcknowledged] = useState(false);
   const [installing, setInstalling] = useState(false);
   // objectstack#32040 — the hosted unmanaged install's target namespace: the
   // control plane's default as read for one package (`null` while the read is
@@ -345,6 +349,12 @@ function MarketplacePackagePageBody() {
   // = still reading. The confirm in front of a local Install draws it.
   const [previewRead, setPreviewRead] = useState<{ packageId: string; preview: InstallPreview | null } | null>(null);
   const [confirmLocalOpen, setConfirmLocalOpen] = useState(false);
+  // objectstack#31542 — the platform-object acknowledgment is given for one
+  // opening: however a surface closes (its own Close button included, which
+  // bypasses `onOpenChange`), the next opening asks again.
+  useEffect(() => {
+    if (!installOpen && !confirmLocalOpen) setExtensionsAcknowledged(false);
+  }, [installOpen, confirmLocalOpen]);
   // `undefined` until read, when the manifest declares none, or when it could
   // not be read: then no choice is drawn and no mode is sent, so the door's own
   // default and answer decide.
@@ -1474,6 +1484,19 @@ function MarketplacePackagePageBody() {
     : undefined;
   const installModeReasonId = 'install-mode-required-reason';
   const localPreviewRead = previewRead && previewRead.packageId === packageId ? previewRead : null;
+  // objectstack#31542 — the existing objects the install changes: the catalog's
+  // `object_extensions` for the version installed (`latest`); on a catalog that
+  // does not serve the key, the same reading of the manifest read above. No
+  // manifest read on this runtime, or none readable: `null`, "could not read".
+  const catalogExtensions = pkg.latest_version?.object_extensions;
+  const objectExtensions: ObjectExtensionsReading = catalogExtensions !== undefined
+    ? catalogExtensions
+    : !getRuntimeConfig().features.installLocal && !getCloudBase()
+      ? null
+      : !localPreviewRead
+        ? undefined
+        : localPreviewRead.preview?.objectExtensions ?? null;
+  const extensionsUnacknowledged = needsPlatformAcknowledgment(objectExtensions) && !extensionsAcknowledged;
   const primaryAction = supportsLocal
     ? {
       label: installingLocal
@@ -1841,10 +1864,17 @@ function MarketplacePackagePageBody() {
               )}
             </div>
           )}
+          <ObjectExtensionDisclosure
+            extensions={objectExtensions}
+            acknowledged={extensionsAcknowledged}
+            onAcknowledgedChange={setExtensionsAcknowledged}
+            idPrefix="install-preview-object-extensions"
+          />
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               data-testid="install-preview-confirm"
+              disabled={extensionsUnacknowledged}
               onClick={() => { void runInstallLocal(); }}
             >
               {localInstall ? t('marketplace.action.reinstall') : t('marketplace.action.install')}
@@ -2040,6 +2070,17 @@ function MarketplacePackagePageBody() {
             </div>
           )}
 
+          {/* objectstack#31542 — every package, not only code: the existing
+              objects it changes, platform objects flagged and acknowledged. */}
+          {!envsError && (
+            <ObjectExtensionDisclosure
+              extensions={objectExtensions}
+              acknowledged={extensionsAcknowledged}
+              onAcknowledgedChange={setExtensionsAcknowledged}
+              idPrefix="install-object-extensions"
+            />
+          )}
+
           {containsCode && !envsError && (
             <div className="space-y-3">
               <PluginDisclosure version={pkg.latest_version} />
@@ -2091,7 +2132,7 @@ function MarketplacePackagePageBody() {
             {!envsError && (
               <Button
                 onClick={doInstall}
-                disabled={!selectedEnv || installing || installResult?.ok === true || deploy !== null || (containsCode && !acknowledged) || namespaceLoading}
+                disabled={!selectedEnv || installing || installResult?.ok === true || deploy !== null || (containsCode && !acknowledged) || extensionsUnacknowledged || namespaceLoading}
               >
                 {dialogUpdate
                   ? (installing ? t('marketplace.action.updating') : t('marketplace.action.updateTo', { defaultValue: 'Update' }))

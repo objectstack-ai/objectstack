@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 309 |
-| Object name statically decidable | 215 |
+| Write call sites | 310 |
+| Object name statically decidable | 216 |
 | Object name chosen at run time | 94 |
-| Against a tenancy-enabled object | 208 |
+| Against a tenancy-enabled object | 209 |
 | Against an object declaring tenancy off | 7 |
 | Threading a tenant context | 239 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
-| Options argument unreadable | 58 |
-| …and decidably tenancy-enabled | 31 |
+| Options argument unreadable | 59 |
+| …and decidably tenancy-enabled | 32 |
 | Threading a decidably elevated context | 174 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 123 |
+| Threading a context of undecidable elevation | 124 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-13 at `7a1bbb3f2`.
+Measured on 2026-11-13 at `cc6cce96c`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1146 |
+| tracked non-test sources scanned | 1149 |
 | engine-shaped types recognised | 135 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 292 |
+| same-named calls subtracted as non-engine | 293 |
 
 ## Every site
 
@@ -119,6 +119,7 @@ Measured on 2026-11-13 at `7a1bbb3f2`.
 | `packages/plugins/plugin-approvals/src/stored-process-package-backfill.ts` | `update` | `sys_approval_request` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/action-invocation-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
+| `packages/plugins/plugin-audit/src/app-activity-door.ts` | `insert` | `sys_activity` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/amendment-writer.ts` | `insert` | `AUDIT_AMENDMENT_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/sealer.ts` | `insert` | `AUDIT_CHECKPOINT_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `insert` | `AUDIT_SIGNING_KEY_OBJECT` | undecidable | elevated | 1 |

@@ -37,6 +37,14 @@
  *    a webhook a package declares. The row answers and the declaration is
  *    withheld for the whole deployment (`plugin-webhooks`' `declared-webhooks.ts`).
  *
+ * A webhook is addressed by `(package, name)` (ADR-0150 D5, #31699): two
+ * packages of two namespaces may each declare one name, and each holder's
+ * switch is its own ledger row. So a webhook ledger row naming package P is an
+ * orphan when P no longer ships the name, whichever other package does, and
+ * covers only P's name; a row holding a declared name withholds every
+ * holder's declaration, one finding per holder. Flow and action keep their
+ * name-addressed reading.
+ *
  * Validations and scheduled jobs have no switch and no stored row of their
  * own, so nothing of theirs is kept by name for an upgrade to strand.
  *
@@ -445,6 +453,28 @@ function shippingPackage(registry: UpgradeImpactRegistry, type: string, name: st
   return isCodeArtifactBody(artifact) ? String((artifact as { _packageId: unknown })._packageId) : undefined;
 }
 
+/** Does package `packageId` itself ship `(type, name)` as a code artifact? (#31699: by `(package, name)`.) */
+function shipsAt(registry: UpgradeImpactRegistry, type: string, name: string, packageId: string): boolean {
+  const artifact = registry.getArtifactItem(type, name, packageId);
+  return isCodeArtifactBody(artifact) && (artifact as { _packageId: unknown })._packageId === packageId;
+}
+
+/**
+ * [#31699] Every package that declares webhook `name`: the one the bare
+ * artifact lookup answers (a disabled package's included, as before), then
+ * each other package the served listing holds it under, in listing order.
+ */
+function webhookShippers(registry: UpgradeImpactRegistry, name: string): string[] {
+  const out = new Set<string>();
+  const first = shippingPackage(registry, 'webhook', name);
+  if (first !== undefined) out.add(first);
+  for (const item of registry.listItems('webhook')) {
+    if (!isRecord(item) || !isCodeArtifactBody(item) || nameOf(item.name) !== name) continue;
+    out.add(String(item._packageId));
+  }
+  return [...out];
+}
+
 interface ActionDeclaration {
   object: string;
   /** The package shipping it; `null` for an action the environment authored. */
@@ -553,16 +583,30 @@ export async function collectUpgradeImpactFindings(
       };
 
       const ledgerNames: Record<UpgradeImpactLedgerType, Set<string>> = { flow: new Set(), action: new Set(), webhook: new Set() };
+      /** [#31699] The webhook rows by `(package, name)`: `<package or empty>\u0000<name>`. */
+      const webhookRowKeys = new Set<string>();
+      const webhookKey = (packageId: string | null, name: string) => `${packageId ?? ''}\u0000${name}`;
       const ledger: Array<{ type: UpgradeImpactLedgerType; name: string; packageId: string | null; switchedOff: boolean }> = [];
       for (const row of ledgerRows) {
         const type = row.metadata_type as UpgradeImpactLedgerType;
         const name = nameOf(row.name);
         if (!(UPGRADE_IMPACT_LEDGER_TYPES as readonly string[]).includes(type) || name === undefined) continue;
         ledgerNames[type].add(name);
+        if (type === 'webhook') webhookRowKeys.add(webhookKey(bindingOf(row.package_id), name));
         ledger.push({ type, name, packageId: bindingOf(row.package_id), switchedOff: row.active === false || row.active === 0 });
       }
+      // A webhook row naming a package is that package's switch alone (#31699);
+      // one naming none, and every flow and action row, is judged by name.
+      const ships = (row: { type: UpgradeImpactLedgerType; name: string; packageId: string | null }): boolean =>
+        row.type === 'webhook' && row.packageId !== null
+          ? shipsAt(registry, 'webhook', row.name, row.packageId)
+          : shipper(row.type, row.name) !== undefined;
+      const covered = (type: UpgradeImpactLedgerType, name: string, packageId: string): boolean =>
+        type === 'webhook'
+          ? webhookRowKeys.has(webhookKey(packageId, name)) || webhookRowKeys.has(webhookKey(null, name))
+          : ledgerNames[type].has(name);
       for (const row of ledger) {
-        if (shipper(row.type, row.name) !== undefined) {
+        if (ships(row)) {
           if (row.type !== 'action' || !row.switchedOff) continue;
           const objects = [...new Set((actions.get(row.name) ?? []).map((d) => d.object))].sort(compare);
           if (objects.length > 1) report.sharedActionSwitches.push({ name: row.name, packageId: row.packageId, objects });
@@ -570,7 +614,8 @@ export async function collectUpgradeImpactFindings(
         }
         report.orphans.push({ ...row });
         if (!row.switchedOff || row.packageId === null) continue;
-        const candidates = shippedNames(row.type, row.packageId).filter((name) => !ledgerNames[row.type].has(name));
+        const packageId = row.packageId;
+        const candidates = shippedNames(row.type, packageId).filter((name) => !covered(row.type, name, packageId));
         if (candidates.length > 0) {
           report.reEnablements.push({ type: row.type, name: row.name, packageId: row.packageId, candidates });
         }
@@ -604,11 +649,13 @@ export async function collectUpgradeImpactFindings(
       }
 
       // ── C: 5. withheld declared webhooks.
+      // A row withholds every holder's declaration of its name (#31699).
       for (const row of webhookRows) {
         const name = nameOf(row.name);
-        const packageId = name === undefined ? undefined : shippingPackage(registry, 'webhook', name);
-        if (name === undefined || packageId === undefined) continue;
-        report.withheldWebhooks.push({ name, packageId, rowId: String(row.id), organizationId: organizationOf(row) });
+        if (name === undefined) continue;
+        for (const packageId of webhookShippers(registry, name)) {
+          report.withheldWebhooks.push({ name, packageId, rowId: String(row.id), organizationId: organizationOf(row) });
+        }
       }
 
       // ── E: 7. field collisions.
@@ -699,7 +746,7 @@ export async function collectUpgradeImpactFindings(
   sortedBy(report.reEnablements, (r) => r.type, (r) => r.name);
   sortedBy(report.sharedActionSwitches, (s) => s.name);
   sortedBy(report.shadowedFlows, (s) => s.name, (s) => s.rowId);
-  sortedBy(report.withheldWebhooks, (w) => w.name, (w) => w.rowId);
+  sortedBy(report.withheldWebhooks, (w) => w.name, (w) => w.rowId, (w) => w.packageId);
   sortedBy(report.overlayOrphans, (o) => o.type, (o) => o.name, (o) => o.member ?? '', (o) => o.rowId);
   sortedBy(report.fieldCollisions, (c) => c.object, (c) => c.field);
   sortedBy(report.refusedObjectRows, (r) => r.name, (r) => r.rowId);
@@ -743,7 +790,7 @@ function logError(logger: UpgradeReportLogger | undefined, message: string, meta
 
 const SWITCH_DOORS =
   'POST /api/v1/automation/<flow>/toggle, POST /api/v1/actions/_activation/<object>/<action> or ' +
-  'POST /api/v1/security/_activation/webhook/<name>, with { "enabled": false }';
+  'POST /api/v1/security/_activation/webhook/<namespace>/<name>, with { "enabled": false }';
 
 /** The finding set as stable data: what the digest, the notification and the log carry. */
 export function upgradeImpactSummary(report: UpgradeImpactReport): Record<FindingKey, unknown[]> {
@@ -782,7 +829,8 @@ const CATEGORY_LINES: Record<FindingKey, (count: number) => string> = {
     `[security] upgrade impact: ${n} sys_webhook row(s) hold the name of a webhook a package declares, so the row ` +
     'answers and the declared webhook is withheld for the whole deployment. Nothing was changed. Fix: rename or ' +
     'delete the row to let the declaration answer; to keep the row as well, rename it, and switch the declared ' +
-    'one off if it must not fire (POST /api/v1/security/_activation/webhook/<name> with { "enabled": false }).',
+    'one off if it must not fire (POST /api/v1/security/_activation/webhook/<namespace>/<name> with { "enabled": false }, ' +
+    'the namespace of the package the finding names).',
   overlayOrphans: (n) =>
     `[security] upgrade impact: ${n} customization(s) of a view, dashboard, report, translation or email template ` +
     'are bound to a package that no longer ships the item, so each is served as an item of its own beside ' +

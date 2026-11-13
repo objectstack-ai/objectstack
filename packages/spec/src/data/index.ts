@@ -228,6 +228,7 @@ export * from './autonumber-format';
 export * from './validation.zod';
 export * from './hook.zod';
 export * from './hook-body.zod';
+export * from './hook-body-doors.zod';
 // [#26170] A hook's refusal catalogue: the code spelling, the save-time reading
 // of a body's literal throws, and the sentences the schema and the body runner
 // both speak.

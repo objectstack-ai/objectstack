@@ -391,6 +391,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'apps',
     why: "live, not offered in this form — the console opens the scoped page inside each app the list names (the page assignment reads the route's app), but no registered form widget spells a list of app names: there is no app picker, and a free-text list would let an author type a package id or a label where an app name is required, which the parse refuses only after the fact. Authored in source or the page JSON until an app-name picker exists",
   },
+  // #32955 — an object's schema-read delegate is `live` (the object-schema
+  // posture asks it), and deliberately never offered: each declaration is a
+  // recorded exception to ruling record 6787890900 (ADR-0106, "Exception
+  // (2026-11-13)"), and the service it names exists only in code.
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'schemaReadDelegate',
+    why: "live, reserved to code — the key names a kernel service whose `authorizeSchemaRead` serves this object's definition to callers the object read check refuses, and ADR-0106 makes every declaration a further exception to ruling record 6787890900 that is recorded in the ADR and reviewed before it ships. The service exists only where a plugin registers it, so the declaration belongs in that plugin's own object source beside the service (as `sys_approval_request` and `sys_approval_action` declare `approvals`). A form control would hand every author a declaration the ADR reserves, and one naming a service the deployment lacks leaves the object absent anyway",
+  },
   // #28022 — an app's per-audience landing list lands spec-first the same way:
   // `planned` in the liveness ledger, read by no console until the landing
   // redirect card. Offering it in the app form first would be the UI half of

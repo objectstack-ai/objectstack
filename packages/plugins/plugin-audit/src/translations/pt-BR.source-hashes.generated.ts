@@ -18,6 +18,8 @@
  */
 
 export const ptBRGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "objects.sys_activity.fields.origin.help": "036947e355512b7f",
+  "objects.sys_activity.fields.origin.label": "f8071c8dc31952ae",
   "objects.sys_activity.fields.url.label": "2203b0b9f72534f7",
   "objects.sys_audit_amendment.description": "593f7118f80bd85d",
   "objects.sys_audit_amendment.fields.amended_at.label": "eb49c9af1cb3db60",

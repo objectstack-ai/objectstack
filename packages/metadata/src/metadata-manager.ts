@@ -655,6 +655,17 @@ export class MetadataManager implements IMetadataService {
    */
   private readonly storedPackagelessRows = new WeakSet<object>();
   /**
+   * [#32986] The items of every OTHER type (one not stored per
+   * `(package, name)`: `object`, `view`, `app`, `hook`, `dashboard` …) that
+   * {@link loadMany} read from a stored-row loader (`datasource:`) naming no
+   * package: the environment's own rows. The boot priming pass stamps one with
+   * the host's declared package (`_packageId`), and the stamp stays — ObjectQL
+   * registers such an `object` as the host package's contribution — but the
+   * row is not the package's item, so {@link unregisterPackage} leaves it
+   * ({@link isStampedEnvironmentRow}).
+   */
+  private readonly storedEnvironmentRows = new WeakSet<object>();
+  /**
    * [ADR-0150 D4, #32791] The {@link storedPackagelessRows} whose registration
    * replaced an item no loader handed out (one registered in memory or by
    * code): that item's package held the name before the row took its slot, so
@@ -2674,6 +2685,10 @@ export class MetadataManager implements IMetadataService {
    * `(package, name)` drops this package's slot and keeps another package's
    * same-named item — and, for such a type, the storage half deletes only this
    * package's row and the `deleted` event names this package.
+   *
+   * [#32986] Of every other type, an environment row the boot priming pass
+   * stamped with this package (the host's) is not one of its items, and stays
+   * ({@link isStampedEnvironmentRow}).
    */
   async unregisterPackage(packageName: string): Promise<void> {
     // Collect all items to delete (type and name pairs). [#32517] One entry
@@ -2686,6 +2701,10 @@ export class MetadataManager implements IMetadataService {
       for (const [key, data] of typeStore) {
         // [#32246] A by-package type: also every item in the package's slot,
         // a package-less customization of its item (D4) included.
+        // [#32986] Not the environment's own row the boot pass stamped with
+        // this package: since #32198 the stamp alone made it a member, and the
+        // removal deleted it from the registry and from storage.
+        if (!slotted && this.isStampedEnvironmentRow(data, packageName)) continue;
         if (isPackageMember(data, packageName) || (slotted && slotPackageOf(key) === packageName)) {
           const slot = `${type}\u0000${slotOfKey(key)}`;
           const entry = itemsToDelete.get(slot);
@@ -2702,6 +2721,20 @@ export class MetadataManager implements IMetadataService {
         ...(PACKAGE_SLOTTED_STORE_TYPES.has(type) ? { packageId: packageName } : {}),
       });
     }
+  }
+
+  /**
+   * [#32986] Whether `data` is one of the {@link storedEnvironmentRows} that
+   * names `packageId` only by the `_packageId` stamp — the boot priming pass's
+   * host stamp, which `applyProtection` writes on an unstamped item alone. The
+   * row's own body named no package when the loader handed it on, so
+   * `packageId` / `package` naming the package is the item's own claim (the
+   * row is the package's, as {@link isPackageMember} reads it).
+   */
+  private isStampedEnvironmentRow(data: unknown, packageId: string): boolean {
+    if (data === null || typeof data !== 'object' || !this.storedEnvironmentRows.has(data)) return false;
+    const meta = data as { packageId?: unknown; package?: unknown; _packageId?: unknown };
+    return meta._packageId === packageId && meta.packageId !== packageId && meta.package !== packageId;
   }
 
   /**
@@ -3845,8 +3878,10 @@ export class MetadataManager implements IMetadataService {
         if (item !== null && typeof item === 'object') {
           this.loadedFrom.set(item, loader);
           // [#32791] Read here, before any caller stamps it.
-          if (PACKAGE_SLOTTED_STORE_TYPES.has(type) && loader.contract.protocol === 'datasource:' && indexedItemPackageId(item) === undefined) {
-            this.storedPackagelessRows.add(item);
+          if (loader.contract.protocol === 'datasource:' && indexedItemPackageId(item) === undefined) {
+            if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) this.storedPackagelessRows.add(item);
+            // [#32986] Read here too, before the boot pass stamps it.
+            else this.storedEnvironmentRows.add(item);
           }
         }
     });
