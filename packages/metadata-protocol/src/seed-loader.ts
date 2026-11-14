@@ -3330,12 +3330,9 @@ export class SeedLoaderService implements ISeedLoaderService {
     // carries cannot see it. The link was NOT written, so it is never counted
     // as resolved: the caller reports it like any other failed back-fill.
     if (updated === null) {
-      throw Object.assign(
-        new Error(
-          `The back-fill update of ${deferred.objectName} '${recordId}' matched no row: the row is gone, or the ` +
-            `organization the write carries cannot see it.`,
-        ),
-        { code: 'SEED_BACKFILL_NO_ROW' },
+      throw new Error(
+        `The back-fill update of ${deferred.objectName} '${recordId}' matched no row: the row is gone, or the ` +
+          `organization the write carries cannot see it.`,
       );
     }
   }
