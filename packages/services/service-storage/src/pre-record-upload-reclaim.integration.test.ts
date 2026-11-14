@@ -51,7 +51,13 @@ const silentLogger = () => ({
 
 type Res = { _status: number; _json: any };
 
-describe('#33125 — an upload for a record that was never created is reclaimed by the platform sweep', () => {
+// Twice: a deployment inside the ADR-0104 column-move window (single-value
+// file fields still JSON, the bound-field backstop unanswerable for them) and
+// one past it (the backstop asks them by equality).
+describe.each([
+  { columnsMoved: false, label: 'file columns still JSON' },
+  { columnsMoved: true, label: 'file columns moved' },
+])('#33125 — an upload for a record that was never created is reclaimed by the platform sweep ($label)', ({ columnsMoved }) => {
   let rootDir: string;
   let engine: ObjectQL;
   let lifecycle: LifecycleService;
@@ -72,6 +78,7 @@ describe('#33125 — an upload for a record that was never created is reclaimed 
       client: 'better-sqlite3',
       connection: { filename: ':memory:' },
       useNullAsDefault: true,
+      fileColumnsMoved: columnsMoved,
     }) as any, true);
     await engine.init();
 
@@ -351,6 +358,36 @@ describe('#33125 — an upload for a record that was never created is reclaimed 
     await sweepAt(TTL_MS + DAY_MS);
 
     expect(await fileRow(fileId)).toMatchObject({ status: 'committed', deleted_at: null });
+    expect(await bytesOf(fileId)).toBe(true);
+  });
+
+  it.skipIf(!columnsMoved)('named by a record no claim recorded (a driver-level write): the bound field keeps it, the stamp cleared', async () => {
+    const [fileId] = await uploadForNewRecord();
+    // The record written straight through the driver: no hook claimed the
+    // file, so `ref_*` stays empty and only the bound field says who holds it.
+    await engine.getDriverForObject('expense_line')!.create('expense_line', {
+      id: `line_${fileId}`, invoice_no: 'INV-6', invoice: fileId, organization_id: ORG,
+    });
+    expect(await fileRow(fileId)).toMatchObject({ ref_id: null });
+    await expireClaimWindow(fileId);
+
+    await sweepAt(TTL_MS + DAY_MS);
+
+    expect(await fileRow(fileId)).toMatchObject({ status: 'committed', ref_id: null, deleted_at: null });
+    expect(await bytesOf(fileId)).toBe(true);
+  });
+
+  it('named among others by a multiple field no claim recorded: $contains finds it, kept', async () => {
+    const [fileId] = await uploadForNewRecord('photos', 1);
+    await engine.getDriverForObject('expense_line')!.create('expense_line', {
+      id: `line_${fileId}`, invoice_no: 'INV-7', photos: ['file_someone_else', fileId], organization_id: ORG,
+    });
+    expect(await fileRow(fileId)).toMatchObject({ ref_id: null });
+    await expireClaimWindow(fileId);
+
+    await sweepAt(TTL_MS + DAY_MS);
+
+    expect(await fileRow(fileId)).toMatchObject({ status: 'committed', ref_id: null, deleted_at: null });
     expect(await bytesOf(fileId)).toBe(true);
   });
 

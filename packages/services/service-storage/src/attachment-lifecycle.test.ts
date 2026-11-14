@@ -19,8 +19,13 @@ const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
 function fakeEngine(seed: {
   attachments?: Array<Record<string, unknown>>;
   files?: Array<Record<string, unknown>>;
+  /** [#33125] Rows of other objects, by object name. */
+  records?: Record<string, Array<Record<string, unknown>>>;
+  /** [#33125] Object definitions `getObject` answers; absent → no `getObject`. */
+  objects?: Record<string, unknown>;
 }) {
   const tables: Record<string, Array<Record<string, unknown>>> = {
+    ...Object.fromEntries(Object.entries(seed.records ?? {}).map(([k, v]) => [k, [...v]])),
     sys_attachment: [...(seed.attachments ?? [])],
     sys_file: [...(seed.files ?? [])],
   };
@@ -30,6 +35,9 @@ function fakeEngine(seed: {
   const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
     Object.entries(where).every(([k, v]) => {
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      if (v && typeof v === 'object' && '$contains' in (v as object)) {
+        return JSON.stringify(row[k] ?? '').includes(String((v as { $contains: unknown }).$contains));
+      }
       return row[k] === v;
     });
 
@@ -47,12 +55,12 @@ function fakeEngine(seed: {
       hooks.set(event, list);
     },
     async find(object, options: any) {
-      const rows = tables[object].filter((r) => matches(r, options?.where ?? {}));
+      const rows = (tables[object] ?? []).filter((r) => matches(r, options?.where ?? {}));
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async findOne(object, options: any) {
       assertEngineFindOnePredicate(object, options);
-      return tables[object].find((r) => matches(r, options?.where ?? {})) ?? null;
+      return (tables[object] ?? []).find((r) => matches(r, options?.where ?? {})) ?? null;
     },
     async update(object, data: any, _options) {
       updates.push({ object, data });
@@ -60,6 +68,7 @@ function fakeEngine(seed: {
       if (row) Object.assign(row, data);
       return row;
     },
+    ...(seed.objects ? { getObject: (name: string) => seed.objects![name] } : {}),
     tables,
     updates,
     /** Row lookup for the DRIVE HELPERS only. Deliberately not routed through
@@ -714,6 +723,97 @@ describe('[#33125] createSysFileReapGuard — an upload-link file no record took
     const guard = createSysFileReapGuard(engine, () => s, logger, async () => true);
     expect(await guard('sys_file', [stamped()])).toEqual([]);
     expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  /** A guard over `snapshot` while the store holds `current` (and any `records`). */
+  const runOver = async (
+    snapshot: Record<string, unknown>,
+    current: Record<string, unknown> | null,
+    seed: { records?: Record<string, Array<Record<string, unknown>>>; objects?: Record<string, unknown> } = {},
+  ) => {
+    const engine = fakeEngine({ attachments: [], files: current ? [current] : [], ...seed });
+    const s = storage();
+    const guard = createSysFileReapGuard(engine, () => s, silentLogger(), async () => true);
+    const confirmed = await guard('sys_file', [snapshot]);
+    return { confirmed, s, engine };
+  };
+
+  it('the sweep read it unheld, but a record took it since: the fresh row keeps it, the stamp cleared', async () => {
+    const { confirmed, s, engine } = await runOver(
+      stamped(),
+      stamped({ ref_object: 'expense_line', ref_id: 'r1', ref_field: 'invoice' }),
+    );
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(engine.updates).toEqual([{ object: 'sys_file', data: { id: 'u1', deleted_at: null } }]);
+  });
+
+  it('the sweep read it stamped, but the claim has cleared the stamp since: kept, no write', async () => {
+    const { confirmed, s, engine } = await runOver(
+      stamped(),
+      stamped({ deleted_at: null, ref_object: 'expense_line', ref_id: 'r1', ref_field: 'invoice' }),
+    );
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(engine.updates).toEqual([]);
+  });
+
+  it('a record whose single-value bound field holds the id, with no claim recorded: kept, the stamp cleared', async () => {
+    const { confirmed, s, engine } = await runOver(stamped(), stamped(), {
+      records: { expense_line: [{ id: 'r9', invoice: 'u1' }] },
+      objects: { expense_line: { fields: { invoice: { type: 'file' } } } },
+    });
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(engine.updates).toEqual([{ object: 'sys_file', data: { id: 'u1', deleted_at: null } }]);
+  });
+
+  it('a record whose multiple bound field holds the id among others: kept, the stamp cleared', async () => {
+    const { confirmed, s, engine } = await runOver(stamped(), stamped(), {
+      records: { expense_line: [{ id: 'r9', invoice: ['u0', 'u1'] }] },
+      objects: { expense_line: { fields: { invoice: { type: 'file', multiple: true } } } },
+    });
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(engine.updates).toEqual([{ object: 'sys_file', data: { id: 'u1', deleted_at: null } }]);
+  });
+
+  /** A guard whose engine refuses any read of the bound object with `err`. */
+  const runRefused = async (err: Error & { code?: string }) => {
+    const engine = fakeEngine({ attachments: [], files: [stamped()] });
+    const find = engine.find.bind(engine);
+    engine.find = async (object, options) => {
+      if (object === 'expense_line') throw err;
+      return find(object, options);
+    };
+    const s = storage();
+    const logger = silentLogger();
+    const guard = createSysFileReapGuard(engine, () => s, logger, async () => true);
+    return { confirmed: await guard('sys_file', [stamped()]), s, logger };
+  };
+
+  it('the driver refuses the bound-field filter (INVALID_FILTER): ref_* alone decides, reclaimed, said once', async () => {
+    const { confirmed, s, logger } = await runRefused(Object.assign(new Error('refused'), { code: 'INVALID_FILTER' }));
+    expect(confirmed).toEqual(['u1']);
+    expect(s.delete).toHaveBeenCalledWith('user/u1.pdf');
+    expect(logger.info).toHaveBeenCalledTimes(1);
+    expect(String((logger.info as any).mock.calls[0][0])).toContain('could not ask the bound file field of 1');
+  });
+
+  it('any other failure of the bound-field read vetoes, retried next sweep', async () => {
+    const { confirmed, s, logger } = await runRefused(new Error('connection reset'));
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('the bound object no longer declares the field: nothing can name the file, it is reclaimed', async () => {
+    const { confirmed, s } = await runOver(stamped(), stamped(), {
+      records: { expense_line: [{ id: 'r9', invoice: 'u1' }] },
+      objects: { expense_line: { fields: {} } },
+    });
+    expect(confirmed).toEqual(['u1']);
+    expect(s.delete).toHaveBeenCalledWith('user/u1.pdf');
   });
 });
 

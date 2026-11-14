@@ -73,6 +73,9 @@ export interface AttachmentLifecycleEngine {
   ): void;
   find(object: string, options: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
   findOne(object: string, options: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+  /** An object's definition, when the engine can give it. Optional: only the
+   * reap guard's bound-field backstop (#33125) reads it. */
+  getObject?(object: string): unknown;
   update(object: string, data: Record<string, unknown>, options: Record<string, unknown>): Promise<unknown>;
 }
 
@@ -122,6 +125,92 @@ function isLiveAttachmentsFile(file: Record<string, unknown> | null | undefined)
  */
 export function isReclaimStampedUpload(row: Record<string, unknown> | null | undefined): boolean {
   return !!row && row.status === 'committed' && row.deleted_at != null && row.deleted_at !== '';
+}
+
+/** What the reap guard makes of a stamped upload-link file (#33125). */
+type StampedUploadVerdict =
+  | { kind: 'clear'; reason: string }
+  | { kind: 'wait' }
+  | { kind: 'reclaim'; binding: { object: string; field: string } };
+
+/**
+ * [#33125] The judgment over one stamped row, made on whatever copy of the row
+ * the caller holds (the sweep's page, then a fresh read before the byte
+ * delete). Held, released, or not a readable binding → `clear` (the stamp goes,
+ * the file is an ordinary one). Claim window open → `wait`. Otherwise
+ * `reclaim`.
+ */
+async function judgeStampedUpload(
+  engine: Pick<AttachmentLifecycleEngine, 'find'>,
+  id: string | number,
+  row: Record<string, unknown>,
+): Promise<StampedUploadVerdict> {
+  // The one hold question first, as for every candidate: a record or an
+  // attachment that names the file keeps it, whatever else holds.
+  const holder = await findFileHolder(engine, id, row);
+  if (holder) return { kind: 'clear', reason: `is held by ${describeHolder(holder, row)}` };
+  const binding = preRecordBindingOf(row);
+  const claimUntil = binding ? Date.parse(binding.claim_until) : Number.NaN;
+  if (!binding || !binding.object || !binding.field || wasReleased(row) || !Number.isFinite(claimUntil)) {
+    return { kind: 'clear', reason: 'is not an unclaimed upload-link file' };
+  }
+  if (Date.now() < claimUntil) return { kind: 'wait' };
+  return { kind: 'reclaim', binding: { object: binding.object, field: binding.field } };
+}
+
+/** Drop the reclaim stamp: the row is an ordinary committed file again. */
+async function clearReclaimStamp(
+  engine: Pick<AttachmentLifecycleEngine, 'update'>,
+  id: string | number,
+  logger: AttachmentLifecycleLogger,
+  reason: string,
+): Promise<void> {
+  await engine.update('sys_file', { id, deleted_at: null }, { context: { ...SYSTEM_CTX } });
+  logger.info(`[storage] reap guard: sys_file ${id} ${reason} — its upload reclaim stamp cleared, not reaped`);
+}
+
+/**
+ * [#33125] The id of a record of the bound object whose bound field holds the
+ * file, or null. A single-value field is asked by equality; a `multiple` one by
+ * `$contains`, which the SQL driver answers as a substring of the stored JSON
+ * array (a false hit only keeps a file). When the engine can say the object no
+ * longer declares the field, nothing can name the file through it: null. When
+ * the driver refuses the filter (see below), `onUnanswerable` is told: null.
+ */
+async function boundRecordNaming(
+  engine: Pick<AttachmentLifecycleEngine, 'find' | 'getObject'>,
+  id: string | number,
+  binding: { object: string; field: string },
+  onUnanswerable?: () => void,
+): Promise<string | null> {
+  let multiple = false;
+  if (typeof engine.getObject === 'function') {
+    const def = (engine.getObject(binding.object) as { fields?: Record<string, { multiple?: unknown }> } | undefined)
+      ?.fields?.[binding.field];
+    if (!def) return null;
+    multiple = def.multiple === true;
+  }
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = await engine.find(binding.object, {
+      where: { [binding.field]: multiple ? { $contains: String(id) } : String(id) },
+      limit: 1,
+      context: { ...SYSTEM_CTX },
+    });
+  } catch (err) {
+    // A single-value file field still stored as JSON (a deployment inside the
+    // ADR-0104 column-move window) answers no operator with its id: the SQL
+    // driver refuses the filter as INVALID_FILTER. The backstop cannot be
+    // asked there, and `ref_*` alone decides, as before it existed. Any other
+    // failure vetoes, to be retried next sweep.
+    if ((err as { code?: unknown })?.code === 'INVALID_FILTER') {
+      onUnanswerable?.();
+      return null;
+    }
+    throw err;
+  }
+  const hit = rows?.[0];
+  return hit ? String(hit.id ?? '?') : null;
 }
 
 /** Whether a record held the file and let it go (#26046: `released_ref_*`). */
@@ -650,7 +739,11 @@ async function tombstoneRefusedAttachFile(
  *    is an ordinary committed file again. Its claim window still open (a ttl
  *    shortened below it) → veto, stamp kept. Otherwise it is a file no write
  *    can name any more, and it goes behind the same `isCollectionOpen` gate
- *    as a field-file tombstone: closed → kept; open → delete bytes, confirm.
+ *    as a field-file tombstone: closed → kept. Open → the row is read again by
+ *    id and judged over (the page it came from may predate a claim), then a
+ *    record of the bound object whose bound field holds the id keeps it too
+ *    (a backstop for a write no claim recorded); only then delete bytes,
+ *    confirm.
  *  - anything else: veto (shouldn't be a candidate; fail toward retention).
  *
  * `isCollectionOpen` absent (an older caller, a test fake) reads as "gate
@@ -678,6 +771,7 @@ export function createSysFileReapGuard(
         }
       })());
     let keptGateClosed = 0;
+    let unanswerable = 0;
     for (const row of rows) {
       const id = row?.id as string | number | undefined;
       if (id === undefined || id === null) continue;
@@ -707,32 +801,53 @@ export function createSysFileReapGuard(
 
       if (isReclaimStampedUpload(row)) {
         try {
-          // The one hold question first, as for every candidate: a record or
-          // an attachment that names the file keeps it, whatever else holds.
-          const holder = await findFileHolder(engine, id, row);
-          const binding = preRecordBindingOf(row);
-          const claimUntil = binding ? Date.parse(binding.claim_until) : Number.NaN;
-          if (holder || !binding || wasReleased(row) || !Number.isFinite(claimUntil)) {
-            // Not a bound upload no record ever held (or its binding is
-            // damaged): the stamp is dropped and the row is an ordinary
-            // committed file again, kept as every other one is.
-            await engine.update('sys_file', { id, deleted_at: null }, { context: { ...SYSTEM_CTX } });
-            logger.info(
-              `[storage] reap guard: sys_file ${id} ` +
-                (holder
-                  ? `is held by ${describeHolder(holder, row)} — its upload reclaim stamp cleared, not reaped`
-                  : 'is not an unclaimed upload-link file — its reclaim stamp cleared, not reaped'),
-            );
+          const first = await judgeStampedUpload(engine, id, row);
+          if (first.kind === 'clear') {
+            await clearReclaimStamp(engine, id, logger, first.reason);
             continue;
           }
           // Its claim window is still open: only a ttl shortened below it gets
           // here. Kept, still stamped, for a later sweep.
-          if (Date.now() < claimUntil) continue;
+          if (first.kind === 'wait') continue;
           if (!(await collectionOpen())) {
             keptGateClosed += 1;
             continue;
           }
-          if (storage && typeof row.key === 'string' && row.key) await storage.delete(row.key);
+          // [#33125] The row above is the sweep's page, read before any guard
+          // ran, so its `ref_*` can be stale: a write may have taken the file
+          // since. The bytes are about to go, so the row is read again here and
+          // the whole judgment is made over on what it says now.
+          const fresh = await engine.findOne('sys_file', { where: { id }, context: { ...SYSTEM_CTX } });
+          if (!isReclaimStampedUpload(fresh)) {
+            logger.info(
+              `[storage] reap guard: sys_file ${id} changed since the sweep read it ` +
+                '(taken, unstamped or gone) — not reaped',
+            );
+            continue;
+          }
+          const now = await judgeStampedUpload(engine, id, fresh!);
+          if (now.kind === 'clear') {
+            await clearReclaimStamp(engine, id, logger, now.reason);
+            continue;
+          }
+          if (now.kind === 'wait') continue;
+          // [#33125] A backstop under `ref_*`: a record of the bound object
+          // whose bound field holds the id keeps the file, even when no claim
+          // recorded it (a driver-level write, a claim that failed after the
+          // field was written).
+          const naming = await boundRecordNaming(engine, id, now.binding, () => {
+            unanswerable += 1;
+          });
+          if (naming) {
+            await clearReclaimStamp(
+              engine,
+              id,
+              logger,
+              `is named by the record ${now.binding.object}/${naming}.${now.binding.field}, which no claim recorded`,
+            );
+            continue;
+          }
+          if (storage && typeof fresh!.key === 'string' && fresh!.key) await storage.delete(fresh!.key);
           confirmed.push(id);
         } catch (err) {
           logger.warn(
@@ -785,6 +900,14 @@ export function createSysFileReapGuard(
           `contract). Either way: fix the data, then run \`os migrate files-to-references --apply\`. ` +
           `See sys_migration.verified_at / deviation_observed_at (ADR-0104): deleting bytes cannot be undone, so ` +
           `it waits for a verified migration with no deviation on record, while reversible work carries on.`,
+      );
+    }
+    if (unanswerable > 0) {
+      logger.info(
+        `[storage] reap guard: could not ask the bound file field of ${unanswerable} upload-link ` +
+          'file(s) no record took: the driver refused the filter (on SQL, a single-value file field still ' +
+          'stored as JSON because the ADR-0104 column move has not run), so `ref_*` and attachments alone ' +
+          'decided them. Finishing `os migrate files-to-references --apply` lets the sweep ask the field too.',
       );
     }
     return confirmed;
