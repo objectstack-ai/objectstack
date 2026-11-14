@@ -5,9 +5,9 @@ import {
   collectExpectedEntries,
   extractTranslations,
   renderTranslationModule,
-  resolveSourceLocale,
   stackAuthoredSubtree,
 } from '../src/utils/i18n-bundle-extract.js';
+import { resolveSourceLocale } from '../src/utils/i18n-coverage.js';
 
 const config: any = {
   objects: [

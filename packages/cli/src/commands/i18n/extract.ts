@@ -30,8 +30,8 @@ import {
   countTranslationLeaves,
   type FillStrategy,
   type TranslationModuleKind,
-  resolveSourceLocale,
 } from '../../utils/i18n-bundle-extract.js';
+import { resolveSourceLocale } from '../../utils/i18n-coverage.js';
 import { authoringRuleUnionStack } from '../../utils/stack-collections.js';
 
 const FILL_STRATEGIES: FillStrategy[] = ['empty', 'default', 'todo'];

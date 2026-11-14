@@ -45,7 +45,7 @@
 import { deepMerge } from '@objectstack/core';
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
 import { resolveI18nLabel } from '@objectstack/spec/ui';
-import { collectExpectedEntries, resolveSourceLocale, type ExpectedEntry } from './i18n-bundle-extract.js';
+import { collectExpectedEntries, type ExpectedEntry } from './i18n-bundle-extract.js';
 
 export type CoverageSeverity = 'error' | 'warning';
 
@@ -602,6 +602,27 @@ function lookupKey(data: TranslationData | undefined, path: string[]): string | 
 }
 
 // ─── Public API ────────────────────────────────────────────────────────
+
+/**
+ * The stack's declared SOURCE locale — the language its inline metadata text
+ * is written in: `i18n.sourceLocale`, else `i18n.defaultLocale`, else `'en'`.
+ *
+ * `defaultLocale` is the users' default language, and it stands in for the
+ * source language only because most stacks author in the language their
+ * users get. The one reading shared by `os lint`, `os i18n check` (through
+ * {@link computeI18nCoverage}) and `os i18n extract`, so the three never
+ * disagree about which locale the inline text satisfies; each command's
+ * `--default-locale` flag still overrides it.
+ */
+export function resolveSourceLocale(i18n: unknown): string {
+  const block = i18n !== null && typeof i18n === 'object'
+    ? (i18n as { sourceLocale?: unknown; defaultLocale?: unknown })
+    : undefined;
+  for (const candidate of [block?.sourceLocale, block?.defaultLocale]) {
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return 'en';
+}
 
 /**
  * Compute a coverage report for a normalized stack config.
