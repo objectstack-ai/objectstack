@@ -186,6 +186,10 @@ describe('HttpDispatcher', () => {
                 // twin records it; rows are pinned in
                 // `domains/meta-save-actor.test.ts`.
                 actor: 'u1',
+                // [#32656] The caller's language ladder, off the admitted
+                // context (which names no locale here); pinned end to end in
+                // `domains/meta-save-user-text-locale.test.ts`.
+                userTextLocales: [],
             });
             expect(result.response?.body).toEqual({
                 success: true,

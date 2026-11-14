@@ -369,3 +369,51 @@ describe('SmtpTransport — a message\'s content reaches the wire only as a stri
     expect(wireAttachments(server.messages[0]!).get('logo.png')?.equals(bytes)).toBe(true);
   }, 20_000);
 });
+
+describe('the fake SMTP sink takes a port, so a runner can keep it inside its own reserved range', () => {
+  /** A port nothing listens on right now: bind 0, read it, let it go. */
+  const freePort = async (): Promise<number> => {
+    const probe = net.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const { port } = probe.address() as net.AddressInfo;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    return port;
+  };
+
+  it('listens on the port it is given, and a real transport delivers there', async () => {
+    const port = await freePort();
+    server = await startFakeSmtp({ port });
+    expect(server.port).toBe(port);
+
+    const transport = new SmtpTransport({ host: '127.0.0.1', port, secure: false, timeout: 5_000 });
+    await transport.send({ to: ['rcpt@example.test'], from: 'no-reply@example.test', subject: 'pinned', text: 'x' });
+    await transport.close();
+    expect(server.messages).toHaveLength(1);
+  }, 20_000);
+
+  it('a port someone else holds rejects with EADDRINUSE instead of opening a sink elsewhere', async () => {
+    const holder = net.createServer();
+    await new Promise<void>((resolve) => holder.listen(0, '127.0.0.1', resolve));
+    const { port } = holder.address() as net.AddressInfo;
+    try {
+      await expect(startFakeSmtp({ port })).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    } finally {
+      await new Promise<void>((resolve) => holder.close(() => resolve()));
+    }
+  });
+
+  it('with no port, two sinks started side by side each get their own ephemeral port (the default is unchanged)', async () => {
+    const [a, b] = await Promise.all([startFakeSmtp(), startFakeSmtp()]);
+    try {
+      expect(a.port).toBeGreaterThan(0);
+      expect(b.port).toBeGreaterThan(0);
+      expect(a.port).not.toBe(b.port);
+    } finally {
+      await Promise.all([a.close(), b.close()]);
+    }
+  });
+
+  it('a port outside 0..65535 is refused before anything listens', async () => {
+    await expect(startFakeSmtp({ port: 70_000 })).rejects.toBeInstanceOf(RangeError);
+  });
+});
