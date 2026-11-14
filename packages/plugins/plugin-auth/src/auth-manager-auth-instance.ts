@@ -827,6 +827,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           get config() { return readConfig(); },
           existingAddressSignUpAnswersSuccess: (...a) => this.existingAddressSignUpAnswersSuccess(...a),
           getDataEngine: (...a) => this.getDataEngine(...a),
+          getConsoleUrl: (...a) => this.getConsoleUrl(...a),
           hasExistingUserFor: (...a) => this.hasExistingUserFor(...a),
           isAuthGateActive: (...a) => this.isAuthGateActive(...a),
           isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
