@@ -4436,6 +4436,7 @@ const ar = {
       objectsAndFields: "الكائنات والحقول",
       views: "طرق العرض",
       suggestedField: "مقترح",
+      suggestedFieldLegend: "الحقول المُعلَّمة بـ «{{mark}}» أضافها الذكاء الاصطناعي؛ لم تطلبها.",
       nameField: "الاسم: {{field}}",
     },
     build: {

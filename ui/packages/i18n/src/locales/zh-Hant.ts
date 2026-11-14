@@ -4331,6 +4331,7 @@ const zhHant = {
       objectsAndFields: '物件與欄位',
       views: '檢視',
       suggestedField: '補充',
+      suggestedFieldLegend: '標「{{mark}}」的欄位是 AI 自行補充的，你沒有要求。',
       nameField: '名稱：{{field}}',
     },
     build: {

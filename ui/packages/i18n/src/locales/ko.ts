@@ -4082,6 +4082,7 @@ const ko = {
       objectsAndFields: "개체 및 필드",
       views: "뷰",
       suggestedField: "추가 제안",
+      suggestedFieldLegend: "'{{mark}}' 표시가 있는 필드는 AI가 추가한 것으로, 요청하지 않은 필드입니다.",
       nameField: "이름: {{field}}",
     },
     build: {

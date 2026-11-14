@@ -4331,6 +4331,7 @@ const zh = {
       objectsAndFields: '对象与字段',
       views: '视图',
       suggestedField: '补充',
+      suggestedFieldLegend: '标「{{mark}}」的字段是 AI 自行补充的，你没有要求。',
       nameField: '名称：{{field}}',
     },
     build: {

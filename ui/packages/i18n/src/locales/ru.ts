@@ -4270,6 +4270,7 @@ const ru = {
       objectsAndFields: "Объекты и поля",
       views: "Представления",
       suggestedField: "предложено",
+      suggestedFieldLegend: "Поля с пометкой «{{mark}}» добавил ИИ; вы их не запрашивали.",
       nameField: "Название: {{field}}",
     },
     build: {

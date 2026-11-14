@@ -4168,6 +4168,7 @@ const fr = {
       objectsAndFields: "Objets et champs",
       views: "Vues",
       suggestedField: "suggéré",
+      suggestedFieldLegend: "Les champs marqués « {{mark}} » ont été ajoutés par l’IA ; vous ne les avez pas demandés.",
       nameField: "Nom : {{field}}",
     },
     build: {

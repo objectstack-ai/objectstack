@@ -4085,6 +4085,7 @@ const ja = {
       objectsAndFields: "オブジェクトとフィールド",
       views: "ビュー",
       suggestedField: "追加提案",
+      suggestedFieldLegend: "「{{mark}}」が付いたフィールドは AI が追加したもので、ご依頼にはありません。",
       nameField: "名前：{{field}}",
     },
     build: {
