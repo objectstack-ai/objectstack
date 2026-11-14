@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 319 |
-| Object name statically decidable | 224 |
+| Write call sites | 320 |
+| Object name statically decidable | 225 |
 | Object name chosen at run time | 95 |
-| Against a tenancy-enabled object | 217 |
+| Against a tenancy-enabled object | 218 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 248 |
+| Threading a tenant context | 249 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 59 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 179 |
+| Threading a decidably elevated context | 180 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 128 |
 
@@ -90,7 +90,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-14 at `be43f4e11`.
+Measured on 2026-11-14 at `d22170763`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
@@ -206,7 +206,7 @@ Measured on 2026-11-14 at `be43f4e11`.
 | `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/sys-session-revoke.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/user-ban-write.ts` | `update` | `sys_user` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/user-session-admission.ts` | `update` | `sys_user` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/user-session-admission.ts` | `update` | `sys_user` | enabled | elevated | 2 |
 | `packages/plugins/plugin-email/src/attachment-reclaim.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `update` | `object` | undecidable | elevated | 1 |
