@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, materializeTreeSelfReferences, BASE_FIELD_DISPLAY_WHITELIST, type ObjectExtensionParsed } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, MANAGED_BY_WRITE_LOCKED_BUCKETS, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, materializeTreeSelfReferences, BASE_FIELD_DISPLAY_WHITELIST, type ObjectExtensionParsed } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -2011,12 +2011,19 @@ export function reconcileManagedApiMethods(
   const kept = methods.filter((_m, i) => !strippedIndexes.has(i));
   const stripped = conflicts.map((c) => c.verb);
 
+  const managedBy = (schema as any).managedBy;
+  // [ADR-0153 D4] On a write-locked bucket (`synced`) `userActions` cannot open
+  // a write — the parse refuses it — so the remedy is to drop the verbs and
+  // write through a declared action (D5). Every other bucket keeps its sentence.
+  const remedy = MANAGED_BY_WRITE_LOCKED_BUCKETS.has(managedBy)
+    ? `userActions cannot open a write on this bucket (ADR-0153 D4): remove [${stripped.join(', ')}] ` +
+      `from enable.apiMethods and send writes through a declared action (ADR-0153 D5).`
+    : `Declare userActions to open a verb the object legitimately takes from a user context.`;
   const warn = opts?.warn ?? ((msg: string) => console.warn(msg));
   warn(
-    `[Registry] Object "${schema.name}" is managedBy:'${(schema as any).managedBy}' but advertised ` +
+    `[Registry] Object "${schema.name}" is managedBy:'${managedBy}' but advertised ` +
       `generic write verb(s) [${stripped.join(', ')}] in enable.apiMethods its resolved affordances ` +
-      `do not permit — stripping them (ADR-0092/ADR-0103). Declare userActions to open a verb the ` +
-      `object legitimately takes from a user context. Kept: [${kept.join(', ')}]. ` +
+      `do not permit — stripping them (ADR-0092/ADR-0103). ${remedy} Kept: [${kept.join(', ')}]. ` +
       `\`os lint\` reports the same contradiction as \`object/managed-api-method-unaffordable\` ` +
       `with full authoring context.`,
   );
