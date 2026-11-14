@@ -90,17 +90,17 @@ Standardized answers to the recurring ambiguous cases:
   in `include`, `account.industry` as a dimension.
 - **Computed column.** Format/currency → the measure's `format`/`currency`;
   arithmetic over measures → a **derived measure**; time between two
-  `datetime` fields of a record → a **`duration` measure**, not a hook-kept
-  number (`{ name: 'avg_days_to_close', aggregate: 'avg', duration: { from:
+  `datetime` fields of a record → a **`duration` measure**
+  (`{ name: 'avg_days_to_close', aggregate: 'avg', duration: { from:
   'created_at', to: 'closed_at', unit: 'days' } }`); CASE / bins /
   `revenue*0.8` / computed dimensions → **not** a dataset.
 - **Total over a computed value.** `sum`/`avg`/`min`/`max` need a STORED numeric
   or boolean field (`percent` not under `sum`; `min`/`max` also dates); a `formula`
-  has no column: refused whatever its `returnType` says. Store the number
-  (user-entered, a `summary` rollup, or hook-kept) or title the widget the `count`
-  it is. Leave days: `sum` over the `formula` `days_requested` (`daysBetween(start, end)`) is
-  refused (`date` fields: no `duration`) ⇒ a stored `number` `days_count` a
-  `beforeInsert`/`beforeUpdate` hook writes, then `{ name: 'days_sum', aggregate: 'sum', field: 'days_count' }`.
+  has no column: refused whatever its `returnType` says. Make it a field of its
+  return type with the same `expression` (computed and stored on write; existing rows
+  stay empty until rewritten, no hosted backfill yet) or title the widget the `count`
+  it is. Leave days (`date` fields: no `duration`): the `formula` `days_requested` ⇒ a
+  `readonly` `number` `days_count` with its `expression`, then `{ name: 'days_sum', aggregate: 'sum', field: 'days_count' }`.
 - **Breakdown by a multi-value field.** `multiselect`/`checkboxes`/`tags` and
   any `multiple: true` field is refused as a dataset or cube dimension and as
   `groupBy` (`INVALID_FIELD`; no per-member buckets); so is a `formula` (at a

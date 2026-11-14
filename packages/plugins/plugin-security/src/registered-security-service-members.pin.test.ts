@@ -49,6 +49,7 @@ import type { ISecurityService } from '@objectstack/spec/contracts';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
+import { PlatformBaselineSets } from './platform-baseline-sets.js';
 
 /** `optional` exactly when the interface declares the member with `?`. */
 type DeclaredOptionality = {
@@ -82,6 +83,7 @@ const DECLARED_MEMBERS = {
   dismissAudienceBindingSuggestion: 'required',
   reopenAudienceBindingSuggestion: 'optional',
   contributeOwnershipFloorAlternates: 'optional',
+  contributePlatformBaselineSet: 'optional',
   organizationBoundaryFailure: 'optional',
 } as const satisfies DeclaredOptionality;
 
@@ -210,5 +212,11 @@ describe('the registered `security` service serves only what ISecurityService de
     const contribute: NonNullable<ISecurityService['contributeOwnershipFloorAlternates']> = (plugin, alternates) =>
       new OwnershipFloorAlternates().contribute(plugin, alternates);
     expect(typeof contribute).toBe('function');
+
+    const contributeSet: NonNullable<ISecurityService['contributePlatformBaselineSet']> = (contributor, set) => {
+      const admitted = new PlatformBaselineSets().contribute(contributor, set, { baseline: [], shipped: [], registry: undefined });
+      return { name: admitted.set.name, joined: admitted.joined };
+    };
+    expect(typeof contributeSet).toBe('function');
   });
 });

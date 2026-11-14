@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
   PageSchema,
+  definePage,
   PAGE_TYPE_ROADMAP,
   PageComponentSchema,
   PageRegionSchema,
@@ -16,6 +17,14 @@ import {
   type InterfacePageConfig,
 } from './page.zod';
 import { ComponentPropsMap } from './component.zod';
+import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
+
+/**
+ * One component in one region — the least a `kind: 'full'` record page must
+ * place (`checkPageRecordPlacesComponent`). Fixtures that are about something
+ * else and default to the `record` type carry it.
+ */
+const PLACED = [{ name: 'main', components: [{ type: 'record:details' }] }];
 
 describe('PageComponentSchema', () => {
   it('should accept valid minimal component', () => {
@@ -122,7 +131,7 @@ describe('PageSchema', () => {
     const page: Page = {
       name: 'account_record_page',
       label: 'Account Record Page',
-      regions: [],
+      regions: PLACED,
     };
 
     expect(() => PageSchema.parse(page)).not.toThrow();
@@ -132,7 +141,7 @@ describe('PageSchema', () => {
     expect(() => PageSchema.parse({
       name: 'valid_page_name',
       label: 'Valid Page',
-      regions: [],
+      regions: PLACED,
     })).not.toThrow();
 
     expect(() => PageSchema.parse({
@@ -152,7 +161,7 @@ describe('PageSchema', () => {
     const page = PageSchema.parse({
       name: 'test_page',
       label: 'Test Page',
-      regions: [],
+      regions: PLACED,
     });
 
     expect(page.type).toBe('record');
@@ -204,7 +213,7 @@ describe('PageSchema', () => {
         name: 'test_page',
         label: 'Test Page',
         type,
-        regions: [],
+        regions: type === 'record' ? PLACED : [],
       });
       expect(page.type).toBe(type);
     });
@@ -348,7 +357,7 @@ describe('PageSchema', () => {
       name: 'custom_layout_page',
       label: 'Custom Layout Page',
       template: 'three-column',
-      regions: [],
+      regions: PLACED,
     });
 
     expect(page.template).toBe('three-column');
@@ -360,7 +369,7 @@ describe('PageSchema', () => {
       label: 'Default Page',
       object: 'account',
       isDefault: true,
-      regions: [],
+      regions: PLACED,
     });
 
     expect(page.isDefault).toBe(true);
@@ -373,7 +382,7 @@ describe('PageSchema', () => {
       regions: [
         { name: 'header', components: [] },
         { name: 'sidebar', width: 'small', components: [] },
-        { name: 'main', components: [] },
+        { name: 'main', components: [{ type: 'record:details' }] },
         { name: 'footer', components: [] },
       ],
     });
@@ -468,7 +477,7 @@ describe('Page ARIA Integration', () => {
     expect(() => PageSchema.parse({
       name: 'accessible_page',
       label: 'Accessible Page',
-      regions: [],
+      regions: PLACED,
       aria: { ariaLabel: 'Main application page', role: 'main' },
     })).not.toThrow();
   });
@@ -640,7 +649,7 @@ describe('PageSchema with page types', () => {
     expect(() => PageSchema.parse({
       name: 'accessible_page',
       label: 'Accessible Page',
-      regions: [],
+      regions: PLACED,
       aria: { ariaLabel: 'App overview page', role: 'main' },
     })).not.toThrow();
   });
@@ -1085,7 +1094,7 @@ describe('PageSchema with interfaceConfig', () => {
     const page = PageSchema.parse({
       name: 'test_page',
       label: 'Test Page',
-      regions: [],
+      regions: PLACED,
     });
     expect(page.interfaceConfig).toBeUndefined();
   });
@@ -1129,13 +1138,13 @@ describe('PageSchema - Negative Validation', () => {
 
   it('should accept page without regions (defaults to [])', () => {
     // Optional with a [] default: list/interface pages render via
-    // interfaceConfig, slotted record pages via slots, and an empty full
-    // record/home/app page falls back to the synthesized default layout.
-    // Requiring regions forced `regions: []` boilerplate everywhere and made
-    // the Studio "New Page" form a dead-end for non-list pages.
+    // interfaceConfig, slotted record pages via slots, and a full home/app/
+    // utility page draws its label as the heading. A full RECORD page is the
+    // one that must place a component — see the describe block below.
     const page = PageSchema.parse({
       name: 'no_regions',
       label: 'No Regions',
+      type: 'home',
     });
     expect(page.regions).toEqual([]);
   });
@@ -1187,8 +1196,10 @@ describe('PageSchema - no cross-field requirements', () => {
   // synthesized default. Each was a "required-but-unauthorable field blocks the
   // Studio create form" trap.
   it('parses a minimal page of each live type with no extra config', () => {
+    // A full record page places one component: it draws nothing else
+    // (`checkPageRecordPlacesComponent`); every other type takes no regions.
     for (const type of ['record', 'home', 'app', 'utility', 'list'] as const) {
-      expect(() => PageSchema.parse({ name: 'test_page', label: 'P', type, regions: [] })).not.toThrow();
+      expect(() => PageSchema.parse({ name: 'test_page', label: 'P', type, regions: type === 'record' ? PLACED : [] })).not.toThrow();
     }
   });
 
@@ -1196,6 +1207,86 @@ describe('PageSchema - no cross-field requirements', () => {
     expect(() => PageSchema.parse({
       name: 'test_page', label: 'P', type: 'record', kind: 'slotted', regions: [],
     })).not.toThrow();
+  });
+});
+
+// A `kind: 'full'` record page draws only the components its regions place:
+// one that places none opened every record of its object on a blank detail
+// panel while every door reported it valid. Refused at `regions` by
+// `checkPageRecordPlacesComponent`; the other page types, and the record
+// page kinds that draw something else, keep accepting no regions.
+describe('PageSchema — a full record page that places no component is refused at `regions`', () => {
+  const VERDICT = 'This record page places no component in its `regions`, so every record of its object would open on a blank detail panel';
+  const LEAVE = { name: 'leave_request_record', label: 'Leave request', object: 'leave_request', template: 'default' } as const;
+
+  const regionIssues = (value: unknown) => {
+    const result = PageSchema.safeParse(value);
+    return result.success ? [] : result.error.issues.filter((i) => i.path.join('.') === 'regions');
+  };
+
+  it.each([
+    ['no `regions`, `type: \'record\'`', { ...LEAVE, type: 'record' }],
+    ['no `regions` and no `type` (the `record` default)', { ...LEAVE }],
+    ['`regions: []`', { ...LEAVE, type: 'record', regions: [] }],
+    ['`kind: \'full\'` spelled out', { ...LEAVE, type: 'record', kind: 'full' }],
+    ['regions whose `components` are all empty', { ...LEAVE, regions: [{ name: 'header', components: [] }, { name: 'main', components: [] }] }],
+    ['`slots` on a full page — not read there', { ...LEAVE, slots: { details: [{ type: 'record:details' }] } }],
+    ['an `interfaceConfig` on a record page bound to an object — the record view does not read it', { ...LEAVE, interfaceConfig: { source: 'leave_request' } }],
+  ] as const)('%s — refused at `regions`, one custom issue, naming the blank panel and the fixes', (_label, value) => {
+    const issues = regionIssues(value);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].message.startsWith(VERDICT)).toBe(true);
+    expect(issues[0].message).toContain('delete the page');
+    expect(issues[0].message).toContain("kind: 'slotted'");
+    // `type` reads `record` after the parse whether written or defaulted, so
+    // the sentence names the default and the types a page is meant as instead.
+    expect(issues[0].message).toContain('`type` defaults to `record`');
+  });
+
+  it.each([
+    ['no `object`, no `type`, no regions — the shape a page meant as a home page takes', { name: 'pp_home', label: 'Home' }],
+    ['no `object`, `type: \'record\'`, regions with no component', { name: 'pp_page', label: 'P', type: 'record', regions: [{ name: 'main', components: [] }] }],
+    ['no `object` and an `interfaceConfig` with a blank `source`', { name: 'pp_page', label: 'P', interfaceConfig: { source: '  ' } }],
+  ] as const)('%s — refused at `regions`, saying it opens blank and naming the types it may be meant as', (_label, value) => {
+    const issues = regionIssues(value);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].message.startsWith('This record page places no component in its `regions` and binds no `object`, so it opens on a blank page')).toBe(true);
+    expect(issues[0].message).toContain('`type` defaults to `record`');
+    expect(issues[0].message).toContain("`type: 'home'`, `'app'` or `'utility'`");
+  });
+
+  it('CONTROL — a page binding no `object` that carries an `interfaceConfig.source` is not judged: the page route draws it as an interface list, whatever its type', () => {
+    expect(regionIssues({ name: 'open_cases', label: 'Open cases', interfaceConfig: { source: 'case' } })).toEqual([]);
+    expect(regionIssues({ name: 'open_cases', label: 'Open cases', type: 'record', interfaceConfig: { source: 'case' } })).toEqual([]);
+  });
+
+  it('`definePage` throws on it — the authoring door a source stack uses', () => {
+    expect(() => definePage({ ...LEAVE })).toThrow(/places no component in its `regions`/);
+  });
+
+  it('CONTROL — one component in one region passes', () => {
+    expect(PageSchema.safeParse({ ...LEAVE, regions: PLACED }).success).toBe(true);
+  });
+
+  it.each(['home', 'app', 'utility', 'list'] as const)('CONTROL — a `%s` page with no regions still parses', (type) => {
+    expect(PageSchema.safeParse({ name: 'pp_page', label: 'P', type }).success).toBe(true);
+    expect(PageSchema.safeParse({ name: 'pp_page', label: 'P', type, regions: [] }).success).toBe(true);
+  });
+
+  it('CONTROL — a `slotted` record page with no regions and no slots parses: it draws the synthesized default', () => {
+    expect(PageSchema.safeParse({ ...LEAVE, kind: 'slotted' }).success).toBe(true);
+  });
+
+  it('CONTROL — an `html` record page draws its `source`, so no regions is not judged here', () => {
+    expect(regionIssues({ ...LEAVE, kind: 'html', source: '<record:details />' })).toEqual([]);
+  });
+
+  it('step 18 of the upgrade guide carries the semantic entry, judging no mechanical edit (no conversion rewrites such a page)', () => {
+    const entry = MIGRATIONS_BY_MAJOR[18]!.semantic.find((e) => e.id === 'page-record-no-component-refused');
+    expect(entry).toBeDefined();
+    expect(entry!.conversionIds ?? []).toEqual([]);
   });
 });
 

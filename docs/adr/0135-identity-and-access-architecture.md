@@ -151,6 +151,57 @@ Two markings do that work, at two levels:
 > It is marked by role on `sys_member`, not by `sys_user.source`, and D4's markings are unchanged.
 > Cloud ADR-0024's own text is not amended here.
 
+> **Note (2026-11-12, objectstack, #32400 landed as `2830f31d75`; contract review `6792533556` on
+> #32400, filed as #32450) — a third writer marks SCIM-provisioned users, and it does not fail
+> open.** The two writers above both key on an account link. A SCIM directory creates none: the
+> vendor keeps its directory links in `sys_scim_user` and `sys_scim_subject` and writes no
+> `sys_account` row, so neither writer sees a SCIM create. A user a directory provisions is marked
+> by the **SCIM provisioning writer**, on the one seam every SCIM user write passes through — the
+> vendor's `identity.reconcileUser` host callback,
+> `packages/plugins/plugin-auth/src/auth-manager.ts#reconcileScimUserLifecycle`, which calls
+> `packages/plugins/plugin-auth/src/scim-identity-source.ts#markDirectoryProvisionedUsers` through
+> the data engine, inside the vendor's SCIM transaction. It has two postures, and the order of the
+> writes is the contract:
+>
+> - **Active state** (a create, a link or re-link, a reprovision, any later write that leaves the
+>   user active): the mark is written first and **fails closed**. A mark that cannot be written
+>   fails the SCIM request, and the identity provider retries. On a datasource that honours
+>   transactions the directory's write rolls back with it, so no user is left active and unmarked.
+>   On a declared degrade — an engine with no `transaction` API, or a driver that cannot open one
+>   ([ADR-0119](./0119-plugin-reachable-transactions-and-honest-atomic-batch.md) D1; both are
+>   named in `packages/plugins/plugin-auth/src/objectql-adapter.ts`) — the request still fails but
+>   nothing rolls back: the vendor's rows stay committed and unmarked until the next SCIM write
+>   for that user, or the next boot, marks them.
+> - **Inactive state** (a deactivation, a `DELETE`, a create with `active: false`): the deprovision
+>   write goes first and the mark after it is **best-effort**. A refused mark is logged at `error`
+>   and swallowed, so the deprovision write already made stands; the next active write for that
+>   user and the boot backfill re-run the mark. Two cases sit outside that guarantee: a mark
+>   failure that aborts the driver transaction itself fails the deprovision write with it (that
+>   is the database, not the mark), and a host with no data engine fails the callback before
+>   either posture is reached.
+>
+> The **boot backfill** covers users a directory provisioned before that writer existed: a
+> `kernel:ready` pass in `packages/plugins/plugin-auth/src/auth-plugin.ts` runs
+> `packages/plugins/plugin-auth/src/scim-identity-source.ts#backfillScimProvisionedIdentitySource`,
+> which finds them from a stored fact — each owns a `sys_scim_subject` row — and marks them. It
+> runs on every boot and is idempotent: it writes only a row whose value is wrong, so once a pass
+> has completed, a later boot writes only a mark missed since (a best-effort mark that did not
+> land, or a row a degrade left unmarked). A pass that cannot complete is logged at `error` and
+> the boot goes on.
+>
+> Why this writer does not fail open as the first two do. Those run inside a person's sign-in or
+> account link: nothing retries a sign-in, and a provenance write must never break one, so they let
+> it succeed and log the stamp that did not land. A provisioning request has no person waiting on
+> it, and the identity provider retries what fails, so refusing it costs a delay and, where the
+> transaction is real, leaves nothing half-written; letting it succeed unmarked would create a
+> managed user who reads `env_native`, and is offered the local-credential actions D5.2 exists to
+> hide, until the directory next writes that user or the process next boots. On a deprovision the
+> priority inverts: disabling the account is the request's whole purpose, so that write goes
+> first and a refused mark does not undo it. The local-password rule is unchanged (D5.2's second
+> bullet: gaining a local credential flips the row to `env_native`): the SCIM writer and the
+> backfill leave the row of a user who holds a local password as it is, and neither writes
+> `env_native` itself. Cloud ADR-0024's own text is not amended here.
+
 ### D5 — Identity comes from the IdP; authorization is decided in the environment
 
 Authentication may be delegated. **Authorization never is.** What a signed-in principal may do is
@@ -205,12 +256,31 @@ records why the bridge sits there and not on the plugin's `schema` option).
 
 **Domain verification is opt-in** — `cloud ADR-0024`'s clause ②, which this repository's code now
 cites as `ADR-0135 D6`. When the environment turns it on, `@better-auth/sso` mounts a DNS-TXT
-proof-of-ownership challenge and refuses a login through a provider whose email domain is not
-proven, which stops an organization admin from registering a provider for a domain they do not
-control. It is off by default, because turning it on changes the register-then-login flow. The
-surface is
+proof-of-ownership challenge covering every domain a provider lists, and signs nobody in through a
+provider until that list is proven; editing the list clears the proof. With it on, where the
+platform admits a new account, a provider creates an account only for an email address at a domain it has proven,
+compared exactly (a subdomain counts only when it is itself listed and verified, and a listed entry
+counts only for the host the provider proved), failing closed, and relaxed by no audience posture,
+invitation or JIT toggle (plugin-auth's rule at better-auth's `user.validateUserInfo` gate,
+`packages/plugins/plugin-auth/src/sso-account-at-proven-domain.ts#refuseSsoAccountOutsideProvenDomain`).
+Accounts that already exist are not re-checked. With the rule that a domain is claimed by one
+provider at most, held where a provider is registered and where its domain list is edited
+(`packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts#findSsoDomainClaim`), an SSO provider
+creates a new account at a domain only when it is the one provider that claims that domain and has
+proven it. Domain verification is off by default, because turning it on changes the
+register-then-login flow. The surface is
 `packages/platform-objects/src/identity/sys-sso-provider.object.ts#request_domain_verification`,
 `#verify_domain` and `#domain_verified`.
+
+> **Note (2026-11-13, objectstack) — the proven-domain account rule is this repository's own.**
+> Cloud ADR-0024 clause ② decides that domain verification exists and is opt-in. The account rule
+> in the paragraph above (exact comparison, failing closed, relaxed by no audience posture,
+> invitation or JIT toggle) is not a clause of cloud ADR-0024: it is a rule made in this
+> repository, like the repository-side facts the D4 notes record. It was approved by the
+> maintainer on 2026-11-13, on the security lane's decision card, with no carve-out, and with a
+> provider's domain entry counting only when it is written as a bare host name (an entry written
+> as a URL or with a port proves nothing). That ruling, not this file, is its authority; #32669
+> implements it. Cloud ADR-0024's own text is not amended here.
 
 ⚠️ **The SCIM half of "SSO + SCIM per production environment" is not restated here.** Its
 mechanism record is `cloud ADR-0071`, mirrored into this repository by its own card; this file
@@ -261,7 +331,8 @@ spelling. The re-pointing is per-site and semantic.
 
 ## What this record does NOT settle
 
-- **Anything cloud ADR-0024 did not decide.** This file adds no clause. Where the mechanism in
+- **Anything cloud ADR-0024 did not decide.** This file adds no clause, except the one the D6
+  note on the proven-domain account rule names as this repository's own. Where the mechanism in
   this tree is richer than the decision (the ADR-0092 write guard, the ADR-0095 tenant wall, the
   ADR-0091 validity window), that richness belongs to those records, and is cited here only as the
   thing D4 and D5 lean on.

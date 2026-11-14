@@ -102,6 +102,11 @@ import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// The source under test reaches `@objectstack/lint` through a dynamic
+// `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
+// case's `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 
 interface Row {
     id: string;
@@ -191,7 +196,7 @@ function makeProtocol(
  * body stays minimal and reaches the authorization gate exactly as before.
  */
 const BODIES: Record<string, Record<string, unknown>> = {
-    page: { name: 'probe_item', label: 'Probe', type: 'record', regions: [] },
+    page: { name: 'probe_item', label: 'Probe', type: 'record', regions: [{ name: 'main', components: [{ type: 'record:details' }] }] },
     app: { name: 'probe_item', label: 'Probe' },
     action: { name: 'probe_item', label: 'Probe', type: 'script', body: { language: 'expression', source: '1 + 1' } },
     dataset: { name: 'probe_item', label: 'Probe', object: 'sys_user', dimensions: [], measures: [] },

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/hono",
-  "version": "18.3.0",
+  "version": "18.4.0",
   "license": "Apache-2.0",
   "type": "commonjs",
   "main": "dist/index.js",
@@ -34,7 +34,7 @@
   },
   "devDependencies": {
     "@objectstack/runtime": "workspace:*",
-    "hono": "^4.13.9",
+    "hono": "^4.13.16",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

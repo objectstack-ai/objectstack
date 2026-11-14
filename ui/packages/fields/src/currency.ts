@@ -12,6 +12,52 @@
  * every field/cell renderer that already depends on it.
  */
 export { resolveFieldCurrency, recordCurrencyField } from '@object-ui/i18n';
+import { recordCurrencyPath, type FieldCurrencyConfig } from '@object-ui/i18n';
+
+/**
+ * The key a form stamps the PARENT OBJECT under on a `record`-mode amount
+ * that follows its parent's currency (ADR-0144 D2 as amended), as it stamps a
+ * home field's source: a widget receives one field, not the object, so it
+ * could not otherwise name the object its `master_detail` points at, and a
+ * form record holds that relation as a bare id with no code on it.
+ */
+export const FOLLOWED_PARENT_OBJECT_KEY = 'followedParentObject';
+
+/**
+ * `def` with the object its parent path's `master_detail` references stamped
+ * under {@link FOLLOWED_PARENT_OBJECT_KEY}, or `def` itself when it follows no
+ * parent or the object declares no such relation.
+ */
+export function withFollowedParentObject<T extends object>(
+  def: T,
+  fields: Readonly<Record<string, unknown>> | null | undefined,
+): T {
+  const path = recordCurrencyPath(def as { currencyConfig?: FieldCurrencyConfig });
+  const relation = path ? (fields?.[path.via] as { reference?: unknown } | undefined) : undefined;
+  return typeof relation?.reference === 'string' && relation.reference !== ''
+    ? { ...def, [FOLLOWED_PARENT_OBJECT_KEY]: relation.reference }
+    : def;
+}
+
+/** The parent object a form stamped on `field`, or `undefined`. */
+export function readFollowedParentObject(field: unknown): string | undefined {
+  const value = (field as Record<string, unknown> | null | undefined)?.[FOLLOWED_PARENT_OBJECT_KEY];
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+/**
+ * Whether a roll-up (`summary`) field declares the currency its value is in
+ * (ADR-0144 D6 as amended, the shape #31910 settled): a `fixed` code, or a
+ * `record` pointer at its own object's code field, the parent's currency its
+ * following children were written in. Both roll-up faces then draw the value
+ * as money through `resolveFieldCurrency`, with the parent row as the
+ * record. `dynamic` is refused on a summary by the spec, and a summary that
+ * declares nothing stays a number.
+ */
+export function summaryDeclaresCurrency(field: unknown): boolean {
+  const config = (field as { currencyConfig?: { currencyMode?: unknown } } | null | undefined)?.currencyConfig;
+  return config?.currencyMode === 'record' || config?.currencyMode === 'fixed';
+}
 
 /**
  * Fallback width for a currency whose digit count cannot be resolved: the

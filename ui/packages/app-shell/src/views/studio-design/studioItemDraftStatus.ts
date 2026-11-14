@@ -17,9 +17,11 @@
  * item off the ledger, whichever door did it.
  *
  * The pillar's own reading of its item (`hasDraft`, set when it loads or saves
- * the item) is taken once at load and is not re-read on the pulse: on its own
- * it would miss a draft the copilot wrote after the load, and keep a draft that
- * a discard elsewhere removed. It counts here only while the ledger is behind
+ * the item) can lag the ledger. The Data pillar re-reads its open object on
+ * the pulse (objectstack#32610), but holds that re-read while the author has
+ * unsent work; other pillars read their item once, at load. On its own the
+ * reading would then miss a draft the copilot wrote after the load, or keep a
+ * draft that a discard elsewhere removed. It counts here only while the ledger is behind
  * a save this surface made (`behindSave`, objectui#11787), so the line shows
  * from the render the save lands in.
  *

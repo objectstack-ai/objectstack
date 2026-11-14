@@ -79,8 +79,7 @@ import { PLURAL_TO_SINGULAR, unrecognisedMetaTypeRefusal } from '@objectstack/sp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
-import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
+import type { IPubSub } from '@objectstack/spec/contracts';
 import type { ConversionNotice, ConversionTodoNotice } from '@objectstack/spec';
 import { type I18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -321,7 +320,7 @@ import {
     judgeExtensionFieldSuffix,
 } from './protocol-extension-field-suffix.js';
 // [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
-import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
+import { applySeedBodiesOnHost, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
 // [#25467 cut 15] The artifact registry's lookups: an item's artifact, the packages that ship a type, and the lock's artifact layer.
 import { artifactLockLayerAt, lookupArtifactItem, shippedArtifactsOf, shippingPackagesOf } from './protocol-artifact-lookup.js';
 // [#25467 cut 16] The stored-overlay row reads: a type's active rows, their parsed entries, the names with a row of their own, and one item's rows.
@@ -360,6 +359,7 @@ import { legacyOrganizationRowsOf, withoutLegacyOrganizationRows } from './proto
 import { foldObjectExtendersFromRegistry } from './protocol-object-extender-fold.js';
 // [#25467 cut 31] The disabled-package face of the by-name item read.
 import { readMetaItemFace } from './protocol-meta-item-face.js';
+import type { PrereadActiveRows } from './protocol-meta-item-reads.js';
 // [#25467 cut 32] A stored commit row's `items` column read back as its revert plan.
 import { parseCommitItems } from './protocol-commit-items.js';
 // [#25467 cut 33] What a stored overlay row binds: the lock layer, the package binding, the external datasource.
@@ -381,7 +381,7 @@ import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-
 // [#25467 cut 35] The environment's own `sys_metadata` rows: the family read, the one-row read, the served row and the package-less address.
 import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage } from './protocol-environment-rows.js';
 // [#25467 cut 35] The stored rows of a collection, folded over the registered ones.
-import { foldStoredCollection } from './protocol-stored-collection-fold.js';
+import { foldStoredCollection, type StoredCollectionTargetFold } from './protocol-stored-collection-fold.js';
 // [#25467 cut 35] The environment-wide package uninstall verb.
 import { deletePackage, recordPackageUninstall, runUninstallGuards } from './protocol-package-uninstall.js';
 // ADR-0146 D3 — the ensure door of a base's paired `.custom` package, and the
@@ -614,6 +614,7 @@ import { ProtocolWriteGatesFacet } from './protocol-write-gates.js';
 import { ProtocolWriteGatesTables } from './protocol-write-gates-tables.js';
 // [#29985 codemod] Registry hydration, view expansion, write-through, object storage: the members below delegate to its facet, `ProtocolRegistryHydrationFacet`.
 import { ProtocolRegistryHydrationFacet } from './protocol-registry-hydration.js';
+import type { HealPackageBinding } from './protocol-heal-binding.js';
 // [#29985 codemod] Save refusals, saveMetaItem, saveConflict, migrateStoredMetadata: the members below delegate to its facet, `ProtocolSaveFacet`.
 import { ProtocolSaveFacet } from './protocol-save.js';
 // [#29985 codemod] History, publish, drafts, publish backfill: the members below delegate to its facet, `ProtocolHistoryAndPublishFacet`.
@@ -2023,11 +2024,21 @@ export class ObjectStackProtocolImplementation implements
      * `warn`, not `error`, per this repo's degradation rule: no write claims to
      * have persisted anything it did not. The consequence is a possible wrong
      * verdict on the NEXT reference, and the message says so.
+     *
+     * ## `targetFold` (#33072)
+     *
+     * Optional; every caller but one passes nothing and gets the fold above.
+     * The runtime authoring gate passes it on an `object_extension` write: the
+     * stored row named `targetFold.target` is folded without
+     * `targetFold.withoutExtensionsOf`'s `extend` contributions (the written
+     * package's own stored extension of the target, which the write
+     * replaces), and every other row is folded exactly as without it.
      */
     private async foldStoredCollection(
         registered: unknown[],
         singularType: string,
         pluralType: string,
+        targetFold?: StoredCollectionTargetFold,
     ): Promise<unknown[]> {
         // [#25467 cut 35] The body moved to `protocol-stored-collection-fold.ts` (see `StoredCollectionFoldHost`).
         const readEngine = () => this.engine;
@@ -2037,7 +2048,7 @@ export class ObjectStackProtocolImplementation implements
             findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
             foldObjectExtendersFromRegistry: (...a) => this.foldObjectExtendersFromRegistry(...a),
         };
-        return foldStoredCollection.call(host, registered, singularType, pluralType);
+        return foldStoredCollection.call(host, registered, singularType, pluralType, targetFold);
     }
 
     /**
@@ -2778,14 +2789,29 @@ export class ObjectStackProtocolImplementation implements
      * already been folded, and the fold concatenates `validations`/`indexes`
      * (see {@link SchemaRegistry.foldObjectExtendersOnto}), so applying it twice
      * would duplicate both.
+     *
+     * ## The two optional package arguments
+     *
+     * Each is handed to the registry's fold as the option of the same name
+     * (`ObjectExtensionFoldOptions`), and both are optional:
+     *
+     *  - `onlyExtensionsOf` (#29903, #29872) — every OTHER package's `extend`
+     *    contributions are left out; the per-package layer passes it.
+     *  - `withoutExtensionsOf` (#33072) — that one package's `extend`
+     *    contributions are left out; the runtime authoring gate passes it for
+     *    an `object_extension` write's target.
+     *
+     * Neither given is the ordinary fold. Both given are both handed over, and
+     * the registry leaves out a contribution either one leaves out; no caller
+     * passes both today.
      */
-    private foldObjectExtendersFromRegistry(type: string, name: unknown, body: unknown, onlyExtensionsOf?: string): unknown {
+    private foldObjectExtendersFromRegistry(type: string, name: unknown, body: unknown, onlyExtensionsOf?: string, withoutExtensionsOf?: string): unknown {
         // [#25467 cut 30] The body moved to `protocol-object-extender-fold.ts` (see `ObjectExtenderFoldHost`).
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof foldObjectExtendersFromRegistry> = {
             get engine() { return readEngine(); },
         };
-        return foldObjectExtendersFromRegistry.call(host, type, name, body, onlyExtensionsOf);
+        return foldObjectExtendersFromRegistry.call(host, type, name, body, onlyExtensionsOf, withoutExtensionsOf);
     }
 
     /**
@@ -4132,6 +4158,11 @@ export class ObjectStackProtocolImplementation implements
         const host: ThisParameterType<typeof readMetaItemFace> = {
             get engine() { return readEngine(); },
             readMetaItem: (...a) => this.readMetaItem(...a),
+            packagelessAddress: (...a) => this.packagelessAddress(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
+            readItemActiveRows: (...a) => this.readItemActiveRows(...a),
+            declinesStoredRow: (...a) => this.declinesStoredRow(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
         };
         return readMetaItemFace.call(host, request, face);
     }
@@ -4152,11 +4183,15 @@ export class ObjectStackProtocolImplementation implements
      * [#24535] `face: 'execution'` skips the serving decorations at this
      * read's exits, and nothing else: see {@link getMetaItemForExecution}. An
      * authoring caller is decorated as the served face is, as before.
+     *
+     * [#32607] `activeRows`: the item's active rows a face already read for
+     * its served-holder judgment ({@link readMetaItemFace}), taken instead of
+     * a second read when they are this read's item's (#24371: one read).
      */
     private async readMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
-    }, opts: { face?: 'served' | 'execution' } = {}) {
+    }, opts: { face?: 'served' | 'execution'; activeRows?: PrereadActiveRows } = {}) {
         // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
         return readMetaItem(protocolHost(this), request, opts);
     }
@@ -4185,6 +4220,13 @@ export class ObjectStackProtocolImplementation implements
      * its in-process resolution readers (the security catalog echo, the
      * packaged-permission-set lock gate, `/published`) read the layers of a
      * name with no package and keep the answer they had.
+     *
+     * [#32354, ADR-0150 D3] While a package is disabled, a name the stored
+     * rows of two or more served packages hold beside it is refused here
+     * naming only those served packages (the plain read's own refusal), and a
+     * name with one served holder is no ambiguity: {@link getMetaItemLayered}
+     * reads it at that holder's address. Both are judged by the same
+     * `servedAddressJudgment`, which neither of them throws.
      */
     async packagelessLayeredReadRefusal(request: {
         type: string;
@@ -8365,6 +8407,8 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         /** The DELETE's own scope — `null` for an env-wide row. [#6780] */
         organizationId: string | null,
+        /** [#32366] The package the removed row was bound to; `null` for none; `HEAL_BINDING_UNKNOWN` when the caller does not know it. */
+        packageId: HealPackageBinding,
         /**
          * [#22877] The bundle member whose row was removed, as the door's
          * selector named it; omitted, the canonical member. For a type whose
@@ -8376,7 +8420,7 @@ export class ObjectStackProtocolImplementation implements
         member?: string,
     ): Promise<void> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
-        return ProtocolRegistryHydrationFacet.restoreArtifactRegistryView(protocolHost(this), type, name, organizationId, member);
+        return ProtocolRegistryHydrationFacet.restoreArtifactRegistryView(protocolHost(this), type, name, organizationId, packageId, member);
     }
 
     /** Docblock and body: {@link ProtocolRegistryHydrationFacet.ensureObjectStorage} in `protocol-registry-hydration.ts` [#29985 codemod]. */
@@ -9673,6 +9717,8 @@ export class ObjectStackProtocolImplementation implements
         member?: string;
         /** The registry question this promotion asks (`registry-question.ts`). */
         registryQuestion: RegistryQuestion;
+        /** [#32396] Judge every refusal, write nothing: the answer then carries no `result`. */
+        judgeOnly?: boolean;
     }): Promise<{
         singularType: string;
         /**
@@ -9687,7 +9733,12 @@ export class ObjectStackProtocolImplementation implements
          * discipline — per the maintainer's ruling, no parallel top-level map.
          */
         advisories: RuntimeAuthoringIssue[];
-        result: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** What the promotion wrote. Absent exactly when `judgeOnly` was stated. */
+        result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** [#32396] The draft row the promotion consumed. Absent when nothing was written. */
+        promotedDraft?: { body: unknown; hash: string };
+        /** [#32369] What a judge-only call judged: the draft body and the package it would go live in. */
+        judged?: { body: unknown; packageId: string | null };
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.promoteDraftForPublish(protocolHost(this), request);
@@ -9726,16 +9777,8 @@ export class ObjectStackProtocolImplementation implements
         issues?: Array<{ path: string; message: string; code?: string | undefined }>;
         landed?: SeedAppliedLandedParsed[];
     }> {
-        // [#25467 cut 14] The body moved to `protocol-publish-batch.ts` (see `PublishBatchHost`).
-        const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof applySeedBodies> = {
-            get engine() { return readEngine(); },
-            getMetaItem: (...a) => this.getMetaItem(...a),
-            // [#25779] The `field-files` service, so a published seed's files
-            // are stored as the boot seed's are.
-            getFieldFiles: () => this.getServicesRegistry?.().get(FIELD_FILE_SERVICE) as IFieldFileService | undefined,
-        };
-        return applySeedBodies.call(host, bodies);
+        // [#30020 codemod] The body moved to `protocol-publish-batch.ts`; it runs on this class's host (`protocol-host.ts`) as `this`.
+        return applySeedBodiesOnHost.call(protocolHost(this), bodies);
     }
 
     /**
@@ -9957,8 +10000,13 @@ export class ObjectStackProtocolImplementation implements
      * per-item {@link publishMetaItem} primitive (which runs the overridable /
      * lock guards and refreshes the runtime registry), so this needs NO
      * `metadata` service (unlike `MetadataService.publishPackage`, which reads
-     * the in-memory registry and 503s when that service is absent). Per-item
-     * failures are collected and do NOT abort the rest.
+     * the in-memory registry and 503s when that service is absent).
+     *
+     * All-or-nothing (ADR-0067 D2): a refusal of any draft refuses the whole
+     * batch, and nothing it promoted stays live. [#32396] That holds on a
+     * runtime that cannot roll a transaction back too — there the whole batch
+     * is judged before any draft is promoted, and a failure only the writes
+     * meet undoes the promotions already made — see the body's Phase 0.
      *
      * [#9406] The wire face of this return is DECLARED:
      * `PublishPackageDraftsResponseSchema` in `@objectstack/spec/api` (the
@@ -10796,6 +10844,14 @@ export class ObjectStackProtocolImplementation implements
      * by the override write gate as {@link rollbackMetaItem} judges it
      * ({@link restoreWriteFor}): a version declaring no override is refused
      * into `failed[]`.
+     *
+     * [#32700] A restored object's storage is synced as the save door syncs
+     * it, and once the revert's own commit row is written, every object whose
+     * stored computed fields the revert made compute something new (a
+     * restore, or a removed `object_extension` handing its owner's field back)
+     * is filled over its existing rows by the save door's fill
+     * (`protocol-stored-expression-fill.ts`), each field reported on
+     * `advisories`, omitted when empty.
      */
     async revertCommit(request: {
         commitId: string;
@@ -10813,6 +10869,8 @@ export class ObjectStackProtocolImplementation implements
         reverted: Array<{ type: string; name: string; action: 'removed' | 'restored' }>;
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
         revertCommitId?: string;
+        /** [#32700] What the revert did to the rows of an object it restored; omitted when nothing to report. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolPackageCommitsFacet.revertCommit(protocolHost(this), request);
@@ -10831,6 +10889,10 @@ export class ObjectStackProtocolImplementation implements
      * failed". A refused item stops neither its commit nor the rollback: the
      * step still reverts the item's neighbours and records its revert commit,
      * so that commit is also listed in `revertedCommits`.
+     *
+     * [#32700] `advisories` carries every step's own `advisories` (its storage
+     * sync refusals and stored-expression fill notices), in step order;
+     * omitted when no step raised one.
      */
     async rollbackToPackageCommit(request: {
         commitId: string;
@@ -10845,6 +10907,8 @@ export class ObjectStackProtocolImplementation implements
         success: boolean;
         revertedCommits: string[];
         failed: Array<{ commitId: string; error: string }>;
+        /** [#32700] Every step's `advisories`, in step order; omitted when none has any. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolPackageCommitsFacet.rollbackToPackageCommit(protocolHost(this), request);
@@ -10860,6 +10924,13 @@ export class ObjectStackProtocolImplementation implements
      * [#29848, ADR-0146 D8 item 2] The door names no package: it restores
      * into the row the by-name read naming no package serves, a `.custom`
      * pair's declared override over a row bound to its read-only base.
+     *
+     * [#32700] Then, as the save door does: the restored object's storage is
+     * synced, and every stored computed field the restore makes compute
+     * something new is filled over the object's existing rows
+     * (`protocol-stored-expression-fill.ts`), each reported on `advisories`,
+     * omitted when empty. A refused sync or an unfinished fill never fails
+     * the rollback.
      */
     async rollbackMetaItem(request: RollbackMetaItemRequest): Promise<{
         success: boolean;
@@ -10867,6 +10938,8 @@ export class ObjectStackProtocolImplementation implements
         seq: number;
         restoredFromVersion: number;
         message?: string;
+        /** [#32700] A refused storage sync and the stored-expression fill of the restored object; omitted when nothing to report. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolPackageCommitsFacet.rollbackMetaItem(protocolHost(this), request);
@@ -10879,6 +10952,8 @@ export class ObjectStackProtocolImplementation implements
         seq: number;
         restoredFromVersion: number;
         message?: string;
+        /** [#32700] A refused storage sync and the stored-expression fill of the restored object; omitted when nothing to report. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolPackageCommitsFacet.rollbackMetaItemUnaudited(protocolHost(this), request);

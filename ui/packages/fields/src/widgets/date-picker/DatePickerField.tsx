@@ -7,8 +7,21 @@
  */
 
 import React from 'react';
-import { CalendarDays, X } from 'lucide-react';
-import { Button, Calendar, Input, Popover, PopoverContent, PopoverTrigger, cn } from '@object-ui/components';
+import { CalendarDays, Clock, X } from 'lucide-react';
+import {
+  Button,
+  Calendar,
+  Input,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  cn,
+} from '@object-ui/components';
 import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from '../touchTarget.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { FieldWidgetComponentProps } from '../types.js';
@@ -24,6 +37,8 @@ import {
 import {
   formatLocaleDateText,
   localeDatePattern,
+  localeHourLabel,
+  minuteOptions,
   parseLocaleDateText,
   toLocalDay,
   fromLocalDay,
@@ -64,10 +79,31 @@ import { useFieldTranslation } from '../useFieldTranslation.js';
  * - A form whose `field:date` widget is not registered (no
  *   `@object-ui/fields` loaded) falls back to the form renderer's own
  *   `<input type={inputType}>`, with the `inputType` `ObjectForm` maps.
+ *
+ * ## The `datetime` face picks the time too (objectstack#32589)
+ *
+ * Its popover carries an hour and a minute control under the calendar, so a
+ * time is chosen without typing the whole value. Picking a day keeps the
+ * value's time; with no value yet it writes the day at `00:00` (the reading a
+ * typed date with no time gets) and KEEPS THE POPOVER OPEN with focus on the
+ * hour control, so the time is the next thing chosen rather than a midnight
+ * committed out of sight. Picking a time with no value yet writes it on
+ * today. Every pick goes through `fromDateTimeInputValue`, the same write the
+ * text box uses. The `date` face is unchanged: no time row, and a day pick
+ * closes the popover.
  */
 export function DatePickerField(props: FieldWidgetComponentProps<string>) {
   return <TemporalPicker {...props} withTime={false} />;
 }
+
+/**
+ * The minute grid of the `datetime` face's minute control. Fixed: no field
+ * key declares a time step (`step` is the slider's increment), and a value's
+ * own off-grid minute is still offered, so nothing stored is rounded.
+ */
+const DATE_TIME_MINUTE_STEP = 5;
+
+const HOURS = Array.from({ length: 24 }, (_, h) => h);
 
 /** The `datetime` face of {@link DatePickerField}. */
 export function DateTimePickerField(props: FieldWidgetComponentProps<string>) {
@@ -88,6 +124,7 @@ function TemporalPicker({
   const { t } = useFieldTranslation();
   const noticeId = React.useId();
   const [open, setOpen] = React.useState(false);
+  const hourRef = React.useRef<HTMLButtonElement>(null);
 
   // The value in the native control's shape: `YYYY-MM-DD`, or the local wall
   // clock `YYYY-MM-DDTHH:mm`. `''` for an empty value and for a stored day that
@@ -156,12 +193,31 @@ function TemporalPicker({
     write(parsed);
   };
 
-  /** A day picked in the calendar or by a shortcut keeps the value's time. */
+  /**
+   * A day picked in the calendar or by a shortcut keeps the value's time. On
+   * the `datetime` face the popover stays open and the hour control takes
+   * focus, so the time is chosen next.
+   */
   const pickDay = (day: Date | undefined) => {
     if (!day) return;
+    if (!withTime) {
+      write(toLocalDay(day));
+      setOpen(false);
+      return;
+    }
     const time = nativeValue.slice(11, 16) || '00:00';
-    write(withTime ? `${toLocalDay(day)}T${time}` : toLocalDay(day));
-    setOpen(false);
+    write(`${toLocalDay(day)}T${time}`);
+    hourRef.current?.focus();
+  };
+
+  // The value's hour and minute (`HH`, `mm`), `undefined` with no value.
+  const hour = nativeValue ? nativeValue.slice(11, 13) : undefined;
+  const minute = nativeValue ? nativeValue.slice(14, 16) : undefined;
+
+  /** A time picked on the `datetime` face, on the value's day or today. */
+  const pickTime = (nextHour: string, nextMinute: string) => {
+    const day = nativeValue.slice(0, 10) || toLocalDay(new Date());
+    write(`${day}T${nextHour}:${nextMinute}`);
   };
 
   const shortcut = (offsetDays: number) => {
@@ -252,6 +308,53 @@ function TemporalPicker({
                 autoFocus
                 className="[--cell-size:2.75rem] sm:[--cell-size:2rem]"
               />
+              {withTime ? (
+                <div
+                  role="group"
+                  aria-label={t('fields.datePicker.time', { defaultValue: 'Time' })}
+                  className="flex items-center gap-1.5 border-t p-2"
+                  data-testid="date-picker-time"
+                >
+                  <Clock className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <Select value={hour} onValueChange={(h) => pickTime(h, minute ?? '00')}>
+                    <SelectTrigger
+                      ref={hourRef}
+                      className={cn('h-8 w-[5.75rem]', PHONE_TOUCH_HEIGHT)}
+                      aria-label={t('fields.datePicker.hour', { defaultValue: 'Hour' })}
+                      data-testid="date-picker-hour"
+                    >
+                      <SelectValue placeholder="--" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-64">
+                      {HOURS.map((h) => {
+                        const v = String(h).padStart(2, '0');
+                        return (
+                          <SelectItem key={v} value={v}>
+                            {localeHourLabel(h, locale)}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-muted-foreground" aria-hidden="true">:</span>
+                  <Select value={minute} onValueChange={(m) => pickTime(hour ?? '00', m)}>
+                    <SelectTrigger
+                      className={cn('h-8 w-[4.25rem]', PHONE_TOUCH_HEIGHT)}
+                      aria-label={t('fields.datePicker.minute', { defaultValue: 'Minute' })}
+                      data-testid="date-picker-minute"
+                    >
+                      <SelectValue placeholder="--" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-64">
+                      {minuteOptions(DATE_TIME_MINUTE_STEP, minute).map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
               <div className="flex items-center gap-2 border-t p-2">
                 <Button type="button" variant="outline" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={() => shortcut(0)}>
                   {t('fields.datePicker.today')}

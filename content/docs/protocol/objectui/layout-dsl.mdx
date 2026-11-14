@@ -857,7 +857,9 @@ interface Page {
   // validation. See page.zod.ts (PageTypeSchema / PAGE_TYPE_ROADMAP).
   object?: string;       // bound object for record pages
   template?: 'default' | 'header-sidebar-main' | 'three-column' | 'dashboard';  // default 'default'
-  regions?: PageRegion[]; // named regions, each holding components (optional; defaults to [])
+  regions?: PageRegion[]; // named regions, each holding components (optional; defaults to []),
+                          // except on a kind 'full' record page, which must place at least one component
+                          // (one binding no object may draw an interfaceConfig.source instead)
 }
 
 interface PageRegion {

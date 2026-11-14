@@ -678,13 +678,19 @@ export const AuthConfigSchema = lazySchema(() => z.object({
    * SSO-only ("enforced") login mode. When `true`, the login UI hides the
    * local email/password form and self-registration so the team signs in via
    * the configured IdP only (cloud-as-IdP, or an external OIDC/SAML provider).
-   * The break-glass password endpoint stays enabled — managed (IdP-provisioned)
-   * users simply hold no local credential, while the env owner retains a
-   * password escape hatch. Generic over the IdP; orthogonal to which providers
-   * are wired. Self-host can also set this via `OS_AUTH_SSO_ONLY=true`.
+   * The server also refuses to give an IdP-provisioned user
+   * (`sys_user.source = 'idp_provisioned'`) a local password at every door
+   * that sets one: their own initial password, an administrator's
+   * set-password, and the emailed and texted password resets answer
+   * `409 RESOURCE_CONFLICT`. One exception keeps break-glass: a platform
+   * administrator may set their own local password. Environment-native users
+   * are unaffected, and a local password a user already holds keeps working
+   * (sign-in and change-password). The break-glass password endpoint stays
+   * enabled. Generic over the IdP; orthogonal to which providers are wired.
+   * Self-host can also set this via `OS_AUTH_SSO_ONLY=true`.
    */
   ssoOnlyMode: z.boolean().optional().describe(
-    'SSO-only login: hide the local password form + self-registration (the break-glass password endpoint stays enabled)',
+    'SSO-only login: hide the local password form + self-registration, and refuse to give an IdP-provisioned user a local password (a platform administrator may still set their own; the break-glass password endpoint stays enabled)',
   ),
   mutualTls: MutualTLSConfigSchema.optional().describe('Mutual TLS (mTLS) configuration'),
 }).catchall(z.unknown()));

@@ -257,7 +257,8 @@ describe('Register SAML Provider through the REAL route — the INSTALLED @bette
     const plugin = new AuthPlugin({ secret: 'test-secret-at-least-32-chars-long!!', plugins: { oidcProvider: false } });
     await plugin.init(ctx);
     (plugin as any).authManager = {
-      handleRequest: (req: Request) => vendor.handler(req),
+      // [#32637] The bridge delegates through the manager's vendor entry.
+      handleVendorRequest: (req: Request) => vendor.handler(req),
       getApi: async () => ({
         getSession: async () => ({ user: { id: 'usr_admin', positions: ['user', 'platform_admin'], isPlatformAdmin: true } }),
       }),

@@ -35,6 +35,7 @@ import { StorageNameMapping } from '@objectstack/spec/system';
 import { applyProtection } from '@objectstack/spec/shared';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
 import { isFederatedObject } from './federated-object.js';
+import { RecordCurrencyFollowRefusedError } from './record-currency-aggregate-door.js';
 // [#22070] The builtin audit stamps are wrapped like a bound hook but registered in code.
 import { wrapDeclarativeHook } from './hook-wrappers.js';
 import { announceStoredExpressionHoles } from './stored-expression-backfill.js';
@@ -51,6 +52,7 @@ import {
   GLOBAL_ACTION_OBJECT_KEY,
   runActionGovernanceInventory,
   standaloneActionOwnerKey,
+  standaloneActionOwnsRoute,
 } from './action-governance.js';
 // [ADR-0126 §8] The packaged-action activation ledger's durable store. The
 // engine holds the projection; this plugin is what attaches the store and
@@ -63,9 +65,9 @@ import {
 import type { IMetadataService } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
 import {
-  collectManifestPicklistExtensions,
   collectManifestPicklistNames,
   collectManifestPicklistReferences,
+  describeDisagreeingPicklistReference,
   describeUnresolvedPicklistReferences,
   picklistMetadataError,
   type PicklistMetadataError,
@@ -483,6 +485,45 @@ const SKIP_SCHEMA_SYNC_ENGINE_KEY = 'skipSchemaSync';
  */
 export const OBJECTQL_DRIVERS_READY_HOOK = 'objectql:drivers-ready';
 
+/**
+ * [#32164] The kernel-bus event every schema-sync pass of this plugin triggers
+ * when its DDL is done, with the live engine as its one argument: each boot
+ * phase that syncs (`start()`'s first and third phases, inside the boot's
+ * schema-migration lock) and each `metadata:reloaded` re-sync. Never on a
+ * `skipSchemaSync` boot, which runs no DDL.
+ *
+ * Only this plugin's passes trigger it. The engine's own doors,
+ * `ObjectQL.syncSchemas` and `syncObjectSchema`, run the same DDL and trigger
+ * nothing. No first-party composition creates `sys_user_permission_set`
+ * through them: a package install, a published object or extension and a
+ * datasource connect reach them after a boot's own pass has created the
+ * platform tables, and the CLI's declaration-phase composition calls
+ * `syncObjectSchema` only while DDL is held back, which its flush then
+ * announces. A door that rebuilds a SQLite table leaves that table without its
+ * runtime-managed indexes until this plugin's next pass.
+ *
+ * A pass whose driver holds DDL back (the one-shot CLI boot of `os migrate
+ * plan`, every dry-run mode, and `os migrate apply` before its confirmation;
+ * the driver reads `schemaDdlDeferred`) triggers it too, before any of that DDL
+ * exists: a subscriber that writes reads the same flag and builds nothing then.
+ * The CLI triggers it once more when its flush has performed what was held back
+ * (`DeferSchemaDdlPlugin.announceSchemaSynced`).
+ *
+ * It exists for the runtime-managed indexes the declared index surface cannot
+ * spell and a table must not stand without: the first is
+ * `sys_user_permission_set`'s package-less guard (metadata-protocol's
+ * `user-permission-set-packageless-index.ts`). Built from a `kernel:ready`
+ * handler, such an index would be missing while every later plugin's `start()`
+ * writes, and on a `bootPhaseHooks: false` host, which withholds
+ * `kernel:ready`, always. This event is dispatched by the plugin, not the
+ * kernel, so `bootPhaseHooks: false` does not withhold it.
+ *
+ * Not in `IPluginLifecycleEvents`: the bus is open to custom names. A handler's
+ * throw propagates into the pass, so a handler that must never fail a boot
+ * catches its own errors.
+ */
+export const OBJECTQL_SCHEMA_SYNCED_HOOK = 'objectql:schema-synced';
+
 export class ObjectQLPlugin implements Plugin {
   name = 'com.objectstack.engine.objectql';
   type = 'objectql' as const;
@@ -551,14 +592,8 @@ export class ObjectQLPlugin implements Plugin {
   private readonly extendedObjectCopies = new Map<string, Set<string>>();
 
   /**
-   * Set at `kernel:ready`, once the boot audit has found every picklist a
-   * field names: from then on an artifact registered through the `manifest`
-   * service is judged before it registers (AGENTS.md, startup registry reads:
-   * seal the vocabulary, then judge).
-   */
-  private picklistVocabularySealed = false;
-  /**
-   * [#24400] Set at `kernel:ready` beside {@link picklistVocabularySealed},
+   * [#24400] Set at `kernel:ready` beside the registry's picklist seal
+   * (`SchemaRegistry.sealPicklistVocabulary`),
    * once the boot audit has found the target object of every bound top-level
    * action: from then on a late artifact's bound actions are judged before it
    * registers.
@@ -951,45 +986,19 @@ export class ObjectQLPlugin implements Plugin {
 
         // Once the boot has sealed the picklist vocabulary (`kernel:ready`,
         // below), an artifact arriving later is judged BEFORE anything of it
-        // registers: every field it brings that names a picklist must resolve
-        // against the registry or against a list the artifact itself declares.
-        // A refused install registers nothing.
-        if (this.picklistVocabularySealed) {
-          // [ADR-0150 D3, child E6] A reference is reached the way the served
-          // field will reach it: from the package that writes it, through the
-          // package-scoped resolver, against a registry view holding the
-          // artifact's manifests — their declared dependencies and the lists
-          // each one declares. A list the reference's OWN manifest declares is
-          // its own; every other list, a sibling's in this artifact included,
-          // is R's to answer (epic seat review on #31731: no artifact-wide
-          // "declared somewhere" pass). A reference R refuses — the
-          // environment's own list included (D3 (a)) — is refused here,
-          // loudly, naming every candidate. An extension's target is a
-          // contribution, judged caller-less (epic seat ruling X on #31678;
-          // `SchemaRegistry.picklistContributions`).
-          const judge = <R extends { picklist: string; packageId: string | undefined }>(
-            ref: R,
-            own: ReadonlySet<string>,
-            caller: string | null | undefined,
-          ): R & { refusal?: string } | undefined => {
-            if (own.has(ref.picklist)) return undefined;
-            const verdict = ql.registry.picklistReferenceVerdict(ref.picklist, caller, ordered);
-            if (verdict.status === 'resolved') return undefined;
-            return verdict.status === 'refused' ? { ...ref, refusal: verdict.message } : ref;
-          };
-          const unresolved = ordered.flatMap((manifest) => {
-            const own = collectManifestPicklistNames(manifest);
-            return collectManifestPicklistReferences(manifest, artifactPackageId(manifest))
-              .flatMap((ref) => judge(ref, own, ref.packageId) ?? []);
-          });
-          const orphans = ordered.flatMap((manifest) => {
-            const own = collectManifestPicklistNames(manifest);
-            return collectManifestPicklistExtensions(manifest, artifactPackageId(manifest))
-              .flatMap((ext) => judge(ext, own, null) ?? []);
-          });
-          const refusal = describeUnresolvedPicklistReferences(unresolved, orphans);
-          if (refusal) throw refusal;
-        }
+        // registers, as a whole, by the registry's one re-judge
+        // (`SchemaRegistry.judgePicklistArrival`; ADR-0150 D3, child E6, #31700,
+        // epic seat rulings A 6811306558 and R2-A 6812862622): every field it
+        // brings reaches one list from the package that writes it, every
+        // extension it brings one list judged caller-less (a list of the same
+        // name its own package declares is no shortcut once another namespace
+        // holds the name), no reference or extension already installed is left
+        // with no one list, and no field's writers — an `objectExtensions`
+        // redeclare among them — are split between two lists. A refused
+        // install registers nothing. The registration below runs inside the
+        // judged arrival, so the registry's per-item seams do not judge its
+        // parts again one by one.
+        ql.registry.refusePicklistArrival(ordered);
         // [#24400] The same seal for bound top-level actions: once the boot has
         // judged every target (`kernel:ready`, below), an artifact arriving
         // later must bind its actions to an object the registry holds or one
@@ -1021,10 +1030,19 @@ export class ObjectQLPlugin implements Plugin {
         // in the running kernel while the install door answered the refusal
         // and ledgered nothing. A single-package artifact is the one-body run
         // `registerApp` opens on its own, answered as before.
+        // [ADR-0144 D2 and D6, amended] Once the cold boot has sealed the
+        // registry, the run ends by asking the record-currency follow door of
+        // every object layer it registered — each body's objects and
+        // extensions, its nested plugins' objects, the residual's objects —
+        // with all of them registered, so a pair one member completes for
+        // another is judged whole, and never against the version an upgrade
+        // is replacing (`SchemaRegistry.restoringOnRefusal`). A refusal there
+        // is one more refusal of this run: everything is put back and it
+        // propagates, 422 `INVALID_METADATA`, to the install door's report.
         // [ADR-0150 D2, #31720] The residual as one holder of the stack's
         // namespace — judged below, recorded once the artifact has registered.
         const residualHolder = residualNamespacePackageOf(artifact, residualAnswer);
-        ql.registry.restoringOnRefusal(() => {
+        ql.registry.registeringPicklistArrival(() => ql.registry.restoringOnRefusal(() => {
           for (const { manifest, source } of entries as Array<{ manifest: any; source?: 'code' | 'marketplace' }>) {
             ql.registerApp(manifest, scope, source ?? options?.source);
             ctx.logger.debug('Manifest registered via manifest service', {
@@ -1051,7 +1069,7 @@ export class ObjectQLPlugin implements Plugin {
           // id, through the registration a body's own item of that type takes.
           // See {@link registerUnclaimedTopLevelItems}.
           if (residualItems) this.registerUnclaimedTopLevelItems(ctx, residualItems);
-        });
+        }));
         // [#28534] …and the door's statement of where the residual's owner
         // came from: no package row answers the id, and a reader of an item's
         // origin must tell the host's own residual from an installed bundle's
@@ -1265,8 +1283,23 @@ export class ObjectQLPlugin implements Plugin {
                 { object: ref.object, field: ref.field, packageId: ref.packageId, picklist: ref.picklist },
             );
         }
+        // [ADR-0150 D3, child E6; #31700] A field whose reference several
+        // packaged layers write (the owner and an extension), each reaching a
+        // DIFFERENT list from its own package — reachable once two namespaces
+        // may each hold the name — is served no options, since no referrer is
+        // preferred over another. Every referrer resolves, so neither check
+        // above names it; this one does, every referrer with the list it
+        // reaches, and the boot goes on (the same ruling N2).
+        for (const ref of this.ql?.registry.findDisagreeingPicklistReferences() ?? []) {
+            ctx.logger.warn(`[ObjectQLPlugin] ${describeDisagreeingPicklistReference(ref)}`, {
+                object: ref.object,
+                field: ref.field,
+                picklist: ref.picklist,
+                referrers: ref.referrers.map((r) => r.packageId ?? null),
+            });
+        }
 
-        this.picklistVocabularySealed = true;
+        this.ql?.registry.sealPicklistVocabulary();
         // [#24400] A top-level action bound by `objectName` to an object no
         // package registers fails the boot, naming the action, its package and
         // the object — never registered and listed nowhere. Judged here for the
@@ -1410,8 +1443,11 @@ export class ObjectQLPlugin implements Plugin {
         //      email template sent its old wording, an edited flow re-bound its
         //      old body, while the by-name read served the edit. See
         //      {@link refreshReloadedPackages}.
-        this.refreshReloadedPackages(ctx, payload);
-        this.ingestReloadedObjects(ctx, payload);
+        // [#31700, epic seat ruling R3-C] A reload the picklist re-judge refused
+        // is refused whole: its objects are not ingested either.
+        // [ADR-0144 D2 and D6, amended] Both steps are ONE registration run,
+        // judged once at its end. See {@link registerReloadedArtifact}.
+        this.registerReloadedArtifact(ctx, payload);
         if (this.skipSchemaSync) {
             // DDL is managed out-of-band here, but the objects this reload just
             // ingested still have to be TOLD to the driver, or every JSON /
@@ -1761,12 +1797,14 @@ export class ObjectQLPlugin implements Plugin {
    * Items removed from the artifact stay registered until restart, the
    * lifecycle {@link ingestReloadedObjects} keeps for objects. A body that
    * fails to register is named and skipped: the reload goes on, and that
-   * package keeps serving what it served before.
+   * package keeps serving what it served before (inside the reload's run its
+   * own nested run puts back only itself). Answers `'refused'` when the
+   * picklist re-judge refused the reload whole, else the ids it re-registered.
    */
-  private refreshReloadedPackages(ctx: PluginContext, payload: unknown): void {
-    if (!this.ql) return;
+  private refreshReloadedPackages(ctx: PluginContext, payload: unknown): 'refused' | string[] {
+    if (!this.ql) return [];
     const metadata = (payload as { metadata?: unknown } | undefined)?.metadata as Record<string, any> | undefined;
-    if (!metadata || typeof metadata !== 'object') return;
+    if (!metadata || typeof metadata !== 'object') return [];
     // The shape `AppPlugin` hands the `manifest` service: the manifest's
     // fields with the collections spread over them.
     const artifact = metadata.manifest && typeof metadata.manifest === 'object'
@@ -1781,7 +1819,7 @@ export class ObjectQLPlugin implements Plugin {
       ctx.logger.warn('[ObjectQLPlugin] reload could not read the artifact\'s packages — registry entries keep their previous definitions', {
         error: e?.message,
       });
-      return;
+      return [];
     }
     const scope = {
       packageIds: entries
@@ -1789,29 +1827,99 @@ export class ObjectQLPlugin implements Plugin {
         .filter((id): id is string => id !== undefined),
     };
     const refreshed: string[] = [];
-    for (const { manifest } of entries as Array<{ manifest: any }>) {
+    const reloading = (entries as Array<{ manifest: any }>).flatMap(({ manifest }) => {
       const id = artifactPackageId(manifest);
-      const installed = id === undefined ? undefined : this.ql.registry.getPackage(id);
-      if (!installed || (installed.source !== 'code' && installed.source !== 'marketplace')) continue;
-      try {
-        this.ql.registerApp(manifest, scope, installed.source);
-        refreshed.push(id!);
-      } catch (e: any) {
-        ctx.logger.warn('[ObjectQLPlugin] reload could not re-register a package — its registry entries keep their previous definitions', {
-          packageId: id,
-          error: e?.message,
-        });
-      }
+      const installed = id === undefined ? undefined : this.ql!.registry.getPackage(id);
+      if (!installed || (installed.source !== 'code' && installed.source !== 'marketplace')) return [];
+      return [{ manifest, id: id!, source: installed.source }];
+    });
+    // [ADR-0150 D3, #31700; epic seat ruling R2-A, 6812862622] A reload is an
+    // arrival like an upgrade: once the vocabulary is sealed, the packages it
+    // re-registers are judged as a whole by the registry's one re-judge, before
+    // any of them re-registers. Refused, nothing is reloaded and every package
+    // keeps its previous definitions, as for any reload that cannot register.
+    try {
+      this.ql.registry.refusePicklistArrival(reloading.map((r) => r.manifest), { act: 'reload' });
+    } catch (e: any) {
+      ctx.logger.warn('[ObjectQLPlugin] reload refused — every package keeps its previous definitions', {
+        packageIds: reloading.map((r) => r.id),
+        error: e?.message,
+      });
+      return 'refused';
     }
+    this.ql.registry.registeringPicklistArrival(() => {
+      for (const { manifest, id, source } of reloading) {
+        try {
+          this.ql!.registerApp(manifest, scope, source);
+          refreshed.push(id);
+        } catch (e: any) {
+          ctx.logger.warn('[ObjectQLPlugin] reload could not re-register a package — its registry entries keep their previous definitions', {
+            packageId: id,
+            error: e?.message,
+          });
+        }
+      }
+    });
+    return refreshed;
+  }
+
+  /**
+   * [ADR-0144 D2 and D6, amended] One reload is one registration run: every
+   * package it re-registers ({@link refreshReloadedPackages}), then every
+   * object it ingests ({@link ingestReloadedObjects}), as before.
+   *
+   * What the run adds is its end. Once the cold boot has sealed the registry,
+   * the registry asks the record-currency follow door of every object layer
+   * the reload registered, with all of them registered
+   * (`SchemaRegistry.restoringOnRefusal`). Each `registerApp` used to be a run
+   * of its own; asked there, a reload that adds the code field in one package
+   * and makes another package's amount follow it would be judged against the
+   * version that served, and half of it refused. Refused at the end, the
+   * reload is refused whole, as a reload the picklist re-judge refuses is
+   * (`refusePicklistArrival`, above): every package and object keeps the
+   * definition it served, and the log names the pair.
+   *
+   * What does not change: a package that cannot re-register is named and
+   * skipped while the others reload, and so is an object that cannot be
+   * ingested. Any other error leaves through this method as it did, with the
+   * run put back.
+   */
+  private registerReloadedArtifact(ctx: PluginContext, payload: unknown): void {
+    const registry = this.ql?.registry;
+    if (!registry) return;
+    let refreshed: string[] = [];
+    let ingested = 0;
+    try {
+      registry.restoringOnRefusal(() => {
+        const packages = this.refreshReloadedPackages(ctx, payload);
+        if (packages === 'refused') return;
+        refreshed = packages;
+        ingested = this.ingestReloadedObjects(ctx, payload);
+      });
+    } catch (e) {
+      if (!(e instanceof RecordCurrencyFollowRefusedError)) throw e;
+      ctx.logger.warn('[ObjectQLPlugin] reload refused — every package and object keeps its previous definition', {
+        packageIds: refreshed,
+        error: e.message,
+      });
+      return;
+    }
+    // Said once the run has ended: a refused reload refreshed and ingested nothing.
     if (refreshed.length > 0) {
       ctx.logger.info('[ObjectQLPlugin] reload refreshed the registry entries of its packages', { packageIds: refreshed });
     }
+    if (ingested > 0) {
+      ctx.logger.info('[ObjectQLPlugin] reload ingested object definitions into the registry', {
+        count: ingested,
+      });
+    }
   }
 
-  private ingestReloadedObjects(ctx: PluginContext, payload: unknown): void {
-    if (!this.ql) return;
+  /** Answers how many objects it registered; {@link registerReloadedArtifact} reports them. */
+  private ingestReloadedObjects(ctx: PluginContext, payload: unknown): number {
+    if (!this.ql) return 0;
     const objects = (payload as any)?.metadata?.objects;
-    if (!Array.isArray(objects) || objects.length === 0) return;
+    if (!Array.isArray(objects) || objects.length === 0) return 0;
     let ingested = 0;
     for (const obj of objects) {
       const name = (obj as any)?.name;
@@ -1834,11 +1942,7 @@ export class ObjectQLPlugin implements Plugin {
         });
       }
     }
-    if (ingested > 0) {
-      ctx.logger.info('[ObjectQLPlugin] reload ingested object definitions into the registry', {
-        count: ingested,
-      });
-    }
+    return ingested;
   }
 
   /**
@@ -2844,6 +2948,12 @@ export class ObjectQLPlugin implements Plugin {
     } else if (synced > 0 || skipped > 0) {
       ctx.logger.info('Schema sync complete', { synced, skipped, total: allObjects.length });
     }
+
+    // [#32164] This pass's DDL is done: the indexes a table must not stand
+    // without are built now, before any later plugin's `start()` writes. See
+    // {@link OBJECTQL_SCHEMA_SYNCED_HOOK}. Spelled as the literal, as the
+    // drivers-ready trigger above is, for the settings bind-window guard.
+    await ctx.trigger('objectql:schema-synced', this.ql);
   }
 
   /**
@@ -3865,21 +3975,32 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
-   * True when an action of this name is shipped by an installed CODE
-   * package — either as a standalone `action` artifact, or embedded in a
-   * packaged object's `actions[]` array (the common `defineStack` shape).
-   * Those handlers are registered by AppPlugin under `app:<appId>` with its
-   * own runner, and `engine.registerAction` REPLACES by `<object>:<name>`
-   * key — so re-registering here would clobber the packaged handler with a
-   * metadata copy. Artifact-wins, same rule as {@link isArtifactShippedHook}.
+   * True when a CODE package ships this action at its owner key — either as
+   * a standalone `action` artifact that owns the action's object, or embedded
+   * in a packaged object's `actions[]` array (the common `defineStack`
+   * shape). Those handlers are registered by AppPlugin under `app:<appId>`
+   * with its own runner, and an authored row there is that holder's
+   * customization (ADR-0150 D4), so binding its copy would run it in place
+   * of the packaged handler. Artifact-wins, same rule as
+   * {@link isArtifactShippedHook}.
+   *
+   * [#32990] Judged against every holder's artifact of the name
+   * ({@link artifactActionsNamed}), each by the object it owns
+   * ({@link standaloneActionOwnsRoute}: an object-less artifact owns every
+   * object), never by the bare name alone. Two packages may hold one action
+   * name on different objects (ADR-0150 D4 keys the action by
+   * `(package, objectName, name)`), and the environment's own action on an
+   * object none of them binds is its own item, whose declaration the route
+   * serves (#32751): the bare-name test found a holder's artifact and left
+   * it with no handler.
    */
   private isArtifactShippedAction(action: any): boolean {
     const name = action?.name;
     if (typeof name !== 'string' || name.length === 0) return false;
     const registry: any = this.ql?.registry;
     if (!registry || typeof registry.getArtifactItem !== 'function') return false;
-    if (registry.getArtifactItem('action', name) !== undefined) return true;
     const objectKey = standaloneActionOwnerKey(action);
+    if (this.artifactActionsNamed(name).some((artifact) => standaloneActionOwnsRoute(artifact, objectKey))) return true;
     if (objectKey !== GLOBAL_ACTION_OBJECT_KEY) {
       const artifactObject: any = registry.getArtifactItem('object', objectKey);
       if (Array.isArray(artifactObject?.actions)
@@ -3888,6 +4009,30 @@ export class ObjectQLPlugin implements Plugin {
       }
     }
     return false;
+  }
+
+  /**
+   * [#32990] Every code package's artifact of action `name`: the registry's
+   * first match by bare name (`getArtifactItem`, what one holder always
+   * answered), and each holder's own (`packageScopedHoldersOf`, disabled
+   * packages included: a reversible disable never moves a binding), read
+   * prefer-local. Deduplicated; a holder whose own read answers another
+   * package's artifact adds nothing that is not a genuine artifact.
+   */
+  private artifactActionsNamed(name: string): any[] {
+    const registry: any = this.ql?.registry;
+    if (!registry || typeof registry.getArtifactItem !== 'function') return [];
+    const found = new Set<any>();
+    const first = registry.getArtifactItem('action', name);
+    if (first !== undefined && first !== null) found.add(first);
+    const holders: string[] = typeof registry.packageScopedHoldersOf === 'function'
+      ? registry.packageScopedHoldersOf('action', name, null, { includeDisabledPackages: true })
+      : [];
+    for (const packageId of holders) {
+      const own = registry.getArtifactItem('action', name, packageId);
+      if (own !== undefined && own !== null) found.add(own);
+    }
+    return [...found];
   }
 
   /**
@@ -3944,7 +4089,7 @@ export class ObjectQLPlugin implements Plugin {
         const data = parseRow(row, 'action');
         if (data && typeof data.name === 'string') {
           actions.push(data);
-          if (this.isDeclaredArtifactActionOverride(row, data)) this.declaredActionOverrides.add(data);
+          if (this.isDeclaredArtifactActionOverride(row, data, ctx)) this.declaredActionOverrides.add(data);
         }
       }
 
@@ -3988,6 +4133,9 @@ export class ObjectQLPlugin implements Plugin {
    */
   private readonly declaredActionOverrides = new WeakSet<object>();
 
+  /** [#32990 review S1] Once-per-process dedupe for the ambiguous-override-base warning, keyed `OBJECT:NAME`. */
+  private readonly overrideBaseAmbiguityWarned = new Set<string>();
+
   /**
    * [#30065, ADR-0146 D9 `action`] Whether a stored `action` row is the
    * declared override of the action a code package ships under its name, on
@@ -4007,17 +4155,38 @@ export class ObjectQLPlugin implements Plugin {
    * a row of another base's pair that ships the same key is replaced by the
    * real base's handler when it arrives, as the reads decline it.
    */
-  private isDeclaredArtifactActionOverride(row: unknown, action: any): boolean {
+  private isDeclaredArtifactActionOverride(row: unknown, action: any, ctx?: PluginContext): boolean {
     const registry: any = this.ql?.registry;
     if (!registry || typeof registry.getArtifactItem !== 'function') return false;
     const installed = installedManifestsOf(registry);
-    const artifact: any = registry.getArtifactItem('action', action.name);
-    if (artifact === undefined || artifact === null) {
+    // [#32990] The artifact at the row's own object, among every holder's:
+    // the first match by bare name may be another holder's, on another object.
+    const artifacts = this.artifactActionsNamed(action.name);
+    if (artifacts.length === 0) {
       return isServedOverrideRowOf(row as any, action?.overrides?.package, installed);
+    }
+    // [#32990 review S1] Several holders may ship the name at one owner key
+    // (two object-less actions both own `global`): the base is the one the row
+    // declares; with several and none declared, no base is picked (an
+    // ambiguity is reported, never guessed).
+    const objectKey = standaloneActionOwnerKey(action);
+    const atKey = artifacts.filter((a) => standaloneActionOwnerKey(a) === objectKey);
+    const declared = action?.overrides?.package;
+    const named = atKey.filter((a) => a?._packageId === declared);
+    const artifact: any = named.length === 1 ? named[0] : atKey.length === 1 ? atKey[0] : undefined;
+    if (artifact === undefined && atKey.length > 1) {
+      const key = `${objectKey}:${String(action.name)}`;
+      if (!this.overrideBaseAmbiguityWarned.has(key)) {
+        this.overrideBaseAmbiguityWarned.add(key);
+        ctx?.logger.warn(
+          `[ObjectQLPlugin] stored action '${String(action.name)}' on '${objectKey}' is bound as no override: `
+          + `${atKey.length} packages ship it there (${atKey.map((a) => `'${String(a?._packageId)}'`).join(', ')}) and the row `
+          + 'declares none of them in overrides.package. Fix: name the base package in the row\'s overrides.package.',
+        );
+      }
     }
     const base = artifact?._packageId;
     if (typeof base !== 'string' || base === '') return false;
-    if (standaloneActionOwnerKey(artifact) !== standaloneActionOwnerKey(action)) return false;
     return isServedOverrideRowOf(row as any, base, installed);
   }
 

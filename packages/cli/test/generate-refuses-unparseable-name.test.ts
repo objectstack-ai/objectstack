@@ -252,12 +252,13 @@ describe('[#16541] CONTROL — an ordinary name is untouched by this change', ()
   it('writes a scaffold that parses, still binding `orderLine`', () => {
     const scaffold = readFileSync(join(controlDir, 'src', 'objects', 'order_line.object.ts'), 'utf8');
     expect(parseErrors(scaffold)).toEqual([]);
-    expect(scaffold).toContain('const orderLine = ObjectSchema.create({');
+    expect(scaffold).toContain('export const orderLine = ObjectSchema.create({');
   });
 
   it('writes a barrel that parses, still re-exporting `orderLine`', () => {
     const barrel = readFileSync(join(controlDir, 'src', 'objects', 'index.ts'), 'utf8');
     expect(parseErrors(barrel)).toEqual([]);
-    expect(barrel).toBe("export { default as orderLine } from './order_line.object';\n");
+    // #32153: the object is exported by name, the starter's barrel shape.
+    expect(barrel).toBe("export { orderLine } from './order_line.object';\n");
   });
 });

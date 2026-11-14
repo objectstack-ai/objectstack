@@ -93,9 +93,11 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The console layout's draft lint loads this lazily; paid here, at collection, not inside a test's window.
+import '@objectstack/lint';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import {
   MemoryRouter,
   Routes,
@@ -426,5 +428,28 @@ describe('AppContent — zero-app component/metadata destinations (objectui#3610
 
     expect(await screen.findByTestId('create-first-app-btn')).toBeInTheDocument();
     expect(screen.queryByText('Page not found')).not.toBeInTheDocument();
+  });
+});
+
+describe('AppContent — the unmatched-URL state offers two ways out (objectstack#32157)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('Back to home opens Home', async () => {
+    renderConsoleAt('/apps/setup/system/no-such-page');
+
+    const state = await screen.findByTestId('route-not-found');
+    expect(state).toHaveTextContent('Page not found');
+    fireEvent.click(screen.getByRole('button', { name: 'Back to home' }));
+    expect(await screen.findByTestId('home-launcher')).toBeInTheDocument();
+    expect(pathname()).toBe('/home');
+  });
+
+  it('PRESERVATION: Go back is still offered beside it', async () => {
+    renderConsoleAt('/apps/setup/system/no-such-page');
+
+    await screen.findByTestId('route-not-found');
+    expect(screen.getByRole('button', { name: 'Go back' })).toBeInTheDocument();
   });
 });

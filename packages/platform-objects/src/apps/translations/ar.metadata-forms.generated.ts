@@ -638,7 +638,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyField": {
         label: "حقل العملة",
-        helpText: "لوضع record فقط، ومطلوب فيه: الحقل في هذا الكائن الذي يحمل رمز ISO 4217 لكل سجل — حقل نصي بـ valueDomain قيمته iso_4217_currency، ويُسمّى عُرفًا currency_code."
+        helpText: "لوضع record فقط، ومطلوب فيه: الحقل في هذا الكائن الذي يحمل رمز ISO 4217 لكل سجل — حقل نصي بـ valueDomain قيمته iso_4217_currency، ويُسمّى عُرفًا currency_code. في سجل تابع لعلاقة master_detail يمكنه بدلًا من ذلك أن يسمّي حقل رمز الأصل بالصيغة <حقل master_detail>.<حقل رمز الأصل> (مثل invoice.currency_code): عندها يتبع السجل عملة أصله، ويُرفض تغيير رمز الأصل ما دام له سجل تابع كهذا."
       },
       "currencyConfig.defaultCurrency": {
         label: "العملة الافتراضية",

@@ -407,7 +407,6 @@
 - 该格两空:MCP 送裸页脚、`title`/`labels` 单字段 `issue_write` 是否动页脚,均未实测。
 - issue `PATCH` 同体带 `labels` 与 `type` 回 500 且零写入;拆两次写各 200,已带 type 的卡未实测。
 - heredoc 定界符不加引号会展开正文里每个反引号 ⇒ 请求体永不过会展开的 shell 上下文。
-- `cmd | tail; echo $?` 读到的是 `tail` 的状态 ⇒ 退出码在任何管道之前捕获。
 - CI job 的失败 step 不必与 job 名一致 ⇒ ⛔ 不由 job 名推原因,先读 step 名再下结论。
 - Actions 日志保留把老 job 截到 post-job cleanup ⇒ 归档只剩清理输出时原因不可断言。
 - 无 `packageManager` 的目录里 corepack 运行时解析 registry `latest` ⇒ 同 SHA 前绿后红是 tag 移了。
@@ -422,6 +421,7 @@
 - `check-half-states.mjs` 连 `--help` 都跑整仓 I/O ⇒ 早读到的输出文件是空的,不是干净的。
 - 后台工具调用里再 `nohup … &` 会让包装器报假 `exit 0`,而真活还在跑。
 - harness 按内容拒写:同会话派发 PR 上 PASS 拒 `[Self-Approval]`,建卡、ACCEPT 照过;ccr 翻转亦拒。
+- 卡线程不以 `.claude/agents` 定义起:类型只进子代理名单,正文不进上下文 ⇒ 手读 `os-dev.md`。
 
 ## 闭合关键词解析(PR 正文写侧)
 

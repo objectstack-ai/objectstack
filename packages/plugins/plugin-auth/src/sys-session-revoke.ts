@@ -127,7 +127,7 @@ export interface SysSessionRevokeDeps {
   findLiveSession(sessionId: string): Promise<LiveSessionRow | null>;
   /** Tombstone the session in place with `reason`; `false` when no row was written. */
   tombstoneSession(sessionId: string, reason: string): Promise<boolean>;
-  /** better-auth's universal handler — `AuthManager.handleRequest`. */
+  /** better-auth's universal handler alone — `AuthManager.handleVendorRequest`. */
   handle(request: Request): Promise<Response>;
   /** The auth route base, e.g. `/api/v1/auth`. */
   basePath: string;
@@ -138,7 +138,11 @@ export interface SysSessionRevokeManager {
   getApi(): Promise<unknown>;
   getAuthContext(): Promise<unknown>;
   getDataEngine(): unknown;
-  handleRequest(request: Request): Promise<Response>;
+  /**
+   * The vendor entry (`AuthManager.handleVendorRequest`), never `handleRequest`:
+   * that one answers through the route table this route is mounted on.
+   */
+  handleVendorRequest(request: Request): Promise<Response>;
 }
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -204,7 +208,7 @@ export function sysSessionRevokeDepsFor(manager: SysSessionRevokeManager, basePa
       );
       return written != null && written !== 0;
     },
-    handle: (request) => manager.handleRequest(request),
+    handle: (request) => manager.handleVendorRequest(request),
     basePath,
   };
 }

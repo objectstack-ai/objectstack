@@ -24,9 +24,11 @@
  *                                                            permission set (`permission`), a declared
  *                                                            sharing rule (`sharing_rule`) or a declared
  *                                                            webhook (`webhook`) on/off
- *                                                            for this deployment (`./catalog-activation.ts`)
+ *                                                            for this deployment (`./catalog-activation.ts`);
+ *                                                            `?package=` names a permission set's package
  *   POST /security/permission-sets/:name/clone            → copy a permission set's whole definition
- *                                                            under a new name (`./permission-set-clone.ts`)
+ *                                                            under a new name (`./permission-set-clone.ts`);
+ *                                                            `?package=` names the source set's package
  */
 
 import {
@@ -108,7 +110,7 @@ export async function handleSecurityRequest(
     // split+filter, as below, so no regex runs over request-controlled input.
     const activationParts = path.split('/').filter(Boolean);
     if (isCatalogActivationWrite(activationParts, method.toUpperCase())) {
-        return handleCatalogActivationWrite(deps, activationParts, _body, context);
+        return handleCatalogActivationWrite(deps, activationParts, _body, context, query);
     }
 
     // [ADR-0126 §7.1] THE PERMISSION-SET CLONE DOOR — copy a set's whole
@@ -117,7 +119,7 @@ export async function handleSecurityRequest(
     // reads the security catalog and saves through the metadata protocol,
     // behind the metadata door's own authority (`./permission-set-clone.ts`).
     if (isPermissionSetCloneWrite(activationParts, method.toUpperCase())) {
-        return handlePermissionSetCloneWrite(deps, activationParts, _body, context);
+        return handlePermissionSetCloneWrite(deps, activationParts, _body, context, query);
     }
 
     // [#4127 batch 3] The `as any` was the only thing between this call and

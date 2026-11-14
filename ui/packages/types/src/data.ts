@@ -771,10 +771,18 @@ export interface DataSource<T = any> {
    * Optional: an adapter that cannot enumerate a registry omits it, and the
    * widget then takes a typed name.
    *
+   * `packageId` (objectstack#32770, ADR-0150 D4) is the package the registry
+   * served the item under — the item's `_packageId`, VERBATIM, overlay
+   * sentinel included — when the answer carries one, and absent otherwise.
+   * The registry serves one item per `(package, name)`, so two items of one
+   * name are two holders of it, and `permission-ref` lists one option per
+   * holder. An adapter that does not report it gives every item one holder,
+   * which is what the widget showed before the member existed.
+   *
    * @param type - The registry type (`position`, `permission`)
    * @throws on transport, permission or envelope failure — do NOT resolve `[]`
    */
-  listMetadataItems?(type: string): Promise<Array<{ name: string; label?: string }>>;
+  listMetadataItems?(type: string): Promise<Array<{ name: string; label?: string; packageId?: string }>>;
 
   /**
    * Get a view definition for an object.

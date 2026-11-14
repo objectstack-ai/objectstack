@@ -395,3 +395,51 @@ describe('answeredLoadFailure', () => {
     expect(classifyLoadError(err)).toBe('network');
   });
 });
+
+/**
+ * objectstack#32684 — a coded client refusal that is not a denial no longer
+ * reads as one because its sentence says "not permitted".
+ */
+describe('isPermissionError — a coded non-denial refusal', () => {
+  /** The server's answer for a file outside a field's `accept`, as the client attaches it. */
+  const FILE_CONSTRAINT = {
+    error:
+      "File type 'text/plain' is not permitted by the accept list declared for 'invoice_file' (.pdf, .ofd, .png, .jpg, .jpeg)",
+    code: 'ERR_FILE_CONSTRAINT',
+  };
+  const clientError = (status: number, body: Record<string, unknown>) =>
+    Object.assign(new Error(String(body.error)), { httpStatus: status, code: body.code, details: body });
+
+  it('a 400 ERR_FILE_CONSTRAINT is not a denial', () => {
+    expect(isPermissionError(clientError(400, FILE_CONSTRAINT))).toBe(false);
+  });
+
+  it('reads the code from `details` and the status from `status` too', () => {
+    expect(isPermissionError({ status: 400, message: FILE_CONSTRAINT.error, details: FILE_CONSTRAINT })).toBe(false);
+    expect(isPermissionError({ statusCode: 422, message: 'Install mode not permitted', code: 'INSTALL_MODE_NOT_PERMITTED' }))
+      .toBe(false);
+  });
+
+  it('CONTROL: a 403 or a denial code is a denial whatever else it carries', () => {
+    expect(isPermissionError(clientError(403, { ...FILE_CONSTRAINT, code: 'PERMISSION_DENIED' }))).toBe(true);
+    expect(isPermissionError(clientError(403, FILE_CONSTRAINT))).toBe(true);
+    expect(isPermissionError(clientError(400, { error: 'Nope', code: 'PERMISSION_DENIED' }))).toBe(true);
+    expect(isPermissionError(clientError(400, { error: 'Nope', code: 'FORBIDDEN' }))).toBe(true);
+  });
+
+  it('CONTROL: a refusal its producer did not classify keeps the text match', () => {
+    // No code: the sentence is all there is.
+    expect(isPermissionError({ httpStatus: 400, message: 'permission denied for table invoices' })).toBe(true);
+    expect(isPermissionError({ httpStatus: 400, message: 'Writing this field is not permitted' })).toBe(true);
+    // No status.
+    expect(isPermissionError({ code: 'ERR_FILE_CONSTRAINT', message: FILE_CONSTRAINT.error })).toBe(true);
+    expect(isPermissionError(new Error('row-level security policy violation'))).toBe(true);
+    // A 401 and a 5xx are not classified by this rule.
+    expect(isPermissionError({ httpStatus: 401, code: 'UNAUTHORIZED', message: 'Access denied' })).toBe(true);
+    expect(isPermissionError({ httpStatus: 500, code: 'INTERNAL_ERROR', message: 'permission denied' })).toBe(true);
+  });
+
+  it('CONTROL: a coded 400 with no denial text was never a denial', () => {
+    expect(isPermissionError(clientError(400, { error: 'Validation failed', code: 'VALIDATION_FAILED' }))).toBe(false);
+  });
+});

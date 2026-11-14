@@ -172,6 +172,9 @@ function fixtureRows(): Record<string, Row[]> {
       { id: OTHER, name: 'Other' },
       { id: VIEWER, name: 'Viewer' },
     ],
+    // The D10 delegator is a current member of the organization the delegated
+    // request runs in (ADR-0093 D8.1, as amended: under every posture).
+    sys_member: [{ user_id: VIEWER, organization_id: 'org-1', role: 'member' }],
   };
 }
 

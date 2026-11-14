@@ -18,6 +18,15 @@
  * A save sends `slug` only when it CHANGED. A name-only save therefore never
  * carries a slug, so the guard has nothing to judge and the save answers 200,
  * and a stale form can never write back a slug that was renamed elsewhere.
+ *
+ * ## A delete is refused while the organization still owns records (objectstack#32648)
+ *
+ * The framework deletes an organization with its members and invitations only,
+ * and refuses with 409 `DELETE_RESTRICTED` while any other record names it,
+ * listing `dependents: [{ object, count }]`. The danger-zone copy says so up
+ * front, and a refusal keeps the confirm dialog open and lists those records
+ * there under their object labels (`orgDeleteRefusalRows`), never the server's
+ * English sentence and never an API name.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -40,13 +49,14 @@ import {
 } from '@object-ui/components';
 import { useAuth } from '@object-ui/auth';
 import type { AuthOrganizationMember } from '@object-ui/auth';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { formatDisplayNumber, useDisplayLocale, useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { useUpload } from '@object-ui/fields';
 import { Loader2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { useOrgContext } from './orgContext.js';
 import { readOrgEnvironmentPresence } from './orgEnvironments.js';
+import { orgDeleteRefusalRows, readOrgDeleteRefusal, type OrgDeleteRefusal } from '../orgErrorMessage.js';
 
 /**
  * Whether the slug field is offered: `pending` until the environment read
@@ -56,6 +66,8 @@ type SlugAvailability = 'pending' | 'locked' | 'open';
 
 export function SettingsPage() {
   const { t } = useObjectTranslation();
+  const { objectLabel } = useObjectLabel();
+  const displayLocale = useDisplayLocale();
   const { org } = useOrgContext();
   const {
     user,
@@ -92,6 +104,7 @@ export function SettingsPage() {
   const [isLeaveOpen, setIsLeaveOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deleteConfirmSlug, setDeleteConfirmSlug] = useState('');
+  const [deleteRefusal, setDeleteRefusal] = useState<OrgDeleteRefusal | null>(null);
   const [isDangerLoading, setIsDangerLoading] = useState(false);
 
   // Sync form when org changes (e.g., after save)
@@ -187,11 +200,18 @@ export function SettingsPage() {
       toast.success(t('organization.settings.deleted', { defaultValue: 'Organization deleted' }));
       navigate('/organizations');
     } catch (err) {
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : t('organization.settings.deleteFailed', { defaultValue: 'Failed to delete organization' }),
-      );
+      // The refusal stays in the dialog; any other failure closes it and toasts.
+      const refusal = readOrgDeleteRefusal(err);
+      if (refusal) {
+        setDeleteRefusal(refusal);
+      } else {
+        setIsDeleteOpen(false);
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : t('organization.settings.deleteFailed', { defaultValue: 'Failed to delete organization' }),
+        );
+      }
     } finally {
       setIsDangerLoading(false);
     }
@@ -399,7 +419,8 @@ export function SettingsPage() {
               </p>
               <p className="text-xs text-muted-foreground">
                 {t('organization.settings.deleteDescription', {
-                  defaultValue: 'Permanently delete this organization and all its data.',
+                  defaultValue:
+                    'Permanently delete this organization with its members and invitations. An organization that still holds records can’t be deleted: delete or move them first.',
                 })}
               </p>
             </div>
@@ -408,9 +429,11 @@ export function SettingsPage() {
               size="sm"
               onClick={() => {
                 setDeleteConfirmSlug('');
+                setDeleteRefusal(null);
                 setIsDeleteOpen(true);
               }}
               disabled={!isOwner}
+              data-testid="settings-delete-btn"
             >
               {t('organization.settings.deleteAction', { defaultValue: 'Delete' })}
             </Button>
@@ -454,7 +477,10 @@ export function SettingsPage() {
         open={isDeleteOpen}
         onOpenChange={(open) => {
           setIsDeleteOpen(open);
-          if (!open) setDeleteConfirmSlug('');
+          if (!open) {
+            setDeleteConfirmSlug('');
+            setDeleteRefusal(null);
+          }
         }}
       >
         <AlertDialogContent>
@@ -465,34 +491,78 @@ export function SettingsPage() {
             <AlertDialogDescription>
               {t('organization.settings.deleteConfirmDescription', {
                 defaultValue:
-                  'This action is irreversible. All data will be permanently deleted. Type the organization slug to confirm.',
+                  'This action is irreversible. The organization is deleted with its members and invitations. If it still holds records, the delete is refused and nothing is removed. Type the organization slug to confirm.',
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="px-6 pb-2">
-            <Label htmlFor="delete-confirm-slug" className="text-sm font-medium">
-              {t('organization.settings.deleteConfirmSlugLabel', {
-                defaultValue: 'Type "{{slug}}" to confirm',
-                slug: org.slug,
-              })}
-            </Label>
-            <Input
-              id="delete-confirm-slug"
-              className="mt-2"
-              value={deleteConfirmSlug}
-              onChange={(e) => setDeleteConfirmSlug(e.target.value)}
-              placeholder={org.slug}
-              data-testid="delete-confirm-slug-input"
-            />
-          </div>
+          {deleteRefusal ? (
+            <div
+              role="alert"
+              className="mx-6 mb-2 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm"
+              data-testid="delete-refusal"
+            >
+              <p>
+                {/* objectstack#32654: a producer-composed `userMessage`, in the request's locale, replaces this console frame. */}
+                {deleteRefusal.userMessage ??
+                  t('organization.settings.deleteRestricted', {
+                    defaultValue:
+                      'This organization still holds records, so it can’t be deleted yet. Delete or move these records first, then try again.',
+                  })}
+              </p>
+              {deleteRefusal.dependents.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {orgDeleteRefusalRows(
+                    deleteRefusal.dependents,
+                    (object) => objectLabel({ name: object, label: '' }),
+                    t('organization.settings.deleteRestrictedOther', { defaultValue: 'Other records' }),
+                  ).map((row) => (
+                    <li
+                      key={row.object === null ? 'other-records' : `object:${row.object}`}
+                      className="flex items-baseline justify-between gap-4"
+                      data-testid="delete-refusal-item"
+                    >
+                      <span>{row.label}</span>
+                      {row.count !== undefined && (
+                        <span className="tabular-nums text-muted-foreground">
+                          {formatDisplayNumber(row.count, { locale: displayLocale })}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : (
+            <div className="px-6 pb-2">
+              <Label htmlFor="delete-confirm-slug" className="text-sm font-medium">
+                {t('organization.settings.deleteConfirmSlugLabel', {
+                  defaultValue: 'Type "{{slug}}" to confirm',
+                  slug: org.slug,
+                })}
+              </Label>
+              <Input
+                id="delete-confirm-slug"
+                className="mt-2"
+                value={deleteConfirmSlug}
+                onChange={(e) => setDeleteConfirmSlug(e.target.value)}
+                placeholder={org.slug}
+                data-testid="delete-confirm-slug-input"
+              />
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDangerLoading}>
               {t('common.cancel', { defaultValue: 'Cancel' })}
             </AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={handleDelete}
-              disabled={isDangerLoading || deleteConfirmSlug !== org.slug}
+              onClick={(e) => {
+                // Stay open while the delete runs, so a refusal is listed here.
+                e.preventDefault();
+                void handleDelete();
+              }}
+              disabled={isDangerLoading || deleteRefusal !== null || deleteConfirmSlug !== org.slug}
+              data-testid="delete-confirm-btn"
             >
               {isDangerLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t('organization.settings.deleteConfirmAction', { defaultValue: 'Delete organization' })}

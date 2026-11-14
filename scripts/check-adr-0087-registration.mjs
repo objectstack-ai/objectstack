@@ -151,7 +151,11 @@
 //                            also claim no consumer has to rewrite anything: that
 //                            is a self-contradiction, checked
 //                            statement-against-statement, not a retirement
-//                            detector.
+//                            detector. And REFUSED OUTRIGHT, whatever the body
+//                            says, on a changeset that declares
+//                            `Metadata-protocol: narrowed` (#32601; see the
+//                            section "A declared narrowing owes the upgrade
+//                            guide" below).
 //   runtime-interface-only
 //                         -- every named `<path>#<Symbol>` must resolve to an
 //                            exported TS declaration at HEAD that is NOT itself a
@@ -336,6 +340,39 @@
 // claim is now a checkable sentence about named symbols, which a reviewer can
 // re-run, rather than a paragraph they must re-derive.
 //
+// ## A declared narrowing owes the upgrade guide (#32601)
+//
+// `no-migration-prescription` is the one category with no positive fact behind
+// it: its only check is that the prescription detector finds nothing in the
+// body. That is a fair test of a change that may or may not ask anything of a
+// consumer. It is no test at all of a changeset that declares
+// `Metadata-protocol: narrowed` -- signal (5) -- because that kind IS the
+// statement "a key removed or tombstoned, a value refused, a requirement
+// tightened": something an author used to write is refused now, and the
+// upgrade guide and `objectstack migrate meta`, both projections of the
+// ADR-0087 ledger, are where an upgrading author learns that before a save
+// door, a publish or a boot refuses it. On such a changeset the exemption was
+// held whenever the fix was written as a careful sentence rather than an arrow
+// or a framed table -- reachable by wording, which is the exact failure the
+// detector repairs above kept chasing. Measured on 8bfbc4ed with this file's own readers: 63
+// stock changesets declare `narrowed` and 40 of them hold this exemption with
+// no ledger entry.
+//
+// So on a declared narrowing the category is refused outright, before its
+// justification or its body is read (seat decision, option A, on #32601).
+// Everything else stays open: `registered`, and the categories that rest on a
+// re-checked fact -- `unpublished`, `already-registered`,
+// `runtime-interface-only`, `type-surface-only`, `runtime-export-retired`. Two
+// boundaries are deliberate and pinned in the self-test's NP battery:
+//
+//   * The kind is read off `breakingDeclaration().signals` (`NARROWED_SIGNAL`),
+//     so `readMetadataProtocolLine` stays its only reader: a malformed or
+//     near-miss line refuses nothing here, as it declares nothing there. And
+//     `added`, `semantic` and `none` keep the exemption -- they are not breaks.
+//   * Like every other verdict here it applies only to a changeset this diff
+//     ADDS or newly turns breaking. Stock that was breaking at the branch point
+//     is inherited and never re-judged, so none of those 40 turns red.
+//
 // ## Absence is never a pass (#4690)
 //
 // A gate that cannot find its input and exits 0 is worse than no gate. Every input
@@ -435,6 +472,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'R7: an unknown category is refused (the vocabulary is closed)': 3,
   'R8: an empty justification is refused': 2,
   'G5: the catch-all, on a changeset carrying no prescription': 1,
+  'NP (#32601): a declared narrowing cannot hold the catch-all': 29,
   'D-E2E (#17357): the denial heading, END TO END through `scan()`': 6,
   'F-E2E (#17864): the framed MENTION, END TO END through `scan()`': 2,
   'L-E2E (#18494): the compound-noun label, END TO END through `scan()`': 4,
@@ -648,6 +686,16 @@ export function parseChangeset(text) {
 }
 
 /**
+ * The signal (5) name `breakingDeclaration` reports for a DECLARED
+ * `Metadata-protocol: narrowed`. Named once because two decisions read it: the
+ * breaking classification below, and the refusal of
+ * `not-required (no-migration-prescription)` on a narrowing in `scan()` (#32601).
+ * Both read it off `breakingDeclaration().signals`, never off the body, so the
+ * kind keeps exactly one reader -- `readMetadataProtocolLine`, imported.
+ */
+export const NARROWED_SIGNAL = 'metadata-protocol-narrowed';
+
+/**
  * Does this changeset DECLARE a breaking change?
  *
  * FIVE spellings are in live use in this repo and all five count, because the
@@ -731,7 +779,7 @@ export function breakingDeclaration(parsed) {
   // a DECLARED `narrowed` is a signal; a malformed or near-miss line declares
   // nothing here, and the level gate is what refuses it on the PR.
   const kind = readMetadataProtocolLine(parsed.body);
-  if (kind?.kind === 'declared' && kind.value === 'narrowed') signals.push('metadata-protocol-narrowed');
+  if (kind?.kind === 'declared' && kind.value === 'narrowed') signals.push(NARROWED_SIGNAL);
   return { breaking: signals.length > 0, signals };
 }
 
@@ -5541,6 +5589,30 @@ export function scan({ cwd, base, head = 'HEAD' }) {
       continue;
     }
 
+    // A declared narrowing owes the upgrade guide (#32601): see the header
+    // section of that name. Judged BEFORE the justification and the body, because
+    // no wording of either can earn this category on a `narrowed` changeset.
+    if (d.category === 'no-migration-prescription' && decl.signals.includes(NARROWED_SIGNAL)) {
+      push(
+        '`not-required (no-migration-prescription)` is refused on a changeset that declares\n' +
+        '      `Metadata-protocol: narrowed`. A narrowing refuses something an author used to write,\n' +
+        '      and the ADR-0087 upgrade guide and `objectstack migrate meta` -- both generated from\n' +
+        '      the ledger -- are where an upgrading author learns that before a save door, a publish\n' +
+        '      or a boot refuses it. Whether the fix is spelled as an arrow, a table or a sentence does\n' +
+        '      not change that, so this exemption cannot be held by wording.\n' +
+        `      fix: register an entry under ${MIGRATION_LEDGER_ENTRY_DIRS[0]}/ (one file per\n` +
+        '      entry, e.g. 18.picklist-binding-unknown-refused.ts: id, surface, replacement, reason,\n' +
+        '      acceptanceCriteria) and mark the changeset\n' +
+        '        <!-- adr-0087: registered YOUR-ENTRY-ID -->\n' +
+        '      or, if one of them is TRUE, a category resting on a checked fact: `already-registered`\n' +
+        '      (an entry at the merge base already covers this refusal), `unpublished`,\n' +
+        '      `runtime-interface-only`, `type-surface-only`, `runtime-export-retired`.\n' +
+        '      If the change refuses nothing an author could write, the declaration is what is wrong:\n' +
+        '      correct the `Metadata-protocol:` line, not the disposition.',
+      );
+      continue;
+    }
+
     if (d.why.length < 40) {
       push(
         `\`not-required (${d.category})\` carries a ${d.why.length}-character justification.\n` +
@@ -5894,7 +5966,7 @@ function isShallow(cwd) {
  *
  * @param {ReturnType<typeof parseChangeset>} parsed
  * @param {Map<string, {private: boolean, file: string}>} pkgs
- * @returns {{ klass: 'answered'|'exempt-unpublished'|'exempt-no-prescription'|'residue', detail?: string, prescription?: ReturnType<typeof findMigrationPrescription> }}
+ * @returns {{ klass: 'answered'|'exempt-unpublished'|'exempt-no-prescription'|'residue', detail?: string, prescription?: { branch: string, line: string } }}
  */
 export function classifyStockChangeset(parsed, pkgs) {
   const d = readDisposition(parsed.body);
@@ -5909,6 +5981,13 @@ export function classifyStockChangeset(parsed, pkgs) {
     return { klass: 'exempt-unpublished', detail: parsed.bumps.map((b) => b.pkg).join(', ') };
   }
   const prescription = findMigrationPrescription(parsed.body);
+  // A declared narrowing is never `exempt-no-prescription` (#32601): the gate
+  // refuses that category on it whatever the body says, so the audit must not
+  // report it as entitled to one. With no prescription in the body, the evidence
+  // the worklist prints is the declaration line itself.
+  if (!prescription && breakingDeclaration(parsed).signals.includes(NARROWED_SIGNAL)) {
+    return { klass: 'residue', prescription: { branch: NARROWED_SIGNAL, line: readMetadataProtocolLine(parsed.body).line } };
+  }
   if (!prescription) return { klass: 'exempt-no-prescription' };
   return { klass: 'residue', prescription };
 }
@@ -5945,7 +6024,7 @@ function auditStock(cwd, head) {
     console.log('');
   }
 
-  console.log(`RESIDUE -- published break + migration prescription, so only \`registered\` /`);
+  console.log(`RESIDUE -- published break + migration prescription (or a declared narrowing), so only \`registered\` /`);
   console.log(`\`already-registered\` remain, and both need a ledger entry: ${buckets.residue.length}\n`);
   const shallow = isShallow(cwd);
   if (shallow) {
@@ -6277,6 +6356,111 @@ function selfTest() {
       '.changeset/x.md': CS({ body: '**BREAKING** x\n\n<!-- adr-0087: not-required (no-migration-prescription) an internal error string changed; no key, symbol or stored value moves -->\n' }),
     },
   })));
+
+  // ---- NP (#32601): a declared narrowing cannot hold the catch-all -----------
+  //
+  // The header section "A declared narrowing owes the upgrade guide" is the
+  // argument. These pin both halves of the seat decision: on a DECLARED
+  // `Metadata-protocol: narrowed` the catch-all is refused whatever the body and
+  // the justification say, and everything else -- `registered`, the fact-checked
+  // categories, the other three kinds, a malformed kind line and inherited stock
+  // -- reads exactly as it did before. Every green below that is about the
+  // catch-all also asserts the changeset was JUDGED: a green that came from the
+  // changeset being skipped as non-breaking would pin nothing.
+  battery('NP (#32601): a declared narrowing cannot hold the catch-all');
+  {
+    const NP_WHY = 'the save door refuses the unknown key now and the field is named in prose';
+    const NP_NMP = `<!-- adr-0087: not-required (no-migration-prescription) ${NP_WHY} -->`;
+    // A changeset whose ONLY breaking carrier is the declaration it is given:
+    // `minor`, no banner, no `!`, and an arm-less `Clause-②:` line.
+    const NP_CS = ({ kind = 'narrowed', clause = 'Clause-②: no', banner = '', marker = NP_NMP } = {}) => CS({
+      bumps: [['@objectstack/spec', 'minor']],
+      body: `the save door refuses a key it used to drop\n\n${banner}${clause}\n\nMetadata-protocol: ${kind}\n\n${marker}\n`,
+    });
+    const judgedAs = (res, file, category) =>
+      res.judged.some((j) => j.file === file && j.verdict === 'not-required' && j.category === category);
+    const REFUSAL = [
+      /refused on a changeset that declares\s+`Metadata-protocol: narrowed`/,
+      /cannot be held by wording/,
+      /register an entry under packages\/spec\/src\/migrations\/entries\/semantic\//,
+    ];
+
+    // The precondition the reds below rest on: signal (5) is the ONLY signal.
+    assert(
+      breakingDeclaration(parseChangeset(NP_CS())).signals.join() === NARROWED_SIGNAL,
+      'NP-0: the bare `narrowed` fixture must be breaking by signal (5) and by nothing else',
+    );
+
+    const r1 = run(mk({ files: { '.changeset/np.md': NP_CS() } }));
+    red('NP-R1 `narrowed` alone (signal 5, no banner/major/!/arm) refuses the catch-all', r1, REFUSAL);
+    assert(r1.problems.every((p) => p.file === '.changeset/np.md'), 'NP-R1: the refusal must name the narrowed changeset');
+
+    red('NP-R2 the same with the `(narrowing)` arm and a `**BREAKING**` banner still refuses', run(mk({
+      files: { '.changeset/np.md': NP_CS({ clause: 'Clause-②: no (narrowing)', banner: '**BREAKING** x\n\n' }) },
+    })), REFUSAL);
+
+    // Judged BEFORE the length check: no justification, short or long, earns it.
+    const r3 = run(mk({
+      files: { '.changeset/np.md': NP_CS({ marker: '<!-- adr-0087: not-required (no-migration-prescription) n/a -->' }) },
+    }));
+    red('NP-R3 a too-short justification meets the narrowing refusal, not the length one', r3, [REFUSAL[0]]);
+    assert(
+      !r3.problems.some((p) => /character justification/.test(p.message)),
+      'NP-R3: the narrowing refusal must be judged BEFORE the justification length',
+    );
+
+    // The reconciliation step: the SAME body, registered by this diff, passes.
+    const g1 = run(mk({
+      headIds: ['old-entry-one', 'old-entry-two', 'np-key-refused'],
+      files: { '.changeset/np.md': NP_CS({ marker: '<!-- adr-0087: registered np-key-refused -->' }) },
+    }));
+    green('NP-G1 the same `narrowed` body with `registered` passes', g1);
+    assert(g1.judged.some((j) => j.file === '.changeset/np.md' && j.verdict === 'registered'), 'NP-G1: must be judged as `registered`');
+
+    // A fact-checked category stays open on a narrowing.
+    const g2 = run(mk({
+      files: {
+        '.changeset/np.md': NP_CS({
+          marker: '<!-- adr-0087: not-required (already-registered old-entry-one) that entry already covers this refusal in full -->',
+        }),
+      },
+    }));
+    green('NP-G2 `already-registered` stays open on a `narrowed` changeset', g2);
+    assert(judgedAs(g2, '.changeset/np.md', 'already-registered'), 'NP-G2: must be judged as `already-registered`');
+
+    // The other three kinds keep the catch-all. A banner makes them breaking, so
+    // the catch-all is really judged -- they add no signal of their own.
+    for (const kind of ['added', 'semantic', 'none']) {
+      const res = run(mk({ files: { '.changeset/np.md': NP_CS({ kind, banner: '**BREAKING** x\n\n' }) } }));
+      green(`NP-G3 \`Metadata-protocol: ${kind}\` keeps the catch-all`, res);
+      assert(judgedAs(res, '.changeset/np.md', 'no-migration-prescription'), `NP-G3 ${kind}: must be JUDGED under the catch-all, not skipped`);
+    }
+
+    // A malformed kind line declares nothing here (the level gate refuses it on
+    // the PR), so it cannot trigger this refusal either.
+    const g4 = run(mk({ files: { '.changeset/np.md': NP_CS({ kind: 'narrowed|added', banner: '**BREAKING** x\n\n' }) } }));
+    green('NP-G4 a MALFORMED kind line refuses nothing here', g4);
+    assert(judgedAs(g4, '.changeset/np.md', 'no-migration-prescription'), 'NP-G4: must be JUDGED under the catch-all, not skipped');
+
+    // Stock: a narrowing that already held the catch-all at the branch point is
+    // inherited. Editing it does not re-judge it, so no stock changeset turns red.
+    const g5 = run(mk({
+      baseFiles: { '.changeset/np-stock.md': NP_CS() },
+      files: { '.changeset/np-stock.md': `${NP_CS()}\na sentence added later\n` },
+    }));
+    green('NP-G5 an inherited `narrowed` + catch-all stock changeset is not re-judged', g5);
+    assert(g5.skipped.includes('.changeset/np-stock.md'), 'NP-G5: the edited stock changeset must be SKIPPED as inherited');
+
+    // The audit says the same thing the gate does.
+    const PKGS = new Map([['@objectstack/spec', { private: false, file: 'packages/spec/package.json' }]]);
+    const bare = (kind) => classifyStockChangeset(parseChangeset(NP_CS({ kind, banner: '**BREAKING** x\n\n', marker: '' })), PKGS);
+    const narrowedRow = bare('narrowed');
+    assert(
+      narrowedRow.klass === 'residue' && narrowedRow.prescription?.branch === NARROWED_SIGNAL,
+      `NP-S1: an unanswered \`narrowed\` changeset with no prescription is RESIDUE, never exempt (got ${JSON.stringify(narrowedRow)})`,
+    );
+    assert(bare('semantic').klass === 'exempt-no-prescription', 'NP-S2: an unanswered `semantic` changeset with no prescription stays exempt');
+  }
 
   // ---- D-E2E (#17357): the denial heading, END TO END through `scan()` --------
   //

@@ -42,6 +42,8 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 
+import { PROTOCOL_UPGRADE_GUIDE_URL } from '@objectstack/spec/shared';
+
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpActionBridge, McpDataBridge } from './mcp-http-tools.js';
 import type { McpFileBridge } from './file-content.js';
@@ -328,5 +330,100 @@ describe('MCP tool arguments — the refusal ends at the fix, with no history se
       if (/used to be dropped|silently/i.test(text) || /\s$/.test(text)) offending.push(`${name}: ${JSON.stringify(text)}`);
     }
     expect(offending).toEqual([]);
+  });
+});
+
+// Tool arguments are not protocol metadata and never carried a retirement kit,
+// so a refusal here names the right key and does NOT send the agent to the
+// protocol upgrade guide. The record tools take the id as `recordId`, while
+// `create_record` answers it as `id`; the hand-off is stated on every
+// `recordId` argument rather than accepted under a second spelling.
+describe('MCP tool arguments — no upgrade-guide pointer, and the recordId hand-off is stated', () => {
+  let runtime: MCPServerRuntime;
+  let bridge: StubBridge;
+
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    bridge = makeBridge();
+  });
+
+  it('update_record sent `id`: refused, names `recordId`, no upgrade guide', async () => {
+    const { refused, text, json } = await callTool(runtime, bridge, 'update_record', {
+      objectName: 'crm_opportunity',
+      id: 'n1',
+      data: { name: 'x' },
+    });
+    expect(refused).toBe(true);
+    expect(json.result?.isError).toBe(true);
+    expect(text).toContain('-32602');
+    expect(text).toContain('`id` → `recordId`');
+    expect(text).not.toContain(PROTOCOL_UPGRADE_GUIDE_URL);
+    expect(bridge.calls.find((c: any[]) => c[0] === 'update')).toBeUndefined();
+  });
+
+  it('query_records sent `filter`: names `where`, no upgrade guide', async () => {
+    const { refused, text } = await callTool(runtime, bridge, 'query_records', {
+      objectName: 'crm_opportunity',
+      filter: { stage: 'open' },
+    });
+    expect(refused).toBe(true);
+    expect(text).toContain('-32602');
+    expect(text).toContain('`filter` → `where`');
+    expect(text).not.toContain(PROTOCOL_UPGRADE_GUIDE_URL);
+  });
+
+  it('list_objects sent `includeSystem`: names the key, no upgrade guide', async () => {
+    const { refused, text } = await callTool(runtime, bridge, 'list_objects', { includeSystem: true });
+    expect(refused).toBe(true);
+    expect(text).toContain('`includeSystem`');
+    expect(text).not.toContain(PROTOCOL_UPGRADE_GUIDE_URL);
+  });
+
+  // The stub registers the fifteen `strictToolInput` tools only; the dataset
+  // pair keeps the spec refusal, pinned as the CONTROL in
+  // `mcp-dataset-tools.test.ts`.
+  it('no tool closed by strictToolInput points its refusal at the upgrade guide', async () => {
+    const json = await rpc(runtime, bridge, 'tools/list');
+    const names: string[] = (json.result?.tools ?? []).map((t: any) => t.name);
+    expect(names).toHaveLength(15);
+    const pointing: string[] = [];
+    for (const name of names) {
+      const { refused, text } = await callTool(runtime, bridge, name, { ...VALID_ARGS[name], zzUndeclaredProbeKey: 'x' });
+      expect(refused).toBe(true);
+      if (text.includes(PROTOCOL_UPGRADE_GUIDE_URL)) pointing.push(name);
+    }
+    expect(pointing).toEqual([]);
+  });
+
+  it('every `recordId` argument says it is the `id` create_record answers', async () => {
+    const json = await rpc(runtime, bridge, 'tools/list');
+    const takers = (json.result?.tools ?? []).filter((t: any) => t.inputSchema?.properties?.recordId);
+    expect(takers.map((t: any) => t.name).sort()).toEqual(
+      ['create_upload_link', 'delete_record', 'get_record', 'read_file', 'run_action', 'update_record'],
+    );
+    const silent = takers
+      .filter((t: any) => {
+        const d: string = t.inputSchema.properties.recordId.description ?? '';
+        return !(d.includes('`id`') && d.includes('create_record') && d.includes('query_records'));
+      })
+      .map((t: any) => t.name);
+    expect(silent).toEqual([]);
+  });
+
+  it('create → update → get chains on the `id` create_record answered, under the one spelling', async () => {
+    const created = await callTool(runtime, bridge, 'create_record', { objectName: 'crm_opportunity', data: { name: 'x' } });
+    expect(created.refused).toBe(false);
+    const id = JSON.parse(created.text).id;
+    expect(id).toBe('n1');
+
+    const updated = await callTool(runtime, bridge, 'update_record', { objectName: 'crm_opportunity', recordId: id, data: { name: 'y' } });
+    expect(updated.refused).toBe(false);
+    const fetched = await callTool(runtime, bridge, 'get_record', { objectName: 'crm_opportunity', recordId: id });
+    expect(fetched.refused).toBe(false);
+
+    expect(bridge.calls.filter((c: any[]) => c[0] === 'update' || c[0] === 'get')).toEqual([
+      ['update', 'crm_opportunity', 'n1', { name: 'y' }],
+      ['get', 'crm_opportunity', 'n1'],
+    ]);
   });
 });

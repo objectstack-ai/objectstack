@@ -357,9 +357,34 @@ function currencyWidth(currency: string | undefined): number | undefined {
  * the objectui#9808 SUNSET (objectui#11073), since `@objectstack/spec` 17.5.0
  * refuses a `scale` above 100 at the declaration.
  */
-function storedFractionScale(c: GridColumn, tenantCurrency: string | undefined): number | undefined {
+function storedFractionScale(
+  c: GridColumn,
+  tenantCurrency: string | undefined,
+  columnCurrencies?: ColumnCurrencies,
+): number | undefined {
   if (c.type !== 'currency') return c.scale;
-  return currencyWidth(columnCurrency(tenantCurrency));
+  return currencyWidth(currencyOfColumn(c, tenantCurrency, columnCurrencies));
+}
+
+/**
+ * The currencies a host resolved for some of its `currency` columns, by column
+ * name: a line amount that follows its header's currency through the
+ * `master_detail` (ADR-0144 D2 as amended) is in the header's code, which only
+ * the host holding the header record and the child schema can say. A name
+ * mapped to `undefined` is a column with no known currency (the header holds
+ * no code yet): it shows no symbol, never the tenant's.
+ */
+export type ColumnCurrencies = Readonly<Record<string, string | undefined>>;
+
+/** `c`'s currency: the host's answer for it when it gave one, else {@link columnCurrency}. */
+function currencyOfColumn(
+  c: GridColumn,
+  tenantCurrency: string | undefined,
+  columnCurrencies: ColumnCurrencies | undefined,
+): string | undefined {
+  return columnCurrencies && Object.prototype.hasOwnProperty.call(columnCurrencies, c.name)
+    ? columnCurrencies[c.name]
+    : columnCurrency(tenantCurrency);
 }
 
 /**
@@ -367,14 +392,14 @@ function storedFractionScale(c: GridColumn, tenantCurrency: string | undefined):
  *   the resolver's last step for a `currency` column — see
  *   {@link storedFractionScale}.
  */
-export function computeRow(columns: GridColumn[], row: Row, tenantCurrency?: string): Row {
+export function computeRow(columns: GridColumn[], row: Row, tenantCurrency?: string, columnCurrencies?: ColumnCurrencies): Row {
   const computedCols = columns.filter((c) => c.computed && c.expr);
   if (computedCols.length === 0) return row;
   const next = { ...row };
   for (const c of computedCols) {
     const v = evalArith(c.expr!, next);
     if (v === null) { next[c.name] = null; continue; }
-    const scale = storedFractionScale(c, tenantCurrency);
+    const scale = storedFractionScale(c, tenantCurrency, columnCurrencies);
     next[c.name] = scale != null ? Number(v.toFixed(scale)) : v;
   }
   return next;
@@ -606,6 +631,11 @@ type GridFieldProps = FieldWidgetComponentProps<Row[]> & {
    *  carries no field definition, so the host that knows the child object
    *  hands them over. Supplied by MasterDetailForm and LineItemsPanel. */
   lookupAutofill?: LookupAutofillByField;
+  /** The currency of each `currency` column whose host knows it
+   *  ({@link ColumnCurrencies}): a grid column carries no field definition,
+   *  so the master-detail host that holds the header and the child schema
+   *  hands it over. A column it does not name is in the tenant currency. */
+  columnCurrencies?: ColumnCurrencies;
 };
 
 /**
@@ -697,6 +727,7 @@ function GridFieldBody({
   displayMode,
   onAdd,
   lookupAutofill,
+  columnCurrencies,
   ...props
 }: GridFieldProps) {
   // The field-level keys, read as `GridFieldMetadata` declares them and as
@@ -752,7 +783,8 @@ function GridFieldBody({
   // cell (`computeRow`), the currency face `displayText` renders, and the
   // editable currency cell's symbol.
   const { currency: tenantCurrency } = useLocalization();
-  const currency = columnCurrency(tenantCurrency);
+  // Per column: the host's answer for a column it resolved, else the above.
+  const currencyOf = (c: GridColumn) => currencyOfColumn(c, tenantCurrency, columnCurrencies);
 
   // Per-cell CEL rule state (B2 in grids). A column with no readonlyWhen/
   // requiredWhen resolves to its static flags (cheap fast-path — no engine
@@ -859,12 +891,12 @@ function GridFieldBody({
       const isGhost = rowIdx >= rows.length;
       if (isGhost) {
         if (maxRows != null && rows.length >= maxRows) return;
-        emit([...rows, computeRow(columns, { ...blankRow(), ...patch }, tenantCurrency)]);
+        emit([...rows, computeRow(columns, { ...blankRow(), ...patch }, tenantCurrency, columnCurrencies)]);
         return;
       }
-      emit(rows.map((r, i) => (i === rowIdx ? computeRow(columns, { ...r, ...patch }, tenantCurrency) : r)), false);
+      emit(rows.map((r, i) => (i === rowIdx ? computeRow(columns, { ...r, ...patch }, tenantCurrency, columnCurrencies) : r)), false);
     },
-    [rows, columns, maxRows, blankRow, emit, tenantCurrency],
+    [rows, columns, maxRows, blankRow, emit, tenantCurrency, columnCurrencies],
   );
 
   const applyCell = useCallback(
@@ -1103,7 +1135,7 @@ function GridFieldBody({
                         // (objectui#3569), a select's stored value instead of
                         // its option label, and an amount ungrouped and in no
                         // locale (objectui#12915).
-                        displayText(c, row[c.name], displayLocale, currency)
+                        displayText(c, row[c.name], displayLocale, currencyOf(c))
                       )}
                     </td>
                   ))}
@@ -1192,7 +1224,7 @@ function GridFieldBody({
       }
       return (
         <span className={cn('px-2 text-sm text-foreground', isNumeric(c.type) && 'tabular-nums', (val == null || val === '') && 'text-muted-foreground')}>
-          {displayText(c, val, displayLocale, currency)}
+          {displayText(c, val, displayLocale, currencyOf(c))}
         </span>
       );
     }
@@ -1204,7 +1236,7 @@ function GridFieldBody({
           title={t('fields.grid.computed', { defaultValue: 'Computed' })}
           data-computed={c.name}
         >
-          {displayText(c, val, displayLocale, currency)}
+          {displayText(c, val, displayLocale, currencyOf(c))}
         </span>
       );
     }
@@ -1263,7 +1295,7 @@ function GridFieldBody({
     }
     // The editable currency cell shows the SAME symbol its display face does
     // (objectui#10355) — `currencyAdornment`, never a default `¥`.
-    const adornment = c.type === 'currency' ? currencyAdornment(c, currency, displayLocale) : '';
+    const adornment = c.type === 'currency' ? currencyAdornment(c, currencyOf(c), displayLocale) : '';
     // A `date` or `datetime` cell holding a value written on a day that does
     // not exist (objectui#10474, objectui#10567): its control can paint that
     // only blank — the `date` control sanitises the verbatim day

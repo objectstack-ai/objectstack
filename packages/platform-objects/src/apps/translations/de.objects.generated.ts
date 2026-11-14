@@ -1209,11 +1209,12 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Widerrufsgrund",
-        help: "Warum der Schlüssel widerrufen wurde, sofern das entscheidet, wer ihn wiederherstellen kann. Passwortzurücksetzung durch Administrator: Nur ein Plattformadministrator kann den Schlüssel wiederherstellen. Mitgliedschaft in der Organisation beendet: Der Eigentümer hat die Organisation verlassen, und niemand kann den Schlüssel wiederherstellen; ein Mitglied legt einen neuen an. Von einem Administrator gesperrt: Ein Plattformadministrator hat einen Schlüssel widerrufen, der ihm nicht gehört, und nur ein Plattformadministrator kann ihn wiederherstellen. Wird beim Wiederherstellen des Schlüssels gelöscht. Leer bei einem Schlüssel, den sein Eigentümer in der Liste der API-Schlüssel widerrufen hat.",
+        help: "Warum der Schlüssel widerrufen wurde, sofern das entscheidet, wer ihn wiederherstellen kann. Passwortzurücksetzung durch Administrator: Nur ein Plattformadministrator kann den Schlüssel wiederherstellen. Mitgliedschaft in der Organisation beendet: Der Eigentümer hat die Organisation verlassen, und niemand kann den Schlüssel wiederherstellen; ein Mitglied legt einen neuen an. Von einem Administrator gesperrt: Ein Plattformadministrator hat einen Schlüssel widerrufen, der ihm nicht gehört, und nur ein Plattformadministrator kann ihn wiederherstellen. Durch das Verzeichnis deaktiviert: Das Verzeichnis der Organisation (SCIM) hat den Eigentümer deaktiviert oder gelöscht, und niemand kann den Schlüssel wiederherstellen, auch nicht nach der Reaktivierung des Eigentümers; der Eigentümer legt einen neuen an. Wird beim Wiederherstellen des Schlüssels gelöscht. Leer bei einem Schlüssel, den sein Eigentümer in der Liste der API-Schlüssel widerrufen hat.",
         options: {
           admin_password_reset: "Passwortzurücksetzung durch Administrator",
           organization_membership_ended: "Mitgliedschaft in der Organisation beendet",
-          administrator_suspended: "Von einem Administrator gesperrt"
+          administrator_suspended: "Von einem Administrator gesperrt",
+          scim_deactivated: "Durch das Verzeichnis deaktiviert"
         }
       },
       key: {
@@ -2110,6 +2111,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Claims nur aus dem ID-Token lesen",
         help: "Nur OIDC. Liest E-Mail-Adresse, Name und Gruppen aus dem verifizierten ID-Token des Identitätsanbieters und ruft dessen Userinfo-Endpunkt nicht auf. Für Microsoft Entra ID einschalten: Dessen Userinfo-Antwort enthält keine Gruppen und kein preferred_username. Standardmäßig aus: Ein Anbieter mit Userinfo-Endpunkt liest seine Claims aus dieser Antwort. Änderung über „Anmeldeoptionen bearbeiten“."
       },
+      sign_out_of_idp: {
+        label: "Sign Out of the Company Sign-In Too",
+        help: "When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "Registriert von",
         help: "Benutzer, der diesen Anbieter registriert hat"
@@ -2220,6 +2225,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Optional. Angefordertes SAML-NameID-Format. Standard ist das im IdP konfigurierte Format.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options."
+          },
           mapEmail: {
             label: "Zuordnung: E-Mail-Attribut",
             helpText: "Optional. Assertion-Attribut, das der E-Mail-Adresse des Benutzers zugeordnet wird. Standard ist „email“, danach die NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -2304,6 +2313,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           keepCurrentCert: {
             label: "Dem aktuellen Zertifikat weiter vertrauen",
             helpText: "Während der IdP umstellt, werden Assertions akzeptiert, die mit einem der beiden Zertifikate signiert sind. Erneut ohne diese Option bearbeiten, um das alte zu entfernen."
+          },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one."
           }
         },
         resultDialog: {
@@ -3079,6 +3092,34 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "Nach Thema"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "In-App-Nachricht senden",
+        description: "Senden Sie eine Nachricht an alle in Ihrer Organisation oder an die Mitglieder, die Sie auswählen. Sie erscheint in den Benachrichtigungen jedes Empfängers.",
+        successMessage: "Nachricht gesendet. Empfänger: {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "Alle in dieser Organisation",
+            helpText: "An jedes Mitglied Ihrer aktuellen Organisation senden. Lassen Sie es aus, um die Empfänger unten auszuwählen."
+          },
+          recipients: {
+            label: "Empfänger",
+            helpText: "Die Mitglieder Ihrer Organisation, an die gesendet wird, wenn die Nachricht nicht für alle ist."
+          },
+          title: {
+            label: "Titel",
+            helpText: "Die Zeile, die jeder Empfänger in seinen Benachrichtigungen sieht."
+          },
+          body: {
+            label: "Nachricht"
+          },
+          link: {
+            label: "Link",
+            helpText: "Optional. Eine Seite in dieser App (beginnend mit /) oder eine Webadresse, die die Nachricht öffnet."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3765,9 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "Version"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "Vorgangstyp",

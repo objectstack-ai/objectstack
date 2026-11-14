@@ -26,6 +26,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The source under test reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 import { resolveAuthzContext } from '@objectstack/core';
 import { registerDatasourceAdminRoutes } from '@objectstack/service-datasource';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
@@ -312,6 +316,11 @@ const GRANT_TABLES: Record<string, any[]> = {
     }))),
     sys_permission_set: Object.entries(SETS).map(([id, caps]) => ({
         id, name: id, system_permissions: JSON.stringify(caps), object_permissions: '{}',
+    })),
+    // Every principal is a current member of `o1`, the organization it acts in
+    // (ADR-0093 D8.1, as amended).
+    sys_member: Object.values(PRINCIPALS).map((p) => ({
+        id: `mem_${p.userId}`, user_id: p.userId, organization_id: 'o1', role: 'member',
     })),
 };
 

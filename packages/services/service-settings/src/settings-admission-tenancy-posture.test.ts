@@ -40,13 +40,23 @@
  * principal is an anonymous one. What this file owns is unchanged — the
  * refusal itself, and zero rows in the store.
  *
+ * ## The membership rule reads no posture
+ *
+ * [ADR-0093 D8.1, as amended] Under every tenancy posture, a person's data
+ * access requires a current membership in the organization, judged on each
+ * request. `organization_membership_ended` is that rule's refusal, and a
+ * session's unbacked organization claim is dropped by the same rule: both hold
+ * whatever the posture, and whether or not one can be read. Only
+ * `organization_required` is keyed on the posture.
+ *
  * ## The wiring ablation, held permanently
  *
  * The three `mount()` shapes below differ in NOTHING but whether this seam can
- * resolve a posture: `no-async-registry` and `unregistered` re-admit the very
- * same ex-member the `isolated` case refuses. So the refusal is attributable to
- * the posture supply and to nothing else — a door that authenticated nobody
- * could not produce this table, and the CURRENT-member control proves it does
+ * resolve a posture: `no-async-registry` and `unregistered` admit the very
+ * organization-less key the `isolated` case refuses, while the ex-member stays
+ * refused under all three. So the posture-keyed refusal is attributable to the
+ * posture supply and to nothing else — a door that authenticated nobody could
+ * not produce this table, and the CURRENT-member control proves it does
  * authenticate somebody.
  *
  * ## Real registry, real classification
@@ -529,44 +539,68 @@ describe('#15351 — THE WIRING ABLATION, held permanently', () => {
   // seam can resolve a posture. They are also both RULED behaviours, not
   // regressions: a host with no `tenancy` service has no wall to be walled out
   // of, and a `KernelBase`/`LiteKernel` host has no async registry at all
-  // (#15997). Either way, they re-admit the very caller the posture refuses,
-  // which is what makes the refusal above attributable to the fix.
+  // (#15997). Either way, they admit the organization-less key the posture
+  // refuses, which is what makes that refusal attributable to the fix.
+  //
+  // Admitted is not entitled: with no active organization the key's `org_A`
+  // grant applies nowhere, so the PUT meets the capability refusal (`403`,
+  // never the anonymous `401`) and lands nothing.
 
-  it('omit the async registry ⇒ the ex-member is ADMITTED again and the row lands', async () => {
+  it('omit the async registry ⇒ the organization-less key is ADMITTED again: the capability refusal, not the anonymous one', async () => {
     const m = await mount({ kind: 'no-async-registry' });
-    const res = await put(m, KEY(RAW_EXMEMBER_KEY));
-    expect(res.status).toBe(200);
-    expect(m.settingRows()).toHaveLength(1);
+    const res = await put(m, KEY(RAW_ORGLESS_KEY));
+    expect(res.status).toBe(403);
+    expect(m.settingRows()).toHaveLength(0);
   });
 
-  it('`tenancy` NEVER registered ⇒ the quiet answer, the ex-member is admitted', async () => {
+  it('`tenancy` NEVER registered ⇒ the quiet answer, the organization-less key is admitted', async () => {
     // ⚠️ The half of decision-1-option-A that a blanket `catch { undefined }`
     // and a fail-closed rewrite would both get wrong — in opposite directions.
     const m = await mount({ kind: 'unregistered' });
-    const res = await put(m, KEY(RAW_EXMEMBER_KEY));
-    expect(res.status).toBe(200);
-    expect(m.settingRows()).toHaveLength(1);
+    const res = await put(m, KEY(RAW_ORGLESS_KEY));
+    expect(res.status).toBe(403);
+    expect(m.settingRows()).toHaveLength(0);
+  });
+
+  it('[ADR-0093 D8.1] the membership rule reads no posture: the ex-member stays refused on both, and nothing lands', async () => {
+    for (const kind of ['no-async-registry', 'unregistered'] as const) {
+      const m = await mount({ kind });
+      const res = await put(m, KEY(RAW_EXMEMBER_KEY));
+      expect(res.status).toBe(401);
+      expect(res.body?.error?.code).toBe('UNAUTHENTICATED');
+      expect(m.settingRows()).toHaveLength(0);
+    }
   });
 });
 
 describe('#15351 — the posture is the EFFECTIVE one, never the requested one', () => {
-  it('admits the ex-member when the service reports `single` and the ENV asks for `isolated`', async () => {
+  it('admits the organization-less key when the service reports `single` and the ENV asks for `isolated`', async () => {
     // ⭐ The discriminator. `resolveTenancyPosture()` — the value a "reuse what
     // is already in scope" fix would carry to this seam — answers `isolated`
-    // here. The posture IN FORCE is `single`, so there is no wall to be walled
-    // out of and refusing would break working automation (ADR-0093 D4/D5).
+    // here. The posture IN FORCE is `single`, which requires no active
+    // organization of a key (ADR-0093 D4/D5): ADMITTED, so the capability
+    // refusal answers (`403`), never the anonymous `401`.
     process.env.OS_TENANCY_POSTURE = 'isolated';
     const m = await mount({ kind: 'service', posture: 'single' });
-    const res = await put(m, KEY(RAW_EXMEMBER_KEY));
-    expect(res.status).toBe(200);
-    expect(m.settingRows()).toHaveLength(1);
+    const res = await put(m, KEY(RAW_ORGLESS_KEY));
+    expect(res.status).toBe(403);
+    expect(m.settingRows()).toHaveLength(0);
   });
 
-  it('refuses the ex-member when the service reports `isolated` and the ENV asks for nothing', async () => {
+  it('refuses the organization-less key when the service reports `isolated` and the ENV asks for nothing', async () => {
     // The same discriminator from the other side: a requested-posture fix reads
     // "no posture requested" here and admits.
     delete process.env.OS_TENANCY_POSTURE;
     const m = await mount({ kind: 'service', posture: 'isolated' });
+    const res = await put(m, KEY(RAW_ORGLESS_KEY));
+    expect(res.status).toBe(401);
+    expect(res.body?.error?.code).toBe('UNAUTHENTICATED');
+    expect(m.settingRows()).toHaveLength(0);
+  });
+
+  it('[ADR-0093 D8.1] the membership rule reads no posture: the ex-member is refused under `single` too, and nothing lands', async () => {
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    const m = await mount({ kind: 'service', posture: 'single' });
     const res = await put(m, KEY(RAW_EXMEMBER_KEY));
     expect(res.status).toBe(401);
     expect(res.body?.error?.code).toBe('UNAUTHENTICATED');
@@ -581,10 +615,9 @@ describe("#15351 — the RETURNED tenantId is vetted, not the caller's own store
 
   it("drops a SESSION's stale organization claim instead of returning it", async () => {
     // `u_session_exmember` has no `sys_member` row; the session still carries
-    // `activeOrganizationId: 'org_A'`. Under a wall the claim is DROPPED
-    // (#15409 ruled option B — a session is a person, not a binding), so the
-    // settings tenant is `undefined` rather than an organization the caller
-    // left. Reachable here only because the posture is now supplied.
+    // `activeOrganizationId: 'org_A'`. The claim is DROPPED (#15409 ruled
+    // option B — a session is a person, not a binding), so the settings tenant
+    // is `undefined` rather than an organization the caller left.
     const m = await mount({ kind: 'service', posture: 'isolated' });
     const ctx = await m.contextFromRequest({
       headers: { 'x-fixture-session-user': 'u_session_exmember' },
@@ -593,13 +626,15 @@ describe("#15351 — the RETURNED tenantId is vetted, not the caller's own store
     expect(ctx.tenantId).toBeUndefined();
   });
 
-  it('ABLATION — with no posture resolvable the same session keeps the stale claim', async () => {
-    const m = await mount({ kind: 'no-async-registry' });
-    const ctx = await m.contextFromRequest({
-      headers: { 'x-fixture-session-user': 'u_session_exmember' },
-    } as any as IHttpRequest);
-    expect(ctx.userId).toBe('u_session_exmember');
-    expect(ctx.tenantId).toBe('org_A');
+  it('[ADR-0093 D8.1] the membership rule reads no posture: with none resolvable, or under `single`, the same session\'s claim is dropped too', async () => {
+    for (const tenancy of [{ kind: 'no-async-registry' }, { kind: 'service', posture: 'single' }] as const) {
+      const m = await mount(tenancy);
+      const ctx = await m.contextFromRequest({
+        headers: { 'x-fixture-session-user': 'u_session_exmember' },
+      } as any as IHttpRequest);
+      expect(ctx.userId).toBe('u_session_exmember');
+      expect(ctx.tenantId).toBeUndefined();
+    }
   });
 
   it("CONTROL — a CURRENT member's session keeps its organization under the same posture", async () => {

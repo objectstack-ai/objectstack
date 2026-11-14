@@ -137,7 +137,7 @@
     "datasourceSource": {
       "status": "live",
       "verifiedAt": "2026-11-10",
-      "note": "LIVE since the P2 engine card's wiring slice (#32062, ADR-0153 D1/D2/D8): a job's `pull` reads the federated object this key names and copies its rows into the `synced` target. The build refusals of the P2 spec card (#32061) stay live in packages/spec/src/stack.zod.ts#collectSourcedMappingErrors, and the pull judges the same rules again at run time for a stack the build never saw. Children still `planned` carry their own `authorWarn`: `full` (no committed position is stored until `sys_sync_run`, ADR-0153 D7, so every run reads from `watermark.start` and `full: true` changes nothing yet), `deletePolicy` and `deletedField` (delete marking, D3).",
+      "note": "LIVE since the P2 engine card's wiring slice (#32062, ADR-0153 D1/D2/D8): a job's `pull` reads the federated object this key names and copies its rows into the `synced` target. The build refusals of the P2 spec card (#32061) stay live in packages/spec/src/stack.zod.ts#collectSourcedMappingErrors, and the pull judges the same rules again at run time for a stack the build never saw. Since the run-record slice (ADR-0153 D7) each run stores the read position it reaches at a window's end on `sys_sync_run`, and the next run of the same mapping (the package that holds it and its name, ADR-0150 D3) in the same organization starts there, when it reads the same source object and field into the same target. Children still `planned` carry their own `authorWarn`: `deletePolicy` and `deletedField` (delete marking, D3).",
       "children": {
         "object": {
           "status": "live",
@@ -159,18 +159,17 @@
             "start": {
               "status": "live",
               "verifiedAt": "2026-11-10",
-              "note": "Live with its container (see `datasourceSource`): where every pull starts until the committed position lands with `sys_sync_run` (ADR-0153 D7).",
-              "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (every run starts there until a committed position is stored; `watermark_start_invalid` for a value the field's kind does not read)"
+              "note": "Live with its container (see `datasourceSource`): where a pull starts when no position is committed for the mapping in its organization (and on every `full: true` run), and the lowest value any run reads from. Since ADR-0153 D7 a run otherwise starts at the position the last committed run stored on `sys_sync_run`.",
+              "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (a first run, a `full: true` run or a run whose stored position came from another source, field or target starts there; a resumed run never starts below it; `watermark_start_invalid` for a value the field's kind does not read)"
             }
           },
-          "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (the windows are cut on `watermark.field` from `watermark.start`)"
+          "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (the windows are cut on `watermark.field`, from the committed position or `watermark.start`)"
         },
         "full": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-11-10",
-          "note": "Planned: the container is live, but no committed position is stored until `sys_sync_run` (ADR-0153 D7), so every run reads from `watermark.start` and this key changes nothing yet. Flips with D7.",
-          "authorWarn": true,
-          "authorHint": "Keep it, but it changes nothing yet: until the committed read position is stored (ADR-0153 D7), every pull of a datasource source reads from `watermark.start`, so an incremental pull already reads what a full one reads."
+          "note": "LIVE since the run-record slice (ADR-0153 D7): `full: true` makes every run read from `watermark.start`; omitted, a run reads on from the position the last committed run of the mapping stored on `sys_sync_run`. Delete marking by absence (D3), which only a full pull can do, lands with D3's own rows.",
+          "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (`full: true` skips the read of the last committed position, so the run starts at `watermark.start`; otherwise the run starts from that position, read from `sys_sync_run`)"
         },
         "deletePolicy": {
           "status": "planned",

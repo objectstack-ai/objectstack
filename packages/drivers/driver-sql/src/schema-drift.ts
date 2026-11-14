@@ -189,6 +189,27 @@ export type DriftOp =
    */
   | { type: 'manual_column_type_change'; table: string; column: string; to: string; from: string }
   /**
+   * Widen a `date` column under a field that now declares `datetime` (#32590)
+   * to the column `createColumn` builds for a `datetime`: `timestamptz` on
+   * Postgres, `DATETIME(3)` on MySQL. Postgres and MySQL only — SQLite stores
+   * the canonical text in any declared column type, so its `date` column holds
+   * a time of day already and nothing is reported there.
+   *
+   * The field-type change table promises `date` → `datetime` passes cleanly
+   * (`content/docs/data-modeling/field-type-decision-tree.mdx`), and this is the
+   * column half of that promise. Until this op existed the divergence was
+   * reported by NOTHING, and every write to the field lost its time of day: the
+   * database casts an instant bound into a `date` column to its calendar day,
+   * with no error and no warning.
+   *
+   * `safe` by the class's own definition — a loosening that cannot lose data
+   * and cannot fail: every stored day converts (as midnight UTC, the instant
+   * the canonical form gives a bare day) and no value is refused. A publish of
+   * the object applies it (`SqlDriver.applyPublishedColumnChanges`), as do dev
+   * auto-reconcile and `os migrate apply`.
+   */
+  | { type: 'widen_date_to_datetime'; table: string; column: string }
+  /**
    * REPORT ONLY (#12121). The column is a `varchar(n)` under a TEXT-family
    * field that declared NO usable bound — the shape `createColumn` emits as
    * TEXT — so the column caps writes the declaration allows, and **the platform
@@ -1087,7 +1108,39 @@ export function diffManagedTable(args: {
     // explicit physical constraint — NOT against `required`, which is the
     // write-time contract and implies nothing about the column) ──────────
     const expectNullable = field.storage?.notNull !== true;
-    if (expectNullable && !col.nullable && field.required !== true && fieldName !== ceremonyOwnedNullability) {
+    if (expectNullable && !col.nullable && field.storage?.notNull === false && fieldName !== ceremonyOwnedNullability) {
+      // [#32590] The author DECLARED the column nullable — `storage: { notNull:
+      // false }`, written out, not merely absent. The column constraint is the
+      // declaration's to own (ADR-0113 D2), and this is the "deliberately
+      // relax" ADR-0113 D5 names, said by the author in so many words: until it
+      // is applied, every write that omits the field is refused by the
+      // database, `required` notwithstanding. So the entry is reported whatever
+      // `required` says (D5's silence is for the legacy shape below, which
+      // carries no `storage` at all), and its message says what the declaration
+      // says rather than "declares no storage constraint".
+      //
+      // ⛔ The CATEGORY stays D5's `needs_confirm`, never `safe`: dev
+      // auto-reconcile (`autoMigrate: 'safe'`) still does not apply it at
+      // boot. What applies it is the publish of this declaration
+      // (`applyPublishedColumnChanges`, which selects exactly this entry by
+      // the explicit `false`) or `os migrate apply` — both a deliberate act.
+      // An ABSENT `storage.notNull` stays the undeclared case below, unchanged.
+      out.push({
+        kind: 'nullability_mismatch',
+        remoteName: table,
+        table,
+        column: fieldName,
+        expected: 'NULL',
+        actual: 'NOT NULL',
+        severity: 'warning',
+        category: 'needs_confirm',
+        op: { type: 'relax_not_null', table, column: fieldName },
+        message:
+          `${table}.${fieldName}: the column is NOT NULL but the metadata declares ` +
+          `\`storage: { notNull: false }\`, so the database refuses every write that omits the field. ` +
+          `Relaxing the column cannot lose data: publishing the object applies it, or relax it deliberately via "os migrate apply".`,
+      });
+    } else if (expectNullable && !col.nullable && field.required !== true && fieldName !== ceremonyOwnedNullability) {
       // Column STRICTER than its declaration — and the field is not even
       // write-gated, so an omitting write reaches the DB and dies as a raw
       // driver error instead of a clean validation 400. That surprise is
@@ -1339,6 +1392,46 @@ export function diffManagedTable(args: {
             `rather than wrapping it — rows written through ObjectStack already hold valid JSON — and ` +
             `drop any index on the column first, since a json column cannot carry a plain btree. ` +
             `"os migrate plan" lists this entry; "os migrate apply" reports it as skipped.`,
+      });
+    }
+
+    // ── base type: a `datetime` field over a `date` column (#32590) ──────
+    //
+    // `createColumn` gives a `date` field a `date` column, and the additive sync
+    // never revisits an existing column, so a field retyped `date` → `datetime`
+    // — a change the field-type change table says passes cleanly — keeps its
+    // `date` column. On Postgres and MySQL that column is load-bearing: the
+    // server casts every instant bound into it to its calendar day, so the
+    // field reads back as a bare day and every time of day ever written to it is
+    // gone, with no error. Measured on live Postgres 16 on the pre-fix tree:
+    // `'2026-11-13T01:00:00.000Z'` written after the publish read back
+    // `'2026-11-13'`. SQLite keeps the canonical text whatever the declared
+    // column type, so nothing is reported there.
+    //
+    // `safe` — see the op's own note: the widening keeps every stored day and
+    // refuses no value — so a publish of the object applies it.
+    if (
+      declaredType === 'datetime'
+      && !declaresJsonColumn
+      && (dialect === 'postgres' || dialect === 'mysql')
+      && String(col.type).toLowerCase() === 'date'
+    ) {
+      const widened = dialect === 'mysql' ? 'datetime(3)' : 'timestamptz';
+      out.push({
+        kind: 'type_mismatch',
+        remoteName: table,
+        table,
+        column: fieldName,
+        expected: widened,
+        actual: col.type,
+        severity: 'warning',
+        category: 'safe',
+        op: { type: 'widen_date_to_datetime', table, column: fieldName },
+        message:
+          `${table}.${fieldName}: metadata declares \`datetime\` but the column is \`${col.type}\`, so the ` +
+          `database keeps only the calendar day of every value written to it and drops its time of day. ` +
+          `Widening the column to \`${widened}\` keeps every stored day (as midnight UTC) and refuses no value: ` +
+          `publishing the object applies it, or run "os migrate apply".`,
       });
     }
 
@@ -2453,11 +2546,15 @@ const WIDENED_UNIQUE_MAX_KEY_PARTS = 8;
  *  - the declared index is UNNAMED (a named index keeps its name, so there is
  *    no second name to retire) and `unique: true`/`'global'` — never
  *    `'organization'`, whose materialized key is the tenant arms' to judge;
- *  - every listed column is physical;
+ *  - every column of the superseded key is physical (a GAINED column not yet
+ *    physical keeps the index, below — #32164);
  *  - the superseded index's columns are an in-order PROPER subsequence of the
  *    listed ones, and its name is the one {@link buildIndexName} gives that
  *    subsequence (`diffManagedIndexes` then also requires it to be a plain
- *    UNIQUE on exactly those columns);
+ *    UNIQUE on exactly those columns — or, #32164, the same with the tenant
+ *    column's key part in the NULL-safe organization form an earlier release
+ *    built, which it offers to retire only on a certified table and otherwise
+ *    keeps, see {@link isNullSafeTenantNarrower});
  *  - no index metadata asks for today has that name — field-level uniques
  *    included, so a live single-column unique is never read as superseded;
  *  - an index by that name exists physically (`args.physical`), so the arm
@@ -2494,12 +2591,19 @@ function widenedUniqueReplacements(args: {
       ? idx.fields.filter((f): f is string => typeof f === 'string' && f.length > 0)
       : [];
     if (listed.length < 2 || listed.length > WIDENED_UNIQUE_MAX_KEY_PARTS) continue;
-    if (!listed.every((c) => physicalColumns.has(c))) continue;
+    // [#32164] A gained column not yet physical (the plan read before the sync
+    // that adds it — `os migrate plan` over an upgraded database) does not
+    // disqualify the arm: the narrower index is then plainly still the only
+    // rule, so it is KEPT below rather than left to the orphan arm, which would
+    // offer to drop it. The narrower key's own columns must be physical.
+    const absent = new Set(listed.filter((c) => !physicalColumns.has(c)));
+    if (absent.size === listed.length) continue;
     const replacement = normalizeDeclaredIndex(table, idx, args.tenantField);
     if (!replacement) continue;
     const full = (1 << listed.length) - 1;
     for (let mask = 1; mask < full; mask++) {
       const narrower = listed.filter((_, i) => (mask & (1 << i)) !== 0);
+      if (narrower.some((c) => absent.has(c))) continue;
       const legacyName = buildIndexName(table, narrower, true);
       if (current.has(legacyName) || !physicalNames.has(legacyName)) continue;
       const gained = listed.filter((c) => !narrower.includes(c));
@@ -2510,7 +2614,11 @@ function widenedUniqueReplacements(args: {
       // exactly `narrower`, scoped by a WHERE, already stands beside it (the
       // activation ledger's runtime-built package-less index). Until then it is
       // KEPT: accounted for, so the orphan arm never offers to drop it either.
-      const kept = nullable.length > 0 && !hasPartialUniqueGuard(args.physical ?? [], narrower);
+      // A gained column the table does not have yet keeps it the same way: the
+      // wider index cannot exist before its column does.
+      const kept =
+        gained.some((c) => absent.has(c)) ||
+        (nullable.length > 0 && !hasPartialUniqueGuard(args.physical ?? [], narrower));
       out.push({
         column: listed.find((c) => !narrower.includes(c))!,
         legacyColumns: narrower,
@@ -2541,6 +2649,35 @@ function hasPartialUniqueGuard(physical: ReadonlyArray<PhysicalIndex>, columns: 
     const key = enforcedIndexKey(p).columns;
     return key.length === columns.length && key.every((c, i) => c === columns[i]);
   });
+}
+
+/** The same column identities, in the same key order. */
+function sameColumns(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((c, i) => c === b[i]);
+}
+
+/**
+ * [#32164] Is this physical index a narrower key whose ONLY non-plain key part
+ * is the tenant column in the NULL-safe organization form (ADR-0120 D3,
+ * `COALESCE(<tenantField>, '__global__')`)? The shape an earlier release gave
+ * every organization-scoped unique, and so the shape of a narrower key the
+ * widening arm supersedes when the declaration it retires was
+ * `unique: 'organization'` (`sys_user_permission_set`'s
+ * `(user_id, permission_set, organization_id)` before it gained
+ * `permission_set_package`). Exactly one expression key part, attributed to the
+ * tenant column and to nothing else; the caller has already checked the column
+ * identities and the index's plainness otherwise (unique, not partial, no hash
+ * shadow).
+ */
+function isNullSafeTenantNarrower(p: PhysicalIndex, tenantField: string | null | undefined): boolean {
+  if (!tenantField) return false;
+  const nullSafe = p.nullSafeColumns ?? [];
+  return (
+    nullSafe.length === 1 &&
+    nullSafe[0] === tenantField &&
+    (p.expressions?.length ?? 0) === 1 &&
+    p.columns.includes(tenantField)
+  );
 }
 
 /** The tenant arms of {@link legacyUniqueReplacements}: a unique now scoped per organization. */
@@ -2812,17 +2949,51 @@ export function diffManagedIndexes(args: {
       const p = byName.get(n);
       if (!p || p.primary || isRuntimeManagedIndex(p, runtimeCreated, tenantField)) return false;
       if (!p.unique || p.partial === true) return false;
-      if ((p.expressions?.length ?? 0) > 0 || (p.nullSafeColumns?.length ?? 0) > 0) return false;
       // Commit cd1348802: nor is a hash-shadow carrier. Its stored key is one generated
       // column, so the identity comparison below already excludes it — stated
       // outright because the exclusion must survive that comparison changing,
       // and because `replace_unique_index` DROPS the legacy name.
       if (isHashShadowCarrier(p)) return false;
-      return (
-        p.columns.length === l.legacyColumns.length &&
-        p.columns.every((c, i) => c === l.legacyColumns[i])
-      );
+      if (!sameColumns(p.columns, l.legacyColumns)) return false;
+      if ((p.expressions?.length ?? 0) === 0 && (p.nullSafeColumns?.length ?? 0) === 0) return true;
+      // [#32164] The widening arm alone also names the narrower key an earlier
+      // release built with its organization key part in the NULL-safe form
+      // (ADR-0120 D3: `COALESCE(<tenantField>, '__global__')`, every 18.0
+      // organization unique). Same columns, one expression key part, and that
+      // part is the tenant column's — nothing else the plainness rule refuses.
+      return l.widenedBy !== undefined && isNullSafeTenantNarrower(p, tenantField);
     });
+    // [#32164] A narrower key a #11627 hash shadow carries (MySQL, MariaDB: the
+    // shape a key over a long TEXT column takes) is excluded from `present`
+    // above, because `replace_unique_index` drops the legacy name and nothing
+    // here retires a shadow with it. On the widening arm it is still the
+    // narrower key the declaration superseded — before the respelling, the same
+    // physical index was the declared one and matched by name — so it is KEPT:
+    // accounted for, nothing offered, never left to the orphan arm, which would
+    // offer to drop it (destructive). The disposition the uncertified NULL-safe
+    // case below gets. A carrier whose resolved key is exactly the narrower
+    // columns (any NULL-safe part being the tenant column's) is claimed. So is a
+    // carrier whose generation expression could not be read (no `shadowKey`):
+    // it sits under the narrower key's generated name and we do not know what
+    // it hashes, so it is kept, not guessed at — the orphan arm below does NOT
+    // skip an unresolved carrier, and would offer it as a destructive
+    // `drop_index` (contract review must-fix 1 on #32356). A carrier whose
+    // resolved key is some other set of columns is still the orphan arm's.
+    if (l.widenedBy !== undefined) {
+      for (const n of l.legacyNames) {
+        const p = byName.get(n);
+        if (!p || !p.unique || !isHashShadowCarrier(p)) continue;
+        if (!p.shadowKey) {
+          explained.add(n);
+          continue;
+        }
+        if (p.partial === true) continue;
+        const key = enforcedIndexKey(p);
+        if (!sameColumns(key.columns, l.legacyColumns)) continue;
+        if (!(key.nullSafeColumns ?? []).every((c) => c === tenantField)) continue;
+        explained.add(n);
+      }
+    }
     if (present.length === 0) continue;
     for (const n of present) explained.add(n);
     // Kept, not offered: the widening arm found the narrower index still the
@@ -2830,13 +3001,24 @@ export function diffManagedIndexes(args: {
     // `widenedUniqueReplacements`). It is accounted for — never an orphan to
     // drop — and the plan says nothing about it until the guard stands.
     if (l.kept) continue;
+    // [#32164] A NULL-safe narrower is the same constraint as the plain one
+    // only where the tenant column holds no NULL (`tenantKeyCertified`,
+    // ADR-0131 D1). Elsewhere it also keeps NULL-organization rows to one per
+    // key, which neither the wider key nor the partial guard does (both are
+    // NULL-distinct on the organization), so retiring it would admit rows it
+    // refuses. It is KEPT there too: accounted for, never offered, never an
+    // orphan — the ownership ceremony that certifies the table is what lets
+    // the next plan offer the replace.
+    const nullSafeLegacy = present.some((n) => (byName.get(n)?.nullSafeColumns?.length ?? 0) > 0);
+    if (nullSafeLegacy && tenantKeyCertified !== true) continue;
+    const legacyNullSafe = nullSafeLegacy && tenantField ? [tenantField] : undefined;
     out.push({
       kind: 'index_mismatch',
       remoteName: table,
       table,
       column: l.column,
       expected: indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns),
-      actual: indexSignature(l.legacyColumns, true),
+      actual: indexSignature(l.legacyColumns, true, legacyNullSafe),
       severity: 'warning',
       category: 'safe',
       op: {
@@ -2850,7 +3032,7 @@ export function diffManagedIndexes(args: {
       },
       message: l.widenedBy
         ? `${table}.${l.legacyColumns.join('+')}: a UNIQUE index (${present.join(', ')}) on ` +
-          `${indexSignature(l.legacyColumns, true)} is superseded by the declared ` +
+          `${indexSignature(l.legacyColumns, true, legacyNullSafe)} is superseded by the declared ` +
           `${indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns)}, which adds ` +
           `${l.widenedBy.join(', ')} to the key and admits rows the old index refuses. Replacing it is a pure ` +
           `relaxation: run "os migrate apply".` +
@@ -3024,6 +3206,16 @@ export function diffManagedIndexes(args: {
     // (#4884 — the boot advised dropping `idx_sys_metadata_overlay_draft`, the
     // partial UNIQUE enforcing draft-overlay uniqueness, on a healthy fresh DB).
     if (isRuntimeManagedIndex(p, runtimeCreated, tenantField)) continue;
+    // A hash-shadow carrier whose generation expression could NOT be read
+    // (`shadowKey` unresolved) gets the answer the widening and redefinition
+    // arms above give it: kept, nothing offered. We know by name that it is a
+    // driver-owned UNIQUE, but not WHAT it hashes, and the remedy below is a
+    // DROP — {@link isHashShadowCarrier}: never destroyed on a guess. The
+    // degraded outcome is a missing finding, never a dropped constraint.
+    //
+    // ⛔ The `!p.shadowKey` half is load-bearing, as in the redefinition arm: a
+    // RESOLVED orphan carrier is still an orphan and still offered below.
+    if (isHashShadowCarrier(p) && !p.shadowKey) continue;
     // Commit cd1348802: an orphaned shadow carrier is still an orphan — its declaration
     // is gone, and `drop_index` is the right remedy — but the report must name
     // the constraint it enforced, not the digest column it stored.

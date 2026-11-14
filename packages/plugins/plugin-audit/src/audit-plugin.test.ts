@@ -118,14 +118,13 @@ describe('AuditPlugin — system table provisioning', () => {
  * remedy command and the driver's refusal in meta.
  */
 /**
- * [ADR-0154, #31908 P1b-1] The plugin registers the two tamper-evidence objects
- * the sealer and signer write, `sys_audit_checkpoint` and
- * `sys_audit_signing_key`, ahead of those writers, so their tables exist when
- * the sealer lands. `sys_audit_amendment` is registered with its first writer
- * (the redaction amendments), not before: an object the plugin registers is an
- * object whose `get` / `list` doors and table it serves.
+ * [ADR-0154] The plugin registers the three tamper-evidence objects: the
+ * checkpoints and the signing keys the sealer and signer write, and the
+ * amendments the redaction amendment writer writes before a migration rewrites
+ * a sealed row (D7). An object the plugin registers is an object whose `get` /
+ * `list` doors and table it serves.
  */
-describe('AuditPlugin — registers the checkpoint and signing-key objects (ADR-0154)', () => {
+describe('AuditPlugin — registers the checkpoint, signing-key and amendment objects (ADR-0154)', () => {
   async function registeredNames(): Promise<string[]> {
     const names: string[] = [];
     const { ctx } = makeCtx({ async find() { return []; } });
@@ -136,7 +135,7 @@ describe('AuditPlugin — registers the checkpoint and signing-key objects (ADR-
     return names;
   }
 
-  it('registers sys_audit_checkpoint and sys_audit_signing_key beside the four ledger and comment objects', async () => {
+  it('registers sys_audit_checkpoint, sys_audit_signing_key and sys_audit_amendment beside the four ledger and comment objects', async () => {
     expect(await registeredNames()).toEqual([
       'sys_audit_log',
       'sys_activity',
@@ -144,11 +143,8 @@ describe('AuditPlugin — registers the checkpoint and signing-key objects (ADR-
       'sys_comment_reaction',
       'sys_audit_checkpoint',
       'sys_audit_signing_key',
+      'sys_audit_amendment',
     ]);
-  });
-
-  it('does not register sys_audit_amendment before its writer exists', async () => {
-    expect(await registeredNames()).not.toContain('sys_audit_amendment');
   });
 });
 
@@ -160,6 +156,7 @@ describe('AuditPlugin — a failed provision is an error, once per object (#2291
     'sys_comment_reaction',
     'sys_audit_checkpoint',
     'sys_audit_signing_key',
+    'sys_audit_amendment',
   ];
 
   /** Every DDL succeeds except the named object's, which the driver refuses. */
@@ -265,9 +262,10 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
       sys_activity: 'telemetry',
       sys_comment: 'sqlite',
       sys_comment_reaction: 'sqlite',
-      // No lifecycle class: the two ADR-0154 objects stay on the primary.
+      // No lifecycle class: the three ADR-0154 objects stay on the primary.
       sys_audit_checkpoint: 'sqlite',
       sys_audit_signing_key: 'sqlite',
+      sys_audit_amendment: 'sqlite',
     });
     const { ctx, logs, fireReady } = makeCtx(engine);
     const plugin = new AuditPlugin();
@@ -301,6 +299,7 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
       sys_comment_reaction: 'sqlite',
       sys_audit_checkpoint: 'sqlite',
       sys_audit_signing_key: 'sqlite',
+      sys_audit_amendment: 'sqlite',
     });
     const { ctx, logs, fireReady } = makeCtx(engine);
     const plugin = new AuditPlugin();
@@ -324,6 +323,7 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
       sys_comment_reaction: 'sqlite',
       sys_audit_checkpoint: 'sqlite',
       sys_audit_signing_key: 'sqlite',
+      sys_audit_amendment: 'sqlite',
     });
     const { ctx, logs, fireReady } = makeCtx(engine);
     const plugin = new AuditPlugin();
@@ -378,6 +378,7 @@ describe('AuditPlugin — boot provisioning honours skipSchemaSync (#22984)', ()
     'sys_comment_reaction',
     'sys_audit_checkpoint',
     'sys_audit_signing_key',
+    'sys_audit_amendment',
   ];
   const SKIP = 'NOT provisioned at boot';
 

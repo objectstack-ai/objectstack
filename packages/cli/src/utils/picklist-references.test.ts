@@ -226,6 +226,16 @@ describe('judgePicklistReferences — a field naming a sibling package\'s list (
     expect(refusals[0].hint).toContain('`dependencies` of package \'com.example.orders\'');
   });
 
+  it('[#32967] a holder that already depends on the declaring package: the hint names the move, never the cycle', () => {
+    const { refusals } = judgePicklistReferences({
+      packages: [core({ dependencies: { 'com.example.orders': '^1.0.0' } }), orders()],
+    });
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0].hint).toContain('dependency cycle');
+    expect(refusals[0].hint).toContain('declare the list in \'com.example.orders\' itself');
+    expect(refusals[0].hint).not.toContain('Declare the dependency');
+  });
+
   it('names every holder when two siblings hold the list and the declaring package depends on neither', () => {
     const { refusals } = judgePicklistReferences({
       packages: [core(), { manifest: { ...manifest('com.example.crm'), picklists: [industry] } }, orders()],

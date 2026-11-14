@@ -446,7 +446,14 @@ export const CEILINGS = new Map([
   // may not change, and the `Premise:` claim line. Measured delta +4; the section
   // heading was renamed in place. Not a CROSS_FILE_MOVES destination, so no
   // `ruledRaises` record applies. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 245],
+  // Raised 245 → 246 by the contract-review route (maintainer, 2026-11-13, in the
+  // triage seat's session, verbatim: 「立 skills 卡，把契约复审的路由直接改成 review 座位」
+  // and 「没有 fable 时，找 review 座位」; quoted in the body of card #33157, claim
+  // comment 6879512661): one line in the dispatch-prompt section — the order
+  // carries the route, the dev names the owed review in its hand-back and never
+  // knocks, the seat sends it to a review seat, never triage. Measured delta +1.
+  // Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 246],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
@@ -575,7 +582,16 @@ export const CEILINGS = new Map([
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 60],
+  // Raised 60 → 63 by the contract-review route (maintainer, 2026-11-13, in the
+  // triage seat's session, verbatim: 「立 skills 卡，把契约复审的路由直接改成 review 座位」
+  // and 「没有 fable 时，找 review 座位」; quoted in the body of card #33157, claim
+  // comment 6879512661): the one routing rule — a lane self-reviews only when it
+  // reaches the tier; otherwise (unreachable, 429, rationed) it knocks a seated
+  // review seat, never triage, then a sibling seat with the tier, else the
+  // owed-review list — replaces the 429-only line (+2), and its one-line verbatim
+  // provenance carrying those two operative quotes (+1). Measured delta +3.
+  // Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 63],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
@@ -1446,7 +1462,21 @@ export const CEILINGS = new Map([
   // that file's standing headroom, so its row does not move. Not a
   // CROSS_FILE_MOVES destination, so no `ruledRaises` record applies. Landed
   // count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/execution-duties.md', 188],
+  // Raised 188 → 189 by the addition-side enumeration-row ruling — an ORDINARY
+  // raise, ⛔ not a cross-file move. One line under the implementation-card
+  // file-surface line naming the exception lanes/skills.md defines. Ordered by
+  // ruling record 6819475461 (maintainer, verbatim: 「同意 A」); authorized under
+  // ruling record 6184799323 (letter B). Measured delta +1; headroom 0.
+  // Raised 189 → 190 by the effort-step-down ruling (card #32784) — an ORDINARY
+  // raise, ⛔ not a cross-file move. The 〈派发〉 effort line now names three
+  // kinds of would-be-M card that dispatch at `medium` (review-nit follow-up,
+  // same-family edge card, copy- or changeset-only touch-up), adds epic child
+  // cards to the `xhigh` list, and says the `xhigh` list outranks the three.
+  // Ordered by ruling record 6830795926 (maintainer, verbatim: 「同意，立卡更新
+  // skills」); authorized under ruling record 6184799323 (letter B). Measured:
+  // the old line was already 120 B, the added content alone is over 40 B, so the
+  // rule lands as two lines (115 B and 116 B). Delta +1; headroom 0.
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 190],
   // New file, landed at its own count (headroom 0, same convention as every
   // entry above): the filing gate and the grading/reading criteria the triage
   // seat applies. A new pm-dispatch references file belongs in this map by the
@@ -1490,7 +1520,15 @@ export const CEILINGS = new Map([
   // the possible-data-leak reach exception left the exceptions line in place,
   // so the measured delta is +1.
   // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 67],
+  // 67 → 79 (#32997): an ordinary ruled raise under letter B (record
+  // 6184799323). The ruling of record is the maintainer's 2026-11-13 grading
+  // ruling quoted verbatim in the card body (「只是读代码得出的最高 p2。这个没必要吧，
+  // 我们的客户不多。」 and 「不需要限额，也不需要自动关。其他同意。」; triage audit
+  // 6846766675), which orders the nine adopted grading rules into 〈定级判据〉.
+  // Under the 120-byte line cap they take 14 lines; the old focus-raise and
+  // reach-cap lines fold into rules 8 and 2 and are deleted, so the measured
+  // delta is +12. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 79],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
@@ -1562,7 +1600,15 @@ export const CEILINGS = new Map([
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 33],
+  // Raised 33 → 35 by the addition-side enumeration-row ruling — an ORDINARY
+  // raise, ⛔ not a cross-file move. Two lines under the product-lane bar on
+  // `skills/**`: the PR that adds an authorable top-level key or a bound live
+  // member adds its enumeration row itself, and what that row is. Ordered by
+  // ruling record 6819475461 (maintainer, verbatim: 「同意 A」); authorized under
+  // ruling record 6184799323 (letter B). Two lines, measured: rule plus
+  // definition do not fit the 120-byte cap as one; they land at 113 B and 115 B.
+  // Measured delta +2; headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 35],
   // Lowered 46 → 43 by the rules-only rewrite (maintainer 2026-09-04:
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
@@ -1643,7 +1689,8 @@ export const CEILINGS = new Map([
   // repo's business-rationale first touch. Measured +1, ceiling moved by +1;
   // recorded under the move below as a `ruledRaises` record.
   // 88 → 87 (#26765, main's governed-draft rule) → 86 (#25753): the objectui pin-chain line retired; landed count.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 86],
+  // 86 → 82 (#32869): the daily digest and its external-demand rows retired; landed count.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 82],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
   // is oldest-first, with a 4-hour starvation guard). A seat charter is read per
   // seat session like every entry above. Set at the landed line count read from
@@ -1683,7 +1730,16 @@ export const CEILINGS = new Map([
   // the escalation) and amendment 6595840476 (maintainer 「同意：下班席位的卡交给
   // 兄弟席」, the idle reading and the sibling hand-over, which names this
   // file). Measured delta +3 (17 → 20 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 20],
+  // 20 → 24 (#33226): words the maintainer said to one seat are not spread —
+  // the one-line rule first, then the card body's three bullets (bind that
+  // seat's account only; relayed fleet-wide or triage-directed orders only from
+  // triage's own session or seat post; record a relayed order's effect, never
+  // extend it). Ruling of record: the maintainer in the triage#1 session,
+  // 2026-11-14, 「所有座位当前任务处理完就下班，我说的都是针对某个具体 agent 账户」,
+  // 「转述指令要写明对谁说, 其实问题的关键你是分诊你才会关心别人的座位帖」 (card
+  // body) and 「也就是说，对某个座位说的话不要扩散就行」 (comment 6872810212).
+  // Measured delta +4 (20 → 24 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 24],
   // Review seat charter (`review#N`): the seat whose only job is the contract
   // review, held on any account that reaches CONTRACT_REVIEW_TIER — its seat
   // word, mailbox, review-seat-first routing of `Request: contract-review`

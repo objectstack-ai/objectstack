@@ -3,7 +3,7 @@
 Declaring how long an object's data lives and how its space is
 reclaimed (ADR-0057). Distinct from
 **lifecycle hooks** (`beforeInsert` / `afterUpdate` …), which run logic on
-writes: this page covers the rows' retention, rotation and archival.
+writes.
 
 ## Why This Exists
 
@@ -99,14 +99,8 @@ Duration literals: `<n>` + `h` / `d` / `w` / `y`.
 // ❌ Non-record class with no bounding policy — grows forever, exactly the bug
 lifecycle: { class: 'telemetry' }
 
-// ❌ Policies on record-class — business truth is permanent
-lifecycle: { class: 'record', retention: { maxAge: '30d' } }
-
 // ❌ archive.after must equal retention.maxAge
 lifecycle: { class: 'audit', retention: { maxAge: '90d' }, archive: { after: '30d', to: 'archive' } }
-
-// ❌ Free-form durations
-lifecycle: { class: 'telemetry', retention: { maxAge: '2 weeks' } }  // use '2w'
 
 // ❌ onlyWhen + rotation/archive — shard DROPs and the Archiver act on age
 //    alone and would destroy/move rows the filter protects
@@ -130,6 +124,46 @@ lifecycle: {
 - **Separation**: registering a datasource named `telemetry` moves every
   `telemetry`/`event`/`audit` object onto it — telemetry bloat can't touch
   the business DB.
+
+## Sealing (`seal`)
+
+`seal` makes an `audit` ledger tamper-evident (ADR-0154): an edit, insert or
+delete outside the platform breaks its signed checkpoints. Ten minutes after each `created_at`
+hour, `@objectstack/plugin-audit` signs its rows into a chained checkpoint
+per organization (`tenant_id`; rows with none share a deployment chain); late
+rows get a `late` checkpoint. Columns enter in clear, `valueFields` as salted
+commitments.
+
+<!-- os:check -->
+```typescript
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+// ✅ The sealer needs declared `id` and `tenant_id`
+export const PolicyChangeLog = ObjectSchema.create({
+  name: 'policy_change_log',
+  sharingModel: 'private',
+  lifecycle: { class: 'audit', retention: { maxAge: '1y' }, seal: { valueFields: ['new_value'] } },
+  fields: {
+    id: Field.text({}),
+    tenant_id: Field.lookup('sys_organization', {}), // stamped on insert
+    new_value: Field.textarea({}),
+  },
+});
+```
+
+```typescript
+// ❌ Refused at parse time: id / created_at order the leaves
+seal: { valueFields: ['created_at'] }
+```
+
+Also refused: `seal` off class `audit`, an undeclared `valueFields` name, and
+beside `seal` any `onlyWhen`, a `ttl` not on `created_at`, or rotation
+`storage`. Not sealed, reported at `error` hourly: no declared `id` or
+`tenant_id` (the injected tenant column is `organization_id`); a `password`,
+`secret`, `formula`, `summary`, `image`, `file`, `avatar`, `video` or `audio`
+column; no `cryptoProvider` on `AuditPlugin`. Not built yet (ADR-0154): a
+verifier, so a break is recorded but not reported; expiry (P4), so the sweeper
+still deletes sealed rows, which then read as missing.
 
 ## Operations
 

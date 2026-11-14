@@ -122,7 +122,7 @@ describe.each(DOORS)('[#28414] $door records the session user, never a body acto
 describe('[#28414] the publish-drafts visibility flip re-saves each app as the session user', () => {
     function makeDoor(executionContext: Record<string, unknown>) {
         const publishPackageDrafts = vi.fn().mockResolvedValue({
-            success: true, publishedCount: 0, failedCount: 0, published: [], failed: [],
+            success: true, outcome: 'published', publishedCount: 0, failedCount: 0, published: [], failed: [],
             seedApplied: { success: true, inserted: 0 },
         });
         const getMetaItems = vi.fn().mockResolvedValue({ items: [{ name: 'hidden_app', label: 'Hidden', _unpublished: true }] });

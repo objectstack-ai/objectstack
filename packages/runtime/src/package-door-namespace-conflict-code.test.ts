@@ -64,7 +64,11 @@ import {
     envelopeViolations,
     standardErrorCodeForHttpStatus,
 } from '@objectstack/spec/api';
+import { NAMESPACE_REFUSED_LITERALS, validateNamespaceNotAddressLiteral } from '@objectstack/spec/kernel';
 import { SchemaRegistry } from '@objectstack/objectql';
+// Paid at collection, not inside a case's clock (check:test-source-alias): the
+// dispatcher chain this file reaches loads it dynamically.
+import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 
 /**
@@ -187,5 +191,57 @@ describe('#14748 — the install-time namespace refusal carries its own code on 
         expect(error.code).toBe(standardErrorCodeForHttpStatus(422));
         expect(error.code).not.toBe('A_TENANT_SPELLING_NO_LEDGER_KNOWS');
         expect(error.declaredCode).toBe('A_TENANT_SPELLING_NO_LEDGER_KNOWS');
+    });
+});
+
+/**
+ * [ADR-0150 D5] The address-literal refusal at the same door. The registry
+ * raises it with the namespace collision's envelope (`NAMESPACE_CONFLICT`,
+ * 422), so `POST /api/v1/packages` answers that code for every namespace the
+ * grammar refuses, `runs` included, with the one judge's sentence. The CLI's
+ * `os package install` reaches the registry through the install-local door,
+ * which answers a register refusal as `PLUGIN_REGISTER_FAILED`: a different
+ * door and a different code, pinned in `@objectstack/cloud-connection`.
+ */
+describe('ADR-0150 D5 — a namespace that spells an address literal is refused with the same code on the wire', () => {
+    /**
+     * The refusal binds a NEW occupation of the namespace: until the cold boot
+     * seals the holders, a registering package is one the deployment already
+     * holds, and it is kept with a warning.
+     */
+    function sealedRegistry(): SchemaRegistry {
+        const registry = freshRegistry();
+        registry.sealBareNameHolders();
+        return registry;
+    }
+
+    // Anti-vacuity for the cases below. The set itself is pinned where it is
+    // declared (`spec/kernel/address-grammar.test.ts`), not listed again here.
+    it('the refused set is not empty and holds `runs`, the literal no route spells', () => {
+        expect(NAMESPACE_REFUSED_LITERALS.length).toBeGreaterThan(0);
+        expect(NAMESPACE_REFUSED_LITERALS).toContain('runs');
+    });
+
+    it.each(NAMESPACE_REFUSED_LITERALS.map((literal) => [literal]))(
+        'a new package under the namespace `%s` answers 422 NAMESPACE_CONFLICT carrying the judge\'s sentence',
+        async (literal) => {
+            const registry = sealedRegistry();
+            const id = `com.acme.${literal}`;
+
+            const refused = await install(makeDoor(registry), manifest(id, literal));
+            expect(refused.handled).toBe(true);
+            expect(refused.response?.status).toBe(422);
+
+            const error = expectConformantError(refused.response);
+            expect(error.code).toBe('NAMESPACE_CONFLICT');
+            expect(error.declaredCode).toBeUndefined();
+            expect(error.message).toContain(validateNamespaceNotAddressLiteral(literal));
+            expect(registry.getPackage(id)).toBeUndefined();
+        },
+    );
+
+    it('CONTROL: a namespace that only contains a literal installs at the same door', async () => {
+        const installed = await install(makeDoor(sealedRegistry()), manifest('com.acme.runsapp', 'runs_app'));
+        expect(installed.response?.status).toBe(201);
     });
 });

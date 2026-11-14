@@ -332,6 +332,53 @@
  * nothing is judged at `orderBy` there: the `field` position already judges
  * the name.
  *
+ * ## [#32449] `columns[].summary` — a function the aggregate door refuses
+ *
+ * A column summary is not a renderer binding either: it reaches
+ * `engine.aggregate` through two queries, both compiled off
+ * `COLUMN_SUMMARY_AGGREGATION` (`@objectstack/spec/ui`), so a member lowers
+ * to the same function on both — `count_unique` to `count_distinct`, `sum` /
+ * `avg` / `min` / `max` by name:
+ *
+ *  - the GROUP HEADER query of a grouped view (`compileListViewGroupQuery`),
+ *    one node per summary column;
+ *  - the WHOLE-SET footer query of a paged grid (`useWholeSetSummary` in
+ *    `@object-ui/plugin-grid`), the same nodes with no `groupBy`.
+ *
+ * The aggregated field is `summary.field` on the object form, else the
+ * column's own `field` — the resolution both compilers apply. When the
+ * engine's aggregate door refuses the pair it answers `400 INVALID_FIELD`, so
+ * the grouped view renders no group and the footer falls back to the page.
+ * An ungrouped view whose matched set fits one page sends neither query: its
+ * footer is computed in the browser (`useColumnSummary`), where such a pair
+ * may still draw a figure (`count_unique` over a multi-select, by value).
+ * That figure lasts only while the set fits one page and the view is not
+ * grouped, which is a property of the row count, not of the declaration, so
+ * the declaration is refused all the same (seat ruling on this card, the
+ * reading the value-provider grid took).
+ * {@link LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED}, `error`, judged by the door's
+ * own verdict (`aggregateAcceptsDeclaration`, `aggregate-pair-verdict.ts`: the
+ * aggregate × field-type table through `isAggregateCompatibleWithFieldType`,
+ * plus `isMultiValueField` for `count_distinct`) — ⛔ no second type list, so
+ * `sum` over a `boolean` and `min` over a `date` pass, as they pass the door.
+ *
+ * [#32503] The same entry has a second carrier: an `object-grid` page
+ * component's `properties.columns` declares this union by reference
+ * (`ObjectGridPropsSchema.columns`), and the grid's footer asks the same
+ * whole-set query of its summaries (`useObjectGridSummaries` →
+ * `useWholeSetSummary`, `@object-ui/plugin-grid`). That carrier is walked by
+ * `validateSortableFields` (`validate-sortable-fields.ts`), the member that
+ * binds a page's `object-grid` to its object and reaches the page publish
+ * door, and judged by this module's {@link columnSummaryRefusal}, under this
+ * rule id.
+ *
+ * Not judged: `none`; `count` (fieldless, `COUNT(*)`); the four DERIVED
+ * members (`count_filled` / `count_empty` / `percent_filled` /
+ * `percent_empty`), which ride one `COUNT(field)` node and so compare no
+ * value; a field that does not resolve (that is {@link LIST_VIEW_FIELD_UNKNOWN}
+ * at `summary.field`, or at the column); a dotted name; and the door's own
+ * non-verdicts — no declared type (`id`) or a type outside `FieldType`.
+ *
  * ## [#26719] A chart bound to a dataset over ANOTHER object is REFUSED
  *
  * A list view's `chart` block names an ADR-0021 dataset, and the dataset
@@ -419,8 +466,14 @@ import {
   isAggregateCompatibleWithFieldType,
   virtualFieldAggregateRemedy,
 } from '@objectstack/spec/data';
-import { ListViewSchema } from '@objectstack/spec/ui';
+import { COLUMN_SUMMARY_AGGREGATION, ListViewSchema, type ColumnSummary } from '@objectstack/spec/ui';
 
+import {
+  aggregateAcceptsDeclaration,
+  declaredAs,
+  isJudgeableAggregateType,
+  refusedAggregateRemedy,
+} from './aggregate-pair-verdict.js';
 import { walkFilterFieldKeys } from './filter-walk.js';
 import { retiredKeyRemedy } from './validate-retired-permission-residue.js';
 import {
@@ -468,6 +521,16 @@ export const LIST_VIEW_FIELD_DOTTED = 'list-view-field-dotted';
  * group renders. See the section of that name on this module.
  */
 export const LIST_VIEW_GROUP_ORDER_UNORDERABLE = 'list-view-group-order-unorderable';
+
+/**
+ * [#32449] A column summary whose function the engine's aggregate door
+ * refuses over the aggregated field's declaration — `sum` / `avg` over a
+ * non-numeric field, `min` / `max` over a string-class or JSON-stored one,
+ * `count_unique` over a JSON-stored one — so the grouped view's header query
+ * and the footer's whole-set query answer `400 INVALID_FIELD`. See the
+ * section of that name on this module.
+ */
+export const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED = 'list-view-summary-field-type-refused';
 
 /**
  * [#26719] A list view whose `chart` binds a dataset declared over another
@@ -809,6 +872,66 @@ const GROUPING_ENTRY_POSITIONS: Array<{ key: string; severity: Sev; axis: Dotted
 
 /** `FieldType`'s members — the vocabulary the aggregate door judges, and nothing outside it. */
 const FIELD_TYPES: ReadonlySet<string> = new Set(FieldType.options);
+
+/**
+ * [#32449] The `ColumnSummary` member an author writes for a table function —
+ * the aggregate rows of `COLUMN_SUMMARY_AGGREGATION`, read backwards
+ * (`count_distinct` is written `count_unique`; the fieldless `count` row is
+ * `count`). A summary's fix line names members, never functions the schema
+ * would refuse.
+ */
+const SUMMARY_MEMBER_BY_FUNCTION: ReadonlyMap<string, string> = new Map(
+  (Object.entries(COLUMN_SUMMARY_AGGREGATION) as Array<[string, (typeof COLUMN_SUMMARY_AGGREGATION)[ColumnSummary]]>)
+    .flatMap(([member, mapping]) => (mapping.kind === 'aggregate' ? [[mapping.function as string, member] as const] : [])),
+);
+
+/** The member that writes `fn` on a column summary (the function itself when no row maps it). */
+function summaryMemberOf(fn: string): string {
+  return SUMMARY_MEMBER_BY_FUNCTION.get(fn) ?? fn;
+}
+
+/**
+ * [#32449, #32503] The refusal ONE `ListColumn` entry's `summary` earns over
+ * the field it aggregates on `object`, or `undefined` when nothing is judged
+ * or the aggregate door accepts the pair — see the section `columns[].summary`
+ * on this module for what is judged and what is skipped.
+ *
+ * One verdict for every carrier of the entry: a list view's `columns`
+ * ({@link validateListViewFieldRefs}) and an `object-grid` page component's
+ * `properties.columns` (`validate-sortable-fields.ts`), which declares the
+ * same union (`ObjectGridPropsSchema.columns` is `ListViewSchema.shape.columns`)
+ * and whose footer asks the same whole-set query. Each caller places the
+ * finding (rule {@link LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED}, `error`); the
+ * words are this function's, so the two carriers cannot word one refusal two
+ * ways.
+ */
+export function columnSummaryRefusal(
+  column: Record<string, unknown>,
+  graph: ObjectGraph,
+  object: string,
+): { message: string; hint: string } | undefined {
+  const summary = column.summary;
+  const member = typeof summary === 'string' ? summary : isRec(summary) ? summary.type : undefined;
+  if (typeof member !== 'string' || !Object.prototype.hasOwnProperty.call(COLUMN_SUMMARY_AGGREGATION, member)) return undefined;
+  const mapping = COLUMN_SUMMARY_AGGREGATION[member as ColumnSummary];
+  // `none`, the fieldless `count` and the derived `COUNT(field)` members compare no value.
+  if (mapping.kind !== 'aggregate' || mapping.fieldless) return undefined;
+  const fn = mapping.function;
+  const field = strName(isRec(summary) && summary.field !== undefined ? summary.field : column.field);
+  if (!field || field.includes('.')) return undefined;
+  const verdict = resolveFieldPath(graph, object, field);
+  if (!verdict || isUnjudgeable(verdict) || verdict.kind !== 'ok') return undefined;
+  const fieldType = verdict.meta?.type;
+  if (!isJudgeableAggregateType(fieldType)) return undefined;
+  const shape = { type: fieldType, multiple: verdict.meta?.multiple === true };
+  if (aggregateAcceptsDeclaration(fn, shape)) return undefined;
+  return {
+    message:
+      `summary "${member}" over "${field}" (${declaredAs(shape)}) is refused by the aggregate door ` +
+      '(400 INVALID_FIELD); a one-page browser footer is no exception',
+    hint: refusedAggregateRemedy(fn, field, shape, summaryMemberOf),
+  };
+}
 
 /** The nested field positions inside one `columns[]` entry record. */
 const COLUMN_ENTRY_POSITIONS: Array<{ block: string; key: string; severity: Sev }> = [
@@ -1277,6 +1400,17 @@ export function validateListViewFieldRefs(
   };
 
   /**
+   * [#32449] One `columns[]` entry's `summary` — see the section of that name
+   * on this module: the member's function over the aggregated field's
+   * declaration, asked of the aggregate door's own verdict.
+   */
+  const checkColumnSummary = (column: AnyRec, object: string, where: string, path: string): void => {
+    const refusal = columnSummaryRefusal(column, graph, object);
+    if (refusal === undefined) return;
+    findings.push({ severity: 'error', rule: LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, where, path, ...refusal });
+  };
+
+  /**
    * Every position on ONE list view record. `bindingPath` is the key the
    * binding `object` was read from, where an unresolvable binding is reported.
    */
@@ -1390,6 +1524,8 @@ export function validateListViewFieldRefs(
               `${nested.block}.${nested.key}`,
             );
           }
+          // [#32449] The summary's function over the field it aggregates.
+          checkColumnSummary(entry, bound, `${hostWhere} › ${key}[${i}].summary`, `${entryPath}.summary`);
         });
       }
     }

@@ -28,10 +28,20 @@
  *    bridge's invokability check (`isHeadlessInvokableAction`): a script action
  *    with no handler binding is not run for an agent.
  *
+ * One rule holds under BOTH postures: an AI service account (`principalKind:
+ * 'agent'`, no `onBehalfOf`) never confirms an action for itself (ADR-0151 D3
+ * rule 3), so the `ai.requiresConfirmation` gate refuses it at every door,
+ * whatever the request carries. For a person and a delegated agent the gate
+ * stays an `ai`-posture rule.
+ *
  * Every other refusal is the REST door's under both postures, at the REST
  * door's point in the order, so a `url` action whose caller lacks its declared
  * capability is `403` for an agent too, never a type sentence that tells it
- * nothing about why.
+ * nothing about why. One refusal keeps that point and that status but not the
+ * REST door's sentence: a client-side or off-origin `api` action is refused
+ * `400` under `ai` with the AI door's own sentence
+ * ({@link aiDoorNotInvokableRefusal}), because the REST prescription — open
+ * the `target`, call it directly — is a next step only a REST caller can take.
  *
  * ## What the sequence answers
  *
@@ -195,6 +205,18 @@ function undeclaredActionRefusal(actionName: string, objectName: string): Action
             `(ADR-0110 D3); startup logs every one of them under [action-governance].`,
         status: 404,
     };
+}
+
+/**
+ * The AI door's sentence for an action an agent cannot run headlessly: the
+ * MCP `run_action` bridge's own, from before the doors shared this sequence
+ * (its invokability refusal in `invokeBusinessAction`). Under the `ai`
+ * posture it answers both the type refusal (a client-side or off-origin
+ * `api` action) and the unbound-script refusal, so an agent is never handed
+ * the REST caller's prescription or the action's `target`.
+ */
+function aiDoorNotInvokableRefusal(actionName: string, actionDef: any): ActionRefusal {
+    return { message: `Action '${actionName}' (type='${actionDef?.type ?? 'script'}') cannot be invoked via MCP`, status: 400 };
 }
 
 /** The facts of an admitted call that a door's invocation row records. */
@@ -385,10 +407,11 @@ async function admitResolvedAction(
 
     // [#3915] Action-TYPE dispatch: only `script`, `flow`, the declarative
     // update and a same-origin `api` action have a server dispatch; a client
-    // type is refused with its prescription.
+    // type is refused with its prescription. The prescription is the REST
+    // caller's; under `ai` the same 400 carries the AI door's sentence.
     const actionType: string = typeof actionDef?.type === 'string' ? actionDef.type : 'script';
     const typeError = actionExec.headlessActionTypeError(deps, actionDef, objectName);
-    if (typeError) return refuse({ message: typeError, status: 400 });
+    if (typeError) return refuse(posture === 'ai' ? aiDoorNotInvokableRefusal(actionName, actionDef) : { message: typeError, status: 400 });
 
     // A flow action on a kernel with no automation service is a deployment
     // gap, not a business failure. [#15079] `operation` before `type`.
@@ -401,7 +424,7 @@ async function admitResolvedAction(
     // asked: a script action with no handler binding (`target` / `body`) is
     // not run for an agent. A flow without automation was answered above.
     if (posture === 'ai' && !actionExec.isHeadlessInvokableAction(deps, actionDef, true)) {
-        return refuse({ message: `Action '${actionName}' (type='${actionDef?.type ?? 'script'}') cannot be invoked via MCP`, status: 400 });
+        return refuse(aiDoorNotInvokableRefusal(actionName, actionDef));
     }
 
     // [#25976] The body, and then its params bag, must be objects before the
@@ -428,12 +451,16 @@ async function admitResolvedAction(
     const paramError = actionExec.enforceActionParams(deps, actionDef, actionSchema, params, { objectName, actionName });
     if (paramError) return refuse({ message: paramError, status: 400 });
 
-    // [#15942 / #16293] CONFIRMATION GATE (`ai` posture) — the last pre-dispatch
-    // check: after the param contract, so a malformed bag still gets its
-    // located 400; before the subject load, so a refusal reads and writes
-    // nothing.
-    if (posture === 'ai') {
-        const confirmationRefusal = actionExec.actionConfirmationRefusal(deps, actionDef, call.confirmation ?? {}, objectName);
+    // [#15942 / #16293] CONFIRMATION GATE — the last pre-dispatch check: after
+    // the param contract, so a malformed bag still gets its located 400; before
+    // the subject load, so a refusal reads and writes nothing. [ADR-0151 D3
+    // rule 3] Asked under BOTH postures for an AI service account, which never
+    // confirms an action for itself; under `ai` only for everyone else, so REST
+    // stays outside the gate for a person and a delegated agent.
+    if (posture === 'ai' || actionExec.isAiServiceAccountCaller(wiring.ec)) {
+        const confirmationRefusal = actionExec.actionConfirmationRefusal(
+            deps, actionDef, call.confirmation ?? {}, objectName, wiring.ec,
+        );
         if (confirmationRefusal) {
             return refuse({
                 message: confirmationRefusal.message,
@@ -494,7 +521,7 @@ async function dispatchAdmittedAction(
             }
             const inject = await actionExec.resolveInProcessRequest(deps, requestContext, envId);
             if (!inject) {
-                return { kind: 'refused', refusal: { message: actionExec.apiActionForwardUnavailableError(actionDef), status: 503 } };
+                return { kind: 'refused', refusal: { message: actionExec.apiActionForwardUnavailableError(actionDef, door), status: 503 } };
             }
             // [#28657] On a denied load the request is built from the
             // `recordId` alone — ⛔ never from a row the caller could not read.
@@ -523,8 +550,12 @@ async function dispatchAdmittedAction(
                 // [#15168] `subject`, not `record`: the shared door derives the
                 // flow context's `record` AND its `recordLoadDenied` sibling
                 // from the one load outcome.
+                // [ADR-0150 D3, #31696] The action's own package: its `target`
+                // flow name resolves from it.
+                const callerPackageId = call.declaration.packageId ?? actionExec.actionDeclaringPackage(actionDef, call.declaration.obj);
                 const result = await actionExec.dispatchFlowAction(deps, requestContext, actionDef, {
                     objectName, subject, params, recordId, ec, envId,
+                    ...(callerPackageId !== undefined ? { callerPackageId } : {}),
                 });
                 return { kind: 'answered', result };
             } catch (err) {
@@ -784,9 +815,29 @@ export interface ActionDispatchRequest extends AIActionConfirmation {
      * The caller, as the host authenticated it. The same envelope a REST
      * request carries: an anonymous caller (no `userId`, not `isSystem`) is
      * refused `401`, as at the REST door.
+     *
+     * It is used as given. `dispatch()` resolves a REST caller's envelope
+     * against the kernel the request was placed on; this door does not, so
+     * the envelope must be the caller as the named environment resolves it
+     * (its permission sets and positions there). See {@link dispatchAction} for the
+     * gates that stay the host's.
      */
     executionContext: ExecutionContext;
-    /** The environment the call runs in; omitted, the single-environment default. */
+    /**
+     * The environment the call runs in. It reaches the host's
+     * `kernel-resolver` as the scoped-URL hint (`urlEnvironmentId`), the way
+     * `POST /environments/:environmentId/actions/...` reaches it, and the
+     * resolver writes the environment: the call runs on the kernel it answers,
+     * on the host kernel when it places none, and a resolver that throws
+     * refuses the call with the status it carries. Omitted, the resolver gets
+     * no environment hint and places the call from what else it reads (the
+     * `credentialHeaders`; a host door has no hostname), or not at all; a call
+     * the resolver places in no environment runs in the kernel's default
+     * environment, as the REST door's does. On a host with no
+     * `kernel-resolver` nothing places the call: it runs in the environment
+     * named here (the scope of its service lookups), or in the default
+     * environment when none is named.
+     */
     environmentId?: string;
     /** The object whose action is called; omitted, an object-less action. */
     objectName?: string;
@@ -833,11 +884,54 @@ export interface ActionDispatchAnswer {
 }
 
 /**
+ * The dispatcher's placement step for the host door (`HttpDispatcher`'s
+ * `placeHostActionRequest`): it writes the two resolver hints from the
+ * values it is handed — `routePath`, and `urlEnvironmentId` from
+ * `environmentId` alone — then runs the placement `resolveRequestScope`
+ * runs, writing `context.kernel` and whatever the host's resolver writes
+ * (`environmentId`, `dataDriver`). A resolver's throw leaves through it.
+ */
+export type PlaceRequestInEnvironment = (
+    context: HttpProtocolContext,
+    hints: { routePath: string; environmentId?: string },
+) => Promise<void>;
+
+/**
+ * The REST route of the same call, as the scoped mount hands it to
+ * `dispatch()` (the environment travels beside it, never inside it). Every
+ * segment is encoded, so a name containing `/` stays one segment. It is
+ * informational only: no environment hint is derived from it, so the route
+ * path the host door builds cannot be steered by an object, namespace or
+ * action name. The record id travels in the body, a spelling the REST door
+ * also takes.
+ */
+function actionRoutePath(namespace: string | undefined, objectName: string, actionName: string): string {
+    const segment = encodeURIComponent;
+    return `/actions${namespace !== undefined ? `/${segment(namespace)}` : ''}/${segment(objectName)}/${segment(actionName)}`;
+}
+
+/**
+ * The declared environment header (`X-Environment-Id`, lower-case as the
+ * forward's header bag spells it), which a host's `kernel-resolver` reads to
+ * place a request in its environment and which the api forward carries across
+ * from its request (`action-execution.ts`'s forward allow-list).
+ */
+const FORWARD_ENVIRONMENT_HEADER = 'x-environment-id';
+
+/**
  * The host door over a dispatcher's deps: the REST door's sequence for a
  * call that arrived as values, not as a path. Writes the invocation row with
  * no `surface` (a host's call came through neither REST nor MCP).
+ *
+ * `place` is the dispatcher's own scope step, minus identity (the host
+ * authenticated its caller): the call is placed in its environment's kernel
+ * by the code that places a REST request, never by a copy of it.
  */
-export async function dispatchActionRequest(deps: DomainHandlerDeps, request: ActionDispatchRequest): Promise<ActionDispatchAnswer> {
+export async function dispatchActionRequest(
+    deps: DomainHandlerDeps,
+    request: ActionDispatchRequest,
+    place: PlaceRequestInEnvironment,
+): Promise<ActionDispatchAnswer> {
     const ec: any = request?.executionContext;
     // [#5519] ANONYMOUS BASELINE — first, as at the REST door: a script body
     // runs `isSystem`, so an anonymous call must never reach it.
@@ -864,11 +958,51 @@ export async function dispatchActionRequest(deps: DomainHandlerDeps, request: Ac
     for (const [name, value] of Object.entries(request.credentialHeaders ?? {})) {
         if (typeof value === 'string') headers[name.toLowerCase()] = value;
     }
-    const context: HttpProtocolContext = {
-        request: { headers },
-        executionContext: ec,
-        ...(typeof request.environmentId === 'string' && request.environmentId !== '' ? { environmentId: request.environmentId } : {}),
-    };
+    const namedEnvironment = typeof request.environmentId === 'string' && request.environmentId !== '' ? request.environmentId : undefined;
+    // On a host with a `kernel-resolver`, `environmentId` is the RESOLVER's to
+    // write, as at the REST door: the named environment reaches it as the
+    // scoped-URL hint, never pre-written onto the context.
+    const context: HttpProtocolContext = { request: { headers }, executionContext: ec };
+    const objectName = typeof request.objectName === 'string' && request.objectName !== ''
+        ? request.objectName
+        : actionExec.GLOBAL_ACTION_OBJECT_KEY;
+    // [ADR-0006 Phase 5] PLACEMENT — the step `dispatch()` runs before the
+    // REST door, asked what the scoped REST request asks: on a multi-kernel
+    // host the resolver answers the environment's own kernel (and writes its
+    // `environmentId` / `dataDriver`), and a resolver that fails refuses the
+    // call instead of letting it run on the host kernel.
+    try {
+        await place(context, {
+            routePath: actionRoutePath(request.namespace, objectName, actionName),
+            ...(namedEnvironment ? { environmentId: namedEnvironment } : {}),
+        });
+    } catch (err) {
+        return deps.errorFromThrown(err, 500);
+    }
+    // [#32658] THE FORWARD'S ROUTING IDENTITY. A same-origin `type: 'api'`
+    // action forwards into the host's raw app, which places the forwarded
+    // request as it places any request it receives. A REST request placed by
+    // its hostname or its `X-Environment-Id` carries that signal into its
+    // forward, so the forward lands in the environment the call ran in. This
+    // door's request carries neither: on a multi-kernel host its forward
+    // reached the raw app as `Host: localhost`, which places it in no
+    // environment, and the target answered the caller 401. The environment the
+    // host's resolver placed the call in is written as the declared
+    // environment header, so the forward is placed where the call ran. It is
+    // the resolver's answer, never the caller's: it replaces any spelling the
+    // credential headers carried. Read before the no-resolver fallbacks below
+    // write an environment, so a host that placed nothing (a single kernel)
+    // routes nothing; `platform` is the control plane, not an environment.
+    const placedEnvironment = context.environmentId;
+    if (typeof placedEnvironment === 'string' && placedEnvironment !== '' && placedEnvironment !== 'platform') {
+        headers[FORWARD_ENVIRONMENT_HEADER] = placedEnvironment;
+    }
+    // On a host with NO resolver nothing places the call, so the environment
+    // the host named is carried as it always was — never silently dropped for
+    // the default one. Written after placement, so the scope touch, which this
+    // door never made for an unvalidated id, still fires only on one a
+    // resolver wrote.
+    if (namedEnvironment && !deps.isMultiTenantHost()) context.environmentId = namedEnvironment;
     if (!context.environmentId) {
         const def = deps.getDefaultEnvironmentId();
         if (def) context.environmentId = def;
@@ -876,10 +1010,6 @@ export async function dispatchActionRequest(deps: DomainHandlerDeps, request: Ac
     const projectQl: any = await deps.resolveProjectKernelObjectQL(context);
     const ql: any = projectQl ?? await deps.getObjectQL(context, context.environmentId);
     if (!ql || typeof ql.executeAction !== 'function') return deps.error('Data engine not available', 503);
-
-    const objectName = typeof request.objectName === 'string' && request.objectName !== ''
-        ? request.objectName
-        : actionExec.GLOBAL_ACTION_OBJECT_KEY;
     let qualifier: actionExec.ActionAddressQualifier | undefined;
     if (request.namespace !== undefined) {
         const registry: any = ql?.registry;
@@ -932,7 +1062,30 @@ const hostDispatchers = new WeakMap<object, HttpDispatcher>();
  *
  * `posture` picks the rules (see {@link ActionDispatchPosture}): a door an
  * agent drives takes `'ai'`, which adds the `sys_*` exposure, `ai.exposed`
- * and `ai.requiresConfirmation` gates the MCP `run_action` tool enforces.
+ * and `ai.requiresConfirmation` gates the MCP `run_action` tool enforces. An
+ * AI service account meets the `ai.requiresConfirmation` gate under either
+ * posture, and `confirm` never satisfies it for one (ADR-0151 D3 rule 3).
+ *
+ * `kernel` is the kernel the host's HTTP door is served from — on a
+ * multi-kernel host, the one that registers the `kernel-resolver` service.
+ * The call is placed by the dispatcher's own placement step, asked what the
+ * scoped REST request asks, so both doors run the call on the same kernel.
+ *
+ * A same-origin `type: 'api'` action forwards into the raw app of the
+ * kernel's HTTP server, as at the REST door, and on a multi-kernel host the
+ * forward carries the environment the resolver placed the call in
+ * (`X-Environment-Id`), so the raw app places it in that same environment.
+ * An environment's own kernel owns no socket: handed one, the door has
+ * nothing to forward through and refuses the action `503`.
+ *
+ * What `dispatch()` runs after placement and this door does NOT, so it stays
+ * the host's job before it calls:
+ *  - resolving the caller's envelope against the placed kernel
+ *    (`executionContext` is used as given);
+ *  - the ADR-0069 authentication-policy gate (an expired password or a
+ *    required MFA step blocks a REST session; nothing here reads a session);
+ *  - the environment-membership gate, which refuses a signed-in non-member of
+ *    the environment `403 PROJECT_MEMBERSHIP_REQUIRED` at the REST door.
  *
  * @example
  * const answer = await dispatchAction(kernel, {

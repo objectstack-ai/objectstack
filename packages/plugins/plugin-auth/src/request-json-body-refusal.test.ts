@@ -125,7 +125,8 @@ beforeAll(async () => {
   });
   await plugin.init(ctx);
   (plugin as unknown as { authManager: unknown }).authManager = {
-    handleRequest,
+    // [#32637] The mounts re-dispatch through the manager's vendor entry.
+    handleVendorRequest: handleRequest,
     getApi: async () => ({
       getSession: async () => ({ user: { id: 'usr_platform_admin', email: SESSION_EMAIL, isPlatformAdmin: true } }),
       createOAuthClient: acts.createOAuthClient,
@@ -142,6 +143,8 @@ beforeAll(async () => {
     getDataEngine: () => engine,
     unlockUser: acts.unlockUser,
     isSsoDomainVerificationEnabled: () => true,
+    // SSO-only mode off: the set-initial-password route asks it (`sso-only-local-password.ts`).
+    isSsoOnlyMode: () => false,
     isPhoneNumberEnabled: () => false,
     isEmailServiceAvailable: () => false,
     isPhoneOtpDeliverable: () => false,

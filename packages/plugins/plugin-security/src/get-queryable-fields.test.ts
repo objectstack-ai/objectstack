@@ -19,6 +19,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { PermissionSet } from '@objectstack/spec/security';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
 
 const CRUD = { allowRead: true, allowCreate: true, allowEdit: true };
@@ -82,8 +83,16 @@ async function boot(sets: PermissionSet[], opts: { noBaseline?: boolean } = {}) 
     objectql: {
       registerMiddleware: (mw: any) => middlewares.push(mw),
       getSchema: (name: string) => SCHEMAS[name],
-      findOne: vi.fn(async (_object: string, query: any) =>
-        (query?.where?.id === LIVE_DELEGATOR ? { id: LIVE_DELEGATOR, email: 'boss@example.test' } : null)),
+      findOne: vi.fn(async (object: string, query: any) => {
+        assertEngineFindOnePredicate(object, query);
+        return query?.where?.id === LIVE_DELEGATOR ? { id: LIVE_DELEGATOR, email: 'boss@example.test' } : null;
+      }),
+      // The delegator is a current member of the organization the delegated
+      // request runs in (ADR-0093 D8.1, as amended: under every posture).
+      find: vi.fn(async (object: string, query: any) =>
+        (object === 'sys_member' && (query?.where?.user_id === undefined || query.where.user_id === LIVE_DELEGATOR)
+          ? [{ user_id: LIVE_DELEGATOR, organization_id: 'org-1', role: 'member' }]
+          : [])),
     },
     metadata: {
       get: async (_type: string, name: string) => SCHEMAS[name],

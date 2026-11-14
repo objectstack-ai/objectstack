@@ -113,6 +113,9 @@ export function StudioCopilotConversation({
   });
 
   const pendingFirstMessageRef = React.useRef<PendingFirstMessage | null>(null);
+  // ADR-0028 — the composer's picked model, held here so it outlives the keyed
+  // pane's remount when the first send mints the conversation.
+  const [selectedModelId, setSelectedModelId] = React.useState<string | undefined>(undefined);
 
   // No agent served (community edition / misconfigured) → no copilot, plain surface.
   if (!agentsLoading && agents.length === 0) return null;
@@ -133,6 +136,8 @@ export function StudioCopilotConversation({
       initialMessages={initialMessages}
       pendingFirstMessageRef={pendingFirstMessageRef}
       ensureConversation={ensureConversation}
+      selectedModelId={selectedModelId}
+      onSelectedModelChange={setSelectedModelId}
       onSent={() => {}}
       onShare={() => {}}
       showDebug={false}

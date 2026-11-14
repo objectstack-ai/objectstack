@@ -51,6 +51,7 @@ import { overlayMemberWhere } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { rowMatchesOverlayWhere, servedOverlayRowCandidates } from './protocol.js';
 import { holdsServedOverlayCandidate } from './protocol-overlay-merge.js';
+import type { ShipsName } from './suite-moved-overlay.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 
 /**
@@ -122,10 +123,13 @@ export async function findServedOverlayRow(
     const installed = installedManifestsOfEngine(this.engine);
     // [#31593] The code packages that ship the item, read once, when a
     // moved edit of it can be a candidate (`suite-moved-overlay.ts`).
+    // [#32606] Two grains: the item (its member) for the address's package,
+    // the name (any member) for the former owner ({@link ShipsName}).
     let shippers: ReadonlySet<string> | undefined;
-    const ships = (packageId: string): boolean => {
-        shippers ??= shippingPackageIds(this.shippedArtifactsOf(args.type, args.name, undefined, args.member));
-        return shippers.has(packageId);
+    let nameShippers: ReadonlySet<string> | undefined;
+    const ships: ShipsName = {
+        item: (packageId) => (shippers ??= shippingPackageIds(this.shippedArtifactsOf(args.type, args.name, undefined, args.member))).has(packageId),
+        name: (packageId) => (nameShippers ??= shippingPackageIds(this.shippedArtifactsOf(args.type, args.name))).has(packageId),
     };
     for (const candidate of servedOverlayRowCandidates({ packageId: args.packageId, servedOverride: args.servedOverride, installed, ships })) {
         const type = candidate.spelling === 'canonical' ? args.type : other;
@@ -262,6 +266,33 @@ export function shippingPackageIds(shipped: readonly unknown[]): ReadonlySet<str
         if (typeof id === 'string' && id !== '' && id !== 'sys_metadata') shippers.add(id);
     }
     return shippers;
+}
+
+/**
+ * [ADR-0150 D4, #32552] Whether `judge` holds for SOME code package that ships
+ * `(type, name)`: the package the bare-name artifact lookup answers first (the
+ * one-holder answer, read alone while it holds), then every shipper
+ * ({@link shippingPackageIds} over `shippedArtifactsOf`).
+ *
+ * The question a pair's row asks of its base — is this row a declared
+ * override of the item, may this removal or restore treat it as one — when two
+ * namespaces' packages each ship the name (ADR-0150 D9): each holder has its
+ * own pair, so a row is judged against its own base, never against whichever
+ * shipper registered first. No shipper is picked: the row judged is the one
+ * its own `package_id` names. A name one package ships answers exactly as the
+ * bare lookup alone did.
+ */
+export function someShipperOf(
+    host: {
+        packagedArtifactOwner(request: { type: string; name: string }): string | undefined;
+        shippedArtifactsOf(type: string, name: string): unknown[];
+    },
+    type: string,
+    name: string,
+    judge: (basePackageId: string | undefined) => boolean,
+): boolean {
+    if (judge(host.packagedArtifactOwner({ type, name }))) return true;
+    return [...shippingPackageIds(host.shippedArtifactsOf(type, name))].some((shipper) => judge(shipper));
 }
 
 /**

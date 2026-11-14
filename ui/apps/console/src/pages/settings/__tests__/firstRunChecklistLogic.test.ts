@@ -11,10 +11,12 @@ import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_ORGANIZATION_NAME,
   browserRegion,
+  checklistCompletion,
   dismissRecordKey,
   hasInvitedColleagues,
   isKeySet,
   isMailConfigured,
+  isMailDelivering,
   isOrganizationNamed,
   localeOffer,
   localizationRows,
@@ -153,6 +155,20 @@ describe('done is read from the resolved value', () => {
     expect(isMailConfigured({ provider: fromTenant('resend'), from_email: fromTenant('a@b.co') })).toBe(true);
   });
 
+  it('mail follows the provider the running system states (live.provider), the saved values only without that statement', () => {
+    const saved = { provider: fromTenant('smtp'), from_email: fromTenant('a@b.co'), smtp_host: fromTenant('mx') };
+    // Configured through the deployment's environment: nothing saved, still delivering.
+    expect(isMailDelivering({ values: {}, live: { provider: { value: 'smtp', source: 'environment' } } })).toBe(true);
+    expect(isMailDelivering({ values: {}, live: { provider: { value: 'resend', source: 'settings' } } })).toBe(true);
+    // The development log delivers nothing: not done, even over saved values that would pass.
+    expect(isMailDelivering({ values: saved, live: { provider: { value: null, source: 'none' } } })).toBe(false);
+    // CONTROL: no statement, so the saved values decide, as before.
+    expect(isMailDelivering({ values: saved })).toBe(true);
+    expect(isMailDelivering({ values: { provider: fromTenant('log'), from_email: fromTenant('a@b.co') } })).toBe(false);
+    expect(isMailDelivering({ values: saved, live: {} })).toBe(true);
+    expect(isMailDelivering({ values: {}, live: {} })).toBe(false);
+  });
+
   it('the organization is named once it no longer carries the platform name', () => {
     expect(DEFAULT_ORGANIZATION_NAME).toBe('Default Organization');
     expect(isOrganizationNamed('Default Organization')).toBe(false);
@@ -198,5 +214,32 @@ describe('hiding the checklist is a per-device record, per workspace and user', 
     expect(wasDismissed(broken, 'k')).toBe(false);
     expect(wasDismissed(undefined, 'k')).toBe(false);
     expect(markDismissed(broken, 'k')).toBe(false);
+  });
+});
+
+describe('completion counts the required rows; email delivery is optional (objectstack#32643)', () => {
+  const required = ['organization_name', 'language_country', 'timezone', 'currency', 'invite'].map((id) => ({ id, done: true }));
+
+  it('every required row done and mail not: complete, and mail is in neither count', () => {
+    expect(checklistCompletion([...required, { id: 'mail', done: false }])).toEqual({ done: 5, total: 5, complete: true });
+  });
+
+  it('mail done moves neither count', () => {
+    expect(checklistCompletion([...required, { id: 'mail', done: true }])).toEqual({ done: 5, total: 5, complete: true });
+  });
+
+  it('CONTROL: a required row not done keeps it open, mail done or not', () => {
+    const open = required.map((r) => (r.id === 'invite' ? { ...r, done: false } : r));
+    expect(checklistCompletion([...open, { id: 'mail', done: true }])).toEqual({ done: 4, total: 5, complete: false });
+    expect(checklistCompletion([...open, { id: 'mail', done: false }]).complete).toBe(false);
+  });
+
+  it('the rows outside the localization set count as required too (the AI rows)', () => {
+    expect(checklistCompletion([{ id: 'ai_provider', done: false }, { id: 'mail', done: false }])).toEqual({
+      done: 0,
+      total: 1,
+      complete: false,
+    });
+    expect(checklistCompletion([{ id: 'connect_assistant', done: false }]).complete).toBe(false);
   });
 });

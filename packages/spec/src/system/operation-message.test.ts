@@ -418,3 +418,85 @@ describe('operation message catalog — sharing write denial and approvals recal
     }
   });
 });
+
+/**
+ * The queue refusal's two sentences: `record_queue_change_denied` for a change
+ * of an existing record's queue, `record_queue_assign_denied` for a create into
+ * a queue the caller does not belong to. The call sites are pinned in
+ * `packages/plugins/plugin-security/src/owner-queue-field-write-user-message.test.ts`,
+ * on the REST data door's body.
+ */
+describe('operation message catalog — the queue refusal, a sentence per verb', () => {
+  const KEYS = ['record_queue_change_denied', 'record_queue_assign_denied'] as const;
+  const GRANT_VOCABULARY = /allowTransfer|modifyAllRecords|owner_id|_id\b|\[Security\]|Access denied/;
+
+  it('every locale defines both, placeholder-free and naming no grant or API name', () => {
+    const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+    // Guard the guard: a catalog that lost its locales would make the loop
+    // below vacuously true.
+    expect(locales.length).toBeGreaterThanOrEqual(4);
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const key of KEYS) {
+        expect(catalog[key], `${locale} defines ${key}`).toBeTypeOf('string');
+        expect(catalog[key].length, `${locale}.${key}`).toBeGreaterThan(10);
+        expect(catalog[key], `${locale}.${key} placeholder-free`).not.toMatch(/[{}]/);
+        expect(catalog[key], `${locale}.${key}`).not.toMatch(GRANT_VOCABULARY);
+      }
+    }
+  });
+
+  it('the create sentence is not the change sentence, nor any sibling, in any locale', () => {
+    // A create into a queue is admitted for a member of that queue, a change of
+    // an existing record's queue for no member: two situations, two next steps.
+    // Identical copy would make the new key a synonym, which the header bars.
+    const SIBLINGS = ['permission_denied', 'record_queue_change_denied', 'record_owner_assign_denied'] as const;
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const sibling of SIBLINGS) {
+        expect(catalog.record_queue_assign_denied, `${locale} vs ${sibling}`).not.toBe(catalog[sibling]);
+      }
+    }
+  });
+
+  it('a deployment translation override wins, under the shared `errors.` address', () => {
+    for (const key of KEYS) {
+      expect(operationMessageTranslationKey(key)).toBe(`errors.${key}`);
+      const translate = (k: string) => (k === `errors.${key}` ? '部署自定义文案。' : k);
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'zh-CN', translate }))
+        .toBe('部署自定义文案。');
+    }
+  });
+});
+
+/**
+ * `field_edit_denied`'s `{{fields}}` is spelled by two list rules that live in
+ * this catalog: `field_label_quoted` quotes one label, `field_label_list_separator`
+ * joins them. A locale added without them is refused by "every locale defines
+ * every key en defines" above; this asserts their shape. The rendered sentence
+ * per locale is pinned byte for byte at its call site,
+ * `packages/plugins/plugin-security/src/owner-queue-field-write-user-message.test.ts`.
+ */
+describe('operation message catalog — the field-label list rules', () => {
+  it('every locale quotes with exactly one {{label}} and separates with a placeholder-free mark', () => {
+    const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+    expect(locales.length).toBeGreaterThanOrEqual(4);
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      const quoted = catalog.field_label_quoted;
+      expect(quoted, `${locale} defines field_label_quoted`).toBeTypeOf('string');
+      expect(quoted.match(/\{\{\w+\}\}/g), `${locale}.field_label_quoted`).toEqual(['{{label}}']);
+      expect(quoted.replace('{{label}}', ''), `${locale}.field_label_quoted quotes`).not.toBe('');
+      const separator = catalog.field_label_list_separator;
+      expect(separator, `${locale} defines field_label_list_separator`).toBeTypeOf('string');
+      expect(separator.length, `${locale}.field_label_list_separator`).toBeGreaterThan(0);
+      expect(separator, `${locale}.field_label_list_separator placeholder-free`).not.toMatch(/[{}]/);
+    }
+  });
+
+  it('a deployment translation override wins for each rule, under the shared `errors.` address', () => {
+    const translate = (k: string) =>
+      k === 'errors.field_label_quoted' ? '[{{label}}]' : k === 'errors.field_label_list_separator' ? ' / ' : k;
+    expect(renderOperationMessage({ messageKey: 'field_label_quoted', params: { label: 'A' } }, { locale: 'en', translate }))
+      .toBe('[A]');
+    expect(renderOperationMessage({ messageKey: 'field_label_list_separator' }, { locale: 'en', translate }))
+      .toBe(' / ');
+  });
+});

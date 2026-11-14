@@ -7,7 +7,7 @@ MCP Runtime Server Plugin for ObjectStack — exposes your app's data objects, b
 - **Model Context Protocol (MCP)**: expose an ObjectStack app to any MCP client
 - **Object tools**: list / describe / query / aggregate / read / create / update / delete, generated from your metadata
 - **Action tools**: invoke the business actions an author opted into the AI surface
-- **Resources**: object schemas, records and metadata types as MCP resources
+- **Resources** (stdio transport only): object schemas, records and metadata types as MCP resources; over HTTP the same reads are the `list_objects`, `describe_object` and `get_record` tools
 - **Prompts**: authored skills and registered agents project as MCP prompts
 - **Two transports**: a long-lived stdio server, and a per-request Streamable HTTP endpoint at `/api/v1/mcp`
 - **Security**: every call runs under a real principal — permissions, row-level and field-level security apply, and OAuth scopes narrow the tool families
@@ -109,7 +109,7 @@ apply):
 
 ```typescript
 // Object data
-'list_objects'         // List objects (system sys_* objects hidden by default)
+'list_objects'         // List objects (sys_* hidden unless declared enable.aiReadable: sys_approval_request, sys_user)
 'describe_object'      // Object schema: fields + features
 'validate_expression'  // Check a CEL expression against a schema before authoring it
 'query_records'        // Filter / sort / paginate
@@ -122,7 +122,7 @@ apply):
 
 // Business actions — operate the app, not just its rows
 'list_actions'         // Invokable business actions the caller may run
-'run_action'           // Invoke an action by name with { recordId, params }
+'run_action'           // Invoke an action by name or listed face with { recordId, params }
 'resume_run'           // Continue a run paused on a screen with { runId, values }
 ```
 
@@ -152,8 +152,13 @@ in the UI). The served `SKILL.md` names those tools only under the same grant.
 flow), filtered to what the author exposed and the caller may run: only actions
 opted into the AI surface (`ai: { exposed: true }`, ADR-0011 / #2849) are
 listed, declared `requiredPermissions` (ADR-0066 D4) are enforced, and
-`sys_*`-object actions are held back fail-closed. `run_action` resolves the
-action by name and dispatches it through the framework's own action mechanism
+`sys_*`-object actions are held back fail-closed. One name bound to several
+objects is listed once per binding, and each row carries its own `face`
+(ADR-0150 D6, e.g. `sys_member-invite_user`). `run_action` resolves the action
+by name, or by a listed face as `actionName` (read back against the caller's own
+listing; a face it does not list is not found, and a face sent with an
+`objectName` or `namespace` naming another binding is refused), and dispatches
+it through the framework's own action mechanism
 (`engine.executeAction` / automation flow runner), so a BYO-AI MCP client
 (Claude Code, Cursor, …) can trigger real business logic — e.g. "complete this
 task", "convert this lead". When a flow action stops on a screen, `run_action`
@@ -179,7 +184,8 @@ registered means the `tools` capability is not advertised.
 
 ## Resources
 
-Registered by the resource bridge, from your metadata:
+Resources are served on the **stdio transport only**. Registered by the resource
+bridge on the long-lived stdio server, from your metadata:
 
 ```
 objectstack://objects                                    # List all data objects
@@ -197,6 +203,20 @@ The listing and schema resources read the same objects `list_objects` and
 shape and a disabled package's objects do not. A host with no `protocol`
 service reads the metadata service instead.
 
+The Streamable HTTP endpoint at `/api/v1/mcp` serves **no** resources: it does
+not advertise the `resources` capability, and `resources/list`,
+`resources/templates/list` and `resources/read` answer `-32601 Method not found`.
+Over HTTP, read the same data with the tools, which run under the same caller's
+principal (permissions, row-level and field-level security, OAuth scopes):
+
+| Resource (stdio) | Tool (HTTP and stdio) |
+|---|---|
+| `objectstack://objects` | `list_objects` |
+| `objectstack://objects/{objectName}` | `describe_object` |
+| `objectstack://objects/{objectName}/records/{recordId}` | `get_record` |
+
+`objectstack://metadata/types` has no HTTP counterpart.
+
 ## Prompts
 
 Two prompt families are bridged — there is no per-item prompt registration call:
@@ -207,12 +227,22 @@ Two prompt families are bridged — there is no per-item prompt registration cal
    and its `agentName` argument names agents that boot holds; the open
    framework registers none, so there it is not listed.
 2. **One prompt per authored skill** that carries `instructions` (#3905). Write
-   a `*.skill.ts`, and its instructions become a prompt any connected MCP client
+   a `*.skill.ts`, and its instructions become a prompt a connected MCP client
    can list and fetch.
 
 The skill **list** is a snapshot taken when the bridge runs; each prompt's
 **body** is re-read from metadata at `prompts/get` time, so an edited skill
 serves fresh text without a restart.
+
+`bridgePrompts` lists every such skill on the long-lived server. The HTTP door,
+and any server a host installs `registerSkillPrompts` on, offers a skill on
+`prompts/list` and `prompts/get` only when that server lists every tool the
+skill binds (`SkillSchema.tools`), read from the server's own tool registry when
+the prompt request is answered: a plain name by a tool of that name, a trailing
+wildcard by any listed tool it matches, and an `action_<name>` entry (or
+`action_*`) also by `run_action`. A skill that binds no tool is offered as
+before, and `prompts/get` answers a withheld skill as it answers an unknown
+prompt name.
 
 ## Extending the server from a host
 
@@ -482,7 +512,8 @@ the handler and declares the capability together — so there is no way to
 advertise a primitive this server cannot serve (ADR-0076 D12).
 
 In practice: `tools` appears once a tool is registered, `resources` once a
-resource is, `prompts` once the skill/agent bridge runs. `logging` is the one
+resource is (on the stdio server only: the HTTP endpoint registers no resource,
+so it never advertises `resources`), `prompts` once the skill/agent bridge runs. `logging` is the one
 hand-declared entry, and it is honest — declaring it is itself what wires the
 `logging/setLevel` handler.
 

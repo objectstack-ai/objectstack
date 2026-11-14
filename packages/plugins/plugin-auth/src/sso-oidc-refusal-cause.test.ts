@@ -533,6 +533,94 @@ describe('invite_only refuses an unknown OIDC user unless the provider allows JI
   });
 });
 
+// ── Sign out of the company sign-in too: OIDC RP-initiated logout ───────────
+//
+// Ruling record 6866334319 (`sso-sign-out-of-idp.ts`). The provider's
+// `end_session_endpoint` is the one saving the switch on read from discovery
+// and kept in the stored OIDC config; here it is written into the row as that
+// save leaves it.
+
+describe('sign out of the company sign-in too: OIDC logout redirect', () => {
+  const END_SESSION = `${IDP}/oauth2/logout`;
+  const AFTER_SIGN_OUT = `${BASE}/signed-out`;
+
+  const parkEndSession = (rp: Rp) => {
+    const row = rp.engine.tables.get('sys_sso_provider')![0];
+    row.oidc_config = JSON.stringify({ ...JSON.parse(row.oidc_config), endSessionEndpoint: END_SESSION });
+  };
+
+  const sessionOf = async (rp: Rp, cookie: string): Promise<{ user?: { email?: string } } | null> => {
+    const res = await rp.manager.handleRequest(new Request(`${AUTH}/get-session`, { headers: { cookie } }));
+    const body = (await res.json().catch(() => null)) as { user?: { email?: string } } | null;
+    return body?.user ? body : null;
+  };
+
+  const signOut = (rp: Rp, cookie: string, body: Record<string, unknown> = {}): Promise<Response> =>
+    rp.manager.handleRequest(
+      new Request(`${AUTH}/sign-out`, {
+        method: 'POST',
+        headers: { cookie, origin: BASE, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  const recordedSessions = (rp: Rp): unknown[] =>
+    (rp.engine.tables.get('sys_verification') ?? []).filter((v: any) => String(v.identifier).startsWith('oidc-session-by-id:'));
+
+  it('CONTROL, switch off: sign-out ends the platform session only, with no logout URL, and no session is recorded', async () => {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(rp);
+    parkEndSession(rp);
+    const signedIn = cookiesOf(await signInThroughIdp(rp, await idToken()));
+    expect((await sessionOf(rp, signedIn))?.user?.email).toBe(EMAIL);
+    expect(recordedSessions(rp)).toHaveLength(0);
+
+    const out = await signOut(rp, signedIn, { callbackURL: AFTER_SIGN_OUT });
+    expect(out.status).toBe(200);
+    const body = (await out.json()) as { success?: boolean; url?: string };
+    expect(body.success).toBe(true);
+    expect(body.url).toBeUndefined();
+    expect(out.headers.get('location')).toBeNull();
+    expect(await sessionOf(rp, signedIn)).toBeNull();
+  });
+
+  it('on: sign-out answers the provider logout URL carrying the ID token as its hint, and the session ends', async () => {
+    const rp = await makeRp({ provider: { allowJit: true, signOutOfIdp: true } });
+    await seedAdmin(rp);
+    parkEndSession(rp);
+    const token = await idToken();
+    const signedIn = cookiesOf(await signInThroughIdp(rp, token));
+    expect((await sessionOf(rp, signedIn))?.user?.email).toBe(EMAIL);
+    expect(recordedSessions(rp)).toHaveLength(1);
+
+    const out = await signOut(rp, signedIn, { callbackURL: AFTER_SIGN_OUT, state: 'opaque-state' });
+    expect(out.status).toBe(200);
+    const body = (await out.json()) as { success?: boolean; url?: string; redirect?: boolean };
+    expect(body).toMatchObject({ success: true, redirect: true });
+    const url = new URL(body.url!);
+    expect(`${url.origin}${url.pathname}`).toBe(END_SESSION);
+    expect(url.searchParams.get('id_token_hint')).toBe(token);
+    expect(url.searchParams.get('client_id')).toBe(CLIENT_ID);
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe(AFTER_SIGN_OUT);
+    expect(url.searchParams.get('state')).toBe('opaque-state');
+    expect(out.headers.get('location')).toBe(body.url);
+    expect(await sessionOf(rp, signedIn)).toBeNull();
+    expect(recordedSessions(rp)).toHaveLength(0);
+  });
+
+  it('on: an untrusted callbackURL is not handed to the identity provider as the place to return to', async () => {
+    const rp = await makeRp({ provider: { allowJit: true, signOutOfIdp: true } });
+    await seedAdmin(rp);
+    parkEndSession(rp);
+    const signedIn = cookiesOf(await signInThroughIdp(rp, await idToken()));
+    const out = await signOut(rp, signedIn, { callbackURL: 'https://elsewhere.example/landing', disableRedirect: true });
+    const body = (await out.json()) as { url?: string; redirect?: boolean };
+    expect(body.redirect).toBe(false);
+    expect(out.headers.get('location')).toBeNull();
+    expect(new URL(body.url!).searchParams.get('post_logout_redirect_uri')).toBeNull();
+  });
+});
+
 // ── 4. IdP group → permission set at sign-in ────────────────────────────────
 //
 // Ruling A on the Enterprise SSO knobs (record 6718355623), item 3: an SSO
@@ -1181,5 +1269,149 @@ describe('Entra ID: a user without a mailbox signs in through an explicit email 
     expect(stored.userInfoEndpoint).toBe(USERINFO_ENDPOINT);
     expect(Object.keys(stored).filter((k) => /parked/i.test(k))).toEqual([]);
     expect(stored.mapping).toEqual({ email: 'preferred_username', name: 'name', extraFields: { groups: 'groups' } });
+  });
+});
+
+// ── 5. With SSO domain verification on, a provider creates an account only at a domain it has proven ──
+//
+// `sso-account-at-proven-domain.ts` states the rule. Every case runs with
+// verification on, the provider's `domain_verified` on and its JIT toggle on,
+// and one human already present, so the audience gate would admit each
+// newcomer: the rule alone decides.
+
+describe('with SSO domain verification on, an OIDC provider creates an account only at a domain it has proven', () => {
+  const VERIFICATION_ON = { plugins: { sso: true, ssoDomainVerification: true } };
+  const verifiedRp = async (domain = 'acme.com', provider: Record<string, unknown> = {}) => {
+    const rp = await makeRp({ config: VERIFICATION_ON, provider: { domain, domainVerified: true, allowJit: true, ...provider } });
+    await seedAdmin(rp);
+    return rp;
+  };
+  /** What a sign-in left behind besides the seeded admin. */
+  const written = (rp: Rp) => ({
+    users: (rp.engine.tables.get('sys_user') ?? []).map((u: any) => u.email).filter((e: string) => e !== 'admin@acme.com'),
+    accounts: (rp.engine.tables.get('sys_account') ?? []).length,
+    members: (rp.engine.tables.get('sys_member') ?? []).length,
+    sessions: (rp.engine.tables.get('sys_session') ?? []).length,
+  });
+  const NOTHING = { users: [], accounts: 0, members: 0, sessions: 0 };
+
+  const expectAdmitted = (res: Response) => {
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location'), res.headers.get('location') ?? '').toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=[^;]/);
+  };
+  const expectRefused = (rp: Rp, res: Response) => {
+    expect(res.status).toBe(302);
+    expect(errorParams(res)).toMatchObject({ base: FAILED, error: 'EMAIL_DOMAIN_NOT_ALLOWED' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(written(rp)).toEqual(NOTHING);
+  };
+
+  it('admits an address exactly at the single listed domain', async () => {
+    const rp = await verifiedRp();
+    expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.com' })));
+    expect(written(rp).users).toEqual(['bob@acme.com']);
+  });
+
+  it("the IdP's email_verified claim does not mark the account it creates verified", async () => {
+    const rp = await verifiedRp();
+    // `idToken` always asserts `email_verified: true`.
+    expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.com' })));
+    const bob = rp.engine.tables.get('sys_user')!.find((u: any) => u.email === 'bob@acme.com');
+    expect(bob).toBeDefined();
+    expect(bob.email_verified === true || bob.email_verified === 1).toBe(false);
+  });
+
+  it('admits an address exactly at the second entry of a multi-entry list', async () => {
+    const rp = await verifiedRp('acme.com, acme.co.uk');
+    expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.co.uk' })));
+  });
+
+  const refused: Array<[string, string, string?]> = [
+    ['another domain', 'bob@other.example'],
+    ['a subdomain of a listed domain', 'bob@eng.acme.com'],
+    ['a parent of a listed domain', 'bob@acme.com', 'eng.acme.com'],
+    ['a look-alike of a listed domain', 'bob@acme.com.other.example'],
+    ['an asserted email that is not an address', 'bob.acme.com'],
+    ['a domain part with a port', 'bob@acme.com:443'],
+    ['a domain part with a path', 'bob@acme.com/x'],
+    ['a domain part with a trailing dot', 'bob@acme.com.'],
+    ['a full-width spelling of a listed domain', 'bob@\uFF41\uFF43\uFF4D\uFF45.com'],
+    ['an address at a listed entry that is not written as a bare host', 'ceo@victim.example', 'victim.example\\@evil.example'],
+  ];
+  for (const [what, email, domain] of refused) {
+    it(`refuses ${what}, and writes no user, account, membership or session`, async () => {
+      const rp = await verifiedRp(domain);
+      expectRefused(rp, await signInThroughIdp(rp, await idToken({ email })));
+    });
+  }
+
+  it('case, and punycode against Unicode for an internationalised name, are one domain', async () => {
+    for (const [domain, email] of [
+      ['acme.com', 'Bob@ACME.com'],
+      ['bücher.de', 'bob@xn--bcher-kva.de'],
+      ['xn--bcher-kva.de', 'bob@bücher.de'],
+    ]) {
+      const rp = await verifiedRp(domain);
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email })));
+    }
+  });
+
+  it('no carve-out: the first human of a deployment, at an outside domain, is refused', async () => {
+    // JIT off: without the rule, the first-human carve-out alone would admit.
+    const rp = await makeRp({ config: VERIFICATION_ON, provider: { domainVerified: true, allowJit: false } });
+    const email = 'bob@other.example';
+    expectRefused(rp, await signInThroughIdp(rp, await idToken({ email })));
+    expect(rp.engine.tables.get('sys_user') ?? []).toEqual([]);
+  });
+
+  it('no carve-out: an outside-domain address holding a pending invitation is refused', async () => {
+    // JIT off: without the rule, the invitation alone would admit.
+    const rp = await verifiedRp('acme.com', { allowJit: false });
+    const email = 'bob@other.example';
+    await inviteForAudienceGate(rp.engine, email);
+    expectRefused(rp, await signInThroughIdp(rp, await idToken({ email })));
+  });
+
+  it('CONTROL (stays green under ablation): a provider whose domain is not verified signs nobody in', async () => {
+    // The vendor refuses this at the start of the sign-in, before any account
+    // is judged, so it does not pin the rule above.
+    const rp = await makeRp({ config: VERIFICATION_ON, provider: { domainVerified: false, allowJit: true } });
+    await seedAdmin(rp);
+    const start = await rp.manager.handleRequest(
+      new Request(`${AUTH}/sign-in/sso`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE },
+        body: JSON.stringify({ providerId: PROVIDER_ID, callbackURL: AFTER, errorCallbackURL: FAILED }),
+      }),
+    );
+    expect(start.status).toBe(401);
+    expect(written(rp)).toEqual(NOTHING);
+  });
+
+  it('CONTROL: with verification off, the outside-domain account is created as today', async () => {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(rp);
+    expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@other.example' })));
+    expect(written(rp).users).toEqual(['bob@other.example']);
+  });
+
+  it('CONTROL: an existing linked account at an outside domain still signs in', async () => {
+    const rp = await verifiedRp();
+    // The account is made while the environment reports verification off (as
+    // it was before it was turned on); the vendor's own provider gate stays on.
+    const off = vi.spyOn(rp.manager, 'isSsoDomainVerificationEnabled').mockReturnValue(false);
+    expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@other.example' })));
+    off.mockRestore();
+    expect(rp.manager.isSsoDomainVerificationEnabled()).toBe(true);
+    expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@other.example' })));
+    expect(written(rp).users).toEqual(['bob@other.example']);
+  });
+
+  it('CONTROL: invite_only without allowJit still answers SELF_REGISTRATION_CLOSED for an on-domain stranger', async () => {
+    const rp = await verifiedRp('acme.com', { allowJit: false });
+    const res = await signInThroughIdp(rp, await idToken({ email: 'bob@acme.com' }));
+    expect(errorParams(res)).toMatchObject({ base: FAILED, error: 'SELF_REGISTRATION_CLOSED' });
+    expect(written(rp)).toEqual(NOTHING);
   });
 });

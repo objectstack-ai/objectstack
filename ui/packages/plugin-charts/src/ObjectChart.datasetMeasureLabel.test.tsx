@@ -64,8 +64,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // Anything other than the dataset-definition probe is a NEW escape.
-  expect(metaCalls.filter((u) => u !== '/api/v1/meta/dataset/showcase_task_metrics')).toEqual([]);
+  // Anything other than the dataset-definition probe (bare, or as the host
+  // package's reader) is a NEW escape.
+  expect(metaCalls.filter((u) => !/^\/api\/v1\/meta\/dataset\/showcase_task_metrics(\?callerPackage=[\w.]+)?$/.test(u))).toEqual([]);
   vi.unstubAllGlobals();
   cleanup();
 });
@@ -108,8 +109,8 @@ describe('ObjectChart — dataset-bound measure label resolution', () => {
   });
 });
 
-/* objectstack#32077 (ADR-0150 D5) — the host's package rides the query. */
-describe('ObjectChart — the host\'s package on a dataset-bound query (objectstack#32077)', () => {
+/* ADR-0150 D3 — the host's package rides the query as the reader's package. */
+describe('ObjectChart — the host\'s package as the reader\'s package on a dataset-bound query (ADR-0150 D3)', () => {
   const schema = {
     type: 'object-chart' as const,
     chartType: 'bar' as const,
@@ -118,7 +119,7 @@ describe('ObjectChart — the host\'s package on a dataset-bound query (objectst
     values: ['task_count'],
   };
 
-  it('two hosts in two packages: each query names its own package', async () => {
+  it('two hosts in two packages: each query names its own package as the caller', async () => {
     const ds = makeDS();
     const { unmount } = render(<ObjectChart schema={schema} dataSource={ds} packageId="com.acme.alpha" />);
     await waitFor(() => expect(ds.queryDataset).toHaveBeenCalledTimes(1));
@@ -126,12 +127,12 @@ describe('ObjectChart — the host\'s package on a dataset-bound query (objectst
     render(<ObjectChart schema={schema} dataSource={ds} packageId="com.acme.beta" />);
     await waitFor(() => expect(ds.queryDataset).toHaveBeenCalledTimes(2));
     expect(ds.queryDataset.mock.calls.map((c: unknown[]) => c[2])).toEqual([
-      { packageId: 'com.acme.alpha' },
-      { packageId: 'com.acme.beta' },
+      { callerPackage: 'com.acme.alpha' },
+      { callerPackage: 'com.acme.beta' },
     ]);
   });
 
-  it('a host with no package sends none', async () => {
+  it('CONTROL: a host with no package sends no caller and no package', async () => {
     const ds = makeDS();
     render(<ObjectChart schema={schema} dataSource={ds} />);
     await waitFor(() => expect(ds.queryDataset).toHaveBeenCalledTimes(1));

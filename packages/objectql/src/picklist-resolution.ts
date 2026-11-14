@@ -35,6 +35,7 @@
 // here, not authored: they judge what the author wrote, and the field schema
 // refuses `picklist` and `options` together.
 import { isResolvedPicklistOptions, markResolvedPicklistOptions } from '@objectstack/metadata-core';
+import { describePackageScopedHolder, type PackageScopedHolder } from '@objectstack/core';
 // The walk — which picklists a manifest's fields name, which lists it declares
 // and extends — is `@objectstack/metadata`'s, the one spelling the
 // residual-picklist refusal (`unreferencedResidualPicklists`) and the
@@ -218,6 +219,109 @@ export type UnresolvedPicklistReference = PicklistReference & { readonly refusal
 /** A `picklistExtensions` entry whose target resolves to no list from its package (as above). */
 export type UnresolvedPicklistExtension = OrphanPicklistExtension & { readonly refusal?: string };
 
+/** What brings a picklist arrival: an install or upgrade, a hot reload, or one item a seam registers. */
+export type PicklistArrivalAct = 'install' | 'reload' | 'register';
+
+/**
+ * [ADR-0150 D3, #31700; epic seat rulings A (6811306558) and R2-A
+ * (6812862622)] The one re-judge's answer for an arrival
+ * (`SchemaRegistry.judgePicklistArrival`): the arrival's own references and
+ * extensions that resolve to no one list, the installed ones it would leave
+ * with no one list, and the fields whose writers it would split between two
+ * lists.
+ */
+export interface PicklistArrivalVerdict {
+  readonly unresolved: UnresolvedPicklistReference[];
+  readonly orphans: UnresolvedPicklistExtension[];
+  readonly references: UnresolvedPicklistReference[];
+  readonly extensions: UnresolvedPicklistExtension[];
+  readonly disagreeing: DisagreeingPicklistReference[];
+}
+
+/**
+ * [ADR-0150 D3, #31700; epic seat rulings A (6811306558) and R2-A
+ * (6812862622)] The refusal of an arrival that would leave references ALREADY
+ * installed with no one list, or split one field's writers between two lists
+ * (`SchemaRegistry.judgePicklistArrival`): every such field and extension,
+ * with the refusal it would meet or the list each writer would reach, and the
+ * fix. `undefined` when there is none.
+ */
+export function describePicklistReferencesBrokenByInstall(
+  incomingPackageIds: readonly string[],
+  references: readonly UnresolvedPicklistReference[],
+  extensions: readonly UnresolvedPicklistExtension[] = [],
+  disagreeing: readonly DisagreeingPicklistReference[] = [],
+  options: { act?: PicklistArrivalAct; subject?: string } = {},
+): PicklistMetadataError | undefined {
+  if (references.length === 0 && extensions.length === 0 && disagreeing.length === 0) return undefined;
+  const lines = [
+    ...references.map(
+      (r) => `field '${r.object}.${r.field}' (${describePackage(r.packageId)}) references picklist '${r.picklist}'`
+        + refusalSuffix(r.refusal),
+    ),
+    ...extensions.map(
+      (e) => `a \`picklistExtensions\` entry (${describePackage(e.packageId)}) extends picklist '${e.picklist}'`
+        + refusalSuffix(e.refusal),
+    ),
+    ...disagreeing.map(
+      (d) => `field '${d.object}.${d.field}' would be written to picklist '${d.picklist}' by packages that reach `
+        + `different lists (${d.referrers
+          .map((r) => `${describePackage(r.packageId)} reaches the list of ${describePackageScopedHolder(r.holder)}`)
+          .join('; ')})`,
+    ),
+  ];
+  const packages = incomingPackageIds.length > 0
+    ? incomingPackageIds.map((id) => `'${id}'`).join(', ')
+    : 'this artifact';
+  const act = options.act ?? 'install';
+  const doing = act === 'register'
+    ? `Registering ${options.subject ?? packages}`
+    : `${act === 'reload' ? 'Reloading' : 'Installing'} ${packages}`;
+  const nothing = act === 'register' ? 'Nothing was registered.' : act === 'reload'
+    ? 'Nothing was reloaded: every package keeps its previous definitions.'
+    : 'Nothing was installed.';
+  return picklistMetadataError(
+    `${doing} would leave ${lines.length === 1 ? 'a picklist reference' : `${lines.length} picklist references`} `
+    + `already installed with no one list: ${lines.join('; ')}. Each reaches one list now; once this registered, `
+    + 'a field would lose its options and refuse every value, and an extension would add its options to nothing '
+    + '(the next boot refuses a reference or an extension with no one list, and warns for a field whose writers '
+    + `reach different lists). ${nothing} Rename the list in the package being ${act === 'register' ? 'registered' : 'installed'}, `
+    + 'or remove the reference, the redeclared field or the extension that names it first.',
+  );
+}
+
+/**
+ * [ADR-0150 D3, child E6; #31700] A field whose picklist reference two or more
+ * packaged layers write (the object's owner and an extension of it), each
+ * resolving the name — from its own package — to a DIFFERENT list. The field
+ * is served no options and its values are refused, since no referrer is
+ * preferred over another (`SchemaRegistry.resolvePicklistFields`); this names
+ * the disagreement itself. Reachable once two namespaces may each hold the
+ * name.
+ */
+export interface DisagreeingPicklistReference {
+  readonly object: string;
+  readonly field: string;
+  readonly picklist: string;
+  /** Each package that writes the reference, with the list's holder it reaches from there. */
+  readonly referrers: ReadonlyArray<{ readonly packageId: string | undefined; readonly holder: PackageScopedHolder }>;
+}
+
+/**
+ * The boot's warning for one {@link DisagreeingPicklistReference}: the field,
+ * every referrer and the holder it reaches, and the fix.
+ */
+export function describeDisagreeingPicklistReference(ref: DisagreeingPicklistReference): string {
+  const reaches = ref.referrers
+    .map((r) => `${describePackage(r.packageId)} reaches the list of ${describePackageScopedHolder(r.holder)}`)
+    .join('; ');
+  return `Field '${ref.object}.${ref.field}' is served with no options and refuses every value: the packages that `
+    + `write its reference to picklist '${ref.picklist}' resolve that name to different lists (${reaches}), and `
+    + 'none of them is preferred over another. Make every package that writes the reference reach the same list: '
+    + 'name a picklist only one of them holds, or have each depend on the package whose list is meant and hold '
+    + 'none of its own under the name.';
+}
+
 function refusalSuffix(refusal: string | undefined): string {
   return refusal ? ` (${refusal})` : '';
 }
@@ -247,11 +351,29 @@ export function describeUnresolvedPicklistReferences(
         + refusalSuffix(e.refusal),
     ),
   ];
+  // [ADR-0150 D3, #31700] A name the package-scoped resolver REFUSED is held,
+  // by more than one list or by none the referrer reaches: "no loaded package
+  // declares" would be false for it, and so would "declare the picklist". Each
+  // such line carries the refusal, every candidate named; the header and the
+  // remedy say what is true of both kinds.
+  const refused = [...unresolved, ...orphanExtensions].some((r) => r.refusal !== undefined);
+  if (!refused) {
+    return picklistMetadataError(
+      `${lines.length === 1 ? 'A picklist is named' : `${lines.length} picklist names are used`} `
+      + `that no loaded package declares: ${lines.join('; ')}. A field bound to a picklist takes its options `
+      + 'from that list and has none of its own, and an extension adds options to a list that must exist, so '
+      + 'neither can take effect until the list does. Declare the picklist (a `*.picklist.ts` file, or '
+      + '`defineStack({ picklists })`) in the package or in one it depends on, or correct the name.',
+    );
+  }
   return picklistMetadataError(
-    `${lines.length === 1 ? 'A picklist is named' : `${lines.length} picklist names are used`} `
-    + `that no loaded package declares: ${lines.join('; ')}. A field bound to a picklist takes its options `
-    + 'from that list and has none of its own, and an extension adds options to a list that must exist, so '
-    + 'neither can take effect until the list does. Declare the picklist (a `*.picklist.ts` file, or '
-    + '`defineStack({ picklists })`) in the package or in one it depends on, or correct the name.',
+    `${lines.length === 1 ? 'A picklist name resolves' : `${lines.length} picklist names resolve`} `
+    + `to no one list: ${lines.join('; ')}. A field bound to a picklist takes its options from that list and `
+    + 'has none of its own, and an extension adds options to one list, so neither can take effect until its '
+    + 'name means exactly one list. A name nothing declares: declare the picklist (a `*.picklist.ts` file, or '
+    + '`defineStack({ picklists })`) in the package or in one it depends on, or correct the name. A name whose '
+    + 'refusal names its holders: a field resolves from its own package and the packages it declares it depends '
+    + 'on, so make exactly one holder reachable from there; an extension\'s target is judged across the whole '
+    + 'environment, so extend a list whose name one package holds, or ask the holders to rename one of theirs.',
   );
 }

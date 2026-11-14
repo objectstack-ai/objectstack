@@ -54,9 +54,13 @@ import {
   type RecordFileRead,
   type RecordFileTarget,
   type UploadLinkDoor,
+  type UploadLinkFilesOutcome,
   type UploadLinkGrant,
+  type UploadLinkInspectOptions,
   type UploadLinkOutcome,
   type UploadLinkTarget,
+  type NewRecordUploadLinkGrant,
+  type NewRecordUploadLinkTarget,
   type UploadLinkUpload,
   type UploadLinkView,
 } from './record-file-access.js';
@@ -144,9 +148,12 @@ export interface FileAttachmentServiceDeps {
    * for whether the caller may create an attachment at all.
    */
   getSecurity?():
-    | (AttachmentSecurityLike & Partial<Pick<ISecurityService, 'explain' | 'getWritableFields'>>)
+    | (AttachmentSecurityLike &
+        Partial<Pick<ISecurityService, 'explain' | 'getWritableFields' | 'getReadableFields' | 'getQueryableFields'>>)
     | null
     | undefined;
+  /** [#32734] The approvals service, for whether a record a field upload link writes is locked. */
+  getApprovals?: RecordFileAccessDeps['getApprovals'];
   /**
    * [#30892] What the record-file verbs ({@link ICallerRecordFileService},
    * {@link UploadLinkDoor}) are bound over beyond the members above — the
@@ -157,7 +164,7 @@ export interface FileAttachmentServiceDeps {
    */
   recordFiles?: Pick<
     RecordFileAccessDeps,
-    'judgeFileRead' | 'isServable' | 'resolveUserContext' | 'getDownloadTtl' | 'getBasePath'
+    'judgeFileRead' | 'isServable' | 'resolveUserContext' | 'getDownloadTtl' | 'getBasePath' | 'getI18n'
   >;
 }
 
@@ -318,6 +325,7 @@ export class FileAttachmentService
           attachments: this,
           getSharing: () => deps.getSharing?.(),
           getSecurity: () => deps.getSecurity?.(),
+          getApprovals: () => deps.getApprovals?.(),
           logger: deps.logger,
         })
       : null;
@@ -358,12 +366,33 @@ export class FileAttachmentService
     return this.recordFilesOrRefuse().createUploadLinkAs(object, recordId, target, context);
   }
 
-  async inspectUploadLink(token: string, callerUserId: string): Promise<UploadLinkView> {
-    return this.recordFilesOrRefuse().inspectUploadLink(token, callerUserId);
+  async createUploadLinkForNewRecordAs(
+    object: string,
+    target: NewRecordUploadLinkTarget,
+    context: ExecutionContext,
+  ): Promise<NewRecordUploadLinkGrant> {
+    return this.recordFilesOrRefuse().createUploadLinkForNewRecordAs(object, target, context);
+  }
+
+  async inspectUploadLink(
+    token: string,
+    callerUserId: string,
+    options?: UploadLinkInspectOptions,
+  ): Promise<UploadLinkView> {
+    return this.recordFilesOrRefuse().inspectUploadLink(token, callerUserId, options);
   }
 
   async consumeUploadLink(token: string, upload: UploadLinkUpload, callerUserId: string): Promise<UploadLinkOutcome> {
     return this.recordFilesOrRefuse().consumeUploadLink(token, upload, callerUserId);
+  }
+
+  /** [#32747] One submit carrying several files, for a link to a multi-file field. */
+  async consumeUploadLinkFiles(
+    token: string,
+    uploads: UploadLinkUpload[],
+    callerUserId: string,
+  ): Promise<UploadLinkFilesOutcome> {
+    return this.recordFilesOrRefuse().consumeUploadLinkFiles(token, uploads, callerUserId);
   }
 
   async attachFile(input: AttachFileInput): Promise<AttachedFile> {

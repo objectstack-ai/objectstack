@@ -71,7 +71,7 @@ import { resolveUserAuthzGrants, vetOrganizationClaim } from '@objectstack/core'
 import { OWNERSHIP_QUEUE_SERVICE, type AuthoredRowWriteOperation, type IOwnershipQueueService } from '@objectstack/spec/contracts';
 import type { ExplainDecision, ExplainOperation, PermissionSet } from '@objectstack/spec/security';
 import type { SecurityPlugin } from './security-plugin.js';
-import { absentUnderCallerRead, requiredCapsForOperation, unreadableUnderCallerRead } from './security-plugin.js';
+import { absentUnderCallerRead, readUnlessRefused, requiredCapsForOperation, unreadableUnderCallerRead } from './security-plugin.js';
 import { ExplainUserNotFoundError, PermissionDeniedError } from './errors.js';
 import { grantRowPolicySpeaks } from './external-owd-grant-stamp.js';
 import { delegatedUnitReadAdmission } from './delegated-admin-gate.js';
@@ -189,7 +189,8 @@ export async function explainAccessForCaller(
   // [#27442] Any `userId` that is not omitted, the empty string included, goes
   // through the other-user arm: an empty id names nobody, so it is refused
   // there like an unknown one, never folded into explaining the caller.
-  if (request.userId !== undefined && request.userId !== callerContext?.userId) {
+  const explainsAnotherUser = request.userId !== undefined && request.userId !== callerContext?.userId;
+  if (request.userId !== undefined && explainsAnotherUser) {
     if (!(await mayDescribeAnotherUser.call(this, request.userId, callerContext))) {
       throw new PermissionDeniedError(
         `[Security] Access denied: explaining another user's access requires the 'manage_users' ` +
@@ -215,10 +216,11 @@ export async function explainAccessForCaller(
       : undefined;
     // [#20580] ...but only while the explained user could be resolved in it.
     // Explaining them in the caller's organization is a CLAIM on it made for
-    // them, and enforcement vets a claim before it resolves anything:
-    // under a walled posture a member removed from that organization, whose
-    // session still names it, has the claim dropped and resolves with NO
-    // active organization — so none of that organization's grants apply.
+    // them, and enforcement vets a claim before it resolves anything: a
+    // member removed from that organization, whose session still names it,
+    // has the claim dropped and resolves with NO active organization — so none
+    // of that organization's grants apply. Under every posture since ADR-0093
+    // D8.1 was amended; the posture argument is no longer read.
     // `vetOrganizationClaim` is that check (the session arm of
     // `resolveAuthzContext`), asked of the same membership set; the explainer
     // spells no membership rule of its own.
@@ -544,13 +546,27 @@ export async function explainAccessForCaller(
   };
 
   // The asker: the caller, whose read of the record decides whether this
-  // explanation discloses that the record exists. On a self-explanation it
-  // is the explained context itself, and the engine asks it the write
-  // path's question; explaining another user, the engine asks `cannotRead`,
-  // the same read with a refusal counted as "cannot read" (ruling C).
+  // explanation discloses that the record exists. Explaining another user,
+  // the engine asks `cannotRead`, the read with a refusal counted as "cannot
+  // read" (ruling C). [Ruling of record 6787890900] On a self-explanation it
+  // asks `self.readOf`, the same read classified three ways, so a refused
+  // read is answered for every record id alike, with the refusal as its
+  // decider. A self-explanation is told by the request (no other user named),
+  // never by the explained context's identity: a person's context is copied
+  // above to carry the resolver's split.
   const asker = {
     context: callerContext,
     cannotRead: (o: string, rid: string) => unreadableUnderCallerRead(() => this.readRowById(o, rid, callerContext)),
+    ...(explainsAnotherUser
+      ? {}
+      : {
+          self: {
+            readOf: async (o: string, rid: string) => {
+              const answer = await readUnlessRefused(() => this.readRowById(o, rid, callerContext));
+              return answer.refused ? 'refused' as const : answer.value == null ? 'no_row' as const : 'row' as const;
+            },
+          },
+        }),
   };
   if (recordIds) {
     return explainRecordsForAsker(depsFor(undefined), (rid) => depsFor(rid), { object, operation, context: targetContext }, recordIds, asker);

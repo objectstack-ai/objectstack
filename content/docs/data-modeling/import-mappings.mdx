@@ -81,13 +81,26 @@ Both end up resolvable by the same name. When the import endpoint resolves
 falls back to the packaged registry — so a runtime-saved mapping and a packaged one are
 addressed identically by the request.
 
-`mappingName` names no package, so the name resolves the way any read that names no
-package does (ADR-0150 D3): the environment's own mapping, else the one package that
+A bare `mappingName` names no package, so the name resolves the way any read that names
+no package does (ADR-0150 D3): the environment's own mapping, else the one package that
 holds the name. When **two packages** hold the same mapping name, the import is refused
 with `409 RESOURCE_CONFLICT` naming every package that holds it, and no row is written;
-it never picks one of them. A request cannot yet name the package, so give one of the
-two mappings another name. `GET /api/v1/meta/mapping/<name>` answers the same `409`;
-`?package=<id>` or `/meta/mapping/<namespace>/<name>` reads one holder's mapping.
+it never picks one of them. `GET /api/v1/meta/mapping/<name>` answers the same `409`.
+
+To name the holder, put the mapping's qualified address in `mappingName`:
+`"<namespace>/<name>"`, where the namespace is the holding package's manifest
+`namespace`, or `"_env/<name>"` for the mapping saved in the environment. It is the
+address `GET /api/v1/meta/mapping/<namespace>/<name>` reads, and the import door reads it
+the same way (ADR-0150 D5). The import applies exactly that holder's mapping. When that
+namespace, or the environment, holds no mapping of the name and a package does, the
+import is refused with the `409 RESOURCE_CONFLICT` that read answers, naming every holder,
+and no row is written. A first segment that is neither `_env` nor an installed namespace
+is no address: the whole string is read as the name, which no mapping has, so the import
+answers `404 MAPPING_NOT_FOUND`. Two limits come with the metadata read's address. Where
+two packages that share a namespace (`base`, `system`, `sys`) both hold the name, the
+address answers `409` naming both. A mapping named like one of that read's sub-resource
+segments (`audit`, `diff`, `history`, `layers`, `publish`, `published`, `references`,
+`rollback`, `tree`) has no qualified address, and is imported by its bare name.
 
 The `mapping` kind carries no per-organization overlay: there is no tenant-customized
 variant of a packaged mapping. A tenant that needs different columns saves its own
@@ -262,7 +275,7 @@ These are whole-request failures — nothing is written, and there is no per-row
 | Status | `code` | Cause |
 |:---|:---|:---|
 | 404 | `MAPPING_NOT_FOUND` | No mapping artifact is registered under that name. |
-| 409 | `RESOURCE_CONFLICT` | Two or more packages hold a mapping under that name, and the environment holds none; the error names every holder. |
+| 409 | `RESOURCE_CONFLICT` | Two or more packages hold a mapping under that name, and the environment holds none; or a qualified `mappingName` (`<namespace>/<name>`, `_env/<name>`) names a holder that holds no mapping of that name while another does. The error names every holder. |
 | 400 | `MAPPING_TARGET_MISMATCH` | The artifact's `targetObject` is not the object in the URL. |
 | 400 | `MAPPING_FORMAT_UNSUPPORTED` | The artifact declares `sourceFormat: 'xml'` or `'sql'`; the endpoint accepts csv, json and xlsx payloads only. |
 | 400 | `MAPPING_FORMAT_MISMATCH` | The declared `sourceFormat` contradicts the payload actually sent. A `csv` mapping does apply to an `xlsx` payload — those rows are tabular in the same way — but a `json` mapping does not. |

@@ -41,6 +41,7 @@
  */
 
 import { codeSelfServiceRefusal } from './account-self-service-refusal-code.js';
+import { BANNED_USER_CODE, causeBannedUserRefusal } from './banned-user-refusal-cause.js';
 import type { AuthManager } from './auth-manager.js';
 import { refusalCodeOf, SIGN_IN_EMAIL_PATH } from './auth-session-audit.js';
 import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
@@ -75,6 +76,7 @@ export interface AfterHookHost {
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
   settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
+  settleSsoSignOutOfIdp: AuthManager['settleSsoSignOutOfIdp'];
   stampLastLogin: AuthManager['stampLastLogin'];
   stampPasswordChangedAt: AuthManager['stampPasswordChangedAt'];
 }
@@ -127,14 +129,6 @@ function passwordChangeAfterEffectsAccount(ctx: any): string | undefined {
 }
 
 /**
- * better-auth's admin plugin refuses a banned user's new session with this
- * code, from its `session.create.before` hook (`ADMIN_ERROR_CODES.BANNED_USER`
- * in `better-auth/dist/plugins/admin/error-codes.mjs`). The package exports no
- * public path to that table, so the code is named here, once.
- */
-const VENDOR_BANNED_USER_CODE = 'BANNED_USER';
-
-/**
  * ADR-0069 D2 — the `/sign-in/email` refusals that come AFTER the password
  * passed, which the lockout counter neither counts nor clears: only a refused
  * credential counts toward a lock. better-auth's `signInEmail` throws
@@ -148,7 +142,8 @@ const VENDOR_BANNED_USER_CODE = 'BANNED_USER';
  *  - the organization's own allowed IP ranges (`SESSION_SCOPING_REFUSAL`),
  *    judged where the new session is scoped to it (`refuseUnadmittedScoping`,
  *    at session creation);
- *  - a ban ({@link VENDOR_BANNED_USER_CODE}), judged at session creation too.
+ *  - a ban ({@link BANNED_USER_CODE}, better-auth's admin plugin, from its
+ *    `session.create.before` hook), judged at session creation too.
  *
  * A function, read when a sign-in is judged, rather than a set built when this
  * module loads: `organization-access-policy.ts` imports `auth-manager.ts`,
@@ -163,7 +158,7 @@ async function refusedAfterTheCredential(returned: unknown): Promise<boolean> {
   const after: readonly string[] = [
     BASE_ERROR_CODES.EMAIL_NOT_VERIFIED.code,
     SESSION_SCOPING_REFUSAL.code,
-    VENDOR_BANNED_USER_CODE,
+    BANNED_USER_CODE,
   ];
   return after.includes(code);
 }
@@ -234,6 +229,11 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // See `sso-provider-lifecycle.ts`.
   if (ctx?.path === SSO_PROVIDER_DELETE_PATH) await this.settleSsoProviderDelete(ctx);
 
+  // Ruling record 6866334319: an OIDC provider saved with "sign out of the
+  // company sign-in too" on keeps the end_session_endpoint its before-hook
+  // read (`sso-sign-out-of-idp.ts`).
+  if (ctx?.path === '/sso/register' || ctx?.path === '/sso/update-provider') await this.settleSsoSignOutOfIdp(ctx);
+
   // ── ADR-0069 D2: account lockout (counter) ──────────────────
   // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
   // the after-hook with it on `ctx.context.returned`; a success leaves
@@ -292,6 +292,13 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
         }
       }
     }
+    // ── A ban the identity provider placed says so ──────────────
+    // A `403 BANNED_USER` whose ban is the SCIM deactivation's gains
+    // `details.cause: 'scim_deactivated'`; an administrator's ban is
+    // answered as before. See `banned-user-refusal-cause.ts`. It throws
+    // on a match, so it stays after the settlement and the refusal's
+    // `login_failed` row above.
+    await causeBannedUserRefusal(ctx);
     return;
   }
 

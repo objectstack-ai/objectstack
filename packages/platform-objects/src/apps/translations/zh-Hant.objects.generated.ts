@@ -1209,11 +1209,12 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "撤銷原因",
-        help: "金鑰被撤銷的原因，僅在它決定誰能恢復金鑰時記錄。管理員強制重設密碼：只有平台管理員能恢復該金鑰。組織成員資格已結束：擁有者已離開組織，任何人都不能恢復該金鑰，由組織成員建立新的金鑰。已被管理員暫停：平台管理員撤銷了不屬於自己的金鑰，只有平台管理員能恢復該金鑰。金鑰恢復後清除。擁有者從 API 金鑰清單撤銷的金鑰此項為空。",
+        help: "金鑰被撤銷的原因，僅在它決定誰能恢復金鑰時記錄。管理員強制重設密碼：只有平台管理員能恢復該金鑰。組織成員資格已結束：擁有者已離開組織，任何人都不能恢復該金鑰，由組織成員建立新的金鑰。已被管理員暫停：平台管理員撤銷了不屬於自己的金鑰，只有平台管理員能恢復該金鑰。已被目錄停用：組織的目錄（SCIM）停用或刪除了擁有者，任何人都不能恢復該金鑰，即使擁有者被重新啟用後也不能，由擁有者建立新的金鑰。金鑰恢復後清除。擁有者從 API 金鑰清單撤銷的金鑰此項為空。",
         options: {
           admin_password_reset: "管理員強制重設密碼",
           organization_membership_ended: "組織成員資格已結束",
-          administrator_suspended: "已被管理員暫停"
+          administrator_suspended: "已被管理員暫停",
+          scim_deactivated: "已被目錄停用"
         }
       },
       key: {
@@ -2110,6 +2111,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "僅從 ID 權杖讀取宣告",
         help: "僅適用於 OIDC。從身分識別提供者已驗證的 ID 權杖讀取電子郵件、名稱和群組，不呼叫其 userinfo 端點。Microsoft Entra ID 需開啟此項：它的 userinfo 回應不含群組，也不含 preferred_username。預設關閉：設定了 userinfo 端點的提供者從該回應讀取宣告。請透過「編輯登入選項」修改。"
       },
+      sign_out_of_idp: {
+        label: "Sign Out of the Company Sign-In Too",
+        help: "When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "註冊者",
         help: "註冊該提供方的使用者"
@@ -2220,6 +2225,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
             helpText: "可選。請求的 SAML NameID 格式。預設為 IdP 設定的格式。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options."
+          },
           mapEmail: {
             label: "對應：電子郵件屬性",
             helpText: "可選。對應到使用者電子郵件的斷言屬性。預設為「email」，其次為 NameID。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -2304,6 +2313,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           keepCurrentCert: {
             label: "繼續信任目前的憑證",
             helpText: "在 IdP 切換期間，接受由任一憑證簽署的斷言。之後不勾選此項再編輯一次，即可移除舊憑證。"
+          },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one."
           }
         },
         resultDialog: {
@@ -3079,6 +3092,34 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "依主題"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "傳送站內訊息",
+        description: "向組織內的所有人或你挑選的成員傳送一則訊息，它會出現在每位收件人的通知中。",
+        successMessage: "訊息已傳送給 {{ result.recipients }} 人",
+        params: {
+          everyone: {
+            label: "本組織所有人",
+            helpText: "傳送給目前組織的每位成員。不開啟則在下方挑選收件人。"
+          },
+          recipients: {
+            label: "收件人",
+            helpText: "訊息不是發給所有人時，要傳送給的本組織成員。"
+          },
+          title: {
+            label: "標題",
+            helpText: "每位收件人在通知中看到的那一行。"
+          },
+          body: {
+            label: "內文"
+          },
+          link: {
+            label: "連結",
+            helpText: "選填。訊息開啟的本應用頁面（以 / 開頭）或網址。"
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3765,9 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "版本"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "操作類型",

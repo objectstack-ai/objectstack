@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { ObjectQL, type PackageScopedRegistry } from '@objectstack/objectql';
+import { ObjectQL, SchemaRegistry, type PackageScopedRegistry } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysSharingRule, SysQueueMember, SysAssignmentCursor } from './objects/index.js';
 import {
@@ -285,5 +285,26 @@ describe('no unique key widens: the package column sits beside the keys, never i
       await expect(engine.insert(object, row(`${object}_3`, { [column]: CRM }), { context: SYS_ORG })).rejects.toThrow();
       expect((await engine.find(object, { where: {}, context: SYSTEM_CTX })) as unknown[]).toHaveLength(1);
     }
+  });
+});
+
+describe('#32183 — a binding never moves with a reversible disable: the holder read judges every holder', () => {
+  it('a disabled holder still counts: two holders stay ambiguous, a disabled sole holder is still the holder', () => {
+    const registry = new SchemaRegistry();
+    registry.logLevel = 'silent';
+    for (const [id, namespace] of [[CRM, 'crm'], [HR, 'hr']]) {
+      registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace } as never, 'code');
+    }
+    registry.registerItem('queue', { name: TWO_HOLDERS, label: 'CRM inbox' }, 'name' as never, CRM);
+    registry.registerItem('queue', { name: TWO_HOLDERS, label: 'HR inbox' }, 'name' as never, HR);
+    registry.registerItem('queue', { name: 'hr_only', label: 'HR only' }, 'name' as never, HR);
+    // [contract review S2] The reverse registration order: the disabled holder first.
+    registry.registerItem('queue', { name: 'reversed_inbox', label: 'HR first' }, 'name' as never, HR);
+    registry.registerItem('queue', { name: 'reversed_inbox', label: 'CRM second' }, 'name' as never, CRM);
+    registry.disablePackage(HR);
+    const holderOf = declaredHolderOf(registry);
+    expect(holderOf('queue', TWO_HOLDERS)).toEqual({ kind: 'ambiguous', candidates: [`package "${CRM}"`, `package "${HR}"`] });
+    expect(holderOf('queue', 'reversed_inbox')).toEqual({ kind: 'ambiguous', candidates: [`package "${HR}"`, `package "${CRM}"`] });
+    expect(holderOf('queue', 'hr_only')).toEqual({ kind: 'package', packageId: HR });
   });
 });

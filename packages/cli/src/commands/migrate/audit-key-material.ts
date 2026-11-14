@@ -23,6 +23,7 @@ import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js
 import { absentTableReads } from '../../utils/absent-table-reads.js';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import { archiveFailureCount, examineArchiveTargets } from '../../utils/ledger-copy-archive.js';
+import { composeRedactionSeal } from '../../utils/audit-redaction-seal.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -171,6 +172,8 @@ export default class MigrateAuditKeyMaterial extends Command {
       printStep(apply ? 'Booting data stack (APPLY mode)…' : 'Booting data stack (dry run)…');
     }
 
+    // [ADR-0154 D7] The crypto `os serve` seals with, so a sealed copy is amended before it is rewritten.
+    const redaction = await composeRedactionSeal();
     let stack;
     try {
       // The dry run boots READ-ONLY — the boot `os migrate plan` takes:
@@ -180,7 +183,7 @@ export default class MigrateAuditKeyMaterial extends Command {
       stack = await bootSchemaStack({
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
-        extraPlugins: await buildDataMigrationPlugins({ audit: true }),
+        extraPlugins: [...(await buildDataMigrationPlugins({ audit: true })), ...redaction.plugins],
         // Connect the declared datasources as `os serve` does, so a declared
         // archive datasource is registered under its name and the archive run
         // below reaches it.
@@ -223,7 +226,8 @@ export default class MigrateAuditKeyMaterial extends Command {
         update: (object, data, options) => engine.update(object, data, options),
       };
 
-      const report = await migrateKeyMaterialCopies(readView, logger, { apply });
+      const seal = redaction.seal(stack.kernel, engine);
+      const report = await migrateKeyMaterialCopies(readView, logger, { apply, seal });
 
       // Each copy table's declared archive target, then the same rewrite
       // through that datasource's driver.
@@ -232,14 +236,15 @@ export default class MigrateAuditKeyMaterial extends Command {
         kernel: stack.kernel,
         reads: readView,
         tables: KEY_MATERIAL_COPY_TABLES,
-        run: (driver, objects) => migrateArchivedKeyMaterialCopies(driver, logger, { apply, objects }),
+        run: (driver, objects) => migrateArchivedKeyMaterialCopies(driver, logger, { apply, objects, seal }),
       });
       const failures = report.failures + archiveFailureCount(archive);
+      const refused = report.refused + archive.reduce((n, a) => n + (a.report?.refused ?? 0), 0);
 
       if (flags.json) {
         reads.notice(true);
         await emitJson({ database: stack.dbLabel, apply, report, archive, duration: timer.elapsed() });
-        if (failures > 0) this.exit(1);
+        if (failures > 0 || refused > 0) this.exit(1);
         return;
       }
 
@@ -248,7 +253,8 @@ export default class MigrateAuditKeyMaterial extends Command {
       console.log('');
       for (const [object, stats] of Object.entries(report.byObject)) {
         console.log(
-          `  ${chalk.white(object)}: ${stats.scanned} ledger cop(ies) scanned, ${stats.rewritten} ${apply ? 'rewritten' : 'to rewrite'}`,
+          `  ${chalk.white(object)}: ${stats.scanned} ledger cop(ies) scanned, ${stats.rewritten} ${apply ? 'rewritten' : 'to rewrite'}` +
+            (stats.refused > 0 ? `, ${stats.refused} sealed and refused` : ''),
         );
       }
       for (const a of archive) {
@@ -256,7 +262,7 @@ export default class MigrateAuditKeyMaterial extends Command {
           for (const [object, stats] of Object.entries(a.report.byObject)) {
             console.log(
               `  ${chalk.white(object)} (archive datasource '${a.datasource}'): ${stats.scanned} ledger cop(ies) scanned, ` +
-                `${stats.rewritten} ${apply ? 'rewritten' : 'to rewrite'}`,
+                `${stats.rewritten} ${apply ? 'rewritten' : 'to rewrite'}` + (stats.refused > 0 ? `, ${stats.refused} sealed and refused` : ''),
             );
           }
         } else if (a.status === 'none') {
@@ -292,6 +298,7 @@ export default class MigrateAuditKeyMaterial extends Command {
       }
 
       const rewritten = report.rewritten + archive.reduce((n, a) => n + (a.report?.rewritten ?? 0), 0);
+      if (refused > 0) printError(redaction.refusedLine(refused));
       if (failures > 0) {
         printError(`${failures} read(s), row(s) or archive datasource(s) failed — re-run to finish them.`);
       } else if (apply && rewritten > 0) {
@@ -300,12 +307,12 @@ export default class MigrateAuditKeyMaterial extends Command {
         );
       } else if (!apply && rewritten > 0) {
         printInfo(`Dry run only — ${rewritten} row(s) would be rewritten. Re-run with --apply.`);
-      } else {
+      } else if (refused === 0) {
         printSuccess('Nothing to remove — no audit/activity copy holds a key-material column.');
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
-      if (failures > 0) this.exit(1);
+      if (failures > 0 || refused > 0) this.exit(1);
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }

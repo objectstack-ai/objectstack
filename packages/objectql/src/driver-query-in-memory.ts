@@ -53,7 +53,7 @@
 
 import type { FilterCondition } from '@objectstack/spec/data';
 import { findMisplacedReadableIds, readableIdsDriverRefusal } from '@objectstack/core';
-import { matchesDriverWhere, type AggregatedColumnClass } from './having-filter.js';
+import { assertFilterNodeShapes, matchesDriverWhere, type AggregatedColumnClass } from './having-filter.js';
 
 /** The query keys this helper applies. */
 export interface DriverQueryInMemory {
@@ -94,9 +94,24 @@ const READABLE_IDS_REFUSER = 'objectql in-memory query';
 
 /**
  * Refuse a `where` this helper cannot evaluate before any row is read — or a
- * remote is asked: a `ReadableIds` leaf, composed or not (ADR-0139 D3). The
- * walker would read a composed leaf in a `$in` slot as an empty list and
- * answer no rows, a short list nobody was told about.
+ * remote is asked:
+ *
+ * - a `ReadableIds` leaf, composed or not (ADR-0139 D3). The walker would read
+ *   a composed leaf in a `$in` slot as an empty list and answer no rows, a
+ *   short list nobody was told about;
+ * - [#32252] a combinator operand that is not a filter node: a `$and` / `$or`
+ *   operand that is not a list, or an element of one or a `$not` operand that
+ *   is not a plain object (a condition array, `null`, a string). This is the
+ *   shape gate driver-sql, driver-memory and driver-mongodb run on `where`
+ *   (`assertFilterNodeShapes`, the one `having` and `aggregations[i].filter`
+ *   take), refused `INVALID_FILTER` / 400 in their words at `where.$and[0]`.
+ *   The walker took such an operand as it came: a condition array's index
+ *   positions read as columns (no row), a `null` element as no constraint
+ *   (every row), a non-list `$and` as a one-element list, so one filter got
+ *   two answers on one verb depending on which driver serves the object.
+ *
+ * The root is walked as the engine admitted it (`isWhereFilterObject`, which
+ * takes a class instance), the way the walker reads it: by its own keys.
  */
 export function assertDriverWhereEvaluableInMemory(where: unknown): void {
   const site = findMisplacedReadableIds(where, false);
@@ -107,6 +122,7 @@ export function assertDriverWhereEvaluableInMemory(where: unknown): void {
       'the engine evaluates a plugin driver\'s rows in memory and has no semi-join to read the leaf with',
     );
   }
+  assertFilterNodeShapes(where, 'where');
 }
 
 /**

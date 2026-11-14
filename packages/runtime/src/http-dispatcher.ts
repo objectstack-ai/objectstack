@@ -482,14 +482,6 @@ export class HttpDispatcher {
      * `DispatcherConfig.enforceProjectMembership`).
      */
     private enforceMembership: boolean;
-    /**
-     * In-memory cache of positive membership checks, keyed by
-     * `${environmentId}:${userId}`. Entries expire 60 seconds after insertion
-     * — a short TTL is acceptable because a user whose access was just
-     * revoked sees stale access for at most one minute.
-     */
-    private membershipCache: Map<string, number> = new Map();
-    private static readonly MEMBERSHIP_CACHE_TTL_MS = 60_000;
     /** Well-known system project id — bypassed for any authenticated user. */
     private static readonly SYSTEM_ENVIRONMENT_ID = '00000000-0000-0000-0000-000000000001';
     /** Well-known platform org id — members bypass project membership. */
@@ -669,30 +661,7 @@ export class HttpDispatcher {
      * below, nothing else.
      */
     async resolveRequestScope(context: HttpProtocolContext, cleanPath: string): Promise<void> {
-        // ── Environment Resolution + Multi-Kernel Routing (ADR-0006 Phase 5) ──
-        // The host's KernelResolver owns the whole step: it resolves the
-        // request to an environment (hostname / header / session / defaults —
-        // strategy lives in the cloud distribution), SETS
-        // `context.environmentId` (+ `dataDriver`), and returns the kernel to
-        // serve from. The dispatcher only contributes parsing hints. No
-        // resolver registered → single-environment: every request serves from
-        // `defaultKernel` with no environment context.
-        this.prepareResolverHints(context, cleanPath);
-        // [#5155] The resolved kernel is written on the REQUEST, not on the
-        // dispatcher. Two requests interleaving across the awaits below (and
-        // across every await their handlers make afterwards) each keep their
-        // own; before this, the second resolution silently moved the first
-        // request onto the second one's environment.
-        if (this.kernelResolver) {
-            context.kernel = (await this.kernelResolver.resolveKernel(context, this.defaultKernel)) ?? this.defaultKernel;
-        } else {
-            context.kernel = this.defaultKernel;
-        }
-
-        // Touch scope for TTL/LRU tracking in shared-kernel mode
-        if (this.scopeManager && context.environmentId && context.environmentId !== 'platform') {
-            this.scopeManager.touch(context.environmentId);
-        }
+        await this.resolveRequestKernel(context, cleanPath);
 
         // ── Identity Resolution (RBAC/RLS/FLS context) ──
         // Resolve once per request; SecurityPlugin middleware reads
@@ -773,6 +742,55 @@ export class HttpDispatcher {
             if (isApiKeyLifecycleRefusalError(err)) throw err;
             rethrowAuthzStoreUnavailable(err);
             // anonymous request — leave executionContext undefined
+        }
+    }
+
+    /**
+     * The ENVIRONMENT and KERNEL half of {@link resolveRequestScope}: the
+     * resolver hints parsed from the route path, then the placement
+     * ({@link placeRequestOnKernel}). A resolver that throws throws out of
+     * here, as it throws out of `dispatch()`.
+     */
+    private async resolveRequestKernel(context: HttpProtocolContext, cleanPath: string): Promise<void> {
+        // ── Environment Resolution + Multi-Kernel Routing (ADR-0006 Phase 5) ──
+        // The host's KernelResolver owns the whole step: it resolves the
+        // request to an environment (hostname / header / session / defaults —
+        // strategy lives in the cloud distribution), SETS
+        // `context.environmentId` (+ `dataDriver`), and returns the kernel to
+        // serve from. The dispatcher only contributes parsing hints. No
+        // resolver registered → single-environment: every request serves from
+        // `defaultKernel` with no environment context.
+        this.prepareResolverHints(context, cleanPath);
+        await this.placeRequestOnKernel(context);
+    }
+
+    /**
+     * The placement both doors share, once the resolver hints are on
+     * `context`: the host's {@link KernelResolver} (or `defaultKernel`) and
+     * the scope touch, written onto `context` exactly as `dispatch()` writes
+     * them. A resolver that throws throws out of here.
+     *
+     * Its second caller is the host action door ({@link dispatchHostAction},
+     * the published `dispatchAction`), whose caller the host already
+     * authenticated and whose request has no URL: it writes the same two
+     * hints from the call's VALUES ({@link placeHostActionRequest}) and is
+     * placed by this same step, never a lookalike.
+     */
+    private async placeRequestOnKernel(context: HttpProtocolContext): Promise<void> {
+        // [#5155] The resolved kernel is written on the REQUEST, not on the
+        // dispatcher. Two requests interleaving across the awaits below (and
+        // across every await their handlers make afterwards) each keep their
+        // own; before this, the second resolution silently moved the first
+        // request onto the second one's environment.
+        if (this.kernelResolver) {
+            context.kernel = (await this.kernelResolver.resolveKernel(context, this.defaultKernel)) ?? this.defaultKernel;
+        } else {
+            context.kernel = this.defaultKernel;
+        }
+
+        // Touch scope for TTL/LRU tracking in shared-kernel mode
+        if (this.scopeManager && context.environmentId && context.environmentId !== 'platform') {
+            this.scopeManager.touch(context.environmentId);
         }
     }
 
@@ -1385,7 +1403,8 @@ export class HttpDispatcher {
      * [#15942] No longer a bare "HITL hint": the platform now ENFORCES the
      * declared flag. An action whose author set `ai.requiresConfirmation: true`
      * is REFUSED at the AI-facing door (`ACTION_CONFIRMATION_REQUIRED`, 428)
-     * unless the request carries the confirmation member — see
+     * unless the request carries the confirmation member, and for an AI service
+     * account whatever the request carries (ADR-0151 D3 rule 3) — see
      * `actionConfirmationRefusal` in `./action-execution.ts`. This predicate is
      * the WIDER of the two and is not the one that refuses: it also answers
      * `true` on the `mode:'delete'` / `variant:'danger'` heuristic, where the
@@ -1486,10 +1505,11 @@ export class HttpDispatcher {
      *     authenticated user can read platform metadata).
      *   - The user's active organization is the platform org (staff).
      *
-     * Positive results are cached for 60 seconds to avoid hitting the
-     * control-plane on every request. A failed check returns a 403
-     * response object that callers should surface directly — no further
-     * dispatch happens.
+     * [#32230] Every request is judged against the membership store as it
+     * stands: no answer is carried from one request to the next, so a member
+     * removed from the environment is refused on their next request, on every
+     * replica. A failed check returns a 403 response object that callers
+     * should surface directly — no further dispatch happens.
      */
     /**
      * ADR-0069 — returns a 403 response when the resolved session is blocked by
@@ -1710,10 +1730,30 @@ export class HttpDispatcher {
         // System project is always reachable by any authenticated user.
         if (environmentId === HttpDispatcher.SYSTEM_ENVIRONMENT_ID) return null;
 
-        // Read the session. If auth is not wired up, fail open — tests
-        // and single-tenant setups run without auth.
+        // The gate judges the principal this request RESOLVED
+        // (`resolveRequestScope`), whichever credential admitted it — a
+        // session, an API key or an OAuth access token (with or without a
+        // cookie beside it) — in the organization its resolution vetted
+        // (`resolveAuthzContext`), the one every other door reads
+        // (`resolveActiveOrganizationId`). Which credential that was is the
+        // one reading the api-action forward takes too
+        // (`admittingCredentialKind`).
+        //
+        // A signed-in caller is never admitted because the gate could not
+        // read its session: the identity step already named the principal, so
+        // the gate does not ask the session again for it. An input the gate
+        // still needs and cannot read is the outage it is (the membership
+        // read below), never "allowed".
+        const resolved = context.executionContext;
+        if (admittingCredentialKind(context) !== undefined && resolved?.userId) {
+            return this.judgeMembershipOf(context, environmentId, resolved.userId, resolved.tenantId);
+        }
+
+        // No credential admitted a principal. Read the session; if auth is
+        // not wired up, or the read fails, there is no principal to judge and
+        // upstream auth decides — tests and single-tenant setups run without
+        // auth.
         let userId: string | undefined;
-        let activeOrganizationId: string | undefined;
         let sessionUnread = false;
         try {
             // [#4127 batch 4] This read was `authService?.api?.getSession?.(…)`
@@ -1738,53 +1778,44 @@ export class HttpDispatcher {
             // [#24222] Typed as `AuthSessionApi` declares the answer, not `any`.
             const sessionData: SessionRead | null = await api?.getSession?.(inProcessSessionReadInput(context.request?.headers));
             userId = sessionData?.user?.id ?? sessionData?.session?.userId;
-            activeOrganizationId = sessionData?.session?.activeOrganizationId;
         } catch {
             sessionUnread = true;
         }
+        if (sessionUnread || !userId) return null; // No principal — upstream auth will decide.
 
-        // The gate judges the principal this request RESOLVED
-        // (`resolveRequestScope`), whichever credential admitted it. A
-        // principal an API key or an OAuth access token admitted (with or
-        // without a cookie beside it) is the one judged, in the organization
-        // its resolution vetted; which credential that was is the one reading
-        // the api-action forward takes too (`admittingCredentialKind`). A
-        // session principal is the user the session read above names, in the
-        // organization its resolution vetted (below).
-        const resolved = context.executionContext;
-        const admittedBy = admittingCredentialKind(context);
-        if ((admittedBy === 'api_key' || admittedBy === 'oauth') && resolved?.userId) {
-            userId = resolved.userId;
-            activeOrganizationId = resolved.tenantId;
-        } else if (sessionUnread) {
-            // Auth resolution failed — do not block the request on RBAC.
-            return null;
-        } else {
-            // A session principal acts in the organization its resolution
-            // vetted (`resolveAuthzContext`), the one every other door reads
-            // (`resolveActiveOrganizationId`).
-            activeOrganizationId = resolved?.userId !== undefined && resolved.userId === userId
-                ? resolved.tenantId
-                : undefined;
-        }
+        // A session no credential admission recorded acts in the organization
+        // a resolution vetted only when that resolution named the same user.
+        const activeOrganizationId = resolved?.userId !== undefined && resolved.userId === userId
+            ? resolved.tenantId
+            : undefined;
+        return this.judgeMembershipOf(context, environmentId, userId, activeOrganizationId);
+    }
 
-        if (!userId) return null; // Anonymous requests — upstream auth will decide.
-
+    /**
+     * The membership verdict on one named principal: `userId`, acting in
+     * `activeOrganizationId`, against `sys_environment_member` for
+     * `environmentId`.
+     */
+    private async judgeMembershipOf(
+        context: HttpProtocolContext,
+        environmentId: string,
+        userId: string,
+        activeOrganizationId: string | undefined,
+    ): Promise<{ status: number; body: any } | null> {
         // Platform-org members bypass project membership.
         if (activeOrganizationId === HttpDispatcher.PLATFORM_ORG_ID) return null;
 
-        // Check cache.
-        const cacheKey = `${environmentId}:${userId}`;
-        const cached = this.membershipCache.get(cacheKey);
-        const now = Date.now();
-        if (cached && now - cached < HttpDispatcher.MEMBERSHIP_CACHE_TTL_MS) {
-            return null; // Recently verified as a member.
-        }
-        if (cached) {
-            this.membershipCache.delete(cacheKey); // expired
-        }
-
-        // Query sys_environment_member (control plane).
+        // Query sys_environment_member (control plane), on EVERY request.
+        //
+        // [#32230] A member's admission is never reused from an earlier
+        // request: a removal takes effect on the caller's next request, on
+        // every replica, and a store that cannot answer refuses that request
+        // (below) whoever was admitted a moment ago. A future cache here must
+        // first meet the authorization-cache rule in `resolve-authz-context.ts`
+        // (cache a success only behind seams that observe the writes it
+        // depends on, TTL as the residual bound) — and the writes that change
+        // this answer land in the control plane, which this request's engine
+        // need not observe.
         //
         // [#21941] The gate FAILS CLOSED when its read cannot answer. It used to
         // catch every fault here and return `null` — the caller admitted — so a
@@ -1844,10 +1875,7 @@ export class HttpDispatcher {
         if (rows && (rows as any).value) rows = (rows as any).value;
         const isMember = Array.isArray(rows) && rows.length > 0;
 
-        if (isMember) {
-            this.membershipCache.set(cacheKey, now);
-            return null;
-        }
+        if (isMember) return null;
 
         // [#3842] `PROJECT_MEMBERSHIP_REQUIRED` was parked in `details.type`
         // — the fourth site, and the only one to use that spelling — because
@@ -2878,7 +2906,25 @@ export class HttpDispatcher {
      * (`./action-dispatch.ts#dispatchAction`, the published entry).
      */
     async dispatchHostAction(request: ActionDispatchRequest): Promise<ActionDispatchAnswer> {
-        return dispatchActionRequest(this.domainDeps, request);
+        return dispatchActionRequest(this.domainDeps, request, (context, hints) => this.placeHostActionRequest(context, hints));
+    }
+
+    /**
+     * The host action door's resolver hints, written from the call's values
+     * rather than parsed from a path: `routePath` is the REST route of the
+     * same call (informational, for a resolver's path policy) and
+     * `urlEnvironmentId` is the environment the host named, or nothing. No
+     * environment hint is ever derived from `routePath`, so the object,
+     * namespace or action name a call carries cannot change which
+     * environment the resolver reads. Then the shared placement.
+     */
+    private async placeHostActionRequest(
+        context: HttpProtocolContext,
+        hints: { routePath: string; environmentId?: string },
+    ): Promise<void> {
+        context.routePath = hints.routePath;
+        if (hints.environmentId) context.urlEnvironmentId = hints.environmentId;
+        await this.placeRequestOnKernel(context);
     }
 
     /** Thin delegate — body extracted to `./domains/ai.ts` (D11③ PR-7). */

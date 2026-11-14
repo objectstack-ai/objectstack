@@ -7,11 +7,14 @@
  * as an undeclared field; a non-system write naming a set the security
  * catalog does not hold is refused, and a grant that carries no name is
  * refused as `required`. One grant per user, set and organization: the
- * declared unique index (`unique: 'organization'`) refuses a second on every
- * write path, so a revoke leaves no grant of that set in force. Its
- * organization key part is the plain column since ADR-0131 D1 (the tenant
- * column is NOT NULL), so on the pre-18 nullable column this harness models a
- * grant with no organization is exempt, like a NULL in any key part.
+ * declared key `(user_id, permission_set, permission_set_package,
+ * organization_id)` (`unique: 'global'`, ADR-0150 D4) and, for the grants that
+ * name no package, the package-less guard `metadata-protocol` builds at
+ * schema sync (#32164) refuse a second on every write path, so a revoke
+ * leaves no grant of that set in force. The organization key part is the plain
+ * column since ADR-0131 D1 (the tenant column is NOT NULL), so on the pre-18
+ * nullable column this harness models a grant with no organization is exempt,
+ * like a NULL in any key part.
  *
  * Measured on a REAL `ObjectQL` engine over a real SQL driver with the REAL
  * `SecurityPlugin` started on it the way a kernel composition does, because
@@ -44,6 +47,10 @@ import {
   registerGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
+import {
+  ensureUserPermissionSetPackagelessIndex,
+  resolveUserPermissionSetIndexSeam,
+} from '@objectstack/metadata-protocol';
 import { provisionRigUsers } from './__tests__/rig-users.testkit.js';
 
 // ---------------------------------------------------------------------------
@@ -395,8 +402,20 @@ describe('a system writer', () => {
 // One grant per user, set and organization (seat answers on #15211: Q5 A, Q-S3a)
 // ---------------------------------------------------------------------------
 
-describe('one grant per user, set and organization — the declared unique \'organization\' index', () => {
+describe('one grant per user, set and organization — the declared key and the package-less guard', () => {
   const ORG = 'org_dup';
+  /**
+   * The harness with the package-less guard built as the schema-sync
+   * migration builds it (#32164). The catalog here is the environment's, so
+   * every grant names no package and the guard is what keeps them to one.
+   */
+  const bootGuarded = async (): Promise<Harness> => {
+    const h = await boot();
+    const seam = resolveUserPermissionSetIndexSeam(h.engine);
+    expect(await ensureUserPermissionSetPackagelessIndex(seam?.exec, h.ctx.logger, { client: seam?.client }))
+      .toEqual({ status: 'created' });
+    return h;
+  };
   const grantsOfSet = async (h: Harness, userId: string, set: string) =>
     (await grantsOf(h, userId)).filter((g) => g.permission_set === set);
   /** The engine's envelope, and what the data doors answer it with on the wire. */
@@ -408,7 +427,7 @@ describe('one grant per user, set and organization — the declared unique \'org
   const knexOf = (h: Harness): any => (h.engine as any).getDriver('sys_user_permission_set').knex;
 
   it('NEGATIVE — a second organization-scoped grant is refused 409 (UNIQUE_VIOLATION on the wire); the revoke of the one leaves none in force', async () => {
-    const h = await boot();
+    const h = await bootGuarded();
     await h.engine.insert('sys_member', { id: 'mem_d1', user_id: 'u_d1', organization_id: ORG, role: 'member' }, { context: SYS } as any);
     await h.engine.insert('sys_user_permission_set', { id: 'ups_d1', user_id: 'u_d1', permission_set: 'qa_alpha', organization_id: ORG }, { context: ADMIN } as any);
     const err = await refusalOf(() => h.engine.insert(
@@ -421,15 +440,30 @@ describe('one grant per user, set and organization — the declared unique \'org
     expect(await grantsOfSet(h, 'u_d1', 'qa_alpha')).toEqual([]);
   });
 
-  it('a second grant with no organization is NOT refused by the index on a pre-18 nullable column: the plain organization key part exempts it (ADR-0131 D1)', async () => {
+  // [#32164, red-line review E2] Through the engine the write seam's
+  // one-grant check refuses the second grant whatever the store's indexes
+  // are; below the engine the declared key alone admits it.
+  it('CONTROL — without the guard (driver-memory\'s declared limit; a SQL table before its guard is built): the engine refuses a second package-less grant (the one-grant check), the declared key alone admits it below the engine', async () => {
     const h = await boot();
+    await h.engine.insert('sys_member', { id: 'mem_g1', user_id: 'u_d1', organization_id: ORG, role: 'member' }, { context: SYS } as any);
+    await h.engine.insert('sys_user_permission_set', { id: 'ups_g1', user_id: 'u_d1', permission_set: 'qa_alpha', organization_id: ORG }, { context: ADMIN } as any);
+    const err = await refusalOf(() => h.engine.insert(
+      'sys_user_permission_set', { id: 'ups_g2', user_id: 'u_d1', permission_set: 'qa_alpha', organization_id: ORG }, { context: SYS } as any,
+    ));
+    expect(duplicateShape(err)).toEqual(DUPLICATE);
+    await knexOf(h)('sys_user_permission_set').insert({ id: 'ups_g2', user_id: 'u_d1', permission_set: 'qa_alpha', organization_id: ORG });
+    expect((await grantsOfSet(h, 'u_d1', 'qa_alpha')).map((g) => g.permission_set_package)).toEqual([null, null]);
+  });
+
+  it('a second grant with no organization is NOT refused by the index on a pre-18 nullable column: the plain organization key part exempts it (ADR-0131 D1)', async () => {
+    const h = await bootGuarded();
     await h.engine.insert('sys_user_permission_set', { id: 'ups_p1', user_id: 'u_p1', permission_set: 'qa_alpha', organization_id: null }, { context: ADMIN } as any);
     await knexOf(h)('sys_user_permission_set').insert({ id: 'ups_p2', user_id: 'u_p1', permission_set: 'qa_alpha', organization_id: null });
     expect((await grantsOfSet(h, 'u_p1', 'qa_alpha')).map((g) => g.id).sort()).toEqual(['ups_p1', 'ups_p2']);
   });
 
   it('NEGATIVE — the index refuses an organization duplicate on paths no hook sees: a two-row batch insert stores nothing, and raw SQL beneath the engine is refused', async () => {
-    const h = await boot();
+    const h = await bootGuarded();
     await h.engine.insert('sys_member', { id: 'mem_b1', user_id: 'u_b1', organization_id: ORG, role: 'member' }, { context: SYS } as any);
     const err = await refusalOf(() => h.engine.insert(
       'sys_user_permission_set',
@@ -450,7 +484,7 @@ describe('one grant per user, set and organization — the declared unique \'org
   });
 
   it('NEGATIVE — an update that makes an organization duplicate (re-naming the set) is refused 409 and the row is untouched', async () => {
-    const h = await boot();
+    const h = await bootGuarded();
     await h.engine.insert('sys_member', { id: 'mem_u1', user_id: 'u_u1', organization_id: ORG, role: 'member' }, { context: SYS } as any);
     await h.engine.insert('sys_user_permission_set', { id: 'ups_u1', user_id: 'u_u1', permission_set: 'qa_alpha', organization_id: ORG }, { context: ADMIN } as any);
     await h.engine.insert('sys_user_permission_set', { id: 'ups_u2', user_id: 'u_u1', permission_set: 'qa_beta', organization_id: ORG }, { context: ADMIN } as any);
@@ -462,7 +496,7 @@ describe('one grant per user, set and organization — the declared unique \'org
   });
 
   it('CONTROL — one set to one user in two organizations and platform-wide, two users of one set (a batch and raw SQL alike), and an edit of a held grant all land', async () => {
-    const h = await boot();
+    const h = await bootGuarded();
     for (const org of ['org_c1', 'org_c2']) {
       await h.engine.insert('sys_member', { id: `mem_${org}`, user_id: 'u_c1', organization_id: org, role: 'member' }, { context: SYS } as any);
       await h.engine.insert('sys_user_permission_set', { user_id: 'u_c1', permission_set: 'qa_alpha', organization_id: org }, { context: ADMIN } as any);

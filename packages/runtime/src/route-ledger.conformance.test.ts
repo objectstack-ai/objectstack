@@ -261,6 +261,53 @@ describe('route ledger hygiene', () => {
 });
 
 /**
+ * [ADR-0150 D5, child G1] What a door's namespace position is served through
+ * ANOTHER row's parameter: the second arm of `NamespacePosition.literals`
+ * (`spec/kernel/address-grammar.ts`). A row that puts a parameter where the
+ * door's prefix has a literal still serves the position when it matches a
+ * path the door's qualified form (`<prefix>/:ns/…`) matches: the same verb
+ * and arity, and at every segment a parameter on either side or the same
+ * literal on both. `POST /automation/:name/runs/:runId/cancel` is
+ * `hooks/runs/r1/cancel` for a flow named `hooks`, a path the qualified hook
+ * `POST /automation/hooks/:ns/:flowName/:hookId` matches too, so the hook's
+ * position serves `runs` (`literals`). The connector door's qualified form
+ * ends in the literal `connection`, which no such row spells, so nothing is
+ * served there this way.
+ *
+ * `everyQualifier` is the rows, spelling the prefix or reading it through a
+ * parameter, that match the qualified form's paths with a PARAMETER at the
+ * position: a second route on every qualifier.
+ */
+function parameterServedAt(prefixPath: string): { literals: string[]; everyQualifier: string[]; qualifiedRows: string[] } {
+  const isParameter = (segment: string | undefined) => segment !== undefined && segment.startsWith(':');
+  const rows = ROUTE_LEDGER.map((row) => ({
+    route: row.route,
+    verb: row.route.slice(0, row.route.indexOf(' ')),
+    segments: row.route.slice(row.route.indexOf(' ') + 1).split('?')[0].split('/').filter(Boolean),
+  }));
+  const prefix = prefixPath.split('/').filter(Boolean);
+  const at = prefix.length;
+  const spellsPrefix = (segments: string[]) => prefix.every((segment, i) => segments[i] === segment);
+  const qualified = rows.filter((row) => spellsPrefix(row.segments) && row.segments[at] === ':ns');
+  const literals = new Set<string>();
+  const everyQualifier = new Set<string>();
+  for (const form of qualified) {
+    for (const row of rows) {
+      if (row === form || row.verb !== form.verb || row.segments.length !== form.segments.length) continue;
+      // The prefix's own segment, or a parameter over one of its literals.
+      const readsPrefix = prefix.every((segment, i) => row.segments[i] === segment || (isParameter(row.segments[i]) && !isParameter(segment)));
+      if (!readsPrefix) continue;
+      const sharesAPath = row.segments.every((segment, i) => isParameter(segment) || isParameter(form.segments[i]) || segment === form.segments[i]);
+      if (!sharesAPath) continue;
+      if (isParameter(row.segments[at])) everyQualifier.add(row.route);
+      // A row that spells the prefix serves its literal by the first arm, which the caller reads off the prefix.
+      else if (!spellsPrefix(row.segments)) literals.add(row.segments[at] as string);
+    }
+  }
+  return { literals: [...literals].sort(), everyQualifier: [...everyQualifier].sort(), qualifiedRows: qualified.map((row) => row.route) };
+}
+
+/**
  * [ADR-0150 D5, epic #31527 child G1] The address grammar's literal segments
  * (`NAMESPACE_POSITION_LITERALS`, `spec/kernel/address-grammar.ts`) are
  * MEASURED off this ledger: for each door, the literal segments its rows serve
@@ -271,7 +318,10 @@ describe('route ledger hygiene', () => {
  * addresses could never reach. This pins the two together, in both directions.
  * `:`-led segments are parameters, and `_env` is the environment segment
  * (`ENVIRONMENT_ADDRESS_SEGMENT`), read before a namespace but never a literal
- * of the grammar.
+ * of the grammar. A position is also served by a row that does not spell its
+ * prefix and reads it through a parameter (`parameterServedAt`), measured for
+ * every door: today the hook's alone, where the run doors reach it through
+ * their `:name`.
  */
 describe('address grammar ↔ route ledger (ADR-0150 D5, #31691)', () => {
   it('every door\'s namespace-position literals are exactly the literal segments the ledger serves there', async () => {
@@ -286,6 +336,13 @@ describe('address grammar ↔ route ledger (ADR-0150 D5, #31691)', () => {
         if (segment.startsWith(':') || segment === ENVIRONMENT_ADDRESS_SEGMENT) continue;
         served.add(segment);
       }
+      // The second arm, for every door: a literal served through another
+      // row's parameter (`parameterServedAt`). No row spells a literal under
+      // `/automation/hooks`; the run doors serve `runs` there this way.
+      const throughAParameter = parameterServedAt(position.prefix);
+      // Anti-vacuity: the door's qualified form was found, so the arm was measured.
+      expect(throughAParameter.qualifiedRows.length, `door ${door}: no \`${position.prefix}/:ns\` row`).toBeGreaterThan(0);
+      for (const literal of throughAParameter.literals) served.add(literal);
       expect([...served].sort(), `door ${door} (${position.prefix})`).toEqual([...position.literals].sort());
     }
   });
@@ -333,35 +390,43 @@ describe('address grammar ↔ route ledger (ADR-0150 D5, #31691)', () => {
       expect([path.join('/'), automationRouteAllow(path.slice(1))]).toEqual([path.join('/'), served]);
     }
   });
-  // [ADR-0150 D5, child G1] The qualified inbound hook,
-  // `POST /automation/hooks/:ns/:flowName/:hookId`, has the verb and arity of
-  // every five-segment `POST /automation/…` row whose second segment can read
-  // `hooks` (a parameter, or `hooks` itself): `…/:name/runs/:runId/cancel` is
-  // `hooks/runs/r1/cancel` for a flow named `hooks`. Its third and fourth
-  // segments match some path whatever they are, so each such row collides on
-  // the qualifier its second segment names. The allow-list row never admits
-  // those qualifiers (core's `INBOUND_HOOK_QUALIFIER_EXCLUSIONS`), so the set
-  // is exactly the ledger's; a row whose qualifier position is a parameter
-  // would collide on every qualifier, and none may exist.
-  it('the qualified hook\'s excluded qualifiers are exactly the qualifier-position literals of every five-segment `POST /automation` row that can read `hooks` there', async () => {
+  // [ADR-0150 D5, child G1] The qualifiers on which a run door collides with
+  // the qualified inbound hook (`parameterServedAt`) have ONE declaration: the
+  // grammar's entry for the hook's namespace position, which the test above
+  // holds equal to the ledger. The allow-list row never admits them (core's
+  // `INBOUND_HOOK_QUALIFIER_EXCLUSIONS`, which IS that entry, not a second
+  // spelling), and the install door refuses each one a namespace could spell
+  // (`NAMESPACE_REFUSED_LITERALS`), so no new package takes a namespace its
+  // hook could never be qualified by. A row with a parameter at the qualifier
+  // position would collide on every qualifier, and none may exist.
+  it('the qualified hook\'s excluded qualifiers are the grammar\'s hook-position literals: core reads that entry itself, and it holds every literal a run door serves at the qualifier position', async () => {
     const { INBOUND_HOOK_QUALIFIER_EXCLUSIONS } = await import('@objectstack/core');
-    const colliding = new Set<string>();
-    const everyQualifier: string[] = [];
-    const hookRows: string[] = [];
-    for (const row of ROUTE_LEDGER) {
-      const verb = row.route.slice(0, row.route.indexOf(' '));
-      const segments = row.route.slice(row.route.indexOf(' ') + 1).split('?')[0].split('/').filter(Boolean);
-      if (verb !== 'POST' || segments.length !== 5 || segments[0] !== 'automation') continue;
-      const [, first, qualifierPosition] = segments;
-      if (!(first.startsWith(':') || first === 'hooks')) continue;
-      if (row.route === 'POST /automation/hooks/:ns/:flowName/:hookId') { hookRows.push(row.route); continue; }
-      if (qualifierPosition.startsWith(':')) everyQualifier.push(row.route);
-      else colliding.add(qualifierPosition);
-    }
-    // Anti-vacuity: the qualified hook's own row was seen.
-    expect(hookRows).toEqual(['POST /automation/hooks/:ns/:flowName/:hookId']);
+    const { NAMESPACE_PATTERN, NAMESPACE_POSITION_LITERALS, NAMESPACE_REFUSED_LITERALS } = await import('@objectstack/spec/kernel');
+    const { literals, everyQualifier, qualifiedRows } = parameterServedAt(NAMESPACE_POSITION_LITERALS.inboundHook.prefix);
+    // Anti-vacuity: the qualified hook's own row was seen, and a run door collides with it.
+    expect(qualifiedRows).toEqual(['POST /automation/hooks/:ns/:flowName/:hookId']);
+    expect(literals.length).toBeGreaterThan(0);
     expect(everyQualifier).toEqual([]);
-    expect([...colliding].sort()).toEqual([...INBOUND_HOOK_QUALIFIER_EXCLUSIONS].sort());
-    expect(colliding.size).toBeGreaterThan(0);
+    // One source: core's set is the spec's array itself.
+    expect(INBOUND_HOOK_QUALIFIER_EXCLUSIONS).toBe(NAMESPACE_POSITION_LITERALS.inboundHook.literals);
+    for (const qualifier of literals) expect(INBOUND_HOOK_QUALIFIER_EXCLUSIONS).toContain(qualifier);
+    // The install side. `NAMESPACE_REFUSED_LITERALS` is derived from the same
+    // table, so this holds by construction today: it pins that derivation
+    // against a hand-written list. Anti-vacuity: one of them is spellable.
+    const spellable = literals.filter((qualifier) => NAMESPACE_PATTERN.test(qualifier));
+    expect(spellable.length).toBeGreaterThan(0);
+    for (const qualifier of spellable) expect(NAMESPACE_REFUSED_LITERALS).toContain(qualifier);
+  });
+
+  // CONTROL for `parameterServedAt`: the rule is a shared path, not verb and
+  // arity alone. The run doors have the connector door's verb and arity for a
+  // flow named `connectors`, and its qualified form's last literal keeps them
+  // apart, so a package namespaced `runs` keeps its qualified connector address.
+  it('CONTROL: a row with the qualified form\'s verb and arity and a contradicting literal serves nothing at the position', async () => {
+    const { NAMESPACE_POSITION_LITERALS } = await import('@objectstack/spec/kernel');
+    const connectors = parameterServedAt(NAMESPACE_POSITION_LITERALS.connectors.prefix);
+    expect(connectors.qualifiedRows).toContain('POST /automation/connectors/:ns/:name/connection');
+    expect(ROUTE_LEDGER.map((row) => row.route)).toContain('POST /automation/:name/runs/:runId/resume');
+    expect(connectors.literals).toEqual([]);
   });
 });

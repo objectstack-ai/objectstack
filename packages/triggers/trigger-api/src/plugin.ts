@@ -16,7 +16,35 @@ interface AutomationTriggerRegistry {
     unregisterTrigger?(type: string): void;
     /** [ADR-0150 D5] The package that ships `name`'s flow, or `undefined` (the engine's own read). */
     packagedFlowOwner?(name: string): string | undefined;
+    /**
+     * [ADR-0150 D5, #31696] Which slot's hook an address reaches, for a name
+     * two packages hold or a slot-key spelling (`AutomationEngine.inboundHookSlot`);
+     * `undefined` for any other name, which the door judges as before. An
+     * engine without it holds one flow per name.
+     */
+    inboundHookSlot?(
+        flowName: string,
+        address?: { readonly qualifier: string; readonly namespaceOwners: readonly string[] },
+    ): InboundHookSlotAnswer | undefined;
 }
+
+/**
+ * [#31696] The `trigger-api` service's slot door, beside the contract's
+ * `handleInboundHook`: the hook armed under a slot's key (`PACKAGE/NAME`),
+ * served as the member serves a name. Not on the contract: the hosted face
+ * (`@objectstack/runtime`, `automation-hooks.ts`) calls it only for a slot its
+ * engine routed a qualified address to, and the member itself never serves a
+ * key the path carried.
+ */
+interface InboundHookSlotDoor {
+    handleInboundSlotHook(request: Request, hook: { readonly key: string; readonly hookId: string }): Promise<Response>;
+}
+
+/** [#31696] What {@link AutomationTriggerRegistry.inboundHookSlot} answers. */
+type InboundHookSlotAnswer =
+    | { readonly status: 'served'; readonly key: string }
+    | { readonly status: 'unadmitted' }
+    | { readonly status: 'refused'; readonly candidates: readonly unknown[] };
 
 /** [ADR-0150 D5] The slice of the ObjectQL service the qualified hook reads: the namespace table. */
 interface NamespaceRegistrySurface {
@@ -123,6 +151,31 @@ async function serveInboundHook<R>(
 }
 
 /**
+ * [ADR-0150 D5, #31696] Answer a post whose address the engine routed to a
+ * slot ({@link AutomationTriggerRegistry.inboundHookSlot}): the slot's own
+ * hook, served by {@link serveInboundHook} under its key; otherwise the door's
+ * one refusal, once the body has been read in full as every post's is. The
+ * bare hook of a name two packages hold gets that same refusal, its cause
+ * (`shared-name`) and the holders in the server log only: D5's `409` naming
+ * the holders does not apply to this anonymous door.
+ */
+async function answerInboundHookSlot<R>(
+    trigger: ApiTrigger,
+    c: InboundHookDoorContext<R>,
+    slot: InboundHookSlotAnswer,
+    hook: { readonly flowName: string; readonly hookId: string; readonly qualifier?: string },
+): Promise<R> {
+    if (slot.status === 'served') return serveInboundHook(trigger, c, { flowName: slot.key, hookId: hook.hookId });
+    await c.req.text();
+    const refusal = slot.status === 'refused'
+        ? trigger.refuseSharedName(hook.flowName, slot.candidates)
+        : hook.qualifier === undefined
+            ? trigger.refuseUnknownFlow(hook.flowName)
+            : trigger.refuseUnadmittedAddress(hook.flowName, hook.qualifier);
+    return c.json(refusal.body, refusal.status);
+}
+
+/**
  * ApiTriggerPlugin (ADR-0041 Tier 1)
  *
  * Makes `type: 'api'` flows actually fire. The automation engine derives an
@@ -185,8 +238,28 @@ export class ApiTriggerPlugin implements Plugin {
             // trigger is: where no trigger is installed the slot stays empty,
             // and the member's caller answers its typed absence (the
             // contract's rule), just as no route is mounted here then.
-            const service: ITriggerApiService = {
-                handleInboundHook: (request, hook) => serveInboundHook(trigger, requestDoorContext(request), hook),
+            const registry = () => this.resolveService<NamespaceRegistrySurface>(ctx, 'objectql')?.registry;
+            // [ADR-0150 D5, #31696] A name two packages hold, or a slot-key
+            // spelling, is routed by the engine; any other name is served as
+            // it always was.
+            const slotOf = (flowName: string, address?: { qualifier: string; namespaceOwners: readonly string[] }) =>
+                typeof automation.inboundHookSlot === 'function' ? automation.inboundHookSlot(flowName, address) : undefined;
+
+            const service: ITriggerApiService & InboundHookSlotDoor = {
+                // [#31696] The name as the path carried it, routed as the bare
+                // mount routes it: a slot key names no flow, and a name two
+                // packages hold names neither (the one refusal, either way).
+                handleInboundHook: (request, hook) => {
+                    const door = requestDoorContext(request);
+                    const slot = slotOf(hook.flowName) ?? (hook.flowName.includes('/') ? { status: 'unadmitted' as const } : undefined);
+                    return slot !== undefined && slot.status !== 'served'
+                        ? answerInboundHookSlot(trigger, door, slot, hook)
+                        : serveInboundHook(trigger, door, hook);
+                },
+                // [#31696] The slot door: the hook armed under the slot key the
+                // hosted face's engine routed a qualified address to.
+                handleInboundSlotHook: (request, hook) =>
+                    serveInboundHook(trigger, requestDoorContext(request), { flowName: hook.key, hookId: hook.hookId }),
             };
             ctx.registerService(TRIGGER_API_SLOT, service);
 
@@ -209,10 +282,13 @@ export class ApiTriggerPlugin implements Plugin {
                 );
                 return;
             }
-            rawApp.post(HOOKS_PATH, async (c: any) => serveInboundHook(trigger, c, {
-                flowName: c.req.param('flowName'),
-                hookId: c.req.param('hookId'),
-            }));
+            rawApp.post(HOOKS_PATH, async (c: any) => {
+                const flowName: string = c.req.param('flowName');
+                const hookId: string = c.req.param('hookId');
+                const slot = slotOf(flowName);
+                if (slot) return answerInboundHookSlot(trigger, c, slot, { flowName, hookId });
+                return serveInboundHook(trigger, c, { flowName, hookId });
+            });
             // [ADR-0150 D5, child G1] The qualified hook. A qualifier the
             // allow-list row never admits (`runs`: the run-lifecycle doors of a
             // flow named `hooks` have this verb and arity) is not this route,
@@ -230,20 +306,23 @@ export class ApiTriggerPlugin implements Plugin {
                 const qualifier: string = c.req.param('ns');
                 if (INBOUND_HOOK_QUALIFIER_EXCLUSIONS.includes(qualifier)) return next();
                 const flowName: string = c.req.param('flowName');
-                const objectql = this.resolveService<NamespaceRegistrySurface>(ctx, 'objectql');
-                const getNamespaceOwners = objectql?.registry?.getNamespaceOwners;
+                const hookId: string = c.req.param('hookId');
+                const reg = registry();
+                const namespaceOwners = typeof reg?.getNamespaceOwners === 'function' ? reg.getNamespaceOwners(qualifier) ?? [] : [];
+                const slot = slotOf(flowName, { qualifier, namespaceOwners });
+                if (slot) return answerInboundHookSlot(trigger, c, slot, { flowName, hookId, qualifier });
                 // An engine that cannot say who ships the flow admits no address.
                 const admitted = typeof automation.packagedFlowOwner === 'function' && admitInboundHookAddress({
                     qualifier,
                     flowOwner: automation.packagedFlowOwner(flowName),
-                    namespaceOwners: typeof getNamespaceOwners === 'function' ? getNamespaceOwners.call(objectql!.registry, qualifier) ?? [] : [],
+                    namespaceOwners,
                 });
                 if (!admitted) {
                     await c.req.text();
                     const refusal = trigger.refuseUnadmittedAddress(flowName, qualifier);
                     return c.json(refusal.body, refusal.status);
                 }
-                return serveInboundHook(trigger, c, { flowName, hookId: c.req.param('hookId') });
+                return serveInboundHook(trigger, c, { flowName, hookId });
             });
             ctx.logger.info(
                 `ApiTriggerPlugin: api trigger registered, hooks mounted at POST ${HOOKS_PATH} and POST ${HOOKS_ADDRESSED_PATH}`,

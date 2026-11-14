@@ -128,6 +128,8 @@ describe('Send back for revision (ADR-0044)', () => {
     maxRevisions?: number;
     behavior?: 'first_response' | 'unanimous';
     approvers?: Array<{ type: string; value?: string }>;
+    /** [#31696] Ship it as this package's flow. */
+    packageId?: string;
   }) {
     automation.registerFlow('expense_approval', {
       name: 'expense_approval',
@@ -160,7 +162,7 @@ describe('Send back for revision (ADR-0044)', () => {
         { id: 'e6', source: 'on_approved', target: 'end' },
         { id: 'e7', source: 'on_rejected', target: 'end' },
       ],
-    });
+    }, opts?.packageId ? { source: 'package', packageId: opts.packageId, holder: opts.packageId } : undefined);
   }
 
   async function startFlow() {
@@ -788,6 +790,175 @@ describe('Send back for revision (ADR-0044)', () => {
       expect(advanced.code).toBeUndefined();
       expect(marks).toEqual(['done']);
       expect(automation.listSuspendedRuns()).toHaveLength(0);
+    });
+  });
+
+  describe('[#31696] a request reads its flow from its own slot once a second package ships the name (ADR-0150 D8 row R7)', () => {
+    const P1 = 'com.acme.alpha';
+    const P2 = 'com.acme.beta';
+    /** P2's flow of the name: no review node, so reading it in place of P1's refuses the send-back. */
+    const shipP2 = () => automation.registerFlow('expense_approval', {
+      name: 'expense_approval', label: 'Beta Expense', type: 'autolaunched',
+      nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+      edges: [{ id: 'e1', source: 'start', target: 'end' }],
+    }, { source: 'package', packageId: P2, holder: P2 });
+    const open = async (recordId: string, slotted = false) => {
+      const ctx = { object: 'fin_expense', record: { id: recordId }, userId: 'submitter' };
+      const paused = slotted ? await automation.executeSlot(P1, 'expense_approval', ctx) : await automation.execute('expense_approval', ctx);
+      expect(paused.status).toBe('paused');
+      return (await fake.find('sys_approval_request', { where: { record_id: recordId } }))[0];
+    };
+
+    it('requests opened before and after the second package ships it carry P1, and send-back, the read and resubmit answer as before', async () => {
+      registerReviseFlow({ packageId: P1 });
+      const [before, returned] = [await open('x1'), await open('x2')];
+      await service.sendBack(returned.id, { actorId: 'u1' }, asUser('u1'));
+      shipP2();
+      await expect(automation.getFlow('expense_approval')).rejects.toThrow(P2);
+      const after = await open('x3', true);
+      expect([before.process_package, after.process_package]).toEqual([P1, P1]);
+
+      for (const req of [before, after]) {
+        const read: any = await service.getRequest(req.id, SYSTEM_CTX);
+        expect(read.flow_steps.map((s: any) => s.label)).toContain('Manager Review');
+        expect(read.flow_route).toBeDefined();
+        expect((await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'))).request.status).toBe('returned');
+      }
+      expect((await service.resubmit(returned.id, { actorId: 'submitter' }, asUser('submitter'))).resumed).toBe(true);
+    });
+
+    it('a request naming no package reads through its run; with no run to read either, the send-back keeps the refusal naming both', async () => {
+      registerReviseFlow({ packageId: P1 });
+      const [byRun, control] = [await open('x1'), await open('x2')];
+      shipP2();
+      await fake.update('sys_approval_request', { id: byRun.id, process_package: null });
+      await fake.update('sys_approval_request', { id: control.id, process_package: null, flow_run_id: 'run_nobody' });
+      expect((await service.sendBack(byRun.id, { actorId: 'u1' }, asUser('u1'))).request.status).toBe('returned');
+      const refused = service.sendBack(control.id, { actorId: 'u1' }, asUser('u1'));
+      await expect(refused).rejects.toThrow(P1);
+      await expect(refused).rejects.toThrow(P2);
+      expect((await fake.find('sys_approval_request', { where: { id: control.id } }))[0].status).toBe('pending');
+    });
+  });
+
+  describe('[#32647] a request whose stamped package withdrew never reads another package\'s flow of that name (ADR-0150 D8 row R7)', () => {
+    const P1 = 'com.acme.alpha';
+    const P2 = 'com.acme.beta';
+    const FLOW = 'expense_approval';
+    // The loader's set (ADR-0126 §7.2), as the automation plugin attaches it:
+    // a slot's package ships its flow, so the queue door's package is readable.
+    beforeEach(() => automation.setPackagedFlowSource((name: string, packageId?: string) => {
+      const slots = automation.getFlowSlots(name);
+      return packageId ?? (slots.length === 1 ? slots[0].packageId ?? undefined : undefined);
+    }));
+    /**
+     * P2's flow of the name: a full revise flow under its own labels, so every
+     * door that read it in place of P1's would ANSWER (the moved answers are
+     * then visible as answers, not as refusals that happen to match).
+     */
+    const shipP2 = () => automation.registerFlow(FLOW, {
+      name: FLOW, label: 'Beta Expense', type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'review', type: 'approval', label: 'Beta Review', config: { approvers: [{ type: 'user', value: 'u2' }] } },
+        { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE, label: 'Beta Revision' },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'review' },
+        { id: 'e2', source: 'review', target: 'end', label: 'approve' },
+        { id: 'e3', source: 'review', target: 'end', label: 'reject' },
+        { id: 'e4', source: 'review', target: 'wait_revision', label: 'revise' },
+        { id: 'e5', source: 'wait_revision', target: 'review', label: 'resubmit', type: 'back' },
+      ],
+    }, { source: 'package', packageId: P2, holder: P2 });
+    const open = async (recordId: string, slotted: boolean) => {
+      const ctx = { object: 'fin_expense', record: { id: recordId }, userId: 'submitter' };
+      const paused = slotted ? await automation.executeSlot(P1, FLOW, ctx) : await automation.execute(FLOW, ctx);
+      expect(paused.status).toBe('paused');
+      return (await fake.find('sys_approval_request', { where: { record_id: recordId } }))[0];
+    };
+    const stored = async (id: string) => (await fake.find('sys_approval_request', { where: { id } }))[0];
+    /** The four doors that read the request's flow, each answered as data (a refusal is its error's code and message). */
+    const doors = async (req: any) => {
+      const raw = await stored(req.id);
+      const settle = async (p: Promise<any>) => p.then((v) => ({ ok: v }), (e: any) => ({
+        code: e?.code, status: e?.status, message: String(e?.message),
+        refusal: e?.refusal && { reason: e.refusal.reason, qualifier: e.refusal.callerPackageId, candidates: e.refusal.candidates },
+      }));
+      const read: any = await service.getRequest(req.id, SYSTEM_CTX);
+      return {
+        steps: read.flow_steps?.map((s: any) => s.label),
+        route: read.flow_route === undefined ? undefined : 'present',
+        // The resubmit door: which revise window a stranded resubmit continues (ADR-0044).
+        resubmitWindow: await settle((service as any).expectedPauseNode(raw, { decision: 'resubmit', what: 'the resubmit' }, req.id, raw.flow_run_id)
+          .then((n: any) => n.nodeId)),
+        // The queue door: the package a step's queue name is read from (ADR-0150 D3).
+        queuePackage: (service as any).flowPackageOf(await (service as any).requestFlowKey(raw)),
+        sendBack: await settle(service.sendBack(req.id, { actorId: 'u1' }, asUser('u1')).then((out) => out.request.status)),
+        status: (await stored(req.id)).status,
+      };
+    };
+
+    it('withdrawn beside a second holder: every door refuses or reads no flow, naming every holder, and nothing is written (FROM: P2\'s flow)', async () => {
+      registerReviseFlow({ packageId: P1 });
+      shipP2();
+      const req = await open('x1', true);
+      expect(req.process_package).toBe(P1);
+      automation.withdrawFlowSlot(P1, FLOW);
+      // P2 now holds the name alone, under the bare key the bare read serves.
+      expect((await automation.getFlow(FLOW))?.label).toBe('Beta Expense');
+
+      const answered = await doors(req);
+      expect(answered).toMatchObject({
+        steps: undefined, route: undefined, queuePackage: null, status: 'pending',
+        resubmitWindow: { code: 'RESOURCE_CONFLICT', status: 409 },
+        sendBack: { code: 'RESOURCE_CONFLICT', status: 409 },
+      });
+      for (const refused of [answered.sendBack, answered.resubmitWindow] as any[]) {
+        expect(refused.refusal).toEqual({ reason: 'not-held-by-qualifier', qualifier: P1, candidates: [{ kind: 'package', packageId: P2 }] });
+        expect([refused.message.includes(P1), refused.message.includes(P2)]).toEqual([true, true]);
+      }
+      expect(await actionsOf(req.id)).toEqual(['submit']);
+    });
+
+    it('install, open, uninstall, another package installs the name: the run\'s key is the bare name again and still reads no other package\'s flow', async () => {
+      registerReviseFlow({ packageId: P1 });
+      const req = await open('x1', false);
+      expect(req.process_package).toBe(P1);
+      automation.withdrawFlowSlot(P1, FLOW);
+
+      // CONTROL: no package holds the name: the doors answer as for a deleted flow, as on `main`.
+      const gone = await doors(req);
+      expect(gone).toMatchObject({ steps: undefined, route: undefined, queuePackage: null, status: 'pending' });
+      expect([(gone.sendBack as any).refusal, (gone.sendBack as any).message]).toEqual([undefined, expect.stringMatching(/^VALIDATION_FAILED:/)]);
+      expect([(gone.resubmitWindow as any).refusal, (gone.resubmitWindow as any).message]).toEqual([undefined, expect.stringMatching(/^INVALID_STATE:/)]);
+
+      shipP2();
+      expect(automation.flowSlotKey(P2, FLOW)).toBe(FLOW);
+      const answered = await doors(req);
+      expect(answered).toMatchObject({
+        steps: undefined, route: undefined, queuePackage: null, status: 'pending',
+        resubmitWindow: { code: 'RESOURCE_CONFLICT', status: 409 },
+        sendBack: { code: 'RESOURCE_CONFLICT', status: 409 },
+      });
+      expect((answered.sendBack as any).refusal).toEqual({ reason: 'not-held-by-qualifier', qualifier: P1, candidates: [{ kind: 'package', packageId: P2 }] });
+      expect(await actionsOf(req.id)).toEqual(['submit']);
+    });
+
+    it('CONTROL: a request whose stamped package still holds the name reads its own flow at every door, beside a second holder and alone', async () => {
+      registerReviseFlow({ packageId: P1 });
+      const lone = await open('x1', false);
+      const loneAnswer = await doors(lone);
+      shipP2();
+      const shared = await open('x2', true);
+      const sharedAnswer = await doors(shared);
+      for (const answer of [loneAnswer, sharedAnswer]) {
+        expect(answer).toMatchObject({
+          steps: ['Manager Review'], route: 'present', queuePackage: P1,
+          resubmitWindow: { ok: 'wait_revision' }, sendBack: { ok: 'returned' }, status: 'returned',
+        });
+      }
     });
   });
 });

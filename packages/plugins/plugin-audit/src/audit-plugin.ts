@@ -29,6 +29,7 @@ import {
   SysCommentReaction,
   SysAuditCheckpoint,
   SysAuditSigningKey,
+  SysAuditAmendment,
 } from './objects/index.js';
 import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
@@ -40,7 +41,8 @@ import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // core path depend on this plugin being installed. `sys_attachment` moved to
 // @objectstack/service-storage for the same ownership reason (ADR-0052 §3: a
 // file↔record link belongs with storage, not the compliance ledger).
-import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
+import { installAuditWriters, type AuditActorSnapshot, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
+import { createAppActivityWriter } from './app-activity-door.js';
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { createActionInvocationAuditWriter } from './action-invocation-audit.js';
@@ -130,14 +132,30 @@ export interface AuditPluginOptions {
   /**
    * [ADR-0154 D2, D6] The crypto provider the audit sealer seals each
    * checkpoint's seed under, and the default checkpoint signer seals its
-   * private key under (scope `audit_seal`). The host composes it here.
+   * private key under (scope `audit_seal`). The host composes it here: `os
+   * serve` hands over the one provider it seals every `sys_secret` row with.
+   *
+   * A function is read once, when the sealer starts (`kernel:ready`), for a
+   * host that composes this plugin before it has built its provider; an
+   * `undefined` answer is an absent provider.
    *
    * Absent, nothing is sealed: an object that declares `lifecycle.seal` is
    * reported once, at `error`, naming the consequence and this option as the
    * fix. A host that registers its own `audit.checkpointSigner` still needs
    * it, for the seeds.
    */
-  cryptoProvider?: ICryptoProvider;
+  cryptoProvider?: ICryptoProvider | (() => ICryptoProvider | undefined);
+  /**
+   * [ADR-0154 D3] Start the audit sealer. Default `true`: every server wants
+   * it, and a server that cannot seal says so at `error`.
+   *
+   * Set `false` for a one-shot command — `os audit verify` and the `os
+   * migrate …` boots. Such a run is not a second server: a sealer started there
+   * would write checkpoints (and, on a first run, the signing key) from a
+   * read-only check or a dry run, and with no crypto provider it would report
+   * the sealed objects unsealed on the command's own output.
+   */
+  armSealer?: boolean;
 }
 
 /**
@@ -302,6 +320,11 @@ export class AuditPlugin implements Plugin {
    * and the hook write through one writer.
    */
   private credentialUseWriter: CredentialUseAuditWriter | null = null;
+  /**
+   * The platform's display snapshot of a user, once the writers are installed
+   * at `kernel:ready`; the activity door's writer reads it at each call.
+   */
+  private actorSnapshotOf: ((api: unknown, userId: string) => Promise<AuditActorSnapshot>) | undefined;
 
   constructor(private readonly options: AuditPluginOptions = {}) {}
 
@@ -315,12 +338,10 @@ export class AuditPlugin implements Plugin {
       scope: 'system',
       defaultDatasource: 'cloud',
       namespace: 'sys',
-      // [ADR-0154] The checkpoints and the signing keys are registered ahead
-      // of the sealer and signer that write them (#31908 P1b-1), so their
-      // tables, translations and `get` / `list` doors exist when the sealer
-      // lands. `sys_audit_amendment` is registered with its first writer, the
-      // redaction amendments of P3; until then it is declared and unregistered.
-      objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey],
+      // [ADR-0154] The checkpoints and the signing keys, which the sealer and
+      // signer write, and the amendments, which the redaction amendment writer
+      // writes before a migration rewrites a sealed row (D7).
+      objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey, SysAuditAmendment],
       // The ledger row's record page: its fields, and every ledger row about
       // the same record beside it, so a `config_change` row sits next to the
       // mirror's rows about the same settings row (`sys-audit-log.page.ts`).
@@ -413,6 +434,9 @@ export class AuditPlugin implements Plugin {
       ...createPackageLifecycleAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...this.credentialUseWriter,
       ...createScimRefusalAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
+      // The activity door's writer: one timeline entry an app adds through
+      // `ctx.activity.append` (`app-activity-door.ts`).
+      ...createAppActivityWriter({ getEngine: getLedgerEngine, getActorSnapshot: () => this.actorSnapshotOf }),
     });
 
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n
@@ -529,6 +553,7 @@ export class AuditPlugin implements Plugin {
         admitMentionRecipients: (input) =>
           admitMentionRecipients({ engine: engine as any, getTenancyPosture, logger: ctx.logger as any }, input),
       });
+      this.actorSnapshotOf = auditWriters?.resolveActorSnapshot;
       ctx.logger.info('AuditPlugin: audit + activity writers installed');
 
       // [#31796] The `credential_use` row: recognised on each credential's own
@@ -731,13 +756,16 @@ export class AuditPlugin implements Plugin {
    * and `audit.checkpointSink` slots (D11), the signer falling back to the
    * default local key of D6; the `cluster` service, when registered, holds the
    * `audit.sealer` lock. An engine without the storage surface the sealer
-   * reads (a test double) starts no sealer.
+   * reads (a test double) starts no sealer, and neither does a one-shot
+   * command's boot (`armSealer: false`).
    */
   private startSealer(engine: IDataEngine, ctx: PluginContext): void {
+    if (this.options.armSealer === false) return;
     const storage = engine as unknown as Partial<AuditSealerEngine>;
     if (typeof storage.getDriverForObject !== 'function' || typeof storage.registry?.getAllObjects !== 'function') return;
     const sealEngine = storage as AuditSealerEngine;
-    const crypto = this.options.cryptoProvider;
+    const option = this.options.cryptoProvider;
+    const crypto = typeof option === 'function' ? option() : option;
     const localSigner = crypto ? new LocalCheckpointSigner({ engine: sealEngine, crypto }) : undefined;
     const optional = <T>(name: string): T | undefined => {
       try {
@@ -833,7 +861,7 @@ export class AuditPlugin implements Plugin {
    * different problems, and the log now distinguishes them.
    */
   private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
-    const objects = [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey];
+    const objects = [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey, SysAuditAmendment];
     // [#22984] FIRST: a deployment that declared its DDL managed out-of-band
     // gets none from here either. See "Why the flag skips this provisioning".
     if (bootSchemaSyncSkipped(engine)) {

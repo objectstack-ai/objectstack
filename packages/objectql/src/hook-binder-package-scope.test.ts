@@ -218,7 +218,8 @@ describe('a hook handler name resolves from its own package\'s holding when two 
     const { engine } = makeEngine();
     const ran: string[] = [];
     registerBoth(engine, ran);
-    expect(engine.resolveFunctionEntry('shared_stamp')?.packageId, 'the bare map holds the last registration').toBe('app:com.example.b');
+    // [#31700, epic seat ruling R2-C] The bare read of a name two packages hold picks neither.
+    expect(() => engine.resolveFunctionEntry('shared_stamp'), 'the bare read refuses the two-holder name').toThrow(/com\.example\.a[\s\S]*com\.example\.b/);
 
     const result = bindHooksToEngine(engine, [hookNaming('a_own_two_holders', 'shared_stamp')], {
       packageId: 'app:com.example.a',

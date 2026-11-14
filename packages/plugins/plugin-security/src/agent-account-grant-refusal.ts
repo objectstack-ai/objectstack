@@ -21,9 +21,15 @@
  *
  * - `sys_user_permission_set`: the set the row holds AFTER the write (the
  *   payload's `permission_set`, else the stored one), read the way every
- *   by-name grant reader reads it (`grantSetNameOf`);
+ *   by-name grant reader reads it (`grantSetNameOf`), at the package the row
+ *   stores (`permission_set_package`, ADR-0150 D8 R1);
  * - `sys_user_position`: every set the position the row holds after the
- *   write binds in its catalog definition.
+ *   write binds in its catalog definition, each read from that position
+ *   (ADR-0150 D3), as the authorization resolver reads it.
+ *
+ * [#32164] A set read the rule refuses (two holders, none placed) fails
+ * closed: every holder of the name the catalog serves is judged, and a breach
+ * of any refuses the write.
  *
  * For an INSERT (one dispatch per row) and an UPDATE (one dispatch per
  * matched row, with that row's stored image as `previous`). The holder is the
@@ -66,7 +72,15 @@
  * code (ADR-0112).
  */
 
-import { isAgentAccountRow, securityCatalogReaderOf, type SecurityCatalogReader } from '@objectstack/core';
+import {
+  isAgentAccountRow,
+  resolveCatalogReference,
+  securityCatalogReaderOf,
+  storedPermissionSetScope,
+  type SecurityCatalogEntry,
+  type SecurityCatalogReader,
+  type SecurityCatalogReferenceScope,
+} from '@objectstack/core';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import { classifyFilterToken, isPlainRecord } from '@objectstack/spec/data';
 import { validationFailure } from '@objectstack/types';
@@ -84,6 +98,8 @@ export const AGENT_ACCOUNT_GRANT_HOOK_PACKAGE = 'plugin-security:agent-account-g
 const HOOK_PRIORITY = 45;
 
 const HOLDER_FIELD = 'user_id';
+/** [ADR-0150 D8 R1] The grant's package column, which the resolver reads the set by. */
+const GRANT_PACKAGE_FIELD = 'permission_set_package';
 const USER_OBJECT = 'sys_user';
 
 /** The grant objects judged, each with the column its refusal is at. */
@@ -212,19 +228,36 @@ async function isAgentAccount(engine: AgentAccountGrantEngine, userId: string, t
   return Array.isArray(rows) && rows.some((r: any) => String(r?.id) === userId && isAgentAccountRow(r));
 }
 
-/** The ceiling breaches of the set `name`, per its catalog definition; `[]` when the catalog holds none. */
-async function setBreaches(catalog: SecurityCatalogReader, name: string): Promise<string[]> {
-  const entry = await catalog.resolve('permission', name);
-  return entry ? agentCeilingBreaches(entry.definition) : [];
+/**
+ * The ceiling breaches of the set `name`, read the way the authorization
+ * resolver reads the reference (`scope`: a grant's stored package column, or
+ * the position that binds it — ADR-0150 D3/D8), per its catalog definition;
+ * `[]` when the catalog holds none.
+ *
+ * [#32164] A read the rule refuses (two holders, none named) places no set,
+ * so it fails CLOSED: every holder of the name the catalog serves is judged,
+ * and a breach of any refuses the write. Before #32164 the bare name was read,
+ * and a refused read answered no breach.
+ */
+async function setBreaches(catalog: SecurityCatalogReader, name: string, scope?: SecurityCatalogReferenceScope): Promise<string[]> {
+  const answer = await resolveCatalogReference(catalog, 'permission', name, scope);
+  if (answer.status === 'resolved') return agentCeilingBreaches(answer.entry.definition);
+  if (answer.status === 'not-found') return [];
+  const breaches = new Set<string>();
+  for (const entry of await catalog.list('permission')) {
+    if (entry.name !== name) continue;
+    for (const breach of agentCeilingBreaches(entry.definition)) breaches.add(breach);
+  }
+  return [...breaches];
 }
 
-/** The sets the position `name` binds that breach the ceiling, per the catalog definitions. */
+/** The sets the position `name` binds that breach the ceiling, each read from the position (ADR-0150 D3), per the catalog definitions. */
 async function positionBreachingSets(catalog: SecurityCatalogReader, name: string): Promise<AgentAccountBreachingSet[]> {
-  const entry = await catalog.resolve('position', name);
+  const entry: SecurityCatalogEntry | undefined = await catalog.resolve('position', name);
   const bound = Array.isArray(entry?.definition?.permissionSets) ? entry!.definition.permissionSets : [];
   const out: AgentAccountBreachingSet[] = [];
   for (const setName of new Set(bound.filter((n): n is string => typeof n === 'string' && n !== ''))) {
-    const breaches = await setBreaches(catalog, setName);
+    const breaches = await setBreaches(catalog, setName, entry ? { position: entry } : undefined);
     if (breaches.length > 0) out.push({ name: setName, breaches });
   }
   return out;
@@ -240,6 +273,8 @@ async function judge(
   const userId = idOf(image[HOLDER_FIELD]);
   if (userId === undefined) return;
   const isGrant = ctx.object === GRANT_OBJECT;
+  // [#32164] The grant is read by the package it stores, as the resolver reads it.
+  const scope = isGrant ? storedPermissionSetScope(image[GRANT_PACKAGE_FIELD]) : undefined;
   const value = isGrant ? grantSetNameOf(image) : nameOf(image[POSITION_FIELD]);
   if (value === undefined) return;
   const catalog = securityCatalogReaderOf(engine);
@@ -252,7 +287,7 @@ async function judge(
   let breaching: AgentAccountBreachingSet[];
   try {
     breaching = isGrant
-      ? [{ name: value, breaches: await setBreaches(catalog, value) }].filter((s) => s.breaches.length > 0)
+      ? [{ name: value, breaches: await setBreaches(catalog, value, scope) }].filter((s) => s.breaches.length > 0)
       : await positionBreachingSets(catalog, value);
   } catch (e) {
     logger?.warn?.(
@@ -286,6 +321,13 @@ async function onUpdate(engine: AgentAccountGrantEngine, ctx: any, logger: Logge
     [HOLDER_FIELD]: hasOwn(data, HOLDER_FIELD) ? (data as any)[HOLDER_FIELD] : previous[HOLDER_FIELD],
     [valueField]: hasOwn(data, valueField) ? (data as any)[valueField] : previous[valueField],
   };
+  if (ctx.object === GRANT_OBJECT) {
+    // [#32164] The package the row stores after the write: a re-name's, which
+    // the package stamp (priority 40) has written by now; otherwise the stored
+    // one — a caller's own value of the readonly column is stripped.
+    const renamed = hasOwn(data, valueField) && (data as any)[valueField] !== previous[valueField];
+    image[GRANT_PACKAGE_FIELD] = renamed ? (data as any)[GRANT_PACKAGE_FIELD] : previous[GRANT_PACKAGE_FIELD];
+  }
   await judge(engine, ctx, image, logger);
 }
 

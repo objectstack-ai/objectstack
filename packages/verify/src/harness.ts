@@ -49,6 +49,7 @@ import { createHostImporter, hostImportFailureKind } from '@objectstack/types/no
 import { materializeStackPlugin, resolveCapabilityArgument } from '@objectstack/core';
 import { createHandle, type VerifyHandle } from './handle.js';
 import { constructServedProviders } from './required-providers.js';
+import { registryLevelFor, resolveBootLogLevel, scopeRegistryLogLevel } from './boot-log-level.js';
 
 /** A Hono app exposes `.request(path, init)` returning a standard `Response`. */
 interface InjectableApp {
@@ -104,7 +105,6 @@ class SimulatedOrgScopingPlugin {
 const API_PREFIX = '/api/v1';
 const DEFAULT_ADMIN_EMAIL = 'admin@objectos.ai';
 const DEFAULT_ADMIN_PASSWORD = 'admin123';
-const DEFAULT_AUTH_SECRET = 'objectstack-verify-secret';
 
 /**
  * The enterprise multi-org runtime this harness mounts under `multiTenant: true`
@@ -159,6 +159,33 @@ function harnessCryptoProvider(): LocalCryptoProvider {
   return processCryptoProvider;
 }
 
+/** This process's auth signing secret; created on the first boot, never persisted. */
+let processAuthSecret: string | undefined;
+
+/**
+ * [#32154] The auth signing secret every `bootStack` in this process hands to
+ * `AuthPlugin` when the caller passes no `authSecret`: 32 random bytes,
+ * base64url-encoded (43 characters).
+ *
+ * It replaced a fixed 25-character string, which better-auth reported on every
+ * boot outside a test runner as both shorter than 32 characters and
+ * low-entropy: two `WARN [better-auth]` lines per boot, four per `os verify`
+ * run (it boots twice), on a run that had passed. A verifier that prints
+ * warnings about its own setup teaches its reader to skip warnings.
+ *
+ * It is the PROCESS's secret, not the boot's, for the reason
+ * {@link harnessCryptoProvider}'s key is: better-auth signs and encrypts with
+ * it, and two boots over one `BootOptions.databaseFile` (the harness's restart)
+ * must accept each other's sessions, as a real host's stable secret lets them.
+ * ⛔ It never leaves this process's memory: nothing is read from the
+ * environment and nothing is written. Exported for its pin
+ * (`harness.quiet-boot.test.ts`); ⛔ not re-exported from `./index.ts`.
+ */
+export function harnessAuthSecret(): string {
+  processAuthSecret ??= randomBytes(32).toString('base64url');
+  return processAuthSecret;
+}
+
 /**
  * A booted stack: the HTTP surface (`api` / `raw` / `signIn` / `signUp` /
  * `apiAs`) plus the in-process handle (`hooks` / `validate` / `flows` /
@@ -188,7 +215,7 @@ export interface VerifyStack extends VerifyHandle {
 export interface BootOptions {
   /** Override the dev admin credentials the harness signs in with. */
   admin?: { email: string; password: string };
-  /** Override the auth signing secret. Defaults to a fixed in-process dev secret. */
+  /** Override the auth signing secret. Defaults to a random secret held in this process's memory. */
   authSecret?: string;
   /**
    * Override the SecurityPlugin instance. Pass a `new SecurityPlugin({...})`
@@ -1004,7 +1031,10 @@ async function bootClaimed(
     else process.env.OS_TENANCY_POSTURE = prevTenancyPosture;
   };
 
-  const kernel = new ObjectKernel();
+  // [#32154] `warn` unless `OS_LOG_LEVEL` says otherwise — see
+  // `./boot-log-level.ts` for why, and for how to get the whole log back.
+  const bootLogLevel = resolveBootLogLevel();
+  const kernel = new ObjectKernel({ logger: { level: bootLogLevel } });
 
   // Data engine + in-memory SQLite (pure-JS WASM driver — no native build, CI-safe).
   // The default datasource is a DECLARED DEFINITION connected through the
@@ -1106,7 +1136,7 @@ async function bootClaimed(
   // positions, not org roles. `membership-role-vocabulary.dogfood.test.ts`
   // boots through this harness and asserts exactly that.
   await kernel.use(new AuthPlugin({
-    secret: opts.authSecret ?? DEFAULT_AUTH_SECRET,
+    secret: opts.authSecret ?? harnessAuthSecret(),
   }));
 
   // ADR-0062 — datasource connection service (registers 'datasource-connection'),
@@ -1343,7 +1373,14 @@ async function bootClaimed(
   await kernel.use(createDispatcherPlugin({}));
 
   // Fire the ready lifecycle: seed data, dev-admin bootstrap, route registration.
-  await kernel.bootstrap();
+  // [#32154] The registry's `[Registry] …` lines follow the kernel's level; it
+  // is built, and speaks first, inside this call (see `scopeRegistryLogLevel`).
+  const restoreRegistryLogLevel = scopeRegistryLogLevel(registryLevelFor(bootLogLevel));
+  try {
+    await kernel.bootstrap();
+  } finally {
+    restoreRegistryLogLevel();
+  }
 
   // Secret fields (Field.secret) refuse to persist without a crypto provider —
   // mirror `objectstack dev`, which wires one in development so an app with an

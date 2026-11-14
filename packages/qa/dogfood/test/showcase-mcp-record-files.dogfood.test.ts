@@ -23,6 +23,26 @@
 // a `receipt` file field). The member owns one invoice and its line; the admin
 // owns the other pair, which the member can neither read nor edit.
 //
+// [#32734] And a field that cannot take the upload when it arrives: an extra
+// object, `dogfood_upload_claim`, whose multi-file `invoices` field is
+// read-only once the claim is approved (`readonlyWhen`). A link minted on the
+// draft and used after the approval is refused with the reason, attaches
+// nothing and keeps no file — never "attached" for a change the engine
+// ignored.
+//
+// [#32686] And a record that cannot be created without its file: an extra
+// object, `dogfood_expense_line`, whose `invoice` file field is required. The
+// agent asks for a link naming the object and the field (no record), the
+// member uploads through it, and the agent's `create_record` names the file id
+// the link answered: two agent calls and one upload, over the real
+// `/api/v1/mcp` and the real upload-link route.
+//
+// [#32747] And one link, three PDFs: a link for the claim's multi-file
+// `invoices` takes the three invoices in one send, as the page's form sends
+// them through the served stack (`multipart/form-data`, `file0` … `file2`
+// and `count`), and lands all three in one write; a link for a claim not yet
+// created takes `count: 3` and answers the three ids `create_record` names.
+//
 // Not eligible for the shared showcase project: it boots its own plugins.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -61,9 +81,50 @@ const memberSet = PermissionSetSchema.parse({
     showcase_invoice: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     showcase_invoice_line: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     sys_attachment: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+    dogfood_upload_claim: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+    dogfood_expense_line: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
   },
   rowLevelSecurity: [RLS.ownerPolicy('showcase_invoice', 'created_by')],
 });
+
+/** [#32734] An expense claim whose invoices lock once it is approved. */
+const UPLOAD_CLAIM = 'dogfood_upload_claim';
+/** [#32686] An expense line whose e-invoice is required. */
+const EXPENSE_LINE = 'dogfood_expense_line';
+const uploadClaimApp = {
+  name: 'com.dogfood.upload-claim',
+  type: 'standard' as const,
+  version: '0.0.0',
+  optionalDependencies: ['com.objectstack.engine.objectql'],
+  async init(ctx: any) {
+    ctx.getService('manifest').register({
+      id: 'com.dogfood.upload-claim',
+      name: 'Upload claim',
+      version: '0.0.0',
+      type: 'plugin',
+      scope: 'system',
+      objects: [{
+        name: UPLOAD_CLAIM,
+        label: 'Upload Claim',
+        fields: {
+          name: { type: 'text', label: 'Name' },
+          status: { type: 'text', label: 'Status' },
+          invoices: { type: 'file', label: 'Invoices', multiple: true, readonlyWhen: "record.status == 'approved'" },
+        },
+      }, {
+        // [#32686] An expense line that cannot be saved without its e-invoice.
+        name: EXPENSE_LINE,
+        label: 'Expense Line',
+        fields: {
+          invoice_no: { type: 'text', label: 'Invoice No.' },
+          amount: { type: 'number', label: 'Amount' },
+          invoice: { type: 'file', label: 'E-invoice', required: true },
+        },
+      }],
+    });
+  },
+  async start() {},
+};
 
 /** A one-page PDF whose text layer says `text`. */
 function minimalPdf(text: string): Buffer {
@@ -174,6 +235,7 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       extraPlugins: [
         new MCPServerPlugin(),
         new StorageServicePlugin({ adapter: 'local', local: { rootDir }, bindToSettings: false }),
+        uploadClaimApp as never,
       ],
     });
     adminToken = await stack.signIn();
@@ -388,6 +450,257 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       } finally {
         storage.setLimitsSnapshot({});
       }
+    });
+  });
+
+  describe('[#32734] a field read-only when the upload arrives (`readonlyWhen`)', () => {
+    const invoicesOf = async (id: string): Promise<string[]> => {
+      const row = await ql.findOne(UPLOAD_CLAIM, { where: { id }, ...SYS });
+      const value = row?.invoices;
+      const list = Array.isArray(value) ? value : value == null ? [] : [value];
+      return list.map((v: any) => String(typeof v === 'object' ? v.id : v));
+    };
+    const filesNamed = (name: string) => ql.find('sys_file', { where: { name }, ...SYS });
+
+    it('a draft takes the upload; after approval a link minted before is refused 403 with the reason, attaching and keeping nothing', async () => {
+      const users = (await ql.find('sys_user', { where: { email: MEMBER_EMAIL }, ...SYS })) as Array<{ id: string }>;
+      const created = await ql.insert(UPLOAD_CLAIM, { name: 'Trip to Lyon', status: 'draft', created_by: users[0]!.id, owner_id: users[0]!.id }, SYS);
+      const claimId = String(created?.id ?? created?.record?.id ?? created);
+
+      const draft = await mint({ objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
+      const first = await put(draft.path, minimalPdf('Hotel invoice'), { 'x-file-name': 'hotel-invoice.pdf' });
+      const firstBody: any = await first.json();
+      expect(first.status, JSON.stringify(firstBody)).toBe(200);
+      expect(await invoicesOf(claimId)).toEqual([firstBody.data.fileId]);
+      expect((await stack.apiAs(memberToken, 'GET', `/data/${UPLOAD_CLAIM}/${claimId}`)).status, 'the member owns the claim').toBe(200);
+
+      const late = await mint({ objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
+      await ql.update(UPLOAD_CLAIM, { status: 'approved' }, { where: { id: claimId }, ...SYS });
+      const res = await put(late.path, minimalPdf('Taxi invoice'), { 'x-file-name': 'taxi-invoice.pdf' });
+      const body: any = await res.json();
+
+      expect(res.status, JSON.stringify(body)).toBe(403);
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe('FIELD_NOT_ACCESSIBLE');
+      expect(body.error.message).toMatch(/^Nothing was attached: /);
+      expect(body.error.message).toContain(`${UPLOAD_CLAIM}.invoices`);
+      expect(await invoicesOf(claimId)).toEqual([firstBody.data.fileId]);
+      expect(await filesNamed('taxi-invoice.pdf')).toEqual([]);
+      // Spent: the link is not usable a second time.
+      expect((await put(late.path, minimalPdf('Taxi invoice'))).status).toBe(404);
+    });
+
+    // [#32768] The issue-time half: once the lock holds, the agent gets no
+    // link at all, refused for the lock `update_record` reports on the same
+    // field (`droppedFields`, reason `readonly_when`), in the words the
+    // update's strict refusal uses for it.
+    it('after approval create_upload_link gets no link, refused 403 for the lock update_record reports on the field', async () => {
+      const users = (await ql.find('sys_user', { where: { email: MEMBER_EMAIL }, ...SYS })) as Array<{ id: string }>;
+      const created = await ql.insert(UPLOAD_CLAIM, { name: 'Trip to Porto', status: 'draft', created_by: users[0]!.id, owner_id: users[0]!.id }, SYS);
+      const claimId = String(created?.id ?? created?.record?.id ?? created);
+      const draft = await mint({ objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
+      const first = await put(draft.path, minimalPdf('Train invoice'), { 'x-file-name': 'train-invoice.pdf' });
+      const firstBody: any = await first.json();
+      expect(first.status, JSON.stringify(firstBody)).toBe(200);
+
+      await ql.update(UPLOAD_CLAIM, { status: 'approved' }, { where: { id: claimId }, ...SYS });
+      const linksBefore = (await ql.find('sys_file', { where: { name: 'upload-link', status: 'pending' }, ...SYS })).length;
+      const error = await refused(memberToken, 'create_upload_link', { objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
+      expect(error.code).toBe('FIELD_NOT_ACCESSIBLE');
+      expect(error.message).toBe(
+        `You cannot attach a file to ${UPLOAD_CLAIM}.invoices: the field is read-only in the target record's current state ` +
+          '(a TRUE `readonlyWhen` predicate).',
+      );
+      expect((await ql.find('sys_file', { where: { name: 'upload-link', status: 'pending' }, ...SYS })).length).toBe(linksBefore);
+
+      const { json } = await ok(memberToken, 'update_record', {
+        objectName: UPLOAD_CLAIM, recordId: claimId, data: { invoices: [firstBody.data.fileId] },
+      });
+      expect(json.droppedFields, JSON.stringify(json)).toEqual(
+        expect.arrayContaining([expect.objectContaining({ reason: 'readonly_when', fields: ['invoices'] })]),
+      );
+    });
+  });
+
+  // [#32686] Ruling A: an agent creates a record whose file field is
+  // required. The link names the object and the field, no record; the member
+  // uploads; the create names the file id the link answered.
+  describe('[#32686] a required file field, filled when the record is created (`dogfood_expense_line.invoice`)', () => {
+    const lineOf = (id: string) => ql.findOne(EXPENSE_LINE, { where: { id }, ...SYS });
+    const invoiceOf = async (id: string): Promise<string | null> => {
+      const value = (await lineOf(id))?.invoice;
+      return value == null ? null : String(typeof value === 'object' ? value.id : value);
+    };
+
+    it('two agent calls and one upload: create_upload_link with no record, the upload, create_record naming fileIds[0]', async () => {
+      // Without the file the line cannot be created: the precondition the card measures.
+      const missing = await refused(memberToken, 'create_record', { objectName: EXPENSE_LINE, data: { invoice_no: 'FP-0001', amount: 88 } });
+      expect(JSON.stringify(missing), 'the required e-invoice refuses the create').toContain('invoice');
+
+      // Agent call 1: a link for the field of a record not yet created.
+      const { path, answer } = await mint({ objectName: EXPENSE_LINE, field: 'invoice' });
+      expect(answer).toMatchObject({ singleUse: true, objectName: EXPENSE_LINE, field: 'invoice' });
+      expect(answer).not.toHaveProperty('recordId');
+      expect(answer.fileIds).toHaveLength(1);
+      const [fileId] = answer.fileIds as string[];
+
+      // The browser: the page the member opens says what is wanted and that
+      // the file will be received (no record holds it yet), and names nothing.
+      const page = await open(path);
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain('The file was received');
+      expect(html).not.toContain(EXPENSE_LINE);
+      expect(html).not.toContain(MEMBER_EMAIL);
+
+      // The upload, as the page's script sends it.
+      const pdf = minimalPdf('E-invoice FP-0001');
+      const res = await put(path, pdf, { 'x-file-name': 'fp-0001.pdf' });
+      const body: any = await res.json();
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      expect(body.data).toEqual({ fileId, fileIds: [fileId], size: pdf.length, field: 'invoice' });
+      expect(await fileRow(fileId)).toMatchObject({ status: 'committed', size: pdf.length, ref_id: null, name: 'fp-0001.pdf' });
+
+      // Agent call 2: the create names the file id; the record holds the file.
+      const { json } = await ok(memberToken, 'create_record', {
+        objectName: EXPENSE_LINE,
+        data: { invoice_no: 'FP-0001', amount: 88, invoice: fileId },
+      });
+      const lineId = String(json.id ?? json.record?.id);
+      expect(await invoiceOf(lineId)).toBe(fileId);
+      expect(await fileRow(fileId)).toMatchObject({ ref_object: EXPENSE_LINE, ref_id: lineId, ref_field: 'invoice' });
+
+      // read_file reads it back through the record, as for any record's file.
+      const read = await ok(memberToken, 'read_file', { objectName: EXPENSE_LINE, recordId: lineId, field: 'invoice' });
+      expect(read.content.map((c: any) => c.text ?? '').join('\n')).toContain('E-invoice FP-0001');
+    });
+
+    it('another user\'s create naming the member\'s upload is refused as a file they cannot open, and the file stays unclaimed', async () => {
+      const { path, answer } = await mint({ objectName: EXPENSE_LINE, field: 'invoice' });
+      const [fileId] = answer.fileIds as string[];
+      expect((await put(path, minimalPdf('E-invoice FP-0002'), { 'x-file-name': 'fp-0002.pdf' })).status).toBe(200);
+
+      const error = await refused(adminToken, 'create_record', { objectName: EXPENSE_LINE, data: { invoice_no: 'FP-0002', invoice: fileId } });
+      expect(JSON.stringify(error)).toContain('it is not a file you can open');
+      expect(await fileRow(fileId)).toMatchObject({ status: 'committed', ref_id: null });
+      // Nor can that user download it while no record holds it.
+      const download = await stack.apiAs(adminToken, 'GET', `/storage/files/${fileId}/url`);
+      const downloadBody: any = await download.json();
+      expect(download.status, JSON.stringify(downloadBody)).toBe(403);
+      expect(downloadBody.error?.code).toBe('FILE_DOWNLOAD_DENIED');
+
+      // The member's own create still takes it.
+      const { json } = await ok(memberToken, 'create_record', { objectName: EXPENSE_LINE, data: { invoice_no: 'FP-0002', invoice: fileId } });
+      expect(await invoiceOf(String(json.id ?? json.record?.id))).toBe(fileId);
+    });
+
+    it('a member who cannot create the object gets no link: the create verdict refuses it before anything is reserved', async () => {
+      const linksBefore = (await ql.find('sys_file', { where: { name: 'upload-link', status: 'pending' }, ...SYS })).length;
+      // `showcase_task` is not in the member's set; its `cover` is an image field.
+      const error = await refused(memberToken, 'create_upload_link', { objectName: 'showcase_task', field: 'cover' });
+      expect(error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      expect(error.message).toBe('You cannot upload a file for a new showcase_task: you cannot create showcase_task records.');
+      expect((await ql.find('sys_file', { where: { name: 'upload-link', status: 'pending' }, ...SYS })).length).toBe(linksBefore);
+    });
+  });
+
+  // [#32747] Ruling A: one link, several files, on a multi-file field.
+  describe('[#32747] one link, three PDFs (`dogfood_upload_claim.invoices`)', () => {
+    const invoicesOf = async (id: string): Promise<string[]> => {
+      const row = await ql.findOne(UPLOAD_CLAIM, { where: { id }, ...SYS });
+      const value = row?.invoices;
+      const list = Array.isArray(value) ? value : value == null ? [] : [value];
+      return list.map((v: any) => String(typeof v === 'object' ? v.id : v));
+    };
+    /** The page's several-file send: one form, `count` and `file0` … `fileN-1`, each name URI-encoded. */
+    const putForm = (path: string, picks: Array<{ name: string; bytes: Buffer }>, token: string | null = memberToken) => {
+      const form = new FormData();
+      form.append('count', String(picks.length));
+      picks.forEach((pick, i) => {
+        form.append(`file${i}`, new Blob([new Uint8Array(pick.bytes)], { type: 'application/pdf' }), encodeURIComponent(pick.name));
+      });
+      // The page's form says it is the form (`x-upload-link-form: several`); any other body is the file.
+      return stack.raw(path, { method: 'PUT', headers: { ...authOf(token), 'x-upload-link-form': 'several' }, body: form });
+    };
+    const threeInvoices = () => [
+      { name: 'hotel-invoice.pdf', bytes: minimalPdf('Hotel invoice 268.00') },
+      { name: 'taxi-invoice.pdf', bytes: minimalPdf('Taxi invoice 42.50') },
+      { name: 'meal-invoice.pdf', bytes: minimalPdf('Meal invoice 96.00') },
+    ];
+
+    it('a claim\'s link takes the three invoices in one send: three ids, three files on the field, each read back', async () => {
+      const users = (await ql.find('sys_user', { where: { email: MEMBER_EMAIL }, ...SYS })) as Array<{ id: string }>;
+      const created = await ql.insert(UPLOAD_CLAIM, { name: 'Trip to Turin', status: 'draft', created_by: users[0]!.id, owner_id: users[0]!.id }, SYS);
+      const claimId = String(created?.id ?? created?.record?.id ?? created);
+
+      const { path } = await mint({ objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
+      const page = await open(path);
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain('<input id="file" type="file" multiple>');
+      expect(html).toContain('Pick up to 10');
+
+      const picks = threeInvoices();
+      const res = await putForm(path, picks);
+      const body: any = await res.json();
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      const fileIds = body.data.fileIds as string[];
+      expect(fileIds).toHaveLength(3);
+      expect(body.data.files).toEqual(fileIds.map((fileId, i) => ({ fileId, size: picks[i]!.bytes.length })));
+      expect(await invoicesOf(claimId)).toEqual(fileIds);
+      for (const [i, fileId] of fileIds.entries()) {
+        expect(await fileRow(fileId)).toMatchObject({ status: 'committed', name: picks[i]!.name, ref_object: UPLOAD_CLAIM, ref_id: claimId, ref_field: 'invoices' });
+        const read = await ok(memberToken, 'read_file', { objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices', fileId });
+        expect(read.content.map((c: any) => c.text ?? '').join('\n')).toContain(['Hotel', 'Taxi', 'Meal'][i]);
+      }
+      // One send spent the link.
+      expect((await putForm(path, picks.slice(0, 1))).status).toBe(404);
+    });
+
+    it('a claim not yet created: count 3 answers three ids, one send fills them, create_record names all three', async () => {
+      const { path, answer } = await mint({ objectName: UPLOAD_CLAIM, field: 'invoices', count: 3 });
+      expect(answer.fileIds).toHaveLength(3);
+      expect(answer.instructions).toContain('pick all 3 files');
+      const page = await (await open(path)).text();
+      expect(page).toContain('3 files were asked for');
+
+      const res = await putForm(path, threeInvoices());
+      const body: any = await res.json();
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      expect(body.data.fileIds).toEqual(answer.fileIds);
+
+      const { json } = await ok(memberToken, 'create_record', {
+        objectName: UPLOAD_CLAIM,
+        data: { name: 'Trip to Genoa', status: 'draft', invoices: answer.fileIds },
+      });
+      const claimId = String(json.id ?? json.record?.id);
+      expect(await invoicesOf(claimId)).toEqual(answer.fileIds);
+    });
+
+    it('one PDF of three the size limit refuses: nothing lands and the same link then takes the three', async () => {
+      const users = (await ql.find('sys_user', { where: { email: MEMBER_EMAIL }, ...SYS })) as Array<{ id: string }>;
+      const created = await ql.insert(UPLOAD_CLAIM, { name: 'Trip to Bari', status: 'draft', created_by: users[0]!.id, owner_id: users[0]!.id }, SYS);
+      const claimId = String(created?.id ?? created?.record?.id ?? created);
+      const { path } = await mint({ objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 0.002, authored: true } });
+      try {
+        const picks = threeInvoices();
+        picks[1] = { name: 'big-invoice.pdf', bytes: Buffer.concat([picks[1]!.bytes, Buffer.alloc(4096, 32)]) };
+        const res = await putForm(path, picks);
+        const body: any = await res.json();
+        expect(res.status, JSON.stringify(body)).toBe(413);
+        expect(await invoicesOf(claimId)).toEqual([]);
+        // Nothing of the send is stored: no file names the claim, and the
+        // refused PDF's name is nowhere (the other two names recur in the
+        // earlier cases' claims, so they are judged by the claim instead).
+        expect(await ql.find('sys_file', { where: { ref_object: UPLOAD_CLAIM, ref_id: claimId }, ...SYS })).toEqual([]);
+        expect(await ql.find('sys_file', { where: { name: 'big-invoice.pdf' }, ...SYS })).toEqual([]);
+      } finally {
+        storage.setLimitsSnapshot({});
+      }
+      const res = await putForm(path, threeInvoices());
+      expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
+      expect(await invoicesOf(claimId)).toHaveLength(3);
     });
   });
 });

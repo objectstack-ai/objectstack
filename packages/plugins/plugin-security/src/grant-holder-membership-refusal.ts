@@ -327,7 +327,7 @@ function memoOf(store: WeakMap<object, Map<string, boolean>>, ctx: any): Map<str
  * that object registered (see *A holder the caller cannot read*). Anything
  * else — a schema this engine cannot hand over included — answers no.
  */
-function referenceCheckAsksCaller(engine: MembershipEngine, object: string): boolean {
+function referenceCheckAsksCaller(engine: Pick<MembershipEngine, 'getSchema'>, object: string): boolean {
   if (typeof engine.getSchema !== 'function') return false;
   const def = (engine.getSchema(object) as { fields?: Record<string, any> } | undefined)?.fields?.[HOLDER_FIELD];
   if (!def || def.readonly === true) return false;
@@ -361,10 +361,12 @@ async function callerReadsHolder(ctx: any, holder: unknown, userId: string): Pro
 /**
  * Is `holder` — a value this write NAMES — one the caller cannot read? Then
  * the engine's reference check answers it, and this hook judges nothing for
- * it (see *A holder the caller cannot read*).
+ * it (see *A holder the caller cannot read*). Exported for the grant's
+ * one-grant check (`stored-permission-set-package-stamp.ts`), which steps
+ * aside on the same holders for the same reason.
  */
-async function holderLeftToReferenceCheck(
-  engine: MembershipEngine,
+export async function holderLeftToReferenceCheck(
+  engine: Pick<MembershipEngine, 'getSchema'>,
   ctx: any,
   holder: unknown,
   userId: string,

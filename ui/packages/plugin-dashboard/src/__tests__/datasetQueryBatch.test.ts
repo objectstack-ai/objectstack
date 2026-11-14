@@ -79,3 +79,35 @@ describe('createDatasetQueryCoalescer (objectstack#32165)', () => {
     expect(settled).toEqual([{ status: 'rejected', reason: failure }, { status: 'rejected', reason: failure }]);
   });
 });
+
+describe('createDatasetQueryCoalescer carries the caller package per request (ADR-0150 D3)', () => {
+  it('two callers\' queries asked in one window never share a batch: one batch per caller, each with its own caller', async () => {
+    const { source, queryDataset, queryDatasetBatch } = makeSource();
+    const coalescer = createDatasetQueryCoalescer(source);
+    await Promise.all([
+      coalescer.queryDataset('sales', {}, { callerPackage: 'com.acme.alpha' }),
+      coalescer.queryDataset('pipeline', {}, { callerPackage: 'com.acme.beta' }),
+      coalescer.queryDataset('sales', {}, { callerPackage: 'com.acme.beta' }),
+      coalescer.queryDataset('pipeline', {}, { callerPackage: 'com.acme.alpha' }),
+      coalescer.queryDataset('sales', {}),
+    ]);
+    expect(queryDatasetBatch.mock.calls.map(([queries, options]) => [queries.map((q) => q.dataset), options])).toEqual([
+      [['sales', 'pipeline'], { callerPackage: 'com.acme.alpha' }],
+      [['pipeline', 'sales'], { callerPackage: 'com.acme.beta' }],
+    ]);
+    // CONTROL: the package-less query is alone in its group and goes with no options.
+    expect(queryDataset.mock.calls).toEqual([['sales', {}]]);
+  });
+
+  it('the caller arm and the exact qualifier are separate groups, never merged into one request', async () => {
+    const { source, queryDatasetBatch } = makeSource();
+    const coalescer = createDatasetQueryCoalescer(source);
+    await Promise.all([
+      coalescer.queryDataset('a', {}, { callerPackage: 'crm' }),
+      coalescer.queryDataset('b', {}, { callerPackage: 'crm' }),
+      coalescer.queryDataset('c', {}, { packageId: 'crm' }),
+      coalescer.queryDataset('d', {}, { packageId: 'crm' }),
+    ]);
+    expect(queryDatasetBatch.mock.calls.map(([, options]) => options)).toEqual([{ callerPackage: 'crm' }, { packageId: 'crm' }]);
+  });
+});

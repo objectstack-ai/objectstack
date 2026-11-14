@@ -101,7 +101,9 @@ beforeEach(() => {
     const connectorHolder = connectorNameResolver(ctx);
     // The plugin's holderOf, verbatim (`registerStoredReferenceBackfill`).
     holderOf = (type, name) =>
-        storedReferenceHolderOf(type === 'flow' ? automation.flowHolder(name) : connectorHolder(name, null));
+        storedReferenceHolderOf(type === 'flow'
+            ? automation.durableFlowHolder(name)
+            : connectorHolder(name, null, { includeDisabledPackages: true }));
 });
 
 const engines: ObjectQL[] = [];
@@ -192,7 +194,7 @@ describe('R10 — the dispatch key\'s coordinates (flowDispatchHolder): the bare
     });
 });
 
-describe('R8 — a paused run gains the package that holds its flow', () => {
+describe('R8 — a run, paused or terminal, gains the package that holds its flow', () => {
     async function seed(engine: ObjectQL): Promise<void> {
         for (const row of [
             run('r1', ONE_HOLDER, 'paused'),
@@ -201,10 +203,13 @@ describe('R8 — a paused run gains the package that holds its flow', () => {
             run('r4', TWO_HOLDERS, 'paused'),
             run('r5', ENV_FLOW, 'paused'),
             run('r6', NOBODY, 'paused'),
-            // Terminal and running rows are not asked (seat ruling Q4).
+            // [#31696 R3, ruling 6816878345] Terminal and running rows are asked
+            // too; a terminal row of a shared or environment name stays null.
             run('r7', ONE_HOLDER, 'completed'),
             run('r8', ONE_HOLDER, 'failed'),
             run('r9', ONE_HOLDER, 'running'),
+            run('r11', TWO_HOLDERS, 'completed'),
+            run('r12', ENV_FLOW, 'failed'),
             // Already names a package: never a candidate, never moved.
             run('r10', ONE_HOLDER, 'paused', { flow_package: 'com.acme.elsewhere' }),
         ]) {
@@ -212,7 +217,7 @@ describe('R8 — a paused run gains the package that holds its flow', () => {
         }
     }
 
-    it('binds a paused run of a flow one package holds; leaves every other row naming no package', async () => {
+    it('binds every run of a flow one package holds, terminal history included; leaves a shared, environment or unheld name\'s rows naming no package (CONTROL)', async () => {
         const engine = await boot();
         await seed(engine);
 
@@ -222,17 +227,18 @@ describe('R8 — a paused run gains the package that holds its flow', () => {
             r1: A, r2: A,
             r3: P,
             r4: null, r5: null, r6: null,
-            r7: null, r8: null, r9: null,
+            r7: A, r8: A, r9: A,
             r10: 'com.acme.elsewhere',
+            r11: null, r12: null,
         });
         expect(report.bound).toEqual([
-            { name: ONE_HOLDER, rows: 2, packageId: A },
+            { name: ONE_HOLDER, rows: 5, packageId: A },
             { name: OVERRIDDEN, rows: 1, packageId: P },
         ]);
         expect(report.ambiguous).toEqual([
-            { name: TWO_HOLDERS, rows: 1, candidates: [`package "${A}"`, `package "${B}"`] },
+            { name: TWO_HOLDERS, rows: 2, candidates: [`package "${A}"`, `package "${B}"`] },
         ]);
-        expect(report.unpackaged).toEqual([{ name: ENV_FLOW, rows: 1, holder: 'environment' }]);
+        expect(report.unpackaged).toEqual([{ name: ENV_FLOW, rows: 2, holder: 'environment' }]);
         expect(report.unheld).toEqual([{ name: NOBODY, rows: 1 }]);
     });
 
@@ -304,6 +310,90 @@ describe('R11 — a connector connection gains the package that holds its connec
         expect(report.ambiguous).toEqual([{ name: 'mailer', rows: 1, candidates: [`package "${A}"`, `package "${B}"`] }]);
         expect(report.unpackaged).toEqual([{ name: 'my_api', rows: 1, holder: 'environment' }]);
         expect(report.unheld).toEqual([{ name: 'gone', rows: 1 }]);
+        expect(report.duplicated).toEqual([]);
+    });
+
+    /**
+     * [#31699] R11's column is a part of its table's unique key
+     * (`(organization_id, connector_package, connector_name)`). A row naming no
+     * package beside a row of the same organization and instance that already
+     * names the holder cannot be bound: the write is a unique violation. It is
+     * reported by id and left naming no package, and the walk goes on, so the
+     * rows after it are still bound and the next boot is not stuck on it.
+     *
+     * ABLATED (the walk without its per-row catch, measured): the run throws
+     * `DuplicateRecordError` at k1, so the boot pass logs "did not finish",
+     * makes no R11 report, and every later boot stops at the same row.
+     */
+    it('a bind that would be a second row of one key is reported by id and left naming no package; the walk goes on', async () => {
+        const engine = await boot();
+        const connection = (id: string, name: string, pkg: string | null = null) => ({
+            id, organization_id: ORG, connector_name: name, connector_package: pkg,
+            grant: 'authorization_code', status: 'connected', revision: 1,
+        });
+        // k0 already names A; k1 is the stray row of the same key; k9 sorts after it.
+        for (const row of [connection('k0', 'billing', A), connection('k1', 'billing'), connection('k9', 'billing', null)]) {
+            if (row.id === 'k9') row.organization_id = 'org_b';
+            await engine.insert(CONNECTIONS.object, row, { context: { isSystem: true, tenantId: row.organization_id } });
+        }
+
+        const dry = await backfillStoredReferencePackages(engine, CONNECTIONS, holderOf, { dryRun: true });
+        expect(dry.duplicated).toEqual([{ id: 'k1', name: 'billing', packageId: A }]);
+        expect(dry.bound).toEqual([{ name: 'billing', rows: 1, packageId: A }]);
+
+        const report = await backfillStoredReferencePackages(engine, CONNECTIONS, holderOf);
+        expect(report.duplicated).toEqual([{ id: 'k1', name: 'billing', packageId: A }]);
+        expect(report.bound).toEqual([{ name: 'billing', rows: 1, packageId: A }]);
+        expect(await column(engine, CONNECTIONS.object, 'connector_package')).toEqual({ k0: A, k1: null, k9: A });
+
+        // The boot pass says so at warn, and finishes R11.
+        const logger = silentLogger();
+        const reports = await backfillStoredReferencePackagesAtBoot(engine, (object) => object === CONNECTIONS.object, holderOf, logger);
+        expect(reports.map((r) => [r.row, r.duplicated.length])).toEqual([['R11', 1]]);
+        expect(logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining(`'billing' row k1 → ${A}`),
+            { duplicated: [{ id: 'k1', name: 'billing', packageId: A }] },
+        );
+        expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('did not finish'), expect.anything());
+    });
+
+    it('two unbound rows of one key: the dry run binds one and lists the other, as the real run does', async () => {
+        const engine = await boot();
+        for (const id of ['k1', 'k2']) {
+            await engine.insert(CONNECTIONS.object, {
+                id, organization_id: ORG, connector_name: 'billing', grant: 'authorization_code', status: 'connected', revision: 1,
+            }, { context: SYS_ORG });
+        }
+        const dry = await backfillStoredReferencePackages(engine, CONNECTIONS, holderOf, { dryRun: true });
+        const real = await backfillStoredReferencePackages(engine, CONNECTIONS, holderOf);
+        expect(real.duplicated).toEqual([{ id: 'k2', name: 'billing', packageId: A }]);
+        expect(real.bound).toEqual([{ name: 'billing', rows: 1, packageId: A }]);
+        expect({ duplicated: dry.duplicated, bound: dry.bound }).toEqual({ duplicated: real.duplicated, bound: real.bound });
+    });
+
+    it('a unique violation no row of the holder confirms is not read as a second row: it ends the run', async () => {
+        const engine = await boot();
+        await engine.insert(CONNECTIONS.object, {
+            id: 'k1', organization_id: ORG, connector_name: 'billing', grant: 'authorization_code', status: 'connected', revision: 1,
+        }, { context: SYS_ORG });
+        vi.spyOn(engine, 'update').mockRejectedValueOnce(Object.assign(new Error('UNIQUE constraint failed: other_key'), { code: 'SQLITE_CONSTRAINT_UNIQUE' }));
+        await expect(backfillStoredReferencePackages(engine, CONNECTIONS, holderOf)).rejects.toThrow('other_key');
+    });
+
+    it('a unique violation on a reference whose key does not carry the package (R8) ends the run', async () => {
+        const engine = await boot();
+        await engine.insert(RUNS.object, run('r1', ONE_HOLDER, 'paused'), { context: SYS_ORG });
+        vi.spyOn(engine, 'update').mockRejectedValueOnce(Object.assign(new Error('UNIQUE constraint failed: runs'), { code: 'SQLITE_CONSTRAINT_UNIQUE' }));
+        await expect(backfillStoredReferencePackages(engine, RUNS, holderOf)).rejects.toThrow('UNIQUE constraint failed: runs');
+    });
+
+    it('CONTROL — any other failed write still ends the run', async () => {
+        const engine = await boot();
+        await engine.insert(CONNECTIONS.object, {
+            id: 'k1', organization_id: ORG, connector_name: 'billing', grant: 'authorization_code', status: 'connected', revision: 1,
+        }, { context: SYS_ORG });
+        vi.spyOn(engine, 'update').mockRejectedValueOnce(new Error('disk full'));
+        await expect(backfillStoredReferencePackages(engine, CONNECTIONS, holderOf)).rejects.toThrow('disk full');
     });
 });
 
@@ -322,6 +412,135 @@ describe('the boot pass', () => {
         const after = await backfillStoredReferencePackagesAtBoot(engine, () => true, holderOf, logger);
         expect(after.map((r) => r.row)).toEqual(['R9', 'R11']);
         expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('sys_automation_run.flow_package backfill did not finish'), { error: 'table gone' });
+    });
+});
+
+/**
+ * [#32183, contract review M2] A disable is reversible, so it moves no
+ * binding: the backfills behind R8–R11 ask every holder, a disabled package's
+ * included, while the execute reads (`flowHolder`, the connector resolver
+ * asked without the option) keep judging the served holders. Both
+ * registration orders of a clash.
+ *
+ * BASE (branch head 340f7cbc, measured): a flow or a connector whose only
+ * holder was disabled at boot was left null and reported as held by nothing;
+ * a sealed clash with one holder disabled was bound to the enabled holder, for
+ * good. On main (de141e32) each answered as pinned here.
+ */
+describe('#32183 — a disable moves no binding: R8–R11 ask every holder', () => {
+    const D = 'com.acme.parked';
+    const PARKED = 'parked_flow'; // shipped by D alone; D is disabled at boot
+    const REVERSED = 'reversed_sync'; // shipped by B, then by A
+    const at = new Date('2026-11-09T12:00:00.000Z');
+    const inside = new Date(at.getTime() - 24 * 3600_000).toISOString();
+    const W = '2026-11-08T12:00:00.000Z';
+    let servedConnector: ReturnType<typeof connectorNameResolver>;
+
+    beforeEach(() => {
+        registry.installPackage(manifest(D), 'code');
+        const flow = (name: string, packageId: string) => ({ name, label: name, type: 'autolaunched', nodes: [], edges: [], _packageId: packageId });
+        registry.registerItem('flow', flow(PARKED, D), 'name' as never, D);
+        registry.registerItem('flow', flow(REVERSED, B), 'name' as never, B);
+        registry.registerItem('flow', flow(REVERSED, A), 'name' as never, A);
+        registry.registerItem('connector', { name: 'parked_api', label: 'parked_api', type: 'api', authentication: { type: 'none' }, actions: [], _packageId: D }, 'name' as never, D);
+        registry.disablePackage(D);
+        registry.disablePackage(B);
+        servedConnector = connectorNameResolver({ getService: (name: string) => (name === 'objectql' ? { registry } : undefined) } as any);
+    });
+
+    it('the execute reads judge the served holders; the durable read judges every holder', () => {
+        expect(automation.flowHolder(PARKED)?.status).toBe('not-found');
+        expect(automation.durableFlowHolder(PARKED)).toMatchObject({ status: 'resolved', holder: { kind: 'package', packageId: D } });
+        for (const name of [TWO_HOLDERS, REVERSED]) {
+            expect([name, automation.flowHolder(name)]).toMatchObject([name, { status: 'resolved', holder: { kind: 'package', packageId: A } }]);
+            expect([name, automation.durableFlowHolder(name)?.status]).toEqual([name, 'refused']);
+            // [main #32302 merged in] The credential save door's stamp is the
+            // served holder's package, as its refusal is the served refusal.
+            expect([name, automation.flowHolderPackage(name)]).toEqual([name, A]);
+        }
+        expect(automation.flowHolderPackage(PARKED)).toBeNull();
+        expect(servedConnector('parked_api', null)?.status).toBe('not-found');
+        expect(servedConnector('parked_api', null, { includeDisabledPackages: true }))
+            .toMatchObject({ status: 'resolved', holder: { kind: 'package', packageId: D } });
+        expect(servedConnector('mailer', null)).toMatchObject({ status: 'resolved', holder: { kind: 'package', packageId: A } });
+        expect(servedConnector('mailer', null, { includeDisabledPackages: true })?.status).toBe('refused');
+    });
+
+    it('R10 at the trigger: the dispatch coordinates read every holder, as the re-key does; a disable moves no key', () => {
+        const coordinates = () => Object.fromEntries([PARKED, TWO_HOLDERS, REVERSED, ONE_HOLDER].map((name) => [name, automation.flowDispatchHolder(name)]));
+        const disabled = coordinates();
+        // The disabled D's own flow keeps its scope, the bare key claimed first.
+        expect(disabled[PARKED]).toEqual({ packageId: D, claimBare: true });
+        // A clash with one holder disabled keeps the collision guard: the bare key is never claimed.
+        expect(disabled[TWO_HOLDERS]).toEqual({ packageId: null, claimBare: false });
+        expect(disabled[REVERSED]).toEqual({ packageId: null, claimBare: false });
+        // CONTROL: re-enabled, every coordinate is the same.
+        registry.enablePackage(D);
+        registry.enablePackage(B);
+        expect(coordinates()).toEqual(disabled);
+        expect(disabled[ONE_HOLDER]).toEqual({ packageId: A, claimBare: true });
+    });
+
+    it('R8, R9: a flow only a disabled package holds binds to it; a clash with one holder disabled stays null, both named', async () => {
+        const engine = await boot();
+        for (const [id, name] of [['r1', PARKED], ['r2', TWO_HOLDERS], ['r3', REVERSED]] as const) {
+            await engine.insert(RUNS.object, run(id, name, 'paused'), { context: SYS_ORG });
+        }
+        const credential = (id: string, flowName: string) => ({
+            id, flow_name: flowName, state: 'active', node_id: 'n1', credential_key: 'token', position: 'pos_a', value: 'secret-value', created_at: NOW,
+        });
+        for (const [id, name] of [['c1', PARKED], ['c2', TWO_HOLDERS], ['c3', REVERSED]] as const) {
+            await engine.insert(CREDENTIALS.object, credential(id, name), { context: SYS_ORG });
+        }
+
+        const runs = await backfillStoredReferencePackages(engine, RUNS, holderOf);
+        const credentials = await backfillStoredReferencePackages(engine, CREDENTIALS, holderOf);
+
+        expect(await column(engine, RUNS.object, 'flow_package')).toEqual({ r1: D, r2: null, r3: null });
+        expect(await column(engine, CREDENTIALS.object, 'flow_package')).toEqual({ c1: D, c2: null, c3: null });
+        for (const report of [runs, credentials]) {
+            expect(report.bound).toEqual([{ name: PARKED, rows: 1, packageId: D }]);
+            expect(report.ambiguous).toEqual([
+                { name: TWO_HOLDERS, rows: 1, candidates: [`package "${A}"`, `package "${B}"`] },
+                // Named in registration order.
+                { name: REVERSED, rows: 1, candidates: [`package "${B}"`, `package "${A}"`] },
+            ]);
+            expect(report.unheld).toEqual([]);
+        }
+    });
+
+    it('R10: the re-key copies the key of a flow only a disabled package holds to its scope, and leaves a clash\'s bare key', async () => {
+        const engine = await boot();
+        for (const flow of [PARKED, TWO_HOLDERS, REVERSED]) {
+            await engine.insert('sys_flow_dispatch', { id: `schedule:${flow}:${W}`, dispatched_at: inside, created_at: inside }, { context: SYSTEM_CTX });
+        }
+
+        const report = await rekeyFlowDispatchesByPackage(engine, (flow) => holderOf('flow', flow), at);
+
+        const ids = ((await engine.find('sys_flow_dispatch', { where: {}, context: SYSTEM_CTX })) as Array<Record<string, unknown>>).map((r) => String(r.id));
+        expect(ids.sort()).toEqual([`schedule:${D}:${PARKED}:${W}`, `schedule:${PARKED}:${W}`, `schedule:${REVERSED}:${W}`, `schedule:${TWO_HOLDERS}:${W}`].sort());
+        expect(report.rekeyed).toEqual([{ flow: PARKED, rows: 1, packageId: D }]);
+        // Walked in key order; each clash's candidates named in registration order.
+        expect([...report.ambiguous].sort((x, y) => x.flow.localeCompare(y.flow))).toEqual([
+            { flow: REVERSED, rows: 1, candidates: [`package "${B}"`, `package "${A}"`] },
+            { flow: TWO_HOLDERS, rows: 1, candidates: [`package "${A}"`, `package "${B}"`] },
+        ]);
+    });
+
+    it('R11: a connector only a disabled package holds binds to it; a clash with one holder disabled stays null, both named', async () => {
+        const engine = await boot();
+        const connection = (id: string, name: string) => ({
+            id, organization_id: ORG, connector_name: name, grant: 'authorization_code', status: 'connected', revision: 1,
+        });
+        for (const row of [connection('k1', 'parked_api'), connection('k2', 'mailer')]) {
+            await engine.insert(CONNECTIONS.object, row, { context: SYS_ORG });
+        }
+
+        const report = await backfillStoredReferencePackages(engine, CONNECTIONS, holderOf);
+
+        expect(await column(engine, CONNECTIONS.object, 'connector_package')).toEqual({ k1: D, k2: null });
+        expect(report.bound).toEqual([{ name: 'parked_api', rows: 1, packageId: D }]);
+        expect(report.ambiguous).toEqual([{ name: 'mailer', rows: 1, candidates: [`package "${A}"`, `package "${B}"`] }]);
     });
 });
 
@@ -496,7 +715,7 @@ describe('R10 — the missed-run check reads the window\'s bare key too (the tra
     });
 });
 
-// ── Keys that do not move: byte-identical pins (seat rulings Q2, R14) ────────
+// ── Keys that do not move: byte-identical pins (seat rulings Q2, R14; R11 moved by #31699) ──
 
 describe('no key moves: each table keeps its indexes byte for byte (ADR-0150 D8, seat ruling Q2)', () => {
     it('sys_automation_run', () => {
@@ -516,9 +735,14 @@ describe('no key moves: each table keeps its indexes byte for byte (ADR-0150 D8,
         ]));
     });
 
-    it('sys_connector_connection (R11: one connection per instance name in an organization)', () => {
+    // [#31699] The one key that moves, by the maintainer's ruling on that card
+    // ("unique by package and name", 2026-11-14): an instance is (package,
+    // name), so one organization may connect both packages' instances of one
+    // name. Spelled 'global' with the organization listed, the spelling the
+    // drivers' widening arms retire the old key under.
+    it('sys_connector_connection (R11: one connection per instance — package and name — in an organization)', () => {
         expect(JSON.stringify(SysConnectorConnection.indexes)).toBe(JSON.stringify([
-            { fields: ['connector_name'], unique: 'organization' },
+            { fields: ['organization_id', 'connector_package', 'connector_name'], unique: 'global' },
         ]));
     });
 

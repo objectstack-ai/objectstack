@@ -65,6 +65,8 @@ describe('the derived name-keyed set (#13390)', () => {
       'permissions',
       'books',
       'datasets',
+      // [#32666] Carried as judged subjects of an object write.
+      'flows',
     ]);
   });
 
@@ -104,11 +106,22 @@ describe('the derived name-keyed set (#13390)', () => {
   });
 
   it('a write type mapping onto a NON-context key contributes nothing', () => {
-    // `flow` -> `flows` is a real mapping onto a collection the context never
-    // fills; `flows[0]` IS the write, trivially stable, and must stay positional.
-    expect(deriveNameKeyedStackKeys(['objects'], ['objects', 'flows'])).toEqual(['objects']);
-    expect(nameKeyFindingPath('flows[0].name', { flows: [{ name: 'acme_flow' }] })).toBe(
-      'flows[0].name',
+    // `view` -> `views` is a real mapping onto a collection the context never
+    // fills; `views[0]` IS the write, trivially stable, and must stay positional.
+    // [#32666] It used `flows`, which the context now fills on an object write.
+    expect(deriveNameKeyedStackKeys(['objects'], ['objects', 'views'])).toEqual(['objects']);
+    expect(nameKeyFindingPath('views[0].name', { views: [{ name: 'acme_view' }] })).toBe(
+      'views[0].name',
+    );
+  });
+
+  it('[#32666] a judged-subject collection keeps its index on a write of its own type', () => {
+    const candidate = { flows: [{ name: 'acme_flow' }] };
+    // A flow write: the context copy was dropped, `flows[0]` IS the write.
+    expect(nameKeyFindingPath('flows[0].nodes[1].config', candidate, 'flows')).toBe('flows[0].nodes[1].config');
+    // An object write: the flow is a subject, keyed by its name on the wire.
+    expect(nameKeyFindingPath('flows[0].nodes[1].config', candidate, 'objects')).toBe(
+      'flows.acme_flow.nodes[1].config',
     );
   });
 

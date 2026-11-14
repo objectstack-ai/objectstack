@@ -1238,24 +1238,26 @@ export const NestedFanOutRemindersFlow = defineFlow({
  * `catch` region records the failure with the caught error bound to `$error`.
  * Both regions are single-entry/single-exit and run in the enclosing scope; the
  * node's ordinary out-edge (`→ end`) is the after-block continuation.
+ *
+ * Run on demand (`POST /api/v1/automation/showcase_resilient_sync/trigger`
+ * with `params: { taskId, title }`), never from a record save. An inline push
+ * retried on a save's path would hold the save through every backoff delay,
+ * and the platform refuses that shape (`flow-after-save-inline-retry`). A push
+ * that must follow a save goes through the outbox instead: see the
+ * `push_incident` step of {@link ProjectEscalationFlow}.
  */
 export const ResilientSyncFlow = defineFlow({
   name: 'showcase_resilient_sync',
   label: 'Resilient Sync (Try/Catch/Retry)',
-  description: 'Pushes a task to an external system, retrying on failure and recording errors via try/catch (ADR-0031).',
+  description: 'On demand, pushes a task to an external system, retrying on failure and recording errors via try/catch (ADR-0031).',
   type: 'autolaunched',
   status: 'active',
+  variables: [
+    { name: 'taskId', type: 'text', isInput: true, isOutput: false },
+    { name: 'title', type: 'text', isInput: true, isOutput: false },
+  ],
   nodes: [
-    {
-      id: 'start',
-      type: 'start',
-      label: 'On Task Completed',
-      config: {
-        objectName: 'showcase_task',
-        triggerType: 'record-after-update',
-        condition: 'status == "done" && previous.status != "done"',
-      },
-    },
+    { id: 'start', type: 'start', label: 'Start' },
     {
       id: 'guarded_push',
       type: 'try_catch',
@@ -1281,7 +1283,7 @@ export const ResilientSyncFlow = defineFlow({
                 method: 'POST',
                 // CEL holds a map's values to one type: the literal beside the
                 // field reads is wrapped in `dyn(…)`.
-                body: { dialect: 'cel', source: "{'id': record.id, 'title': record.title, 'status': dyn('done')}" },
+                body: { dialect: 'cel', source: "{'id': taskId, 'title': title, 'status': dyn('done')}" },
               },
             },
           ],
@@ -1295,7 +1297,7 @@ export const ResilientSyncFlow = defineFlow({
               label: 'Flag Sync Failure',
               config: {
                 objectName: 'showcase_task',
-                filter: { id: { dialect: 'cel', source: 'record.id' } },
+                filter: { id: { dialect: 'cel', source: 'taskId' } },
                 // `$error` (this try_catch's `errorVariable`) is not a CEL
                 // identifier, so the envelope reads it through `vars`.
                 fields: { sync_status: 'failed', sync_error: { dialect: 'cel', source: 'vars["$error"].message' } },
@@ -1512,11 +1514,16 @@ export const ProjectEscalationFlow = defineFlow({
       type: 'try_catch',
       label: 'Push to incident system',
       config: {
-        // Canonical `backoffMs` — see the note on ResilientSyncFlow above.
-        retry: { maxRetries: 2, backoffMs: 500, backoffMultiplier: 2 },
+        // `durable: true` — this flow runs after a record save, and the save
+        // waits for the run, so the push is queued on the messaging HTTP
+        // outbox where one is wired (without one the node falls back to the
+        // inline call), which retries it in the background; an inline push retried
+        // here would hold the save through every backoff delay
+        // (`flow-after-save-inline-retry`). The try region now fails only when
+        // the request cannot be queued, and the catch region reports that.
         errorVariable: '$error',
         try: {
-          nodes: [{ id: 'push', type: 'http', label: 'POST incident', config: { url: 'https://api.example.com/v1/incidents', method: 'POST', body: { dialect: 'cel', source: "{'project': record.id, 'severity': dyn('critical')}" } } }],
+          nodes: [{ id: 'push', type: 'http', label: 'POST incident', config: { url: 'https://api.example.com/v1/incidents', method: 'POST', durable: true, body: { dialect: 'cel', source: "{'project': record.id, 'severity': dyn('critical')}" } } }],
           edges: [],
         },
         catch: {

@@ -42,6 +42,11 @@ import {
   renderNullableTenantColumns,
   type NullableTenantColumnsReport,
 } from '../../utils/nullable-tenant-columns.js';
+import {
+  collectSchemaSyncIndexes,
+  renderSchemaSyncIndexes,
+  type SchemaSyncIndexStep,
+} from '../../utils/schema-sync-indexes.js';
 import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import {
@@ -122,6 +127,16 @@ import {
  * tightens it or leaves it, and why. It is not drift: it proposes no op, adds
  * nothing to the change count, and changes no exit code; under `--json` it is
  * the separate `nullableTenantColumns` field (`utils/nullable-tenant-columns.ts`).
+ *
+ * [#32460] Nor is the plan silent about an index `apply` builds beside its DDL:
+ * the permission-set grant's package-less guard, which `apply` builds when its
+ * flush announces the schema-sync pass. It is listed in its own section, after
+ * the held-back work and before the drift (the order `apply` performs them in),
+ * and under `--json` as `schemaSyncIndexes`. A guard that already stands is no
+ * step, because `apply` sends it no DDL; and a plan with nothing to apply lists
+ * none, because `apply` then never flushes. The indexes the serving boot builds
+ * at `kernel:ready` are not `apply`'s work and stay out of the plan
+ * (`utils/schema-sync-indexes.ts` says which is which).
  */
 export default class MigratePlan extends Command {
   static override description =
@@ -304,6 +319,23 @@ export default class MigratePlan extends Command {
       // DDL): `pending` below was not examined, so it cannot read as "none".
       const schemaSyncSkipped = stack.schemaSync === 'skipped';
 
+      // The stack's `objectql` service, asked at most once and only by a read
+      // that needs it: the drop gates below, and the runtime-owned indexes.
+      const kernel = stack.kernel as { getService?: (n: string) => unknown };
+      let engine: { value: unknown } | undefined;
+      const objectql = (): unknown => (engine ??= { value: kernel.getService?.call(kernel, 'objectql') }).value;
+
+      // [#32460] The runtime-owned indexes `apply` builds beside the DDL it
+      // performs: today the permission-set grant's package-less guard. Read
+      // only, through the build's own statements; `[]` when it already stands,
+      // when its table is not there, and when `apply` would perform nothing.
+      const schemaSyncIndexes: SchemaSyncIndexStep[] = await collectSchemaSyncIndexes({
+        schemaSync: stack.schemaSync,
+        applyPerformsWork: drift.length > 0 || pending.length > 0,
+        pending,
+        engine: objectql,
+      });
+
       if (flags.json) {
         await emitJson({
           database: stack.dbLabel,
@@ -322,6 +354,12 @@ export default class MigratePlan extends Command {
           total: drift.length,
           changes: drift,
           pending,
+          // [#32460] What `apply` builds beside the DDL it performs, after
+          // `pending` and before `changes`. Always present once a SQL driver
+          // was found; never counted in `total`. Each entry's `status` is
+          // `build`, `blocked` (the build is refused by colliding rows) or
+          // `unreadable` (whether it stands could not be read).
+          schemaSyncIndexes,
           // [#13204] Always present once a SQL driver was found, including
           // when the sweep found nothing (`tables: []`) and when it could not
           // run (`status: 'unreadable'`). A consumer must be able to tell
@@ -479,10 +517,12 @@ export default class MigratePlan extends Command {
       // preconditions hold. Read through the gates' own predicates and reads,
       // never a second list. Empty when nothing is held, and then everything
       // below reads as it always has.
-      const kernel = stack.kernel as { getService?: (n: string) => unknown };
-      const held = await readHeldDrops(new DropGateReads(), () => kernel.getService?.call(kernel, 'objectql'), drift);
+      const held = await readHeldDrops(new DropGateReads(), objectql, drift);
 
       await renderPendingSchemaWork(pending);
+      // [#32460] Between the two, as `apply` performs them: its flush runs the
+      // held-back DDL and then builds these; the drift is applied after.
+      for (const line of renderSchemaSyncIndexes(schemaSyncIndexes)) console.log(line);
       // Still listed, still counted: it IS drift. Only the remedy changes,
       // from a command that cannot perform it here to the reason it cannot.
       renderPlan(drift, await describeDriftEntries(limits, held));

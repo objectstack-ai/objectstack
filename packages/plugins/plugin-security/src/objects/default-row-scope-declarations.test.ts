@@ -121,15 +121,16 @@ const KEPT_IN_SETS = DECLARERS.filter((n) => !(n in DROPPED_COPIES));
  * ruling's 23 (and outside the byte-for-byte baseline below) on purpose.
  *  - `sys_personal_view`: a reader's own named list views, on the
  *    `sys_user_preference` template (ruling 6570568131 on #28971, letter C).
- *  - `sys_audit_checkpoint` and `sys_audit_signing_key`: the audit ledger's
- *    checkpoints and signing keys (ADR-0154), which plugin-audit registers.
- *    Written only by the platform, so each declares `_none` (`id == null`, no
- *    row), the scope `sys_jwks` declares.
+ *  - `sys_audit_checkpoint`, `sys_audit_signing_key` and `sys_audit_amendment`:
+ *    the audit ledger's checkpoints, signing keys and amendments (ADR-0154),
+ *    which plugin-audit registers. Written only by the platform, so each
+ *    declares `_none` (`id == null`, no row), the scope `sys_jwks` declares.
  */
 const DECLARED_AT_BIRTH: Record<string, { name: string; operation: string; using: string }> = {
   sys_personal_view: { name: 'sys_personal_view_self', operation: 'all', using: 'user_id == current_user.id' },
   sys_audit_checkpoint: { name: 'sys_audit_checkpoint_none', operation: 'select', using: 'id == null' },
   sys_audit_signing_key: { name: 'sys_audit_signing_key_none', operation: 'select', using: 'id == null' },
+  sys_audit_amendment: { name: 'sys_audit_amendment_none', operation: 'select', using: 'id == null' },
 };
 
 /** Ruling E′ item 5: the platform-global objects declare no default. */

@@ -43,7 +43,9 @@ export interface MetadataKeyedItem<T = any> {
    * item for; absent for an item it holds for no package. A customization of
    * a package's item (D4) is held for that package though its body names
    * none, which is why the package travels beside the body rather than being
-   * read off it.
+   * read off it. [#32458, #32680] Also on a `loadManyKeyed` entry of a type
+   * stored per `(package, name)` (a loader's own, and `MetadataManager`'s,
+   * which hands on its loaders' packages).
    */
   readonly packageId?: string;
 }
@@ -148,6 +150,14 @@ export interface MetadataLoader {
   loadManySlots?<T = any>(type: string): Promise<MetadataKeyedItem<T>[]>;
 
   /**
+   * [#31699 R7-A] Bind the empty `package_id` column of the legacy row this
+   * loader's plural read handed `item` out from to the package that row's own
+   * stored body names, the column only. Optional; `MetadataManager.register`
+   * calls it in place of the write-through it skips (`skipSourceLoader`).
+   */
+  bindReadRowPackage?(type: string, name: string, item: object): Promise<void>;
+
+  /**
    * Check if item exists
    * @param type The metadata type
    * @param name The item name
@@ -230,8 +240,11 @@ export interface MetadataLoader {
    * `register()` — see the note on `save?` above.
    *
    * Loaders on the other protocols (`file:`, `memory:`, `http:`, `s3:`) are not
-   * gated: `MetadataManager` never writes to them at runtime, so it never has a
-   * deletion of its own to take back.
+   * gated: `MetadataManager` never saves to them at runtime. `unregister()`
+   * also deletes from a `memory:` loader that implements `delete()` (the
+   * artifact door's store), for every type (#32246, #32353), so that a
+   * removed item stops answering; a `memory:` loader without `delete()` is
+   * skipped, and the `file:`, `http:` and `s3:` loaders are never deleted from.
    *
    * [ADR-0150 D4, #32198] `options.packageId` is passed only when one package's
    * item of a type stored per `(package, name)` is removed while another
@@ -241,9 +254,17 @@ export interface MetadataLoader {
    * another package's stored item. A loader that ignores the option deletes by
    * name, as every delete did before.
    *
+   * [ADR-0150 D3, #32560] `options.packagelessOnly` is passed when a removal
+   * naming no package of an action name was judged, over the registry and
+   * every loader, to take the environment's own item only (the item a read
+   * naming no package answers beside one package's). The loader then deletes
+   * the name's package-less slots only — ⛔ never a package's, even where it
+   * holds that package's item alone and its own rule would take every slot.
+   *
    * @param type The metadata type
    * @param name The item name
-   * @param options `packageId`: delete only that package's row of the name
+   * @param options `packageId`: delete only that package's row of the name;
+   *   `packagelessOnly`: delete only the name's package-less slots
    */
   delete?(type: string, name: string, options?: MetadataLoaderDeleteOptions): Promise<void>;
 }
@@ -252,5 +273,12 @@ export interface MetadataLoader {
 export interface MetadataLoaderDeleteOptions {
   /** Delete the name's row only when it holds this package's item. */
   packageId?: string;
+  /**
+   * [ADR-0150 D3, #32560] Delete only the name's package-less slots (the
+   * environment's own item): the manager judged a removal naming no package
+   * over every holder of the name, and a package's item is not what it takes.
+   * Never sent beside `packageId`.
+   */
+  packagelessOnly?: true;
 }
 

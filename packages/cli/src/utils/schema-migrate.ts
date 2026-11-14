@@ -477,6 +477,9 @@ export class DeferSchemaDdlPlugin {
   /** The kernel's logger, as `init()` was handed it: what the flush's birth half reports through. */
   logger: BirthLogger | undefined;
 
+  /** The kernel's hook dispatch, as `init()` was handed it: what {@link announceSchemaSynced} fires through. */
+  private trigger: ((name: string, ...args: unknown[]) => Promise<void>) | undefined;
+
   /**
    * [#23816] `exemptPrimary`: leave the engine's DEFAULT driver un-armed. Set
    * only by a `skipSchemaSync` boot (`deferredDdlUnsupported:
@@ -497,6 +500,7 @@ export class DeferSchemaDdlPlugin {
 
   init = async (ctx: any) => {
     this.logger = ctx.logger;
+    if (typeof ctx.trigger === 'function') this.trigger = (name, ...args) => ctx.trigger(name, ...args);
     if (this.options.exemptPrimary) this.exempt = defaultDriverOf(ctx);
     for (const name of SQL_DRIVER_SERVICES) {
       try { this.arm(ctx.getService(name)); } catch { /* not registered */ }
@@ -577,6 +581,21 @@ export class DeferSchemaDdlPlugin {
       const objectName = (obj as { name?: unknown } | null)?.name;
       if (typeof objectName === 'string') this.arm(e.getDriverForObject(objectName));
     }
+  }
+
+  /**
+   * [#32164] Tell the kernel that the DDL this boot's schema-sync pass held back
+   * is now performed: `objectql:schema-synced`, the event `ObjectQLPlugin`
+   * triggers after each pass's DDL, with the engine as its argument.
+   *
+   * The pass itself triggered it while every armed driver was still deferring,
+   * so a subscriber that builds beside the DDL (`metadata-protocol`'s
+   * package-less grant guard) built nothing then, by design: a dry run must not
+   * write. This is the same pass's event, for the DDL the operator confirmed.
+   * A handler's throw propagates, as from the pass.
+   */
+  async announceSchemaSynced(engine: unknown): Promise<void> {
+    await this.trigger?.('objectql:schema-synced', engine);
   }
 
   /** Put every shadowed `registerDriver` back, unless something else now sits on top of ours. */
@@ -1639,6 +1658,19 @@ export async function bootSchemaStack(
       // [#21529] The tables exist now; nothing is measured absent any more.
       absentTables.clear();
       deferral?.release();
+      // [#32164] The pass's DDL is done now, not at boot: what is built beside
+      // it (the package-less grant guard) is built here. Only a deferred boot
+      // held a pass back; a skip-sync boot ran none, and its primary is left
+      // to its serving boot (see `deferredDdlUnsupported`).
+      if (defer && deferral) {
+        let engine: unknown;
+        try {
+          engine = (kernel as { getService?: (name: string) => unknown }).getService?.('objectql');
+        } catch {
+          engine = undefined;
+        }
+        if (engine) await deferral.announceSchemaSynced(engine);
+      }
       // [ADR-0131 D10] The birth half the deferred boot could not run: only a
       // deferred boot holds DDL back, so only it can have created the store here.
       if (deferral) await recordBirthOfFlushedStore(kernel, recordOrganizationOwnershipBirth, deferral.logger);

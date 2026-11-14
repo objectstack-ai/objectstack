@@ -300,7 +300,7 @@ const DIVERGENCE_BY_AGGREGATE = (aggregate: string, fieldType: string, column = 
  * every type: since #20808 it accepts every type but the JSON-stored ones.
  * [#24426] A VIRTUAL field (`formula`) is answered first, and not here: its
  * sentence is the spec's `virtualFieldAggregateRemedy`, the one the lint leg
- * prints too — store the value as a number field and aggregate that, with a
+ * prints too — a field of its return type carrying the same `expression`, aggregated in its place, with a
  * count named only as a different question. A count is no way to a total.
  */
 const REMEDY_BY_SOURCE_CLASS = (fieldType: string, aggregate: string): string => {

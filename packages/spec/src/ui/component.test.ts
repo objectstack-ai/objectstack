@@ -1389,6 +1389,9 @@ describe('ComponentPropsMap', () => {
       const slotted = PageSchema.safeParse({
         name: 'home',
         label: 'Home',
+        // `slots` are read on a slotted page only; a `full` record page with no
+        // component in its regions is refused at `regions` on its own.
+        kind: 'slotted',
         regions: [],
         slots: { header: { type: 'user:profile' } },
       });

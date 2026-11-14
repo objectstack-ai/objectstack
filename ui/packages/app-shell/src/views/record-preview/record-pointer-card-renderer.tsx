@@ -33,13 +33,40 @@
  * mount the card: no read of the target, no link. The text is the declared
  * option's own label, as the details grid's options spell it; this package
  * authors no string for it. Every other pair draws the card exactly as before.
+ *
+ * ## The link: the record's own app when the page cannot route to it (objectstack#32667)
+ *
+ * The card links its title through the host's record-URL builder. On a record
+ * page that is the page's bridge, which routes only to the objects its route
+ * scope holds; a pointer names a record of ANY object, chosen per row, so the
+ * scope of the page that holds it (an approval request's: the request and its
+ * timeline) need not hold the target, and the bridge answers no href. The card
+ * then drew its title as plain text: an approval request's record could not be
+ * opened from it.
+ *
+ * So this renderer is also the caller that completes the link. Under a router,
+ * it hands the card the host's builder unchanged for every target the host can
+ * route to, and for the pointer's own target where the host answers none, the
+ * record's route under the app that owns it (`useObjectHostAppSegment`: the
+ * page's app when it lists the object, else the first app that does, else
+ * Setup, else the page's app). The card still asks only in its `readable`
+ * state, so a target the reader cannot read still yields no link.
  */
 
+import { useMemo, type ReactNode } from 'react';
+import { useHref, useInRouterContext, useNavigate, useParams } from 'react-router-dom';
 import { Card, CardContent } from '@object-ui/components';
 import { registerFieldRenderer, RECORD_POINTER_CARD_TYPE, type CellRendererProps, type RecordPointer } from '@object-ui/fields';
-import { useAdapter } from '@object-ui/react';
+import {
+  RelatedRecordActionsProvider,
+  useAdapter,
+  useRelatedRecordActions,
+  type RelatedRecordActionsValue,
+} from '@object-ui/react';
 import { Trash2 } from 'lucide-react';
 import { RecordPreviewCard } from './RecordPreviewCard.js';
+import { documentHref } from '../documentHref.js';
+import { useObjectHostAppSegment } from '../../utils/objectHostApp.js';
 
 /** The pair `resolveRecordPointer` hands the renderer as its `value`. */
 function asRecordPointer(value: unknown): RecordPointer | null {
@@ -72,9 +99,10 @@ function DeletedRecordPointer({ label }: { label: string }) {
  */
 export function RecordPointerCardRenderer({ value }: CellRendererProps) {
   const dataSource = useAdapter();
+  const inRouter = useInRouterContext();
   const pointer = asRecordPointer(value);
   if (pointer?.deletedLabel !== undefined) return <DeletedRecordPointer label={pointer.deletedLabel} />;
-  return (
+  const card = (
     <RecordPreviewCard
       objectName={pointer?.objectName}
       recordId={pointer?.recordId}
@@ -82,6 +110,57 @@ export function RecordPointerCardRenderer({ value }: CellRendererProps) {
       className="w-full max-w-md"
     />
   );
+  if (!inRouter || !pointer) return card;
+  return <OwnerAppRecordLinks objectName={pointer.objectName}>{card}</OwnerAppRecordLinks>;
+}
+
+/** A host value with no handlers of its own, for a card drawn under no host. */
+const NO_HOST_HANDLERS: RelatedRecordActionsValue['resolve'] = () => ({});
+
+/**
+ * The host's record-URL builder, completed for the pointer's target: the
+ * host's answer wherever it has one, and otherwise, for `objectName` alone, the
+ * record route under the app that owns it (see "The link" above).
+ */
+function OwnerAppRecordLinks({ objectName, children }: { objectName: string; children: ReactNode }) {
+  const host = useRelatedRecordActions();
+  const owner = useObjectHostAppSegment(objectName);
+  const { appName } = useParams<{ appName?: string }>();
+  const segment = owner ?? appName;
+  const navigate = useNavigate();
+  const rootHref = useHref('/');
+
+  const value = useMemo<RelatedRecordActionsValue>(() => {
+    const hostHref = (target: string, recordId: string | number): string | null =>
+      host?.recordHref ? host.recordHref(target, recordId) : null;
+    const ownerPath = (target: string, recordId: string | number): string | null =>
+      target === objectName && segment
+        ? `/apps/${segment}/${target}/record/${encodeURIComponent(String(recordId))}`
+        : null;
+    return {
+      ...host,
+      resolve: host?.resolve ?? NO_HOST_HANDLERS,
+      recordHref: (target, recordId) => {
+        const href = hostHref(target, recordId);
+        if (href !== null) return href;
+        const path = ownerPath(target, recordId);
+        return path === null ? null : documentHref(rootHref, path);
+      },
+      openRecord: (target, recordId) => {
+        const href = hostHref(target, recordId);
+        if (href !== null) {
+          // A host with no in-app navigator: follow its href, as its anchor would.
+          if (host?.openRecord) host.openRecord(target, recordId);
+          else window.location.assign(href);
+          return;
+        }
+        const path = ownerPath(target, recordId);
+        if (path !== null) navigate(path);
+      },
+    };
+  }, [host, objectName, segment, rootHref, navigate]);
+
+  return <RelatedRecordActionsProvider value={value}>{children}</RelatedRecordActionsProvider>;
 }
 
 registerFieldRenderer(RECORD_POINTER_CARD_TYPE, RecordPointerCardRenderer);

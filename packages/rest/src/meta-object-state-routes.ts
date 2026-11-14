@@ -76,7 +76,8 @@
  * published surface does not move.
  */
 
-import { handleRouteError } from './error-response.js';
+import { ObjectSchemaMaskEvaluationError, type ObjectSchemaMaskPosture } from '@objectstack/metadata-core';
+import { handleRouteError, sendFieldVisibilityFault } from './error-response.js';
 import type { MetaRouteScope } from './meta-collection-routes.js';
 import * as metaReadGate from './meta-item-read-gate.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
@@ -96,6 +97,23 @@ export interface MetaObjectStateRouteHost {
     readonly objectQLProvider: RestServer['objectQLProvider'];
     resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveProtocol: RestServer['resolveProtocol'];
+    /** [ruling record 6787890900] The `/meta` object door's own masker. */
+    resolveObjectMasker: RestServer['resolveObjectMasker'];
+}
+
+/**
+ * This door's ONE answer for a name with no object behind it — and, [ruling
+ * record 6787890900], for an object the caller may not read.
+ *
+ * `{ error: { code, message } }`, the envelope `BaseResponseSchema` declares —
+ * not the bare `{ error: 'string' }` the dispatcher branch this mirrors emits.
+ * `pnpm check:route-envelope` ratchets both non-conforming shapes DOWN only, so
+ * a new route arrives conforming or not at all.
+ */
+function sendNoObject(res: any): void {
+    res.status(404).json({
+        error: { code: 'NOT_FOUND', message: 'Object not found' },
+    });
 }
 
 /**
@@ -152,6 +170,24 @@ export function registerMetaObjectStateRoute(this: MetaObjectStateRouteHost, sco
                 // runtime dispatcher's twin refuses the same name.
                 if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.state)) return;
                 const from = req.query?.from !== undefined ? String(req.query.from) : undefined;
+                // [ruling record 6787890900] This door reads an object's schema,
+                // so it resolves the caller's posture first: an object the
+                // caller may not read is this door's answer for no object
+                // (below), before any engine or registry is read.
+                let posture: ObjectSchemaMaskPosture;
+                try {
+                    posture = await (await this.resolveObjectMasker(environmentId, req, 'object'))(name);
+                } catch (maskError: any) {
+                    if (maskError instanceof ObjectSchemaMaskEvaluationError) {
+                        sendFieldVisibilityFault(res, name);
+                        return;
+                    }
+                    throw maskError;
+                }
+                if (posture.kind === 'hidden') {
+                    sendNoObject(res);
+                    return;
+                }
                 // [#15405] The engine seam, reached the way its SIBLING at
                 // `computeExecCtx` already reaches it — `wiredEngineOrLoud`
                 // — so "no engine is wired" and "the engine WAS wired and
@@ -213,15 +249,7 @@ export function registerMetaObjectStateRoute(this: MetaObjectStateRouteHost, sco
                 }
                 const schema = disabledObject ? undefined : registry?.getObject?.(name);
                 if (!schema) {
-                    // `{ error: { code, message } }`, the envelope
-                    // `BaseResponseSchema` declares — not the bare
-                    // `{ error: 'string' }` the dispatcher branch this
-                    // mirrors emits. `pnpm check:route-envelope`
-                    // ratchets both non-conforming shapes DOWN only, so
-                    // a new route arrives conforming or not at all.
-                    res.status(404).json({
-                        error: { code: 'NOT_FOUND', message: 'Object not found' },
-                    });
+                    sendNoObject(res);
                     return;
                 }
                 // Dynamic import, matching the dispatcher branch this

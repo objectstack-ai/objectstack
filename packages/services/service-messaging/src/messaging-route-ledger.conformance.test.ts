@@ -2,9 +2,10 @@
 
 /**
  * Messaging route-ledger conformance — the package-local guard every
- * `*-route-ledger.ts` pairs with. `registerPreferenceOptionsRoutes` is a
- * standalone, synchronous function that calls `http.get` and touches neither
- * argument before a request arrives, so a capturing mock `IHttpServer`
+ * `*-route-ledger.ts` pairs with. `registerPreferenceOptionsRoutes` and
+ * `registerInAppMessageRoutes` are standalone, synchronous functions that call
+ * `http.get` / `http.post` and touch neither argument's services before a
+ * request arrives, so a capturing mock `IHttpServer`
  * enumerates its real surface (the seam the print and settings ledgers use),
  * and the two directions fail here by name on every `pnpm test` of this
  * package.
@@ -12,6 +13,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { registerPreferenceOptionsRoutes } from './preference-options-routes.js';
+import { registerInAppMessageRoutes } from './in-app-message-routes.js';
 import { MESSAGING_ROUTE_LEDGER } from './messaging-route-ledger.js';
 
 function createMockServer() {
@@ -30,6 +32,7 @@ function createMockServer() {
 function enumerateMessagingRoutes(): Set<string> {
     const server = createMockServer();
     registerPreferenceOptionsRoutes(server as any, {} as any);
+    registerInAppMessageRoutes(server as any, {} as any);
     const keys = new Set<string>();
     for (const verb of ['get', 'post', 'put', 'patch', 'delete'] as const) {
         for (const call of server[verb].mock.calls) keys.add(`${verb.toUpperCase()} ${call[0]}`);
@@ -39,7 +42,7 @@ function enumerateMessagingRoutes(): Set<string> {
 
 const ledgerKeys = (): Set<string> => new Set(MESSAGING_ROUTE_LEDGER.map((e) => e.route));
 
-describe('messaging route ledger ↔ registerPreferenceOptionsRoutes enumeration', () => {
+describe('messaging route ledger ↔ the messaging registrars\' enumeration', () => {
     it('every mounted messaging route has a ledger entry', () => {
         const ledger = ledgerKeys();
         const missing = [...enumerateMessagingRoutes()].filter((k) => !ledger.has(k));

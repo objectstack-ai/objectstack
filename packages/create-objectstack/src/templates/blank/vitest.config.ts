@@ -13,9 +13,9 @@ export default defineConfig({
     // every test passed. Printing logs straight to the terminal, instead of
     // through vitest's console capture, removes that failure.
     disableConsoleIntercept: true,
-    // At its default level the engine logs one `[Registry]` line for every
-    // item it registers while booting, over a hundred for this starter alone.
-    // `warn` keeps the engine's warnings and errors and drops that chatter.
-    env: { OS_REGISTRY_LOG: 'warn' },
+    // A booted stack logs at `warn`: its warnings and errors print, its
+    // per-item boot chatter does not, and a failing test still prints its
+    // failure. To see the whole boot log, run `OS_LOG_LEVEL=info pnpm test`
+    // (or `debug`).
   },
 });

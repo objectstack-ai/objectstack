@@ -19,9 +19,9 @@
 //     by its package, as before;
 //   - two packages' same-named actions bound to their OWN objects are two
 //     identities (contract review G1): both kept, each package's read answers
-//     its own (base: the survivor's body under the asked package's stamp), and
-//     the in-process bare read is not refused. Which body the bare HTTP read
-//     serves for that pair is #32244's, and is not pinned here;
+//     its own (base: the survivor's body under the asked package's stamp);
+//     [#32244] the bare read, in process and over HTTP, is 409 naming both
+//     packages with their objects;
 //   - the bare layered read of the two-holder object-less name is 409 naming
 //     both, and `?package=` serves each package's own code layer.
 
@@ -141,19 +141,24 @@ describe('[#31697] the artifact door keeps each namespace\'s same-named action i
     expect([bare.status, bare.label, bare.packageId], bare.text.slice(0, 300)).toEqual([200, `alpha ${SOLO}`, ALPHA]);
   });
 
-  it('two packages\' same-named actions bound to their own objects are two identities: the metadata service keeps both, answers each package its own, and does not refuse the bare read; `/meta/action/NAME?package=` serves each its own (BASE: the survivor\'s body, under the asked package\'s stamp)', async () => {
+  it('two packages\' same-named actions bound to their own objects are two identities: the metadata service keeps both and answers each package its own; `/meta/action/NAME?package=` serves each its own; [#32244] the bare read, in process and over HTTP, is 409 naming both packages with their objects (BASE: the survivor\'s body, under the asked package\'s stamp; #32244 BASE: the bare read answered one of them)', async () => {
     expect((await metadata.get('action', BOUND, ALPHA))?.label).toBe(`alpha ${BOUND}`);
     expect((await metadata.get('action', BOUND, BETA))?.label).toBe(`beta ${BOUND}`);
     expect((await metadata.list('action')).filter((i) => i?.name === BOUND).map((i) => i?.label).sort())
       .toEqual([`alpha ${BOUND}`, `beta ${BOUND}`]);
-    const bare = await metadata.get('action', BOUND).then((v: any) => v?.label, (e: any) => `refused ${e?.status}`);
-    expect([`alpha ${BOUND}`, `beta ${BOUND}`], 'not refused').toContain(bare);
+    const refused = await metadata.get('action', BOUND).then(() => undefined, (e: any) => e);
+    expect([refused?.code, refused?.status, refused?.refusal?.reason], 'the in-process bare read refuses')
+      .toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(refused.refusal.candidates.map((c: any) => c.packageId)).toEqual([ALPHA, BETA]);
     for (const p of ['alpha', 'beta'] as const) {
       const read = await metaItem(BOUND, `com.qa.slot.${p}`);
       expect([read.status, read.label, read.packageId], read.text.slice(0, 300)).toEqual([200, `${p} ${BOUND}`, `com.qa.slot.${p}`]);
     }
-    // ⛔ Which body the bare `GET /meta/action/NAME` serves for this pair is
-    // not pinned here: that read is #32244's.
+    const bare = await metaItem(BOUND);
+    expect([bare.status, bare.code], bare.text.slice(0, 300)).toEqual([409, 'RESOURCE_CONFLICT']);
+    for (const p of ['alpha', 'beta'] as const) {
+      expect(bare.text).toContain(`package \\"com.qa.slot.${p}\\" binds it to object \\"${p}_item\\"`);
+    }
   });
 
   it('the bare layered read `/meta/action/NAME/layers` of the two-holder object-less name is refused 409 naming both; `?package=` serves each package its own code layer', async () => {

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
+import { RUNTIME_COMPATIBILITY_PACKAGE_ID, effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
 import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type {
@@ -36,6 +36,13 @@ import { SysFlowDispatch } from './sys-flow-dispatch.object.js';
 import { SysFlowCredential } from './sys-flow-credential.object.js';
 import { SysConnectorCredential } from './sys-connector-credential.object.js';
 import { SysConnectorConnection } from './sys-connector-connection.object.js';
+import { SysSyncRun } from './sys-sync-run.object.js';
+import {
+    ObjectStoreSyncRunLedger,
+    SYNC_RUN_OBJECT,
+    closeInterruptedSyncRuns,
+    type SyncRunLedgerEngine,
+} from './sync-run-ledger.js';
 import type {
     ConnectorCredentialRef,
     ConnectorCredentialSetRequest,
@@ -634,8 +641,11 @@ const DISPATCH_REKEY_HOLD_MS = 120_000;
  * (`stored-reference-package-backfill.ts`), and dispatch keys inside
  * retention get their scoped copy (`flow-dispatch-key-package-backfill.ts`).
  * Each asks the one D3 rule with no caller — a flow through
- * `AutomationEngine.flowHolder`, a connector through the same resolver the
- * connector reader uses — so a row records WHICH item it belongs to (D4).
+ * `AutomationEngine.durableFlowHolder`, a connector through the same resolver
+ * the connector reader uses — so a row records WHICH item it belongs to (D4).
+ * [#32183] Over every holder, a disabled package's included
+ * (`includeDisabledPackages`): a binding is written once and never moves, and
+ * a disable is reversible. The execute doors keep judging the served holders.
  *
  * The dispatch ledger is held from here until that run has finished, so a
  * trigger's first claim after an upgrade reads the re-keyed rows. A kernel
@@ -660,7 +670,9 @@ function registerStoredReferenceBackfill(
     });
     const connectorHolder = connectorNameResolver(ctx);
     const holderOf = (type: StoredReferenceType, name: string) =>
-        storedReferenceHolderOf(type === 'flow' ? engine.flowHolder(name) : connectorHolder(name, null));
+        storedReferenceHolderOf(type === 'flow'
+            ? engine.durableFlowHolder(name)
+            : connectorHolder(name, null, { includeDisabledPackages: true }));
     ctx.hook('kernel:bootstrapped', async () => {
         try {
             const registry = objectqlRegistryOf(ctx) as { bareNameHoldersAreSealed?: boolean; getObject?(name: string): unknown } | undefined;
@@ -1110,6 +1122,16 @@ function connectorInstanceSignature(entry: {
 }
 
 /**
+ * [#33049] The protocol's flow view as one comparable string: each flow's
+ * whole definition, order-free. Two reads of an unchanged view give the same
+ * string, so the `kernel:bootstrapped` pass binds again only when a plugin
+ * registered or changed a flow after the `kernel:ready` bind read the view.
+ */
+function flowViewFingerprint(defs: readonly unknown[]): string {
+    return stableStringify(defs.map((def) => stableStringify(def)).sort());
+}
+
+/**
  * [#28591] The provider-bound instances a declaration asks the reconcile for,
  * as one comparable string: the name and {@link connectorInstanceSignature} of
  * every named, provider-bound entry not `enabled: false`, sorted. Two reads
@@ -1161,6 +1183,40 @@ function withFailureTextRewritten(
  * **instance** the automation service materializes at boot (ADR-0097);
  * its absence marks a catalog **descriptor** (#2612).
  */
+/**
+ * [#31699] The package a declared connector entry belongs to: its
+ * `_packageId`, or `null` for an entry no package ships (the environment's,
+ * a stored row's provenance sentinel, the compatibility API's default).
+ */
+function declaredEntryPackage(entry: unknown): string | null {
+    const stamp = (entry as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (typeof stamp !== 'string' || stamp.length === 0) return null;
+    return stamp === 'sys_metadata' || stamp === RUNTIME_COMPATIBILITY_PACKAGE_ID ? null : stamp;
+}
+
+/**
+ * [#31699] The package a declared connector instance's connections are read
+ * and written by. An entry stamped with a real package is that package's; the
+ * environment's stored entry (`sys_metadata`) is no package's. An entry with
+ * no stamp, or the compatibility API's default, is the name's durable holder's
+ * when that is a package: the package the boot backfill binds a package-less
+ * row of the name to, so a row the instance connected is still its row once
+ * bound. With no registry to ask, or no package holder, it is no package's.
+ */
+function connectorInstancePackage(
+    resolve: ReturnType<typeof connectorNameResolver>,
+    entry: unknown,
+): string | null {
+    const own = declaredEntryPackage(entry);
+    if (own !== null) return own;
+    const stamp = (entry as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (stamp === 'sys_metadata') return null;
+    const name = (entry as { name?: unknown } | null | undefined)?.name;
+    if (typeof name !== 'string' || name.length === 0) return null;
+    const holder = resolve(name, null, { includeDisabledPackages: true });
+    return holder?.status === 'resolved' && holder.holder.kind === 'package' ? holder.holder.packageId : null;
+}
+
 interface DeclaredConnectorItem {
     name?: string;
     label?: string;
@@ -1342,7 +1398,7 @@ export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (nam
  * named that the engine does not hold, and nothing is guessed.
  */
 export function flowNameResolver(ctx: Pick<PluginContext, 'getService'>): FlowNameResolver {
-    return (name, callerPackageId) => {
+    return (name, callerPackageId, options) => {
         let registry: PackageScopedRegistry | undefined;
         try {
             // The same slice reader the connector reconcile asks (E5's `packageScopedRegistryOf`).
@@ -1351,7 +1407,10 @@ export function flowNameResolver(ctx: Pick<PluginContext, 'getService'>): FlowNa
             return undefined;
         }
         if (!registry) return undefined;
-        return resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId });
+        return resolvePackageScopedName(registry, {
+            type: 'flow', name, callerPackageId,
+            ...(options?.includeDisabledPackages === true ? { includeDisabledPackages: true } : {}),
+        });
     };
 }
 
@@ -1493,6 +1552,12 @@ export class AutomationServicePlugin implements Plugin {
      */
     private syncedFlowNames = new Set<string>();
     /**
+     * [#33049] The flow view the boot's last protocol bind read
+     * ({@link flowViewFingerprint}); `undefined` until a bind has read one.
+     * The `kernel:bootstrapped` pass compares against it.
+     */
+    private bootFlowViewFingerprint: string | undefined;
+    /**
      * Provider-bound declarative connectors this plugin has materialized
      * (ADR-0097), keyed by connector name. `signature` is a stable hash of the
      * entry's materialization inputs so a `metadata:reloaded` reconcile can tell
@@ -1600,6 +1665,15 @@ export class AutomationServicePlugin implements Plugin {
      * what their disagreement looks like in production.
      */
     private runObjectRegistered = false;
+    /**
+     * [ADR-0153 D7] Whether {@link SysSyncRun} reached the `manifest` service —
+     * with the run objects, or with the credential objects under
+     * `suspendedRunStore: 'memory'`: a pull's read position needs its table on
+     * every composition, whatever the suspended-run store is.
+     */
+    private syncRunObjectRegistered = false;
+    /** [ADR-0153 D7] Said once: a pull ran with no run ledger. */
+    private syncRunLedgerAbsenceSaid = false;
     /** The context `init()` received — what {@link pullConnectorSource} resolves its services through. */
     private ctx?: PluginContext;
     /**
@@ -1695,6 +1769,15 @@ export class AutomationServicePlugin implements Plugin {
             throw new Error('[Automation] pullConnectorSource() called before init() — the automation plugin is not initialized');
         }
         const protocol = ctx.getService<ConnectorPullProtocol>('protocol');
+        const runs = this.syncRunLedgerOf(ctx);
+        if (!runs && !this.syncRunLedgerAbsenceSaid) {
+            this.syncRunLedgerAbsenceSaid = true;
+            ctx.logger.warn(
+                `[Automation] pulls run with no run record: ${SYNC_RUN_OBJECT} ${this.syncRunObjectRegistered ? 'is registered, but no data engine serves it' : 'was never registered (no manifest service)'}. `
+                + 'A datasource pull keeps no read position, so every run reads from watermark.start and rewrites every row it reads, '
+                + 'and no run history is kept. Compose ObjectQLPlugin before AutomationServicePlugin.',
+            );
+        }
         return pullConnectorSource(
             {
                 protocol,
@@ -1704,9 +1787,49 @@ export class AutomationServicePlugin implements Plugin {
                 // [ADR-0150 D3, #32071] A pull naming the package that declares
                 // its job reads the mapping from that package.
                 mappingByPackage: mappingNameResolver(ctx),
+                ...(runs ? { runs } : {}),
             },
             opts,
         );
+    }
+
+    /**
+     * [ADR-0153 D7] The `sys_sync_run` ledger, resolved where a pull uses it:
+     * the data engine may register after this plugin inits. None when the
+     * object never reached a manifest (no table would hold the rows) or no
+     * engine serves it.
+     */
+    private syncRunLedgerOf(ctx: PluginContext): ObjectStoreSyncRunLedger | undefined {
+        if (!this.syncRunObjectRegistered) return undefined;
+        const engine = this.resolveDataEngine(ctx) as Partial<SyncRunLedgerEngine> | undefined;
+        if (!engine || typeof engine.find !== 'function' || typeof engine.insert !== 'function' || typeof engine.update !== 'function') {
+            return undefined;
+        }
+        return new ObjectStoreSyncRunLedger(engine as SyncRunLedgerEngine);
+    }
+
+    /**
+     * [ADR-0153 D7] At boot, close every pull a stopped server left `running`:
+     * `failed`, reason `interrupted`, its committed read position untouched.
+     * A store that cannot be written leaves those rows reading `running`, which
+     * is said once at `error` — the next pull still starts from the right
+     * position, because the position is read by commit time, never by status.
+     */
+    private async closeInterruptedSyncRuns(ctx: PluginContext): Promise<void> {
+        const ledger = this.syncRunLedgerOf(ctx);
+        if (!ledger) return;
+        const engine = this.resolveDataEngine(ctx) as unknown as SyncRunLedgerEngine;
+        try {
+            await closeInterruptedSyncRuns(engine, ctx.logger);
+        } catch (err) {
+            ctx.logger.error(
+                `[Automation] ${SYNC_RUN_OBJECT}: the pulls a stopped server left running could not be closed at boot — they keep `
+                + 'reading running in the run history although nothing runs them. Their committed read positions are unaffected. '
+                + "Check that schema sync ran for this datasource; the driver's own failure is in this record's meta.",
+                undefined,
+                describeThrownForLog(err),
+            );
+        }
     }
 
     /**
@@ -1732,8 +1855,9 @@ export class AutomationServicePlugin implements Plugin {
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
                 // [#27237] The connector credential store rides it too, and
-                // (ADR-0143 D3) the connector connection store.
-                objects: [SysAutomationRun, SysFlowDispatch, SysFlowCredential, SysConnectorCredential, SysConnectorConnection],
+                // (ADR-0143 D3) the connector connection store, and (ADR-0153
+                // D7) the pull's run record, beside the flow's.
+                objects: [SysAutomationRun, SysFlowDispatch, SysFlowCredential, SysConnectorCredential, SysConnectorConnection, SysSyncRun],
             });
             return true;
         } catch (err) {
@@ -1801,7 +1925,9 @@ export class AutomationServicePlugin implements Plugin {
                 scope: 'system',
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
-                objects: [SysFlowCredential, SysConnectorCredential, SysConnectorConnection],
+                // [ADR-0153 D7] The pull's run record too: a read position has
+                // nowhere else to go under `suspendedRunStore: 'memory'`.
+                objects: [SysFlowCredential, SysConnectorCredential, SysConnectorConnection, SysSyncRun],
             });
             return true;
         } catch (err) {
@@ -1944,7 +2070,14 @@ export class AutomationServicePlugin implements Plugin {
         this.connectorCredentialStore = new ConnectorCredentialStore(() => this.resolveDataEngine(ctx));
         // ADR-0143 D3 / D5 — the connector connection store, and the door the
         // `automation` service's connection members answer through.
-        this.connectorConnectionStore = new ConnectorConnectionStore(() => this.resolveDataEngine(ctx));
+        // [#31699] While the name's durable resolution (the question the boot
+        // backfill asks) answers one holder, every row of the name is the one
+        // instance's; under two holders each package's rows are its own.
+        const connectionNullRowHolder = connectorNameResolver(ctx);
+        this.connectorConnectionStore = new ConnectorConnectionStore(
+            () => this.resolveDataEngine(ctx),
+            (name) => connectionNullRowHolder(name, null, { includeDisabledPackages: true }),
+        );
         this.engine.setConnectorConnectionDoor({
             get: (request) => this.getConnectorConnection(ctx, request),
             begin: (request) => this.beginConnectorConnection(ctx, request),
@@ -2019,8 +2152,9 @@ export class AutomationServicePlugin implements Plugin {
         if ((this.options.suspendedRunStore ?? 'auto') !== 'memory') {
             // [#20790] The channel's table rides the same registration.
             this.runObjectRegistered = this.registerRunObject(ctx);
+            this.syncRunObjectRegistered = this.runObjectRegistered;
         } else {
-            this.registerCredentialObject(ctx);
+            this.syncRunObjectRegistered = this.registerCredentialObject(ctx);
         }
 
         // Seed the platform's built-in node executors. A bare
@@ -2111,6 +2245,7 @@ export class AutomationServicePlugin implements Plugin {
                 // smell (`optionalDependencies` should have ordered us after it).
                 if (!this.runObjectRegistered) {
                     this.runObjectRegistered = this.registerRunObject(ctx);
+                    if (this.runObjectRegistered) this.syncRunObjectRegistered = true;
                     if (this.runObjectRegistered) {
                         ctx.logger.info(
                             '[Automation] sys_automation_run registered at start() — the manifest service was not available during init()',
@@ -2228,6 +2363,10 @@ export class AutomationServicePlugin implements Plugin {
             }
         }
 
+        // [ADR-0153 D7] A pull a stopped server left `running` is closed
+        // `failed` / `interrupted`; its committed read position stands.
+        await this.closeInterruptedSyncRuns(ctx);
+
         // Run-history AGE retention is declarative since ADR-0057 (#2834):
         // sys_automation_run carries `retention: { maxAge: '30d', onlyWhen:
         // { status: { $in: ['completed', 'failed'] } } }` and the platform
@@ -2318,6 +2457,11 @@ export class AutomationServicePlugin implements Plugin {
                         // the user, so `sys_user_org_members` resolves for the
                         // run as it does for the user's own request.
                         org_user_ids: grants.org_user_ids,
+                        // [ADR-0093 D8.1, as amended] The membership set the
+                        // request path carries from this same resolution, so
+                        // the organization wall judges the run as it judges
+                        // the user's own request.
+                        accessible_org_ids: grants.accessible_org_ids,
                         // The email the request path seeds through this same
                         // resolver (the user's `sys_user` email), so a row
                         // policy reading `current_user.email` resolves for the
@@ -2536,11 +2680,12 @@ export class AutomationServicePlugin implements Plugin {
         // package a plugin registers in its own `kernel:ready` handler arrives
         // after it — the install-local rehydrate re-registers every installed
         // package there — and announces no reload, so its connectors were never
-        // materialized until some unrelated reload. Its flows already bind: the
-        // `kernel:ready` flow sync below reads the protocol's view after the
-        // rehydrate. Connectors are read again at `kernel:bootstrapped`, which
-        // fires once every `kernel:ready` handler has settled, whatever the
-        // plugin order. See {@link reconcileConnectorsRegisteredDuringBoot}.
+        // materialized until some unrelated reload. Connectors are read again at
+        // `kernel:bootstrapped`, which fires once every `kernel:ready` handler
+        // has settled, whatever the plugin order. See
+        // {@link reconcileConnectorsRegisteredDuringBoot}. [#33049] Its flows
+        // need the same second read: see the `kernel:bootstrapped` flow pass
+        // below the `kernel:ready` bind.
         ctx.hook('kernel:bootstrapped', async () => {
             await this.reconcileConnectorsRegisteredDuringBoot(ctx);
         });
@@ -2636,6 +2781,22 @@ export class AutomationServicePlugin implements Plugin {
                     if (this.degradedInstances.size > 0) void this.materializeDeclaredConnectors(ctx, { fatal: false });
                 });
             }
+        });
+
+        // ── [#33049] Flows a plugin registered after the bind above ──────────
+        // The bind above sees a package registered in another plugin's own
+        // `kernel:ready` handler only when that handler ran first, and handlers
+        // run in plugin start order: a plugin that declares a dependency on
+        // this one (every connector plugin does) starts this one earlier, so
+        // the install-local rehydrate, which re-registers every installed
+        // package there and announces no reload, then runs after the bind. Its
+        // flows were served and never registered, until some unrelated hot
+        // install re-synced. `kernel:bootstrapped` fires once every
+        // `kernel:ready` handler has settled, whatever the plugin order, and
+        // before this plugin seals its flow holders below: the view is read
+        // again there, and bound again only when it changed.
+        ctx.hook('kernel:bootstrapped', async () => {
+            await this.enqueueFlowSync(() => this.bindFlowsRegisteredDuringBoot(ctx));
         });
 
         // [#27238] Setup → Integrations → Connector Credentials — the door's
@@ -3240,7 +3401,9 @@ export class AutomationServicePlugin implements Plugin {
             if (auth?.type !== 'oauth2' || auth.grant !== 'authorization_code') continue;
             let state: ConnectionStateOfInstance;
             try {
-                const rows = await this.connectorConnectionStoreOrNone().listFor(name);
+                // [#31699] An organization whose read is refused has no connection to materialize with.
+                const rows = (await this.connectorConnectionStoreOrNone().listFor(name, connectorInstancePackage(connectorNameResolver(ctx), d.entry)))
+                    .filter((r) => r.conflict === undefined);
                 const reconnectRequired = rows.filter((r) => r.status === 'reconnect_required').map((r) => r.organizationId).sort();
                 const discovery = discoveryOrganizationOf(rows);
                 const discoveryConnectedAt = rows.find((r) => r.organizationId === discovery)?.connectedAt;
@@ -4008,6 +4171,7 @@ export class AutomationServicePlugin implements Plugin {
         // the client its administrator entered (`clientSource: 'installer'`).
         return createOAuth2GrantHandle({
             connector: name,
+            packageId: connectorInstancePackage(connectorNameResolver(ctx), entry),
             config: {
                 grant: auth.grant,
                 ...(takesInstallerClient(auth) ? { clientSource: 'installer' as const } : {}),
@@ -4066,7 +4230,7 @@ export class AutomationServicePlugin implements Plugin {
         let marked = false;
         try {
             const store = this.connectorConnectionStoreOrNone();
-            const record = await store.read(connection.organizationId, name);
+            const record = await store.read(connection.organizationId, name, connectorInstancePackage(connectorNameResolver(ctx), info.entry));
             if (record && record.status === 'connected' && record.connectedAt === connection.connectedAt) {
                 await store.markReconnectRequired(record, reason);
                 marked = true;
@@ -4212,7 +4376,7 @@ export class AutomationServicePlugin implements Plugin {
         const serverUrl = mcpDiscoveryServerUrl(entry, auth);
         if (serverUrl === undefined) return undefined;
         const store = this.connectorConnectionStoreOrNone();
-        const existing = installerClient ? undefined : await store.readOrRefuse(organizationId, name);
+        const existing = installerClient ? undefined : await store.readOrRefuse(organizationId, name, connectorInstancePackage(connectorNameResolver(ctx), entry));
         if (existing?.hasRegisteredClient) {
             let kept: McpAuthorizationClient | undefined;
             try {
@@ -4263,9 +4427,17 @@ export class AutomationServicePlugin implements Plugin {
     private async connectionDoorSubject(
         ctx: PluginContext,
         request: ConnectorConnectionRequest | undefined,
+        /**
+         * [#31699, M7] The instance's package as the pending authorization
+         * recorded it: a package id, `null` for the environment's or the
+         * platform's instance. Absent, the door resolves the name.
+         */
+        recordedPackage?: string | null,
     ): Promise<{
         name: string;
         entry: DeclaredConnectorItem;
+        /** [#31699] The instance's package (`null`: the environment's or the platform's instance). */
+        packageId: string | null;
         auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>;
         organizationId: string;
         userId?: string;
@@ -4275,7 +4447,7 @@ export class AutomationServicePlugin implements Plugin {
             throw credentialDoorRefusal('A connector instance name is required.', 'VALIDATION_ERROR', 400);
         }
         const declared = await this.readDeclaredConnectorItems(ctx, { post: true });
-        const entry = (declared ?? []).find((raw) => (raw as DeclaredConnectorItem | null)?.name === name) as DeclaredConnectorItem | undefined;
+        const { entry, packageId } = this.connectionDoorInstance(ctx, name, declared ?? [], recordedPackage);
         if (!entry || typeof entry.provider !== 'string' || entry.provider.length === 0) {
             throw credentialDoorRefusal(
                 `No installed package declares a provider-bound connector instance '${name}'.`,
@@ -4306,7 +4478,61 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         const userId = typeof request?.context?.userId === 'string' && request.context.userId.length > 0 ? request.context.userId : undefined;
-        return { name, entry, auth, organizationId, userId };
+        return { name, entry, packageId, auth, organizationId, userId };
+    }
+
+    /**
+     * [ADR-0150 D3/D4, #31699; design review M6] Which declared instance the
+     * connection door's name means, and its package. The resolver decides
+     * identity; the entry always comes from the declared list, matched on name
+     * and package:
+     *
+     * - a package the pending authorization recorded (`recordedPackage`) is
+     *   read exactly, never re-resolved: an entry of that package, else none;
+     * - `refused` (two packages hold the name) answers `409` naming them;
+     * - `resolved` takes the entry whose instance package
+     *   ({@link connectorInstancePackage}) is the resolved one (`null`: the
+     *   environment's or the platform's); when no declared entry is, the rule
+     *   below;
+     * - `not-found`, or no registry to ask (a code-registered instance, one only
+     *   a dev reload declares, a composition with no ObjectQL), serves the one
+     *   declared entry of the name as before, with the package that entry
+     *   carries; two declared entries are refused `409`, never picked.
+     */
+    private connectionDoorInstance(
+        ctx: PluginContext,
+        name: string,
+        declared: readonly unknown[],
+        recordedPackage: string | null | undefined,
+    ): { entry: DeclaredConnectorItem | undefined; packageId: string | null } {
+        const ofName = declared.filter((raw) => (raw as DeclaredConnectorItem | null)?.name === name) as DeclaredConnectorItem[];
+        const resolve = connectorNameResolver(ctx);
+        const exactly = (packageId: string | null) => ({
+            entry: ofName.find((entry) => connectorInstancePackage(resolve, entry) === packageId),
+            packageId,
+        });
+        if (recordedPackage !== undefined) return exactly(recordedPackage);
+        const resolution = resolve(name, null);
+        if (resolution?.status === 'refused') {
+            throw credentialDoorRefusal(resolution.message, 'RESOURCE_CONFLICT', 409);
+        }
+        if (resolution?.status === 'resolved') {
+            const held = exactly(resolution.holder.kind === 'package' ? resolution.holder.packageId : null);
+            // A holder no declared entry is the instance of (an entry stamped
+            // with another package than the one the name resolves to) falls to
+            // the one declared entry below, with that entry's own package: the
+            // package the dispatch reads the same instance's connection by.
+            if (held.entry !== undefined) return held;
+        }
+        if (ofName.length > 1) {
+            throw credentialDoorRefusal(
+                `${ofName.length} declared connector instances are named '${name}', and the connection door connects one: `
+                    + 'address the instance by its package.',
+                'RESOURCE_CONFLICT',
+                409,
+            );
+        }
+        return { entry: ofName[0], packageId: ofName[0] ? connectorInstancePackage(resolve, ofName[0]) : null };
     }
 
     /** ADR-0143 D3 — a connection row (or its absence) as the door answers it. Never a token. */
@@ -4360,6 +4586,7 @@ export class AutomationServicePlugin implements Plugin {
      */
     private async installerClientOfBegin(
         name: string,
+        packageId: string | null,
         auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>,
         request: ConnectorConnectionRequest,
         organizationId: string,
@@ -4376,7 +4603,7 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         if (offered === undefined) {
-            const kept = await this.keptInstallerClient(name, organizationId);
+            const kept = await this.keptInstallerClient(name, packageId, organizationId);
             if (kept) return kept;
             throw refuse(
                 `Connector instance '${name}' takes its OAuth client from the installer (\`clientSource: 'installer'\`), and this `
@@ -4418,9 +4645,9 @@ export class AutomationServicePlugin implements Plugin {
      * encrypted client column, or `undefined` when it keeps none. A store
      * that cannot read or decrypt it refuses (`503`), never "keeps none".
      */
-    private async keptInstallerClient(name: string, organizationId: string): Promise<InstallerClient | undefined> {
+    private async keptInstallerClient(name: string, packageId: string | null, organizationId: string): Promise<InstallerClient | undefined> {
         const store = this.connectorConnectionStoreOrNone();
-        const record = await store.readOrRefuse(organizationId, name);
+        const record = await store.readOrRefuse(organizationId, name, packageId);
         if (record?.installerClientId === undefined) return undefined;
         const kept = parseKeptConnectionClient(await store.resolveRegisteredClient(record));
         if (!kept?.installer) return undefined;
@@ -4435,9 +4662,13 @@ export class AutomationServicePlugin implements Plugin {
      * is absent, never a refusal: the read still answers the status.
      */
     private async getConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
-        const { name, organizationId } = await this.connectionDoorSubject(ctx, request);
+        const { name, packageId, organizationId } = await this.connectionDoorSubject(ctx, request);
         this.refuseClientOffLeg(name, request, 'read');
-        const state = this.describeConnection(name, organizationId, await this.connectorConnectionStoreOrNone().readOrRefuse(organizationId, name));
+        const state = this.describeConnection(
+            name,
+            organizationId,
+            await this.connectorConnectionStoreOrNone().readOrRefuse(organizationId, name, packageId),
+        );
         const redirectUri = this.derivedConnectorOAuthRedirectUri();
         return redirectUri === undefined ? state : { ...state, redirectUri };
     }
@@ -4448,7 +4679,7 @@ export class AutomationServicePlugin implements Plugin {
      * the authorization URL. Nothing is written to the connection record.
      */
     private async beginConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin> {
-        const { name, entry, auth, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
+        const { name, entry, packageId, auth, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
         if (userId === undefined) {
             throw credentialDoorRefusal(
                 `Connecting connector instance '${name}' needs a signed-in user: the callback is accepted only from the user `
@@ -4458,13 +4689,13 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         const redirectUri = this.connectorOAuthRedirectUri();
-        const installerClient = await this.installerClientOfBegin(name, auth, request, organizationId, redirectUri);
+        const installerClient = await this.installerClientOfBegin(name, packageId, auth, request, organizationId, redirectUri);
         const client = await this.mcpAuthorizationClient(ctx, name, entry, auth, organizationId, redirectUri, installerClient);
         const state = createAuthorizationState();
         const { verifier, challenge } = createPkcePair();
         const expiresAt = Date.now() + PENDING_AUTHORIZATION_TTL_SECONDS * 1000;
         await this.pendingAuthorizations(ctx).put(state, {
-            connector: name, organizationId, userId, verifier, redirectUri, expiresAt,
+            connector: name, packageId, organizationId, userId, verifier, redirectUri, expiresAt,
             ...(client ? { client } : {}),
             ...(installerClient ? { installerClient } : {}),
         });
@@ -4539,10 +4770,14 @@ export class AutomationServicePlugin implements Plugin {
         }
         // The declaration is read again: the instance may have changed while
         // the browser was away.
-        const { name, auth, organizationId } = await this.connectionDoorSubject(ctx, {
+        // [#31699, M7] Exactly the instance the connect was begun for: the
+        // package it recorded (`null`: the environment's or the platform's
+        // instance), never the bare name resolved again. A record from before
+        // the package was recorded (no key, within its TTL) resolves the name.
+        const { name, packageId, auth, organizationId } = await this.connectionDoorSubject(ctx, {
             connector: pending.connector,
             context: request.context,
-        });
+        }, pending.packageId);
         const client = pending.client;
         // ADR-0143 D2.1 (2026-11-02 amendment): an instance that takes the
         // installer's client exchanges as the client its connect was begun
@@ -4603,6 +4838,7 @@ export class AutomationServicePlugin implements Plugin {
             const stored = await this.connectorConnectionStoreOrNone().connect({
                 organizationId,
                 connectorName: name,
+                packageId,
                 ...(userId ? { userId } : {}),
                 ...(token.refreshToken === undefined ? {} : { refreshToken: token.refreshToken }),
                 ...(token.scope === undefined ? {} : { scopes: token.scope }),
@@ -4638,10 +4874,10 @@ export class AutomationServicePlugin implements Plugin {
 
     /** ADR-0143 D5 — `IAutomationService.revokeConnectorConnection`. */
     private async revokeConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
-        const { name, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
+        const { name, packageId, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
         this.refuseClientOffLeg(name, request, 'revoke');
         const removed = await this.onReconcileQueue(async () => {
-            const gone = await this.connectorConnectionStoreOrNone().revoke(organizationId, name, userId);
+            const gone = await this.connectorConnectionStoreOrNone().revoke(organizationId, name, userId, packageId);
             if (!gone) return false;
             this.grantHandles.get(name)?.forget(organizationId);
             ctx.logger.info(
@@ -5688,10 +5924,16 @@ export class AutomationServicePlugin implements Plugin {
      * flow in the view at `kernel:ready` — a record made there could be
      * contradicted by this same boot (AGENTS.md "Startup registry reads").
      */
-    private async syncFlowsFromProtocol(ctx: PluginContext): Promise<void> {
+    private async syncFlowsFromProtocol(
+        ctx: PluginContext,
+        phase: 'kernel:ready' | 'kernel:bootstrapped' = 'kernel:ready',
+        read?: Array<{ name?: string }>,
+    ): Promise<void> {
         if (!this.engine) return;
-        const defs = await this.readFlowDefsFromProtocol(ctx);
+        const defs = read ?? await this.readFlowDefsFromProtocol(ctx);
         if (!defs) return;
+        // [#33049] What this bind read, for the `kernel:bootstrapped` pass.
+        this.bootFlowViewFingerprint = flowViewFingerprint(defs);
         let bound = 0;
         // [#20913] Through the boot pull's own precedence decision — see
         // {@link resolveFlowContenders}. registerFlow is idempotent, so
@@ -5724,8 +5966,27 @@ export class AutomationServicePlugin implements Plugin {
             }
         }
         if (bound > 0) {
-            ctx.logger.info(`[Automation] Bound ${bound} flow(s) from the protocol at kernel:ready`);
+            ctx.logger.info(`[Automation] Bound ${bound} flow(s) from the protocol at ${phase}`);
         }
+    }
+
+    /**
+     * [#33049] The `kernel:bootstrapped` pass: bind again, through the same
+     * additive {@link syncFlowsFromProtocol}, when the protocol's flow view
+     * differs from the one the `kernel:ready` bind read, so a package a plugin
+     * registered after that bind (the install-local rehydrate) has its flows
+     * registered whatever the plugin order. An unchanged view binds nothing;
+     * a bind that never read a view (no protocol) leaves this pass nothing to
+     * compare, and it does nothing. Runs on the flow sync queue, before the
+     * flow holders seal.
+     */
+    private async bindFlowsRegisteredDuringBoot(ctx: PluginContext): Promise<void> {
+        if (!this.engine || this.destroyed) return;
+        if (this.bootFlowViewFingerprint === undefined) return;
+        const defs = await this.readFlowDefsFromProtocol(ctx);
+        if (!defs) return;
+        if (flowViewFingerprint(defs) === this.bootFlowViewFingerprint) return;
+        await this.syncFlowsFromProtocol(ctx, 'kernel:bootstrapped', defs);
     }
 
     /**

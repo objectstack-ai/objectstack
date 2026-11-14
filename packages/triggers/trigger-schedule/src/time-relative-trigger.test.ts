@@ -1687,4 +1687,26 @@ describe('TimeRelativeTrigger — R10: a flow one package holds is keyed by that
         expect(await sweep(ledger.surface)).toEqual([]);
         expect(ledger.claims).toEqual([BARE]);
     });
+
+    // [#31696 PR-2] A slot of a name two packages hold is bound under its key
+    // (`PACKAGE/NAME`); its claim is spelled with the flow's name the holder
+    // answers, never the key — the key the same slot claimed alone.
+    it('a slot bound under its key claims the key spelled with the flow\'s name and its package', async () => {
+        const shared = fakeClaimLedger();
+        const surface: FlowDispatchClaimSurface = {
+            claim: shared.surface.claim,
+            flowDispatchHolder: (flowName) => (flowName === `${PKG}/renewal_alert`
+                ? { packageId: PKG, claimBare: false, name: 'renewal_alert' }
+                : { packageId: null, claimBare: true }),
+        };
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine(rows);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW, () => surface);
+        const launched: string[] = [];
+        trigger.start(binding(desc, { flowName: `${PKG}/renewal_alert` }), async (ctx) => { launched.push((ctx.record as Row).id as string); });
+        await flush();
+        await job.fire(`flow-time-relative:${PKG}/renewal_alert`);
+        expect(launched).toEqual(['c1']);
+        expect(shared.claims).toEqual([SCOPED]);
+    });
 });

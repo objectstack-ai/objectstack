@@ -23,6 +23,7 @@ import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js
 import { absentTableReads } from '../../utils/absent-table-reads.js';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import { archiveFailureCount, examineArchiveTargets } from '../../utils/ledger-copy-archive.js';
+import { composeRedactionSeal } from '../../utils/audit-redaction-seal.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -178,6 +179,8 @@ export default class MigrateAuditMailBodies extends Command {
       printStep(apply ? 'Booting data stack (APPLY mode)…' : 'Booting data stack (dry run)…');
     }
 
+    // [ADR-0154 D7] The crypto `os serve` seals with, so a sealed copy is amended before it is masked.
+    const redaction = await composeRedactionSeal();
     let stack;
     try {
       // [#21349] The dry run boots READ-ONLY — the same boot `os migrate plan`
@@ -188,7 +191,7 @@ export default class MigrateAuditMailBodies extends Command {
       stack = await bootSchemaStack({
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
-        extraPlugins: await buildDataMigrationPlugins({ audit: true }),
+        extraPlugins: [...(await buildDataMigrationPlugins({ audit: true })), ...redaction.plugins],
         // [#24899] Connect the declared datasources as `os serve` does, so a
         // declared archive datasource is registered under its name and the
         // archive run below reaches it.
@@ -231,7 +234,8 @@ export default class MigrateAuditMailBodies extends Command {
         update: (object, data, options) => engine.update(object, data, options),
       };
 
-      const report = await migrateMailLogBodyCopies(readView, logger, { apply });
+      const seal = redaction.seal(stack.kernel, engine);
+      const report = await migrateMailLogBodyCopies(readView, logger, { apply, seal });
 
       // [#24899] Each copy table's declared archive target, then the same
       // runner through that datasource's driver (`examineArchiveTargets`).
@@ -240,15 +244,16 @@ export default class MigrateAuditMailBodies extends Command {
         kernel: stack.kernel,
         reads: readView,
         tables: MAIL_LOG_BODY_COPY_OBJECTS,
-        run: (driver, objects) => migrateArchivedMailLogBodyCopies(driver, logger, { apply, objects }),
+        run: (driver, objects) => migrateArchivedMailLogBodyCopies(driver, logger, { apply, objects, seal }),
       });
       const archiveFailures = archiveFailureCount(archive);
       const failures = report.failures + archiveFailures;
+      const refused = report.refused + archive.reduce((n, a) => n + (a.report?.refused ?? 0), 0);
 
       if (flags.json) {
         reads.notice(true);
         await emitJson({ database: stack.dbLabel, apply, report, archive, duration: timer.elapsed() });
-        if (failures > 0) this.exit(1);
+        if (failures > 0 || refused > 0) this.exit(1);
         return;
       }
 
@@ -257,7 +262,8 @@ export default class MigrateAuditMailBodies extends Command {
       console.log('');
       for (const [object, stats] of Object.entries(report.byObject)) {
         console.log(
-          `  ${chalk.white(object)}: ${stats.scanned} mail-log cop(ies) scanned, ${stats.rewritten} ${apply ? 'masked' : 'to mask'}`,
+          `  ${chalk.white(object)}: ${stats.scanned} mail-log cop(ies) scanned, ${stats.rewritten} ${apply ? 'masked' : 'to mask'}` +
+            (stats.refused > 0 ? `, ${stats.refused} sealed and refused` : ''),
         );
       }
       for (const a of archive) {
@@ -265,7 +271,7 @@ export default class MigrateAuditMailBodies extends Command {
           for (const [object, stats] of Object.entries(a.report.byObject)) {
             console.log(
               `  ${chalk.white(object)} (archive datasource '${a.datasource}'): ${stats.scanned} mail-log cop(ies) scanned, ` +
-                `${stats.rewritten} ${apply ? 'masked' : 'to mask'}`,
+                `${stats.rewritten} ${apply ? 'masked' : 'to mask'}` + (stats.refused > 0 ? `, ${stats.refused} sealed and refused` : ''),
             );
           }
         } else if (a.status === 'none') {
@@ -301,6 +307,7 @@ export default class MigrateAuditMailBodies extends Command {
       }
 
       const rewritten = report.rewritten + archive.reduce((n, a) => n + (a.report?.rewritten ?? 0), 0);
+      if (refused > 0) printError(redaction.refusedLine(refused));
       if (failures > 0) {
         printError(`${failures} read(s), row(s) or archive datasource(s) failed — re-run to finish them.`);
       } else if (apply && rewritten > 0) {
@@ -309,12 +316,12 @@ export default class MigrateAuditMailBodies extends Command {
         );
       } else if (!apply && rewritten > 0) {
         printInfo(`Dry run only — ${rewritten} row(s) would be masked. Re-run with --apply.`);
-      } else {
+      } else if (refused === 0) {
         printSuccess('Nothing to mask — no audit/activity copy of a mail-log row holds a mail body in clear.');
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
-      if (failures > 0) this.exit(1);
+      if (failures > 0 || refused > 0) this.exit(1);
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }

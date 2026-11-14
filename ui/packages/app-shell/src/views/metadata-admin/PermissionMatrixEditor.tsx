@@ -125,6 +125,7 @@ import { AssignedUsersSection } from './AssignedUsersSection.js';
 import { SetupAssignmentsLink } from './SetupAssignmentsLink.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
 import { CatalogItemActiveSwitch } from './CatalogActiveSwitch.js';
+import { holdingOfRead, holdingPackage, type PermissionSetHolding } from './permission-set-holder.js';
 import { isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
 import { errorCodeIs } from '@object-ui/types';
@@ -534,6 +535,15 @@ export interface PermissionStudioChrome {
   chips?: React.ReactNode;
   /** Before History in the header's actions (the pillar's Explain access). */
   actions?: React.ReactNode;
+  /**
+   * objectstack#32774 — told, for the set `name` this editor shows, the
+   * package the clone door must name to copy it (`holdingPackage` of the
+   * holding this editor read): `undefined` where the name alone addresses it
+   * (one holder, the environment's own set) or no holder was read. The pillar
+   * hosts its own clone dialog ("New similar") and passes it as
+   * `sourcePackage`.
+   */
+  onCloneSourceRead?: (name: string, sourcePackage: string | undefined) => void;
 }
 
 export interface PermissionMatrixEditPageProps {
@@ -790,6 +800,22 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // layer): a name nobody has saved yet, which this editor's first Save creates.
   // `null` until a load lands, and after a failed read, which says nothing.
   const [existsOnServer, setExistsOnServer] = React.useState<boolean | null>(null);
+  // objectstack#32537 — which holder of the name this editor shows, where more
+  // than one package holds it (`holdingOfRead`): the assignment section and the
+  // active switch below read and write that holder's grants and state, never
+  // the union of every holder's. `null`: more than one holder serves the name
+  // and this read addressed none of them, or the published list could not be
+  // read, so the editor draws neither. `undefined`: one holder, by the name as
+  // before.
+  const [assignmentsHolding, setAssignmentsHolding] = React.useState<PermissionSetHolding | undefined | null>(undefined);
+  // objectstack#32774 — the package a clone of the set shown names: the holder
+  // this editor read, only where the name alone does not address it.
+  const cloneSourcePackage = holdingPackage(assignmentsHolding ?? undefined);
+  const onCloneSourceReadRef = React.useRef(studio?.onCloneSourceRead);
+  onCloneSourceReadRef.current = studio?.onCloneSourceRead;
+  React.useEffect(() => {
+    onCloneSourceReadRef.current?.(name, cloneSourcePackage);
+  }, [name, cloneSourcePackage]);
   // objectui#7611 — the Setup catalog (`?scope=environment`) shows who holds the
   // set under its definition; Studio's design surface does not. Nor does a set
   // the server does not hold yet: a grant names a set that exists, so Add there
@@ -937,6 +963,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // objectui#11799 — the same published read, held for the load below: a set
   // it does not list has never been published. The load runs after this
   // effect, so it reads this request rather than sending one of its own.
+  // objectstack#32774 — read again whenever the load re-reads the set (a
+  // publish, a reload), so a holder of the name that arrived while the editor
+  // was open is counted by that load, ⛔ not only after a remount.
   const publishedSetsRef = React.useRef<Promise<Array<{ name?: string; label?: unknown }>> | null>(null);
   React.useEffect(() => {
     let cancelled = false;
@@ -953,7 +982,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, publishNonce, reloadNonce]);
 
   /* ── Load draft + object catalog ───────────────────────────── */
   React.useEffect(() => {
@@ -965,6 +994,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     setCodeIsArtifact(false);
     setServedEditable(undefined);
     setExistsOnServer(null);
+    setAssignmentsHolding(undefined);
     // Same reason: a notice raised by the previous set's save must not survive
     // into a set that is about to be read fresh (objectui#9484).
     setPostSaveRereadFailed(false);
@@ -975,6 +1005,21 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     setCloned((c) => (c && c.name === name ? c : null));
     setServedLabel(null);
     setDraftRefused(null);
+    // objectstack#32537 — the holder this read addresses, from the published
+    // list the effect above holds (its rows carry each holder's `_packageId`).
+    // A list that cannot be read cannot say how many holders the name has, so
+    // it answers `null`: the editor draws nothing holder-scoped rather than a
+    // by-name section that could be every holder's.
+    const publishedForHolding = publishedSetsRef.current;
+    const holdingRead: Promise<PermissionSetHolding | undefined | null> =
+      type !== 'permission'
+        ? Promise.resolve(undefined)
+        : publishedForHolding
+          ? publishedForHolding.then(
+              (rows) => (Array.isArray(rows) ? holdingOfRead(rows, name, layeredPackageId) : null),
+              () => null,
+            )
+          : Promise.resolve(null);
     (async () => {
       try {
         // ADR-0086 P2 (D6): under the package door a set is draft/published
@@ -1117,6 +1162,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         if (pendingRead && packageId) recordSetRead(type, name, packageId, pendingRead.pin);
         else forgetSetVersion();
         // A draft-only set has no served row and keeps its draft label.
+        const holdingShown = await holdingRead;
+        if (cancelled) return;
+        setAssignmentsHolding(holdingShown);
         const servedRow = publishedSets
           ? (await publishedSets.catch(() => null))?.find((r) => r?.name === name)
           : undefined;
@@ -1127,6 +1175,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         }
       } catch (err: any) {
         setError(err?.message ?? String(err));
+        // A refused read (a name two packages hold, read naming neither) still
+        // says which holder, if any, the sections below may show.
+        const holdingShown = await holdingRead;
+        if (!cancelled) setAssignmentsHolding(holdingShown);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -2178,6 +2230,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       {cloneOpen && (
         <PermissionSetCloneDialog
           source={name}
+          sourcePackage={cloneSourcePackage}
           locale={locale}
           onClose={() => setCloneOpen(false)}
           onCloned={onCloned}
@@ -2616,6 +2669,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               (Studio, embedded) never shows it. objectui#7611 — the Setup catalog
               IS this editor in the environment scope (ADR-0131 D3), so there the
               set's holders render under its definition, by name.
+              objectstack#32537 — where more than one package holds the name,
+              by the holder this editor shows (`assignmentsHolding`).
               objectstack#26885 — in the matrix's own scroll, after the grid: a
               strip pinned beneath it took up to 35vh off the grid's height, so
               a laptop showed about five object rows and a phone none. */}
@@ -2626,13 +2681,23 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             <div className="mx-4">
               {/* N-28 (M-1 ruling A) — the set's active switch moved with
                   the item from Setup's catalog list into Studio. */}
-              <CatalogItemActiveSwitch type="permission" name={name} />
-              <SetupAssignmentsLink kind="permission" name={name} />
+              {assignmentsHolding !== null && (
+                <CatalogItemActiveSwitch type="permission" name={name} holding={assignmentsHolding} />
+              )}
+              <SetupAssignmentsLink
+                kind="permission"
+                name={name}
+                holderPackage={holdingPackage(assignmentsHolding ?? undefined)}
+              />
             </div>
           )}
-          {showAssignments && !areaHost && (
+          {showAssignments && !areaHost && assignmentsHolding !== null && (
             <div className="mx-4 my-4 rounded-md border" data-testid="perm-assignments">
-              <AssignedUsersSection permissionSetName={name} onHoldersRead={onHoldersRead} />
+              <AssignedUsersSection
+                permissionSetName={name}
+                holding={assignmentsHolding}
+                onHoldersRead={onHoldersRead}
+              />
             </div>
           )}
         </MatrixScrollPane>

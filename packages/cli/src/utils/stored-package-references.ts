@@ -42,6 +42,31 @@
  * `?package=ID`, and only a rename of its namespace gives them qualified
  * addresses. Not bindable either: a namespace is the author's to change.
  *
+ * It lists, last, each customization pair's member row of a bundled type
+ * whose readers consult `(package, name)` (an email template's locale) that
+ * two or more holders of the name could own: two packages of one App share
+ * the App's pair, and a row Studio added there declares no `overrides` naming
+ * the base it customizes. Each such holder's exact read refuses the row,
+ * naming every one (`pairMemberOwners`, `@objectstack/metadata-protocol`; the
+ * epic ruling on #31699 F2). Not bindable by `bind`: the row's package column
+ * already names the pair. A row declaring its base (`overrides.package`) is
+ * served by that base only, but the save gate refuses that declaration on a
+ * member the base does not ship (`declared_package_ships_no_such_item`,
+ * #28777), so no door binds an added member to one base today: the row stays
+ * refused, and listed here, until it is deleted.
+ *
+ * Beside them it lists each package-less `sys_metadata` row of such a type
+ * (any type whose readers consult `(package, name)`, not only a bundled one,
+ * and any type whose one-holder rule has narrowed to the namespace, such as
+ * `action`: `judgesPackageLessRows`, #32407)
+ * whose name two or more packages hold: the row is the customization of one
+ * holder and cannot say which (ADR-0150 D4), so each holder's exact read
+ * refuses it and the list scoped to a holder leaves it out
+ * (`packageLessRowOwners`, `@objectstack/metadata-protocol`; epic ruling
+ * 6761802819 on #31699). Where one holder ships the item, the fix is saving
+ * the customization into that holder's pair declaring it and deleting the
+ * row; otherwise no door binds it to one package today.
+ *
  * ## A database this release has not booted yet
  *
  * The release that carries D8 adds each package column at its first boot and
@@ -72,9 +97,12 @@
  */
 
 import type { PackageScopedHolder, PackageScopedResolution } from '@objectstack/core';
+import { PACKAGE_SCOPED_TYPES } from '@objectstack/core';
 import { resolvePackageScopedName, type PackageScopedRegistry } from '@objectstack/objectql';
-import { keysetWalk } from '@objectstack/types';
-import { validateNamespaceNotAddressLiteral } from '@objectstack/spec/kernel';
+import { isUniqueViolationError, keysetWalk } from '@objectstack/types';
+import { isCustomizationPackage, validateNamespaceNotAddressLiteral } from '@objectstack/spec/kernel';
+import { ITEM_KEY_DISCRIMINATORS, installedManifestsOf } from '@objectstack/metadata-core';
+import { judgesPackageLessRows, packageLessRowOwners, pairMemberOwners } from '@objectstack/metadata-protocol';
 
 /** The D3 types a stored reference names. */
 type ReferencedType = 'permission' | 'sharing_rule' | 'queue' | 'assignment_rule' | 'flow' | 'connector' | 'email_template';
@@ -134,7 +162,9 @@ export type StoredReferenceRefusal = 'ambiguous' | 'environment-only' | 'outside
 export type ReferenceCandidate =
   | { readonly holder: 'package'; readonly packageId: string; readonly address: string }
   | { readonly holder: 'environment'; readonly address: string }
-  | { readonly holder: 'platform' };
+  | { readonly holder: 'platform' }
+  /** [#32412] A stack's residual (ADR-0130 D4); the registry's rule never names one, the job binder's refusal does. */
+  | { readonly holder: 'residual'; readonly ownerId: string };
 
 /** One stored row the rule refused. */
 export interface StoredReferenceFinding {
@@ -177,12 +207,40 @@ export interface LiteralNamespaceFinding {
   readonly message: string;
 }
 
+/** One pair member row two or more holders of the name could own (module doc; epic ruling on #31699 F2). */
+export interface PairMemberFinding {
+  readonly table: 'sys_metadata';
+  readonly id: string;
+  readonly type: string;
+  readonly name: string;
+  /** The bundle member the row stores (an email template's locale). */
+  readonly member: string | null;
+  /** The customization package the row is bound to. */
+  readonly pairId: string;
+  /** Every holder the row could be the added member of. */
+  readonly candidates: readonly ReferenceCandidate[];
+}
+
+/** One package-less row two or more holders of the name could own (module doc; epic ruling 6761802819 on #31699). */
+export interface PackageLessRowFinding {
+  readonly table: 'sys_metadata';
+  readonly id: string;
+  readonly type: string;
+  readonly name: string;
+  /** The bundle member the row stores (an email template's locale), else `null`. */
+  readonly member: string | null;
+  /** Every holder the row could be the customization of. */
+  readonly candidates: readonly ReferenceCandidate[];
+}
+
 /** The report (module doc). */
 export interface StoredPackageReferenceReport {
   readonly stored: readonly StoredReferenceFinding[];
   readonly picklists: readonly PicklistReferenceFinding[];
   readonly sealedClashes: readonly SealedClashFinding[];
   readonly literalNamespaces: readonly LiteralNamespaceFinding[];
+  readonly pairMembers: readonly PairMemberFinding[];
+  readonly packageLessRows: readonly PackageLessRowFinding[];
   /** D8 tables this composition does not carry, so not read. */
   readonly tablesNotCarried: readonly string[];
   /** D8 tables the boot measured absent from the database: nothing stored, read as no rows. */
@@ -198,6 +256,7 @@ export interface StoredReferenceEngine {
 /** The registry slice: the resolver's reads, the table check, and the readers the report lists. */
 export type StoredReferenceRegistry = PackageScopedRegistry & {
   getObject?(name: string): unknown;
+  readsByPackage?(type: string): boolean;
   getAllPackages?(): ReadonlyArray<{ manifest?: { id?: unknown; namespace?: unknown } }>;
   findOutsideClosurePicklistReferences?(): ReadonlyArray<{ object: string; field: string; picklist: string; packageId?: string }>;
   picklistReferenceVerdict?(name: string, callerPackageId?: string | null): PackageScopedResolution;
@@ -259,9 +318,18 @@ function fieldsOf(reference: StoredPackageReference, packageColumnPresent = true
   return [...fields];
 }
 
-/** Ask the one rule, as the reference's backfill asks it. */
+/**
+ * Ask the one rule, as the reference's backfill asks it: over every holder, a
+ * disabled package's included (#32183), since a binding never moves with a
+ * reversible disable. Every D8 backfill this report covers asks that way: the
+ * flow rows (R7–R10) through the automation engine's `durableFlowHolder`, the
+ * connector row (R11) through its resolver with `includeDisabledPackages`,
+ * the rest through objectql's resolver or the registry's holder read with it.
+ * So a row resolved here is one the next boot binds, its package disabled or
+ * not.
+ */
 function ask(registry: StoredReferenceRegistry, type: ReferencedType, name: string, callerPackageId: string | null): PackageScopedResolution {
-  return resolvePackageScopedName(registry, { type, name, callerPackageId });
+  return resolvePackageScopedName(registry, { type, name, callerPackageId, includeDisabledPackages: true });
 }
 
 /** The report's reading of a refusal (module doc). */
@@ -275,6 +343,7 @@ export function refusalOf(answer: PackageScopedResolution): StoredReferenceRefus
 function candidateOf(registry: StoredReferenceRegistry, holder: PackageScopedHolder, name: string): ReferenceCandidate {
   if (holder.kind === 'environment') return { holder: 'environment', address: `_env/${name}` };
   if (holder.kind === 'platform') return { holder: 'platform' };
+  if (holder.kind === 'residual') return { holder: 'residual', ownerId: holder.ownerId };
   const pkg = registry.getPackage(holder.packageId) as { manifest?: { namespace?: unknown } } | undefined;
   const namespace = typeof pkg?.manifest?.namespace === 'string' && pkg.manifest.namespace !== '' ? pkg.manifest.namespace : undefined;
   return { holder: 'package', packageId: holder.packageId, address: namespace ? `${namespace}/${name}` : `${holder.packageId}:${name}` };
@@ -350,6 +419,85 @@ async function refusedRowsOf(
 
 const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
+/** The stored body of a `sys_metadata` row, or `undefined` when it is not a JSON object. */
+function storedBody(value: unknown): unknown {
+  if (value !== null && typeof value === 'object') return value;
+  if (typeof value !== 'string') return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The pair member rows two or more holders of the name could own (module doc). Reads only; ordered by id. */
+async function ambiguousPairMemberRows(engine: StoredReferenceEngine, registry: StoredReferenceRegistry): Promise<PairMemberFinding[]> {
+  const types = Object.keys(ITEM_KEY_DISCRIMINATORS).filter((type) => registry.readsByPackage?.(type) === true);
+  if (types.length === 0) return [];
+  const installed = installedManifestsOf(registry as never);
+  const findings: PairMemberFinding[] = [];
+  const walk = keysetWalk<Row>(
+    async (query) => {
+      const page = await engine.find('sys_metadata', {
+        ...query, fields: ['id', 'type', 'name', 'package_id', 'bundle_member', 'metadata', 'state'], context: SYSTEM_CTX,
+      });
+      return Array.isArray(page) ? (page as Row[]) : [];
+    },
+    { where: { type: { $in: types }, state: 'active' }, pageSize: PAGE_SIZE },
+  );
+  for await (const page of walk.pages()) {
+    for (const row of page) {
+      const { id, type, name } = row;
+      const pairId = row.package_id;
+      if (id === null || id === undefined || typeof type !== 'string' || !types.includes(type) || typeof name !== 'string') continue;
+      if (row.state !== 'active' || typeof pairId !== 'string' || !isCustomizationPackage(pairId)) continue;
+      // [#32183] Every holder, a disabled package's included: the report is a
+      // durable judgment, so its listing never moves with a reversible disable.
+      const every = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+      const owners = pairMemberOwners(pairId, every, installed, storedBody(row.metadata));
+      if (owners.length < 2) continue;
+      findings.push({
+        table: 'sys_metadata', id: String(id), type, name,
+        member: typeof row.bundle_member === 'string' && row.bundle_member !== '' ? row.bundle_member : null,
+        pairId,
+        candidates: owners.map((packageId) => candidateOf(registry, { kind: 'package', packageId }, name)),
+      });
+    }
+  }
+  return findings.sort((a, b) => byText(a.id, b.id));
+}
+
+/** The package-less rows two or more holders of the name could own (module doc). Reads only; ordered by id. */
+async function ambiguousPackageLessRows(engine: StoredReferenceEngine, registry: StoredReferenceRegistry): Promise<PackageLessRowFinding[]> {
+  const types: string[] = PACKAGE_SCOPED_TYPES.filter((type) => judgesPackageLessRows(registry, type));
+  if (types.length === 0) return [];
+  const findings: PackageLessRowFinding[] = [];
+  const walk = keysetWalk<Row>(
+    async (query) => {
+      const page = await engine.find('sys_metadata', {
+        ...query, fields: ['id', 'type', 'name', 'package_id', 'bundle_member', 'state'], context: SYSTEM_CTX,
+      });
+      return Array.isArray(page) ? (page as Row[]) : [];
+    },
+    { where: { type: { $in: types }, state: 'active' }, pageSize: PAGE_SIZE },
+  );
+  for await (const page of walk.pages()) {
+    for (const row of page) {
+      const { id, type, name } = row;
+      if (id === null || id === undefined || typeof type !== 'string' || !types.includes(type) || typeof name !== 'string') continue;
+      if (row.state !== 'active' || (row.package_id !== null && row.package_id !== undefined && row.package_id !== '')) continue;
+      const owners = packageLessRowOwners(registry as never, type, name, { includeDisabledPackages: true });
+      if (owners.length < 2) continue;
+      findings.push({
+        table: 'sys_metadata', id: String(id), type, name,
+        member: typeof row.bundle_member === 'string' && row.bundle_member !== '' ? row.bundle_member : null,
+        candidates: owners.map((packageId) => candidateOf(registry, { kind: 'package', packageId }, name)),
+      });
+    }
+  }
+  return findings.sort((a, b) => byText(a.id, b.id));
+}
+
 /**
  * The upgrade report (module doc): every refused stored row, every refused
  * picklist reference and every sealed clash, in a stable order, so two runs
@@ -424,7 +572,13 @@ export async function collectStoredPackageReferences(
   }
   literalNamespaces.sort((a, b) => byText(a.packageId, b.packageId));
 
-  return { stored, picklists, sealedClashes, literalNamespaces, tablesNotCarried, tablesAbsent };
+  // [#31699 F2] The pair member rows two holders could own.
+  const readsMetadata = carries(registry, 'sys_metadata') && !options?.absent?.('sys_metadata');
+  const pairMembers = readsMetadata ? await ambiguousPairMemberRows(engine, registry) : [];
+  // [epic ruling 6761802819 on #31699] …and the package-less rows two holders could own.
+  const packageLessRows = readsMetadata ? await ambiguousPackageLessRows(engine, registry) : [];
+
+  return { stored, picklists, sealedClashes, literalNamespaces, pairMembers, packageLessRows, tablesNotCarried, tablesAbsent };
 }
 
 /** What the operator asks the bind to write. */
@@ -437,7 +591,7 @@ export interface BindRequest {
 /** Why a bind wrote nothing. */
 export type BindRefusal =
   | 'unknown-table' | 'report-only' | 'table-not-carried' | 'no-such-row' | 'already-bound' | 'not-asked'
-  | 'no-name' | 'resolved' | 'not-held' | 'environment-only' | 'outside-closure' | 'not-a-candidate';
+  | 'no-name' | 'resolved' | 'not-held' | 'environment-only' | 'outside-closure' | 'not-a-candidate' | 'duplicate';
 
 /** What one bind did. */
 export type BindOutcome =
@@ -512,7 +666,8 @@ export async function bindStoredPackageReference(
   }
   if (reason === 'outside-closure') {
     return refuse('outside-closure', `${answer.message} Binding it would resolve past the package's declared dependencies, `
-      + 'which the rule never does (ADR-0150 D3 (c)): declare the dependency instead. Nothing written.', candidates);
+      + 'which the rule never does (ADR-0150 D3 (c)): declare the dependency instead, or, where the holder already depends '
+      + 'on the package (a cycle), make the move the sentence names. Nothing written.', candidates);
   }
   const chosen = candidates.find((c) => c.holder === 'package' && c.packageId === request.packageId);
   if (!chosen) {
@@ -523,11 +678,23 @@ export async function bindStoredPackageReference(
   // landed between the re-ask above and this one (another bind, a boot's
   // backfill) wins: this one updates 0 rows and refuses, naming what is stored.
   // A bound row is never moved, concurrency included.
-  const written = await engine.update(reference.table, { [packageColumn]: request.packageId }, {
-    where: { id: { $eq: row.id }, [packageColumn]: { $null: true } },
-    multi: true,
-    context: SYSTEM_CTX,
-  });
+  let written: unknown;
+  try {
+    written = await engine.update(reference.table, { [packageColumn]: request.packageId }, {
+      where: { id: { $eq: row.id }, [packageColumn]: { $null: true } },
+      multi: true,
+      context: SYSTEM_CTX,
+    });
+  } catch (e: unknown) {
+    // [#31699] A table whose unique key carries the package column (R1's
+    // grant, R11's connection) refuses a bind that would make the row a second
+    // row of one key: another row of the same key already names the package.
+    // Said as what it is, never a crash; the row stays naming no package.
+    if (!isUniqueViolationError(e)) throw e;
+    return refuse('duplicate', `${reference.table} "${request.id}" cannot be bound to "${request.packageId}": another row of `
+      + `the same key already names that package in ${packageColumn}, so this row would be a second one. Review the pair `
+      + 'and remove the row that should not stand. Nothing written.', candidates);
+  }
   if (rowsWritten(written) === 0) {
     const now = await engine.find(reference.table, { where: { id: request.id }, limit: 1, fields: ['id', packageColumn], context: SYSTEM_CTX });
     const stored = Array.isArray(now) ? (now[0] as Row | undefined)?.[packageColumn] : undefined;

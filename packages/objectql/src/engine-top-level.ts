@@ -33,7 +33,7 @@ import type { TenantLayer0Verdict } from '@objectstack/spec/security';
 import { applyProtection, pluralToSingular } from '@objectstack/spec/shared';
 import type { SchemaRegistry } from './registry.js';
 import { SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
-import { ExpressionEngine, analyzeRelationshipTraversals, isUnparseableDate } from '@objectstack/formula';
+import { ExpressionEngine, analyzeRelationshipTraversals, formulaReadOrder, isUnparseableDate } from '@objectstack/formula';
 import type { EvalError, EvalOptionLabels, EvalPermissions } from '@objectstack/formula';
 import { declaredOptionLabels } from './formula-option-labels.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY, AssembledViewArtifactSchema, isAggregatedViewContainer, isViewContainerShaped } from '@objectstack/spec';
@@ -41,6 +41,7 @@ import type { Expression } from '@objectstack/spec';
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { ValidationError } from './validation/record-validator.js';
+import { NotNullRefusalError } from './not-null-refusal-error.js';
 import type { FieldValidationError } from './validation/record-validator.js';
 import { collectReferenceTraversals, referenceTraversalConflicts, staticReadonlyInsertSubject, stripReadonlyFields } from './validation/rule-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
@@ -521,6 +522,44 @@ export function writeFailureLogMeta(
   return logged instanceof Error
     ? { ...meta, error: { message: logged.message, stack: logged.stack } }
     : { ...(logged as Record<string, unknown> | undefined), ...meta };
+}
+
+/**
+ * [#32154] The insert and update doors' `… operation failed` META for a
+ * caller-input refusal, or `undefined` when `error` is not one (the door then
+ * logs {@link writeFailureLogMeta}, unchanged).
+ *
+ * A caller-input refusal is the engine's own {@link ValidationError}: a
+ * `required` field left out, a value out of range, a validation rule's
+ * message. Every `new ValidationError` in this package sits ahead of the
+ * driver call in both doors, so it carries nothing the DATABASE said, and its
+ * stack is the engine's own frames. (A hook may throw the exported class too;
+ * its refusal carries nothing the database said either.) The line stays at `warn` (the maintainer's ruling D on this
+ * card), as ONE line with no stack, naming the object, the operation, the
+ * failing field(s) and the reason. Before, every refused form submission wrote
+ * a WARN with a stack trace into the server's log, and every test asserting a
+ * refusal wrote one into a passing run.
+ *
+ * ⛔ A {@link NotNullRefusalError} is not one, though it IS a `ValidationError`:
+ * it is the database's NOT NULL refusal under the validator's envelope
+ * (#24768), and its line carries the driver's own error and stack. So does
+ * every other failure (a driver fault, a duplicate, a hook's or a permission
+ * refusal): this answers `undefined` for each.
+ *
+ * The reason is the error's `message`, the same text the `error.message` of
+ * the line before carried; the fields are their API names and constraint
+ * codes, never the refused values.
+ */
+export function callerInputRefusalLogMeta(
+  error: unknown,
+  meta: { object: string; operation: 'insert' | 'update' },
+): Record<string, unknown> | undefined {
+  if (!(error instanceof ValidationError) || error instanceof NotNullRefusalError) return undefined;
+  return {
+    ...meta,
+    fields: error.fields.map((f) => ({ field: f.field, code: f.code })),
+    reason: error.message,
+  };
 }
 
 /**
@@ -1329,6 +1368,13 @@ export interface FormulaPlanEntry {
    * sentence — the lint refuses the same shape with the same words.
    */
   hopConflict?: string;
+  /**
+   * [#33100] Why this formula cannot be evaluated at all: it reads its own
+   * value, directly or through the formulas it reads. Such a formula is not
+   * evaluated (there is no order in which it could be): it reads `null` and
+   * the fault sink carries this sentence, naming the cycle.
+   */
+  cycle?: string;
 }
 
 /**
@@ -1483,6 +1529,13 @@ function deleteWalkTargetOf(fdef: { type?: unknown } | null | undefined, reader:
  * caller named, and {@link withoutFormulaWidening} cuts them back off the rows
  * once the read is done, so the caller gets the projection it declared plus
  * the formula's value. `widened` is absent whenever nothing was widened.
+ *
+ * [#33100] A formula may read another formula (`record.f_sibling * 2`), and
+ * every authoring door accepts that. The plan therefore carries every formula
+ * a planned formula reads, transitively, even when the caller did not name it,
+ * and is ordered so each formula is evaluated after the formulas it reads —
+ * see {@link orderFormulaPlan}. A formula planned only because another reads
+ * it is widening too: it is listed in `widened` and cut off the answer.
  */
 /**
  * ONE plan entry for a field's declared `expression`: the envelope, the
@@ -1537,6 +1590,8 @@ function planFormulaProjection(
     }
   }
   if (plan.length === 0) return { plan: [] };
+  // [#33100] The formulas the planned ones read, and the order they evaluate in.
+  const ordered = orderFormulaPlan(plan, schema.fields);
   // For formulas: project all schema fields so CEL `record.<field>` lookups
   // see complete data. Static dependency analysis on AST is M9.7 work.
   if (Array.isArray(requestedFields) && requestedFields.length > 0) {
@@ -1553,12 +1608,76 @@ function planFormulaProjection(
     // [#22300] What the widening added — `id` included when the caller did not
     // name it — is what the read cuts back off once the formulas are computed.
     const named = new Set(requestedFields);
-    const widened = Array.from(projected).filter((f) => !named.has(f));
-    return { plan, projected: Array.from(projected), ...(widened.length > 0 ? { widened } : {}) };
+    // [#33100] A formula planned only because a named formula reads it is
+    // cut off the answer the same way; it is never projected (no column).
+    const widened = [...Array.from(projected), ...ordered.added].filter((f) => !named.has(f));
+    return { plan: ordered.plan, projected: Array.from(projected), ...(widened.length > 0 ? { widened } : {}) };
   }
   // Implicit/full projection — leave projected undefined so the driver
   // returns its default columns (typically *).
-  return { plan };
+  return { plan: ordered.plan };
+}
+
+/**
+ * [#33100] A formula read plan in an order it can be evaluated in.
+ *
+ * {@link applyFormulaPlan} evaluates the entries one after the other over the
+ * same row and writes each value onto it, so a formula reading another formula
+ * (`record.f_sibling * 2`) sees that formula's value only when it comes LATER
+ * in the plan. The plan used to be the declaration order of the object's
+ * fields (or the caller's projection order), so the reader read `null` with
+ * "No such key: f_sibling" whenever it was declared first, and on every
+ * projection naming it without the formula it reads, while the publish gate,
+ * `validate_expression` and the Studio editor all accept the expression.
+ *
+ * Two steps, over the fields each formula reads as {@link storedExpressionReads}
+ * names them (the stored-expression plan's reader: the fields read as values
+ * and the fields read through), the read set the authoring lint's cycle
+ * refusal takes too:
+ *
+ *  1. Closure: a formula field a planned formula reads joins the plan,
+ *     transitively. Those are returned as `added`; a projection cuts them back
+ *     off the answer.
+ *  2. Order: each formula after the formulas it reads; otherwise the order
+ *     the entries came in — `@objectstack/formula`'s `formulaReadOrder`, the
+ *     answer the authoring lint refuses a cycle by, sentence included.
+ *
+ * A formula that reads its own value, itself or through the formulas it reads,
+ * has no order to be evaluated in. Every formula on such a cycle is marked
+ * with `cycle` and reads `null` with that sentence as its fault — it is never
+ * evaluated, so nothing loops. A formula that merely reads one of them is
+ * evaluated as usual, over the `null` that one reads.
+ */
+function orderFormulaPlan(
+  requested: FormulaPlanEntry[],
+  fields: Record<string, any>,
+): { plan: FormulaPlanEntry[]; added: string[] } {
+  const byName = new Map<string, FormulaPlanEntry>(requested.map((entry) => [entry.name, entry]));
+  const added: string[] = [];
+  const formulaReads = new Map<string, string[]>();
+  const pending = [...requested];
+  for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
+    const reads = [...(storedExpressionReads(next) ?? [])].filter((name) => {
+      const def = fields[name];
+      return def?.type === 'formula' && Boolean(def.expression);
+    });
+    formulaReads.set(next.name, reads);
+    for (const name of reads) {
+      if (byName.has(name)) continue;
+      const entry = formulaPlanEntry(name, fields[name], fields);
+      byName.set(name, entry);
+      added.push(name);
+      pending.push(entry);
+    }
+  }
+  // No formula reads another — the common case keeps the plan as it was.
+  if (![...formulaReads.values()].some((reads) => reads.length > 0)) {
+    return { plan: requested, added };
+  }
+  // `formulaReads` was filled requested-first, so a formula no other reads keeps its place.
+  const { order, cycles } = formulaReadOrder(formulaReads);
+  for (const [name, message] of cycles) byName.get(name)!.cycle = message;
+  return { plan: order.map((name) => byName.get(name)!), added };
 }
 
 /**
@@ -2798,6 +2917,13 @@ function applyFormulaPlan(
         onFault?.(fp.name, { kind: 'runtime', message: fp.hopConflict });
         continue;
       }
+      // [#33100] A formula on a cycle of formulas has no order to be computed
+      // in: it reads null and names the cycle, and nothing is evaluated.
+      if (fp.cycle) {
+        rec[fp.name] = null;
+        onFault?.(fp.name, { kind: 'runtime', message: fp.cycle });
+        continue;
+      }
       let scope: Record<string, unknown> = rec;
       let empty: string[] = [];
       if (fp.hops) {
@@ -3180,8 +3306,10 @@ function replacedStoredExpressionFields(
  * {@link hydrateWriteFormulas} use — plans EVERY formula field on the schema
  * and `ExpressionEngine.compile`s each one at planning stage. Asking for one
  * title would then throw on an unrelated malformed formula elsewhere on the
- * object. Passing `[field]` plans exactly the requested field, so the blast
- * radius of a title lookup is the title's own declaration.
+ * object. Passing `[field]` plans the requested field and [#33100] the
+ * formulas it reads, transitively (a formula over a formula reads the other's
+ * value), so the blast radius of a title lookup is the title's own
+ * declaration and the declarations of the formulas it reads.
  *
  * ## Read-path parity, including how it fails
  *

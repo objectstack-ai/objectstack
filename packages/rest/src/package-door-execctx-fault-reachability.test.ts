@@ -142,6 +142,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// The source under test reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 import {
   ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS,
   // [commit 6a180e42d] The loud permission-store outage, and its brand predicate.
@@ -257,10 +261,12 @@ const AUTH_OK = async () => ({ api: { getSession: async () => ({ user: { id: 'u_
  * A permission store that actually grants the package capabilities, through
  * the SHIPPED aggregation (`sys_user_permission_set` → `sys_permission_set`
  * → `system_permissions`) rather than by handing the door a ready-made context.
- * The grant is owned by `o1`, the session's active organization.
+ * The grant is owned by `o1`, the session's active organization, where the
+ * caller is a current member (ADR-0093 D8.1, as amended).
  */
 const qlHealthy = () => bindTestSecurityCatalog({
   find: async (object: string) => {
+    if (object === 'sys_member') return [{ id: 'mem_admin', user_id: 'u_admin', organization_id: 'o1', role: 'member' }];
     if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps_pkg', permission_set: 'pkg_admin', organization_id: 'o1' }];
     if (object === 'sys_permission_set') return [{ id: 'ps_pkg', name: 'pkg_admin' }];
     return [];

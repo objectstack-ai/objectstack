@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { IJobService, JobHandler, JobRunOutcome, JobExecution, JobReplayOptions } from './job-service';
+import type { IJobService, JobHandler, JobRunOutcome, JobExecution, JobReplayOptions, JobRunTrigger } from './job-service';
 
 describe('Job Service Contract', () => {
   it('should allow a minimal IJobService implementation with required methods', () => {
@@ -344,5 +344,38 @@ describe('IJobService.replay force option — a succeeded window replays only wh
     expect(docBlock).toContain('**the claim**');
     // …and the one door past it.
     expect(docBlock).toContain('options.force: true');
+  });
+});
+
+/**
+ * [ADR-0153 D7] `JobHandler`'s context says which run it is: `runId` (the job
+ * service's run-history row of the attempt) and `trigger` (`schedule` /
+ * `manual`). Pinned at the type level (`check:test-typecheck` compiles this
+ * file): both optional, so a context with neither is still one, and the
+ * trigger is exactly the two values. The pre-#6617 handler pin above keeps
+ * holding: a handler that reads neither is still a `JobHandler`.
+ */
+describe('JobHandler context — the run it is executing (ADR-0153 D7)', () => {
+  type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+  type Assert<T extends true> = T;
+  type Context = Parameters<JobHandler>[0];
+
+  it('runId and trigger are optional members, and the trigger is schedule or manual', async () => {
+    const pinned: [
+      Assert<Eq<keyof Context, 'jobId' | 'data' | 'runId' | 'trigger'>>,
+      Assert<Eq<Context['runId'], string | undefined>>,
+      Assert<Eq<Context['trigger'], JobRunTrigger | undefined>>,
+      Assert<Eq<JobRunTrigger, 'schedule' | 'manual'>>,
+      Assert<{ jobId: string } extends Context ? true : false>,
+    ] = [true, true, true, true, true];
+    expect(pinned).toHaveLength(5);
+
+    const seen: Context[] = [];
+    const handler: JobHandler = async (ctx) => { seen.push(ctx); };
+    await handler({ jobId: 'pull' });
+    await handler({ jobId: 'pull', runId: 'run_1', trigger: 'schedule' });
+    // @ts-expect-error — a trigger outside the two values is not a JobRunTrigger
+    await handler({ jobId: 'pull', trigger: 'replay' });
+    expect(seen.map((c) => c.trigger)).toEqual([undefined, 'schedule', 'replay']);
   });
 });

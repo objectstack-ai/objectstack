@@ -79,7 +79,10 @@ export function activationLedgerHolderOf(
 ): (metadataType: string, name: string) => ActivationLedgerHolder {
   return (metadataType, name) => {
     if (!isPackageScopedType(metadataType)) return { kind: 'unaddressed' };
-    const answer = resolvePackageScopedName(registry, { type: metadataType, name, callerPackageId: null });
+    // [#32183] A binding never moves with a reversible disable: every holder.
+    const answer = resolvePackageScopedName(registry, {
+      type: metadataType, name, callerPackageId: null, includeDisabledPackages: true,
+    });
     switch (answer.status) {
       case 'resolved':
         return answer.holder.kind === 'package'

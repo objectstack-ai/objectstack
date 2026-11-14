@@ -69,6 +69,7 @@ import {
   lowerWhereFilterArray, masterIdOf, planStoredExpressions, rejectUnknownEngineOptions,
   replacedStoredExpressionFields, settleBulkStoredExpressions, shouldSkipStateMachine, staticReadonlyStoredView,
   stripComputedWriteFields, undeclaredWriteFieldErrors, updateStaticReadonlySubject, writeFailureLogMeta,
+  callerInputRefusalLogMeta,
 } from './engine-top-level.js';
 import type { OperationContext, StoredExpressionServing } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
@@ -2273,10 +2274,13 @@ export class UpdateFacet {
           //
           // [#17052] The insert door's twin here too: the level is `warn`,
           // because `throw e` on the next line IS the answer to the caller.
+          // [#32154] …and, as there, a caller-input refusal is one line with
+          // no stack (see `callerInputRefusalLogMeta`).
           const logged = e instanceof DuplicateRecordError || e instanceof NotNullRefusalError ? e.cause : e;
           this.logger.warn(
             'Update operation failed',
-            writeFailureLogMeta(redactBoundStatement(logged), { object }),
+            callerInputRefusalLogMeta(e, { object, operation: 'update' })
+              ?? writeFailureLogMeta(redactBoundStatement(logged), { object }),
           );
           // [#27495] The insert door's twin: a write that did not complete takes
           // back the credential row it wrote, unless a stored row names it.

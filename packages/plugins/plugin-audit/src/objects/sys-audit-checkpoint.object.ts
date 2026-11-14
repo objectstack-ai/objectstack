@@ -15,10 +15,14 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Its integrity is not its access control but its chain and its signature:
  * `previous_digest` links each checkpoint to the one before it, and
  * `signature` covers every column of the signed body (see
- * `audit-seal/signed-body.ts`). `id`, `chain_key` and `signature` are the only
- * columns outside that body. `chain_key` exists for the unique index alone —
- * NULL is distinct from NULL in a SQL unique index, so the deployment chain's
- * NULL `tenant_id` could not stop two sealers taking one sequence.
+ * `audit-seal/signed-body.ts`). `id`, `chain_key`, `leaf_hashes` and
+ * `signature` are the only columns outside that body. `chain_key` exists for
+ * the unique index alone — NULL is distinct from NULL in a SQL unique index,
+ * so the deployment chain's NULL `tenant_id` could not stop two sealers taking
+ * one sequence. `leaf_hashes` is each sealed row's leaf hash, in leaf order:
+ * `os audit verify` trusts it only once it rebuilds the signed `root`, and then
+ * judges each row against its own hash (ADR-0154 D9's per-row verdicts; a root
+ * alone says that a window changed, not which row).
  *
  * Not itself a sealed object, and kept out of the audit writer
  * (`AUDIT_EXCLUDED_OBJECTS`): a checkpoint written would otherwise write a
@@ -97,6 +101,12 @@ export const SysAuditCheckpoint = ObjectSchema.create({
     }),
     leaf_count: Field.number({ label: 'Leaf Count', required: true, readonly: true }),
     row_ids: Field.textarea({ label: 'Row IDs', required: true, readonly: true, description: 'JSON array of the sealed row ids' }),
+    leaf_hashes: Field.textarea({
+      label: 'Leaf Hashes',
+      required: true,
+      readonly: true,
+      description: "JSON array of each sealed row's leaf hash, in the order of the row ids; checked against the signed root",
+    }),
     root: Field.text({ label: 'Merkle Root', required: true, readonly: true }),
     previous_digest: Field.text({
       label: 'Previous Digest',

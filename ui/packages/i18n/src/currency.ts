@@ -13,7 +13,11 @@
 export interface FieldCurrencyConfig {
   currencyMode?: 'dynamic' | 'fixed' | 'record';
   defaultCurrency?: string;
-  /** `record` mode only: the sibling field holding each record's ISO 4217 code. */
+  /**
+   * `record` mode only: the sibling field holding each record's ISO 4217 code,
+   * or, on a `master_detail` child, `MASTER_DETAIL.CODE`: the parent's code
+   * field reached through that `master_detail` (ADR-0144 D2 as amended).
+   */
   currencyField?: string;
   /** `record` mode only (ADR-0144 D5): where the engine stores the amount in the home currency. */
   homeAmount?: { field?: string; rateDate?: string; rateField?: string };
@@ -34,6 +38,104 @@ export function recordCurrencyField(
   return typeof config.currencyField === 'string' && config.currencyField !== ''
     ? config.currencyField
     : undefined;
+}
+
+/**
+ * A `record`-mode pointer that follows the parent (ADR-0144 D2 as amended):
+ * `via` is the amount's own `master_detail` field, `codeField` the parent's
+ * code field. The child stores no code of its own.
+ */
+export interface RecordCurrencyPath {
+  readonly via: string;
+  readonly codeField: string;
+}
+
+/**
+ * The parent path a `record`-mode amount's `currencyField` names, or
+ * `undefined` for a sibling pointer, a non-record field, and any spelling the
+ * spec does not admit (only exactly two non-empty segments are a path).
+ */
+export function recordCurrencyPath(
+  field: { currencyConfig?: FieldCurrencyConfig } | null | undefined,
+): RecordCurrencyPath | undefined {
+  const pointer = recordCurrencyField(field);
+  if (pointer === undefined) return undefined;
+  const segments = pointer.split('.');
+  if (segments.length !== 2 || segments[0] === '' || segments[1] === '') return undefined;
+  return { via: segments[0], codeField: segments[1] };
+}
+
+/**
+ * The field of the amount's OWN object a row must carry for
+ * {@link resolveFieldCurrency} to read its code: the sibling code field, or
+ * the `master_detail` a parent path starts with, which the read must also
+ * EXPAND (a bare id holds no code). `undefined` outside `record` mode. A list
+ * that projects its rows asks for this beside each record-mode amount it
+ * shows, or the cell has no code to read.
+ */
+export function recordCurrencyReadField(
+  field: { currencyConfig?: FieldCurrencyConfig } | null | undefined,
+): { readonly field: string; readonly expand: boolean } | undefined {
+  const path = recordCurrencyPath(field);
+  if (path) return { field: path.via, expand: true };
+  const pointer = recordCurrencyField(field);
+  return pointer !== undefined && !pointer.includes('.') ? { field: pointer, expand: false } : undefined;
+}
+
+/** A related row as a read answers it expanded: an object, not a bare id. */
+function isRowObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** The id a `master_detail` value names, expanded or bare. */
+function referencedId(value: unknown): string | undefined {
+  if (typeof value === 'string' && value !== '') return value;
+  if (typeof value === 'number') return String(value);
+  if (isRowObject(value)) return referencedId(value.id);
+  return undefined;
+}
+
+/**
+ * `record` with its parent row laid under the path's `master_detail`, so
+ * {@link resolveFieldCurrency} reads the parent's code from it: the one way a
+ * caller that holds the parent apart from the row (a record page's related
+ * list, a master-detail form's line grid, a form that read the parent) hands
+ * it over. `record` itself is returned when `field` follows no parent, when
+ * there is no parent row, when the row already holds its parent expanded, and
+ * when the row names ANOTHER parent: a parent is laid only under a row that
+ * names it, or names none yet (a line not saved under its header).
+ */
+export function withFollowedParent<T extends Readonly<Record<string, unknown>>>(
+  record: T | null | undefined,
+  field: { currencyConfig?: FieldCurrencyConfig } | null | undefined,
+  parent: Readonly<Record<string, unknown>> | null | undefined,
+): T | Record<string, unknown> | null | undefined {
+  const path = recordCurrencyPath(field);
+  if (!path || !isRowObject(parent)) return record;
+  const named = record?.[path.via];
+  if (isRowObject(named)) return record;
+  const namedId = referencedId(named);
+  const parentId = referencedId(parent.id);
+  if (namedId !== undefined && parentId !== undefined && namedId !== parentId) return record;
+  return { ...(record ?? {}), [path.via]: parent };
+}
+
+/**
+ * The code a `record`-mode amount reads off `record`: its sibling code field,
+ * or, for a parent path, the code field of the parent row expanded under the
+ * `master_detail`. A bare id there holds no code, so it reads as none.
+ */
+function recordCurrencyCode(
+  field: { currencyConfig?: FieldCurrencyConfig } | null | undefined,
+  record: Readonly<Record<string, unknown>> | null | undefined,
+): unknown {
+  const path = recordCurrencyPath(field);
+  if (path) {
+    const parent = record?.[path.via];
+    return isRowObject(parent) ? parent[path.codeField] : undefined;
+  }
+  const codeField = recordCurrencyField(field);
+  return codeField !== undefined ? record?.[codeField] : undefined;
 }
 
 /**
@@ -103,7 +205,10 @@ export function readHomeAmountSource(field: unknown): HomeAmountSource | undefin
  * order:
  *
  *  0. a `record`-mode field (ADR-0144 D2) reads ONLY the record in scope: the
- *     value of the sibling field `currencyConfig.currencyField` names. No
+ *     value of the sibling field `currencyConfig.currencyField` names, or,
+ *     for a `MASTER_DETAIL.CODE` pointer (D2 as amended), the parent's code
+ *     field on the parent row the record holds under that `master_detail`
+ *     (expanded by the read, or laid there by {@link withFollowedParent}). No
  *     record, or a record whose code is blank, resolves to `undefined` — never
  *     to steps 1–4. The record's code field is the only place that amount's
  *     currency lives, so the tenant default would name a currency the amount
@@ -172,8 +277,7 @@ export function resolveFieldCurrency(
 ): string | undefined {
   const config = field?.currencyConfig;
   if (config?.currencyMode === 'record') {
-    const codeField = recordCurrencyField(field);
-    const code = codeField !== undefined ? record?.[codeField] : undefined;
+    const code = recordCurrencyCode(field, record);
     return typeof code === 'string' && code !== '' ? code : undefined;
   }
   return (

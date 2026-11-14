@@ -57,6 +57,25 @@
  *    \`sortable: false\``), so a declaration naming it is the same
  *    first-fetch refusal as check 2, and is graded the same: `error`.
  *
+ * 4. GRID AGGREGATIONS (`grid-aggregation-field-type-refused`, #32144,
+ *    #32449): not a sort, but the one other field-typed question an
+ *    `object-grid` block's stored props raise against the same object —
+ *    `properties.aggregations` whose function the aggregate door refuses over
+ *    the field's declaration (`sum` / `avg` / `min` / `max` / `count_distinct`,
+ *    every row of the aggregate × field-type table).
+ *    Asked here because this is the member that already binds a page's
+ *    `object-grid` to its object and reaches the page publish door; graded
+ *    `error` because the engine's `aggregate` door refuses the pair. See
+ *    `validateGridAggregations` for the walk and its skips.
+ *
+ * 5. GRID COLUMN SUMMARIES (`list-view-summary-field-type-refused`, #32503):
+ *    the same block's `properties.columns[].summary`. The entry IS a list
+ *    view's column (`ObjectGridPropsSchema.columns` is
+ *    `ListViewSchema.shape.columns`), and the grid's footer asks the same
+ *    whole-set aggregate query of it, so it is judged by the list view's own
+ *    verdict (`columnSummaryRefusal`, `validate-list-view-field-refs.ts`) and
+ *    reported under the list view's rule id, from the walk check 4 rides.
+ *
  * Checks 2 and 3 are ONE question — the served sortability projection's
  * `sortable: false` — answered by `resolveObjectSortability`
  * (`@objectstack/spec/api`), the resolver the list door refuses by, never by a
@@ -255,10 +274,27 @@ import {
   resolveObjectSortability,
   type FieldSortability,
 } from '@objectstack/spec/api';
-
-import { objectsAsServed, objectsWithoutTiedFields, recordsOf, suggestName } from './object-graph.js';
+import {
+  aggregateAcceptsDeclaration,
+  declaredAs,
+  isJudgeableAggregateType,
+  isTableAggregate,
+  refusedAggregateRemedy,
+} from './aggregate-pair-verdict.js';
+import {
+  indexServedObjectGraph,
+  isUnjudgeable,
+  objectsAsServed,
+  objectsWithoutTiedFields,
+  recordsOf,
+  resolveFieldPath,
+  suggestName,
+  type ObjectGraph,
+} from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
+import { LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, columnSummaryRefusal } from './validate-list-view-field-refs.js';
 import { PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED } from './validate-page-field-bindings.js';
+import type { UserTextParams } from './finding-user-text.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
@@ -275,13 +311,22 @@ export const SORT_FIELD_UNKNOWN = 'sort-field-unknown';
 export const SORT_FIELD_UNSORTABLE = 'sort-field-unsortable';
 /** [#10474] The provenance verdict — a WARNING, unlike the two above. */
 export const SORT_FIELD_UNPROVISIONED = 'sort-field-unprovisioned';
+/**
+ * [#32144, #32449] An `object-grid` group-header aggregation whose function
+ * the aggregate door refuses over the field's declaration (every row of the
+ * aggregate × field-type table, plus `count_distinct` over a multi-value
+ * field) — an `error`, the page-sort grade, because the engine's `aggregate` door refuses
+ * the same pair (`400 INVALID_FIELD`) on the grouped grid's header query.
+ */
+export const GRID_AGGREGATION_FIELD_TYPE_REFUSED = 'grid-aggregation-field-type-refused';
 
 export type SortableFieldSeverity = 'error' | 'warning';
 
 export interface SortableFieldFinding {
   /**
-   * `error` for the two verdicts the runtime REFUSES (`400 INVALID_SORT` at
-   * request time); `warning` for the #10474 provenance verdict, which no
+   * `error` for the verdicts the runtime REFUSES (`400 INVALID_SORT` at
+   * request time, and since #32144 `400 INVALID_FIELD` for a grid aggregation
+   * the aggregate door refuses); `warning` for the #10474 provenance verdict, which no
    * runtime door refuses and which this pass cannot prove against a remote
    * schema it cannot see.
    */
@@ -296,6 +341,16 @@ export interface SortableFieldFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's user sentence interpolates: set on
+   * `sort-field-unprovisioned`, the list-view advisory the publish door returns
+   * (its sentences are `validate-sortable-fields.user-text.ts`), and on the
+   * page-sort `page-field-unprovisioned` warning, the advisory the page publish
+   * door returns (its sentences belong to `validate-page-field-bindings.ts`, the
+   * id's owner, in `validate-page-field-bindings.user-text.ts`). The errors
+   * carry none.
+   */
+  userTextParams?: UserTextParams;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -443,6 +498,7 @@ export function checkSortDeclaration(
           rule: SORT_FIELD_UNPROVISIONED,
           where,
           path: `${path}${key.at}`,
+          userTextParams: { object: objectName, field: name },
           // [#22161] One verdict sentence: the shared short anchor clause and
           // this axis' consequence. The measured byte-identical reading and why
           // no door refuses it are the id's `os explain` entry.
@@ -650,6 +706,7 @@ function checkPageSortDeclaration(
   where: string,
   path: string,
   subject: string,
+  pageName: string,
 ): SortableFieldFinding[] {
   if (declared === undefined || declared === null || !objectName) return [];
   const projection = sortability.get(objectName);
@@ -672,6 +729,7 @@ function checkPageSortDeclaration(
             `${subject}: ${unprovisionedAnchorVerdict(objectName, name)}, so its ORDER BY is ` +
             'dropped and every fetch returns rows in an arbitrary order',
           hint: unprovisionedAnchorFix(objectName, name),
+          userTextParams: { page: pageName, object: objectName, field: name },
         });
       }
       // An author-DECLARED field of a system name is the author's own column,
@@ -728,10 +786,12 @@ function validatePageSorts(
   unprovisionedAnchors: ReadonlyMap<string, ReadonlySet<string>>,
 ): SortableFieldFinding[] {
   const findings: SortableFieldFinding[] = [];
-  const check = (declared: unknown, objectName: string | undefined, where: string, path: string, subject: string) => {
+  const check = (
+    declared: unknown, objectName: string | undefined, where: string, path: string, subject: string, pageName: string,
+  ) => {
     findings.push(
       ...checkPageSortDeclaration(
-        declared, objectName, fieldsByObject, sortability, unprovisionedAnchors, where, path, subject,
+        declared, objectName, fieldsByObject, sortability, unprovisionedAnchors, where, path, subject, pageName,
       ),
     );
   };
@@ -748,7 +808,7 @@ function validatePageSorts(
       const dataSource = isRec(component.dataSource) ? component.dataSource : undefined;
 
       if (dataSource) {
-        check(dataSource.sort, strName(dataSource.object), where, `${path}.dataSource.sort`, `${type} dataSource sort`);
+        check(dataSource.sort, strName(dataSource.object), where, `${path}.dataSource.sort`, `${type} dataSource sort`, pageName);
       }
       if (!props) continue;
       const objectProp = PAGE_BLOCK_SORT_OBJECT_PROP[type];
@@ -759,6 +819,7 @@ function validatePageSorts(
           where,
           `${path}.properties.sort`,
           `${type} sort`,
+          pageName,
         );
       }
       // The PARENT binding is declared on `record:related_list` alone.
@@ -771,6 +832,7 @@ function validatePageSorts(
           where,
           `${path}.properties.parentDataSource.sort`,
           `${type} parentDataSource sort`,
+          pageName,
         );
       }
     }
@@ -783,6 +845,7 @@ function validatePageSorts(
         `page "${pageName}" · interfaceConfig`,
         `pages[${pi}].interfaceConfig.sort`,
         'list-page sort',
+        pageName,
       );
     }
 
@@ -794,6 +857,7 @@ function validatePageSorts(
         `page "${pageName}" · record`,
         `pages[${pi}].record.sort`,
         'page record sort',
+        pageName,
       );
     }
   }
@@ -974,6 +1038,142 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
   // ── [#30023] Stored page sorts: existence (#30093), provenance, sortability ──
   findings.push(...validatePageSorts(stack, fieldsByObject, sortability, unprovisionedAnchors));
 
+  // ── [#32144, #32449, #32503] `object-grid` aggregations and column summaries the aggregate door refuses ──
+  findings.push(...validateGridAggregations(stack));
+
+  return findings;
+}
+
+/**
+ * [#32144, #32449] Every stored `object-grid` block's `properties.aggregations`
+ * (`[{ field, type }]`, the per-group numbers a grouped grid draws in its group
+ * headers) whose (`type`, field) pair the engine's `aggregate` door refuses:
+ * `sum` / `avg` over a non-numeric field (a `text`, `date`, `datetime`,
+ * `select`, `lookup`, `formula`, … field, and `sum` over a `percent` — a rate
+ * does not add), `min` / `max` over a string-class or JSON-stored field, and
+ * `count_distinct` over a JSON-stored one (a structured-JSON or multi-option
+ * type, or a multi-capable type flagged `multiple: true`).
+ *
+ * The VERDICT is the door's, asked through `aggregateAcceptsDeclaration`
+ * (`aggregate-pair-verdict.ts`): the aggregate × field-type table
+ * (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, `@objectstack/spec/data`) through
+ * `isAggregateCompatibleWithFieldType` on every row, plus `isMultiValueField`
+ * for `count_distinct` — the two predicates the engine's `aggregate` door
+ * (`aggregate-field-type-door.ts`, `@objectstack/objectql`) refuses the grouped
+ * grid's header query by, with `400 INVALID_FIELD`, and the dataset-measure
+ * lint refuses a measure by. ⛔ No second list of types here: so `boolean` /
+ * `toggle`, which the table accepts for `sum` / `avg` / `min` / `max`
+ * (booleans aggregate as numbers on every backend, ruled), pass, and so does
+ * `min` / `max` over a date, exactly as they pass the door. `count` accepts
+ * every type and is never refused.
+ *
+ * Every `type` the schema admits reaches the door: the grid hands each entry
+ * to the header query as the column summary member it reads back through
+ * (`serverSummaryOf` in `@object-ui/plugin-grid`: `count_distinct` as
+ * `count_unique`, the rest by name), and `compileListViewGroupQuery` lowers
+ * that member to the same function (`COLUMN_SUMMARY_AGGREGATION`).
+ *
+ * The grade is the page-sort grade, `error`: like a page sort the door refuses
+ * (`page-field-unknown`, `sort-field-unsortable`), a grid that owns its fetch
+ * has its grouped header query refused at runtime, on the first grouped load
+ * and every load after it. A grid handed its rows (`data.provider: 'value'`)
+ * groups them in the browser instead and draws a figure the pair cannot mean
+ * (`0` for a text sum); the declaration is the same one, refused here on the
+ * same verdict, because which of the two a block meets is not the
+ * declaration's to choose. Zod cannot see either — `GridAggregationSchema.field`
+ * is a bare string, and the field's type lives on the object. This member reaches the page publish door
+ * (`runtimeTypes` carries `page`), so the refusal lands at save.
+ *
+ * Bound the way the page-sort walk binds the block ({@link PAGE_BLOCK_SORT_OBJECT_PROP}):
+ * the node's `dataSource.object` ahead of `properties.objectName`. Field types
+ * are read off the SERVED object graph with a field two packages tie on left
+ * out (`indexServedObjectGraph(stack, { tied: 'drop' })`), so a field an
+ * `objectExtensions` entry adds, and a registry-injected column such as
+ * `created_at`, are judged by their own declaration. Skipped, never reported:
+ * an object this stack does not define or that declares no field map, a field
+ * that does not resolve (existence is not this verdict), a dotted path, a
+ * `type` outside the table's vocabulary (the schema's refusal), and a leaf
+ * whose declaration carries no type (`id`) or a type outside `FieldType`.
+ *
+ * [#32503] The same walk judges the block's `properties.columns[].summary`,
+ * the footer figure a column declares. The entry is a list view's `ListColumn`
+ * (`ObjectGridPropsSchema.columns` reuses `ListViewSchema.shape.columns`), and
+ * a paged, ungrouped grid that owns its fetch asks the footer's whole-set
+ * aggregate query of it (`useObjectGridSummaries` → `useWholeSetSummary` →
+ * `DataSource.queryGroupHeaders` with no `groupBy`, `@object-ui/plugin-grid`),
+ * which reaches the same `aggregate` door. So the verdict, the words and the
+ * rule id are the list view's (`columnSummaryRefusal`,
+ * `list-view-summary-field-type-refused`), never a second reading here; a
+ * grid whose rows fit one page, or are handed in, sums them in the browser
+ * instead, and the declaration is refused all the same (the ruling the list
+ * view's summaries and the value-provider grid took). A grouped grid draws its
+ * header numbers from `aggregations`, not from the column summaries, so only
+ * the footer reads them. Binding and graph are the aggregations'.
+ */
+function validateGridAggregations(stack: AnyRec): SortableFieldFinding[] {
+  const findings: SortableFieldFinding[] = [];
+  const pages = recordsOf(stack.pages);
+  if (pages.length === 0) return findings;
+  let graph: ObjectGraph | undefined;
+
+  for (let pi = 0; pi < pages.length; pi++) {
+    const page = pages[pi];
+    const pageName = strName(page.name) ?? `#${pi}`;
+    for (const { component, path } of walkPageComponents(page, `pages[${pi}]`)) {
+      if (component.type !== 'object-grid') continue;
+      const props = isRec(component.properties) ? component.properties : undefined;
+      if (!props || (!Array.isArray(props.aggregations) && !Array.isArray(props.columns))) continue;
+      const dataSource = isRec(component.dataSource) ? component.dataSource : undefined;
+      const objectName =
+        strName(dataSource?.object) ?? strName(valueAt(props, PAGE_BLOCK_SORT_OBJECT_PROP['object-grid']));
+      if (!objectName) continue;
+
+      // [#32503] `properties.columns[].summary`: the list view's own column
+      // entry, judged by the list view's own verdict (`columnSummaryRefusal`).
+      if (Array.isArray(props.columns)) {
+        props.columns.forEach((column: unknown, ci: number) => {
+          if (!isRec(column) || column.summary === undefined) return;
+          graph ??= indexServedObjectGraph(stack, { tied: 'drop' });
+          const refusal = columnSummaryRefusal(column, graph, objectName);
+          if (refusal === undefined) return;
+          findings.push({
+            severity: 'error',
+            rule: LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED,
+            where: `page "${pageName}" · object-grid › columns[${ci}].summary`,
+            path: `${path}.properties.columns[${ci}].summary`,
+            ...refusal,
+          });
+        });
+      }
+
+      if (!Array.isArray(props.aggregations)) continue;
+      props.aggregations.forEach((entry: unknown, ai: number) => {
+        if (!isRec(entry)) return;
+        const fn = entry.type;
+        const field = strName(entry.field);
+        if (!isTableAggregate(fn) || !field || field.includes('.')) return;
+
+        graph ??= indexServedObjectGraph(stack, { tied: 'drop' });
+        const verdict = resolveFieldPath(graph, objectName, field);
+        if (!verdict || isUnjudgeable(verdict) || verdict.kind !== 'ok') return;
+        const fieldType = verdict.meta?.type;
+        if (!isJudgeableAggregateType(fieldType)) return;
+        const shape = { type: fieldType, multiple: verdict.meta?.multiple === true };
+        if (aggregateAcceptsDeclaration(fn, shape)) return;
+
+        findings.push({
+          severity: 'error',
+          rule: GRID_AGGREGATION_FIELD_TYPE_REFUSED,
+          where: `page "${pageName}" · object-grid`,
+          path: `${path}.properties.aggregations[${ai}]`,
+          message:
+            `"${fn}" over "${field}" (${declaredAs(shape)} on "${objectName}") is refused by the aggregate door ` +
+            '(400 INVALID_FIELD on the server)',
+          hint: refusedAggregateRemedy(fn, field, shape),
+        });
+      });
+    }
+  }
   return findings;
 }
 

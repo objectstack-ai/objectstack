@@ -146,12 +146,18 @@ describe('checkPagePrintComposition — a print page prints exactly the blocks i
     }
   });
 
-  it('refuses `print` on a full page with no regions — it would draw the synthesized default layout', () => {
-    for (const value of [{ ...BASE, print: {} }, { ...BASE, regions: [], print: {} }]) {
+  it('refuses `print` on a full page with no regions — it authors no block to print', () => {
+    // A `home` page: a record page with no regions is also refused at `regions`
+    // on its own (it would draw a blank record view), which is not this check.
+    for (const value of [{ ...BASE, type: 'home', print: {} }, { ...BASE, type: 'home', regions: [], print: {} }]) {
       const issues = issuesOf(value);
       expect(issues.map((i) => [i.path, i.code])).toEqual([['print', 'custom']]);
-      expect(issues[0].message).toMatch(/synthesized default layout/);
+      expect(issues[0].message).toMatch(/authors no block to print/);
+      // A full page never falls back to the synthesized default layout.
+      expect(issues[0].message).not.toMatch(/synthesized default layout/);
     }
+    // The record page: both refusals, each at its own path.
+    expect(issuesOf({ ...BASE, print: {} }).map((i) => [i.path, i.code])).toEqual([['print', 'custom'], ['regions', 'custom']]);
   });
 
   it.each([
@@ -177,7 +183,8 @@ describe('checkPagePrintComposition — a print page prints exactly the blocks i
     expect(issuesOf({ ...BASE, kind: 'slotted' })).toEqual([]);
     expect(issuesOf({ ...BASE, type: 'list' })).toEqual([]);
     expect(issuesOf({ ...BASE, type: 'utility' })).toEqual([]);
-    expect(issuesOf({ ...BASE })).toEqual([]);
+    // A full record page places a component (it draws nothing else).
+    expect(issuesOf({ ...BASE, regions: REGIONS })).toEqual([]);
   });
 });
 

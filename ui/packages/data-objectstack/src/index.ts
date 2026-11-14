@@ -1518,13 +1518,33 @@ function readAnalyticsErrorEnvelope(body: unknown): { code?: string; message?: s
  */
 const ANALYTICS_ABSENT_STATUSES: readonly number[] = [404, 501];
 
+/** How a dataset query addresses a saved dataset name by package (ADR-0150). */
+interface DatasetQueryAddressOptions {
+  /** The exact qualifier `?package=` (ADR-0150 D5): that package's dataset, or a refusal. */
+  packageId?: string;
+  /**
+   * The caller arm `?callerPackage=` (ADR-0150 D3): the package of the item
+   * that names the dataset. The server resolves the name for that reader, its
+   * own dataset first, then the unique holder in its dependency closure plus
+   * `sys`, else `409` naming the candidates.
+   */
+  callerPackage?: string;
+}
+
 /**
- * The package a dataset query is read from, sent as `?package=` (ADR-0150 D5):
- * the caller's package, and only with a saved dataset NAME. An inline draft
- * names no saved item, so it is read with no package.
+ * The package query parameters a dataset query carries, in the order the
+ * server reads them, and only with a saved dataset NAME: an inline draft names
+ * no saved item, so it is sent with neither. An empty value sends nothing, so
+ * the read stays caller-less. Both arms set are both sent, and the server
+ * refuses the pair `400`: which one the caller meant is not guessed here.
  */
-function datasetQueryPackage(dataset: Record<string, unknown> | string, packageId: string | undefined): string | undefined {
-  return typeof dataset === 'string' && typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
+function datasetQueryAddress(dataset: Record<string, unknown> | string, options: DatasetQueryAddressOptions | undefined): string {
+  if (typeof dataset !== 'string') return '';
+  const params = new URLSearchParams();
+  if (typeof options?.packageId === 'string' && options.packageId !== '') params.set('package', options.packageId);
+  if (typeof options?.callerPackage === 'string' && options.callerPackage !== '') params.set('callerPackage', options.callerPackage);
+  const query = params.toString();
+  return query === '' ? '' : `?${query}`;
 }
 
 /**
@@ -2424,7 +2444,7 @@ export type DroppedFieldsNotice = DroppedFieldsEvent | UnrecognizedDropReasonEve
  * {@link WriteWarningEvent} — is unchanged: a subscriber's `fields: string[]`
  * stays `string[]` and is now TRUE rather than asserted.
  */
-type WireDroppedFieldsEntry = { object?: unknown; fields: unknown[]; reason?: unknown };
+export type WireDroppedFieldsEntry = { object?: unknown; fields: unknown[]; reason?: unknown };
 
 /** Whether the wire's `reason` is an arm the installed spec pin declares. */
 function isRecognizedDropReason(reason: unknown): reason is DroppedFieldsEvent['reason'] {
@@ -2446,8 +2466,15 @@ function isRecognizedDropReason(reason: unknown): reason is DroppedFieldsEvent['
  * them: both are parsed afterwards, so a missing `object` or an unnameable
  * `reason` still reaches the user as the warning it is (objectui#3484's
  * silence is the worse failure).
+ *
+ * Exported with {@link asDroppedFieldsNotice} (objectstack#33009): a flow
+ * run's answer carries the same `droppedFields` wire (`AutomationResult`,
+ * objectstack#32861) but reaches the console outside this adapter, so its
+ * reader (`app-shell`'s `announceFlowDroppedFields` in `utils/flowLaunch`)
+ * parses it with these two — one parser for every `droppedFields` the
+ * console reads, never a second copy.
  */
-function isWireDroppedFieldsEntry(e: unknown): e is WireDroppedFieldsEntry {
+export function isWireDroppedFieldsEntry(e: unknown): e is WireDroppedFieldsEntry {
   return (
     !!e &&
     typeof e === 'object' &&
@@ -2486,7 +2513,7 @@ function isWireDroppedFieldsEntry(e: unknown): e is WireDroppedFieldsEntry {
  * Extra server-sent keys still ride along: the spread preserves them, and only
  * the three parsed keys are rewritten.
  */
-function asDroppedFieldsNotice(
+export function asDroppedFieldsNotice(
   entry: WireDroppedFieldsEntry,
   fallbackObject: string,
 ): DroppedFieldsNotice {
@@ -6134,19 +6161,30 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * An item without a string `name` is not listed (the widget stores the
    * name, so there is nothing to store); a `label` that is not a string is
    * left off rather than coerced.
+   *
+   * objectstack#32770 — the package the registry served an item under (its
+   * `_packageId`) rides along, verbatim, as `packageId`, so the
+   * `permission-ref` widget can tell two holders of one name apart (ADR-0150
+   * D4). A `_packageId` that is not a non-empty string is left off, and an
+   * item served without one reads exactly as before.
    */
-  async listMetadataItems(type: string): Promise<Array<{ name: string; label?: string }>> {
+  async listMetadataItems(type: string): Promise<Array<{ name: string; label?: string; packageId?: string }>> {
     await this.connect();
     const result: { items?: unknown } | null | undefined = await this.client.meta.getItems(type);
     if (!Array.isArray(result?.items)) {
       throw new Error(`GET /meta/${type} answered without an items list`);
     }
-    const out: Array<{ name: string; label?: string }> = [];
+    const out: Array<{ name: string; label?: string; packageId?: string }> = [];
     for (const it of result.items as unknown[]) {
       const name = (it as { name?: unknown } | null)?.name;
       if (typeof name !== 'string' || !name) continue;
       const label = (it as { label?: unknown }).label;
-      out.push(typeof label === 'string' && label ? { name, label } : { name });
+      const packageId = (it as { _packageId?: unknown })._packageId;
+      out.push({
+        name,
+        ...(typeof label === 'string' && label ? { label } : {}),
+        ...(typeof packageId === 'string' && packageId ? { packageId } : {}),
+      });
     }
     return out;
   }
@@ -6842,10 +6880,71 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     }
 
     const merged = mergeViewPatch(current, partial, viewName, objectName);
-    const result: any = await this.client.meta.saveItem('view', viewName, merged);
+    // A view a read-only package ships is written into that package's
+    // customization pair, declaring the override ({@link viewCustomizationHome}).
+    // Every other view is written where it always was, naming no package.
+    const home = await this.viewCustomizationHome(current, viewName);
+    const body = home ? { ...merged, overrides: home.overrides } : merged;
+    const result: any = home
+      ? await this.client.meta.saveItem('view', viewName, body, { packageId: home.packageId })
+      : await this.client.meta.saveItem('view', viewName, body);
     this.invalidateViewKeys(objectName, viewName);
     if (result && result.item) return result.item;
-    return merged;
+    return body;
+  }
+
+  /**
+   * Where {@link updateView}'s published write of a view must land: `null`
+   * for the package-less row it has always written, or the customization pair
+   * of the read-only package that ships the view, with the override
+   * declaration that write must carry.
+   *
+   * ADR-0146 D11 closes a write naming no package onto an item a read-only
+   * package ships: `PUT /meta/view/NAME` answers `403 NOT_OVERRIDABLE` and
+   * names the fix, "save it into `BASE.custom` (`?package=`), declaring
+   * `overrides: { package, basedOn }`". So a row-state edit of a shipped view
+   * (Set as Default clearing the shipped default's `isDefault`, a pin, a
+   * rename) was refused, while the write beside it in the same click still
+   * landed. This takes that fix, through the doors the server already serves:
+   *
+   * 1. The read named the shipping package (`_packageId`). No `_packageId`
+   *    means no package ships the view: written package-less, as before.
+   * 2. `GET /packages/BASE` says whether that package is read-only. A
+   *    writable package takes its changes directly (ADR-0146 D3), so its view
+   *    is written as before too; only `writable: false` routes.
+   * 3. The declaration: the one the read already carries when the view is a
+   *    customization in the pair (`overrides` naming this base, kept as it
+   *    is), else this base's served `manifest.version` as `basedOn` (D2, the
+   *    version Studio's Customize declares). A base that records no version
+   *    cannot be overridden: the write is refused here and nothing is sent.
+   * 4. The pair is the ensure door's answer
+   *    (`POST /packages/BASE/ensure-customization`, D3), which creates it on
+   *    first use and answers it unchanged after; its id is never spelled here.
+   *
+   * Every read or door refusal propagates: nothing is written when the pair
+   * cannot be had, and the caller says why.
+   */
+  private async viewCustomizationHome(
+    current: Record<string, any>,
+    viewName: string,
+  ): Promise<{ packageId: string; overrides: { package: string; basedOn: string } } | null> {
+    const base = current?._packageId;
+    if (typeof base !== 'string' || base === '') return null;
+    const shipping: any = await this.client.packages.get(base);
+    if (shipping?.writable !== false) return null;
+    const declared = current?.overrides;
+    const basedOn =
+      declared && declared.package === base && typeof declared.basedOn === 'string' && declared.basedOn
+        ? declared.basedOn
+        : shipping?.manifest?.version;
+    if (typeof basedOn !== 'string' || basedOn === '') {
+      throw new Error(
+        `updateView: view "${viewName}" ships in the read-only package "${base}", which records no version,` +
+          ' so it cannot be customized: a customization declares the version it was taken from. Nothing was written.',
+      );
+    }
+    const pair = await this.client.packages.ensureCustomization(base);
+    return { packageId: pair.packageId, overrides: { package: base, basedOn } };
   }
 
   /**
@@ -7500,20 +7599,22 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    *   flag passes it: the Studio canvas. When the option is absent, the page
    *   URL decides (see the body).
    *
-   *   `packageId` names the package a saved dataset is read from, sent as
-   *   `?package=` (ADR-0150 D5): the exact qualifier the server reads with
-   *   `/meta`'s meaning, that package's dataset or a refusal naming the
-   *   holders. It is the package of the item that references the dataset (the
-   *   dashboard, report or view as served), and it is sent only with a saved
-   *   dataset NAME: an inline draft names no saved item. A caller with no
-   *   package leaves it out and the read stays caller-less. A `409
+   *   `callerPackage` names the package of the item that references a saved
+   *   dataset (the dashboard, report or view as served), sent as
+   *   `?callerPackage=` (ADR-0150 D3): the server resolves the name for that
+   *   reader, its own dataset, else the unique holder in its dependency
+   *   closure plus `sys`, else a refusal naming the candidates. `packageId`
+   *   is the exact qualifier `?package=` (ADR-0150 D5): that package's
+   *   dataset, or a refusal naming the holders. Either is sent only with a
+   *   saved dataset NAME: an inline draft names no saved item. A caller with
+   *   no package leaves both out and the read stays caller-less. A `409
    *   RESOURCE_CONFLICT` is thrown as it came, with the server's sentence that
    *   names every candidate; it is never retried bare.
    */
   async queryDataset(
     dataset: Record<string, unknown> | string,
     selection: DatasetSelection,
-    options?: { previewDrafts?: boolean; packageId?: string },
+    options?: { previewDrafts?: boolean } & DatasetQueryAddressOptions,
   ): Promise<{
     rows: Array<Record<string, unknown>>;
     /**
@@ -7579,9 +7680,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     totals?: Array<{ dimensions: string[]; rows: Array<Record<string, unknown>> }>;
   }> {
     await this.connect();
-    const packageId = datasetQueryPackage(dataset, options?.packageId);
-    const url = `${this.baseUrl}/api/v1/analytics/dataset/query`
-      + (packageId !== undefined ? `?package=${encodeURIComponent(packageId)}` : '');
+    const url = `${this.baseUrl}/api/v1/analytics/dataset/query${datasetQueryAddress(dataset, options)}`;
     const requestBody = datasetQueryBody(dataset, selection, datasetPreviewDrafts(options?.previewDrafts));
 
     const res = await this.fetchImpl(url, {
@@ -7660,11 +7759,12 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    *
    * What a batch request can carry decides how the queries are sent:
    *
-   * - The batch URL's `?package=` and `?preview=` are read once for every
-   *   query, so one request carries one package. `packageId` is the package
-   *   of every saved dataset name here; an inline draft names no saved item
-   *   and goes without one, as the single door sends it. Queries with no
-   *   package and queries with one go in separate requests.
+   * - The batch URL's `?callerPackage=`, `?package=` and `?preview=` are
+   *   read once for every query, so one request carries one caller.
+   *   `callerPackage` (or `packageId`) addresses every saved dataset name
+   *   here; an inline draft names no saved item and goes without one, as the
+   *   single door sends it. Queries with no package and queries with one go
+   *   in separate requests, and so do two callers.
    * - At most `DATASET_QUERY_BATCH_MAX_QUERIES` queries go in one request;
    *   more go in several, sent side by side.
    * - A request carrying one query is the single door's own request.
@@ -7677,21 +7777,24 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    */
   async queryDatasetBatch(
     queries: readonly DatasetBatchQuery[],
-    options?: { previewDrafts?: boolean; packageId?: string },
+    options?: { previewDrafts?: boolean } & DatasetQueryAddressOptions,
   ): Promise<DatasetBatchOutcome[]> {
     const outcomes = new Array<DatasetBatchOutcome>(queries.length);
-    // Group by the package each query is read from, keeping each query's index.
+    // Group by the package address each query is sent with, keeping each query's index.
     const groups = new Map<string, number[]>();
     queries.forEach((query, index) => {
-      const key = datasetQueryPackage(query.dataset, options?.packageId) ?? '';
+      const key = datasetQueryAddress(query.dataset, options);
       const group = groups.get(key);
       if (group) group.push(index); else groups.set(key, [index]);
     });
     const requests: Promise<void>[] = [];
-    for (const [packageKey, indexes] of groups) {
+    for (const [address, indexes] of groups) {
+      // A group with no address is the inline drafts' (or a caller with no
+      // package): it is sent with neither arm.
+      const addressed = address === '' ? undefined : options;
       for (let at = 0; at < indexes.length; at += DATASET_QUERY_BATCH_MAX_QUERIES) {
         const chunk = indexes.slice(at, at + DATASET_QUERY_BATCH_MAX_QUERIES);
-        requests.push(this.sendDatasetQueryBatch(queries, chunk, packageKey || undefined, options?.previewDrafts, outcomes));
+        requests.push(this.sendDatasetQueryBatch(queries, chunk, addressed, options?.previewDrafts, outcomes));
       }
     }
     await Promise.all(requests);
@@ -7703,19 +7806,22 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
 
   /**
    * One request of {@link queryDatasetBatch}: the queries at `indexes`, all
-   * read from `packageId`, settled into `outcomes` at their own indexes.
+   * sent with `address`, settled into `outcomes` at their own indexes.
    */
   private async sendDatasetQueryBatch(
     queries: readonly DatasetBatchQuery[],
     indexes: readonly number[],
-    packageId: string | undefined,
+    address: DatasetQueryAddressOptions | undefined,
     previewDrafts: boolean | undefined,
     outcomes: DatasetBatchOutcome[],
   ): Promise<void> {
     const viaSingleDoor = () => Promise.all(indexes.map(async (index) => {
       const { dataset, selection } = queries[index];
       try {
-        outcomes[index] = { status: 'fulfilled', value: await this.queryDataset(dataset, selection, { previewDrafts, packageId }) };
+        outcomes[index] = {
+          status: 'fulfilled',
+          value: await this.queryDataset(dataset, selection, { previewDrafts, packageId: address?.packageId, callerPackage: address?.callerPackage }),
+        };
       } catch (reason) {
         outcomes[index] = { status: 'rejected', reason };
       }
@@ -7730,8 +7836,9 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     try {
       await this.connect();
       const drafts = datasetPreviewDrafts(previewDrafts);
-      const url = `${this.baseUrl}/api/v1/analytics/dataset/query/batch`
-        + (packageId !== undefined ? `?package=${encodeURIComponent(packageId)}` : '');
+      // Every query of one request shares its address, so the first one's
+      // reading is the request's (an inline draft's group carries none).
+      const url = `${this.baseUrl}/api/v1/analytics/dataset/query/batch${datasetQueryAddress(queries[indexes[0]].dataset, address)}`;
       const res = await this.fetchImpl(url, {
         method: 'POST',
         headers: {

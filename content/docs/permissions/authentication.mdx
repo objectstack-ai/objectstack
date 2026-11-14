@@ -343,6 +343,34 @@ Two refusals are deliberate and are what separate this from a password reset:
 The Console reaches it from **Profile → Password** when `hasLocalPassword()`
 reports no credential.
 
+#### SSO-only mode: IdP-provisioned users get no local password
+
+With SSO-only mode on (`ssoOnlyMode`, or `OS_AUTH_SSO_ONLY=true`), the server
+gives a user whose `sys_user.source` is `idp_provisioned` no local password, at
+every door that sets one: `POST /api/v1/auth/set-initial-password`, an
+administrator's `POST /api/v1/auth/admin/set-user-password` (the **Set
+Password** action), and the two resets, `POST /api/v1/auth/reset-password` and
+`POST /api/v1/auth/phone-number/reset-password`. Each answers
+`409 RESOURCE_CONFLICT` with a message that names SSO-only mode, and writes
+nothing; the user signs in through the identity provider.
+
+- **Break-glass stays reachable.** A platform administrator may set their own
+  local password at any of these doors. An administrator setting one for
+  another IdP-provisioned user, another administrator included, is refused.
+- **The resets judge only a credential they would accept.** A reset token or a
+  texted code that does not match answers exactly as it does with SSO-only mode
+  off. If the reset record or the user's identity source cannot be read, the
+  reset answers `503 SERVICE_UNAVAILABLE` and sets nothing.
+- **The two resets answer in the auth library's flat body**,
+  `{ "code": "RESOURCE_CONFLICT", "message": "…" }`, the shape their other
+  refusals (an invalid token, an invalid code) take. The two set doors answer
+  the platform's `{ "success": false, "error": { "code", "message" } }`
+  envelope.
+- **Unchanged:** environment-native users at every door, SSO-only mode off, and
+  a local password a user already holds — it still signs in, and
+  `POST /api/v1/auth/change-password` still changes it. On a cloud-managed
+  environment the cloud-managed rules answer first.
+
 ### Email Verification
 
 #### Send Verification Email
@@ -1222,6 +1250,46 @@ SCIM request (at most once a minute; a refused request records nothing), and
 its `token_hint` tells the two rows apart: the old one is safe to revoke once
 its `last_used_at` stops advancing while the new one's does. Each mint and each revoke writes one `sys_audit_log` row naming the
 administrator and the connection, never the credential.
+
+#### When the identity provider deactivates a user
+
+A SCIM `active: false`, or a SCIM `DELETE /Users/{id}`, disables the account
+with a ban that the platform records as the identity provider's. A password
+sign-in (`POST /api/v1/auth/sign-in/email`) by that account is refused `403`
+like any banned account's, with one field added:
+
+```json
+{
+  "code": "BANNED_USER",
+  "message": "You have been banned from this application. Please contact support if you believe this is an error.",
+  "details": { "cause": "scim_deactivated" }
+}
+```
+
+- An administrator's ban answers the same `403 BANNED_USER` with no `details`.
+  Branch on `code` and `details.cause`, never on `message`: the message is the
+  same for both, and the wording a person reads is the client's to choose.
+- `scim_deactivated` marks exactly the bans the identity provider lifts when it
+  sends `active: true` again. An administrator's ban that a deactivation
+  arrived on top of keeps the administrator's reason, and answers as an
+  administrator's ban.
+- A deactivation, or a `DELETE /Users/{id}`, also revokes every API key the
+  user owns (`revoked_reason: scim_deactivated`). A re-activation re-arms none
+  of them, and no one can restore them: the owner's Restore and a platform
+  administrator's are both refused `403 PERMISSION_DENIED`. The person creates
+  a new key under **Account → Developer → API Keys** and replaces the old one
+  wherever it is configured.
+- It also suspends every AI service account the user is accountable for, with
+  the reason that the directory deactivated its owner. Nothing is revoked: the
+  account's keys are refused while it is suspended. A re-activation does not
+  resume it, and `resume` refuses while the owner is still deactivated; once the
+  owner is re-activated, or a new owner is named, an administrator resumes it
+  (see [AI service account](/docs/ai/agents#connect-your-ai-byo-ai-over-mcp)).
+- The cause is told only after the password verified: a wrong password is the
+  ordinary `401 INVALID_EMAIL_OR_PASSWORD`, whatever the account's state. It
+  names no connection, provider or other account.
+- It is added on `/sign-in/email` only; other sign-in methods answer the plain
+  `BANNED_USER`.
 
 A connection's groups grant permission sets through the same group mappings an
 SSO provider's sign-in uses; see

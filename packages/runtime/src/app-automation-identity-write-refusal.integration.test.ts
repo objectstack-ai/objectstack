@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine per case, 100 cases that each attempt a governed write and read the store back as unmoved, so no boot can be shared; 3.4 s in a local run; slowest CI reading 10.2 s (scheduled full-battery run 41255489006, Test Core shard log) x 1.25, rounded up
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine per case, 118 cases that each attempt a governed write and read the store back as unmoved, so no boot can be shared; 6.7 s in a local run on a shared box; slowest CI reading 10.2 s (scheduled full-battery run 41255489006, Test Core shard log) x 1.25, rounded up
 
 /**
  * [#25653, the #25251 principle for the whole family] App-authored automation
@@ -43,6 +43,8 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+// Paid at collection: the action path reaches a dynamic import of this package inside a clocked case.
+import '@objectstack/metadata';
 import { ObjectQL, bindHooksToEngine, wrapDeclarativeHook } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { PermissionSetSchema } from '@objectstack/spec/security';
@@ -121,6 +123,9 @@ async function boot(): Promise<ObjectQL> {
       inline('sys_user_position', ['user_id', 'position', 'business_unit_id', 'granted_by']),
       inline('sys_user_permission_set', ['user_id', 'permission_set', 'granted_by']),
       inline('qa_note', ['title', 'organization_id', 'owner_id']),
+      // Two append-only stand-ins, named for the audit ledger and the activity feed.
+      inline('sys_audit_log', ['action', 'object_name'], { managedBy: 'append-only', systemFields: { tenant: false } }),
+      inline('sys_activity', ['type', 'summary'], { managedBy: 'append-only', systemFields: { tenant: false } }),
     ],
   } as never);
   await engine.syncSchemas();
@@ -509,4 +514,137 @@ describe('CONTROL: a hook registered in code, with no metadata binding, still wr
       }
     }, 30000);
   }
+});
+
+/**
+ * [Ruling record 6787890900] The same elevations do not change or delete an
+ * append-only object's rows: the paths above, each driven end to end, on two
+ * append-only objects. The predicate is pinned beside the refusal
+ * (`flow-system-identity-write-refusal.test.ts`, plugin-security); a system
+ * flow's data nodes are pinned in service-automation
+ * (`runas-system-append-only-write-refusal.integration.test.ts`).
+ */
+describe('app-automation elevation does not change or delete an append-only object\'s rows', () => {
+  const LEDGERS: Record<string, { row: (id: string) => Record<string, unknown>; edit: Record<string, unknown> }> = {
+    sys_audit_log: { row: (id) => ({ id, action: 'create', object_name: 'qa_note' }), edit: { action: 'delete' } },
+    sys_activity: { row: (id) => ({ id, type: 'created', summary: 'Note created' }), edit: { summary: 'Note edited' } },
+  };
+  const LEDGER_NAMES = Object.keys(LEDGERS);
+  const LEDGER_VERBS = ['update', 'delete'] as const;
+
+  async function seedLedger(engine: ObjectQL, object: string): Promise<Record<string, unknown>> {
+    await engine.insert(object, LEDGERS[object].row('seeded'), { context: { ...PLATFORM } } as never);
+    return (await stored(engine, object, 'seeded'))!;
+  }
+
+  function ledgerSource(object: string, verb: (typeof LEDGER_VERBS)[number]): string {
+    const repo = `ctx.api.object(${JSON.stringify(object)})`;
+    return verb === 'update'
+      ? `await ${repo}.update(${JSON.stringify(LEDGERS[object].edit)}, { where: { id: 'seeded' } });`
+      : `await ${repo}.delete({ where: { id: 'seeded' } });`;
+  }
+
+  function ledgerWrite(object: string, verb: (typeof LEDGER_VERBS)[number]) {
+    return async (api: any): Promise<void> => {
+      const repo = api.object(object);
+      if (verb === 'update') await repo.update(LEDGERS[object].edit, { where: { id: 'seeded' } });
+      else await repo.delete({ where: { id: 'seeded' } });
+    };
+  }
+
+  function expectLedgerRefused(err: any, object: string, verb: string, source: 'hook' | 'action'): void {
+    expect(err, `${verb} on ${object} from the ${source} was not refused`).not.toBe(null);
+    const root = rootRefusal(err);
+    expect(root.code).toBe('PERMISSION_DENIED');
+    expect(root.statusCode ?? root.status).toBe(403);
+    expect(String(err.message)).toMatch(new RegExp(`'${object}' is append-only`));
+    expect(String(err.message)).toMatch(source === 'hook' ? /a hook that runs as system/ : /an action body/);
+  }
+
+  for (const object of LEDGER_NAMES) {
+    for (const verb of LEDGER_VERBS) {
+      for (const surface of ['body', 'handler'] as const) {
+        it(`a runAs:'system' hook ${surface}: ${verb} on ${object} is refused and the row does not move`, async () => {
+          const engine = await boot();
+          const before = await seedLedger(engine, object);
+          const write = ledgerWrite(object, verb);
+          const hook = surface === 'body'
+            ? { runAs: 'system', body: { language: 'js', source: ledgerSource(object, verb), capabilities: ['api.read', 'api.write'] } }
+            : { runAs: 'system', handler: async (hctx: any) => write(hctx.api) };
+
+          expectLedgerRefused(await fireInheritingHook(engine, hook, PLAIN), object, verb, 'hook');
+
+          expect(await stored(engine, object, 'seeded')).toEqual(before);
+          expect(await stored(engine, 'qa_note', 'note_1')).toBe(null);
+        }, 30000);
+      }
+
+      it(`an app-authored hook with no runAs under a platform write, and its ctx.api.sudo() under a user's: ${verb} on ${object} is refused`, async () => {
+        const engine = await boot();
+        const before = await seedLedger(engine, object);
+        const write = ledgerWrite(object, verb);
+
+        expectLedgerRefused(await fireInheritingHook(engine, { handler: async (hctx: any) => write(hctx.api) }, PLATFORM), object, verb, 'hook');
+        const second = await boot();
+        await seedLedger(second, object);
+        expectLedgerRefused(await fireInheritingHook(second, { handler: async (hctx: any) => write(hctx.api.sudo()) }, PLAIN), object, verb, 'hook');
+
+        expect(await stored(engine, object, 'seeded')).toEqual(before);
+        expect(await stored(second, object, 'seeded')).toMatchObject({ id: 'seeded' });
+      }, 30000);
+
+      it(`an action body, through ctx.api and through ctx.engine: ${verb} on ${object} is refused and the row does not move`, async () => {
+        const engine = await boot();
+        const before = await seedLedger(engine, object);
+
+        expectLedgerRefused(await runAction(engine, `${ledgerSource(object, verb)} return 1;`), object, verb, 'action');
+        const facade = buildActionEngineFacade({} as never, engine, { ...PLAIN });
+        expectLedgerRefused(
+          await refusal(() => (verb === 'update' ? facade.update(object, 'seeded', LEDGERS[object].edit) : facade.delete(object, 'seeded'))),
+          object, verb, 'action',
+        );
+
+        expect(await stored(engine, object, 'seeded')).toEqual(before);
+      }, 30000);
+    }
+  }
+
+  it('CONTROL: the same hook and body still read both ledgers and update and delete an ordinary object', async () => {
+    const engine = await boot();
+    for (const object of LEDGER_NAMES) await seedLedger(engine, object);
+    const err = await runAction(
+      engine,
+      `const seen = [];
+       for (const o of ${JSON.stringify(LEDGER_NAMES)}) seen.push((await ctx.api.object(o).find({ where: { id: 'seeded' } })).length);
+       await ctx.api.object('qa_note').insert({ id: 'note_2', title: 'draft' });
+       await ctx.api.object('qa_note').update({ title: String(seen.join(',')) }, { where: { id: 'note_2' } });
+       await ctx.api.object('qa_note').insert({ id: 'note_3', title: 'gone' });
+       await ctx.api.object('qa_note').delete({ where: { id: 'note_3' } });
+       return 1;`,
+    );
+    expect(err).toBe(null);
+    expect(await stored(engine, 'qa_note', 'note_2')).toMatchObject({ title: '1,1' });
+    expect(await stored(engine, 'qa_note', 'note_3')).toBe(null);
+  }, 30000);
+
+  it("CONTROL: a hook registered in code writes a ledger row under an app-authored hook's write, and a platform writer updates and deletes both ledgers", async () => {
+    const engine = await boot();
+    engine.registerHook('afterInsert', async (hctx: any) => {
+      if (noteId(hctx) === 'note_by_hook') await hctx.api.sudo().object('sys_audit_log').create({ id: 'platform_row', action: 'create' });
+    }, { object: 'qa_note', packageId: 'sys:qa' });
+    const err = await fireInheritingHook(engine, {
+      runAs: 'system',
+      handler: async (hctx: any) => { if (noteId(hctx) === 'note_1') await hctx.api.object('qa_note').insert({ id: 'note_by_hook', title: 'by hook' }); },
+    }, PLAIN);
+    expect(err).toBe(null);
+    expect(await stored(engine, 'sys_audit_log', 'platform_row')).toMatchObject({ id: 'platform_row' });
+
+    for (const object of LEDGER_NAMES) {
+      await seedLedger(engine, object);
+      await engine.update(object, LEDGERS[object].edit, { where: { id: 'seeded' }, context: { ...PLATFORM } } as never);
+      expect(await stored(engine, object, 'seeded')).toMatchObject(LEDGERS[object].edit);
+      await engine.delete(object, { where: { id: 'seeded' }, context: { ...PLATFORM } } as never);
+      expect(await stored(engine, object, 'seeded')).toBe(null);
+    }
+  }, 30000);
 });

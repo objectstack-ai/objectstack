@@ -241,7 +241,12 @@ describe('#4289 — a transient missing-resource answer does not cost the sessio
     let reads = 0;
     inboxBehaviour = () => {
       reads += 1;
-      return reads === 1 ? objectMissing(true) : Promise.resolve({ data: ROWS });
+      // Each answer differs from the last (objectstack#32627): a poll that
+      // finds nothing new backs off, and this case is about a LIVE feed
+      // against one on probes, not about how a quiet inbox paces itself.
+      return reads === 1
+        ? objectMissing(true)
+        : Promise.resolve({ data: [{ ...ROWS[0], title: `${ROWS[0].title} (${reads})` }] });
     };
 
     renderHook(() => useSharedInboxFeed());

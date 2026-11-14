@@ -105,7 +105,12 @@ export async function backfillTemplatePackages(
       const id = row.id;
       const name = row.name;
       if (id === null || id === undefined || typeof name !== 'string' || name === '') continue;
-      if (!answers.has(name)) answers.set(name, resolvePackageScopedName(registry, { type: 'email_template', name, callerPackageId: null }));
+      // [#32183] A binding never moves with a reversible disable: every holder.
+      if (!answers.has(name)) {
+        answers.set(name, resolvePackageScopedName(registry, {
+          type: 'email_template', name, callerPackageId: null, includeDisabledPackages: true,
+        }));
+      }
       const answer = answers.get(name)!;
       if (answer.status === 'resolved') {
         if (answer.holder.kind === 'package') {

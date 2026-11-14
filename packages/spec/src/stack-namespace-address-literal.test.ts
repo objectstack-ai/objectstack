@@ -3,9 +3,9 @@
 /**
  * [ADR-0150 D5, child G1] `defineStack` WARNS, once per package and
  * namespace, about a namespace that spells a literal segment of the address
- * grammar (`actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger`) —
- * its own manifest's or a `packages[]` body's — and still returns the stack.
- * It runs at every load of a config, the server's included, so a refusal here
+ * grammar (`actions`, `connectors`, `global`, `hooks`, `oauth`, `runs`,
+ * `trigger`) — its own manifest's or a `packages[]` body's — and still
+ * returns the stack. It runs at every load of a config, the server's included, so a refusal here
  * would stop a deployment that already holds such a package from booting; the
  * refusal is the author's doors' (`os validate`, `os build`) and the install
  * door's. The warning carries the install door's own sentence
@@ -51,8 +51,8 @@ const literalWarnings = () =>
   warn.mock.calls.map((c: unknown[]) => String(c[0])).filter((line: string) => line.includes('spells a literal segment of the address grammar'));
 
 describe('defineStack — an address-literal namespace loads, with one warning', () => {
-  it('the six literals are the ones this file pins', () => {
-    expect([...NAMESPACE_REFUSED_LITERALS]).toEqual(['actions', 'connectors', 'global', 'hooks', 'oauth', 'trigger']);
+  it('the seven literals are the ones this file pins', () => {
+    expect([...NAMESPACE_REFUSED_LITERALS]).toEqual(['actions', 'connectors', 'global', 'hooks', 'oauth', 'runs', 'trigger']);
   });
 
   it.each(NAMESPACE_REFUSED_LITERALS.map((literal) => [literal]))(

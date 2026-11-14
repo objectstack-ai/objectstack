@@ -102,7 +102,9 @@ managed-update whitelist. SCIM provisioning and directory sync can populate it t
 through a provisioning path your own deployment supplies: this platform declares the SCIM
 `manager` attribute without projecting it onto the column. Where an identity carries
 `source: 'idp_provisioned'` the admin operation **refuses**, so that directory stays the one
-surface that authors its manager.
+surface that authors its manager. A user a SCIM connection provisions carries that value from its
+creation unless it holds a local password, so for such a user the column is written only by that
+deployment-supplied path, and a value the column already holds stays as it is.
 
 Setting the column is still something you have to *do*. Where `manager_id` is unset the rung
 expands to nobody, and under the default `onEmptyApprovers: 'admin_rescue'` the request opens on
@@ -440,6 +442,10 @@ Set Manager** — see [the `manager` callout above](#3-the-approval-node). `posi
 organization's directory resolves them — see
 [Approving across organizations](#cross-org-approvers).
 
+A `position` or `queue` name is not checked when the flow is saved: positions and
+queues are runtime data an administrator adds and removes, so a name nobody holds
+yet saves, and it is resolved when the run reaches the node.
+
 What an entry that resolves to nobody leaves on the slate depends on its kind:
 
 - **A person entry** (`manager`, `field`) adds no slot. Nor does a `queue`
@@ -583,6 +589,23 @@ requests, not every request in the tenant. Admins with override authority
 The same rule governs a decision's files: an attachment is exactly as readable
 as the decision it hangs off, never more (`sys_approval_action` delegates that
 question back to this service via `fileAccessDelegate`).
+
+Every signed-in member holds a read on `sys_approval_request` through the
+member baseline (`member_default`), and the data door serves them exactly the
+requests the rule above lets them see, with the same snapshot redaction. So
+`GET /api/v1/data/sys_approval_request` (and an MCP agent's `query_records`)
+lists a member's own requests, and a `pending_approvers` filter on
+`{current_user_id}` finds the requests waiting on them, including a step
+addressed to their email or position. No write opens on it.
+
+The two objects' definitions follow. The metadata API answers an object the
+caller may not read as absent; with the baseline read, every member is served
+the `sys_approval_request` definition, projected by their field-level
+security. `sys_approval_action` stays closed to ordinary members on the data
+side, and both objects declare `schemaReadDelegate: 'approvals'`, so
+`GET /api/v1/meta/object/sys_approval_action` (and the object list) serves it
+to a caller who can see at least one request by the rule above. A member who
+can see none is answered `404` for it.
 </Callout>
 
 <Callout type="info">
@@ -840,8 +863,8 @@ progress, the approvers it is waiting on, the merged decision timeline and a rem
 button for the submitter. Every viewer who can read the record sees it, not only
 approvers. A request opens on its record page through the approvals routes rather
 than the data API, so an approver who is not an administrator sees the whole page,
-decision actions included, although the data API stays closed to them on the
-approval objects.
+decision actions included, even where the data API does not serve them the
+request row.
 
 Each action's visibility is gated by a **server-computed per-viewer block** the
 service attaches to every request it returns:
@@ -1032,6 +1055,13 @@ background job — so a lapsed delegation simply stops applying. Chains
 (A → B → C) are followed and cycle-safe. The delegate acts under **their own
 identity**; the reroute is recorded as an `ooo_substitute` audit action and both
 the delegate and the skipped approver are notified.
+
+A delegation that could never reroute anything is refused at the write with
+`400 VALIDATION_FAILED`, naming the field: a window whose `valid_until` is at or
+before its `valid_from` (on `valid_until`), and a `delegate_id` equal to the
+`delegator_id` (on `delegate_id`). Leave either bound empty for an open-ended
+window. A row stored with either shape before this check existed stays inert:
+correct its dates or its delegate, or delete it.
 
 A delegation belongs to the organization it is created in, and reroutes only the
 approvals opened in that organization; a request's organization is its record's.

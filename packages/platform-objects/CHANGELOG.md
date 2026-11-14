@@ -1,5 +1,960 @@
 # @objectstack/platform-objects
 
+## 18.4.0
+
+### Minor Changes
+
+- b5eb61d: Clause-②: yes (widening) — `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` (and so `PLATFORM_PROVIDED_OBJECT_NAMES` / `isPlatformProvidedObjectName`) lists one more real platform object, `sys_lifecycle_state`. Its readers resolve references against the roster and none refuses an author declaration, so a stack that references the object now resolves it instead of drawing the unknown-platform-name advisory; nothing that was accepted is refused.
+  Metadata-protocol: added
+  Skills-docs: none — `skills/**` and `content/docs/**` enumerate no platform object roster and teach nothing about the lifecycle sweep's schedule; the object is internal clock state with no data API, so there is nothing for an author to write against it.
+  
+  The lifecycle sweep remembers when it last completed, so a kernel that reboots onto an existing datastore no longer re-sweeps within a minute of every boot.
+  
+  `LifecycleService` now keeps a watermark in a new engine-owned, tenant-less object, `sys_lifecycle_state` (declared and registered by `@objectstack/platform-objects`, one row per datastore, id `lifecycle`). At the initial delay the scheduler reads that one row: when the last completed sweep is younger than the sweep interval, the first sweep waits for the interval and the read is the only statement issued. An older or missing watermark, a kernel without the object, or a read that fails (logged at `warn`) sweeps at the initial delay as before. Every sweep that completes with no policy error and a finished reference audit advances the row; a failed or partial sweep leaves it alone. A datastore the process created from empty still defers its first sweep one interval, and now seeds the row. A direct `sweep()` call still always sweeps.
+  
+  The row is internal state, not a setting: no settings key, no environment variable, no audit row per sweep and no data API (`apiEnabled: false`). `@objectstack/plugin-audit` leaves `sys_lifecycle_state` out of `sys_audit_log` and `sys_activity`, so a sweep writes no ledger row for its own clock. `OS_LIFECYCLE_DISABLED=1` still arms nothing. `os migrate organization-ownership` inventories the new table as deployment-level state with no organization column.
+- ac890f5: feat(objectql,plugin-sharing): an organization authors its own assignment rules in Setup, as `sys_assignment_rule` records
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — content/docs/automation/queues-and-assignment-rules.mdx, skills/objectstack-automation/SKILL.md
+  
+  Until now only a package could declare an assignment rule, so routing new records differently meant a package release. An organization can now write its own rules in Setup (Access Control → Assignment Rules), on the same two-source model sharing rules and queues already follow: the rules packages declare keep working, and the organization's own rules sit beside them.
+  
+  - **`@objectstack/plugin-sharing`**: a new object, `sys_assignment_rule`. One row is one rule: when a new record of the chosen object matches the condition (a CEL expression over `record`, empty for every record), it goes to a queue or to one person, and a queue target may pick a member by `round_robin` or `least_loaded` (which needs its open-work expression, `load`). Each row belongs to one organization (`organization_id` is required). The table's save guard refuses, naming each field at fault: a name that is not snake_case or that a package rule already holds (one name means one rule); an object that does not exist or whose records have no owner; an entry shape the stack schema refuses for a declared rule; a condition or open-work expression the engine cannot compile; a person who is not an active member of the organization; a rule that would land in no organization. A boot report logs, at `error`, an organization's rule whose name a later-installed package now declares. Setup gains an "Assignment Rules" entry beside Queues.
+  - **`@objectstack/objectql`**: the engine evaluates an object's organization rules first, ascending by `sort_order` and then by name, and the rules packages declare as the fallback; the first match decides. A user target, from either source, now owns the record only while the user is an active member of the record's organization and is not banned. One that no longer resolves leaves the record ownerless, the way a queue that no longer resolves does, and is logged once; the insert is never refused. When an organization's rules cannot be read, its new records are written as they stood rather than routed by the package rules its own would have overtaken. New exports for the save guard: `ASSIGNMENT_RULE_OBJECT`, `assignmentExpressionRefusals`, `organizationMemberStanding`.
+  - **`@objectstack/spec`**: `PLATFORM_PROVIDED_OBJECT_NAMES` lists `sys_assignment_rule` under `plugin-sharing`, and the `AssignmentRuleSchema` documentation says how the two sources combine. No key, shape or validation changes.
+  - **`@objectstack/platform-objects`**: the Setup app labels the new "Assignment Rules" navigation entry in English, Chinese, Japanese and Spanish.
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_assignment_rule`, so `os migrate organization-ownership` plans it instead of refusing it as an uninventoried platform table.
+  
+  Upgrading: a package rule whose entry names a user id (the `assignment-rule-user-target` lint warning) stops assigning in an organization where that user is not a member; the engine logs the lapse once per rule, user and organization. Route such a rule to a queue whose members are positions.
+- 25e1c1a: feat(objectql,platform-objects): a by-id delete keeps its rows in the recycle bin (ADR-0148): the `sys_recycle_bin` object, the snapshot on delete, the retention stamp and the TTL reap
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-api/SKILL.md :268, :417 (they teach that there is no recycle bin)
+  
+  The recycle bin's write side. A delete is still a physical delete, and no read path changed: the rows are gone from every query the moment the delete commits. What is new is the copy kept beside them. Restoring, purging and emptying the bin, the two grants that govern them and their REST doors are not in this release.
+  
+  - **`@objectstack/platform-objects`:** registers `sys_recycle_bin`, built from the spec's `RECYCLE_BIN_ENTRY_FIELDS`. One entry per delete operation. It is engine-owned, with no generic data-API method, because the snapshot holds every field of the deleted rows. Its tenant column cascades, so deleting an organization deletes its entries. The lifecycle sweep reaps an entry once its stamped `purge_after` has passed (`ttl` on `purge_after`, window `0h`), and asks no resolver.
+  - **`@objectstack/objectql`:** a by-id delete of a business record writes one entry in the delete's own unit of work, before the record's row is removed. The entry holds the record and its master-detail cascade, the master first. Each row keeps its declared columns, and `secret` columns are left out, so a restored record's secret fields come back empty. The entry also records the `set_null` references the delete cleared, and `deleted_by`, `deleted_at`, `retention_days` and `purge_after`. If removing the row fails, the entry goes too: the transaction rolls it back, or the engine removes it when no transaction covered it.
+  - **Retention:** `ObjectQLPlugin`'s new `recycleBinRetention: { resolve, token }` option takes the host's retention resolver, called once per delete with the token the host handed over. When the option is absent or the resolver answers `undefined`, the retention is `OS_RECYCLE_BIN_RETENTION_DAYS`, else 30 days. A value that is not a positive whole number of days is refused: from the resolver, the delete is refused before it writes anything; in the variable, the boot is refused, because the plugin reads it in `init()`.
+  - **Which deletes do NOT enter the bin:**
+    - a delete by predicate (`multi: true`), which includes every lifecycle sweep reap, even though the sweep names each reaped row by its id;
+    - a child the cascade deletes, which is a row of its root's entry instead;
+    - any platform object, meaning a `sys_*`, `cloud_*` or `ai_*` object, whose rows are also left out of a business record's snapshot;
+    - any delete on a composition that does not register `PlatformObjectsPlugin`, which logs one `info` line saying so.
+  - **Forward-only:** records deleted before this release have no entry.
+  - **Storage:** every by-id delete of a business record now also writes one `sys_recycle_bin` row holding the deleted rows. The row is reaped once its retention has passed.
+  - **`@objectstack/spec`:** `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` lists `sys_recycle_bin`, so a reference to it lints as a real platform object. The comment above `RECYCLE_BIN_OBJECT` now names the object file that builds the table; no exported name, shape or description changed.
+  - **`@objectstack/cli`:** the organization-ownership inventory has a row for `sys_recycle_bin` (fate `attribution`).
+  - **`@objectstack/plugin-audit`:** `sys_recycle_bin` is excluded from the generic audit and activity writer, like the other engine-owned plumbing, so reaping an entry, clearing its `deleted_by` or cascading an organization's delete into its entries never copies a snapshot into `sys_audit_log` or `sys_activity`. The business delete an entry was taken for is audited exactly as before.
+- c7d1367: feat(spec): an action param can name the widget that draws it (`widget`, same key as on a field), so a param can ask for the permission-set picker (ADR-0131 D4)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`@objectstack/spec`: `ActionParamSchema.widget`**, an optional string with the same key, vocabulary and meaning as `FieldSchema.widget`. It names a registered field component, looked up as `field:` plus the name, to draw the param in the action dialog instead of the `type` default. `type` stays the value's type. The case it exists for is `widget: 'permission-ref'` on a `text` param: it lists the permission sets of the security catalog and submits the chosen machine name, the picker the grant column `sys_user_permission_set.permission_set` already uses. Like the field key it is an open string: an unregistered name is kept, and the dialog draws the `type` renderer instead. A non-string is refused. A param that does not declare the key parses exactly as before. Until now a param naming `widget` was refused as an unknown key.
+  - **Not read yet.** The console's param resolver does not carry the key to the dialog's widget until objectstack#30260 lands. Until then a param that declares it is drawn by its `type` renderer, and its value is submitted as before. The key's description says so, and the liveness ledger grades it `planned` with an author warning: `os validate` and `os lint` warn an author who writes it.
+  - **`@objectstack/platform-objects`: the action form's Params repeater offers the key** as a `Widget` column, labelled in en, zh-CN, ja-JP and es-ES.
+- 677d542: feat(spec): a field group's `requiresFeature` hides the group where a deployment feature is off; Edit organization hides Parent Organization and Sort Order on a single-organization deployment
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #30812 — skills/objectstack-data/references/examples-objects.md (its Field Groups section teaches `fieldGroups` and should name `visibleWhen` and `requiresFeature` beside `collapse`); kept out of this diff so it does not become a governed (`skills/**`) change
+  
+  On a deployment that runs one organization, Edit organization showed Parent Organization and Sort Order, two fields that order and group organizations against each other and so do nothing there. They are now hidden wherever the deployment does not run several organizations.
+  
+  - **`@objectstack/spec`: `fieldGroups[].requiresFeature`.** A field group can name a deployment feature flag, from the same set an action's `requiresFeature` names (`PUBLIC_AUTH_FEATURES`), and a flag outside it is refused at parse. It is lowered at parse into the group's `visibleWhen`, exactly as the action key is lowered into `visible`, and the key is stripped from the output: `{ key: 'group_structure', label: 'Group Structure', requiresFeature: 'multiOrgEnabled' }` parses to a group whose `visibleWhen` is `features.multiOrgEnabled != false`. Beside an authored `visibleWhen` the two are AND-composed, the author's predicate first: `visibleWhen: "record.kind == 'child'"` gives `(record.kind == 'child') && features.multiOrgEnabled != false`. The form and the record page already evaluate a group's `visibleWhen` with the host's `features` in scope, so the gate holds on both. Like every group predicate it is presentation only: the fields stay readable and writable through the API. A group predicate is fail-closed where an action's `visible` is fail-soft: while the host's `features` does not carry the flag yet (the console's empty scope before `/auth/config` resolves, or after that fetch fails) the gate faults and the group stays hidden, even for a default-on flag, and it appears once the flag is published. `lowerRequiresFeature` takes an optional third argument, the slot it lowers into (`'visible'`, the default, or `'visibleWhen'`), and its refusals name that slot. `PUBLIC_AUTH_FEATURES` books `sys_organization.fieldGroups.group_structure` under `multiOrgEnabled`; a `gatedInputs` path may now name a field group as `OBJECT.fieldGroups.KEY`.
+  - **`@objectstack/lint`: the lowered gate is accepted.** A field group's `visibleWhen` keeps its root verdict (it binds `record`, `previous` and `parent`), except for the one trailing gate a `requiresFeature` lowers to, which `os validate`, `os build` and the object save door now accept. Any other `features` read in a group predicate is refused as before, and the message now points at `requiresFeature`.
+  - **`@objectstack/platform-objects`: `sys_organization` declares its field groups.** Identity, Branding, Configuration and Group Structure, in the fields' own order, so every field keeps its place; `id`, `created_at` and `updated_at` stay ungrouped and last, as before. Group Structure (Parent Organization, Sort Order) carries `requiresFeature: 'multiOrgEnabled'`. The two fields' help, which says they matter only with several organizations, is unchanged.
+- b70d9aa: feat(plugin-auth,platform-objects): per-provider SSO sign-in options for IdP-initiated sign-in and just-in-time accounts, and `invite_only` now refuses an SSO sign-in by someone who was not invited
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  **Behaviour change for existing deployments.** Under the `invite_only` audience posture, which is the default, an enterprise SSO sign-in (OIDC or SAML, through `@better-auth/sso`) by a person who has no account and no pending invitation is now refused. It redirects to the error page with `error=SELF_REGISTRATION_CLOSED`, and no user is created. Before, such a sign-in created the account. To keep the old behaviour for a provider, turn on its new `allowJit` option: **Setup → SSO Providers → Edit Sign-In Options**, or `POST /api/v1/auth/sso/update-provider` with `{ providerId, allowJit: true }`. Unchanged: a person who already has an account, a person with a pending invitation, the first human of an empty deployment, every sign-in under the `email_domain` or `open` posture, and the social and `oidcProviders` sign-ins.
+  
+  - **Two options on each SSO provider, both off by default.** `sys_sso_provider` gains `allow_idp_initiated` and `allow_jit` (boolean, default false, history tracked). They are declared to `@better-auth/sso` as provider `additionalFields`, so its own `/sso/register` and `/sso/update-provider` accept them, a non-boolean is refused 400 `VALIDATION_ERROR`, and the people who can write a provider today are the only ones who can change them. Every change writes a `sys_audit_log` row and a field-level activity line with the old and the new value.
+  - **IdP-initiated sign-in (SAML and OIDC).** Off, a SAML Response with no `InResponseTo` is refused `error=unsolicited_response`, and an OIDC callback with a `code` and no `state` is refused `error=state_not_found`, as before. On, the vendor's own IdP-initiated handling runs for that provider only. For SAML, the vendor's plugin-wide `saml.allowIdpInitiated` now answers the provider's column for each ACS request. For OIDC, the column is carried into the configuration the vendor reads, and an `allowIdpInitiated` member stored in that configuration is ignored and removed on the next write.
+  - **Setup.** The SSO Providers list shows both options, and each row has an **Edit Sign-In Options** action.
+- 4123865: fix(metadata-protocol,runtime): a seed row a person deleted is no longer inserted again under a new id by the next seed replay
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A seed replays long after its first load: on every boot of a single-tenant runtime (`objectstack serve`, `os start`) and per organization whenever a host replays the seed union, for example on a package upgrade. The create-only default (`mode` omitted, which is `ignore`) inserted every declared row it did not find, and `upsert` did the same. A row a person deleted therefore came back under a new id at the next replay.
+  
+  The seed loads AppPlugin runs now keep a per-organization record of which seed rows landed: the boot seed, the per-organization replay (the `seed-replayer` service) and the dev hot-reload seeder. The record is the new platform object `sys_seed_landed_key` (`SysSeedLandedKey`, registered by `PlatformObjectsPlugin`). It holds one row per landed key: the organization, the object, and the dataset's `externalId` fields with the values the row was matched by. The loader records every keyed row an `upsert` or `ignore` dataset lands, whether it inserted the row, updated it or matched it and left it alone. A row an earlier release seeded therefore counts as landed from the first load after the upgrade. A missing row is inserted only when its key never landed in that organization:
+  
+  - A deleted seed row stays deleted across reboots and upgrades. A row an upgrade adds to the seed still lands.
+  - An edited row is left as the person left it. Under `ignore` this includes a renamed key: the old name is not inserted again.
+  - A reference to a removed row is left as it is, and a row whose own key names a removed row is withdrawn with it. Nothing is reported unresolved for either, so a replay after a person's delete still loads clean.
+  - One `info` line per load says how many seed rows were not inserted again, and where.
+  
+  The deliberate re-seed is the `seed-replayer` service called with `{ reseed: true }`. It inserts every missing row, including the ones a person removed, and records them again. A new database starts with an empty record. Deleting an organization deletes its record.
+  
+  `SeedLoaderService` takes the record through a new constructor option, `landedKeys: 'honour' | 'reseed'`. A caller that does not pass it neither reads nor writes the record, so the package publish, marketplace install, reseed and purge doors behave as before. A load keeps no record when it seeds no organization, and says so at `info`. It also keeps none when the composition does not register `sys_seed_landed_key`, and says so at `warn`. A record write that fails is reported once at `error`. It fails neither the rows nor the load, and the next load records every row that is still present.
+  
+  `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` in `@objectstack/spec` lists the new object, and so do `PLATFORM_PROVIDED_OBJECT_NAMES` and `isPlatformProvidedObjectName`, so a stack that references `sys_seed_landed_key` resolves it instead of drawing the unknown-platform-name advisory. `@objectstack/plugin-audit` leaves `sys_seed_landed_key` out of `sys_audit_log` and `sys_activity`: recording which seed rows landed writes no ledger row of its own, and the seeded rows stay audited. `os migrate organization-ownership` inventories the new table as organization-owned rows (fate 3, attribution), each written with the organization its load seeds.
+
+### Patch Changes
+
+- f6a429b: feat(plugin-auth,platform-objects,core): `sys_api_key.revoked_reason` accepts `organization_membership_ended`, and no user-context Restore lifts it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/platform-objects`: `sys_api_key.revoked_reason` gains the option `organization_membership_ended`** ("Organization membership ended"), beside `admin_password_reset`. It is the word `sys_session.revoke_reason` already carries when a membership removal ends a session, so one grep finds every place the platform acts on a membership ending, across sessions and keys. The platform never writes it: a host that removes someone from the organization and revokes their keys writes it in the system context, beside `revoked: true`. The column stays readonly and off the ADR-0092 D2 whitelist, so no data-API write sets or clears it. The field's help text names both reasons and who can restore each; the six translated locales carry the new option and the new help.
+  - **`@objectstack/plugin-auth`: the restore guard refuses every user-context restore of a key carrying that reason**, a platform administrator's included (by the `admin_full_access` grant or by the `OS_PLATFORM_OWNER_EMAIL` anchor), on the by-id path and per row on a multi-row update: `403 PERMISSION_DENIED`, nothing written, and a message that says the owner's membership ended and that a member creates a new key (`POST /api/v1/keys`, or the API Keys page). This is the `restore_api_key` row action's own door (`PATCH /api/v1/data/sys_api_key/{id}` with `{ revoked: false }`). Re-arming the key would hand a non-member's credential back its access, whoever clicks Restore, and on a `single` deployment no per-request membership check refuses the key, so `revoked` is the only barrier. A system-context un-revoke still lands and clears the reason, as for every reason. `admin_password_reset` keeps its rule unchanged: a platform administrator restores it, its owner does not.
+  - **`@objectstack/core`: the key door's `403 API_KEY_REVOKED` text for such a key** says it was revoked because its owner's membership in the organization ended and cannot be restored, and names the new-key road. It used to offer "its owner or a platform administrator can restore it", a restore the guard now refuses. Code, status and every carried field are unchanged.
+- a52761f: fix(console): an action another package places on `sys_user` at `record_header` / `record_more` draws again on the user's record page, in the drawer and on the full page (#29951)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The header reads `placedActions: true`.** `page:header`'s `placedActions` (#30018) is now drawn by the console's header renderer (`PageHeaderActions` in `@object-ui/components`): `true` draws every action of the page's object whose `locations` include `record_header` or `record_more`, in declaration order, read from the object's metadata at render time, so an action an installed package adds to the object is drawn without editing the page. Omitted or `false`, an authored `actions` list is still the whole set (#11592). A `true` beside an authored list, which the spec refuses, draws none of the object's actions and is reported once in the console.
+  - **One placed-header reader.** `placedHeaderActions` (`@object-ui/types`) is the rule both headers read: the synthesized default record page's header in `RecordDetailView` and a `placedActions: true` header. The `page:header` registration publishes the `placedActions` input.
+  - **The platform record pages opt in.** `sys_user_detail` and `sys_organization_detail` (`@objectstack/platform-objects`) and `sys_approval_request_detail` (`@objectstack/plugin-approvals`) set `placedActions: true` in place of the id lists #27219 froze, which dropped every header action another package places on those objects. The tab strips are unchanged, and every action the lists named is placed at `record_header` / `record_more`, so each still draws.
+  - `@objectstack/spec`: the `placedActions` describe no longer opens with `[PLANNED — not yet rendered]`, and the `page` liveness record names the reader.
+- 8fed00f: fix(platform-objects): Create User's permission set is picked from a list of the permission sets, by label, instead of typed as a machine name (#30117)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The optional Permission Set on Setup's Create User dialog was an empty text box that accepted only a set's machine name, while everything else in Setup shows sets by their labels. Typing the label the administrator could see was refused. The `create_user` action's `permissionSet` param now declares `widget: 'permission-ref'`, so the dialog draws the permission-set picker the grant column itself uses: a searchable list of the permission sets, each shown by its label, that submits the chosen set's name. The value is still a set's name, and the endpoint and the grant are unchanged.
+- 86ae2ca: fix(platform-objects): zh-CN metadata forms say 仪表盘 for dashboard (#30164)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The zh-CN dashboard authoring form the platform serves (`MetadataFormsTranslations`, which `/api/v1/meta/types` localizes forms with) still said 仪表板 on six strings: the form title, the basics section description, and the help text of the header, show-title, show-description and widgets fields. The Console and Studio say 仪表盘, so one object carried two names in one flow of work. All six now say 仪表盘. The generated bundle is the extract's merge baseline, so its leaves were corrected in place and the bundle regenerated (`pnpm i18n:extract` reproduces it byte for byte; `pnpm check:i18n` is green). en, ja-JP and es-ES are unchanged.
+- 977be38: fix(service-settings)!: Setup no longer offers a Feature Flags page whose four toggles changed nothing (#30204)
+  
+  Clause-②: no (narrowing) — removes the four settable keys of the `feature_flags` settings namespace (`ai_enabled`, `kanban_swimlanes`, `realtime_cursors`, `inline_comments`), the namespace itself (left empty by their removal), its Setup entry and the `featureFlagsSettingsManifest` export. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/service-settings#featureFlagsSettingsManifest) The one author-reachable removal is a runtime export: the `feature_flags` settings manifest constant leaves `@objectstack/service-settings`'s published entry and `builtinSettingsManifests`. A settings key is a value an administrator saves, not metadata an author writes: no spec key, authorable spelling, object definition or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** for an administrator who saved one of the four Feature Flags toggles, and for a host that imports `featureFlagsSettingsManifest`.
+  
+  - **Why.** No code read any of the four keys, so turning one on changed nothing (ADR-0049 enforce-or-remove). A flag comes back with the feature that reads it.
+  - **Removed keys.** `feature_flags.ai_enabled`, `feature_flags.kanban_swimlanes`, `feature_flags.realtime_cursors` and `feature_flags.inline_comments`: removed; each had no effect. The in-app AI panel is decided elsewhere and is unchanged.
+  - **The namespace.** `feature_flags` is no longer registered, so `GET` and `PUT /api/settings/feature_flags` answer `404 UNKNOWN_NAMESPACE`, and `SettingsService.getManifest('feature_flags')` throws `UnknownNamespaceError` (`SETTINGS_UNKNOWN_NAMESPACE`). Setup's Configuration group no longer lists Feature Flags (`@objectstack/platform-objects`, entry `nav_settings_feature_flags` and its four locale labels).
+  - **Stored values.** A `sys_setting` row saved under `feature_flags` and an `OS_FEATURE_FLAGS_*` environment variable are left in place and become inert: nothing registers the namespace, so nothing resolves them. They are not cleaned up; delete them at will.
+  
+  The one-line fix for a host:
+  
+  - FROM `featureFlagsSettingsManifest` TO nothing: drop it from the host's `SettingsServicePlugin({ manifests })` list; `builtinSettingsManifests` no longer carries it.
+- 740edc5: fix(plugin-audit,platform-objects): the audit log's default list shows what people did, not the rows the platform writes beside it; the audit objects read in Chinese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Setup's 审计日志 opens the first `sys_audit_log` list view, `recent`. One sign-in used to put two rows there (the `login` row and an `update` of the person's `sys_user` stamping `last_login_at` / `last_login_ip`), the first sign-in through the console a third (the token-signing key in `sys_jwks`), and one settings change three or four (the `config_change` row, the stored setting, a secret's ciphertext, and the settings trail's own entry).
+  
+  - The ledger writer now marks the sign-in stamp row with `metadata: {"event":"auth.last_login_stamp"}`, the way `config_change` rows carry `settings.set`. Only an update of `sys_user` whose changes are the stamp's fields alone is marked; an administrator's edit of a user is not. The row is still written.
+  - `recent` leaves out the marked row, the rows on `sys_secret`, `sys_setting_audit`, `sys_platform_setting_audit`, `sys_jwks`, `sys_migration` and `sys_migration_journal`, and the rows on `sys_setting` / `sys_platform_setting` other than `config_change`. Nothing is removed from storage, and `all_events` (全部) still lists every row.
+  - `sys_platform_setting` and `sys_platform_setting_audit` were in no translation bundle, so they read English in every locale; they now ship in `@objectstack/platform-objects`' bundles with zh-CN translations (ja-JP and es-ES carry the English fill). `sys_comment_reaction`'s zh-CN bundle is translated.
+- 778aedf: fix: the Business Unit page and the `security-private-no-readscope` hint say what needs the enterprise edition
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Business Unit page (`sys_business_unit` description, en and zh-CN).** It used to say units are "used to scope data and reports". It now says what a unit does in the open edition: sharing rules can share records with a unit, or a unit and the units under it, and members get that access and lose it when they leave. It also says that letting a permission set read every record of a unit (read scope `unit`) needs the enterprise edition. That matches the compile refusal, which is unchanged.
+  - **Business unit Timezone help (en and zh-CN).** It used to say date boundaries are computed in this zone. Nothing reads the column, so the help now says it changes no date calculation and that Settings → Localization → Default timezone is the one in effect, as the organization's Timezone help already does.
+  - **`security-private-no-readscope` hint (`os validate`, `os lint`).** The hint now offers only the scopes the stack can compile. When `requires` lists `hierarchy-security`, nothing changes: it offers `own_and_reports`, `unit`, `unit_and_below` and `org`. Without it, the hint offers `org` (or widening the object's `sharingModel`), and says that the three hierarchy scopes need `requires: ['hierarchy-security']`, which `@objectstack/security-enterprise` provides. The rule still fires on the same grants at the same severity.
+- 71318af: fix(platform-objects): Edit organization's Parent Organization and Sort Order help says they matter only where the deployment runs several organizations
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a deployment with one organization, Edit organization still shows 上级组织 / Parent Organization and 排序 / Sort Order, and nothing told the administrator they do nothing there. Their help text, in the object declaration and in the `en` / `zh-CN` packs, now ends with "Meaningful only where the deployment runs several organizations." (「仅在部署运行多个组织时有意义。」). No field, permission or behaviour changes; the fields stay visible.
+- 6a8f415: feat(ui): a Setup page to restore deleted records from the recycle bin, or empty it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Setup → Configuration → **Recycle Bin** (ADR-0148) lists the business objects whose recycle bin you manage (`manageRecycleBin`, which `modifyAllRecords` implies). Pick one to see its deleted records, 50 at a time with **Load more**. Each row shows the record's name, how many related records were deleted with it, who deleted it, when, and how long it is kept. **Restore** brings a record back under its original ids. It is the same restore as the Undo on a delete toast, so a refusal says why in the user's language and names objects and fields by their labels. **Empty recycle bin** asks first, says the removal is permanent, and reports how many deleted records it removed. If you manage no object's recycle bin, the page says so and reads no bin.
+  
+  `@objectstack/platform-objects` contributes the `nav_recycle_bin` entry (`componentRef: 'data:recycle-bin'`) to the Setup app's Configuration group, with its label in every translation bundle. `@object-ui/app-shell` registers the `data:recycle-bin` component, and `CatalogAssignmentPage` gains an optional `select` prop that narrows the catalog. `renderSection` now also receives the picked entry. `@object-ui/i18n` adds the `recycleBin.page.*` keys to every pack, including the `related` and `emptied` count families.
+  
+  The Undo on the delete toast (#31795) also exported `RecordDeleteToastAction` from `@object-ui/core`: the `{ label, onClick }` action a host's `toast.success` receives.
+- 0005fec: fix: on a zh-CN console every row of the view properties panel's collapsed sections (表格选项 / 分页 / 终端用户控制 / 导航与共享) reads in Chinese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `viewForm` (`@objectstack/spec/ui`) now spells out the children of its `selection`, `pagination`, `userFilters`, `appearance`, `userActions`, `navigation` and `sharing` composites, and gives the rows that had none a hint. Each declared hint is the schema description the panel already showed, so an English console reads the same text; `os i18n extract` now emits a `metadataForms.view.fields['<parent>.<child>']` key per row.
+  - `userFilters.fields` is enumerated as an inline-table repeater, and `UserFilterFieldSchema`'s six properties carry a `.meta({ title })` (Field / Label / Type / Options / Show Count / Default Values) — the English column heads, unchanged.
+  - The panel no longer offers `navigation.view` and `sharing.type`: both are `retiredKey()` tombstones that the schema-derived child list used to render as editable rows. A stored value is untouched by a panel save (the composite editor spreads the block it was given).
+  - The platform metadata-forms catalogs carry zh-CN, ja-JP and es-ES text for every new row, and the console's zh-CN overlay copies the zh-CN rows.
+- e8e924f: fix(plugin-auth,platform-objects): an organization's require-MFA refusal reads in the caller's language, an accepted save that turns it on names the grace period in force, and the field help says two-factor must be on (#30411)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** Saving `sys_organization.require_mfa` on while two-factor enrollment was off was refused with an English sentence, whatever language the administrator's console used. An accepted save that turned it on answered nothing about when members would be blocked, and the configured grace period (`auth.mfa_grace_period_days`) was readable only through the `auth` settings, which need `manage_platform_settings`, a capability an organization administrator does not hold. The field help did not say the requirement needs two-factor on.
+  - **Now.** The refusal is in the request's language (English, Simplified Chinese, Japanese, Spanish; matched from `Accept-Language` exactly, then by language, else English), with the same shape as before: `400 VALIDATION_FAILED`, one `require_mfa` / `invalid_value` field entry carrying the same sentence as the top-level message. A save that is admitted and turns the requirement on (two-factor on, the stored value off, or an insert) answers a save `notice` on the create or update answer, in the same language: every member without an authenticator app must enroll, within the grace period in force, in days, read per write from the same setting the MFA gate's clock holds to. A save that turns nothing on (clearing it, re-saving a stored `true`, writing other columns) answers no notice. The field help, in all four languages, says the requirement needs two-factor authentication on for the deployment (`OS_AUTH_TWO_FACTOR=true`) and that saving it on is refused while it is off.
+  - **Unchanged.** Which writes are refused and which are admitted, the refusal's code, status and field entry, the MFA gate and its grace clock, and every `auth` setting and its read permission. No member is added to any answer: `notice` is the create and update answers' existing optional member.
+- 35cd64c: fix(platform-objects): a team membership is named by the person and the team, and a team's Members list shows the user and when they joined, not two raw ids
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The record title.** `sys_team_member`'s title (`display_title`) composed its two stored lookup ids, so a team's Members panel, a membership's own page and every reference to the row read `USER_ID in TEAM_ID`. It now reads the user's `name` (their `email` where the name is blank) and the team's `name`, one hop through each lookup (ADR-0079 addendum, 2026-10-18), as `sys_business_unit_member`'s title does: `Ada Lovelace in Core Platform`. Both hops are read as the reader: a user or team the reader may not read, or one that no longer exists, leaves the title empty rather than showing an id. No column is stored, so a renamed user or team is named anew on the next read.
+  - **The team page's Members list.** A related list with no authored columns leads with the record title (ADR-0079), so the Members list opened on a Title column beside the User column. The `team_id` lookup now declares `relatedListColumns: ['user_id', 'created_at']`: the list shows the user and when the membership began, drawn as declared, with no title column.
+  - **A user's Teams list.** The `user_id` lookup declares `relatedListColumns: ['team_id', 'created_at']`, for a user page that derives its related lists. Setup's own `sys_user_detail` page is authored and lists no teams, so it is unchanged.
+- e3948ae: fix(platform-objects): an organization membership, a two-factor enrollment and the two SCIM join rows are named by the people and groups they point at, not raw ids
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The record titles.** Four identity join objects built their title (`display_title`) by splicing stored lookup ids, so a record page's heading, a list's Title column and every reference to the row read ids. Each now reads names one hop through its lookups (ADR-0079 addendum, 2026-10-18), as `sys_business_unit_member` and `sys_team_member` do. A person is their `name`, or their `email` where the name is blank:
+    - `sys_member`: `Ada Lovelace (admin)`, or `Ada Lovelace` with no role;
+    - `sys_two_factor`: `Two-factor for Ada Lovelace`;
+    - `sys_scim_projection_grant`: `billing_admin → Ada Lovelace`;
+    - `sys_scim_group_member`: the provisioned user's `user_name` and the group's `display_name`, each its object's own title: `ada.lovelace@idp.example in Operations`.
+  
+    Every hop is read as the reader: a person, provisioned user or group the reader may not read, or one that no longer exists, leaves the title empty rather than showing an id. No column is stored, so a rename shows on the next read.
+  - **The authorization prelude reads no title.** `@objectstack/core`'s grant resolver reads `sys_member` three times (the caller's memberships, the active organization's first page of members, and the position-holder count). Each read now names the columns it decides on, as the `sys_user_permission_set` grant read already did, so the membership's title, which now reads a `sys_user` row, is never computed there. An authenticated request still pays the same reads and round trips as before.
+- eb68b98: i18n(platform-objects): the platform objects, Setup, Studio and Account ship in Arabic
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/platform-objects` now carries `ar` beside `en`, `zh-CN`, `ja-JP`, `es-ES` and `zh-Hant`: every `sys_*` object (labels, fields, help, options, views, actions and their dialogs), the metadata-type configuration forms Studio opens, the Setup, Studio and Account navigation, the System Overview dashboard and its datasets, the platform pages' titles, and the inline copy on the user and organization record pages. An administrator or developer reading the platform in Arabic no longer sees it in English. The new bundles pass through the same source-hash fallback as the existing ones, and every hand-authored leaf records the digest of the source it was translated from. The extract config documents `ar` in its `--locales`, so `check:i18n` now gates the new bundles. Package 11 of #30512, second of seven locales; `fr`, `pt-BR`, `ru`, `de` and `ko` follow.
+- 1ebe0c5: i18n(platform-objects): the platform objects, Setup, Studio and Account ship in German
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/platform-objects` now carries `de` beside `en`, `zh-CN`, `ja-JP`, `es-ES`, `zh-Hant`, `ar`, `fr`, `pt-BR` and `ru`: every `sys_*` object (labels, fields, help, options, views, actions and their dialogs), the metadata-type configuration forms Studio opens, the Setup, Studio and Account navigation, the System Overview dashboard and its datasets, the platform pages' titles, and the inline copy on the user and organization record pages. A user whose locale is `de` no longer reads English `sys_*` labels in the console. The new bundles pass through the same source-hash fallback as the existing ones, and every hand-authored leaf records the digest of the source it was translated from. The extract config documents `de` in its `--locales`, so `check:i18n` now gates the new bundles. Package 11 of #30512, sixth of seven locales; `ko` follows.
+- 2f05a46: i18n(platform-objects): the platform objects, Setup, Studio and Account ship in French
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/platform-objects` now carries `fr` beside `en`, `zh-CN`, `ja-JP`, `es-ES`, `zh-Hant` and `ar`: every `sys_*` object (labels, fields, help, options, views, actions and their dialogs), the metadata-type configuration forms Studio opens, the Setup, Studio and Account navigation, the System Overview dashboard and its datasets, the platform pages' titles, and the inline copy on the user and organization record pages. A user whose locale is `fr` no longer reads English `sys_user` field labels inside French sentences, as the Home feed showed them (`A modifié Utilisateur « … » : Banned et Ban Reason`). The new bundles pass through the same source-hash fallback as the existing ones, and every hand-authored leaf records the digest of the source it was translated from. The extract config documents `fr` in its `--locales`, so `check:i18n` now gates the new bundles. Package 11 of #30512, third of seven locales; `pt-BR`, `ru`, `de` and `ko` follow.
+- b126c13: i18n(platform-objects): the platform objects, Setup, Studio and Account ship in Korean
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/platform-objects` now carries `ko` beside `en`, `zh-CN`, `ja-JP`, `es-ES`, `zh-Hant`, `ar`, `fr`, `pt-BR`, `ru` and `de`: every `sys_*` object (labels, fields, help, options, views, actions and their dialogs), the metadata-type configuration forms Studio opens, the Setup, Studio and Account navigation, the System Overview dashboard and its datasets, the platform pages' titles, and the inline copy on the user and organization record pages. A user whose locale is `ko` no longer reads English `sys_*` labels in the console. The new bundles pass through the same source-hash fallback as the existing ones, and every hand-authored leaf records the digest of the source it was translated from. The extract config documents `ko` in its `--locales`, so `check:i18n` now gates the new bundles. Package 11 of #30512, the last of its seven locales.
+- a11ef71: i18n(platform-objects): the platform objects, Setup, Studio and Account ship in Traditional Chinese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/platform-objects` now carries `zh-Hant` beside `en`, `zh-CN`, `ja-JP` and `es-ES`: every `sys_*` object (labels, fields, help, options, views, actions and their dialogs), the metadata-type configuration forms Studio opens, the Setup, Studio and Account navigation, the System Overview dashboard and its datasets, the platform pages' titles, and the inline copy on the user and organization record pages. An administrator or developer reading the platform in Traditional Chinese no longer sees it in English. The new bundles pass through the same source-hash fallback as the existing ones, and every hand-authored leaf records the digest of the source it was translated from. The extract config documents `zh-Hant` in its `--locales`, so `check:i18n` now gates the new bundles. Package 11 of #30512, first of seven locales; `ar`, `fr`, `pt-BR`, `ru`, `de` and `ko` follow.
+- deac7f4: i18n(platform-objects): the platform objects, Setup, Studio and Account ship in Brazilian Portuguese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/platform-objects` now carries `pt-BR` beside `en`, `zh-CN`, `ja-JP`, `es-ES`, `zh-Hant`, `ar` and `fr`: every `sys_*` object (labels, fields, help, options, views, actions and their dialogs), the metadata-type configuration forms Studio opens, the Setup, Studio and Account navigation, the System Overview dashboard and its datasets, the platform pages' titles, and the inline copy on the user and organization record pages. A user whose locale is `pt-BR` no longer reads English `sys_user` field labels inside Portuguese sentences. The new bundles pass through the same source-hash fallback as the existing ones, and every hand-authored leaf records the digest of the source it was translated from. The extract config documents `pt-BR` in its `--locales`, so `check:i18n` now gates the new bundles. Package 11 of #30512, fourth of seven locales; `ru`, `de` and `ko` follow.
+- 2ae3e30: i18n(platform-objects): the platform objects, Setup, Studio and Account ship in Russian
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/platform-objects` now carries `ru` beside `en`, `zh-CN`, `ja-JP`, `es-ES`, `zh-Hant`, `ar`, `fr` and `pt-BR`: every `sys_*` object (labels, fields, help, options, views, actions and their dialogs), the metadata-type configuration forms Studio opens, the Setup, Studio and Account navigation, the System Overview dashboard and its datasets, the platform pages' titles, and the inline copy on the user and organization record pages. A user whose locale is `ru` no longer reads English `sys_*` labels in the console. The new bundles pass through the same source-hash fallback as the existing ones, and every hand-authored leaf records the digest of the source it was translated from. The extract config documents `ru` in its `--locales`, so `check:i18n` now gates the new bundles.
+  
+  The French Connect-an-AI-assistant page subtitle (`pages.connect_agent.subtitle`) is retranslated from the current English text, which names Claude and Doubao, and its recorded digest is refreshed; before this, the source-hash fallback served the English sentence to `fr` users because the French leaf had been translated from an older wording. Package 11 of #30512, fifth of seven locales; `de` and `ko` follow.
+- 7569fb5: fix(platform-objects)!: the platform-admin actions declare their gate, so MCP `list_actions` no longer lists them to a caller who cannot run them, and both action doors refuse that caller themselves
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing an author wrote is retired or renamed: the change adds `requiredPermissions` to fifteen first-party action declarations, so stored metadata needs no rewrite, and the one thing an upgrader may act on (a legacy role-only admin needing the admin_full_access set or OS_PLATFORM_OWNER_EMAIL) is a grant, not a metadata edit -->
+  
+  **BREAKING.** The 15 first-party actions whose door runs the platform-admin gate (on `sys_user`: `ban_user`, `unban_user`, `unlock_user`, `create_user`, `set_user_password`, `impersonate_user`, `set_user_manager`, `list_platform_admins`; on `sys_member`: `add_member`; on `sys_oauth_application`: `disable_oauth_application`, `enable_oauth_application`; on `sys_sso_provider`: `register_sso_provider`, `register_saml_provider`, `request_domain_verification`, `verify_domain`) now declare `requiredPermissions`: `['manage_users']` for the account and membership doors, `['manage_platform_settings']` for the OAuth application and SSO doors. It is the existing ADR-0066 D4 key, read by one runtime check for MCP `list_actions`, MCP `run_action` and `POST /api/v1/actions/:object/:action`. A platform administrator holds both capabilities on either way of becoming one (the `admin_full_access` grant or `OS_PLATFORM_OWNER_EMAIL`), so nothing changes for them.
+  
+  What changes, before and now:
+  
+  - **MCP `list_actions`.** Before: every caller was listed all of these actions (a plain member saw `ban_user` and `set_user_manager`). Now: a caller without the capability is not listed them.
+  - **The refusal at `POST /actions/:object/:action` and MCP `run_action`.** Before: the door forwarded the call and the target answered 403 `PERMISSION_DENIED` "Admin role required". Now: nothing reaches the target. `POST /actions/...` answers 403 itself, with the capability sentence (`Action 'ban_user' on 'sys_user' requires capability [manage_users] — caller is missing [manage_users]`), and MCP `run_action` answers the same sentence as `PERMISSION_DENIED` with status 403, whether it is called by `actionName` alone or with `objectName`.
+  - **A caller whose only admin standing is the legacy better-auth `role === 'admin'` scalar** (no `admin_full_access` grant, not in `OS_PLATFORM_OWNER_EMAIL`). Before: the action doors forwarded the call and the target admitted it. Now: the action doors refuse it 403, because that caller holds no `manage_users` / `manage_platform_settings`. The target endpoints themselves (`/api/v1/auth/admin/*`) are unchanged and still admit it; give the account the `admin_full_access` permission set, or list its email in `OS_PLATFORM_OWNER_EMAIL`, to keep it on the action doors.
+  
+  **MCP `run_action` refusal codes (`@objectstack/runtime`, `@objectstack/mcp`).** The capability gate's refusal at MCP `run_action` used to be a plain message; it now carries `code: 'PERMISSION_DENIED'` and `status: 403`, the REST door's answer, for every action with `requiredPermissions`. With `objectName` on a `sys_*` object, the MCP tools admit an action only where `list_actions` lists it, and answered every action missing from the listing with the system-object sentence (`… is not exposed via MCP …`). An action that IS exposed but whose gate refuses the caller now gets the gate's refusal there too, through a new optional `McpActionBridge.capabilityRefusal(name, objectName)` the runtime bridge implements; an action not exposed to AI keeps the system-object sentence, and a bridge without the member behaves as before.
+  
+  What does not change: the target endpoints judge the platform-admin standing as before, the console shows and hides these buttons from their `visible` standing as before, and an action on another object is unaffected.
+- 78eb352: feat: put Connect an AI Assistant where each person looks, and call it that
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Connect an Agent page is now Connect an AI Assistant (连接 AI 助手, AI アシスタントを接続, Conectar un asistente de IA): the page title, its header and both of its navigation entries, in every shipped language. "Agent" already names the agents an author builds in Studio, and this page connects the AI assistant a person uses, such as Claude, Doubao or Cursor.
+  
+  Where to find it:
+  
+  - **Every signed-in person**: the avatar menu has a Connect an AI Assistant item, under Profile. In the Account app the entry has a group of its own, AI Assistant, open by default, instead of sitting inside the collapsed Developer group.
+  - **Platform administrators**: in Setup the entry is in the top group, Overview, under System Overview, instead of near the bottom of Integrations. Who sees it does not change: both groups need `manage_platform_settings`.
+  
+  All three doors appear only where the MCP server is enabled; with `OS_MCP_SERVER_ENABLED=false` the page, both menu entries and the avatar item are absent. The page address (`page/connect_agent`) and the nav item id (`nav_connect_agent`) are unchanged, so bookmarks and links keep working. The stdio start-up refusal and the API-key session refusal name the new page and paths.
+- 2ce2646: feat(console): Connect an AI Assistant names the connected assistant and its last call; plain-words page subtitle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: once the signed-in person has connected, the line under the example requests on Connect an AI Assistant names what is connected and when it last made a call, the most recent call first: an authorized assistant by its name, with its last call "in the hour from" the recorded hour, or an API key by its name, with its last call as a moment; "no call yet" when none is recorded, and a pointer to the list at the bottom when more than one is connected. With nothing connected (or when it cannot be read) the line stays the try-first hint. It reads the records the "What can act as you" list reads (`oauth.authorizedClients.list()` and the person's own `sys_api_key` rows; a revoked or expired key is not a connection) through one hook, `useConnectedAccess`, and follows a Revoke made on the page.
+  - **`@object-ui/i18n`**: `connectAgent.capabilities.connected`, `connectedKey`, `lastCallHour`, `lastCallAt`, `noCallYet` and `moreConnected` added in all eleven packs.
+  - **`@objectstack/mcp`**: the Connect an AI Assistant page header no longer speaks of MCP-capable clients or row-level security: "Work in this system from Claude, Doubao and other AI assistants. Each one acts as you: it sees and changes only what your own permissions allow."
+  - **`@objectstack/platform-objects`**: `pages.connect_agent.subtitle` follows in en, es-ES, ja-JP, zh-CN and zh-Hant, with the source digests re-recorded.
+- 6bd00d2: feat(platform-objects): `sys_oauth_consent` gains `last_used_at`, the start of the most recent hour in which the client made a verified MCP call under the consent
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A nullable, read-only datetime on the better-auth-managed consent table, owned by ObjectStack. The OAuth provider neither reads nor writes it. Its one writer is plugin-auth, server-side, after it verifies an MCP access token minted under the consent. The object stays off the data API (`apiEnabled: false`), so no client reaches the column. A withdrawn or revoked consent takes the stamp with it. Schema sync adds the column, and existing rows read `null`.
+- b5696b4: feat(plugin-auth, service-settings)!: the access policy is set per organization, and the multi-factor requirement has three levels
+  
+  Clause-②: yes (narrowing) — a new `access_policy` settings namespace (scope `tenant`) carries each organization's allowed IP ranges, idle, absolute and concurrent session limits and multi-factor requirement; `auth.mfa_required` changes from a toggle to the levels `off` / `administrators` / `everyone`, `sys_organization.require_mfa` is no longer writable, and `AuthManagerOptions.mfaRequired` becomes `mfaRequirement`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-auth/src/auth-manager.ts#AuthManagerOptions) the narrowed operands are a runtime option of the auth manager (`AuthManagerOptions.mfaRequired`, which the compiler names at every caller), a settings value (`auth.mfa_required`, rewritten from a stored toggle to a level by plugin-auth at boot) and a platform object column's editability (`sys_organization.require_mfa`, whose stored value plugin-auth moves into the organization's access policy at boot); no packages/spec schema, registered node type or ADR-0087 conversion surface names any of them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING.** The access policy is set per organization (rulings of record on objectstack-ai/cloud#3668: 「支持按组织（推荐）」, 「可以，按三档做（推荐）」). Each organization sets its own allowed IP ranges, session idle timeout, absolute session lifetime, concurrent-session cap and multi-factor requirement in **Settings → Access policy** (the `access_policy` namespace, one row per organization, written by its administrators). The deployment's values in **Settings → Authentication** are the default and the floor: an organization may tighten and never loosen.
+  
+  The rule per key — a value weaker than the deployment's is refused at the save, and enforcement holds the floor whatever is stored:
+  
+  - `allowed_ip_ranges`: each range must lie inside a deployment range (any range when the deployment sets none), and the list must admit the address it is saved from. A request must pass both lists. A session is scoped to an organization only from an address its list admits: the sign-in is refused with `403 IP_NOT_ALLOWED` when the organization the session would be scoped to does not admit the address, and so is a switch of the active organization. A session the organization's list no longer admits (it roamed, or the list was tightened) is signed out on its next session read through the auth routes. Sign-in itself, before any organization is chosen, is judged by the deployment's list alone. A platform administrator is held by the deployment's list only, so an organization that locks out its own administrators can be reopened, and the save check does not refuse a platform administrator's save from outside an organization's list.
+  - `session_idle_timeout_minutes`, `session_absolute_max_hours`: `0` keeps the deployment's limit; a positive value may not exceed the deployment's. The shorter of the two applies to every session scoped to the organization. A switch of the active organization is judged against the target organization's limits before it lands, from the session's last request in any organization; a session past either is signed out and the switch refused.
+  - `max_concurrent_sessions_per_user`: `0` keeps the deployment's cap; a positive value may not exceed the deployment's. The deployment's cap still counts every session of the user, in any organization; an organization's cap counts only the user's sessions in that organization and signs out only those, oldest first. Both are checked at sign-in and when a session switches into the organization.
+  - `mfa_required`: `off` keeps the deployment's level; a level may not be weaker than the deployment's. The stronger of the two applies. `administrators` holds platform administrators, the organization's own administrators (owner or admin membership) and delegated administrators (a permission set with an `adminScope`), and lets everyone else through.
+  
+  What to do on upgrade:
+  
+  - `auth.mfa_required` saved as on now reads `everyone`, and as off `off`. A stored toggle is rewritten at the first boot; the `OS_AUTH_MFA_REQUIRED` env override still reads `true`/`false` with a warning for one major release — set it to `off`, `administrators` or `everyone`. A **write** of `true` or `false` to `auth.mfa_required` is now refused by the setting's option table (`invalid_option`): write `everyone` or `off`. Consumer: objectstack-ai/cloud's `apps/cloud/test/settings-cross-org-doors.test.ts` (`:533` writes `true`, `:552` expects it back) must be rewritten to `everyone` when the framework pin moves past this release.
+  - An organization whose `sys_organization.require_mfa` was on now carries `access_policy.mfa_required` set to `everyone`. Moved at the first boot (unless the organization already chose a level), and the column is cleared once the row lands; a move that fails is logged at `error` and retried at the next boot. The column is now readonly: a data-API write to it is refused like any other non-editable column.
+  - A host that passed the auth manager or plugin option `mfaRequired: true` passes `mfaRequirement: 'everyone'` (or `'administrators'`) instead. A host still passing `mfaRequired` is refused at construction (and on `applyConfigPatch`) with an error naming the replacement, never run without the requirement.
+  
+  What does not change: with no organization policy saved, every deployment enforces exactly what it enforced before, and the deployment's own keys keep their names.
+- ed4b832: feat(plugin-auth): a SCIM group push grants the ordinary permission set its group mapping names
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An identity provider that pushes a group over SCIM now changes what its members may do. A platform administrator saves a mapping from one SCIM connection's group to one permission set with `POST /api/v1/auth/admin/scim/set-group-mapping` (`connectionId`, `groupExternalId` or `groupDisplayName`, `permissionSet`), and deletes one with `POST /api/v1/auth/admin/scim/delete-group-mapping` (`mappingId`). Both run the platform-admin gate the SCIM credential door runs. A connection whose credential names no organization, or whose credentials name two, is refused `400 VALIDATION_FAILED` on `connectionId`, so every mapping, and every grant it makes, belongs to exactly one organization. Only live credentials (active and unexpired, as the bearer verifier reads them) decide that organization: a credential revoked in one organization does not block a mapping once a new one is minted in another. Saving the same group and set again is idempotent; if that mapping was saved while another organization owned the connection, the save is refused `409 RESOURCE_CONFLICT` naming the old mapping, which must be deleted first. The rows live in the new platform object `sys_idp_group_mapping`, which the data API only lists.
+  
+  When a group's membership changes, `@better-auth/scim`'s projection grants each member the mapped set in the organization that owns the connection, inside the SCIM transaction, written by the connection (`svc:scim:CONNECTION_ID` in the audit trail). Removing a member removes that grant. A group nobody mapped grants nothing. The projection asks the boundary again before every grant it writes, so a set that becomes an administrator set after its mapping was saved grants nothing. A grant the projection did not make, such as one an administrator made by hand, is never removed. Saving or deleting a mapping applies it to the group's current members at once.
+  
+  A mapping can never make anyone an administrator. The save refuses, with `400 VALIDATION_FAILED` on `permissionSet`, every set outside the organization boundary: `admin_full_access`, the organization-administrator sets, the agent ceiling sets, a set with a superuser wildcard or an `adminScope`, and a set with a capability not scoped to the organization. The judgement is plugin-security's own delegated-administration predicate, now served as the optional `ISecurityService.organizationBoundaryFailure(setName)` member. Without a security service the save is refused `503` and nothing is granted.
+  
+  The break-glass guard's refusal no longer tells operators that "the SCIM group mapping is too broad": a group mapping never moves administrator standing, so the sentence now says to grant another account standing first.
+  
+  The v18 organization-ownership ceremony (`os migrate organization-ownership`) inventories `sys_idp_group_mapping` with the attribution fate, like the other organization-owned rows written with their organization: a database that holds the new table plans and applies as before.
+- 8c9260f: feat(plugin-auth): an SSO sign-in grants the ordinary permission set its IdP group is mapped to
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An enterprise SSO provider (OIDC or SAML, through `@better-auth/sso`) can now drive what its users may do from the groups the identity provider sends at sign-in, through the same `sys_idp_group_mapping` mappings a SCIM connection uses. There is no second mapping model.
+  
+  - **Where the groups come from.** Set the provider's own claim mapping to fill `groups`: `mapping.extraFields: { groups: 'groups' }` for an OIDC claim named `groups`, or the attribute name an IdP uses for SAML (for example Entra ID's groups claim URI). The value may be one string or a list of strings. A provider whose mapping fills no `groups` behaves as before.
+  - **Saving a mapping.** `POST /api/v1/auth/admin/scim/set-group-mapping` now also takes `providerId` in place of `connectionId` (exactly one of the two; both is `400 VALIDATION_FAILED` on `providerId`). The grant's organization is the provider's own `organization_id`; a provider that names none, or an unknown provider, is refused `400 VALIDATION_FAILED` on `providerId`. With SSO off the save is refused `503`. The same platform-admin gate and the same organization-boundary judgement apply: administrator sets and every set outside the organization boundary are refused, and without a security service the save is refused `503`. The row is stored with `source_kind: 'sso'` (a new option on `sys_idp_group_mapping.source_kind`) and `source_id` = the provider id.
+  - **At each sign-in.** Every sign-in through the provider matches each group value against the provider's mappings (by `groupExternalId` when the mapping names one, which suits Entra ID's group object ids, else by exact `groupDisplayName`) and makes the user's grants follow them: a mapped group grants its set in the provider's organization, and a group the user has left loses the set at their next sign-in. A sign-in with no groups removes the grants that provider made earlier. The boundary is asked again before every grant, so a set that becomes an administrator set after its mapping was saved grants nothing, and with no security service nothing is granted. Only grants the provider made (their `reason` names the provider) are ever removed: a grant made by hand, or by SCIM, is never touched. Every write goes through the engine, so the break-glass last-administrator guard still refuses what it refuses elsewhere. If applying the mappings fails, the sign-in still succeeds and the failure is logged at `error`.
+  - **Deleting a mapping.** `POST /api/v1/auth/admin/scim/delete-group-mapping` removes an SSO mapping and, at once, the grants its provider made of that set in that organization, unless another of the provider's mappings still names that set (then each user's next sign-in decides).
+- f5e23e2: feat(plugin-auth)!: an organization administrator reads the client address their access-policy list is judged by, and the console's notices over the retired `require_mfa` column are gone
+  
+  Clause-②: yes (narrowing) — the published `@object-ui/i18n` packs (all eleven) drop the `console.organizationMfa.needsTwoFactor` and `.nowRequired` keys, which had no reader outside the removed notices. Both keys were added by the still-pending `.changeset/30295-org-mfa-notice-and-enroll-refusal.md` and never released, so no published version of the packs carries them. The widening half: a new served read, `GET /api/v1/auth/client-address`.
+  Metadata-protocol: none
+  Skills-docs: none — `skills/**` teaches no access-policy key, client-address read or console notice, and `content/docs/**` teaches no per-organization access policy; its `allowed_ip_ranges` section in `permissions/authentication.mdx` is the deployment's own list, whose platform-admin read it names correctly.
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/i18n/src/locales/en.ts#TranslationKeys) the key type of the console's own translation catalogue: no Zod schema, no spec declaration and no stored metadata reads it, so the compiler is the channel that reaches every caller -->
+  
+  **An organization administrator sees their judged address before saving their organization's Allowed IP ranges.** A save of `access_policy.allowed_ip_ranges` that leaves out the saving request's own address is refused, and until now an organization administrator learned that address only from the refusal: `GET /api/v1/auth/admin/client-address` answers platform administrators alone. `GET /api/v1/auth/client-address` answers the same `{ clientAddress, trustProxy }`, the address the save check judges (`server.trustProxy` deciding whether forwarded headers count; `null` when the server cannot establish one), to the caller who may save that list: `setup.write` in their current organization, resolved the way the settings door resolves a saving caller. It is the caller's own address only; the query set is closed and empty (`400 VALIDATION_ERROR`), the answer is `Cache-Control: no-store`. Anonymous: `401 UNAUTHENTICATED`. A held session: `403` with its posture's code. A member without `setup.write`: `403 PERMISSION_DENIED`. An unreachable permission store: `503 SERVICE_UNAVAILABLE`. The console's Access policy page does not read it yet.
+  
+  **The organization's IP list is judged on an objectstack mount's own session read too.** The routes the auth plugin mounts itself under `/api/v1/auth` (the platform-admin routes, the authorized-AI-assistant routes, session revoke, add member and the others that read the caller's session in process) now carry the address the deployment's IP gate established for the request to that read, so a session whose organization's Allowed IP ranges no longer admit it is ended there (`revoke_reason: ip_not_allowed`), as it already was on a session read through better-auth's own routes. Data requests outside the auth mount are judged by neither list, as before.
+  
+  `sys_session.revoke_reason`'s published vocabulary (the field description) now names `ip_not_allowed`.
+  
+  **BREAKING** (`@object-ui/i18n`, TypeScript only): the exported `TranslationKeys` (`typeof en`) loses the two `console.organizationMfa.*` keys, in all eleven packs (ar, de, en, es, fr, ja, ko, pt-BR, ru, zh-Hans, zh-Hant). A `t()` call that names one still compiles, since its key is a `string`, and reads the key back. Both keys come from the still-pending `.changeset/30295-org-mfa-notice-and-enroll-refusal.md` and were never released: a consumer of a published `@object-ui/i18n` never had them.
+  
+  | Removed key | Replacement |
+  |:---|:---|
+  | `console.organizationMfa.needsTwoFactor` | none: `sys_organization.require_mfa` is read-only and off the organization form; the multi-factor requirement is the access policy's `mfa_required` level, whose save refusal names two-factor itself |
+  | `console.organizationMfa.nowRequired` | none: the same column can no longer be turned on, so no save turns the requirement on from the organization form |
+- cadd6aa: feat(platform-objects): Setup's user page gains an "AI Assistants" tab, for platform administrators
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/platform-objects`**: the `sys_user` record page (`sys_user_detail`) has a new "AI Assistants" tab, beside API Keys, labelled in en, zh-CN, ja-JP, es-ES and zh-Hant. Its body is the console widget `mcp:authorized-assistants`: the AI assistants (OAuth clients such as Claude Desktop) this person authorized, each with a confirm-first Revoke. An administrator can now see and end what acts as a person who cannot sign in to withdraw it themselves (a lost laptop, a departure). The tab is shown only to a platform administrator (`current_user.isPlatformAdmin == true` on the tab item): the widget's list and Revoke go through the platform-admin-gated `/api/v1/auth/admin/authorized-clients` doors, so any other viewer could only see a refusal. The server's gate is unchanged.
+- d36d4ad: feat(plugin-auth): a "SCIM Credentials" entry in Setup > Access Control while SCIM is wired
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/plugin-auth`** contributes a Setup navigation entry `nav_scim_credentials` ("SCIM Credentials") that opens `sys_scim_connection_credential`, the object the console's Mint Credential and Revoke Credential actions live on. It sits in the Access Control group after SSO Providers and carries the same gate (`manage_platform_settings`). It is contributed only while SCIM is wired, decided by `isScimWired()`, the same answer the `/admin/scim/mint-credential` door reads before it refuses 503, so the entry never opens a list whose Mint button can only fail. The mint and revoke doors keep their own platform-admin gate; the entry widens nothing. The SSO Providers entry is unchanged, and a deployment with neither SSO nor SCIM wired gets no plugin-auth Setup entry, as before.
+  - **`@objectstack/platform-objects`** adds the label `apps.setup.navigation.nav_scim_credentials` to the Setup app's translation bundle in en, zh-CN, ja-JP, es-ES, zh-Hant and ar (a new published key, hence the widening arm).
+- 1f37085: feat(console): the user page's Permission Sets tab shows the person's effective permission sets and where each comes from
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: new SDUI widget `security:effective-access` for a `sys_user` record page. It reads the person from the bound record (no props) and lists every permission set in force for them in the caller's organization through `security.describeEffectiveAccess(userId)` of `@objectstack/client`. Each set appears once, by its catalog label with its name beside it, with every origin the server reports: a direct grant, a position by name, the default binding, or a derived standing (the configured platform administrator, AI access). A `403` (a person the viewer may not manage) and a `501` (a server that does not report effective access) each show one quiet line and no list; any other failure is named. The widget reads again when a grant or a position is written on the page. Off a `sys_user` record it renders nothing.
+  - **`@objectstack/platform-objects`**: the `sys_user` record page's Permission Sets tab opens with the `security:effective-access` widget, above the list of stored grants. A person who holds access only through the default binding or a position no longer reads as having no permission sets; direct grants keep their remove action in the list below.
+  - **`@object-ui/i18n`**: `effectiveAccess.*` (the widget's title, body, refused, unserved, failed and empty lines, and one label per origin kind) added in all eleven packs.
+  - **`@object-ui/types`**: `SecurityEffectiveAccessSchema` (zod arm) and its TypeScript twin, so a page placing `{ type: 'security:effective-access' }` validates. The widget reads only `className`: `properties` may only be `{}`, and `body` / `children` are refused by name.
+  - **`@object-ui/cli`**: `objectui check` knows the `security:effective-access` type (the generated known-types list).
+- 59630d9: fix(plugin-auth): disabling an OAuth client refuses its already-issued tokens on their next call, and a platform administrator's revoke of someone else's API key holds against its owner
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **OAuth clients.** Disabling a client (the Disable action of `sys_oauth_application`, `POST /api/v1/auth/admin/oauth2/toggle-disabled`) refused it a new token, but the MCP door kept serving the access tokens it already held until they expired, up to an hour. The door now reads the client on every call, beside the consent it already reads, and refuses with the same `401` a withdrawn grant gets when the client is disabled, when its row is gone, or when the read fails. Disabling is a pause: the consent and the refresh token stay, so enabling the client again serves them again. To end the grant, withdraw it (`POST /api/v1/auth/authorized-clients/withdraw`, or the admin door) or call `/oauth2/revoke`. Each MCP call now makes two indexed reads (the client by `client_id`, then the consent) instead of one.
+  
+  **API keys.** A revoked key is restorable, and until now its owner could restore a key an administrator had revoked the moment it was revoked. When a platform administrator revokes a key that is not theirs, `sys_api_key.revoked_reason` now records `administrator_suspended`, and only a platform administrator can restore that key. The owner's restore is refused `403 PERMISSION_DENIED`, naming the reason, and the key door's `403 API_KEY_REVOKED` says who can restore it. Restoring clears the reason, as before, and the same key works again with no re-issue. A host that stops a key itself writes the same value in the system context, beside `revoked: true`. The owner's own revoke still records no reason. An administrator's revoke never replaces a reason the key already carries, so a key revoked because its owner's membership ended stays restorable by no one. One multi-row revoke that matches both a key this rule stamps and a key that already carries a reason is refused whole with `400 VALIDATION_ERROR`; revoke those keys separately. The new select option and its description are translated in every shipped locale.
+  
+  This does not stop a person from minting a new key of their own. A key acts as its owner, so stopping an agent for good takes a credential its owner cannot re-issue.
+- 7e697ff: The dataset metadata form now offers each dimension's and measure's `synonyms` and `description` (ADR-0149 D1) as row properties, with help text and translations in every shipped locale. `synonyms` are the words people use for a member in a question, matched by the dataset AI tools and never shown; `description` is a plain-language business definition, never a prompt. Both keys were already authorable and are read since the dataset AI tools landed; only the Studio form control is new.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 96b9350: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Setup → SSO Providers forms now set the groups claim an SSO sign-in grants permission sets from. It is stored where `POST /api/v1/auth/sso/register` stores it, the provider's `mapping.extraFields.groups`, and nowhere else.
+  
+  - **Register SSO Provider** takes **Map: Groups claim** and **Register SAML Provider** takes **Map: Groups attribute**. Left blank, the provider maps no groups, as before.
+  - **Show Groups Claim** (`POST /api/v1/auth/admin/sso/get-groups-claim`) shows a provider's claim, including one the register door wrote.
+  - **Edit Groups Claim** (`POST /api/v1/auth/admin/sso/set-groups-claim`) sets it, or removes it when blank. It writes through `/sso/update-provider` and keeps every other mapping member as stored.
+  
+  Both new routes run the platform-admin gate of the other `/admin/sso` bridges and answer only `{ providerId, groupsClaim }`.
+  
+  Fixed: `POST /api/v1/auth/sso/update-provider` with an `oidcConfig` was refused 400 "clientSecret is required" for any OIDC provider whose client secret is held in `sys_secret`. The vendor reads the provider through an adapter update, and that read now carries the client secret like every other provider read.
+- 5b7269f: feat(core): the activation ledger is keyed by `(metadata_type, package_id, name)`, and rows that name no package take their one holder
+  
+  Clause-②: yes (widening) — `@objectstack/core` exports `backfillActivationLedgerPackages` and the `ActivationLedgerHolder`, `ActivationLedgerUnboundRow`, `ActivationLedgerBackfillReport` and `ActivationLedgerBackfillOptions` types from its root, and `@objectstack/metadata-protocol` exports `ensureActivationLedgerPackagelessIndex`, `buildActivationLedgerPackagelessIndexSql`, `buildActivationLedgerPackagelessDuplicateProbeSql`, `ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME` and the `EnsureActivationLedgerPackagelessIndexResult` / `EnsureActivationLedgerPackagelessIndexStatus` types; nothing is removed or renamed, and every door and name-keyed reader answers as before.
+  Metadata-protocol: none
+  
+  `sys_metadata_activation` (the switch an administrator throws to turn a packaged flow, action, permission set, sharing rule, webhook, queue or assignment rule off) is now unique on `(metadata_type, package_id, name)` instead of `(metadata_type, name)` (ADR-0150 D4, D8 row R4). Two packages may each hold a row for an item of the same name; one package may not hold two.
+  
+  At every boot, once the package holders are sealed, a ledger row that names no package is given the package that holds its item, as the package-scoped resolver answers it. Who sees it: an operator whose deployment carries such rows reads one `info` line naming each row bound. A row whose name two packages hold is left as it is and reported in one `warn` line naming every holder; nothing is picked. A row for an item the environment authored, or for a position, keeps naming no package. The backfill writes only `package_id`, never the switch itself, so the next boot finds nothing to change.
+  
+  Nothing reads the package yet: every flow, action and catalog switch still applies by type and name exactly as before, and the activation doors answer as before.
+  
+  Rows for an item the environment authored name no package, and SQL `UNIQUE` (like the memory and MongoDB drivers) exempts a row whose key part is NULL, so the new key does not constrain them. They keep one row per `(metadata_type, name)` through an index of their own, `uniq_sys_metadata_activation_packageless`: built at boot by `metadata-protocol` (SQLite and PostgreSQL: a partial index `WHERE package_id IS NULL`; MySQL 8.0.13+: a functional key part) and by `driver-mongodb` at collection sync (a `{ package_id: null }` partial filter). Who sees it: a second activation row naming no package for one item is refused `409 DUPLICATE_RECORD`, as it was before. A database that already holds such duplicates keeps them and gets one `error` line with the query that lists them, also reported by `os migrate duplicates`; nothing is deleted. MariaDB can build neither form and says so at `error`. The memory driver enforces declared indexes only.
+  
+  On an existing SQL database the boot's schema sync creates the new key's index beside the old one, and once the package-less index stands, `os migrate plan` reports the old `(metadata_type, name)` index as superseded: one `replace_unique_index`, category safe, applied by `os migrate apply` with no `--allow-destructive`. The SQL driver reads a generated plain UNIQUE whose columns are an in-order proper subsequence of a declared global UNIQUE on the same table this way, because widening a unique key only admits rows the old key refused; when a column the key gained is nullable, it does so only beside a partial UNIQUE on the old columns, and until then keeps the old index without offering to drop it (MariaDB stays there). A UNIQUE on other columns still reads as an orphan, as before. Until the replace is applied the old index keeps refusing a second package's row of the same name, which nothing writes yet.
+- 2735ca4: feat(service-automation, plugin-approvals, plugin-email, trigger-schedule): automation stored references gain a package column, and a scheduled flow's dispatch key names its flow's package (ADR-0150 D8 R7–R11, R20)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Five stored references that name a flow, a connector instance or an email template by its bare name now carry, beside the name, the package that holds it: `sys_approval_request.process_package` on open requests (R7: `pending` and `returned`), `sys_automation_run.flow_package` on paused runs (R8), `sys_flow_credential.flow_package` (R9), `sys_connector_connection.connector_package` (R11) and `sys_email_template.package_id` on legacy template rows (R20). Each is nullable, read-only to users, and filled in by the platform.
+  
+  At every boot, once the registry has sealed its holders, each table's rows that name no package are walked and asked the one ADR-0150 D3 rule with no caller package: the item's one holder in this environment. An environment override of a package's flow is that package's flow overlaid, so its runs and requests bind to that package. A name only the email service's built-in templates hold binds to `com.objectstack.service.email`. A name two or more packages hold is left null and logged as a warning naming every candidate; it is never bound to the first. A name only the environment or the platform holds, or that nothing holds, is left null and reported. A row that already names a package is never read again, so a second boot writes nothing.
+  
+  The once-per-window dispatch key in `sys_flow_dispatch` (R10) now names the flow's package: `schedule:PACKAGE:FLOW:WINDOW` and `time-relative:PACKAGE:FLOW:SCOPE:RECORD`. A flow the environment holds, or nothing holds, keeps the old shape. At boot, keys claimed inside the ledger's 30-day retention gain a copy under the new key with the same claim time and outcome, and the old rows stay until the retention reaper removes them. The ledger holds every claim, settle and read until that copy has run, for at most two minutes, so a trigger's first claim after the upgrade sees the window as claimed. A claim also inserts the window's old key first, and the scoped key second: whoever inserts the old key wins the window, so during a rolling upgrade a node of an older release, which claims only the old key, and a node of this release share one arbiter in either order, and the old key settles beside the new one. A replay check and a missed-run check also read a claim under the old key as the window's claim. So no window fires twice across the change. The one case that claims no old key is a flow two packages hold: its old key would be one row for both, so each package claims only its own key. That case is unreachable while a second package's same-named flow is refused at registration.
+  
+  Nothing else reads the new columns yet, writers do not stamp them, and no other unique key changes. If a boot pass fails, it logs a warning, leaves its rows as they are and is tried again at the next boot.
+- fb94249: feat(plugin-auth): register an AI service account and mint its API key (ADR-0151 D1, D4)
+  
+  Clause-②: yes (widening) — two new auth doors (`POST /api/v1/auth/service-account/register`, `POST /api/v1/auth/service-account/create-key`), two new `sys_user` actions, and `readRequestedApiKeyExpiry`, `signApiKeyExpiry`, `ApiKeyExpiryRefusal` and `ApiKeyExpiryCeilingRefusal` newly exported by `@objectstack/core`. Nothing existing is removed, retyped or refused: the break-glass guard and the upgrade-report audience now leave AI service accounts out, and an account row is only written by the new door (or by a seed).
+  Metadata-protocol: none
+  
+  An organization administrator, or a platform administrator, can now register an **AI service account**: Setup → Users → *Register AI Service Account*, or `POST /api/v1/auth/service-account/register` with a `name` and an optional `ownerId`. One act writes a `sys_user` of kind `agent`, accountable to the named owner (the caller by default; the owner must be an active member of the organization), with a placeholder email that is never delivered and never collides with a real address, and a plain `member` membership of the caller's active organization. If either write is refused, neither stays.
+  
+  The account's owner, an administrator of its organization, or a platform administrator mints its API key: *Create API Key* on the account, or `POST /api/v1/auth/service-account/create-key` with `userId`. The key is shown once, bound to the account's organization, and signed under the same expiry policy and ceiling as `POST /api/v1/keys` (the two now share one rule in `@objectstack/core`); a date past the ceiling is refused `400 VALIDATION_FAILED` at `expires_at`, with the message `POST /api/v1/keys` gives, which names the latest date allowed. `POST /api/v1/keys` answers exactly as before. The key acts as the account, under the agent ceiling.
+  
+  Both doors read the caller from a signed-in session only: anonymous is `401`, and a caller carrying only an API key (the account's own included) is `401` too, so an account can neither register another nor mint its own key. Refusals reuse the existing codes: `403 PERMISSION_DENIED`, `400 VALIDATION_FAILED`, `404 RESOURCE_NOT_FOUND` for an id that is not an account, `409 RESOURCE_CONFLICT` for an account with no active membership, `503` when the authority read is unavailable.
+  
+  An AI service account is never counted as one of the administrators the break-glass guard keeps (whatever grant or membership grade it holds), and never receives the upgrade report or counts as an organization's administrator there.
+- 98ba756: feat(auth): an AI service account is a `sys_user` row of kind `agent` that never signs in (ADR-0151 D1, D2)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `sys_user` gains two columns. `principal_kind` is `human` (the default, and what every existing row reads as) or `agent`, an AI service account. `accountable_user_id` names the person accountable for an AI service account. Both are system-managed: the generic data path never writes them.
+  
+  Rules that hold for every writer, the system included:
+  
+  - A user is created with its kind and the kind never changes. An update that turns a person into an AI service account, or the reverse, is refused `400 VALIDATION_FAILED` on `principal_kind`.
+  - An AI service account names an existing person as its accountable owner; a person names none. Creating or updating a row against that is refused `400 VALIDATION_FAILED` on `accountable_user_id` (`required`, `reference_not_found` or `invalid_value`).
+  - An AI service account never holds a session: password, magic link, one-time code, passkey, social and SSO sign-in, impersonation and every server-minted session are refused `403 PERMISSION_DENIED`. It never holds a password or a sign-in provider link either.
+  - The membership reconciler and the one-time membership backfill never bind an AI service account (`reconcileMembership` answers the new outcome `agent-account`).
+  
+  Nothing registers an AI service account yet: the registration, key and lifecycle doors, and the account's own authority under the agent ceiling, follow in later changes. Every existing user, sign-in and membership behaves as before.
+- c7dd505: feat(plugin-audit): seal audit-class objects that declare `lifecycle.seal` into signed, chained checkpoints
+  
+  Clause-②: yes (widening) (a new optional key; its refusals bind only an object that declares it, and none does)
+  Metadata-protocol: added (`lifecycle.seal` joins the ADR-0057 lifecycle block)
+  
+  The third slice of ADR-0154. No object opts in by default: `sys_audit_log`'s own `lifecycle.seal` comes with expiry amendments, in a later release, so nothing is sealed until an object declares the key.
+  
+  - **`@objectstack/spec`.** `lifecycle.seal = { valueFields: string[] }` opts an `audit`-class object into tamper evidence. Refused at parse time, each with its reason: `seal` on another class, a `valueFields` name that is not a declared field or is `id` or `created_at`, and beside `seal` a `retention.onlyWhen` or `ttl.onlyWhen`, a `ttl` on a field other than `created_at`, or rotation `storage`. Until expiry amendments ship, the retention sweeper still deletes sealed rows, which then read as missing. `ICryptoProvider.rotateKey`'s `audit_seal` reason now says which handle sits in a signed body (the seed's) and which does not (the signing key's private half), and `AuditCheckpointSinkEntry` lists every member a sink receives.
+  - **`@objectstack/plugin-audit`.** The sealer starts at `kernel:ready`. Each hour of `created_at` is sealed ten minutes after it ends, under the cluster lock `audit.sealer` (an in-process lock when no cluster service is registered): one checkpoint per organization and one for rows about no organization, each with a Merkle root, the previous checkpoint's digest, the sealed-through watermark and the lock's fencing token, signed with the deployment's Ed25519 key. Late rows of the last seven days are sealed as `late` checkpoints first; rows that existed before sealing started are sealed oldest first, archived rows included. The key is created on first use, its private half sealed under the crypto provider, and its creation recorded as one `audit_signing_key_change` ledger row. Every column type has one canonical spelling or none: an object with a column of no rule (`password`, `secret`, `formula`, `summary`, or a file type), or with no `tenant_id` field, is not sealed. Compose a crypto provider with the new `AuditPluginOptions.cryptoProvider`; without one, nothing is sealed and that is reported at `error`, again each hour while it lasts.
+  - **`@objectstack/platform-objects`.** `sys_secret`'s source comments name the audit sealer as its fourth producer.
+- f75466c: fix(console): a clean self-hosted install reads as a first run — the sign-in page leads with creating the owner account, sign-up says every problem inline at once, Home says each item once, and a wrong password on a box with no mail points to the administrator
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  What a visitor and an administrator see on a fresh deployment (objectstack#32021):
+  
+  - **Sign-in on a box nobody has an account on.** The page asked the first visitor "Welcome back". When `GET /api/v1/auth/bootstrap-status` answers `hasOwner: false` (the probe that already switched the card's footer between "Sign up" and "Have an invitation?"), the card is now titled "Set up this deployment" and leads with a "Create the owner account" button, with the sign-in form below it. The probe now runs for every posture that offers a form to a visitor not invited, not only `invite_only`. A probe that fails, or a box that has an owner, keeps "Welcome back" exactly as before.
+  - **Sign-up.** `RegisterForm` is `noValidate` and checks every field on submit, so the browser's one-at-a-time bubble (in the browser's language) is gone, and a short password that also does not match shows both messages together, each under its own field with `aria-invalid` and `aria-describedby`. Three new labels, `nameRequiredError`, `emailRequiredError` and `emailInvalidError`, carry the empty-name, empty-email and malformed-email messages; the minimum stays 8, as the auth config serves none. The banner still carries what the server refuses.
+  - **Home.** "No email service is set up" and "Connect an AI assistant" are each said once: the deployment notice keeps its email line (what it says and who sees it are ruled, objectstack#30120), and the first-run checklist leaves its Email delivery row out while that line is drawn; the checklist's assistant row, while it is not done, stands in for Home's Connect an AI Assistant card, which members (who get no checklist) still see. The notice now uses the same 1120px width as the rest of Home, and the checklist sits closer under it, so "Your apps" is not pushed below the fold.
+  - **The checklist's assistant row** says it is about an external AI assistant over MCP, and that the built-in AI is set up separately.
+  - **A wrong password with no mail transport.** When `/api/v1/auth/config` reports `features.emailDelivery: false`, the refusal says to ask the administrator to reset the password, instead of pointing to a reset email that never arrives.
+  - **zh-CN wording.** The checklist names the current language and country in the reader's language; the managed-by note says 账号系统 instead of 「经身份服务写入」; and the AI settings page translates Embedder, Trace, Prompt and PII (向量化, 请求追踪, 提示词, 个人敏感信息).
+  
+  New `@object-ui/i18n` keys, in every pack: `auth.login.firstOwner.{title,description,createButton,signInDivider}`, `auth.login.errors.invalidCredentialsNoMail`, `auth.register.{nameRequiredError,emailRequiredError,emailInvalidError}` and `auth.register.firstOwner.{title,description}`. Nothing is removed or renamed.
+- 02498c9: feat(plugin-auth, platform-objects): an SSO provider maps who a sign-in resolves to (SAML email, first, last and display name; OIDC email and name), and a refused SAML response names its cause
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **Attribute mapping.** `@better-auth/sso` reads a SAML user's email from the `email` attribute (else the NameID) and the name from `givenName` + `surname`, else `displayName`, else the NameID. Okta sends the full name as `name` and Entra ID sends claim URIs, so their users were named after their NameID, and nothing in the platform could map other attribute names.
+  
+  - **Register SAML Provider** takes four new optional fields, `mapEmail`, `mapFirstName`, `mapLastName` and `mapName`, stored as the provider's `mapping.email` / `firstName` / `lastName` / `name` beside the groups attribute. Blank leaves the default. The help text names the Okta and Entra ID attribute names.
+  - **Show Attribute Mapping** and **Edit Attribute Mapping** on `sys_sso_provider` show and change the mapping of an existing provider, SAML or OIDC, through two new platform-admin bridges, `POST /api/v1/auth/admin/sso/get-attribute-mapping` and `POST /api/v1/auth/admin/sso/set-attribute-mapping` (route ledger rows, `server-only`, `requires: 'sso'`). A member left untouched keeps its value, a cleared one goes back to the default, and the groups claim and every other member of the stored mapping are kept. An OIDC provider maps `email` and `name` only; `firstName` / `lastName` on one answer `400 INVALID_REQUEST`. An unknown provider is `404 RESOURCE_NOT_FOUND`. The answer carries the provider id, its protocol and the four members, nothing else of the stored configuration. The edit is not offered to an AI caller: the email member decides which account a sign-in links to.
+  - The labels are translated in all ten locales.
+  
+  **SAML refusal causes.** The vendor answers every samlify rejection with `error=saml_error&error_description=Invalid SAML response`. After it refuses, the posted response is now read once more against the provider's configured signing certificates and IdP entity id, in samlify's order, and `error_description` names the first of four causes that applies: `saml_idp_status_not_success`, `saml_response_unsigned`, `saml_signing_certificate_mismatch` (the IdP certificate rotation case) or `saml_issuer_mismatch`. One `warn` line carries the provider id, `protocol: 'saml'` and the cause. `error=saml_error` is unchanged, any other refusal keeps `Invalid SAML response`, and nothing about the accept decision changes. No cryptography runs; neither the redirect nor the line carries assertion content, and the answer is the same for every account. `fast-xml-parser` (the parser the vendor already uses) becomes a direct dependency of plugin-auth.
+  
+  Documented in `content/docs/permissions/sso.mdx` ("Map the user's email and name", "Why a SAML sign-in was refused").
+- 2830f31: fix(plugin-auth)!: a user a SCIM directory provisions reads `idp_provisioned` from the moment SCIM creates it, and users a directory provisioned earlier are marked once at boot
+  
+  Clause-②: yes (narrowing) — every refusal and hidden action keyed on a directory-owned identity (`sys_user.source = 'idp_provisioned'`) now applies to a SCIM-provisioned user who holds no local password: `POST /api/v1/auth/admin/set-user-manager` answers `403 PERMISSION_DENIED` with reason `idp_provisioned`; the admin bulk import (`POST /api/v1/auth/admin/import-users`) refuses that user's `manager_id` link through the same refusal; `admin/set-user-password` on a cloud-managed environment answers `409 RESOURCE_CONFLICT`; the Setup "Set Manager" row action is hidden; and the self-service Change Password, Change Email and Delete My Account actions are hidden (ADR-0135 D4, D5.2).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, no export changes, and `sys_user.source` keeps its two values. The stored rows the rule covers are marked by the boot pass itself, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing for SCIM-provisioned users (ADR-0135 D4).
+  
+  - A user a SCIM connection creates, re-links through a tombstone or reprovisions reads `sys_user.source = 'idp_provisioned'` ("IdP-Provisioned" in Setup), written in the same transaction as the SCIM write. On a create or another active write the mark fails closed: if it cannot be written, the SCIM request fails, nothing persists, and the identity provider retries it. On a deactivation or a `DELETE` the account is disabled first and the mark after it is best-effort, so a mark that cannot be written never leaves a deprovisioned account enabled; it is logged at `error` and re-run by the next active write and the boot pass.
+  - At boot, every user that owns a `sys_scim_subject` row and does not already read `idp_provisioned` is marked. The pass logs how many users it marked and writes nothing on a later boot.
+  - A user who holds a local password keeps `env_native`: setting a password on a directory-provisioned user still flips it to `env_native`, and a later SCIM sync or boot leaves that value.
+  - `sys_user.source`'s description names SCIM directory provisioning beside federated SSO (`@objectstack/platform-objects`).
+  
+  **Who moves: the manager of a SCIM-provisioned user.** For a SCIM-provisioned user with no local password, the admin set-manager endpoint, the Setup "Set Manager" button and the bulk import's `manager_id` column all refuse ("directory wins, per identity"). The platform does not write the manager from SCIM: it declares the SCIM `manager` attribute without projecting it onto `sys_user.manager_id`, and an existing `manager_id` value stays as it is. An approval node whose `manager` rung resolves to nobody for such a user can declare `onEmptyApprovers: 'fallback'` with a `fallbackApprovers` list; the other remedy is a provisioning path your deployment supplies that writes the column.
+- c419609: fix(plugin-auth): a directory deactivation revokes the user's API keys, and no one restores them
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **The rule.** Deactivating a user through SCIM (`active: false`), or deleting one (`DELETE /Users/{id}`), revokes every API key the user owns. Each key row stays, with `revoked: true` and `revoked_reason: scim_deactivated`. A later re-activation lifts the directory's ban and re-arms none of those keys: the person creates a new key (`POST /api/v1/keys`, or the API Keys page) and replaces the old one wherever it is configured. An administrator's own ban and unban are unchanged and leave keys alone. The user's local password is not changed by this release.
+  
+  **Who can restore such a key.** No one, from a user context. The owner's Restore is refused `403 PERMISSION_DENIED`, and so is a platform administrator's, naming the reason and the new-key road. The AI service account door (`POST /api/v1/auth/service-account/restore-key`) refuses it the same way. The key door's `403 API_KEY_REVOKED` says the key cannot be restored and names no restorer. A key the user had already revoked, or that carried `admin_password_reset` or `administrator_suspended`, is restamped with `scim_deactivated` by the deactivation; a key that carried `organization_membership_ended` keeps it, since no one restores either.
+  
+  **`@objectstack/platform-objects`: `sys_api_key.revoked_reason` gains the option `scim_deactivated`** ("Deactivated by the directory"), beside `admin_password_reset`, `organization_membership_ended` and `administrator_suspended`. The column stays readonly and off the ADR-0092 D2 whitelist, so no data-API write sets or clears it. The field's help text names the new reason and that no one restores it; every shipped locale carries the new option and help.
+  
+  **If the revocation does not finish.** The deactivation still lands: the account is disabled and the SCIM request succeeds. The server logs one `error` line naming the user, how many keys were and were not revoked, and the remedy (revoke the remaining `sys_api_key` rows with that reason). The next SCIM write that leaves the user inactive runs the revocation again.
+- e34723f: feat(plugin-auth, platform-objects): a SCIM connection credential shows a token hint and when it was last used, so two credentials of one connection can be told apart during a rotation
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `sys_scim_connection_credential` gains two read-only columns, both in the `all` list view and readable through the data API's list door:
+  
+  - `token_hint`: the last four characters of the bearer, stored when the credential is minted. The mint door (`POST /api/v1/auth/admin/scim/mint-credential`) answers it as `data.tokenHint` beside the token, and the mint result dialog shows it, so an administrator can match a row to the bearer they pasted into the identity provider. Never a prefix (every bearer starts with the constant `oss_scim_`), never the bearer, never the digest, which stays internal.
+  - `last_used_at`: written by the SCIM bearer verifier on a successful verification only, at most once per credential per minute. A refused bearer (unknown, revoked or expired) writes nothing. A failed write never fails the SCIM request; it is logged once per distinct failure at `error`, naming the credential row and never the bearer.
+  
+  Existing credentials: a credential minted before this release has no `token_hint`, and none can be backfilled because the bearer is not stored. It shows empty; mint a new credential to get one. Its `last_used_at` starts filling on its next successful SCIM request.
+- 9052363: feat(plugin-auth): an IdP group mapping says whether it matches a current group of its source
+  
+  Clause-②: yes (widening) — three new read-only columns on `sys_idp_group_mapping` (`match_status`, `matched_group_id`, `match_changed_at`), shown in its `all` list view. No package export changes. Nothing existing is removed, retyped or refused; the object's data API stays list-only.
+  Metadata-protocol: none
+  
+  A group mapping now says whether the group it names is one its SCIM connection pushes right now. `match_status` reads `matched` (with `matched_group_id`, the `sys_scim_group` it matches), `unmatched` (the identity provider renamed or deleted the group, or never pushed it) or `not_applicable` (an SSO provider, which sends groups only as a sign-in claim and stores no group list). `match_changed_at` records when the answer last changed, so a console can show "matches no current group since …".
+  
+  plugin-auth keeps the columns current on every write to either side: a SCIM group create, rename (`PATCH` or `PUT`) or delete, and a mapping save. A membership change writes nothing to the mapping. The answers are re-judged once per boot too, so mappings saved before this release read right after the upgrade. A failure to re-judge never fails the SCIM request that triggered it; it is logged at `error` and heals on the next write or boot.
+  
+  Who gets which grant does not change: the projection still matches on every membership change, and a mapping that matches nothing still grants nothing.
+- e267b96: fix(plugin-auth): Microsoft Entra ID registers and signs in over OIDC: Graph trusted for its discovery only, groups from the verified ID token, and a named refusal for a user without a mailbox
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **Registration.** Entra ID's discovery document names its `userinfo_endpoint` on `https://graph.microsoft.com`, so every Entra ID registration was refused `discovery_untrusted_origin` unless the operator widened `OS_TRUSTED_ORIGINS`, and with it the CSRF allow-list. A built-in table of companion origins (`login.microsoftonline.com` → `https://graph.microsoft.com`) now trusts Graph only while `/sso/register` validates the discovery document of a registration whose issuer is an `https://login.microsoftonline.com` URL. The CSRF allow-list does not change. A host named only by a discovery document is still never trusted: any other IdP whose discovery names a foreign host is refused as before, and the message now names the endpoint and the registration member that names it explicitly (`"userInfoEndpoint": "…"`). The Register SSO Provider bridge (`POST /api/v1/auth/admin/sso/register`) now takes `userInfoEndpoint` and `skipUserInfo`; the Setup form does not show them yet.
+  
+  **Groups.** When the userinfo answer does not carry the provider's groups claim, the groups are read from the ID token the vendor already verified. Userinfo wins where both carry it. A groups overage (`_claim_names`) grants nothing from groups, makes no Graph call, and logs one `warn` per provider naming the fix (emit only the groups assigned to the application, or use Entra ID app roles).
+  
+  **Users without a mailbox.** A provider can now read its claims from the verified ID token only: the new `skipUserInfo` option (column `skip_user_info` on `sys_sso_provider`, "Read Claims From the ID Token Only", off by default, set at registration or with Edit Sign-In Options). With it on and the email mapped to `preferred_username` or `upn`, an Entra ID user without a mailbox signs in. The stored userinfo endpoint is kept.
+  
+  **Refusal wording.** A sign-in whose claims carry no email address was redirected with `error_description=missing_user_info`. It now reads `error_description=email_claim_missing` (`error=invalid_provider` is unchanged), and the `warn` line names the missing claim and the mapping key (`mapping.email`). A client that matched `missing_user_info` should match `email_claim_missing`, exported as `SSO_OIDC_EMAIL_CLAIM_MISSING`.
+- 2b11a71: feat(platform-objects): add and remove an IdP group mapping from Setup
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Setup → IdP Group Mappings was a read-only list: the only writers of a group → permission-set mapping were plugin-auth's `POST /api/v1/auth/admin/scim/set-group-mapping` and `/admin/scim/delete-group-mapping`, posted by operator scripts. `sys_idp_group_mapping` now declares three actions that post those two doors, offered to platform administrators only (`current_user.isPlatformAdmin == true`) and gated on `manage_platform_settings` where the action doors read it:
+  
+  - **Map SSO Group** (list toolbar): an SSO provider's Provider ID, the group as its groups claim sends it (an external ID or a display name), and a permission set picked from the security catalog. It applies at each member's next sign-in through the provider.
+  - **Map SCIM Group** (list toolbar): the same for a SCIM connection; the group's current members are granted the set at once.
+  - **Delete Mapping** (each mapping row): asks for confirmation, then deletes the mapping; the grants it made are removed.
+  
+  Every refusal is the door's own sentence, shown in the action's dialog: a permission set outside the organization boundary (an administrator set, an agent ceiling), a same-group mapping left in another organization (naming the mapping to delete first), SCIM, SSO or the security service not enabled, an unknown mapping. The data API stays list-only and the object stays fully locked, so no generic create, edit or delete appears.
+  
+  `@objectstack/plugin-auth`: the set-group-mapping door now admits `organizationId` in its body and reads nothing from it. Every `type: 'api'` action aimed at an `/api/v1/auth/` path is forwarded with the caller's active organization stamped as `organizationId`, so the door's closed key set refused every action that posted it. The mapping's organization is still the source's (the SCIM connection's or the SSO provider's), never the stamped one; any other unknown key is still refused `400 VALIDATION_FAILED`.
+- c147fc2: fix(i18n): the Metadata Commit object reads in Chinese, Japanese and Spanish, and the zh-CN authentication settings use full-width punctuation
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_metadata_commit`, the package commit log, was missing from the platform-objects translation extract while its three `sys_metadata*` siblings were in it, so a zh-CN, ja-JP or es-ES admin read its label, plural and field labels in English ("Metadata Commit"). It is now extracted into every locale bundle and translated in zh-CN (元数据提交), ja-JP and es-ES; the other locales carry the English source until they are translated.
+  
+  The zh-CN copy of the Authentication settings page mixed ASCII `, ; : ( )` into Chinese sentences (「认证限流:最大请求数」, 「密码有效期(天)」). Those marks are now full-width; ASCII stays inside codes, addresses and English names (`203.0.113.0/24`, `acme.com`, `ISO 8601`).
+- 0115280: fix(platform-objects): the Register SSO Provider form can name the userinfo endpoint, read claims from the ID token only, and suggests the Microsoft Entra ID email claim
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Setup → SSO Providers → **Register SSO Provider** (`sys_sso_provider.register_sso_provider`) now collects the two fields the register bridge (`POST /api/v1/auth/admin/sso/register`) has accepted since the server half of #32147:
+  
+  - **Userinfo URL** (`userInfoEndpoint`, optional): kept instead of the userinfo endpoint the discovery document names. An endpoint the registration names is trusted for that registration, so this is the field the refusal of an untrusted discovery endpoint tells the admin to fill.
+  - **Read Claims From the ID Token Only** (`skipUserInfo`, optional, off unless ticked): stored as the provider's `skip_user_info`, labelled as that column is.
+  
+  **Discovery URL** (`discoveryEndpoint`) and **Userinfo URL** are `url` inputs, and both help texts say an endpoint named there is trusted for the provider. The **Map: Email claim** help text names the Entra ID mapping: for an issuer on `login.microsoftonline.com`, users without a mailbox carry no `email` claim, so map `preferred_username` (or `upn`) and turn on the ID-token option. The hint is static text. An action param's help text and visibility cannot read the dialog's own values, so the form cannot key a hint on the issuer the admin types. The claim is never set for the admin: left blank, it still maps `email`.
+  
+  The new labels and help texts are translated in every locale bundle.
+- cac0f1a: fix(metadata)!: history, diff and rollback of a type stored per package address one package's row, and a removed package's version is no longer written into the remaining holder's row
+  
+  Clause-②: no (narrowing) — for a type stored per `(package, name)` (the types in `PACKAGE_SLOTTED_STORE_TYPES`; at this release `api`, `agent`, `skill`, `action`, `email_template`, `permission`, `flow`) read through `DatabaseLoader`: `MetadataManager.getHistory` / `diff` and `DatabaseLoader.queryHistory` / `getHistoryRecord` of a name two row slots hold (two packages', or a package's beside the package-less row), naming no address, answered every holder's versions and now answer `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming every holder), and so do `rollback` and `diff` there of a version that does not exist, which answered "Version N not found"; `MetadataManager.rollback` to the version of a package that holds no row of the name (one since removed) wrote that version's body into the remaining holder's row and now answers `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`, naming that package). A rollback to a version recorded under no package (a history row written before this release) on a name two row slots hold answered `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`) and answers it still, at every door and under every address, since no address reads it. A name one row slot holds, and every other type, answer as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any authorable schema is added, removed or re-shaped. The one stored-shape change is a nullable `package_id` column on `sys_metadata_history`, which the history object's schema sync adds without rewriting any row; a row written before it reads exactly as it did, its package being the one its stored body names, as for a `sys_metadata` row. The two refusals answer a request without writing anything, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for a caller of `MetadataManager` (or `DatabaseLoader`) history on a database-backed loader that reads the history of a name two packages hold without naming a package, or that rolls back to a version of a package removed since. No first-party door reaches `DatabaseLoader` history today: the REST `/meta/:type/:name/history`, `/rollback` and `/diff` doors go through the protocol's own repository.
+  
+  ADR-0150 D3/D4: such a type keeps a row per package of a name, its versions numbered per name across those rows. Until now its history rows did not say whose row they were taken of, so a rollback by name could not tell which row a version belongs to.
+  
+  - **Each history row names its package.** `sys_metadata_history` gains a nullable `package_id` column. `DatabaseLoader` fills it on a save and a rollback of such a type with the package of the row written, including a package-less customization saved into a package's row (D4). A snapshot of the package-less row records the `sys_metadata` sentinel. NULL means "not attributed", never the environment: it stays NULL for every other type and on every row `SysMetadataRepository` writes. The unique `(type, name, version)` is unchanged. Upgrade path: the boot's schema sync adds the column on every driver (`ALTER TABLE … ADD COLUMN package_id`, nullable, no default, no row rewritten). A row written before it is read as the package its stored body names (the `_packageId` stamp), else as attributed to none. No row is backfilled; a later backfill attributes a legacy row only on a name one row slot holds, and writes the sentinel for the environment's.
+  - **Name the package.** `getHistory(type, name, { packageId })`, `diff(type, name, v1, v2, { packageId })` and `rollback(type, name, version, { packageId })` on `MetadataManager`, and `queryHistory(…, { packageId })`, `getHistoryRecord(…, { packageId })` and `registerRollback(…, { packageId })` on `DatabaseLoader`, read or write that package's versions and row only. `total` and `hasMore` count that package's versions. Another package's version answers "not found". A rollback writes that package's row and leaves every other package's row untouched. A package that holds no row of the name is refused `409` (`not-held-by-qualifier`), and a name with no row left answers "not found for rollback". The new options type is exported as `MetadataHistoryAddress`.
+  - **The environment.** `{ packageId: null }` addresses the name's package-less row and the versions recorded of it (`''` and the `sys_metadata` sentinel name no package, so they address it too). A package-less save of a name two packages hold writes that row, and its versions stay readable and restorable this way. A rollback by this address restores that row and the registry's package-less entry, never a package's.
+  - **Naming none.** One holder answers as before. Two or more row slots, two packages' or a package's beside the package-less row, are refused `409` naming every holder. The rollback was already refused this way.
+  - **A version lands only in its own package's row.** A rollback to a version whose history row names a package that no longer holds a row is refused `409` naming that package, and one naming a package that still holds a row is refused saying the version is that package's. Nothing is written either way. An environment version is refused into a package's row the same way while the name has several row slots; on a name one row slot holds (a package took over the package-less row, or saved after it was removed) it lands in that row, as before. A version attributed to none (a row written before the column, or one `SysMetadataRepository` wrote) is in no address's history; a rollback to it lands in the name's row only when one row slot holds the name, as before, and with several is refused `409` (`ambiguous-in-environment`) naming every holder, addressed or not. Before, after package B's item was removed, `rollback(name, <B's version>)` wrote B's body into package A's row.
+  
+  **Who moves, and the fix.** A caller reading the history of a name two packages hold names the package: `getHistory(type, name, { packageId })`, once per package. A rollback names the package whose version it restores: `rollback(type, name, version, { packageId })`. The package-less row's versions are addressed with `{ packageId: null }`. A removed package's version cannot be restored into another package's row: reinstall that package, or save the body you want into the remaining package's item.
+- 5694bf5: feat(messaging): an organization administrator can send an in-app message to everyone in their organization, or to the members they pick, from Setup
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  Setup → Diagnostics → Notification Events now carries a **Send In-App Message** action. The message goes through the platform's single notification ingress, lands in each recipient's notifications, and appears on that list as one event.
+  
+  - **`@objectstack/service-messaging`: `POST /api/v1/messaging/in-app-messages`.** The body is `{ everyone, recipients, title, body, severity, link }`, and nothing else: either `everyone: true` or a `recipients` list of user ids, not both. The door requires the `setup.write` capability in the caller's current organization, refuses a request with no current organization, and never reads the organization from the body. `everyone` reaches every member of the caller's current organization and no one outside it; picked recipients must each be a member of it, and a request naming anyone else is refused by name with nothing sent. A picked id is always addressed as that one user, never read as an audience selector or an email address. `severity` is `info` (the default), `warning` or `critical`; `link` is a path on this site or an `http(s)` address. Each refusal says what to change and that nothing was sent. On success the answer is `{ notificationId, recipients, delivered, enqueued, failed }`, where `recipients` is how many people the message went to; a member whose notification preferences turn the topic (`org.announcement`) off is not sent it and not counted. `MessagingServicePlugin` mounts the door beside the notification-preference options door, on the same HTTP server.
+  - **`@objectstack/platform-objects`: the `send_in_app_message` action on `sys_notification`.** A list-toolbar `api` action aimed at that route, whose form is the door's body, one field per key. Its `requiredPermissions` is the door's own capability, `setup.write`, so the action is listed to exactly the callers the door admits: organization administrators and the platform administrator by default, and a custom permission set that grants `setup.write`. A plain member does not see it. Its labels are in the translation bundles.
+- f4cd4ec: fix(core)!: a banned user's credentials are refused while the ban holds, at every door that accepts an API key
+  
+  Clause-②: yes (narrowing) — while a user's ban holds, a request authenticated by an API key that user owns is answered as a key that does not exist (the generic `401 UNAUTHENTICATED`), at every door that accepts a key: the REST data door, the MCP door, and every other door that resolves a key through the shared key-admission seam. The widening half: `@objectstack/core` exports the one ban predicate, `isUserBanInForce` (with `USER_BAN_FIELDS` and the `UserBanFields` type), which the key-admission seam and plugin-auth's session-shaped refusals now share.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and nothing at rest changes: the ban columns are read where a key becomes its owner, and no key row is revoked or rewritten. -->
+  
+  **BREAKING** accept-set narrowing at every key-admitting door (`@objectstack/core`): a banned user's API keys are refused while the ban holds.
+  
+  - **The rule.** A ban holds every credential of the user. Banning a user already ends their sessions and refuses their sign-in; their API keys now answer as a key that does not exist for as long as the ban holds. A ban with an expiry stops binding once the expiry has passed, exactly as sign-in does — no sign-in is needed to lapse it.
+  - **Not a revocation.** No key row is revoked or rewritten. Lifting the ban (or letting it expire) admits the same keys again, with nothing reissued, each still judged by its own lifecycle: a key left unused past the inactivity window during the ban answers as inactive (`API_KEY_INACTIVE`), and its remedy is a new key.
+  - **One anonymous entry.** A key refused for its owner (a ban) or for the tenancy posture (no organization under `isolated`) resolves to the same entry as a key that does not exist, on every composition: the guest's grants on a face that serves the guest, nothing elsewhere. It never falls through to a session.
+  - **Who moves.** An integration running on a key whose owner is banned gets `401` until the ban is lifted or expires.
+  
+  **The remedy.** Lift the ban, or mint a replacement key under a user who is not banned.
+- b3d2f4b: fix(runtime,plugin-auth)!: a banned user's OAuth access tokens and refresh grants are refused while the ban holds
+  
+  Clause-②: yes (narrowing) — while a user's ban holds, an OAuth access token that user consented to is answered at the MCP door as a token that does not verify (the generic `401`, with the same body and `WWW-Authenticate` header), and so is an agent forward credential acting for that user; `/oauth2/userinfo` answers that token as an access token that does not verify (`401 invalid_token`), and `/oauth2/introspect` answers that user's access and refresh tokens as inactive (`{ "active": false }`); the token endpoint mints that user no token: a `refresh_token` grant answers as an invalid refresh token (`400 invalid_grant`), and an `authorization_code` exchange is refused, with the code spent: by the provider's own session answer (`400 invalid_request`) when the ban ended the user's sessions, as the ban routes do, and otherwise as an invalid code (`400 invalid_grant`). Those are the doors this change narrows.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and nothing at rest changes: the ban columns are read where an OAuth credential becomes its user or is read back, and no token, grant or consent row is revoked or rewritten. -->
+  
+  **BREAKING** accept-set narrowing at the MCP door and at the OAuth authorization server's token, userinfo and introspection endpoints: a banned user's OAuth access tokens and refresh grants are refused while the ban holds.
+  
+  - **The rule.** Banning a user already ends their sessions and refuses their sign-in and their API keys. While the ban holds, their OAuth access tokens are now also refused at the MCP door and read as not valid at userinfo and introspection, and the token endpoint mints them no new token (no refresh, no code exchange). A ban with an expiry stops binding once the expiry has passed, exactly as sign-in does.
+  - **Not a revocation.** No token, refresh token or consent row is revoked or rewritten. Lifting the ban (or letting it expire) admits the same access token at the MCP door and lets the same refresh token renew, with nothing reissued. An authorization code presented while the ban held is spent, so the client signs the user in again.
+  - **Cost.** One primary-key read of the user's ban columns per OAuth credential the MCP door resolves, and one read of the user row per active introspection answer that names a user; the token and userinfo endpoints read nothing extra. A store fault on the MCP door's read answers `503 SERVICE_UNAVAILABLE`, as every other authorization-input read on that door does; a store fault on the introspection read fails the request rather than answering active or inactive.
+  - **Who moves.** An MCP client or OIDC relying party connected over OAuth on behalf of a banned user gets `401` at the MCP door and at userinfo, `{ "active": false }` from introspection, and `400` from the token endpoint, until the ban is lifted or expires. The Ban User confirmation (`@objectstack/platform-objects`) and the administrator and authentication guides now say so.
+  
+  **The remedy.** Lift the ban, or connect the client as a user who is not banned.
+- 767f110: docs(spec): the `currencyField` help text names the parent path and the parent-code lock
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio help text for `currencyConfig.currencyField` now says that on a master-detail child it may name the parent's code field as `<master_detail field>.<parent code field>`, that the record then follows its parent's currency, and that a change of the parent's code is refused while such a child exists (ADR-0144 D2 as amended). The metadata-form translation packs carry the same sentence. Help text only; no schema change.
+- 7b2bb66: **Shipped in 18.3.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  fix(plugin-auth): a session a password reset ends leaves a revocation trail
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **A session a password reset ends leaves a revocation trail.** When a completed self-service password reset ends the account's sessions — the emailed link (`POST /api/v1/auth/reset-password`), and the phone OTP reset (`POST /api/v1/auth/phone-number/reset-password`); better-auth's email-OTP reset door, which the platform does not mount, is covered on its own path too — each `sys_session` row is now kept and stamped, `revoked_at` with `revoke_reason: password_reset`, the same kind of trail an interactive revoke leaves, instead of being deleted. The session is still refused (`401`).
+  - **The value says who ended the session.** `password_reset` is distinct from `user_revoked` (the owner revoking their own sessions) and from `admin_password_reset`, which an administrator's forced reset keeps writing.
+  - **`sys_session.revoke_reason`'s published vocabulary names `password_reset`** (`@objectstack/platform-objects`, the field's description and its translated help).
+  - **Unchanged.** Which sessions a reset ends; sign-out, which still deletes its row; the account's API keys, which a self-service reset does not revoke; and the audit log, which records no `logout` row for a reset.
+- a794e32: feat(platform-objects): mint and revoke SCIM connection credentials from the console
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_scim_connection_credential` gains two actions, so a platform administrator setting up SCIM provisioning no longer needs curl to get a bearer token:
+  
+  - **Mint Credential** (list toolbar) posts `POST /api/v1/auth/admin/scim/mint-credential` with a connection ID and the optional label, organization, provisioning domain and expiry, then shows the token once in a result dialog the administrator must close. Only the token's one-way digest is stored, so it cannot be shown again. Mint is not exposed to AI tools: an agent that ran it would hold a live SCIM bearer.
+  - **Revoke Credential** (a credential row or its record header) posts `POST /api/v1/auth/admin/scim/revoke-credential` for that row, after a confirmation. It is offered on an active credential only; the route's 404 and 409 answers show as the action's error. Revoke is exposed to AI tools and always asks the human to confirm first.
+  
+  Both are offered only to a platform administrator and declare the routes' own gate (`manage_platform_settings`). Who may mint or revoke is unchanged: the routes still decide.
+  
+  `@objectstack/plugin-auth`: a mint made on an impersonation session now names the administrator at the keyboard in its `sys_audit_log` row, as `metadata.impersonated_by` (the key the audit writers use). A mint on an ordinary session writes the same row as before.
+- bdbaf80: fix: Setup's form help speaks to an administrator, and the queue pages, the mail status banner and the test-email toast read in Chinese on a zh-CN console
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Field help (English source and zh-CN):** the permission set and position assignment forms, the out-of-office (approval delegation) rule, and the business unit, organization and user forms no longer describe the implementation. Gone: "fail-closed", "half-open [from, until)", "agent grants", "graph semantics", "expanded by graph queries", "Null = root of tenant", "HRIS", "When true / When false" (zh-CN 「为 true 时」 now reads 「开启后」) and an HTTP status code. The help now says when an assignment starts and ends, what turning a switch on does, and what to fill in. Text only: no field name, key, option value or behaviour changes.
+  - **`@objectstack/plugin-sharing`:** `sys_queue` and `sys_queue_member` join the plugin's translation bundle, with zh-CN text, so the 队列 and 队列成员 pages, their columns, help and the 新建 button read in Chinese. ja-JP and es-ES carry English fills for now.
+  - **`@objectstack/plugin-email`:** the live-status statement at the top of Setup → Email and the "Send test email" answer (sent, failed, logged only) are written in the caller's display language, en and zh-CN today; another language gets English.
+  - **`@objectstack/service-settings`:** a settings action handler (`SettingsActionHandler`) receives an optional `locale`, the caller's display language read from the request the same way the live-status statement's is (`Accept-Language`, else `?locale`); `runAction` takes it as a fifth `display` argument. Existing handlers compile and behave unchanged.
+- 1f3e6fd: feat(auth)!: edit an SSO provider in place, see what deleting one removes, and keep one provider per email domain
+  
+  Clause-②: yes (narrowing) — registering an SSO provider, or editing a provider's domain, onto a domain entry another provider already serves is refused, where it was accepted before; registering a provider, or editing a provider's domain, is refused when the SSO providers cannot be read to check the domain; and deleting a provider is refused when the number of users it unlinks cannot be read. The edit actions and their door, the delete preview and the counts on a successful delete widen.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes. The refusals are new answers of the auth routes to a request; no stored provider, mapping or grant row is rewritten by the upgrade, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing on SSO provider registration, provider domain edits and provider delete (`@objectstack/plugin-auth`).
+  
+  After the upgrade, `POST /api/v1/auth/sso/register`, the `register_sso_provider` / `register_saml_provider` actions behind `/api/v1/auth/admin/sso/register` and `/register-saml`, and a `domain` edit on `POST /api/v1/auth/sso/update-provider` are refused `409 RESOURCE_CONFLICT` with `field: 'domain'` when one of the domains named is an exact entry of another provider's domain list. Before, the second provider was saved, but sign-in routes an address to the first provider that serves it, so the second provider would not be reached by address. Providers already stored are not touched or re-checked; only a new claim of an entry is refused. A provider for a subdomain beside one for its parent (`eng.acme.com` beside `acme.com`) is still accepted. To serve a second IdP, register it under its own domain entry (a subdomain stays accepted), edit the domain off the provider that serves it, or delete that provider first. The same register and domain-edit requests are refused `503 SERVICE_UNAVAILABLE` when the SSO providers cannot be read to check the domain, and nothing is saved. `POST /api/v1/auth/sso/delete-provider` is refused `503 SERVICE_UNAVAILABLE` when the count of users it would unlink cannot be read, and nothing is deleted; retry once the data store answers.
+  
+  - **Edit instead of delete and re-register.** Two new SSO Providers actions, "Edit SAML Settings" (IdP entity ID, SSO URL, signing certificate, with an option to keep trusting the current certificate while the IdP switches over) and "Edit OIDC Settings" (client ID, client secret, scopes), post to a new platform-admin `POST /api/v1/auth/admin/sso/update-provider`. It writes through `@better-auth/sso`'s own `/sso/update-provider` with only the fields you changed; a blank field keeps what is stored, and the client secret is never shown back. A certificate or client secret changes while users are linked; the entity ID, SSO URL and client ID identify the IdP account each user signs in with, so they change only while no user is linked (`409`, with that reason).
+  - **Delete names its consequences.** "Delete SSO Provider" now shows, before you confirm, how many users the delete unlinks, how many of them have no other sign-in method linked (no password, no other provider), and the group mappings and grants removed with it (read from a new platform-admin `GET /api/v1/auth/admin/sso/delete-impact?providerId=`). The delete itself answers the same counts. After a delete, the provider's IdP group mappings and the permission-set grants its sign-ins projected are removed; a grant made by hand or by SCIM is never touched.
+  - **One email domain, one provider.** Registering a provider (either door), or editing a provider's domain, onto a domain another provider already serves is refused `409 RESOURCE_CONFLICT` with `field: 'domain'`, naming the provider that serves it to a platform administrator. A provider for a subdomain beside one for its parent is still accepted.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [60fe44f]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [f56354c]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [36a8700]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [1368536]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [de6d893]
+- Updated dependencies [326453e]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [cac0f1a]
+- Updated dependencies [e336a33]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [3299873]
+- Updated dependencies [7d13a33]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/metadata-core@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

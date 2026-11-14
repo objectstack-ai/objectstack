@@ -213,6 +213,9 @@
  */
 
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias): the
+// save and delete doors reach it dynamically.
+import '@objectstack/lint';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { META_OVERLAY_CACHE_DEFAULT_TTL_MS } from './meta-overlay-cache.js';
 import {
@@ -654,7 +657,7 @@ describe('[#13609] the read door under measurement', () => {
         expect(published).toHaveLength(1);
         expect(published[0].channel).toBe(METADATA_MUTATION_CLUSTER_CHANNEL);
         expect(published[0].payload.event).toEqual({
-            type: 'datasource', name: 'billing_db', state: 'deleted', organizationId: null,
+            type: 'datasource', name: 'billing_db', state: 'deleted', organizationId: null, packageId: null,
         });
     });
 

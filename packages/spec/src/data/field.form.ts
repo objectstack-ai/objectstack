@@ -124,8 +124,8 @@ export const fieldForm = defineForm({
               { label: 'Fixed — one currency for this field', value: 'fixed' },
               { label: 'Record — each record names its currency', value: 'record' },
             ] },
-            // ADR-0144 D2 — the record-mode pointer.
-            { field: 'currencyField', type: 'text', helpText: 'Record mode only, and required there: the field on this object holding each record\'s ISO 4217 code — a text field with valueDomain iso_4217_currency, conventionally currency_code.' },
+            // ADR-0144 D2 — the record-mode pointer, a sibling field or (as amended) a parent path.
+            { field: 'currencyField', type: 'text', helpText: 'Record mode only, and required there: the field on this object holding each record\'s ISO 4217 code — a text field with valueDomain iso_4217_currency, conventionally currency_code. On a master-detail child it may instead name the parent\'s code field as <master_detail field>.<parent code field> (e.g. invoice.currency_code): the record then follows its parent\'s currency, and a change of the parent\'s code is refused while such a child exists.' },
             { field: 'defaultCurrency', type: 'text', helpText: 'The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode; refused in record mode.' },
           ],
         },

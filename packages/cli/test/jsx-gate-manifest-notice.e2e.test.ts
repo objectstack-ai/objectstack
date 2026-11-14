@@ -178,7 +178,9 @@ export default defineStack({
 `;
 }
 const TOP_EMPTY = '[]';
-const TOP_FULL = "[{ name: 'jxg_home', label: 'Home', kind: 'full', regions: [] }]";
+// A home page, so it names its type: with `type` left to its `record` default,
+// a `kind: 'full'` page placing no component is refused at parse.
+const TOP_FULL = "[{ name: 'jxg_home', label: 'Home', type: 'home', kind: 'full', regions: [] }]";
 
 /** Declares exactly the one component the fixture page uses. */
 const MANIFEST = JSON.stringify({ components: { div: { type: 'div', inputs: [{ name: 'children', type: 'slot' }] } } });

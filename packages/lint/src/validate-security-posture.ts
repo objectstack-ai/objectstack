@@ -24,6 +24,7 @@
  * | security-controlled-by-parent-owner-policy-without-opt-in (warning) | ADR-0055 §3 amendment (ruling 6398566164): a caller-keyed update policy on a detail admits nobody the master gate refuses — unless it keys `owner_id` and the detail opted in (#26591: the opt-in is prescribed only there) |
  * | security-superuser-field-mask-inert (warning) | ADR-0066 D2 ⑧ as amended (ruling 6573563853, letter A): a set's View All / Modify All on an object votes on every field of it, so its own `readable: false` (or, under Modify All, its edit lock) on that object binds none of its holders |
  * | security-controlled-by-parent-master-reference-hidden (warning) | ADR-0055 §3: a write of a detail needs edit access to the master its stored reference names, so a set's `readable: false` on that reference hides a field that still decides its holders' writes, and a holder refused there gets a refusal that names no master |
+ * | security-update-policy-no-check (info) | ADR-0058 D4 write-check composition: a USING-only `update` / `all` policy keyed on a caller column other than `created_by` lets the ownership floor admit a row's new image too; info tier, so neither `os lint --strict` nor `os validate --strict` fails on it |
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
  * mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
@@ -141,6 +142,7 @@ import {
   type VisibleObjectExtension,
 } from './object-graph.js';
 import { injectedColumnsFor } from './system-fields.js';
+import type { UserTextParams } from './finding-user-text.js';
 import {
   PUBLIC_READ_WRITE_WAY_OUT,
   READ_ONLY_EXTERNAL_WAY_OUT,
@@ -180,6 +182,7 @@ export const SECURITY_MODIFY_ALL_DELETE_WITHHELD = 'security-modify-all-delete-w
 export const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN = 'security-controlled-by-parent-owner-policy-without-opt-in';
 export const SECURITY_SUPERUSER_FIELD_MASK_INERT = 'security-superuser-field-mask-inert';
 export const SECURITY_CBP_MASTER_REFERENCE_HIDDEN = 'security-controlled-by-parent-master-reference-hidden';
+export const SECURITY_UPDATE_POLICY_NO_CHECK = 'security-update-policy-no-check';
 
 export type SecuritySeverity = 'error' | 'warning' | 'info';
 
@@ -195,6 +198,12 @@ export interface SecurityFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's user-facing sentence interpolates, set by the
+   * advisory push sites whose rule has a sentence in
+   * `validate-security-posture.user-text.ts` (`AuthoringFinding.userTextParams`).
+   */
+  userTextParams?: UserTextParams;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -610,6 +619,7 @@ function pushCbpOwnerPolicyWithoutOptIn(
     hint:
       `Declare sharing: { controlledByParent: { ownerMayEdit: true } } on "${objName}" so its owner_id updates ` +
       `with read access to the master, or drop the policy`,
+    userTextParams: { permissionSet: psName, policy: policyName, object: objName, remedy: 'allow-owner-edit' },
   });
 }
 
@@ -655,6 +665,51 @@ function pushCbpCallerPolicyOffOwnerColumn(
         `against), or drop the policy`
       : `Give "${objName}" an ${CBP_OWNER_COLUMN} column (ownership: 'user', the default) and key the accountable ` +
         `person on it, or drop the policy`,
+    // The same remedy split as `hint`: ⛔ never the opt-in here.
+    userTextParams: {
+      permissionSet: psName,
+      policy: policyName,
+      object: objName,
+      remedy: detail.ownerColumn ? 'key-owner-id' : 'add-owner-id',
+    },
+  });
+}
+
+/**
+ * [ADR-0058 D4] The one caller column the platform's ownership floor keys
+ * (`owner_only_writes`: `created_by == current_user.id`, plugin-security
+ * `platform-ownership-policies.ts`). A policy keyed on it alone admits on the
+ * new row exactly whom the floor admits, so the update-check arm below skips it.
+ */
+const OWNERSHIP_FLOOR_COLUMN = 'created_by';
+
+/**
+ * `security-update-policy-no-check` for one policy, at `path` (the `check` it
+ * does not declare). One verdict sentence that states the composition rule and
+ * one remedy line that states its side effect; why both hold is this id's
+ * `os explain` entry. ⛔ It prescribes no way to hand a row back to its creator.
+ */
+function pushUpdatePolicyNoCheck(
+  findings: SecurityFinding[],
+  psName: string,
+  path: string,
+  policyName: string,
+  operation: string,
+  fields: readonly string[],
+): void {
+  const keyed = fields.map((f) => `${f} == current_user.id`).join(', ');
+  findings.push({
+    severity: 'info',
+    rule: SECURITY_UPDATE_POLICY_NO_CHECK,
+    where: `permission set "${psName}"`,
+    path,
+    message:
+      `${operation} policy "${policyName}" (${keyed}) declares no check. A row-level policy with no ` +
+      '`check` also admits new rows the ownership floor admits; declare `check` to bound what an update may write.',
+    hint:
+      'Declaring `check` on any applicable policy takes the USING-only siblings and the floor out of the check, ' +
+      'so a creator who is not the owner loses update unless a `check` admits them.',
+    userTextParams: { permissionSet: psName, policy: policyName },
   });
 }
 
@@ -678,6 +733,7 @@ function pushCbpMasterReferenceHidden(findings: SecurityFinding[], psName: strin
     hint:
       `Make '${flsKey}' readable (readable: true) so a refused holder is told which master the write needs, ` +
       `or keep it hidden if a generic refusal is meant`,
+    userTextParams: { permissionSet: psName, field: flsKey },
   });
 }
 
@@ -1089,6 +1145,50 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     }
   }
 
+  // ── [ADR-0058 D4] a caller-keyed update policy that declares no check ──
+  // When no applicable policy for an update declares `check`, each applicable
+  // policy's `using` stands in as its check, OR-combined, and the platform's
+  // ownership floor (`owner_only_writes`, `created_by == current_user.id`)
+  // takes part where the write's pre-image gate kept it (plugin-security
+  // `writeCheckPolicies`, rule 3; `rls.zod.ts` `check`). So a USING-only
+  // `update` / `all` policy keyed on another caller column (`owner_id`, an
+  // assignee) admits a new row its creator writes as well as one its keyed
+  // user writes. That is the published composition; this arm states it where
+  // the policy is authored. Advisory `info`: the composition is correct as
+  // published and nothing refuses the shape; `--strict` promotes warnings,
+  // never an `info`, on `os lint` and `os validate` alike (ruling of record
+  // 6787890900).
+  //
+  // Judged per policy, as declared: whether a sibling policy declares `check`
+  // for a given caller depends on the sets and positions that caller holds,
+  // which an authored stack does not settle. The caller columns are read by
+  // the owner arm's recogniser above (`callerIdentityKeyedFields`), never a
+  // second one; a blank `check` declares nothing, as the runtime reads it.
+  for (let i = 0; i < permissionSets.length; i++) {
+    const ps = permissionSets[i];
+    if (!ps || typeof ps !== 'object') continue;
+    const psName = typeof ps.name === 'string' ? ps.name : `(permission set ${i})`;
+    const policies = recordsOf(ps.rowLevelSecurity);
+    for (let j = 0; j < policies.length; j++) {
+      const policy = policies[j];
+      if (!policy || typeof policy !== 'object' || policy.enabled === false) continue;
+      const operation = String(policy.operation ?? '');
+      if (!UPDATE_CLASS_RLS_OPERATIONS.has(operation)) continue;
+      if (typeof policy.check === 'string' && policy.check.trim() !== '') continue;
+      const fields = callerIdentityKeyedFields(policy.using).filter((f) => f !== OWNERSHIP_FLOOR_COLUMN);
+      if (fields.length === 0) continue;
+      const policyName = typeof policy.name === 'string' ? policy.name : `(policy ${j})`;
+      pushUpdatePolicyNoCheck(
+        findings,
+        psName,
+        `permissions[${i}].rowLevelSecurity[${j}].check`,
+        policyName,
+        operation,
+        fields,
+      );
+    }
+  }
+
   // [#16108] The object graph, for the FLS field-existence rule below. Built
   // ONCE here rather than per permission set: `indexObjectGraph` walks every
   // object's whole field map, and a stack with N sets would otherwise pay for
@@ -1332,6 +1432,15 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         hint:
           `Remove ${bit} from ${via} and reach the rows with readScope/writeScope or a row-level policy, ` +
           `or delete the entry if the bypass is meant`,
+        // `inert` names the half the user sentence may call ineffective: beside
+        // View All only the read mask is, and the edit lock still binds.
+        userTextParams: {
+          permissionSet: psName,
+          field: flsKey,
+          object: flsObject,
+          bypass: modifyAll ? 'modify' : 'view',
+          inert: inertBits.length > 1 ? 'both' : readMasked && viewAll ? 'read' : 'edit',
+        },
       });
     }
 
@@ -1447,6 +1556,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         hint:
           `Gate the book on one of this package's own permission sets (ADR-0090 D9, e.g. its admin set), ` +
           `or fix the typo. Ignore if the set is intentionally provided by another installed package.`,
+        userTextParams: { book: String(book.name ?? i), permissionSet: setName },
       });
     }
   }
@@ -1499,6 +1609,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
               : `If that is intended (personal data), ignore this. Otherwise add readScope: 'org', ` +
                 `or widen the object's sharingModel. Scopes 'own_and_reports', 'unit' and 'unit_and_below' ` +
                 `need requires: ['hierarchy-security'], which @objectstack/security-enterprise provides.`,
+            userTextParams: { permissionSet: psName, object: objName },
           });
         }
       }
@@ -1562,6 +1673,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           hint:
             `Grant it where its master${md.parent ? ` "${md.parent}"` : ''} is granted: ` +
             `permissions[i].objects.${objName} = { allowRead: true, allowCreate: true, allowEdit: true }`,
+          userTextParams: { object: objName, master: md.parent ?? '' },
         });
       }
     }

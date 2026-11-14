@@ -40,10 +40,9 @@
  *   keeps is the parity, and the enumeration in
  *   `explain-enforce-parity.test.ts` holds the tenant-object and
  *   organization-authored-set rows.
- * - `single`: there is no wall, enforcement keeps the claim, and so does the
- *   explanation. That is the posture condition of the same check, which is how
- *   this file tells "the check enforcement runs" from a rule of the explainer's
- *   own.
+ * - `single` answers the same (ADR-0093 D8.1, as amended): the membership
+ *   rule holds under every posture, so the removed member's claim is dropped
+ *   there too, on both faces.
  *
  * ## The rig
  *
@@ -293,7 +292,7 @@ function withRig(makeDriver: () => Driver, posture: TenancyPosture) {
 }
 
 describe.each(DRIVERS)('[#20580] %s', (_driver, makeDriver) => {
-  describe.each(['isolated', 'group'] as const)('walled posture `%s`: the explainer resolves the user where enforcement does', (posture) => {
+  describe.each(['single', 'isolated', 'group'] as const)('posture `%s`: the explainer resolves the user where enforcement does', (posture) => {
     const r = withRig(makeDriver, posture);
 
     it('precondition: enforcement drops the removed member\'s org_alpha claim, and keeps the current member\'s', async () => {
@@ -338,21 +337,6 @@ describe.each(DRIVERS)('[#20580] %s', (_driver, makeDriver) => {
       expect(enforcement.read).toEqual({ admitted: 1 });
       expect(crudOf(d)).toBe('grants');
       expect(d.allowed).toBe('admitted' in enforcement.read);
-    });
-  });
-
-  describe('CONTROL · posture `single`: no wall, so enforcement keeps the claim, and so does the explanation', () => {
-    const r = withRig(makeDriver, 'single');
-
-    it('the removed member keeps org_alpha on both faces: the set is listed and the read is granted', async () => {
-      const d = await r.rig().explain(USER_REMOVED);
-      const enforcement = await r.rig().enforce(USER_REMOVED);
-      expect(enforcement.tenantId).toBe(ALPHA);
-      expect(r.droppedClaimLines()).toEqual([]);
-      expect(enforcement.read).toEqual({ admitted: 1 });
-      expect(d.principal.permissionSets).toContain(PROBE_SET);
-      expect(sorted(d.principal.permissionSets)).toEqual(sorted(enforcement.sets));
-      expect(crudOf(d)).toBe('grants');
     });
   });
 });

@@ -16,8 +16,13 @@
  * or promoted.
  *
  * Every other producer (a draft save, the batch writers, a package publish)
- * keeps the body-only question; their registration refusals are still only
- * logged at the write-through (#32369). A NEW producer of a published
+ * keeps the body-only question per row. A batch that makes object rows live
+ * then asks the question once its unit is whole (#32369,
+ * `batch-object-registration.ts`): a package duplicate, an unmanaged import, a
+ * package publish and the stored-metadata migration pass register their objects
+ * together and refuse — or take back and report, per row, in their own result
+ * shape — every row the registry refuses, so a refused row is never left
+ * stored and answered written. A NEW producer of a published
  * `saveMetaItem`, or of `promoteDraftForPublish`, states its choice here and
  * in {@link REGISTRY_QUESTION_PRODUCERS};
  * `packages/runtime/src/metadata-registry-question-producers.test.ts` (the
@@ -31,10 +36,13 @@ export type RegistryQuestion = 'against-registry' | 'body-only';
 
 /**
  * The save faces that are one object made live at once and answered to its
- * author: `PUT /meta/:type/:name` (`meta-envelope`) and the runtime `/meta`
- * dispatcher (`meta-dispatch`). Each is stated at exactly one call site.
+ * author: `PUT /meta/:type/:name` (`meta-envelope`), the runtime `/meta`
+ * dispatcher (`meta-dispatch`), and a datasource table's import
+ * (`external-import`: each import saves ONE object and relays the save's
+ * refusal to its caller, #32369 — not a batch). Each is stated at exactly one
+ * call site.
  */
-export const AGAINST_REGISTRY_SAVE_FACES: ReadonlySet<MetadataWriteFace> = new Set<MetadataWriteFace>(['meta-envelope', 'meta-dispatch']);
+export const AGAINST_REGISTRY_SAVE_FACES: ReadonlySet<MetadataWriteFace> = new Set<MetadataWriteFace>(['meta-envelope', 'meta-dispatch', 'external-import']);
 
 /** The registry question a `saveMetaItem` asks: a published save on an {@link AGAINST_REGISTRY_SAVE_FACES} face asks against the registry. */
 export function saveRegistryQuestion(request: { mode?: 'draft' | 'publish'; writeFace?: MetadataWriteFace }): RegistryQuestion {
@@ -47,7 +55,9 @@ export function saveRegistryQuestion(request: { mode?: 'draft' | 'publish'; writ
  * The registry question each producer of `promoteDraftForPublish` states (its
  * request's required `registryQuestion`): the per-item publish
  * (`POST /meta/:type/:name/publish`) has no sibling and asks against the
- * registry; a package publish promotes its drafts as one batch.
+ * registry; a package publish promotes its drafts as one batch, and asks the
+ * unit once every draft is promoted, before its commit (#32369) — on a runtime
+ * that cannot roll back, also before any draft is promoted.
  */
 export const PROMOTION_REGISTRY_QUESTION = {
     'item-publish': 'against-registry',
@@ -75,11 +85,11 @@ export const REGISTRY_QUESTION_PRODUCERS: readonly RegistryQuestionProducer[] = 
     { file: 'packages/runtime/src/domains/automation.ts', callee: 'saveMetaItem', calls: 1, question: 'body-only', why: 'a flow clone writes a flow, never an object.' },
     { file: 'packages/runtime/src/domains/packages.ts', callee: 'saveMetaItem', calls: 1, question: 'body-only', why: 'a package publish/unpublish flips each of its apps\' visibility: writes an app, never an object.' },
     { file: 'packages/runtime/src/domains/permission-set-clone.ts', callee: 'saveMetaItem', calls: 1, question: 'body-only', why: 'a permission-set clone writes a permission set, never an object.' },
-    { file: 'packages/services/service-datasource/src/plugin.ts', callee: 'saveMetaItem', calls: 1, question: 'body-only', why: 'face `external-import`: an import pass over a datasource\'s tables (batch).' },
+    { file: 'packages/services/service-datasource/src/plugin.ts', callee: 'saveMetaItem', calls: 1, question: 'by-face', why: 'face `external-import`: one datasource table imported as one object, its refusal relayed to the caller: against the registry.' },
     { file: 'packages/services/service-automation/src/flow-credential-migration.ts', callee: 'saveMetaItem', calls: 1, question: 'body-only', why: 'a stored-flow migration pass writes flows, never an object.' },
-    { file: 'packages/metadata-protocol/src/protocol-package-commits.ts', callee: 'saveMetaItem', calls: 2, question: 'body-only', why: 'faces `package-duplicate` and `package-unmanaged-import`: a package copied or imported row by row (batch).' },
+    { file: 'packages/metadata-protocol/src/protocol-package-commits.ts', callee: 'saveMetaItem', calls: 2, question: 'body-only', why: 'faces `package-duplicate` and `package-unmanaged-import`: a package copied or imported row by row (batch); its objects are judged as one unit after the loop.' },
     { file: 'packages/metadata-protocol/src/protocol-packageless-overlay-migration.ts', callee: 'saveMetaItem', calls: 2, question: 'body-only', why: 'the packageless overlay migration rewrites stored rows (batch).' },
-    { file: 'packages/metadata-protocol/src/protocol-save.ts', callee: 'saveMetaItem', calls: 1, question: 'body-only', why: 'the stored-object migration pass re-saves stored rows (batch).' },
+    { file: 'packages/metadata-protocol/src/protocol-save.ts', callee: 'saveMetaItem', calls: 1, question: 'body-only', why: 'the stored-object migration pass re-saves stored rows (batch); its rewritten objects are judged as one unit after the pass.' },
     { file: 'packages/cli/src/commands/migrate/organization-ownership.ts', callee: 'saveMetaItem', calls: 1, question: 'body-only', why: 'the CLI organization-ownership migration re-saves stored rows (batch).' },
-    { file: 'packages/metadata-protocol/src/protocol-history-and-publish.ts', callee: 'promoteDraftForPublish', calls: 2, question: 'by-face', why: 'states `registryQuestion` per call: the per-item publish `item-publish` (against the registry), `publishPackageDrafts` `package-publish` (body-only).' },
+    { file: 'packages/metadata-protocol/src/protocol-history-and-publish.ts', callee: 'promoteDraftForPublish', calls: 2, question: 'by-face', why: 'states `registryQuestion` per call: the per-item publish `item-publish` (against the registry), `publishPackageDrafts` `package-publish` (body-only, the promoted unit judged before its commit).' },
 ];

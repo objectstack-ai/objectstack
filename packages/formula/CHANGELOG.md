@@ -1,5 +1,384 @@
 # @objectstack/formula
 
+## 18.4.0
+
+### Minor Changes
+
+- 4c2cd29: **Shipped in 18.3.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  fix(lint)!: publish refuses a validation rule (or another fail-closed predicate) that orders a text or boolean field against a number, instead of warning that it "evaluates to null" and then refusing every write (#29904)
+  
+  Clause-②: no (narrowing) — the author-time gate (`os build`, `os validate`, the object save door and the package publish) refuses a `type-mismatch` it used to pass with a warning, at the predicate sites that fail closed. Nothing is widened.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered validation-type-mismatch-refused -->
+  
+  **BREAKING** accept-set narrowing at the author-time expression gate, served by `os build`, `os validate`, the object save door and `POST /api/v1/packages/:id/publish-drafts`.
+  
+  - **Before.** `record.name > 5` on a text field, written as a validation rule's `condition`, published with one `expression-invalid` advisory at `severity: warning` saying the expression "silently evaluates to null". A validation rule fails closed, so from then on every create and update whose `name` was not numeric text was refused: `400 VALIDATION_FAILED` "Validation rule 'name_gt' could not be evaluated (runtime: no such overload: dyn<string> > int) — write rejected".
+  - **Now.** The same rule is refused at publish as `expression-invalid` at `severity: error`, at the rule's `condition` path, with a message that says the write would be refused and how to compare like with like. This is the severity the nullable-comparison verdict (`record.qty > 1000` on a nullable number) already had at the same slot.
+  - **Which sites.** Those whose runtime refuses the write (or aborts the operation) when the expression faults: a validation rule's `condition` and `when`, nested `then` / `otherwise` rules included; a field's `requiredWhen` and `readonlyWhen`; an option's `visibleWhen` (a write that picks the option); a hook's `condition`. The `validate_expression` MCP tool answers the same for `site: 'validation'`.
+  - **Unchanged.** A formula field's `expression` keeps the warning: there the fault reads null, which is what the warning says. So do flow conditions (the run fails, the write that fired it lands), a field's display `visibleWhen` / `settledWhen`, field group and action predicates, and `conditionalFormatting`. Sharing-rule conditions compile to a query filter and are not judged by this verdict.
+  - **`@objectstack/spec`.** The upgrade guide entry `validation-type-mismatch-refused` (a semantic migration: no automatic rewrite, because whether the author meant the length, a number stored as text or another field is a judgement about the rule).
+  - **`@objectstack/formula`.** `ExprSchemaHint` gains `faultOutcome?: 'fail-closed'`, which the caller sets for a fail-closed site; the `type-mismatch` refusal's `params` carry `outcome: 'fail-closed'` when it is graded an error there.
+  
+  **FROM → TO.** `condition: 'record.name > 5'` on a text field → `size(record.name) > 5` for its length, `record.score > 5` on a number field for a value, or `double(record.name) > 5` only when every value is numeric text (it faults, and refuses the write, on any other). A boolean: `record.active > 0` → `record.active == true`.
+- 9037b13: fix(lint)!: a text-vs-number comparison in a record-triggered flow condition is refused with what really happens (the run fails, the write lands), and in an advisory validation rule the refusal no longer says the write is refused (#29926)
+  
+  Clause-②: no (narrowing) — the author-time gate (`os build`, `os validate`, the package publish and the flow publish door) refuses a `type-mismatch` in a record-triggered flow's start or edge condition that it used to pass with a warning; and the fail-closed arm of the verdict is served under its own code `type-mismatch-fail-closed` instead of `type-mismatch` with `params.outcome`. Added beside them: the codes `type-mismatch-run-fails` and `type-mismatch-fail-open`, and the exported type `ExprFaultOutcome`.
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/data-modeling/formulas.mdx` (the type-soundness row names each outcome) and the MCP skill text in `packages/mcp/src/skill-md.ts` (`flow_condition` now errors too); `skills/**` teaches no text-vs-number comparison in a flow condition or an advisory rule, so no skill or eval moves.
+  
+  <!-- adr-0087: registered flow-condition-type-mismatch-refused -->
+  
+  **BREAKING** accept-set narrowing at the author-time expression gate, served by `os build`, `os validate` and `POST /api/v1/packages/:id/publish-drafts`.
+  
+  - **Record-triggered flow conditions — before.** `name > 5` on a text field, as the start node's `condition` or an edge `condition` of a flow whose start `triggerType` is `record-*`, published with an `expression-invalid` warning saying the expression "silently evaluates to null". It does not: the engine's `evaluateCondition` throws on the fault, so the run fails at that condition, and the record-change trigger isolates the write that fired it, so the write lands and the flow's work is not done.
+  - **Now.** The same condition is refused as `expression-invalid` at `severity: error`, code `type-mismatch-run-fails`, with a message saying the run fails at the condition and the triggering write still lands. This is the severity and outcome the nullable-comparison verdict already has on those conditions (#29026). A flow that is not record-triggered, and a node `condition` other than the start node's (inert), keep the warning. The `validate_expression` MCP tool answers the same for `site: 'flow_condition'`.
+  - **Advisory validation rules** (`severity: 'warning'` / `'info'`). Still refused at publish, as the nullable twin refuses them, but under `type-mismatch-fail-open` with a message that says what happens: the rule is skipped, the write proceeds, and the rule never gives its advisory. The nullable twin's message on the same rule now says the same instead of "the write is rejected fail-closed". A `severity: 'error'` rule keeps both refusals and their wording.
+  - **Refusal codes (`@objectstack/formula`).** A code names one message template, so each outcome has its own: `type-mismatch` (warning, reads null), `type-mismatch-fail-closed`, `type-mismatch-run-fails`, `type-mismatch-fail-open` (all errors). `ExprSchemaHint.faultOutcome` takes `'fail-closed' | 'run-fails' | 'fail-open'` (exported as `ExprFaultOutcome`); the `outcome` param on `type-mismatch` is gone.
+  - **`@objectstack/spec`.** Upgrade guide entry `flow-condition-type-mismatch-refused` (semantic: no mechanical rewrite). The `validation-type-mismatch-refused` entry's acceptance criteria now say a create answers 201, the data door's status.
+  
+  **FROM → TO.** Flow condition `name > 5` on a text field → `size(name) > 5` for its length, `score > 5` on a number field for a value, or `double(name) > 5` only when every value is numeric text. A boolean: `active > 0` → `active == true`. A consumer keyed to the code: `type-mismatch` with `params.outcome === 'fail-closed'` → `type-mismatch-fail-closed`.
+  
+  **The renamed code shipped in 18.3.0.** `@objectstack/formula@18.3.0` and `@objectstack/mcp@18.3.0` already serve #29904's fail-closed refusal as `type-mismatch` with `params.outcome: 'fail-closed'` (the `outcome` param is in the 18.3.0 `ExpressionRefusalParams` type), although 18.3.0's changelog has no line for it: its changeset (`29904-type-mismatch-fail-closed.md`) was not consumed by that release. This release renames that arm `type-mismatch-fail-closed` and removes the `outcome` param, so a consumer keyed to 18.3.0's `type-mismatch` + `outcome` moves to the new code (FROM → TO above). The same changeset also says flow conditions keep the warning; a record-triggered flow's start and edge conditions are now refused, as above.
+- e8afd1e: fix(lint)!: every flow condition's text-vs-number comparison gets a verdict that says what the run does — a record-triggered flow's `record.<field>` read and `decision` branch are refused like its bare name, a time-relative sweep of the flow's object is refused like a record-triggered flow, a bare name a flow variable holds is no longer typed as the field, and any other flow's warning says the run fails instead of "evaluates to null" (#29959)
+  
+  Clause-②: yes (narrowing) — the author-time gate (`os build`, `os validate`, the package publish and the flow publish door) refuses, on a record-triggered flow, a `type-mismatch` in a `decision` branch and in a `record.<field>` / `previous.<field>` read of a start or edge condition, which it passed with no verdict before; refuses the same on a time-relative flow sweeping the object its conditions are typed against, where 18.3.0 served a warning; and a flow condition's `type-mismatch` warning is served under its own code `type-mismatch-run-may-fail` instead of `type-mismatch`. Added beside them (the widening half): the optional `severity` and `triggerKind` inputs of the `validate_expression` MCP tool, the code `type-mismatch-run-may-fail` in `@objectstack/formula`'s `ExpressionRefusalCode`, the optional `flowVariables` key of `@objectstack/formula`'s `ExprSchemaHint`, and a bare flow-condition name that a declared flow variable or node id holds is no longer typed as the field it shadows (no verdict where 18.3.0 served a `type-mismatch` warning).
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/data-modeling/formulas.mdx` (the type-soundness row names the decision branch, the `record.<field>` read and the warning on other flows) and the MCP skill text in `packages/mcp/src/skill-md.ts` (the two new `validate_expression` inputs); `skills/**` teaches no text-vs-number comparison in a flow condition (grep for `type mismatch`, `evaluates to null`, `validate_expression` and the decision examples), so no skill or eval moves.
+  
+  <!-- adr-0087: registered flow-record-read-and-decision-type-mismatch-refused -->
+  
+  **BREAKING** accept-set narrowing at the author-time expression gate, served by `os build`, `os validate` and `POST /api/v1/packages/:id/publish-drafts`.
+  
+  - **Record-triggered flows — before.** The start and edge conditions refused `name > 5` on a text field (`type-mismatch-run-fails`), but `record.name > 5` in the same slot, and `name > 5` in a `decision` node's `config.conditions[].expression`, published with no verdict at all. Both fail the run the same way: the engine's `evaluateCondition` throws on the fault, the run binds the trigger record both as `record` and flattened to bare names, and a decision branch is evaluated over the same variables as an edge.
+  - **Now.** Both are refused as `expression-invalid` at `severity: error`, code `type-mismatch-run-fails`, with the message the bare name already gets: the run fails at the condition and the triggering write still lands. `previous.<field>` is judged the same way. The date verdicts stay on the bare name only, as before.
+  - **Time-relative flows.** A sweep launches each run with the swept row as its record, so on a flow whose `timeRelative.object` is the start node's `objectName` (or is omitted) the start, edge and `decision` conditions get the record-triggered verdict above, bare name included: `type-mismatch-run-fails`, where 18.3.0 served a `type-mismatch` warning. A sweep of another object keeps the warning below.
+  - **Any other flow** (no `triggerType`, a `schedule` flow, an `api` flow) and an inert node `condition` keep a warning. Its text said the expression "silently evaluates to null", which is false on every flow: a condition that faults fails the run. It is now `type-mismatch-run-may-fail`, worded for the failed run, and a warning because such a flow is handed whatever its entrance carries (an API request body, an action's partial record, a parent flow's record, or nothing), so the field's type is not proven to be what the name holds. A `record.<field>` read and a `decision` branch there get the same warning. The flow registration log line reads the same text.
+  - **A bare name a flow variable holds.** The run seeds a flow's declared variables (and each node's outputs, under its id) before it flattens the record, and the flattening skips a name already bound. So in a flow that declares `variables: [{ name: 'title', type: 'number' }]` over a text field `title`, a bare `title > 5` reads the number and runs; it was refused as `type-mismatch-run-fails` on the head that added that error, and warned on 18.3.0. It now gets no type verdict (the `flow-variable-shadows-field` warning still names the shadowing). `record.title > 5` reads the field and stays refused.
+  - **`validate_expression` (MCP).** Two optional inputs, so the tool answers what the gate will: `severity` (`error` | `warning` | `info`, site `validation`; default `error`) gives an advisory rule the gate's `type-mismatch-fail-open` instead of the fail-closed verdict, and `triggerKind` (`record_change` | `time_relative` | `schedule` | `api` | `none`, site `flow_condition`; default `record_change`) gives a `schedule`, `api` or `none` flow the gate's warning instead of the run-fails error (`time_relative` answers run-fails, its record being a row of `objectName`). Either input on a site it does not describe is refused as a tool error. A call that passes neither answers as before.
+  - **`@objectstack/spec`.** Upgrade guide entry `flow-record-read-and-decision-type-mismatch-refused` (semantic: no mechanical rewrite).
+  
+  **FROM → TO.** In a record-triggered flow, or a time-relative flow sweeping its own object: `record.name > 5` (or a decision branch `name > 5`) on a text field → `size(record.name) > 5` for its length, `record.score > 5` on a number field for a value, or `double(record.name) > 5` only when every value is numeric text. A boolean: `record.active > 0` → `record.active == true`. A consumer keyed to the code of a flow condition's warning: `type-mismatch` → `type-mismatch-run-may-fail` (`@objectstack/formula@18.3.0` and `@objectstack/mcp@18.3.0` serve `type-mismatch` there; the record-scoped `type-mismatch`, on a formula field or a display predicate, is unchanged).
+- 3da9a4c: feat(formula): a mail template hole may name the `option` formatter, `{{ stage | option:opportunity.stage }}`, which prints a select value as its option's label from the table the mail renderer hands in
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #30731 — `skills/objectstack-automation/SKILL.md` (the `notify` section) gains one line: an option label in a notice is written with the mail formatter `{{ stage | option:opportunity.stage }}`, not with `label()` in `templateData`. The skills lane owns that file.
+  
+  - **`option` is a mail template's formatter.** `judgeHoleFormatter(…, 'mail')`, `parseMailHole` and `judgeMailHoleGrammar` accept `option:object.field`, and `parseMailHole` returns the reference as `optionField: { object, field }`. `MAIL_TEMPLATE_FORMATTERS` (new) is the mail list, `TEMPLATE_FORMATTERS` then `option`, and the mail refusals list it as the known formatters. `OPTION_ARGUMENT_RULE` (new) is the one sentence the spec, the renderer and the authoring rule quote; `optionFieldReference` (new) parses the argument.
+  - **The argument is a bare `object.field`.** No argument, an empty one, a field with no object (`option:stage`), a quoted reference (`option:'opportunity.stage'`), a marked path (`option:@stage_ref`) and a second dot are refused (`option-field-shape`), naming the hole, the argument and the rule.
+  - **The object and field are judged when the caller hands in the app's objects.** `judgeMailHoleGrammar(face, { objects })` takes each object's name to its fields, each `true` when the field declares options, each `null` for an object that resolves with its fields not in hand (whose field is then not judged), and refuses an object it does not name (`option-object-unknown`), a field that object does not have (`option-field-unknown`) and a field with no options (`option-field-no-options`). A name it does not carry that has a platform prefix (`sys_`, `cloud_`, `ai_`) is rung ④ of the object-reference ladder, neither refused nor judged, since a package outside the app may register it; `optionObjectUnregisteredPlatform` (new) answers which references those are, for a caller that advises on them. `judgeMailHoleGrammar(face, { objects, liveUniverse: true })` says the objects are the deployment's whole served universe (the publish door, the renderer at send): there rung ④ does not apply and such a name is refused (`option-object-unknown`). `packageScope: { packageId }` says those objects are narrowed to a written package's closure (implying `liveUniverse`): a name they do not carry is refused as outside that closure (`option-object-outside-closure`), naming the remedy, a dependency declared in the package's manifest.
+  - **The formatter prints from the table it is handed.** `formatValue('option', value, 'opportunity.stage', { optionLabels })` takes `optionLabels` (`OptionLabelTable`, new): for each `object.field`, each option's label keyed by its stored value, in the locale the face renders in. A value the table does not hold prints as stored, and a multi-select value labels each element joined with `, `. With no table for that `object.field` the call throws a `RangeError` carrying `optionTableRefusal`'s sentence (new export, the `currencyDefaultRefusal` shape, so a renderer can ask it before it formats): the stored value is never printed where a label was promised. This package reads no metadata and no translations: the mail renderer builds the table per recipient.
+  - **In-app template text refuses it.** `TEMPLATE_FORMATTERS` is unchanged, and the in-app dialect (flow notice `title` / `message`, action and bulk-action copy) refuses `option` as a formatter it does not know (`known-formatter`), saying it formats only in a mail template.
+- 4f1de9f: fix(formula)!: the gate refuses a date or datetime field handed straight to a call that takes a timestamp, which faults wherever the field's text reaches it, and stops refusing its concatenation with text and its ordering against a literal (#32595)
+  
+  Clause-②: no (narrowing) — the author-time gate (`os validate`, `os build`, `os lint`, the object save door and the other doors of the active authoring gate) refuses a call on a date or datetime field it passed before. The two refusals it drops (concatenating a date field with text, ordering one against a text literal) are behaviour the published text already declares accepted: the `registerDateTextOverloads` docblock in `packages/formula/src/cel-engine.ts` ("ordering against another date field or a text literal → string-lex", "`+` with text … → string concatenation") and this package's 18.3.0 changelog entry for #28944 (51058ef: "Date comparisons (`<`, `==`, against a literal, against `today()`), concatenation, … all stay accepted"). Nothing is newly accepted.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered formula-date-text-call-refused -->
+  
+  **BREAKING** accept-set narrowing at the authoring type-soundness gate (`@objectstack/formula` `validateExpression`), shipped as `minor`. The gate declared a `date` / `datetime` field a CEL Timestamp, so `isoDate(record.start_at)` and `record.start_date.getFullYear()` checked clean. The SQL driver's read doors (ADR-0053 D-F1) and a write that hands the value as text (every JSON body) give the evaluator a date field as its `YYYY-MM-DD` text and a datetime field as its ISO-8601 instant text, and there the evaluator finds no overload for the call, on every record whose value reaches it.
+  
+  - **Before.** A formula `isoDate(record.start_at)` built green and read `null` on every record whose value reached the call as text, with a server WARN as the only trace. A validation rule `!startsWith(isoDate(record.start_at), "2026")` published clean and then refused every such write as unevaluable, because a validation rule fails closed. A fail-open predicate of the same shape never fired. `isoDatetime(...)` and the Timestamp methods (`getFullYear()`, `getHours()`, …) on a date field behaved the same.
+  - **Now.** The same expression is refused (`severity: error`) under the new code `date-text-call`, or `date-text-call-fail-closed` / `-fail-open` / `-run-fails` / `-run-may-fail` where the site's fault outcome is known. The message names the call and the field, says what the fault does at that site, and prescribes the rewrite with the field parsed by `date(…)` first. The gate checks the rewrite clean before it prescribes it. `params: { call, reference, rewrite }`.
+  - **No longer refused.** `record.title + " " + record.start_at` and `"Due: " + record.end_date` (concatenation), and `record.start_date < "2026-12-01"` (ordering against a text literal), evaluate to a value at runtime. The gate refused them as `type-mismatch-fail-closed` at a fail-closed site and warned `type-mismatch` elsewhere. They are clean now, as the declared text above says.
+  - **Unchanged.** Ordering a date field against text that is not a literal keeps its `type-mismatch` verdict, because no declared text covers it: a text field read directly (`record.title < record.start_at`) or through a ternary, and text computed by `+`, `upper(…)`, `string(…)` or `isoDate(…)` (`record.start_date < isoDate(today())`). Date arithmetic keeps its `date-arithmetic` / `date-text-arithmetic` / `date-duration-value` refusals word for word. `daysBetween`, `addDays`, `addMonths` and comparison against `today()` stay accepted.
+  - **Also refused: a guarded call.** `record.start_at != null && isoDate(record.start_at) == "2026-11-16"` evaluates to `false` on a row without a value and faults on every row with one, so it is refused like the bare call; the rewrite keeps the guard.
+  - **Where a date-time arrives as a JS `Date`.** A server-side writer that hands a `Date` (measured through the engine), or a MongoDB read, whose storage form for a datetime is a BSON `Date` (not measured end to end), gives the evaluator a Timestamp, and there the refused call evaluates. The refusal applies there too. The prescribed rewrite reads the same value on the text and on a `Date`, so rewriting changes no value that worked.
+  - **Who sees it.** An author whose expression hands a date field straight to `isoDate`, `isoDatetime` or a Timestamp method. On an SQL-backed object written through the API, that expression already read `null` or refused the write wherever the field had a value. No expression shipped in this repository's `packages/`, `examples/`, `skills/` or `content/docs/` has this shape.
+  - **`@objectstack/spec`.** The upgrade guide entry `formula-date-text-call-refused` (a semantic migration: the rewrite is shown per call in the refusal, and it reads the same value on both shapes the field arrives in).
+  
+  ## FROM → TO
+  
+  ```ts
+  // before: built green, read null wherever the field's text reached the call (a validation rule refused the write)
+  day: Field.formula({ expression: 'isoDate(record.start_at)' }),
+  year: Field.formula({ expression: 'record.start_date.getFullYear()' }),
+  
+  // after: parse the field's text into a timestamp first
+  day: Field.formula({ expression: 'isoDate(date(record.start_at))' }),
+  year: Field.formula({ expression: 'date(record.start_date).getFullYear()' }),
+  ```
+  
+  `date(…)` keeps a datetime's instant, so `isoDatetime(date(record.start_at))` and `date(record.start_at).getHours()` read the value they were written to read.
+
+### Patch Changes
+
+- 0f3ee58: fix(formula,lint): a date-arithmetic verdict in a flow condition says the run fails, not that the value reads null
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/formula`: four codes join `ExpressionRefusalCode`**: `date-arithmetic-run-fails`, `date-arithmetic-run-may-fail`, `date-text-arithmetic-run-fails` and `date-text-arithmetic-run-may-fail`, with the same params as `date-arithmetic` / `date-text-arithmetic`. A flow condition (a `'flattened'` site) that does arithmetic on a date field used to be told the field "silently evaluates to null", but the engine's `evaluateCondition` throws on the fault on every flow, so the run fails at the condition. Where the caller declares the run proven to hold the field (`faultOutcome: 'run-fails'`, with `bareNamesUnproven` unset) the verdict is served under `-run-fails` and says the run fails; anywhere else in a flow it is served under `-run-may-fail` and says the run fails wherever the name holds the field's date when the condition runs (a flow started by an API call, an action or a parent flow binds what its entrance hands over, which can be a number). The grade is unchanged: an error at every site. A `record`-scoped site (a formula field, a validation rule, a display predicate) keeps `date-arithmetic` / `date-text-arithmetic` and their sentence. A consumer keyed to the old codes on a flow condition re-keys to the new ones.
+  - **`@objectstack/lint`**: the fault-outcome ledger's docblock names the date verdicts' flow codes; the routing is the existing `faultOutcome` / `bareNamesUnproven` hint, unchanged.
+- 29cbfcc: fix(lint): a flow condition's bare-name type verdict no longer refuses a name a `screen` field holds, and stands down to the warning after a node that can bind any name (#30025)
+  
+  Clause-②: yes (widening) — the author-time gate (`os build`, `os validate`, the package publish and the flow publish door) no longer refuses, on a record-triggered flow (or a time-relative sweep of its own object), a `type-mismatch-run-fails` on a BARE condition name that a `screen` node's declared field holds (no verdict now), nor on a bare name in a flow with a node that can bind a name no reader sees (`script`, `connector_action`, `wait`, `subflow`, `map`, a screen with no input contract), which is now the `type-mismatch-run-may-fail` warning. A `record.<field>` / `previous.<field>` read keeps its refusal, and nothing new is refused. The null-guard verdict's bare names also leave a screen's field names out. Added beside them: the optional `bareNamesUnproven` key of `@objectstack/formula`'s `ExprSchemaHint`, and `collectScreenFieldNames` in `@objectstack/lint`'s flow-variable-scope module.
+  Metadata-protocol: none
+  Skills-docs: updated here — `content/docs/data-modeling/formulas.mdx` (the type-soundness row names the screen field and the open binder); `skills/**` and the MCP skill text teach no bare flow-condition name a screen or an open binder holds, so no skill or eval moves.
+  
+  - **Before.** A record-triggered flow whose `screen` node collects `title` (a number) and whose edge after it reads `title > 5`, with `title` a text field on the trigger object, was refused `type-mismatch-run-fails`: the bare name was typed as the field. The run binds the collected number there (a resume lands a screen's values under their plain names), so the condition runs. The same refusal hit a bare name after a `script`, `connector_action`, `wait`, `subflow` or `map` node, or a screen with no input contract, any of which can bind the name to a value nothing can see at build.
+  - **Now.** A screen's declared field names join the names a bare read holds instead of the field, so they are not typed as it (the null-guard verdict leaves them out too). In a flow with a node that can bind any name, a bare-name mismatch is the `type-mismatch-run-may-fail` warning, as the null-guard verdict already stands its bare names down there; `record.<field>` is still refused. The stand-down reads the flow's nodes only: an entrance (and the publish door's per-write snapshot, which sees none) changes which record both the bare name and `record.<field>` read, not whether a node rebinds the bare name, so a bare-name refusal on a record-triggered flow with no such node is unchanged at every door.
+- 67d5d53: fix(formula,lint,mcp): a fail-closed date verdict says the write is refused, and a time-relative sweep's run-fails verdict names no firing write
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/formula`: three codes join `ExpressionRefusalCode`** (`EXPRESSION_REFUSAL_CODES`), with the params of the code they split from:
+    - `date-arithmetic-fail-closed` and `date-text-arithmetic-fail-closed`. On a site that fails closed (`faultOutcome: 'fail-closed'`: an `error` validation rule, a field `requiredWhen` / `readonlyWhen`, an option `visibleWhen`, a hook `condition`), date arithmetic used to be told "this faults at runtime, so the field silently evaluates to null". There the fault refuses the write instead, and the verdict now says so. A formula field and an advisory (`warning` / `info`) validation rule keep `date-arithmetic` / `date-text-arithmetic` and their sentence. A consumer keyed to the old codes on a fail-closed site re-keys to the new ones.
+    - `type-mismatch-sweep-run-fails`. A time-relative sweep of the typed object is graded `run-fails` like a record-triggered flow, but no write fires its run: the sweep starts one run per row it finds. Its condition's text-vs-number verdict used to say "the write that fired it still lands". Served where the new optional `ExprSchemaHint.timeRelativeSweep` is set beside `faultOutcome: 'run-fails'`, it now says the run for that row fails and nothing else happens. A record-triggered flow keeps `type-mismatch-run-fails` and its sentence.
+  - The grade is unchanged at every site. What is refused, warned or passed is unchanged.
+  - **`@objectstack/lint`**: the flow walk passes `timeRelativeSweep` on a `time_relative` flow. The nullable-comparison verdict, which also says "still lands", runs on record-triggered flows only, so it is unchanged.
+  - **`@objectstack/mcp`**: `validate_expression` with `site: 'flow_condition'` and `triggerKind: 'time_relative'` passes the same key, so its answer stays the gate's.
+- 0e4747a: fix(formula): an advisory validation rule's date verdict says the rule is skipped and the write proceeds
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/formula`: two codes join `ExpressionRefusalCode`** (`EXPRESSION_REFUSAL_CODES`), with the params of the code each splits from: `date-arithmetic-fail-open` and `date-text-arithmetic-fail-open`.
+  - On an advisory (`severity: 'warning'` / `'info'`) validation rule (`faultOutcome: 'fail-open'`), date arithmetic used to be told "this faults at runtime, so the field silently evaluates to null". There is no field there, and nothing reads null: the rule is skipped and logged, and the write proceeds. The verdict now closes on the sentence `type-mismatch-fail-open` already uses for that outcome. This replaces the earlier note that an advisory rule keeps `date-arithmetic` / `date-text-arithmetic`.
+  - A formula field keeps `date-arithmetic` / `date-text-arithmetic` and the null sentence. A consumer keyed to the old codes on an advisory rule re-keys to the new ones.
+  - The grade is unchanged: the verdict is an error, as before. What is refused, warned or passed is unchanged.
+  - `@objectstack/lint` and `@objectstack/mcp` `validate_expression` already pass `faultOutcome: 'fail-open'` for an advisory rule, so both serve the new sentence with no change of their own.
+- 98583cd: fix(formula): the bare-reference and unbound-root refusals say the expression faults, not that it evaluates to null
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/formula`.** In a `record`-scoped expression, a bare field name (`amount` where `record.amount` is meant) and a mistyped root (`pge.…` where the surface binds `page`) are unknown variables: the expression faults with `Unknown variable: NAME` and never reads the field. The `bare-reference` and `unbound-root` refusals used to say the name "resolves to nothing and the expression silently evaluates to null", which is true only of a formula field. They now say the expression faults, and `bare-reference` names three outcomes of that fault: a formula field reads null, an `error` validation rule refuses the write, an action's `visible` hides the action. `os validate`, `os build` and the `validate_expression` tool print the new sentences.
+  - Codes and params are unchanged (`bare-reference` `{ name }`, `unbound-root` `{ name, roots, suggestion }`). What is refused, warned or passed is unchanged. Only the English `message` changed, so a consumer that matched the old text re-keys to the `code`.
+  - **`create-objectstack`.** The scaffolded `AGENTS.md` no longer says a bare field reference "evaluates to `null`". It now says the predicate cannot be evaluated on any record, so an action whose `visible` reads it is hidden everywhere and an `error` validation rule that reads it refuses every write. Projects scaffolded earlier keep their copy until it is edited.
+- fe88ecd: feat(formula): `@objectstack/formula` publishes the home-amount conversion arithmetic, `toScaledDecimal`, `divideToPlaces`, `formatScaledDecimal`, `documentDateOf` and the `ScaledDecimal` type
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The four functions the write-time home projection (ADR-0144 D5) converts a record amount with: exact decimal reading, the one division by the rate rounded half away from zero to the decimals you pass (the home currency's `CURRENCY_FRACTION_DIGITS`, still in `@objectstack/spec`), the canonical decimal spelling, and the calendar day a document date names in the organization's timezone (UTC when unset). They move unchanged out of `@objectstack/objectql`, which now imports them back and still re-exports them from its projection module, so a form can preview "≈ home amount" with the engine's own arithmetic instead of a second copy. Stored home amounts, rates and refusals do not change.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [25fea77]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [590724f]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [aad1603]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [ed4b832]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [d9a232f]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [f56354c]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [1368536]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [de6d893]
+- Updated dependencies [326453e]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [e336a33]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [44a030b]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

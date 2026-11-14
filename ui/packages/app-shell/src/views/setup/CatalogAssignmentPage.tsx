@@ -13,6 +13,14 @@
  * Who may add or remove is not judged here. The section asks the caller's
  * grant on the assignment object and the server judges every write, its
  * delegated-administration gate included; this page only picks the item.
+ *
+ * objectstack#32537 (ADR-0150 D4) — a permission set is identified by
+ * `(package, name)`. Given a `holderParam`, a name more than one package holds
+ * is listed once per holder, said beside it, and the pick names the holder's
+ * package in that parameter; the section is handed the holding. A link that
+ * names such a name and no holder the name alone addresses picks nothing: the
+ * page asks for a pick among the holders it lists. A name with one holder is
+ * listed, linked and handed on as before.
  */
 
 import * as React from 'react';
@@ -29,7 +37,14 @@ import {
 import { useMetadata } from '@object-ui/react';
 import { AlertCircle } from 'lucide-react';
 import { PageHeader } from '../../layout/PageHeader.js';
-import { catalogEntries, filterCatalogEntries, type CatalogEntry } from './peopleAssignments.js';
+import {
+  catalogEntries,
+  catalogEntryKey,
+  entryAnswersPick,
+  filterCatalogEntries,
+  type CatalogEntry,
+} from './peopleAssignments.js';
+import { holdingPackage, type PermissionSetHolder } from '../metadata-admin/permission-set-holder.js';
 
 export interface CatalogAssignmentCopy {
   title: string;
@@ -44,6 +59,8 @@ export interface CatalogAssignmentCopy {
   notFound: (name: string) => string;
   retry: string;
   refresh: string;
+  /** How an entry's holder is said, where the page lists more than one holder of a name (`holderParam`). */
+  holder?: (packageId: PermissionSetHolder) => string;
 }
 
 export interface CatalogAssignmentPageProps {
@@ -51,6 +68,12 @@ export interface CatalogAssignmentPageProps {
   type: string;
   /** The page-scoped query parameter that names the picked item. */
   param: string;
+  /**
+   * objectstack#32537 — the page-scoped query parameter that names the picked
+   * item's package where more than one package holds its name; given, the
+   * catalog is listed per holder (module doc).
+   */
+  holderParam?: string;
   icon: React.ReactNode;
   copy: CatalogAssignmentCopy;
   /** The assignment section for the picked item. */
@@ -66,7 +89,16 @@ export interface CatalogAssignmentPageProps {
 
 type CatalogRead = { kind: 'loading' } | { kind: 'failed' } | { kind: 'ready'; entries: CatalogEntry[] };
 
-export function CatalogAssignmentPage({ type, param, icon, copy, renderSection, testId, select }: CatalogAssignmentPageProps) {
+export function CatalogAssignmentPage({
+  type,
+  param,
+  holderParam,
+  icon,
+  copy,
+  renderSection,
+  testId,
+  select,
+}: CatalogAssignmentPageProps) {
   const metadata = useMetadata();
   // Read through a ref: the store's context value is rebuilt whenever any
   // cached type settles, and AGENTS.md #10 forbids keying the read on it.
@@ -78,6 +110,7 @@ export function CatalogAssignmentPage({ type, param, icon, copy, renderSection, 
   const [query, setQuery] = React.useState('');
   const [search, setSearch] = useSearchParams();
   const picked = search.get(param) ?? '';
+  const pickedPackage = holderParam ? search.get(holderParam) : null;
 
   React.useEffect(() => {
     let live = true;
@@ -85,12 +118,12 @@ export function CatalogAssignmentPage({ type, param, icon, copy, renderSection, 
     metadataRef.current.ensureType(type).then((items) => {
       if (!live) return;
       if (metadataRef.current.getTypeStatus?.(type) === 'error') setRead({ kind: 'failed' });
-      else setRead({ kind: 'ready', entries: catalogEntries(items) });
+      else setRead({ kind: 'ready', entries: catalogEntries(items, { byHolder: holderParam !== undefined }) });
     });
     return () => {
       live = false;
     };
-  }, [type, nonce]);
+  }, [type, nonce, holderParam]);
 
   /** Read the catalog again, past the store's cache and its failure cooldown. */
   const reload = React.useCallback(() => {
@@ -98,16 +131,28 @@ export function CatalogAssignmentPage({ type, param, icon, copy, renderSection, 
     void metadataRef.current.refresh(type).finally(() => setNonce((n) => n + 1));
   }, [type]);
 
-  const pick = (name: string) => {
+  const pick = (entry: CatalogEntry) => {
     setSearch(
       (prev) => {
         const next = new URLSearchParams(prev);
-        next.set(param, name);
+        next.set(param, entry.name);
+        if (holderParam) {
+          const packageId = holdingPackage(entry.holding);
+          if (packageId) next.set(holderParam, packageId);
+          else next.delete(holderParam);
+        }
         return next;
       },
       { replace: true },
     );
   };
+  const isPicked = (entry: CatalogEntry) => entryAnswersPick(entry, picked, pickedPackage);
+  const holderLine = (entry: CatalogEntry) =>
+    entry.holding && copy.holder ? (
+      <span className="block truncate text-xs text-muted-foreground" data-testid={`${testId}-holder`}>
+        {copy.holder(entry.holding.packageId)}
+      </span>
+    ) : null;
 
   const entries = read.kind === 'ready' ? (select ? select(read.entries) : read.entries) : [];
   const shown = filterCatalogEntries(entries, query);
@@ -156,20 +201,21 @@ export function CatalogAssignmentPage({ type, param, icon, copy, renderSection, 
         ) : (
           <ul aria-label={copy.listLabel} className="space-y-0.5">
             {shown.map((e) => (
-              <li key={e.name}>
+              <li key={catalogEntryKey(e)}>
                 <button
                   type="button"
-                  onClick={() => pick(e.name)}
-                  aria-current={e.name === picked ? 'true' : undefined}
+                  onClick={() => pick(e)}
+                  aria-current={isPicked(e) ? 'true' : undefined}
                   className={cn(
                     'w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted',
-                    e.name === picked && 'bg-muted font-medium',
+                    isPicked(e) && 'bg-muted font-medium',
                   )}
                 >
                   <span className="block truncate">{e.label}</span>
                   {e.label !== e.name && (
                     <code className="block truncate font-mono text-xs text-muted-foreground">{e.name}</code>
                   )}
+                  {holderLine(e)}
                 </button>
               </li>
             ))}
@@ -191,15 +237,21 @@ export function CatalogAssignmentPage({ type, param, icon, copy, renderSection, 
   } else if (read.kind !== 'ready') {
     detail = null;
   } else {
-    const entry = entries.find((e) => e.name === picked)!;
-    detail = (
+    const entry = entries.find(isPicked);
+    detail = entry ? (
       <div>
         <h2 className="text-base font-semibold">{entry.label}</h2>
         <code className="font-mono text-xs text-muted-foreground">{entry.name}</code>
+        {holderLine(entry)}
         {entry.description && <p className="mt-1 text-sm text-muted-foreground">{entry.description}</p>}
         {/* Keyed by the item: the section's state is that item's, never carried to the next one. */}
-        <React.Fragment key={entry.name}>{renderSection(entry.name, entry)}</React.Fragment>
+        <React.Fragment key={catalogEntryKey(entry)}>{renderSection(entry.name, entry)}</React.Fragment>
       </div>
+    ) : (
+      // objectstack#32537 — the link names a name more than one package holds,
+      // and no holder the name alone addresses: nothing is picked for the
+      // administrator; the list shows each holder.
+      <p className="text-sm text-muted-foreground" data-testid={`${testId}-pick-holder`}>{copy.pick}</p>
     );
   }
 

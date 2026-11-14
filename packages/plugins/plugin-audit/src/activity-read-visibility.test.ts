@@ -37,10 +37,22 @@ function install(opts: {
   logger?: ReturnType<typeof silentLogger>;
   /** The security service's object-level read admission the gate resolves per read; absent: none composed. */
   admission?: ParentObjectReadAdmissionSource;
+  /**
+   * The registry view: by default one holding every parent object `readable`
+   * names, with no `enable` block (the data door serves each); `null`: none.
+   * Either way the engine answers no classifying question, so every read is
+   * the whole-read probe.
+   */
+  registry?: unknown;
 }) {
   let mw!: Mw;
   const calls = { scans: [] as any[], probes: [] as Array<{ object: string; ids: string[]; context: any }> };
-  const engine: CommentAccessEngine = {
+  const registry =
+    opts.registry === undefined
+      ? { getAllObjects: () => Object.keys(opts.readable ?? {}).map((name) => ({ name })) }
+      : opts.registry;
+  const engine: CommentAccessEngine & { registry?: unknown } = {
+    ...(registry === null ? {} : { registry }),
     registerHook: () => {},
     registerMiddleware: (fn) => {
       mw = fn as Mw;
@@ -59,7 +71,7 @@ function install(opts: {
     },
     findOne: async () => null,
   };
-  installActivityReadVisibility(engine, opts.logger ?? silentLogger(), opts.admission ?? (() => undefined));
+  installActivityReadVisibility(engine as ParentRecordGateEngine, opts.logger ?? silentLogger(), opts.admission ?? (() => undefined));
   return { mw, calls };
 }
 
@@ -366,6 +378,8 @@ function installClassifying(opts: {
   admission?: ParentObjectReadAdmissionSource;
   logger?: ReturnType<typeof silentLogger>;
   registry?: unknown;
+  /** object → its declared `enable` block; absent: none declared. */
+  enable?: Record<string, unknown>;
 }) {
   let mw!: Mw;
   const calls = { scans: [] as any[], probes: [] as Array<{ object: string; ids: string[]; context: any }> };
@@ -388,7 +402,9 @@ function installClassifying(opts: {
   };
   // The classifying questions, over the comment-gate double above.
   const engine: ParentRecordGateEngine = Object.assign(base, {
-    registry: (opts.registry ?? { getAllObjects: () => opts.objects.map((name) => ({ name })) }) as any,
+    registry: (opts.registry ?? {
+      getAllObjects: () => opts.objects.map((name) => (opts.enable?.[name] ? { name, enable: opts.enable[name] } : { name })),
+    }) as any,
     hasObjectMiddleware: (object: string) => (opts.middleware ?? []).includes(object),
     resolveEffectiveDatasource: (object: string) => opts.datasource?.[object],
   });
@@ -722,5 +738,59 @@ describe('[ADR-0139 D3] the gate catches nothing the read itself raises', () => 
     })).rejects.toThrow('registry exploded');
     expect(ran).toBe(false);
     expect(ctx.ast?.where).toBeUndefined();
+  });
+});
+
+describe('a parent the data door does not serve: no reader is served a row about it', () => {
+  /** The `enable` blocks the data door refuses `get` for, and one it serves. */
+  const enable = {
+    sys_oauth_resource: { apiEnabled: false, apiMethods: [] },
+    sys_idp_group_mapping: { apiMethods: ['list'] },
+    crm_case: { apiEnabled: true, apiMethods: ['get', 'list'] },
+  };
+  const objects = ['crm_case', 'crm_deal', 'sys_idp_group_mapping', 'sys_oauth_resource'];
+
+  it('the leaf path writes no branch for it; a parent the door serves and one with no enable block keep theirs', async () => {
+    const { mw, calls } = installClassifying({ objects, enable });
+    expect(branchesOf((await read(mw)).where).map(leafObjectOf)).toEqual(['crm_case', 'crm_deal']);
+    expect(calls.probes).toEqual([]);
+  });
+
+  it('a read that names only such a parent gets the deny-all sentinel', async () => {
+    const { mw } = installClassifying({ objects, enable });
+    const where = { object_name: 'sys_oauth_resource' };
+    expect((await read(mw, { ast: { object: 'sys_activity', where } })).where).toEqual({ $and: [where, DENY] });
+  });
+
+  it('the whole-read probe keeps no row naming it, and never reads it as the caller', async () => {
+    const { mw, calls } = installClassifying({
+      objects,
+      enable,
+      scan: () => [
+        { object_name: 'crm_case', record_id: 'c1' },
+        { object_name: 'sys_oauth_resource', record_id: 'r1' },
+        { object_name: 'sys_idp_group_mapping', record_id: 'm1' },
+      ],
+      readable: { crm_case: ['c1'], sys_oauth_resource: ['r1'], sys_idp_group_mapping: ['m1'] },
+      // No `canReadObject`: the whole read is the probe.
+      admission: () => undefined,
+    });
+    expect((await read(mw)).where).toEqual({ object_name: 'crm_case', record_id: { $in: ['c1'] } });
+    expect(calls.probes.map((p) => p.object)).toEqual(['crm_case']);
+  });
+
+  it('with no registry view the whole-read probe cannot say what the door serves: it keeps no row, and says so once', async () => {
+    const logger = silentLogger();
+    const { mw, calls } = install({
+      scan: () => [{ object_name: 'crm_case', record_id: 'c1' }],
+      readable: { crm_case: ['c1'] },
+      registry: null,
+      logger,
+    });
+    expect((await read(mw)).where).toEqual(DENY);
+    await read(mw);
+    expect(calls.probes).toEqual([]);
+    const said = logger.warn.mock.calls.filter(([line]) => String(line).includes('cannot say which parent objects the data door serves'));
+    expect(said).toHaveLength(1);
   });
 });

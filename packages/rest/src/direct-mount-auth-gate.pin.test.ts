@@ -33,6 +33,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The source under test reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 import { isAuthGateAllowlisted } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { createRestApiPlugin } from './rest-api-plugin.js';
@@ -144,6 +148,14 @@ async function bootDirectMounts() {
 
   const engine = {
     find: async (object: string, query: any) => {
+      // The caller is a current member of the organization its session names
+      // (ADR-0093 D8.1, as amended).
+      if (object === 'sys_member') {
+        const where = query?.where ?? {};
+        return (where.user_id === undefined || where.user_id === USER) && (where.organization_id === undefined || where.organization_id === ORG)
+          ? [{ id: 'mem_1', user_id: USER, organization_id: ORG, role: 'member' }]
+          : [];
+      }
       if (object === 'sys_user_permission_set') {
         return query?.where?.user_id === USER
           ? [{ id: 'ups_1', user_id: USER, permission_set_id: SET, permission_set: 'gate_pin_caller', organization_id: ORG }]

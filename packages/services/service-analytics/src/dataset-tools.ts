@@ -63,6 +63,17 @@ import { matchDatasetTerms } from './dataset-term-matcher.js';
 /** `query_dataset`'s row cap when the host sets none — `query_records`' default. */
 export const DATASET_TOOL_DEFAULT_MAX_ROWS = 50;
 
+/**
+ * The members of an `AnalyticsResult` aligned to `rows` by index (entry i
+ * describes row i, per their contract in `spec/contracts`). `query_dataset`
+ * serves them to the length it serves `rows`, so a truncated answer holds no
+ * drill bucket for the probe row it asked for past the cap. The others are not
+ * row-indexed and are served as answered: `fields` (columns), `totals` and
+ * `drillRawTotals` (aligned to `totals`), `dimensionFields` and `drillScopes`
+ * (keyed by member name), `object`.
+ */
+const ROW_ALIGNED_ANSWER_MEMBERS = ['drillRawRows', 'drillRanges'] as const satisfies readonly (keyof AnalyticsResult)[];
+
 const LIST_DATASETS_DESCRIPTION =
   'List the governed business datasets this caller may query: each dataset\'s dimensions (what an answer can be '
   + 'grouped by) and measures (the numbers it can answer), with their business definitions and synonyms. Pass '
@@ -191,6 +202,18 @@ function refusal(code: string, status: number, message: string, details?: unknow
   if (details !== undefined) err.details = details;
   return err;
 }
+
+/**
+ * The sentence `query_dataset` refuses a selection naming no measure with: the
+ * REST door's answer to the same selection (`POST /analytics/dataset/query`,
+ * `answerDatasetQuery` in `@objectstack/rest`), with its code and status. The
+ * spec selection accepts `measures: []`, and a query with nothing to project
+ * reached the SQL driver as a SELECT with an empty projection (500
+ * `DATABASE_ERROR`, the driver's own text) or, with dimensions, served group
+ * rows carrying no measure. Neither package depends on the other, so the
+ * dogfood suite holds the two doors to one answer for one caller.
+ */
+const SELECTION_MEASURES_REQUIRED = 'body.selection.measures must be a non-empty array of measure names.';
 
 /**
  * [ADR-0149 D4] The plugin-wired service, or the refusal. `SERVICE_UNAVAILABLE`
@@ -426,6 +449,10 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     // caller's own selection, never a parse output.
     const raw = input as { datasetName: string; selection: DatasetSelection };
     const datasetName = raw.datasetName;
+    // Judged before anything is read, as the REST door judges it before it
+    // resolves the dataset: a missing dataset with no measure is this 400 on
+    // both doors, never a 404 on one of them.
+    if (raw.selection.measures.length === 0) throw refusal('VALIDATION_FAILED', 400, SELECTION_MEASURES_REQUIRED);
 
     let loaded: LoadedDatasets;
     try {
@@ -490,6 +517,12 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     const truncated = rows.length > cap;
     const served = truncated ? rows.slice(0, cap) : rows;
     const { sql: _sql, ...rest } = answer as AnalyticsResult & { sql?: unknown };
+    if (truncated) {
+      for (const member of ROW_ALIGNED_ANSWER_MEMBERS) {
+        const aligned = rest[member];
+        if (Array.isArray(aligned)) (rest as Record<string, unknown>)[member] = aligned.slice(0, cap);
+      }
+    }
 
     let narrowing: { narrowed: boolean; statement?: string } | undefined;
     if (deps.diagnoseDelegation) {

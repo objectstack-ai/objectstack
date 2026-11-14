@@ -25,6 +25,9 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a clocked case: the dispatcher's package domain
+// reaches it through a dynamic import (check:test-source-alias).
+import '@objectstack/metadata';
 
 const PACKAGE_ID = 'com.workspace';
 
@@ -46,7 +49,7 @@ const PKG_ADMIN = () => ({
  */
 function makeDoor(apps: Array<Record<string, unknown>>) {
     const publishPackageDrafts = vi.fn().mockResolvedValue({
-        success: true, publishedCount: 0, failedCount: 0, published: [], failed: [],
+        success: true, outcome: 'published', publishedCount: 0, failedCount: 0, published: [], failed: [],
         seedApplied: { success: true, inserted: 0 },
     });
     const getMetaItems = vi.fn().mockResolvedValue({ items: apps });

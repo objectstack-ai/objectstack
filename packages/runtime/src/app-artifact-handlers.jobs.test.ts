@@ -278,7 +278,7 @@ describe('#21489: scheduleAppArtifactJobs — handler jobs and the door-wide gat
         ]));
 
         expect(out).toEqual({
-            bodies: [], handlers: [], pulls: [], notScheduled: [], missingOrganization: [], failed: [], cancelled: [],
+            bodies: [], handlers: [], pulls: [], notScheduled: [], missingOrganization: [], refused: [], failed: [], cancelled: [],
         });
         expect(h.jobs.scheduled.size).toBe(0);
     });

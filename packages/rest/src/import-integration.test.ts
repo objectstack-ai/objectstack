@@ -528,6 +528,8 @@ describe('import route — required-field dry-run fidelity', () => {
 describe('import route — named mapping artifact (#2611)', () => {
   let route: any;
   let engine: any;
+  let rest: any;
+  let protocol: any;
 
   const TASK_CSV_MAPPING = {
     name: 'task_feed_import',
@@ -549,7 +551,7 @@ describe('import route — named mapping artifact (#2611)', () => {
   };
 
   beforeEach(async () => {
-    ({ route, engine } = await boot());
+    ({ route, engine, rest, protocol } = await boot());
     engine.registry.registerItem('mapping', TASK_CSV_MAPPING as any, 'name');
     engine.registry.registerItem(
       'mapping',
@@ -673,6 +675,287 @@ describe('import route — named mapping artifact (#2611)', () => {
       expect(res._status).toBeUndefined(); // the success answer sets no status: 200
       expect(res._json).toMatchObject({ total: 1, ok: 1 });
       expect(await engine.findOne('task', { where: { id: 'k1' } })).toMatchObject({ title: '一' });
+    });
+  });
+
+  // [#32079, ADR-0150 D5] `mappingName` takes the `/meta` door's qualified
+  // address: `NAMESPACE/NAME` reaches exactly that namespace's holder, and
+  // `_env/NAME` the environment's own mapping. A qualifier naming a
+  // non-holder is refused with the refusal `GET /meta/mapping/NAMESPACE/NAME`
+  // answers. The bare name keeps #32071's answers (the block above, and the
+  // byte-identity pin below).
+  describe('the qualified mappingName NAMESPACE/NAME (#32079)', () => {
+    const ALPHA = 'com.acme.alpha';
+    const BETA = 'com.acme.beta';
+    const GAMMA = 'com.acme.gamma';
+    const install = (packageId: string) => engine.registry.installPackage(
+      { id: packageId, name: packageId, version: '1.0.0', namespace: packageId.split('.').pop() } as any, 'code',
+    );
+    /** Ship `task_pkg_feed` in `packageId`. Its rows carry `score`, so a row says whose mapping wrote it. */
+    const shipMapping = (packageId: string, score: number) => {
+      install(packageId);
+      engine.registry.registerItem(
+        'mapping',
+        {
+          ...TASK_CSV_MAPPING, name: 'task_pkg_feed', label: `${packageId} feed`,
+          fieldMapping: [
+            { source: 'ID', target: 'id', transform: 'none' },
+            { source: 'Task Title', target: 'title', transform: 'none' },
+            { source: 'ignored_by_projection', target: 'score', transform: 'constant', params: { value: score } },
+          ],
+        } as any,
+        'name',
+        packageId,
+      );
+    };
+    /** `GET /meta/mapping/:ns/:name` on the same server: the refusal the import door's qualifier answers. */
+    const metaQualifiedRead = async (ns: string, name: string) => {
+      const metaRoute = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === '/api/v1/meta/:type/:ns/:name');
+      expect(metaRoute, 'GET /api/v1/meta/:type/:ns/:name').toBeDefined();
+      const res = makeRes();
+      await metaRoute.handler({ params: { type: 'mapping', ns, name }, query: {}, headers: {} } as any, res);
+      return res;
+    };
+    /** The mapping reads the import door asks the protocol for. */
+    const recordMappingReads = (): unknown[] => {
+      const reads: unknown[] = [];
+      const getMetaItem = protocol.getMetaItem.bind(protocol);
+      protocol.getMetaItem = (req: any) => {
+        if (req?.type === 'mapping') reads.push(req);
+        return getMetaItem(req);
+      };
+      return reads;
+    };
+    /**
+     * The answers the import door gave the bare requests of the byte-identity
+     * pin below before the qualified spelling existed, measured on the base
+     * tree's `import-mapping.ts`, as wire bytes: key order included, a `200`
+     * setting no status. The card asks for byte identity, so the sentences are
+     * pinned here and nowhere else.
+     */
+    const BARE_ONE_HOLDER_WIRE = [
+      {
+        body: {
+          object: 'task', dryRun: false, writeMode: 'upsert', total: 1, ok: 1, errors: 0, created: 1, updated: 0, skipped: 0,
+          results: [{ row: 1, ok: true, action: 'created', id: 'k1' }],
+        },
+      },
+      { status: 404, body: { code: 'MAPPING_NOT_FOUND', error: 'No mapping artifact named "nope" is registered' } },
+      {
+        status: 400,
+        body: { code: 'MAPPING_TARGET_MISMATCH', error: 'Mapping "user_only_mapping" targets object "user", not "task"' },
+      },
+      {
+        status: 400,
+        body: {
+          code: 'UNSUPPORTED_TRANSFORM',
+          error: 'Mapping "task_js_mapping" uses transform "javascript", which the import path does not execute (there is no '
+            + 'server-side sandbox), so the import is refused rather than run with that transform skipped',
+        },
+      },
+      {
+        status: 400,
+        body: { code: 'MAPPING_FORMAT_MISMATCH', error: 'Mapping "task_json_mapping" declares sourceFormat "json" but the payload is "csv"' },
+      },
+    ].map((answer) => JSON.stringify(answer));
+
+    // The exact qualifier reads the stored rows bound to the package it names
+    // (`findServedOverlayRow`) before it refuses a non-holder, as a deployed
+    // server's provisioned `sys_metadata` answers. `boot()` registers that
+    // object after its DDL; provision it here.
+    beforeEach(async () => { await engine.syncSchemas(); });
+
+    it('two holders: each qualified request answers 200 with its own holder\'s mapping, where the bare name answers 409', async () => {
+      shipMapping(ALPHA, 1);
+      shipMapping(BETA, 2);
+      const alpha = await call(route, { format: 'csv', csv: 'ID,Task Title\na1,甲', mappingName: 'alpha/task_pkg_feed' });
+      expect(alpha._status).toBeUndefined(); // the success answer sets no status: 200
+      expect(alpha._json).toMatchObject({ total: 1, ok: 1, created: 1 });
+      const beta = await call(route, { format: 'csv', csv: 'ID,Task Title\nb1,乙', mappingName: 'beta/task_pkg_feed' });
+      expect(beta._status).toBeUndefined();
+      expect(beta._json).toMatchObject({ total: 1, ok: 1, created: 1 });
+      expect(await engine.findOne('task', { where: { id: 'a1' } })).toMatchObject({ title: '甲', score: 1 });
+      expect(await engine.findOne('task', { where: { id: 'b1' } })).toMatchObject({ title: '乙', score: 2 });
+      const bare = await call(route, { format: 'csv', csv: 'ID,Task Title\nk1,一', mappingName: 'task_pkg_feed' });
+      expect(bare._status).toBe(409);
+      expect(bare._json.code).toBe('RESOURCE_CONFLICT');
+    });
+
+    it('a namespace that holds no item of the name: 409 not-held-by-qualifier, the refusal GET /meta answers for that address; nothing written', async () => {
+      shipMapping(ALPHA, 1);
+      shipMapping(BETA, 2);
+      install(GAMMA);
+      const res = await call(route, { format: 'csv', csv: 'ID,Task Title\ng1,丙', mappingName: 'gamma/task_pkg_feed' });
+      expect(res._status).toBe(409);
+      expect(res._json.code).toBe('RESOURCE_CONFLICT');
+      // The named subjects: the package the address names, and each holder.
+      for (const id of [GAMMA, ALPHA, BETA]) expect(res._json.error).toContain(id);
+      const meta = await metaQualifiedRead('gamma', 'task_pkg_feed');
+      expect(meta._status).toBe(409);
+      expect(meta._json.details?.candidates).toEqual([
+        { kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA },
+      ]);
+      expect({ code: res._json.code, error: res._json.error }).toEqual({ code: meta._json.code, error: meta._json.error });
+      expect(await engine.findOne('task', { where: { id: 'g1' } })).toBeFalsy();
+    });
+
+    it('one holder: its namespace answers 200, and another installed namespace is refused 409 naming the holder', async () => {
+      shipMapping(ALPHA, 1);
+      install(BETA);
+      const own = await call(route, { format: 'csv', csv: 'ID,Task Title\na2,己', mappingName: 'alpha/task_pkg_feed' });
+      expect(own._status).toBeUndefined();
+      expect(await engine.findOne('task', { where: { id: 'a2' } })).toMatchObject({ title: '己', score: 1 });
+      const other = await call(route, { format: 'csv', csv: 'ID,Task Title\nb2,庚', mappingName: 'beta/task_pkg_feed' });
+      expect(other._status).toBe(409);
+      expect(other._json.code).toBe('RESOURCE_CONFLICT');
+      for (const id of [BETA, ALPHA]) expect(other._json.error).toContain(id);
+      const meta = await metaQualifiedRead('beta', 'task_pkg_feed');
+      expect({ code: other._json.code, error: other._json.error }).toEqual({ code: meta._json.code, error: meta._json.error });
+      expect(await engine.findOne('task', { where: { id: 'b2' } })).toBeFalsy();
+    });
+
+    it('_env/NAME: the environment\'s own mapping answers 200; a name only packages hold is refused 409 naming them, as GET /meta refuses it', async () => {
+      shipMapping(ALPHA, 1);
+      const own = await call(route, { format: 'csv', csv: 'ID,Task Title\ne1,丁', mappingName: '_env/task_feed_import' });
+      expect(own._status).toBeUndefined();
+      expect(own._json).toMatchObject({ total: 1, ok: 1 });
+      expect(await engine.findOne('task', { where: { id: 'e1' } })).toMatchObject({ title: '丁', score: 5 });
+      const held = await call(route, { format: 'csv', csv: 'ID,Task Title\ne2,戊', mappingName: '_env/task_pkg_feed' });
+      expect(held._status).toBe(409);
+      expect(held._json.code).toBe('RESOURCE_CONFLICT');
+      expect(held._json.error).toContain(ALPHA);
+      const meta = await metaQualifiedRead('_env', 'task_pkg_feed');
+      expect(meta._status).toBe(409);
+      expect({ code: held._json.code, error: held._json.error }).toEqual({ code: meta._json.code, error: meta._json.error });
+      expect(await engine.findOne('task', { where: { id: 'e2' } })).toBeFalsy();
+    });
+
+    it('a qualifier that is no address reads the whole string by name, as before: 404, never the name after the slash', async () => {
+      // `task_feed_import` is registered: reading the part after the slash
+      // would import through it.
+      const reads = recordMappingReads();
+      for (const mappingName of ['nope/task_feed_import', 'nope/x/task_feed_import', 'task_feed_import/']) {
+        const res = await call(route, { format: 'csv', csv: 'ID,Task Title\nn1,辛', mappingName });
+        expect(res._status).toBe(404);
+        expect(res._json).toEqual({ code: 'MAPPING_NOT_FOUND', error: `No mapping artifact named "${mappingName}" is registered` });
+      }
+      expect(reads).toStrictEqual([
+        { type: 'mapping', name: 'nope/task_feed_import' },
+        { type: 'mapping', name: 'nope/x/task_feed_import' },
+        { type: 'mapping', name: 'task_feed_import/' },
+      ]);
+      expect(await engine.findOne('task', { where: { id: 'n1' } })).toBeFalsy();
+    });
+
+    it('one holder: every bare request reads and answers exactly as before the qualified spelling', async () => {
+      shipMapping(ALPHA, 1);
+      const reads = recordMappingReads();
+      const answers: Array<{ status: unknown; body: unknown }> = [];
+      for (const [csv, mappingName] of [
+        ['ID,Task Title\nk1,一', 'task_pkg_feed'],
+        ['ID\nx', 'nope'],
+        ['ID\nx', 'user_only_mapping'],
+        ['x\n1', 'task_js_mapping'],
+        ['ID\nx', 'task_json_mapping'],
+      ]) {
+        const res = await call(route, { format: 'csv', csv, mappingName });
+        answers.push({ status: res._status, body: res._json });
+      }
+      expect(reads).toStrictEqual([
+        { type: 'mapping', name: 'task_pkg_feed' },
+        { type: 'mapping', name: 'nope' },
+        { type: 'mapping', name: 'user_only_mapping' },
+        { type: 'mapping', name: 'task_js_mapping' },
+        { type: 'mapping', name: 'task_json_mapping' },
+      ]);
+      // The wire bytes, key order included, as the import door answered them
+      // before the qualified spelling (measured on the base tree).
+      expect(answers.map((a) => JSON.stringify(a))).toEqual(BARE_ONE_HOLDER_WIRE);
+    });
+
+    // [#32501, ADR-0150 D5] A pair's namespace (`<ns>_custom`, the installed
+    // customization pair) qualifies the pair's exact address, so the import
+    // door's qualified `mappingName` and `GET /meta/mapping/NS/NAME` move with
+    // `?package=PAIR`: the App pair two of whose modules hold the mapping is
+    // refused naming both, and a disabled holder registered first no longer
+    // hides the named address's own enabled mapping.
+    //
+    // BASE (main 2f80f2897, measured on this harness): the two-module App pair
+    // imported through the first registered module's mapping (200) and
+    // `GET /meta` served it; with another package registered ahead of the
+    // modules both already answered 409. A disabled holder registered first:
+    // the import 404 `MAPPING_NOT_FOUND`, `GET /meta` 404. Two enabled holders,
+    // the other first: `GET /meta` at the base's pair served the base's mapping
+    // under the other holder's `_packageId`.
+    describe('#32501 — a pair namespace reads the package the pair names', () => {
+      const SUITE = 'com.acme.suite';
+      const ONE = 'com.acme.one';
+      const TWO = 'com.acme.two';
+      const pkg = (id: string, namespace: string, type: string, dependencies?: Record<string, string>, source = 'code') =>
+        engine.registry.installPackage({ id, name: id, version: '1.0.0', type, namespace, ...(dependencies ? { dependencies } : {}) } as any, source);
+      const pair = (base: string, namespace: string) => pkg(`${base}.custom`, namespace, 'module', { [base]: '^1' }, 'authored');
+      const mappingOf = (packageId: string, score: number) => engine.registry.registerItem('mapping', {
+        ...TASK_CSV_MAPPING, name: 'task_pkg_feed', label: `${packageId} feed`,
+        fieldMapping: [
+          { source: 'ID', target: 'id', transform: 'none' },
+          { source: 'Task Title', target: 'title', transform: 'none' },
+          { source: 'ignored_by_projection', target: 'score', transform: 'constant', params: { value: score } },
+        ],
+      } as any, 'name', packageId);
+      /** The App with its modules (each holding the mapping, in `order`) and the App's pair installed. */
+      const suite = (order: readonly string[]) => {
+        pkg(SUITE, 'suite', 'app');
+        for (const id of order) pkg(id, id.split('.').pop()!, 'module', { [SUITE]: '^1.0.0' });
+        pair(SUITE, 'suite_custom');
+        for (const id of order) mappingOf(id, id === ONE ? 1 : 2);
+      };
+      const importAt = async (mappingName: string, id: string) => {
+        const res = await call(route, { format: 'csv', csv: `ID,Task Title\n${id},t`, mappingName });
+        return { status: res._status ?? 200, code: res._json?.code, error: String(res._json?.error ?? ''), row: await engine.findOne('task', { where: { id } }) };
+      };
+      const metaItem = (res: any) => res._json?.item ?? res._json?.data?.item;
+
+      it.each([['one first', [ONE, TWO]], ['two first', [TWO, ONE]]] as const)('two enabled modules of the App the only holders (%s): the App pair namespace is refused naming both, nothing written (BASE: imported through the first registered module\'s mapping)', async (_order, order) => {
+        suite(order);
+        const answer = await importAt('suite_custom/task_pkg_feed', 's1');
+        expect([answer.status, answer.code, answer.row ?? null], answer.error).toEqual([409, 'RESOURCE_CONFLICT', null]);
+        for (const id of [ONE, TWO]) expect(answer.error).toContain(`package "${id}"`);
+        const meta = await metaQualifiedRead('suite_custom', 'task_pkg_feed');
+        expect([meta._status, meta._json?.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+        // CONTROL — a module's own namespace imports through its own mapping.
+        const own = await importAt('one/task_pkg_feed', 's2');
+        expect([own.status, own.row?.score]).toEqual([200, 1]);
+      });
+
+      it('CONTROL — another package registered ahead of the modules: the App pair namespace was already refused, and still is', async () => {
+        pkg(ALPHA, 'alpha', 'app');
+        mappingOf(ALPHA, 10);
+        suite([ONE, TWO]);
+        const answer = await importAt('suite_custom/task_pkg_feed', 's3');
+        expect([answer.status, answer.code, answer.row ?? null], answer.error).toEqual([409, 'RESOURCE_CONFLICT', null]);
+      });
+
+      it.each([['disabled first', [TWO, ONE]], ['disabled second (order control)', [ONE, TWO]]] as const)('one module of the App disabled (%s): the App pair namespace imports through the enabled module\'s mapping (BASE, disabled first: 404)', async (_order, order) => {
+        suite(order);
+        engine.registry.disablePackage(TWO);
+        const answer = await importAt('suite_custom/task_pkg_feed', 's4');
+        expect([answer.status, answer.row?.score], answer.error).toEqual([200, 1]);
+        const meta = await metaQualifiedRead('suite_custom', 'task_pkg_feed');
+        expect([meta._status ?? 200, metaItem(meta)?.label, metaItem(meta)?._packageId]).toEqual([200, `${ONE} feed`, ONE]);
+      });
+
+      it.each([['other first', [BETA, ALPHA]], ['base first (order control)', [ALPHA, BETA]]] as const)('two holders, the base\'s pair namespace (%s): the base\'s mapping under the base\'s envelope, and with the other holder disabled still imported (BASE, other first: the other\'s envelope, then 404)', async (_order, order) => {
+        for (const id of order) pkg(id, id.split('.').pop()!, 'app');
+        pair(ALPHA, 'alpha_custom');
+        for (const id of order) mappingOf(id, id === ALPHA ? 10 : 20);
+        const meta = await metaQualifiedRead('alpha_custom', 'task_pkg_feed');
+        expect([meta._status ?? 200, metaItem(meta)?.label, metaItem(meta)?._packageId]).toEqual([200, `${ALPHA} feed`, ALPHA]);
+        engine.registry.disablePackage(BETA);
+        const answer = await importAt('alpha_custom/task_pkg_feed', 's5');
+        expect([answer.status, answer.row?.score], answer.error).toEqual([200, 10]);
+        const metaDisabled = await metaQualifiedRead('alpha_custom', 'task_pkg_feed');
+        expect([metaDisabled._status ?? 200, metaItem(metaDisabled)?._packageId]).toEqual([200, ALPHA]);
+      });
     });
   });
 });

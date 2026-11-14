@@ -1209,11 +1209,12 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motivo da revogação",
-        help: "Por que a chave foi revogada, quando isso decide quem pode restaurá-la. Redefinição de senha pelo administrador: somente um administrador da plataforma pode restaurar a chave. Fim da associação à organização: o proprietário saiu da organização e ninguém pode restaurar a chave; um membro cria uma nova. Suspensa por um administrador: um administrador da plataforma revogou uma chave que não é dele, e somente um administrador da plataforma pode restaurá-la. Limpo quando a chave é restaurada. Vazio para uma chave que o proprietário revogou na lista de Chaves de API.",
+        help: "Por que a chave foi revogada, quando isso decide quem pode restaurá-la. Redefinição de senha pelo administrador: somente um administrador da plataforma pode restaurar a chave. Fim da associação à organização: o proprietário saiu da organização e ninguém pode restaurar a chave; um membro cria uma nova. Suspensa por um administrador: um administrador da plataforma revogou uma chave que não é dele, e somente um administrador da plataforma pode restaurá-la. Desativada pelo diretório: o diretório da organização (SCIM) desativou ou excluiu o proprietário, e ninguém pode restaurar a chave, nem mesmo depois que o proprietário for reativado; o proprietário cria uma nova. Limpo quando a chave é restaurada. Vazio para uma chave que o proprietário revogou na lista de Chaves de API.",
         options: {
           admin_password_reset: "Redefinição de senha pelo administrador",
           organization_membership_ended: "Fim da associação à organização",
-          administrator_suspended: "Suspensa por um administrador"
+          administrator_suspended: "Suspensa por um administrador",
+          scim_deactivated: "Desativada pelo diretório"
         }
       },
       key: {
@@ -2110,6 +2111,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Ler declarações apenas do token de ID",
         help: "Somente OIDC. Lê o e-mail, o nome e os grupos do token de ID verificado do provedor de identidade e não chama o endpoint userinfo dele. Ative para o Microsoft Entra ID, cuja resposta de userinfo não traz grupos nem preferred_username. Desativado por padrão: um provedor com endpoint userinfo lê suas declarações dessa resposta. Altere em “Editar opções de login”."
       },
+      sign_out_of_idp: {
+        label: "Sign Out of the Company Sign-In Too",
+        help: "When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "Registrado por",
         help: "Usuário que registrou este provedor"
@@ -2220,6 +2225,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Opcional. Formato de NameID SAML solicitado. O padrão é o formato configurado no IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options."
+          },
           mapEmail: {
             label: "Mapear: atributo de e-mail",
             helpText: "Opcional. Atributo da asserção mapeado para o e-mail do usuário. O padrão é \"email\" e, depois, o NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -2304,6 +2313,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           keepCurrentCert: {
             label: "Continuar confiando no certificado atual",
             helpText: "Enquanto o IdP faz a troca, aceitar asserções assinadas por qualquer um dos certificados. Edite novamente sem esta opção para remover o antigo."
+          },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one."
           }
         },
         resultDialog: {
@@ -3079,6 +3092,34 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "Por tópico"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "Enviar mensagem no aplicativo",
+        description: "Envie uma mensagem para todos da sua organização ou para os membros que você escolher. Ela aparece nas notificações de cada destinatário.",
+        successMessage: "Mensagem enviada. Destinatários: {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "Todos nesta organização",
+            helpText: "Enviar para todos os membros da sua organização atual. Deixe desativado para escolher os destinatários abaixo."
+          },
+          recipients: {
+            label: "Destinatários",
+            helpText: "Os membros da sua organização para quem enviar, quando a mensagem não for para todos."
+          },
+          title: {
+            label: "Título",
+            helpText: "A linha que cada destinatário vê nas notificações."
+          },
+          body: {
+            label: "Mensagem"
+          },
+          link: {
+            label: "Link",
+            helpText: "Opcional. Uma página deste aplicativo (começando com /) ou um endereço da web que a mensagem abre."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3765,9 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "Versão"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "Tipo de operação",

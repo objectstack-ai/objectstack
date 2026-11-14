@@ -267,15 +267,18 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
         expect(setup._provenance).toBe('package');
     });
 
-    it('the hydrated plain-key shadow itself carries the artifact envelope', async () => {
+    it('the hydration lays no shadow over a sealed app: the registry keeps the package\'s definition and envelope', async () => {
         await overlayRowThenLockedArtifact('full');
         await protocol.getMetaItems({ type: 'app' }); // triggers hydration
 
-        // Registry-direct read (what nav/UI code does) must not see a
-        // stripped envelope even though the overlay body shadows the
-        // artifact on the plain key.
+        // [#32568, epic ruling 6817768147; ADR-0131 D6] An `app` a managed
+        // package ships is sealed: its package-less stored row is declined by
+        // every read, so the hydrator no longer registers it over the
+        // package's item. The registry-direct read (what nav/UI code does)
+        // answers what the list above answers, before and after a hydration.
+        // Before: the stored body under the artifact's envelope.
         const direct: any = engine.registry.getItem('app', 'setup');
-        expect(direct.label).toBe('Setup HACKED');
+        expect(direct.label).toBe('Setup');
         expect(direct._lock).toBe('full');
         expect(direct._packageId).toBe(PKG);
     });

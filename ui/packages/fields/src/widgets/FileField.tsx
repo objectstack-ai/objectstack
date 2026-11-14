@@ -26,8 +26,54 @@ import { pickNativeImage, useNativeImagePickOffered } from './nativeImagePick.js
 import { FileValueAffordance, useRestrictedFileText } from './file-affordance.js';
 
 /**
- * Shared upload pipeline for the file widgets: validates size, uploads through
- * the configured UploadProvider adapter (with progress), and merges results
+ * Does a pick satisfy one `accept` entry? The vocabulary the native picker and
+ * the server's own `accept` check share: an exact MIME type, a `type/*`
+ * wildcard, a `.ext` suffix matched against the file NAME, or an any-type
+ * wildcard.
+ */
+function matchesAcceptEntry(entry: string, mime: string, name: string): boolean {
+  if (entry === '*' || entry === '*/*') return true;
+  if (entry.startsWith('.')) return name.toLowerCase().endsWith(entry);
+  if (entry.endsWith('/*')) return mime.startsWith(entry.slice(0, -1));
+  return mime === entry;
+}
+
+/**
+ * The hint for a pick whose type the field's `accept` list does not admit, or
+ * `null` when the pick is admitted — so a caller reads it as `if (err) reject`.
+ *
+ * Judged the way the server judges the same file on save (`service-storage`'s
+ * `accept` check), so the widget refuses exactly the picks the save would:
+ * an entry is only weighed against what the pick reports — a MIME entry needs
+ * a reported type, a `.ext` entry needs a name with an extension — and a pick
+ * no entry can be weighed against is admitted, because "we cannot tell" is not
+ * "not accepted". Without this, the picker's own `accept` filter was the only
+ * hint: a file chosen past it (the dialog's "All files", a drop) uploaded
+ * silently and the save was then refused with a sentence the form did not
+ * show at the field.
+ */
+function acceptError(
+  t: TranslateFn,
+  pick: { name: string; type: string },
+  accept: string | undefined,
+): string | null {
+  if (!accept) return null;
+  const entries = accept.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const mime = (pick.type || '').toLowerCase();
+  const hasExtension = pick.name.includes('.');
+  const testable = entries.filter((e) => (e.startsWith('.') ? hasExtension : !!mime));
+  if (testable.length === 0 || testable.some((e) => matchesAcceptEntry(e, mime, pick.name))) return null;
+  const allowed = entries.join(', ');
+  return t('fields.file.typeNotAccepted', {
+    defaultValue: `"${pick.name}" is not an accepted file type (${allowed})`,
+    name: pick.name,
+    accept: allowed,
+  });
+}
+
+/**
+ * Shared upload pipeline for the file widgets: validates type and size,
+ * uploads through the configured UploadProvider adapter (with progress), and merges results
  * into the field value — append for `multiple`, replace otherwise. Extracted so
  * the full-size FileField and the compact grid-cell {@link FileCell} stay
  * behaviourally identical (same value shape, same error handling).
@@ -43,6 +89,8 @@ import { FileValueAffordance, useRestrictedFileText } from './file-affordance.js
 function useFileUploads(opts: {
   files: any[];
   multiple: boolean;
+  /** Comma-joined `accept` list; a pick it does not admit is refused with a hint. */
+  accept?: string;
   maxSize?: number;
   onChange: (value: any) => void;
   /**
@@ -53,7 +101,7 @@ function useFileUploads(opts: {
    */
   holdScope?: () => () => void;
 }) {
-  const { files, multiple, maxSize, onChange, holdScope } = opts;
+  const { files, multiple, accept, maxSize, onChange, holdScope } = opts;
   const { upload } = useUpload();
   const { t } = useObjectTranslation();
   const [errors, setErrors] = useState<string[]>([]);
@@ -65,9 +113,12 @@ function useFileUploads(opts: {
     if (selectedFiles.length === 0) return;
     const newErrors: string[] = [];
 
-    // Shared with ImageField — see `file-size-guard`.
+    // The type first, then the size (shared with ImageField — see
+    // `file-size-guard`): a pick of the wrong type is refused for that, not
+    // also for its size.
     const validFiles = selectedFiles.filter(file => {
-      const rejection = maxSizeError(t as TranslateFn, file, maxSize);
+      const rejection =
+        acceptError(t as TranslateFn, file, accept) ?? maxSizeError(t as TranslateFn, file, maxSize);
       if (rejection) {
         newErrors.push(rejection);
         return false;
@@ -134,7 +185,7 @@ function useFileUploads(opts: {
       setUploading(false);
       setUploadProgress({});
     }
-  }, [files, multiple, onChange, maxSize, upload, t, holdScope]);
+  }, [files, multiple, onChange, accept, maxSize, upload, t, holdScope]);
 
   return { processFiles, errors, uploading, uploadProgress, recent };
 }
@@ -178,7 +229,7 @@ export function FileField({ value, onChange, field, readonly, onUploadingChange,
   const files = value ? (Array.isArray(value) ? value : [value]) : [];
   const holdScope = useUploadingScopeHold();
   const { processFiles, errors, uploading, uploadProgress, recent } = useFileUploads({
-    files, multiple, maxSize, onChange, holdScope,
+    files, multiple, accept, maxSize, onChange, holdScope,
   });
   // The picked photo enters the same `processFiles` an input pick does.
   const pickNative = (camera: boolean) => pickNativeImage(camera, t as TranslateFn).then(processFiles);
@@ -205,21 +256,11 @@ export function FileField({ value, onChange, field, readonly, onUploadingChange,
     e.stopPropagation();
     setIsDragOver(false);
 
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    if (accept) {
-      const acceptedTypes = accept.split(',').map((t: string) => t.trim().toLowerCase());
-      const filtered = droppedFiles.filter(file => {
-        const parts = file.name.split('.');
-        const ext = parts.length > 1 ? '.' + parts.pop()?.toLowerCase() : '';
-        return acceptedTypes.some((t: string) =>
-          t === file.type || (ext && t === ext) || (t.endsWith('/*') && file.type.startsWith(t.replace('/*', '/')))
-        );
-      });
-      processFiles(filtered);
-    } else {
-      processFiles(droppedFiles);
-    }
-  }, [accept, processFiles]);
+    // A drop bypasses the picker's `accept` filter, so every dropped file goes
+    // to the same check a pick does: one outside `accept` is refused with the
+    // hint, not dropped without a word.
+    processFiles(Array.from(e.dataTransfer.files));
+  }, [processFiles]);
 
   if (readonly) {
     // Readonly there is no dropzone: the field's whole rendered surface is the
@@ -525,7 +566,7 @@ export function FileCell({
   const inputRef = useRef<HTMLInputElement>(null);
   const files = value ? (Array.isArray(value) ? value : [value]) : [];
   const { processFiles, errors, uploading, recent } = useFileUploads({
-    files, multiple: !!multiple, maxSize, onChange,
+    files, multiple: !!multiple, accept, maxSize, onChange,
   });
   const fallbackName = t('fields.file.fileFallback', { defaultValue: 'File' });
   const views = withRecentUploads(readFileValues(value, fallbackName), recent);

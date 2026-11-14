@@ -1209,11 +1209,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "失効理由",
-        help: "キーが失効した理由で、誰が復元できるかを左右する場合に記録されます。管理者によるパスワードの強制リセット：キーを復元できるのはプラットフォーム管理者のみです。組織メンバーシップの終了：所有者が組織を離れたため、誰もキーを復元できません。組織のメンバーが新しいキーを作成します。管理者による一時停止：プラットフォーム管理者が自分のものではないキーを失効させたため、キーを復元できるのはプラットフォーム管理者のみです。キーを復元するとクリアされます。所有者が API キー一覧から失効させたキーでは空です。",
+        help: "キーが失効した理由で、誰が復元できるかを左右する場合に記録されます。管理者によるパスワードの強制リセット：キーを復元できるのはプラットフォーム管理者のみです。組織メンバーシップの終了：所有者が組織を離れたため、誰もキーを復元できません。組織のメンバーが新しいキーを作成します。管理者による一時停止：プラットフォーム管理者が自分のものではないキーを失効させたため、キーを復元できるのはプラットフォーム管理者のみです。ディレクトリによる無効化：組織のディレクトリ（SCIM）が所有者を無効化または削除したため、所有者が再有効化された後も含め、誰もキーを復元できません。所有者が新しいキーを作成します。キーを復元するとクリアされます。所有者が API キー一覧から失効させたキーでは空です。",
         options: {
           admin_password_reset: "管理者によるパスワードの強制リセット",
           organization_membership_ended: "組織メンバーシップの終了",
-          administrator_suspended: "管理者による一時停止"
+          administrator_suspended: "管理者による一時停止",
+          scim_deactivated: "ディレクトリによる無効化"
         }
       },
       key: {
@@ -2110,6 +2111,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ID トークンのみからクレームを読み取る",
         help: "OIDC のみ。ID プロバイダーの検証済み ID トークンからメールアドレス、名前、グループを読み取り、userinfo エンドポイントは呼び出しません。Microsoft Entra ID ではオンにしてください。その userinfo 応答にはグループも preferred_username も含まれません。既定はオフで、userinfo エンドポイントを持つプロバイダーはその応答からクレームを読み取ります。「サインインオプションを編集」で変更します。"
       },
+      sign_out_of_idp: {
+        label: "Sign Out of the Company Sign-In Too",
+        help: "When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "登録者",
         help: "このプロバイダーを登録したユーザー"
@@ -2220,6 +2225,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             helpText: "任意。要求する SAML NameID フォーマット。既定では IdP に設定されたフォーマットを使用します。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options."
+          },
           mapEmail: {
             label: "マッピング: メール属性",
             helpText: "任意。ユーザーのメールアドレスにマッピングするアサーション属性です。既定は「email」、なければ NameID です。Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -2304,6 +2313,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           keepCurrentCert: {
             label: "現在の証明書も引き続き信頼する",
             helpText: "IdP の切り替え中は、どちらの証明書で署名されたアサーションも受け入れます。古い証明書を外すには、このオプションなしで再度編集します。"
+          },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one."
           }
         },
         resultDialog: {
@@ -3079,6 +3092,34 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "トピック別"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "アプリ内メッセージを送信",
+        description: "組織の全員、または選んだメンバーにメッセージを送信します。各受信者の通知に表示されます。",
+        successMessage: "{{ result.recipients }} 人にメッセージを送信しました",
+        params: {
+          everyone: {
+            label: "この組織の全員",
+            helpText: "現在の組織のすべてのメンバーに送信します。オフのままにすると、下で受信者を選べます。"
+          },
+          recipients: {
+            label: "受信者",
+            helpText: "全員宛てでないときに送信する、組織のメンバー。"
+          },
+          title: {
+            label: "タイトル",
+            helpText: "各受信者が通知で目にする一行。"
+          },
+          body: {
+            label: "本文"
+          },
+          link: {
+            label: "リンク",
+            helpText: "任意。メッセージが開く、このアプリ内のページ（/ で始まる）またはウェブアドレス。"
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3765,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "バージョン"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "操作タイプ",

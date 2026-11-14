@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 300 |
-| Object name statically decidable | 207 |
-| Object name chosen at run time | 93 |
-| Against a tenancy-enabled object | 200 |
+| Write call sites | 314 |
+| Object name statically decidable | 219 |
+| Object name chosen at run time | 95 |
+| Against a tenancy-enabled object | 212 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 230 |
+| Threading a tenant context | 243 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
-| Options argument unreadable | 58 |
-| …and decidably tenancy-enabled | 31 |
-| Threading a decidably elevated context | 166 |
+| Options argument unreadable | 59 |
+| …and decidably tenancy-enabled | 32 |
+| Threading a decidably elevated context | 177 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 122 |
+| Threading a context of undecidable elevation | 125 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-10 at `2919a8dc2`.
+Measured on 2026-11-14 at `aad3132fa`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1129 |
-| engine-shaped types recognised | 131 |
-| declared objects in the registry | 136 |
-| same-named calls subtracted as non-engine | 287 |
+| tracked non-test sources scanned | 1160 |
+| engine-shaped types recognised | 138 |
+| declared objects in the registry | 137 |
+| same-named calls subtracted as non-engine | 298 |
 
 ## Every site
 
@@ -119,6 +119,8 @@ Measured on 2026-11-10 at `2919a8dc2`.
 | `packages/plugins/plugin-approvals/src/stored-process-package-backfill.ts` | `update` | `sys_approval_request` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/action-invocation-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
+| `packages/plugins/plugin-audit/src/app-activity-door.ts` | `insert` | `sys_activity` | enabled | options unreadable | 1 |
+| `packages/plugins/plugin-audit/src/audit-seal/amendment-writer.ts` | `insert` | `AUDIT_AMENDMENT_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/sealer.ts` | `insert` | `AUDIT_CHECKPOINT_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `insert` | `AUDIT_SIGNING_KEY_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `delete` | `sys_secret` | enabled | options unreadable | 1 |
@@ -185,8 +187,10 @@ Measured on 2026-11-10 at `2919a8dc2`.
 | `packages/plugins/plugin-auth/src/scim-connection-admin.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `update` | `sys_scim_connection_credential` | enabled | elevated | 2 |
+| `packages/plugins/plugin-auth/src/scim-deactivation-key-revocation.ts` | `update` | `SystemObjectName.API_KEY` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `delete` | `sys_user_permission_set` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/scim-identity-source.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/service-account-doors.ts` | `insert` | `sys_api_key` | disabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/service-account-doors.ts` | `insert` | `USER_OBJECT` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/service-account-lifecycle.ts` | `update` | `API_KEY_OBJECT` | undecidable | context, elevation undecidable | 3 |
@@ -210,6 +214,7 @@ Measured on 2026-11-10 at `2919a8dc2`.
 | `packages/plugins/plugin-security/src/claim-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/cleanup-package-permissions.ts` | `delete` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/invitation-placement.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
+| `packages/plugins/plugin-security/src/position-renamed-holder-carry.ts` | `update` | `sys_user_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-security/src/stored-permission-set-package-backfill.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
@@ -232,6 +237,7 @@ Measured on 2026-11-10 at `2919a8dc2`.
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `delete` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `update` | `objectName` | undecidable | context, elevation undecidable | 1 |
+| `packages/services/service-automation/src/connector-connections.ts` | `delete` | `sys_connector_connection` | enabled | elevated | 1 |
 | `packages/services/service-automation/src/connector-connections.ts` | `delete` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/connector-connections.ts` | `insert` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/connector-connections.ts` | `update` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
@@ -251,6 +257,8 @@ Measured on 2026-11-10 at `2919a8dc2`.
 | `packages/services/service-automation/src/suspended-run-store.ts` | `delete` | `sys_automation_run` | enabled | elevated | 3 |
 | `packages/services/service-automation/src/suspended-run-store.ts` | `insert` | `sys_automation_run` | enabled | elevated | 2 |
 | `packages/services/service-automation/src/suspended-run-store.ts` | `update` | `sys_automation_run` | enabled | elevated | 2 |
+| `packages/services/service-automation/src/sync-run-ledger.ts` | `insert` | `sys_sync_run` | enabled | elevated | 1 |
+| `packages/services/service-automation/src/sync-run-ledger.ts` | `update` | `sys_sync_run` | enabled | elevated | 5 |
 | `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `delete` | `sys_metadata` | enabled | elevated | 1 |
 | `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `insert` | `sys_metadata` | enabled | elevated | 1 |
 | `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `update` | `sys_metadata` | enabled | elevated | 2 |
@@ -292,7 +300,7 @@ Measured on 2026-11-10 at `2919a8dc2`.
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_setting_audit` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service.ts` | `insert` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-settings/src/settings-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-storage/src/attachment-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 3 |
+| `packages/services/service-storage/src/attachment-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 4 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `update` | `object` | undecidable | options unreadable | 1 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `insert` | `sys_file` | enabled | context, elevation undecidable | 1 |
@@ -301,7 +309,7 @@ Measured on 2026-11-10 at `2919a8dc2`.
 | `packages/services/service-storage/src/file-attachment-service.ts` | `delete` | `sys_attachment` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-storage/src/file-attachment-service.ts` | `insert` | `sys_attachment` | enabled | context, elevation undecidable | 2 |
 | `packages/services/service-storage/src/file-reference-lifecycle.ts` | `insert` | `sys_file` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-storage/src/file-reference-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 2 |
+| `packages/services/service-storage/src/file-reference-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 3 |
 | `packages/services/service-storage/src/metadata-store.ts` | `delete` | `sys_file` | enabled | options unreadable | 1 |
 | `packages/services/service-storage/src/metadata-store.ts` | `insert` | `sys_file` | enabled | options unreadable | 1 |
 | `packages/services/service-storage/src/metadata-store.ts` | `update` | `sys_file` | enabled | options unreadable | 2 |

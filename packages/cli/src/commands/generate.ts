@@ -66,6 +66,7 @@ import {
   barrelExportsBinding,
   barrelSpecifier,
   measureStackReach,
+  stackCarries,
   wiringLines,
   type StackReach,
 } from '../utils/scaffold-wiring.js';
@@ -110,12 +111,18 @@ export interface ScaffoldBindings {
 /**
  * Where a binding scaffold takes each reference it writes from (#21325).
  *
- *  - `object: 'name'` — the item's own name names the object. Only `view`:
- *    a views container is registered under the object it binds to, so
- *    `os g view task` IS "the views of task", and the name resolves through
- *    {@link objectNameFor} exactly as `os g object task` writes it.
+ *  - `object: 'name'` — the item's own name names the object, unless
+ *    `--object` names it. Only `view`: a views container is registered under
+ *    the object it binds to, so `os g view task` IS "the views of task", and
+ *    the name resolves through {@link objectNameFor} exactly as
+ *    `os g object task` writes it. With `--object` the name is the view's own
+ *    (#32153): `os g view open_tickets --object ticket` writes a list view
+ *    named `open_tickets` for the object `ticket`.
  *  - `object: 'flag'` — `--object`, or the stack's only object.
  *  - `flow: 'flag'`   — `--flow`, or the stack's only flow.
+ *  - `flow: 'flag-or-none'` — the same, except that a stack declaring no
+ *    flow (and no `--flow`) binds none instead of refusing: only `action`,
+ *    which then writes a declarative update (#32153).
  *
  * Every reference is checked against the loaded stack before anything is
  * rendered, so no scaffold is written naming metadata the stack does not
@@ -124,7 +131,7 @@ export interface ScaffoldBindings {
  */
 export interface ScaffoldBinds {
   object?: 'name' | 'flag';
-  flow?: 'flag';
+  flow?: 'flag' | 'flag-or-none';
 }
 
 /**
@@ -195,6 +202,13 @@ const GENERATORS: Record<string, {
    * load, because the namespace and the stack's objects are both read there.
    */
   namesObject: boolean;
+  /**
+   * The scaffold `export const`s its binding, and the barrel line re-exports
+   * it by that name — `export { orderLine } from './order_line.object'`, the
+   * starter's barrel shape (#32153). Absent: the barrel line re-exports the
+   * file's default export under the binding's name, as it always has.
+   */
+  exportsByName?: boolean;
   /** The references the scaffold writes, and where each is taken from (#21325). */
   binds?: ScaffoldBinds;
   /**
@@ -202,9 +216,18 @@ const GENERATORS: Record<string, {
    * `generate`. `runMetadataGeneration` looks for exactly this name in the
    * loaded stack to say whether the file reached it (#20215), and
    * `generate-scaffold-wiring.test.ts` holds it equal to what `generate`
-   * writes, so the two cannot drift.
+   * writes, so the two cannot drift. A views container has no `name`: it is
+   * registered under the object it binds, which is why `bindings` is handed
+   * here too (#32153: `os g view open_tickets --object ticket`).
    */
-  itemName: (name: string, namespace?: string) => string;
+  itemName: (name: string, namespace?: string, bindings?: ScaffoldBindings) => string;
+  /**
+   * The app navigation entry that lists the scaffold, as one line of source
+   * (#32153). `os g` prints it after writing, with the stack's app(s) to add
+   * it to, and never edits an app. Absent: the scaffold is not opened from an
+   * app's navigation.
+   */
+  navEntry?: (name: string, namespace?: string) => string;
   /**
    * Capability tokens a stack must declare in `requires` for this scaffold to
    * RUN (#20215). `os init` declares the union of them, and `os g` names the
@@ -263,28 +286,64 @@ const GENERATORS: Record<string, {
      * scaffold carries no finding into any project. A field the author adds
      * gets its consumer from `os g view NAME`, whose list shows every field the
      * object declares.
+     *
+     * ## The authoring style is the starter's (#32153)
+     *
+     * The `npm create objectstack` starter (`note.object.ts`) and the
+     * getting-started docs declare fields through the `Field.*` builders, export
+     * the object BY NAME (its barrel line is `export { Note } from …`), and put
+     * every field in a `fieldGroups` section. This scaffold used to write a raw
+     * `{ type: 'text', … }` literal and a default export with no field groups, so
+     * a newcomer — or a coding agent copying whichever file it read last — met
+     * two dialects in the first ten minutes. It now writes the starter's: the
+     * builder, a named `export const`, a `details` group the title field joins,
+     * and a barrel line that re-exports the name ({@link GENERATORS} `exportsByName`).
+     *
+     * The binding stays {@link toCamelCase} of the name, as it always was:
+     * every refusal layer in `runMetadataGeneration` — the parse check that
+     * refuses `os g object class`, the barrel-alias check — is measured against
+     * exactly that binding, so the style change moves no name's verdict.
+     *
+     * `export default` is KEPT beside the named export. The `os init` object
+     * templates still default-export their object and their starter app and
+     * list view default-import it, and `scaffold-object-declaration-shape.test.ts`
+     * holds every door that writes a `*.object.ts` to one declaration shape —
+     * the `ObjectSchema.create` factory with the declared binding as the default
+     * export. A default import of a generated object therefore keeps working,
+     * and the named export is what the barrel and an `import { … }` read.
      */
     namesObject: true,
+    exportsByName: true,
     itemName: (name: string, namespace?: string) => objectNameFor(name, namespace),
-    generate: (name: string, namespace?: string) => `import { ObjectSchema } from '@objectstack/spec/data';
+    generate: (name: string, namespace?: string) => `import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 /**
  * ${toTitleCase(name)} Object
  */
-const ${toCamelCase(name)} = ObjectSchema.create({
+export const ${toCamelCase(name)} = ObjectSchema.create({
   name: '${objectNameFor(name, namespace)}',
   label: '${toTitleCase(name)}',
   pluralLabel: '${toTitleCase(name)}s',
+
+  // Field groups: the sections a record's form and detail page draw, top to
+  // bottom in this order. A field joins one by naming its \`key\` in \`group\`.
+  // Give each field you add a \`group\` as well. Field groups versus a view's
+  // own form sections: https://objectstack.ai/docs/ui/field-grouping-and-order
+  fieldGroups: [
+    { key: 'details', label: 'Details' },
+  ],
+
   fields: {
     // The record's title: the platform shows it as each record's name. Add
-    // the fields this object needs beside it; \`objectstack generate view\`
-    // then lists every one of them.
-    name: {
-      type: 'text',
+    // the fields this object needs beside it, each through a \`Field.*\`
+    // builder (Field.textarea, Field.select, Field.lookup, …);
+    // \`objectstack generate view\` then lists every one of them.
+    name: Field.text({
       label: 'Name',
       required: true,
       maxLength: 255,
-    },
+      group: 'details',
+    }),
   },
   // Org-wide default (OWD): who can see records they don't own. 'private' is
   // owner-only until access is widened by a permission grant or a sharing
@@ -353,16 +412,41 @@ export default ${toCamelCase(name)};
      * refused (`list-view-field-unknown`), and the template's old fixed `name`
      * column was exactly that on any object without a `name` field. It is
      * sorted by the record's title field when the object has one.
+     *
+     * ## A view with a name of its own (#32153)
+     *
+     * `os g view open_tickets` used to be refused: the name was read as the
+     * object's, and there was no way to name a view apart from it. With
+     * `--object`, the name is the view's own: `os g view open_tickets --object
+     * ticket` writes a container for `ticket` whose one list view is the named
+     * entry `listViews.open_tickets` (served as `ticket.open_tickets`, and the
+     * object's default list while it is the only one). Without `--object` the
+     * name still names the object, so every existing invocation writes what it
+     * always wrote.
+     *
+     * A stack holds ONE views container per object — `defineStack` refuses a
+     * second (it would occupy the same registry slot) — so a named view for an
+     * object that already has a container is refused before anything is
+     * written, and the refusal prints the `listViews` entry to add to that
+     * container instead ({@link resolveScaffoldBindings}).
      */
     namesObject: true,
     binds: { object: 'name' },
-    itemName: (name: string, namespace?: string) => objectNameFor(name, namespace),
-    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+    itemName: (name: string, namespace?: string, bindings?: ScaffoldBindings) =>
+      bindings?.object?.name ?? objectNameFor(name, namespace),
+    generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => {
       const object = requireBinding('view', bindings, 'object');
-      const columns = object.fields.map((field) => `      { field: ${tsString(field)} },`).join('\n');
-      const sort = object.displayField
-        ? `\n    sort: [{ field: ${tsString(object.displayField)}, order: 'asc' }],`
-        : '';
+      // The name names the object (`os g view task`), or — with `--object`
+      // naming another — the view itself.
+      const ownName = objectNameFor(name, namespace) !== object.name ? toSnakeCase(name) : undefined;
+      const list = renderListView(object, ownName ? toTitleCase(ownName) : `All ${objectPluralLabel(object)}`, ownName ? 6 : 4);
+      const slot = ownName
+        ? `  // A named list view, served as '${object.name}.${ownName}'. More named views
+  // of this object go beside it, each under its own key.
+  listViews: {
+    ${ownName}: ${list},
+  },`
+        : `  list: ${list},`;
       return `import * as UI from '@objectstack/spec/ui';
 
 /**
@@ -373,14 +457,7 @@ const ${toCamelCase(name)}Views: UI.View = {
   // is its identity, so it declares no \`name\` or \`label\` of its own. The
   // label people see is the list view's, below.
   object: ${tsString(object.name)},
-  list: {
-    label: ${tsString(`All ${objectPluralLabel(object)}`)},
-    type: 'grid',
-    columns: [
-${columns}
-    ],${sort}
-    pagination: { pageSize: 25 },
-  },
+${slot}
 };
 
 export default ${toCamelCase(name)}Views;
@@ -420,14 +497,28 @@ export default ${toCamelCase(name)}Views;
      * (`action-no-placement`). `record_header` is the button on the record it
      * acts on; the emitted comment names the rest of the vocabulary and the
      * explicit headless `[]`.
+     *
+     * ## With no flow, a declarative update (#32153)
+     *
+     * `os g action resolve --object ticket` used to be refused until a flow
+     * existed ("an action runs a flow"), while the docs' own tutorial action
+     * is a declarative `operation: 'update'` that needs none. So `flow` binds
+     * `'flag-or-none'`: `--flow`, or the stack's only flow, still writes the
+     * flow action it always wrote, and several flows with no `--flow` are still
+     * refused. Only a stack that declares NO flow changes, from a refusal to
+     * an update action: `operation: 'update'` with a `params` entry naming one
+     * field the object declares, so the click opens a dialog for that value and
+     * writes it to the record as the signed-in user. `type` is left at its
+     * default (`'script'`, the route the write is posted to; any other type is
+     * refused beside the operation), and `locations` leaves out `list_toolbar`,
+     * which `ActionSchema` refuses for an update (no current record there).
      */
     namesObject: true,
-    binds: { object: 'flag', flow: 'flag' },
+    binds: { object: 'flag', flow: 'flag-or-none' },
     itemName: (name: string, namespace?: string) => itemNameFor(toSnakeCase(name), namespace),
     generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => {
       const object = requireBinding('action', bindings, 'object');
-      const flow = requireBinding('action', bindings, 'flow');
-      return `import * as UI from '@objectstack/spec/ui';
+      const header = `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} Action
@@ -435,18 +526,43 @@ export default ${toCamelCase(name)}Views;
 const ${toCamelCase(name)}Action: UI.Action = {
   name: '${itemNameFor(toSnakeCase(name), namespace)}',
   label: '${toTitleCase(name)}',
+  objectName: ${tsString(object.name)},`;
+      const footer = `};
+
+export default ${toCamelCase(name)}Action;
+`;
+      if (bindings?.flow === undefined) {
+        // No flow to run (#32153): the stack declares none and `--flow` named
+        // none. The declarative field write the tutorial's actions use — see
+        // {@link declarativeUpdateField} for the field it asks for.
+        const field = declarativeUpdateField(object);
+        return `${header}
+  // What the click does: write to the record it is invoked on. There is no
+  // handler or flow to write: the platform performs the update as the
+  // signed-in user, so their permissions and the object's validations apply
+  // exactly as they do to an edit. \`params\` asks for values in a dialog;
+  // \`patch\` writes fixed ones instead, e.g. patch: { status: 'resolved' }
+  // (a param of the same name wins). To run a flow, \`objectstack generate
+  // flow\` writes one, and an action with type: 'flow' and target: '<flow>'
+  // runs it.
+  operation: 'update',
+  params: [{ field: ${tsString(field)} }],
+  // Where the button is drawn: the record's header. Others: 'record_more',
+  // 'record_section', 'list_item' (not 'list_toolbar': an update needs the
+  // record it writes). An action meant only for REST / MCP / AI callers says
+  // so with an empty list.
+  locations: ['record_header'],
+${footer}`;
+      }
+      return `${header}
   // Runs the flow named in \`target\` against the record it is invoked on.
   type: 'flow',
-  objectName: ${tsString(object.name)},
-  target: ${tsString(flow)},
+  target: ${tsString(bindings.flow)},
   // Where the button is drawn: the record's header. Others: 'record_more',
   // 'record_section', 'list_item', 'list_toolbar'. An action meant only for
   // REST / MCP / AI callers says so with an empty list.
   locations: ['record_header'],
-};
-
-export default ${toCamelCase(name)}Action;
-`;
+${footer}`;
     },
   },
 
@@ -554,16 +670,44 @@ export default ${toCamelCase(name)}Flow;
   dashboard: {
     description: 'Analytics dashboard',
     defaultDir: 'src/dashboards',
+    /**
+     * A dashboard reaches people through an app's navigation (#32153): one no
+     * app lists is opened only by typing its URL. `os g` never edits an app —
+     * an app file is the author's, exactly as the config is — so the
+     * navigation entry that lists this dashboard is written into the
+     * scaffold's own header and printed after the write
+     * ({@link GENERATORS} `navEntry`), naming the stack's app(s) to add it to.
+     * A package whose manifest type is 'app' holds at most one app
+     * (ADR-0019 D3), so the remedy is an entry in that app, never a second
+     * app.
+     *
+     * `widgets` stays empty, and the comment above it says what an empty
+     * dashboard draws and how a widget binds a dataset (`os g dataset`): which
+     * numbers a dashboard shows is the author's to say, and a widget bound to
+     * nothing is refused.
+     */
     namesObject: false,
     itemName: (name: string, namespace?: string) => itemNameFor(`${toSnakeCase(name)}_dashboard`, namespace),
+    navEntry: (name: string, namespace?: string) => dashboardNavEntry(name, namespace),
     generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} Dashboard
+ *
+ * No app lists this dashboard until an entry in its navigation names it: add
+ * this line to the \`navigation\` of your app (src/apps/*.app.ts), or to a
+ * 'group' entry's \`children\` there.
+ *
+ *   ${dashboardNavEntry(name, namespace)}
  */
 const ${toCamelCase(name)}Dashboard: UI.Dashboard = {
   name: '${itemNameFor(`${toSnakeCase(name)}_dashboard`, namespace)}',
   label: '${toTitleCase(name)} Dashboard',
+  // The tiles it shows. While this is empty the dashboard has nothing to draw.
+  // A widget names a dataset and the measures to show from it — a dataset is
+  // what \`objectstack generate dataset NAME --object OBJECT\` writes:
+  //   { id: 'records', title: 'Records', type: 'metric',
+  //     dataset: 'DATASET', values: ['record_count'], layout: { x: 0, y: 0, w: 3, h: 2 } },
   widgets: [],
 };
 
@@ -910,7 +1054,11 @@ export const GENERATOR_SCAFFOLD_TARGETS: readonly {
    * is measured against a stack that declares what it binds.
    */
   binds: ScaffoldBinds;
-  itemName: (name: string, namespace?: string) => string;
+  /** The scaffold exports its binding by name and the barrel re-exports that name (#32153). */
+  exportsByName: boolean;
+  itemName: (name: string, namespace?: string, bindings?: ScaffoldBindings) => string;
+  /** The app navigation entry `os g` prints for the scaffold, when it has one (#32153). */
+  navEntry?: (name: string, namespace?: string) => string;
   requires: readonly string[];
   generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => string;
 }[] =
@@ -920,10 +1068,31 @@ export const GENERATOR_SCAFFOLD_TARGETS: readonly {
     stackKey: singularToPlural(type),
     namesObject: gen.namesObject,
     binds: gen.binds ?? {},
+    exportsByName: gen.exportsByName ?? false,
     itemName: gen.itemName,
+    ...(gen.navEntry ? { navEntry: gen.navEntry } : {}),
     requires: gen.requires ?? [],
     generate: gen.generate,
   }));
+
+/**
+ * The line `os g` appends to a directory's barrel for the scaffold `name`
+ * written as `moduleSpecifier`, and the binding that line publishes: the
+ * file's named export when the generator `exportsByName` (#32153), its default
+ * export under {@link toCamelCase} of the name otherwise. Either way the
+ * published binding is `toCamelCase(name)`, which every refusal layer is
+ * measured against. Exported so a pin reads the line the command appends.
+ */
+export function barrelExportLine(type: string, name: string, moduleSpecifier: string): { binding: string; line: string } {
+  const binding = toCamelCase(name);
+  const byName = Object.prototype.hasOwnProperty.call(GENERATORS, type) && GENERATORS[type].exportsByName === true;
+  return {
+    binding,
+    line: byName
+      ? `export { ${binding} } from '${moduleSpecifier}';`
+      : `export { default as ${binding} } from '${moduleSpecifier}';`,
+  };
+}
 
 // ─── Retired Generators ─────────────────────────────────────────────
 
@@ -1121,6 +1290,53 @@ function tsString(value: string): string {
 /** The words a scaffold labels a bound object's records with. */
 function objectPluralLabel(object: ScaffoldObjectBinding): string {
   return object.pluralLabel ?? object.label ?? toTitleCase(object.name);
+}
+
+/**
+ * The navigation entry that lists the `dashboard` scaffold named `name`
+ * (#32153): one line, the shape an app's `navigation` array takes it in.
+ */
+function dashboardNavEntry(name: string, namespace?: string): string {
+  const dashboard = itemNameFor(`${toSnakeCase(name)}_dashboard`, namespace);
+  return `{ id: ${tsString(`${dashboard}_nav`)}, type: 'dashboard', dashboardName: ${tsString(dashboard)}, label: ${tsString(toTitleCase(name))} },`;
+}
+
+/**
+ * The field a declarative-update `action` scaffold asks for (#32153): the
+ * record's title field when the object has one, else the first field it
+ * declares. `resolveScaffoldBindings` refuses an object that declares no field
+ * before this is reached, because an update with nothing to write is refused
+ * by `ActionSchema`.
+ */
+function declarativeUpdateField(object: ScaffoldObjectBinding): string {
+  const field = object.displayField ?? object.fields[0];
+  if (field === undefined) {
+    throw new Error(`generate: the \`action\` scaffold has no field of '${object.name}' to write`);
+  }
+  return field;
+}
+
+/**
+ * The list view a `view` scaffold writes for `object`, as an object literal
+ * whose keys sit at `indent` spaces (its closing brace two to the left): every
+ * field the object declares as a column, sorted by the record's title field
+ * when it has one. Shared by the default `list` slot and a named `listViews`
+ * entry (#32153), so the two cannot write different lists.
+ */
+function renderListView(object: ScaffoldObjectBinding, label: string, indent: number): string {
+  const pad = ' '.repeat(indent);
+  const columns = object.fields.map((field) => `${pad}  { field: ${tsString(field)} },`).join('\n');
+  const sort = object.displayField
+    ? `\n${pad}sort: [{ field: ${tsString(object.displayField)}, order: 'asc' }],`
+    : '';
+  return `{
+${pad}label: ${tsString(label)},
+${pad}type: 'grid',
+${pad}columns: [
+${columns}
+${pad}],${sort}
+${pad}pagination: { pageSize: 25 },
+${' '.repeat(indent - 2)}}`;
 }
 
 /**
@@ -1669,8 +1885,10 @@ async function runMetadataGeneration(
     // the `object` scaffold's own name, and a view's, which names the object
     // it binds. A scaffold that binds through `--object` derives nothing from
     // its own name (#21325), so it has none.
+    // A view's name names its object unless `--object` does (#32153): then
+    // the name is the view's own, and nothing is derived from it here.
     const nameNamesObject = (generator.namesObject && generator.binds === undefined)
-      || generator.binds?.object === 'name';
+      || (generator.binds?.object === 'name' && flags.object === undefined);
     const objectName = nameNamesObject ? objectNameFor(name, namespace) : undefined;
     if (objectName !== undefined && namespace) {
       // Prefixing answers the one refusal it can answer — a missing prefix.
@@ -1759,7 +1977,7 @@ async function runMetadataGeneration(
     // every emission site of every generator (14 across 7 when it landed)
     // instead of one patch per site.
     const content = generator.generate(name, namespace, bindings);
-    const exportLine = `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';`;
+    const { line: exportLine } = barrelExportLine(type, name, moduleSpecifier);
 
     // ⛔ REFUSE rather than rewrite (#16541).
     //
@@ -1994,7 +2212,7 @@ async function runMetadataGeneration(
     // `utils/scaffold-wiring.ts` for why the loaded stack, not the config's
     // text, is asked). ⛔ The config is never edited: it is the author's file.
     const stackKey = singularToPlural(type);
-    const itemName = generator.itemName(name, namespace);
+    const itemName = generator.itemName(name, namespace, bindings);
     const requires = generator.requires ?? [];
     const reach = await measureStackReach({ stackKey, itemName, requires });
     const scaffoldLabel = path.join(dir, fileName);
@@ -2039,6 +2257,40 @@ async function runMetadataGeneration(
 
     for (const line of written) printSuccess(line);
     reportStackReach(reach, { type, dir, scaffoldLabel, stackKey, itemName, requires, barrelDir: fullDir });
+    if (generator.navEntry) {
+      reportNavEntry(generator.navEntry(name, namespace), type, project.kind === 'loaded' ? project.config : undefined);
+    }
+}
+
+/**
+ * Print the app navigation entry that lists a scaffold just written, and the
+ * app(s) to add it to (#32153). ⛔ It never edits an app: an app file is the
+ * author's, like the config. A package whose manifest type is 'app' holds at
+ * most one app (ADR-0019 D3), so with no app the remedy named is generating
+ * THE app, and with one it is an entry in that app — never a second app.
+ */
+function reportNavEntry(entry: string, type: string, config: unknown): void {
+  const stack = config ? authoringRuleUnionStack(config as Record<string, unknown>) as Record<string, unknown> : {};
+  const collection = stack.apps;
+  const items = Array.isArray(collection)
+    ? collection
+    : collection && typeof collection === 'object' ? Object.values(collection as Record<string, unknown>) : [];
+  const apps = items
+    .map((app) => (app && typeof app === 'object' ? (app as { name?: unknown }).name : undefined))
+    .filter((appName): appName is string => typeof appName === 'string' && appName.length > 0);
+
+  printWarning(`No app lists it yet: ${article(type)} reaches people through an app's navigation`);
+  if (apps.length === 0) {
+    console.log(chalk.dim(
+      `    This stack declares no app. \`${CLI_ALIAS} g app NAME --object OBJECT\` writes one; then add this`,
+    ));
+    console.log(chalk.dim('    entry to its `navigation`:'));
+  } else {
+    const which = apps.length === 1 ? `app '${apps[0]}'` : `one of the apps ${listed(apps)}`;
+    console.log(chalk.dim(`    Add this entry to the \`navigation\` of ${which} (\`${CLI_ALIAS} g\` never edits an app):`));
+  }
+  console.log(chalk.white(`      ${entry}`));
+  console.log('');
 }
 
 /** Print a refusal and exit 1 — never returns. Every caller has written nothing yet. */
@@ -2139,7 +2391,7 @@ export function resolveScaffoldBindings(args: {
   const bindings: ScaffoldBindings = {};
   const said: string[] = [];
 
-  if (binds.object === 'name') {
+  if (binds.object === 'name' && flags.object === undefined) {
     const object = objects.find((o) => o.name === objectName);
     if (!object) {
       return refuse(
@@ -2150,12 +2402,14 @@ export function resolveScaffoldBindings(args: {
           '',
           declaredObjects,
           `Generate the object first (\`${g} object ${name}\`), or name one the stack declares.`,
+          `To give the ${type} a name of its own, name its object with --object:`,
+          `\`${g} ${type} ${name} --object <object>\`.`,
         ],
       );
     }
     bindings.object = object;
     said.push(`  ${chalk.dim('Object:')} ${chalk.white(object.name)}${object.name !== name ? ns : ''}`);
-  } else if (binds.object === 'flag') {
+  } else if (binds.object === 'name' || binds.object === 'flag') {
     if (flags.object !== undefined) {
       const typed = flags.object;
       const object = objects.find((o) => o.name === typed)
@@ -2210,7 +2464,7 @@ export function resolveScaffoldBindings(args: {
     }
   }
 
-  if (binds.flow === 'flag') {
+  if (binds.flow === 'flag' || binds.flow === 'flag-or-none') {
     const declaredFlows = flows.length > 0
       ? `Flows this stack declares: ${listed(flows)}.`
       : 'This stack declares no flow.';
@@ -2237,6 +2491,29 @@ export function resolveScaffoldBindings(args: {
         `  ${chalk.dim('Flow:')}   ${chalk.white(flows[0])} `
           + chalk.dim('(the only flow this stack declares; --flow runs another)'),
       );
+    } else if (flows.length === 0 && binds.flow === 'flag-or-none') {
+      // No flow to run (#32153): the scaffold is written without one — for
+      // `action`, a declarative update of a field the bound object declares.
+      // An object with no field leaves that update nothing to write, which
+      // `ActionSchema` refuses, so it is refused here first.
+      const object = bindings.object;
+      if (object && object.fields.length === 0) {
+        return refuse(
+          `${aType} with no flow to run writes a field of '${object.name}', which declares none`,
+          [
+            `This stack declares no flow, so the ${type} would update a field of the record it is`,
+            `invoked on, and '${object.name}' declares no field to update. Nothing was written.`,
+            '',
+            'Give the object a field, or generate a flow for the action to run:',
+            '',
+            `    ${g} flow <name> --object ${object.name}`,
+          ],
+        );
+      }
+      said.push(
+        `  ${chalk.dim('Flow:')}   ${chalk.white('none')} `
+          + chalk.dim("(this stack declares no flow: a declarative update; --flow runs one)"),
+      );
     } else if (flows.length === 0) {
       return refuse(
         `${aType} runs a flow, and this stack declares none`,
@@ -2260,6 +2537,36 @@ export function resolveScaffoldBindings(args: {
         ],
       );
     }
+  }
+
+  // One views container per object (#32153). `defineStack` refuses a second
+  // container for an object the stack already has one for — both would occupy
+  // its one registry slot — so the refusal is said here, before anything is
+  // written, with the edit that DOES add a view: a named entry in the
+  // existing container's `listViews`.
+  // Judged on the config's OWN `views`, not folded with `packages[]`: the
+  // refusal is about the one stack this scaffold's barrel feeds.
+  const ownViews = { views: (project.config as { views?: unknown } | null)?.views };
+  if (type === 'view' && bindings.object && stackCarries(ownViews, 'views', bindings.object.name)) {
+    const object = bindings.object;
+    const viewName = flags.object !== undefined && objectNameFor(name, namespace) !== object.name
+      ? toSnakeCase(name)
+      : undefined;
+    return refuse(
+      `this stack already has a views container for '${object.name}'`,
+      [
+        `A stack holds one views container per object, and a second one for '${object.name}' is refused`,
+        'when the config loads. Nothing was written.',
+        '',
+        viewName
+          ? 'Add the view to that container instead, as a named list view in its `listViews`:'
+          : "Add a named list view to that container's `listViews` instead:",
+        '',
+        `    listViews: {`,
+        `      ${viewName ?? '<name>'}: { label: ${tsString(viewName ? toTitleCase(viewName) : 'My View')}, type: 'grid', columns: [${object.fields.slice(0, 3).map((f) => `{ field: ${tsString(f)} }`).join(', ')}] },`,
+        `    },`,
+      ],
+    );
   }
 
   return { ok: true, bindings, said };
@@ -4143,10 +4450,14 @@ async function runMigrationGeneration(configPath: string | undefined, flags: { o
 
 // ─── Main Generate Command ──────────────────────────────────────────
 
-/** The generator types whose `binds[key]` is `source`, read off the roster. */
-function typesBinding(key: keyof ScaffoldBinds, source: 'name' | 'flag'): string {
+/**
+ * The generator types that read `--object` / `--flow`, read off the roster:
+ * every `binds[key]` but none — `'flag'`, `'flag-or-none'`, and the view's
+ * `'name'`, whose `--object` gives the view a name of its own (#32153).
+ */
+function typesTakingFlag(key: keyof ScaffoldBinds): string {
   return Object.entries(GENERATORS)
-    .filter(([, gen]) => gen.binds?.[key] === source)
+    .filter(([, gen]) => gen.binds?.[key] !== undefined)
     .map(([type]) => type)
     .join(', ');
 }
@@ -4164,14 +4475,12 @@ export function unusedBindingFlagRefusal(
   const generator = Object.prototype.hasOwnProperty.call(GENERATORS, type) ? GENERATORS[type] : undefined;
   if (!generator && !Object.prototype.hasOwnProperty.call(SUB_COMMANDS, type)) return undefined;
   for (const key of ['object', 'flow'] as const) {
-    if (given[key] === undefined || generator?.binds?.[key] === 'flag') continue;
+    if (given[key] === undefined || generator?.binds?.[key] !== undefined) continue;
     return {
       headline: `\`${CLI_ALIAS} g ${type}\` takes no --${key}`,
       lines: [
-        generator?.binds?.[key] === 'name'
-          ? `${article(type, true)} is named after the ${key} it binds: \`${CLI_ALIAS} g ${type} <${key}>\`.`
-          : `${article(type, true)} binds no ${key}, so --${key} would name nothing it writes.`,
-        `--${key} is read by: ${typesBinding(key, 'flag')}. Nothing was written.`,
+        `${article(type, true)} binds no ${key}, so --${key} would name nothing it writes.`,
+        `--${key} is read by: ${typesTakingFlag(key)}. Nothing was written.`,
       ],
     };
   }
@@ -4229,10 +4538,10 @@ export default class Generate extends Command {
     // here are (a long name, a value), and described from the roster so the
     // types they apply to cannot drift from the generators that read them.
     object: Flags.string({
-      description: `Object the scaffold binds (${typesBinding('object', 'flag')}). The name as declared, or without the namespace prefix. Default: the stack's only object`,
+      description: `Object the scaffold binds (${typesTakingFlag('object')}). The name as declared, or without the namespace prefix. Default: the stack's only object; for view, the object its name names (with --object, the name is the view's own)`,
     }),
     flow: Flags.string({
-      description: `Flow the scaffold runs (${typesBinding('flow', 'flag')}). Default: the stack's only flow`,
+      description: `Flow the scaffold runs (${typesTakingFlag('flow')}). Default: the stack's only flow; an action in a stack with no flow is a declarative update`,
     }),
   };
 

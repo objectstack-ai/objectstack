@@ -8,13 +8,31 @@ import { describe, it, expect, vi } from 'vitest';
 // `isolate: false`, so whether the module is already warm depends on what else
 // the worker happened to run first; when it wasn't, the seeding test blew the
 // budget. (It surfaced as a timeout rather than a wrong result because
-// `createSeed` swallows failures and returns `{}`.)
+// `createSeed` swallows failures.)
 //
 // Importing it here moves that cost into the file's import phase, which no test
 // or hook timeout applies to, so it can never land inside a timed window again.
 // Keep the specifier identical to the one in anchors.ts — ESM caches by resolved
 // specifier, so this makes the hook's own dynamic import resolve immediately.
 import '@object-ui/plugin-detail';
+// The same for the three packages `validateMetadataDraft` reaches through the
+// CEL authoring helpers' dynamic imports (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@object-ui/core';
+
+// The synthesizer the hook imports, passed through to the real one unless a
+// test names what it returns (a synthesized page that places no component).
+const synth = vi.hoisted(() => ({ returns: undefined as Record<string, unknown> | undefined }));
+vi.mock('@object-ui/plugin-detail', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@object-ui/plugin-detail')>();
+  return {
+    ...real,
+    buildDefaultPageSchema: (...args: Parameters<typeof real.buildDefaultPageSchema>) =>
+      synth.returns ?? real.buildDefaultPageSchema(...args),
+  };
+});
+
 import { registerBuiltinAnchors } from './anchors';
 import { resolveResourceConfig } from './registry';
 import { applyTransform } from './createDerive';
@@ -140,14 +158,77 @@ describe('page createSeed (record-page region seeding)', () => {
     expect(seeded).toEqual({});
   });
 
-  it('returns {} for an explicit full record page when no object is chosen', async () => {
-    const seeded = await cfg.createSeed!({ type: 'record', kind: 'full' }, { client: clientReturning(objectDef) });
-    expect(seeded).toEqual({});
+});
+
+/**
+ * objectstack#32478 — an explicit `full` record page that cannot start as a copy
+ * of the default page's regions starts `slotted` instead: the same default page
+ * on the day it is created, and a body the save door accepts.
+ *
+ * The four paths had no regions to seed — no object chosen, an object read that
+ * comes back empty, a synthesized page that places no component, and a read
+ * that fails — and seeded nothing, so the draft's `kind: 'full'` saved with the
+ * create defaults' empty `regions`. The spec refuses that body at `regions`
+ * (`checkPageRecordPlacesComponent`), so each save answered 422. Each path is
+ * pinned on the body `ResourceEditPage` saves in create mode, judged by the
+ * spec's own `PageSchema`, beside the body the path saved before, which the
+ * spec still refuses.
+ */
+describe('page createSeed — a full record page with nothing to copy starts slotted (objectstack#32478)', () => {
+  const cfg = resolveResourceConfig('page');
+  const failing = { get: async () => { throw new Error('boom'); } };
+  const draft = (extra: Record<string, unknown>) =>
+    ({ label: 'Invoice page', name: 'invoice_page', type: 'record', kind: 'full', ...extra });
+
+  /** The save path of `ResourceEditPage` in create mode, with the seed it applied. */
+  async function createBody(d: Record<string, unknown>, client: { get: (type: string, name: string) => Promise<unknown> }) {
+    const seed = await cfg.createSeed!(d, { client });
+    const body = { ...buildCreateModeBody(cfg, d, getMetadataCreateSeed('page') as Record<string, unknown>), ...seed } as Record<string, unknown>;
+    return { seed, body };
+  }
+
+  const refusedAtRegions = (body: unknown) => {
+    const r = PageSchema.safeParse(body);
+    return !r.success && r.error.issues.some((i) => i.code === 'custom' && i.path.join('.') === 'regions');
+  };
+
+  it.each([
+    ['no object is chosen', draft({}), clientReturning(objectDef)],
+    ['the object read comes back empty', draft({ object: 'showcase_invoice' }), clientReturning(null)],
+    ['the object read fails (the seed stays best-effort)', draft({ object: 'showcase_invoice' }), failing],
+  ])('%s: the seed is `kind: slotted`, and the body saves', async (_label, d, client) => {
+    const { seed, body } = await createBody(d, client);
+    expect(seed).toEqual({ kind: 'slotted' });
+    const parsed = PageSchema.safeParse(body);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    // The body this path saved before, with the draft's `full` kind: refused at `regions`.
+    expect(refusedAtRegions({ ...body, kind: 'full' })).toBe(true);
   });
 
-  it('is best-effort — swallows a client/synth failure and returns {}', async () => {
-    const failing = { get: async () => { throw new Error('boom'); } };
-    const seeded = await cfg.createSeed!({ type: 'record', object: 'showcase_invoice', kind: 'full' }, { client: failing });
-    expect(seeded).toEqual({});
+  it.each([
+    ['no `regions`', {}],
+    ['a region that places nothing', { regions: [{ name: 'main', components: [] }], template: 'default' }],
+  ])('a synthesized page with %s: the seed is `kind: slotted`, not the regions, and the body saves', async (_label, synthesized) => {
+    synth.returns = synthesized;
+    try {
+      const { seed, body } = await createBody(draft({ object: 'showcase_invoice' }), clientReturning(objectDef));
+      expect(seed).toEqual({ kind: 'slotted' });
+      const parsed = PageSchema.safeParse(body);
+      expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+      // What this path seeded before: the synthesized regions (or none) under `full`.
+      const { kind: _kind, ...before } = body;
+      expect(refusedAtRegions({ ...before, kind: 'full', ...synthesized })).toBe(true);
+    } finally {
+      synth.returns = undefined;
+    }
+  });
+
+  it('CONTROL: a synthesized page that places components is copied as before, and the full body saves', async () => {
+    const { seed, body } = await createBody(draft({ object: 'showcase_invoice' }), clientReturning(objectDef));
+    expect((seed as { kind?: unknown }).kind).toBeUndefined();
+    expect(Array.isArray((seed as { regions?: unknown }).regions)).toBe(true);
+    expect(body.kind).toBe('full');
+    const parsed = PageSchema.safeParse(body);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
   });
 });

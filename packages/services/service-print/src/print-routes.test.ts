@@ -43,6 +43,9 @@ const SESSIONS: Record<string, FakeSession> = {
   held: { userId: 'usr_alice', authGate: { code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' } },
 };
 
+/** `usr_alice`'s membership in the organization her sessions name. */
+const MEMBERSHIPS = [{ id: 'mem_alice', user_id: 'usr_alice', organization_id: 'org_1', role: 'member' }];
+
 /** Invoices and their owners: a caller reads only their own (row-level security, as the caller). */
 const RECORDS: Record<string, { id: string; owner: string }> = {
   inv_alice: { id: 'inv_alice', owner: 'usr_alice' },
@@ -140,8 +143,21 @@ function door(setup: DoorSetup = {}) {
 
   registerPrintRoutes(http as never, {
     print: service,
-    // The resolver's grant reads: this caller holds no position or permission set.
-    getEngine: () => ({ find: async () => [] }),
+    // The resolver's grant reads: this caller holds no position or permission
+    // set, and holds a current membership in the organization its session
+    // names — under every tenancy posture the claim is kept only while one
+    // backs it (ADR-0093 D8.1, as amended).
+    getEngine: () => ({
+      find: async (object: string, q: any = {}) => {
+        if (object !== 'sys_member') return [];
+        const rows = MEMBERSHIPS.filter((row) => Object.entries(q?.where ?? {}).every(([k, v]) => {
+          // Scalar equality only: a combinator is refused, never read as a field name.
+          if (k.startsWith('$')) throw new Error(`membership double: ${k} is not implemented`);
+          return (row as Record<string, unknown>)[k] === v;
+        }));
+        return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
+      },
+    }),
     getAuth: () => auth as never,
     resolveTenancyPosture: async () => undefined,
   });

@@ -406,7 +406,8 @@ export class ApprovalsServicePlugin implements Plugin {
       ctx.logger.warn(
         'ApprovalsServicePlugin: the ObjectQL engine has no middleware seam — reads of sys_approval_request, '
         + 'sys_approval_action and sys_approval_approver through the generic data door are NOT narrowed to the '
-        + 'approval requests the caller may see. Grant no read on those objects to non-administrators on this stack.',
+        + 'approval requests the caller may see. Grant no read on those objects to non-administrators on this stack, '
+        + 'and withdraw the member baseline\'s read on sys_approval_request (member_default).',
       );
     }
 
@@ -629,7 +630,7 @@ export class ApprovalsServicePlugin implements Plugin {
         } catch (err: any) {
           ctx.logger.warn?.(
             '[approvals] the sys_approval_request.process_package backfill did not finish: open requests that name no '
-            + 'package keep naming none, every reader still reads the flow by name as before, and the next boot tries again.',
+            + 'package keep naming none, each reads its flow through its run, and the next boot tries again.',
             { error: err?.message ?? String(err) },
           );
         }

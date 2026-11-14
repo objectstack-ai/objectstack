@@ -5,6 +5,8 @@ import type { Plugin, PluginContext, RequestAuthService, TenancyPostureSource } 
 import { resolveLocalizationContext } from '@objectstack/core';
 import type { IDataEngine, IHttpServer } from '@objectstack/spec/contracts';
 import { PREFERENCE_OPTIONS_ROUTE, registerPreferenceOptionsRoutes } from './preference-options-routes.js';
+import { IN_APP_MESSAGE_ROUTE, registerInAppMessageRoutes } from './in-app-message-routes.js';
+import { resolveMessagingCaller, type MessagingCallerSources } from './messaging-request-caller.js';
 import type { PreferenceOptionsEngine } from './preference-options.js';
 import { MessagingService } from './messaging-service.js';
 import type { MessagingChannel } from './channel.js';
@@ -564,10 +566,14 @@ export class MessagingServicePlugin implements Plugin {
         // [#30208 row 6, ruling E on #30527] The preference options door
         // (`preference-options-routes.ts`): the topics and channels a
         // preference or template can name, for the console's pick-or-type
-        // inputs. Mounted at `kernel:ready`, when the HTTP server is
-        // registered; every source it lists is read per request.
+        // inputs. [#32445] And the in-app message door
+        // (`in-app-message-routes.ts`): an organization administrator's
+        // message to members of their organization, the server half of the
+        // Setup action "Send in-app message". Both mounted at `kernel:ready`,
+        // when the HTTP server is registered; everything they read is read
+        // per request.
         if (typeof ctx.hook === 'function') {
-            ctx.hook('kernel:ready', async () => this.mountPreferenceOptionsDoor(ctx, service, getData));
+            ctx.hook('kernel:ready', async () => this.mountHttpDoors(ctx, service, getData));
         }
 
         // Reliable delivery (P1): wire the outbox + dispatcher once the engine
@@ -647,11 +653,14 @@ export class MessagingServicePlugin implements Plugin {
     }
 
     /**
-     * Mount `GET /api/v1/messaging/preference-options` on the kernel's HTTP
-     * server. A kernel with no HTTP server says so once and mounts nothing:
-     * the fields stay plain text boxes, and the in-process service is unchanged.
+     * Mount the package's two HTTP doors on the kernel's HTTP server:
+     * `GET /api/v1/messaging/preference-options` and
+     * `POST /api/v1/messaging/in-app-messages`. A kernel with no HTTP server
+     * says so once and mounts neither: the preference fields stay plain text
+     * boxes, the Setup action "Send in-app message" has nothing to call, and
+     * the in-process service is unchanged.
      */
-    private mountPreferenceOptionsDoor(
+    private mountHttpDoors(
         ctx: PluginContext,
         service: MessagingService,
         getData: () => IDataEngine | undefined,
@@ -666,20 +675,24 @@ export class MessagingServicePlugin implements Plugin {
         const http = optional<IHttpServer>('http-server');
         if (!http) {
             ctx.logger.warn(
-                `[messaging] no HTTP server is registered, so the preference options list (GET ${PREFERENCE_OPTIONS_ROUTE}) ` +
-                    'is not mounted: the console draws notification topic and channel as plain text boxes.',
+                `[messaging] no HTTP server is registered, so neither the preference options list (GET ${PREFERENCE_OPTIONS_ROUTE}) ` +
+                    `nor the in-app message door (POST ${IN_APP_MESSAGE_ROUTE}) is mounted: the console draws notification topic ` +
+                    'and channel as plain text boxes, and the Setup action "Send in-app message" has nothing to call.',
             );
             return;
         }
         const kernel = ctx.getKernel?.() as
             | { getServiceAsync?: <T>(name: string) => Promise<T> }
             | undefined;
-        registerPreferenceOptionsRoutes(http, {
+        const callerSources: MessagingCallerSources = {
             getEngine: () => optional<unknown>('objectql'),
             getAuth: () => optional<RequestAuthService>('auth'),
             tenancy: kernel && typeof kernel.getServiceAsync === 'function'
                 ? () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy')
                 : undefined,
+        };
+        registerPreferenceOptionsRoutes(http, {
+            ...callerSources,
             knownChannels: () => service.getKnownChannels(),
             getData: () => getData() as unknown as PreferenceOptionsEngine | undefined,
             readFlows: async () => {
@@ -690,6 +703,12 @@ export class MessagingServicePlugin implements Plugin {
             },
         });
         ctx.logger.info(`[messaging] preference options list mounted at GET ${PREFERENCE_OPTIONS_ROUTE}`);
+        registerInAppMessageRoutes(http, {
+            resolveCaller: (req) => resolveMessagingCaller(req, callerSources),
+            getMessaging: () => service,
+            getData,
+        });
+        ctx.logger.info(`[messaging] in-app message door mounted at POST ${IN_APP_MESSAGE_ROUTE}`);
     }
 
     /**

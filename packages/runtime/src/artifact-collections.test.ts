@@ -380,21 +380,17 @@ describe('resolveArtifactCollections', () => {
         expect(resolved.functions.syncBilling.effect).toBe('writes');
     });
 
-    it('#14512 — what the EMITTER hands this reader never loses a reconciled object', () => {
+    it('#14512 — the EMITTER never hands this reader a reconciled object it would have to claim', () => {
         // The case above is a hand-built artifact: it proves the reader claims
         // by NAME when the merged copy is present. This one asks the question
         // that pairs with it — does the producer ever hand this reader an
         // artifact where there is nothing to claim WITH?
         //
-        // `composeStacks(…, { manifest: 'preserve' })` drops the flattened copy
-        // for a multi-package artifact (#14512), and two packages declaring one
-        // object under `objectConflict: 'merge'` are RECONCILED into a single
-        // top-level object that neither body carries. Dropping that copy would
-        // hand this reader the two unreconciled halves — measured, on the first
-        // shape of that emitter: `count=2 -> [{account,[a]},{account,[b]}]`
-        // where the same input answered `count=1 -> [{account,[a,b]}]` before.
-        // The emitter keeps the flattened half exactly when the bodies do not
-        // reproduce it, and this is that contract read from the consumer end.
+        // Two packages declaring one object under `manifest: 'preserve'` would
+        // each keep it in their own body, which the boot refuses whatever the
+        // flattened half carries, so `composeStacks` refuses the pair under
+        // every `objectConflict` strategy (STACK_COMPOSE_OBJECT_CONFLICT) and
+        // the reconciled-halves artifact is never emitted.
         //
         // ⚠️ `composeStacks` resolves from `@objectstack/spec`'s BUILD, so a
         // stale `dist/` measures the previous emitter. Build spec first.
@@ -404,22 +400,24 @@ describe('resolveArtifactCollections', () => {
         });
         // Each input through `defineStack` — `composeStacks` refuses any other
         // (#20367 ruling B); `strict: false` keeps the input as authored.
-        const artifact = composeStacks(
-            [
-                defineStack(pkg('com.example.a', 'from_a') as never, { strict: false }),
-                defineStack(pkg('com.example.b', 'from_b') as never, { strict: false }),
-            ],
-            { manifest: 'preserve', objectConflict: 'merge' } as never,
-        ) as Record<string, any>;
-
-        const resolved = resolveArtifactCollections(artifact) as Record<string, any>;
-        expect(resolved.objects).toHaveLength(1);
-        expect(Object.keys(resolved.objects[0].fields).sort()).toEqual(['from_a', 'from_b']);
+        let refused: any;
+        try {
+            composeStacks(
+                [
+                    defineStack(pkg('com.example.a', 'from_a') as never, { strict: false }),
+                    defineStack(pkg('com.example.b', 'from_b') as never, { strict: false }),
+                ],
+                { manifest: 'preserve', objectConflict: 'merge' } as never,
+            );
+        } catch (e) {
+            refused = e;
+        }
+        expect([refused?.code, refused?.status]).toEqual(['STACK_COMPOSE_OBJECT_CONFLICT', 422]);
 
         // Anti-vacuity: the same two packages with DISJOINT objects are emitted
         // with no flattened copy at all, and this reader still answers both —
-        // so the assertion above is about reconciliation, not about the emitter
-        // having quietly stopped stripping anything.
+        // so the refusal above is about the shared name, not about the emitter
+        // refusing every preserve composition.
         const disjoint = composeStacks(
             [
                 defineStack({ manifest: { id: 'com.example.a', name: 'a', version: '1.0.0', type: 'module' as const, namespace: 'probe' }, objects: [{ name: 'probe_a', label: 'A', fields: {} }] } as never, { strict: false }),

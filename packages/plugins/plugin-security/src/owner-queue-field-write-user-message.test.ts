@@ -71,7 +71,12 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
   'zh-CN': { [objectFieldLabelKey('case', 'salary')]: '薪资' },
 };
 
-const boot = async (opts: { sets: PermissionSet[]; row?: Record<string, unknown> | null; verdict?: 'allow' | 'deny' | 'abstain' }) => {
+const boot = async (opts: {
+  sets: PermissionSet[];
+  row?: Record<string, unknown> | null;
+  verdict?: 'allow' | 'deny' | 'abstain';
+  translations?: Record<string, Record<string, string>>;
+}) => {
   const schema: any = { name: 'case', label: 'Case', fields: FIELDS };
   let middleware: any;
   const findOne = vi.fn(async (object: string, query: any) => {
@@ -94,7 +99,7 @@ const boot = async (opts: { sets: PermissionSet[]; row?: Record<string, unknown>
         org && QUEUES[name] ? { name, label: name, source: 'authored', organizationId: org, members: [] } : null),
       isMember: vi.fn(async (userId: string, name: string) => !!QUEUES[name]?.includes(userId)),
     },
-    i18n: { t: (key: string, loc: string) => TRANSLATIONS[loc]?.[key] ?? key },
+    i18n: { t: (key: string, loc: string) => (opts.translations ?? TRANSLATIONS)[loc]?.[key] ?? key },
   };
   const ctx: any = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -194,7 +199,7 @@ const CLASSES: Array<{
     opCtx: (l) => insert({ name: 'A', queue: 'billing' }, l),
     row: null,
     message: queueSentence(INSERT_QUEUE_REFUSAL),
-    key: 'record_queue_change_denied',
+    key: 'record_queue_assign_denied',
   },
 ];
 
@@ -271,6 +276,47 @@ describe('the field-write 403 names field labels only where the caller may learn
   });
 });
 
+/**
+ * The field-write sentence's label list, pinned as LITERAL text per catalog
+ * locale plus two locales the catalog does not register (`zh-TW` reaches
+ * `zh-CN`, `fr` falls through to `en`). The quote marks and the separator are
+ * catalog entries (`field_label_quoted`, `field_label_list_separator`), so
+ * these strings are written out rather than re-rendered: a pin that renders
+ * through the same catalog would move with it.
+ */
+describe('the field-write label list is quoted and separated by the catalog, byte for byte per locale', () => {
+  const PINS: Array<[locale: string, text: string]> = [
+    ['en', 'You do not have permission to edit “Grade”, “Salary”. Undo those changes and try again, or contact your administrator if you need access.'],
+    ['zh-CN', '您无权编辑「Grade」、「薪资」，请撤销这些修改后重试，或联系管理员。'],
+    ['ja-JP', '「Grade」、「Salary」を編集する権限がありません。その変更を取り消して再試行するか、管理者にお問い合わせください。'],
+    ['es-ES', 'No tiene permiso para editar «Grade», «Salary». Deshaga esos cambios e inténtelo de nuevo, o póngase en contacto con su administrador si necesita acceso.'],
+    ['zh-TW', '您无权编辑「Grade」、「Salary」，请撤销这些修改后重试，或联系管理员。'],
+    ['fr', 'You do not have permission to edit “Grade”, “Salary”. Undo those changes and try again, or contact your administrator if you need access.'],
+  ];
+
+  for (const [locale, text] of PINS) {
+    it(`two labels — ${locale}`, async () => {
+      const refuse = await boot({ sets: [memberSet], row: OWNED_BY_U1 });
+      const refusal = await refuse(update({ salary: 1, grade: 'A' }, locale));
+      expect(refusal.code).toBe('PERMISSION_DENIED');
+      expect(refusal.status).toBe(403);
+      expect(refusal.userMessage).toBe(text);
+    });
+  }
+
+  it('a deployment `errors.` override of the list rules reaches the sentence', async () => {
+    const refuse = await boot({
+      sets: [memberSet],
+      row: OWNED_BY_U1,
+      translations: { en: { 'errors.field_label_quoted': '[{{label}}]', 'errors.field_label_list_separator': ' / ' } },
+    });
+    const refusal = await refuse(update({ salary: 1, grade: 'A' }, 'en'));
+    expect(refusal.userMessage).toBe(
+      'You do not have permission to edit [Grade] / [Salary]. Undo those changes and try again, or contact your administrator if you need access.',
+    );
+  });
+});
+
 describe('the userMessage reaches the REST data door body (mapDataError, POST / PATCH /data/:object)', () => {
   it('a PATCH transfer: 403 PERMISSION_DENIED, the developer error unchanged, userMessage beside it', async () => {
     const refuse = await boot({ sets: [memberSet], row: OWNED_BY_U1 });
@@ -296,5 +342,72 @@ describe('the userMessage reaches the REST data door body (mapDataError, POST / 
     const answer = mapDataError(await refuse(update({ grade: 'A' }, 'en')), 'case');
     expect(answer.status).toBe(403);
     expect('userMessage' in answer.body).toBe(false);
+  });
+});
+
+/**
+ * The queue refusal splits its user sentence by verb: a create into a queue the
+ * caller does not belong to renders `record_queue_assign_denied`, a change of an
+ * existing record's queue keeps `record_queue_change_denied`. Only `userMessage`
+ * differs between them; everything else on the wire is the refusal it was
+ * before the split, read here off the REST data door's body.
+ */
+describe('the queue 403 on the wire: a sentence per verb, nothing else moves', () => {
+  const PATHS = [
+    {
+      name: 'POST, creating into a queue the caller is not in',
+      opCtx: (l: string) => insert({ name: 'A', queue: 'billing' }, l),
+      row: null,
+      operation: 'insert',
+      message: queueSentence(INSERT_QUEUE_REFUSAL),
+      key: 'record_queue_assign_denied',
+    },
+    {
+      name: 'PATCH, moving a record to another queue',
+      opCtx: (l: string) => update({ queue: 'billing' }, l),
+      row: SITTING,
+      operation: 'update',
+      message: queueSentence(MOVE_REFUSAL),
+      key: 'record_queue_change_denied',
+    },
+  ] as const;
+
+  for (const p of PATHS) {
+    for (const locale of Object.keys(BUILTIN_OPERATION_MESSAGES)) {
+      it(`${p.name} — ${locale}`, async () => {
+        const refuse = await boot({ sets: [memberSet], row: p.row });
+        const refusal = await refuse(p.opCtx(locale));
+        // The thrown refusal: code, status, message and details as before.
+        expect({
+          code: refusal.code,
+          status: refusal.status,
+          message: refusal.message,
+          details: refusal.details,
+        }).toEqual({
+          code: 'PERMISSION_DENIED',
+          status: 403,
+          message: p.message,
+          details: { operation: p.operation, object: 'case', positions: [], permissionSets: [] },
+        });
+        // The wire body: every member but `userMessage` as before.
+        const answer = mapDataError(refusal, 'case');
+        const { userMessage, ...rest } = answer.body;
+        expect({ status: answer.status, body: rest }).toEqual({
+          status: 403,
+          body: { code: 'PERMISSION_DENIED', error: p.message, object: 'case' },
+        });
+        expect(userMessage).toBe(BUILTIN_OPERATION_MESSAGES[locale][p.key]);
+      });
+    }
+  }
+
+  it('the two verbs render different sentences in every locale', () => {
+    const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+    expect(locales.length).toBeGreaterThanOrEqual(4);
+    for (const locale of locales) {
+      const create = BUILTIN_OPERATION_MESSAGES[locale].record_queue_assign_denied;
+      expect(create, `${locale} defines record_queue_assign_denied`).toBeTypeOf('string');
+      expect(create, locale).not.toBe(BUILTIN_OPERATION_MESSAGES[locale].record_queue_change_denied);
+    }
   });
 });

@@ -261,6 +261,47 @@ export async function leaveOrganization(
 }
 
 /**
+ * [ADR-0093 D8.1, as amended] A principal OUTSIDE the ownership floor's
+ * `org_member` domain that still reaches the organization's data: a CURRENT
+ * member whose grade maps to no `org_member` position.
+ *
+ * Under every tenancy posture a person's data access requires a current
+ * membership in the organization, so a user with no `sys_member` row
+ * ({@link leaveOrganization}) reaches none of its data and cannot stand for
+ * this class. `delegated_admin` is a membership grade `mapMembershipRole`
+ * passes through unmapped (no `org_member`, no `org_admin`), and the
+ * organization-admin auto-grant reads only `owner` / `admin`.
+ *
+ * Re-grades every membership of the user in system context, then signs in
+ * again so the fresh session resolves its active organization from that
+ * membership (ADR-0093 D9). Returns that session's token. Throws when the user
+ * holds no membership in `organizationId`, or when a re-grade did not land.
+ */
+export async function regradeOutsideMemberFloor(
+  stack: VerifyStack,
+  email: string,
+  organizationId: string,
+  password = 'Member-Pass-123',
+): Promise<string> {
+  const ql = await stack.kernel.getServiceAsync<any>('objectql');
+  const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
+  const user = await ql.findOne('sys_user', { where: { email }, context: SYS });
+  if (!user?.id) throw new Error(`regradeOutsideMemberFloor: no sys_user for ${email}`);
+  const memberships = rowsOf(await ql.find('sys_member', { where: { user_id: user.id }, limit: 20, context: SYS }));
+  if (!memberships.some((m) => String(m.organization_id) === organizationId)) {
+    throw new Error(`regradeOutsideMemberFloor: ${email} holds no membership in ${organizationId}`);
+  }
+  for (const m of memberships) {
+    await ql.update('sys_member', { id: m.id, role: 'delegated_admin' }, { context: SYS });
+  }
+  const after = rowsOf(await ql.find('sys_member', { where: { user_id: user.id }, limit: 20, context: SYS }));
+  if (after.some((m) => m.role !== 'delegated_admin')) {
+    throw new Error(`regradeOutsideMemberFloor: ${email} still holds a grade inside the floor's domain`);
+  }
+  return stack.signIn(email, password);
+}
+
+/**
  * A principal is inside the domain the policy under test is gated to.
  *
  * This is #8023's precondition. The wildcard row-level write floor is gated to

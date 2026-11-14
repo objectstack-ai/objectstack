@@ -38,9 +38,11 @@
  * the #22019 block of `packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts`.
  */
 import { describe, expect, it } from 'vitest';
+import { applyInjectedSystemColumns } from '@objectstack/metadata-core';
 import { EXPRESSION_INVALID, runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 import { runStackExpressionPasses, validateStackExpressions } from './validate-expressions.js';
+import { STORED_EXPRESSION_CROSS_RECORD_INPUT, STORED_EXPRESSION_VOLATILE_INPUT } from './stored-expression-inputs.js';
 
 /** The card's object, with the formula under test. `sharingModel` keeps `security-owd-unset` quiet. */
 const fxSqrt = (expression: string, over: Record<string, unknown> = {}) => ({
@@ -262,5 +264,337 @@ describe('#22019 / #22032 — every pass over the object\'s body judges on this 
     const onObjectWrite = runStackExpressionPasses(stack, { runtimeWriteType: 'object' });
     expect(onObjectWrite.map((i) => i.where)).toEqual(LIFTED_SITES);
     expect(onObjectWrite).toEqual(all.filter((i) => LIFTED_SITES.includes(i.where)));
+  });
+});
+
+describe('#32529 / #32554 — the object door judges a stored expression\'s inputs as the build does', () => {
+  /** The related record, delivered by the stored universe the door reads. */
+  const employee = {
+    name: 'fx_employee', label: 'Employee', sharingModel: 'private',
+    fields: { daily_hours: { type: 'number', label: 'Daily Hours' } },
+  };
+  /** The written object, with one stored computed field `hours` (a `number`, not a `formula`). */
+  const leave = (expression: string, type = 'number') => ({
+    name: 'fx_leave',
+    label: 'Leave',
+    sharingModel: 'private',
+    fields: {
+      employee: { type: 'lookup', label: 'Employee', reference: 'fx_employee' },
+      days: { type: 'number', label: 'Days' },
+      hours: { type, label: 'Hours', expression },
+    },
+  });
+  const LEAVE_WHERE = "object 'fx_leave' · field 'hours' expression";
+  const gateLeave = (expression: string, type?: string) =>
+    runRuntimeAuthoringRules({ type: 'object', item: leave(expression, type), context: { objects: [employee] } });
+  const ofRule = <T extends { rule: string }>(rule: string, fs: readonly T[]): T[] => fs.filter((f) => f.rule === rule);
+
+  it('⭐ LIT — a stored expression reading another record is an ADVISORY at the door, under its own rule id, never a 422', () => {
+    const result = gateLeave('record.days * record.employee.daily_hours');
+
+    const advised = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.advisories);
+    expect(advised, dump(result)).toHaveLength(1);
+    expect(advised[0]).toMatchObject({ severity: 'warning', where: LEAVE_WHERE, path: LEAVE_WHERE });
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('⭐ LIT — a hop through the injected `owner_id` is advised too, on an object that does not declare it', () => {
+    const result = gateLeave("record.?owner_id.?name.orValue('')", 'text');
+
+    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.advisories), dump(result)).toHaveLength(1);
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('⭐ LIT — a re-save of an object STORED with the hop still saves: the advisory is repeated, nothing is refused', () => {
+    const stored = leave('record.days * record.employee.daily_hours');
+    const result = runRuntimeAuthoringRules({ type: 'object', item: stored, context: { objects: [employee, stored] } });
+
+    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.advisories), dump(result)).toHaveLength(1);
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('⭐ LIT — a stored expression reading the clock is an ADVISORY at the door, never a refusal', () => {
+    const result = gateLeave('today()', 'date');
+
+    expect(ofRule(STORED_EXPRESSION_VOLATILE_INPUT, result.advisories), dump(result)).toHaveLength(1);
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('⭐ CONTROL — a same-row stored expression, and a `formula` reading the hop, publish clean', () => {
+    for (const result of [gateLeave('record.days * 8'), gateLeave('record.days * record.employee.daily_hours', 'formula')]) {
+      expect(result.errors, dump(result)).toEqual([]);
+      expect(result.advisories, dump(result)).toEqual([]);
+    }
+  });
+
+  it('⭐ PARITY — the door finding IS the build finding for the same body', () => {
+    const body = leave('record.days * record.employee.daily_hours');
+    const atDoor = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, gateLeave('record.days * record.employee.daily_hours').advisories);
+    const stack = { objects: [employee, body] };
+    const atBuild = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, runAuthoringRules('build', { normalized: stack, parsed: stack }));
+
+    expect(atBuild).toHaveLength(1);
+    expect(atDoor).toEqual(atBuild);
+  });
+});
+
+describe('#33072 — the object_extension door judges an extension field\'s formula as the build does', () => {
+  /** The extended object, as the door's live universe carries it. */
+  const target = {
+    name: 'fx_ticket',
+    label: 'Ticket',
+    sharingModel: 'private',
+    fields: {
+      employee: { type: 'lookup', label: 'Employee', reference: 'fx_staff' },
+      amount: { type: 'number', label: 'Amount' },
+    },
+  };
+  const staff = {
+    name: 'fx_staff', label: 'Staff', sharingModel: 'private',
+    fields: { daily_hours: { type: 'number', label: 'Daily Hours' } },
+  };
+  /** One extension of `fx_ticket` adding the given fields. */
+  const extension = (fields: Record<string, unknown>) => ({ extend: 'fx_ticket', fields });
+  const scoreOf = (expression: string) => extension({ score: { type: 'formula', label: 'Score', expression } });
+  const EXT_WHERE = (field: string) => `object 'fx_ticket' · objectExtensions[0] · field '${field}' expression`;
+  const gateExtension = (item: unknown, objects: unknown[] = [target, staff]) =>
+    runRuntimeAuthoringRules({ type: 'object_extension', item, context: { objects } });
+  const ofRule = <T extends { rule: string }>(rule: string, fs: readonly T[]): T[] => fs.filter((f) => f.rule === rule);
+
+  it('`validateStackExpressions` is on the object_extension door, beside the vocabulary freeze', () => {
+    expect(runtimeAuthoringRulesFor('object_extension').map((r) => r.name))
+      .toEqual(['validateStackExpressions', 'validateSecurityRoleWord']);
+  });
+
+  it('⭐ LIT — an extension formula calling an unregistered function (`sqrt`) is REFUSED, at the entry the build names', () => {
+    const result = gateExtension(scoreOf('sqrt(record.amount)'));
+
+    expect(result.rulesRun).toContain('validateStackExpressions');
+    const errs = expressionFindings(result.errors);
+    expect(errs, dump(result)).toHaveLength(1);
+    expect(errs[0]).toMatchObject({ severity: 'error', where: EXT_WHERE('score'), path: EXT_WHERE('score') });
+  });
+
+  it('⭐ LIT — an extension formula reading a field the extended object does not serve is REFUSED', () => {
+    const result = gateExtension(scoreOf('record.amont * 2'));
+
+    const errs = expressionFindings(result.errors);
+    expect(errs, dump(result)).toHaveLength(1);
+    expect(errs[0]!.where).toBe(EXT_WHERE('score'));
+    expect(errs[0]!.message).toContain('amont');
+  });
+
+  it('⭐ LIT — a stored extension field reading another record is an ADVISORY, never a 422', () => {
+    const result = gateExtension(extension({
+      hours: { type: 'number', label: 'Hours', expression: 'record.amount * record.employee.daily_hours' },
+    }));
+
+    const advised = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.advisories);
+    expect(advised, dump(result)).toHaveLength(1);
+    expect(advised[0]).toMatchObject({ severity: 'warning', where: EXT_WHERE('hours') });
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('⭐ PARITY — on one shared input, the door finding IS the build finding', () => {
+    for (const item of [
+      scoreOf('sqrt(record.amount)'),
+      extension({ hours: { type: 'number', label: 'Hours', expression: 'record.amount * record.employee.daily_hours' } }),
+    ]) {
+      const atDoor = gateExtension(item);
+      const stack = { objects: [target, staff], objectExtensions: [item] };
+      const atBuild = runAuthoringRules('build', { normalized: stack, parsed: stack })
+        .filter((f) => f.where.includes('objectExtensions'));
+
+      expect(atBuild.length, dump(atBuild)).toBe(1);
+      expect([...atDoor.errors, ...atDoor.advisories]).toEqual(atBuild);
+    }
+  });
+
+  it('⭐ CONTROL — a valid extension formula, and one reading a field the same extension adds, publish clean', () => {
+    for (const item of [
+      scoreOf('floor(record.amount)'),
+      extension({
+        bonus: { type: 'number', label: 'Bonus' },
+        total: { type: 'formula', label: 'Total', expression: 'record.amount + record.bonus' },
+      }),
+    ]) {
+      const result = gateExtension(item);
+      expect(result.errors, dump(result)).toEqual([]);
+      expect(result.advisories, dump(result)).toEqual([]);
+      expect(result.rulesRun).toEqual(['validateStackExpressions', 'validateSecurityRoleWord']);
+    }
+  });
+
+  it('an extension of an object the door does not carry is judged on what does not depend on its fields', () => {
+    expect(expressionFindings(gateExtension(scoreOf('sqrt(record.amount)'), []).errors)).toHaveLength(1);
+    const read = gateExtension(scoreOf('record.amount * 2'), []);
+    expect(read.errors, dump(read)).toEqual([]);
+  });
+
+  it('a stored object\'s own broken formula is not the extension write\'s to answer for (the differential)', () => {
+    const broken = { ...target, fields: { ...target.fields, bad: { type: 'formula', label: 'Bad', expression: 'sqrt(record.amount)' } } };
+    const result = gateExtension(scoreOf('floor(record.amount)'), [broken, staff]);
+
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('on an extension write only the extension walk judges: no pass over the objects the door carries', () => {
+    const broken = { ...target, fields: { ...target.fields, bad: { type: 'formula', label: 'Bad', expression: 'sqrt(record.amount)' } } };
+    const stack = { objects: [broken, staff], objectExtensions: [scoreOf('floor(record.amount)')] };
+    // The build judges the declared formula…
+    expect(validateStackExpressions(stack).map((i) => i.where)).toEqual(["object 'fx_ticket' · field 'bad' expression"]);
+    // …the extension door's pass reads only the written entry.
+    expect(runStackExpressionPasses(stack, { runtimeWriteType: 'object_extension' })).toEqual([]);
+  });
+
+  it('CONTROL — the object save door is unchanged: it judges the object\'s own formula and no extension field', () => {
+    const result = gateObject(fxSqrt('sqrt(record.amount)'));
+    expect(expressionFindings(result.errors).map((f) => f.where)).toEqual([WHERE]);
+    expect(runtimeAuthoringRulesFor('object').map((r) => r.name)).toContain('validateStackExpressions');
+  });
+});
+
+describe('#33154 — an extension\'s validation rules are judged at the build and the object_extension door by the object\'s own rule pass', () => {
+  /** The extended object, as the door's live universe carries it. */
+  const target = {
+    name: 'fx_ticket',
+    label: 'Ticket',
+    sharingModel: 'private',
+    fields: {
+      employee: { type: 'lookup', label: 'Employee', reference: 'fx_staff' },
+      amount: { type: 'number', label: 'Amount' },
+    },
+  };
+  const staff = {
+    name: 'fx_staff', label: 'Staff', sharingModel: 'private',
+    fields: { daily_hours: { type: 'number', label: 'Daily Hours' } },
+  };
+  const script = (name: string, condition: string) => ({ name, type: 'script', condition, message: 'Refused.' });
+  /** One extension of `fx_ticket` adding the given rules (and fields). */
+  const extension = (validations: unknown[], fields: Record<string, unknown> = {}) => ({ extend: 'fx_ticket', fields, validations });
+  const RULE_WHERE = (rule: string) => `object 'fx_ticket' · objectExtensions[0] · validation '${rule}'`;
+  const gateExtension = (item: unknown, objects: unknown[] = [target, staff]) =>
+    runRuntimeAuthoringRules({ type: 'object_extension', item, context: { objects } });
+  const buildFindings = (stack: Record<string, unknown>) =>
+    runAuthoringRules('build', { normalized: stack, parsed: stack }).filter((f) => f.where.includes('objectExtensions'));
+
+  it('⭐ LIT — a rule reading a field the extended object does not serve is REFUSED, at the entry, with the slot\'s key path', () => {
+    const result = gateExtension(extension([script('amount_positive', 'record.amont < 0')]));
+
+    const errs = expressionFindings(result.errors);
+    expect(errs, dump(result)).toHaveLength(1);
+    expect(errs[0]).toMatchObject({
+      severity: 'error',
+      where: RULE_WHERE('amount_positive'),
+      path: 'objectExtensions[0].validations[0].condition',
+    });
+    expect(errs[0]!.message).toContain('amont');
+  });
+
+  it('⭐ LIT — a rule calling an unregistered function (`sqrt`) is REFUSED, and a nested `then` branch is judged too', () => {
+    const result = gateExtension(extension([
+      script('first_ok', 'record.amount != null && record.amount < 0'),
+      {
+        name: 'big_ticket', type: 'conditional', message: 'Refused.',
+        when: 'record.amount != null && record.amount > 100',
+        then: script('root_check', 'record.amount != null && sqrt(record.amount) > 10'),
+      },
+    ]));
+
+    const errs = expressionFindings(result.errors);
+    expect(errs.map((f) => [f.where, f.path]), dump(result)).toEqual([
+      [`object 'fx_ticket' · objectExtensions[0] · validation rule 'big_ticket' then → 'root_check'`, 'objectExtensions[0].validations[1].then.condition'],
+    ]);
+  });
+
+  it('⭐ PARITY — on one shared input set, the door\'s findings deep-equal the build\'s', () => {
+    for (const item of [
+      extension([script('typo', 'record.amont < 0')]),
+      extension([script('fn', 'sqrt(record.amount) > 1')]),
+      extension([script('bare', 'amount < 0')]),
+    ]) {
+      const atDoor = gateExtension(item);
+      const atBuild = buildFindings({ objects: [target, staff], objectExtensions: [item] });
+
+      expect(atBuild.length, dump(atBuild)).toBeGreaterThan(0);
+      expect([...atDoor.errors, ...atDoor.advisories]).toEqual(atBuild);
+    }
+  });
+
+  it('⭐ PARITY — the door reads the objects as served, injected system columns and all: an unguarded ordering over `created_at` is accepted there as at the build, one over a declared nullable field is refused at both', () => {
+    // As the registry serves them: `created_at`, `owner_id`, … declared.
+    const served = [applyInjectedSystemColumns(target), applyInjectedSystemColumns(staff)];
+    expect(Object.keys(served[0]!.fields)).toContain('created_at');
+    for (const [condition, refused] of [
+      ["record.created_at > timestamp('2020-01-01T00:00:00Z')", false],
+      ['record.amount > 0', true],
+    ] as const) {
+      const item = extension([script('since', condition)]);
+      const atDoor = gateExtension(item, served);
+      const atBuild = buildFindings({ objects: [target, staff], objectExtensions: [item] });
+
+      expect([...atDoor.errors, ...atDoor.advisories], condition).toEqual(atBuild);
+      expect(atBuild.length > 0, `${condition}: ${dump(atBuild)}`).toBe(refused);
+    }
+  });
+
+  it('⭐ CONTROL — a valid rule, a rule reading a field the same extension adds, and a one-hop read publish clean', () => {
+    for (const item of [
+      extension([script('ok', 'record.amount != null && record.amount < 0')]),
+      extension([script('bonus_ok', 'record.bonus != null && record.amount != null && record.bonus > record.amount')], { bonus: { type: 'number', label: 'Bonus' } }),
+      // The one-hop read the rule pass serves, in the shape its traversal
+      // check prescribes: gated on the reference being set.
+      extension([{
+        name: 'hop_ok', type: 'conditional', message: 'Refused.',
+        when: 'record.employee != null',
+        then: script('long_day', 'record.employee.daily_hours > 12'),
+      }]),
+    ]) {
+      const result = gateExtension(item);
+      expect(result.errors, dump(result)).toEqual([]);
+      expect(result.advisories, dump(result)).toEqual([]);
+      expect(buildFindings({ objects: [target, staff], objectExtensions: [item] }), dump(item)).toEqual([]);
+    }
+  });
+
+  it('a rule reading a field a SIBLING package\'s extension adds resolves at the build; a misspelling of it is refused', () => {
+    const sibling = { extend: 'fx_ticket', fields: { bonus: { type: 'number', label: 'Bonus' } } };
+    // An artifact: its top level repeats its bodies' objects, and the fold
+    // reads each body's extensions.
+    const stackWith = (item: unknown) => ({
+      objects: [target, staff],
+      packages: [
+        { manifest: { objects: [target, staff] } },
+        { manifest: { objectExtensions: [sibling] } },
+        { manifest: { objectExtensions: [item] } },
+      ],
+    });
+
+    expect(buildFindings(stackWith(extension([script('sib', 'record.bonus != null && record.bonus > 0')])))).toEqual([]);
+    const typo = buildFindings(stackWith(extension([script('sib', 'record.bonsu != null && record.bonsu > 0')])));
+    expect(typo.map((f) => [f.rule, f.where]), dump(typo)).toEqual([
+      [EXPRESSION_INVALID, "object 'fx_ticket' · packages[2].manifest.objectExtensions[0] · validation 'sib'"],
+    ]);
+  });
+
+  it('an extension of an object the door does not carry is judged on what does not depend on its fields', () => {
+    expect(expressionFindings(gateExtension(extension([script('fn', 'sqrt(record.amount) > 1')]), []).errors)).toHaveLength(1);
+    const read = gateExtension(extension([script('read', 'record.amount != null && record.amount < 0')]), []);
+    expect(read.errors, dump(read)).toEqual([]);
+  });
+
+  it('on an extension write only the extension walk judges: the target\'s own broken rule is not this write\'s to answer for', () => {
+    const broken = { ...target, validations: [script('own_typo', 'record.amont < 0')] };
+    const stack = { objects: [broken, staff], objectExtensions: [extension([script('ok', 'record.amount != null && record.amount < 0')])] };
+    // The build judges the object's own rule…
+    expect(validateStackExpressions(stack).map((i) => i.where)).toEqual(["object 'fx_ticket' · validation 'own_typo'"]);
+    // …the extension door's pass reads only the written entry.
+    expect(runStackExpressionPasses(stack, { runtimeWriteType: 'object_extension' })).toEqual([]);
+  });
+
+  it('CONTROL — the object save door still judges the object\'s own rule at its own location, and no extension rule', () => {
+    const own = { ...target, validations: [script('own_typo', 'record.amont < 0')] };
+    const result = gateObject(own);
+    expect(expressionFindings(result.errors).map((f) => f.where)).toEqual(["object 'fx_ticket' · validation 'own_typo'"]);
   });
 });

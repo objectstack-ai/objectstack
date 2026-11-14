@@ -29,6 +29,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { dispatchFlowAction, loadActionSubjectRecord } from './action-execution.js';
 import { buildAutomationContext } from './domains/automation.js';
@@ -134,5 +136,45 @@ describe('[#28099] the action door forwards the caller\'s posture rung', () => {
             objectName: 'crm_opportunity', subject, params: {}, recordId: 'opp_1', ec: ec(), envId: 'platform',
         });
         expect('posture' in contextOf(automation)).toBe(false);
+    });
+});
+
+/**
+ * [ADR-0093 D8.1, as amended] Under every tenancy posture, a person's data
+ * access requires a current membership in the organization, judged on each
+ * request. The organization wall reads it off the context's membership set
+ * (`accessible_org_ids`), which the request already resolved; the two flow
+ * doors hand the run that set beside the grants they hand it — an EMPTY set
+ * included, since an empty set is the answer the wall reads — so the run's data
+ * operations are judged as the caller's own request is. The consumer half (run
+ * setup and the data context) is pinned in `@objectstack/service-automation`.
+ */
+describe('[ADR-0093 D8.1] the two flow doors hand the run the caller\'s membership set', () => {
+    const withSet = (accessible_org_ids?: string[]) => ({ ...ec(), ...(accessible_org_ids ? { accessible_org_ids } : {}) });
+
+    it('the trigger door carries `executionContext.accessible_org_ids`, an empty set included', () => {
+        const member: any = buildAutomationContext({ params: {} }, { request: {}, executionContext: withSet(['org_1']) } as any);
+        expect(member.accessible_org_ids).toEqual(['org_1']);
+        const outside: any = buildAutomationContext({ params: {} }, { request: {}, executionContext: withSet([]) } as any);
+        expect(outside.accessible_org_ids).toEqual([]);
+    });
+
+    it('a request that carries no set adds no key, and the body cannot name one', () => {
+        const none: any = buildAutomationContext({ params: {} }, { request: {}, executionContext: withSet() } as any);
+        expect('accessible_org_ids' in none).toBe(false);
+        const flat: any = buildAutomationContext({ accessible_org_ids: ['org_x'] }, { request: {}, executionContext: withSet([]) } as any);
+        expect(flat.accessible_org_ids).toEqual([]);
+        expect(flat.params.accessible_org_ids).toEqual(['org_x']);
+    });
+
+    it('the action door carries `ec.accessible_org_ids`, an empty set included', async () => {
+        for (const set of [['org_1'], []]) {
+            const automation = makeAutomation();
+            const subject = await loadActionSubjectRecord('crm_opportunity', 'opp_1', async () => ({ record: { id: 'opp_1' } }));
+            await dispatchFlowAction(flowDeps(automation), REQUEST, QUOTE, {
+                objectName: 'crm_opportunity', subject, params: {}, recordId: 'opp_1', ec: withSet(set), envId: 'platform',
+            });
+            expect(contextOf(automation).accessible_org_ids).toEqual(set);
+        }
     });
 });

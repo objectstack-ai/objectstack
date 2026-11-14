@@ -28,6 +28,7 @@ export * from './hydration-order.js';
 // objectql's lean entry, below it (the security catalog) and above it; every
 // one of them already depends on this package.
 export * from './package-scoped-resolution.js';
+export * from './permission-set-holders.js';
 // [#22301] The two halves of resolving an app's `requires` that `os serve`
 // (`@objectstack/cli`) and the verification handle (`@objectstack/verify`) both
 // read — the package-owned collection reader (ADR-0130 D4) and the token →

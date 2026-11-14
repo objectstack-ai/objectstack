@@ -421,16 +421,18 @@ interface AddressedRecipient {
  * `user:` value on as the recipient id with no lookup at all; the email
  * channel then sends to any recipient id that is address-shaped. So both
  * `a@b.c` and `user:a@b.c` (and `user:user:a@b.c`, whose remainder is itself
- * address-shaped) reach the mail as an address. `role:` and `team:` yield
- * user ids. `owner_of:` reads a stored owner field, which record writes put
- * there, not the expression, so it is not screened.
+ * address-shaped) reach the mail as an address. `role:`, `team:` and the
+ * `org:` namespace (`org:members`, the emitting organization's members;
+ * any other `org:` value resolves to nobody) yield user ids. `owner_of:`
+ * reads a stored owner field, which record writes put there, not the
+ * expression, so it is not screened.
  */
 function mailedAddressOf(recipient: string): string | undefined {
     if (recipient.startsWith('user:')) {
         const rest = recipient.slice('user:'.length);
         return readsAsAddress(rest) ? rest : undefined;
     }
-    if (/^(role|team|owner_of):/.test(recipient)) return undefined;
+    if (/^(role|team|owner_of|org):/.test(recipient)) return undefined;
     return readsAsAddress(recipient) ? recipient : undefined;
 }
 
@@ -795,6 +797,32 @@ function resolveStringSlot(
  * no flow edit. This is the seam that fixes the "notify drops on the floor"
  * gap (#1292) once messaging is present.
  */
+/**
+ * [ADR-0150 D3, #31699] A node's literal `payload` without the key the
+ * delivery reads as the template's caller package: only the engine names it
+ * (`AutomationEngine.flowCallerPackage`), so an authored key can never resolve
+ * the template from another package.
+ */
+function withoutTemplateCallerPackage(payload: unknown): Record<string, unknown> {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return {};
+    const { templateCallerPackageId: _dropped, ...rest } = payload as Record<string, unknown>;
+    return rest;
+}
+
+/**
+ * [ADR-0150 D3, #31699 contract review F-A] Whether a node's literal `payload`
+ * carries a template reference the delivery channels take the template path
+ * on (`payload.template`, a non-blank string, read exactly as the email and
+ * inbox channels read it). Such a reference is resolved from the flow's armed
+ * package like `template:` is, so this spelling never resolves the name
+ * environment-wide from a packaged flow.
+ */
+function literalPayloadTemplate(payload: unknown): boolean {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return false;
+    const template = (payload as { template?: unknown }).template;
+    return typeof template === 'string' && template.trim() !== '';
+}
+
 export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext): void {
     const getMessaging = (): MessagingServiceSurface | undefined => {
         try {
@@ -1054,6 +1082,16 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // is evaluated in the run's scope, a literal handed on as written —
             // the resolver every value-slot map shares.
             const template = toStr(cfg.template);
+            // [ADR-0150 D3, #31699] The package the template name resolves
+            // from at delivery: the package whose own body of this flow is
+            // armed, never a stamp on the definition. An environment-authored
+            // flow (or an environment override of a packaged one) names none,
+            // and the delivery resolves the name as a caller with no package.
+            // A template reference written in the literal `payload` (which the
+            // channels read just the same) names it too.
+            const templateCallerPackageId = template || literalPayloadTemplate(cfg.payload)
+                ? engine.flowCallerPackage(context)
+                : null;
             const templateData = cfg.templateData
                 ? resolveValueSlotMap(engine, cfg.templateData, variables, 'templateData', context)
                 : undefined;
@@ -1218,11 +1256,18 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // On the template path no inline title/body keys are set:
                     // channels without template support fall back to the topic,
                     // which is the honest degraded rendering, not ''.
+                    // [#31699] The template's caller package is the engine's
+                    // answer alone: a key of that name in the literal
+                    // `payload` is dropped, never forwarded as one.
                     payload: {
-                        ...(payload ?? {}),
+                        ...withoutTemplateCallerPackage(payload),
                         ...(template
-                            ? { template, ...(templateData !== undefined ? { templateData } : {}) }
-                            : { title, body }),
+                            ? {
+                                template,
+                                ...(templateData !== undefined ? { templateData } : {}),
+                                ...(templateCallerPackageId ? { templateCallerPackageId } : {}),
+                            }
+                            : { title, body, ...(templateCallerPackageId ? { templateCallerPackageId } : {}) }),
                         url: actionUrl,
                     },
                     severity,

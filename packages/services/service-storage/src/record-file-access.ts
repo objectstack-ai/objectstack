@@ -5,12 +5,22 @@ import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/a
 import type {
   AttachedFile,
   AttachFileInput,
+  IApprovalService,
   IDataEngine,
+  II18nService,
   ISecurityService,
   IStorageService,
 } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { FILE_REFERENCE_TYPES, RAW_FILE_VALUES_CONTEXT_KEY, isFileIdToken } from '@objectstack/spec/data';
+import {
+  FILE_REFERENCE_TYPES,
+  RAW_FILE_VALUES_CONTEXT_KEY,
+  isFileIdToken,
+  isTitleEligible,
+  resolveDisplayField,
+  type DroppedFieldsEvent,
+} from '@objectstack/spec/data';
+import { translateObject, type ObjectLike, type TranslationBundle } from '@objectstack/spec/system';
 import {
   StorageMetadataStore,
   updateFileIfUnchanged,
@@ -35,11 +45,24 @@ import {
 // The upload doors' own storage-key layout, and the download doors' link.
 import { buildKey, mintDownloadUrl } from './storage-routes.js';
 import {
+  UPLOAD_LINK_FILE_COUNT_CODE,
+  UPLOAD_LINK_FILE_COUNT_STATUS,
+  uploadLinkFileCountMessage,
+  UPLOAD_LINK_KIND,
+  UPLOAD_LINK_MAX_FILES,
   UPLOAD_LINK_SEGMENT,
   UPLOAD_LINK_UNUSABLE_CODE,
   UPLOAD_LINK_UNUSABLE_MESSAGE,
   UPLOAD_LINK_UNUSABLE_STATUS,
 } from './upload-link-wire.js';
+// [#32686] A file uploaded before its record: the binding the upload writes,
+// and the field's own `accept` / `maxSize`, judged when the bytes arrive.
+import {
+  PRE_RECORD_CLAIM_WINDOW_SECONDS,
+  PRE_RECORD_UPLOAD_KIND,
+  preRecordBindingMetadata,
+} from './pre-record-upload.js';
+import { assertFileConstraints } from './file-reference-lifecycle.js';
 
 /**
  * [#30892] A record's files for a caller the host has already resolved: read
@@ -61,15 +84,24 @@ import {
  *    the `/files/:fileId/url` door mints, with the record-governed lifetime.
  *  - **Minting a link.** For the attachments list, `assertMayAttach` (the
  *    `sys_attachment` insert's own two questions). For a file field, the
- *    parent-EDIT verdict the attach rule asks (`mayEditAttachmentParent`) and
- *    the field's writability as the security service answers it.
+ *    parent-EDIT verdict the attach rule asks (`mayEditAttachmentParent`),
+ *    the field's writability as the security service answers it, the field's
+ *    own `readonly` declaration, and [#32734] whether a pending approval
+ *    locks the record (`IApprovalService.getRecordLock`, the judgement the
+ *    record-lock hook enforces). A conditional lock (`readonlyWhen`) has no
+ *    judgement a door can ask without writing, so it is judged when the link
+ *    is used.
  *  - **Using a link.** The upload acts as the user who minted it: their grants
  *    are resolved again at that moment (the plugin binds
  *    {@link RecordFileAccessDeps.resolveUserContext}, the `runAs: 'user'`
  *    automation precedent), and the existing writers run under them —
  *    `attachFileAs` for an attachment, the record's own update for a field,
  *    whose file-reference hooks claim the file. So a revoked grant refuses the
- *    upload, and every gate on the write judges that user.
+ *    upload, and every gate on the write judges that user. [#32734] The field
+ *    write is strict (`strictReadonlyWrites`): a field the engine would strip
+ *    (`readonly`, a TRUE `readonlyWhen`) refuses the whole write instead of
+ *    answering success with nothing attached, and the stored upload is
+ *    discarded.
  *
  * ## The link is a pending `sys_file` row
  *
@@ -93,6 +125,70 @@ import {
  * other columns (the record, the field, the organization) rest on `sys_file`
  * edit being an administrative grant.
  *
+ * ## A link that names no record
+ *
+ * [#32686] Ruling A: a link can name an object and a file field and no
+ * record ({@link RecordFileAccess.createUploadLinkForNewRecordAs}), so an
+ * agent can file a record whose file field is required: the user uploads,
+ * then the agent creates the record naming the file id the link answered.
+ *
+ *  - **Minting** asks what the record's creation will need, of the caller:
+ *    the object's CREATE permission (`explain(…, 'create')`, the verdict
+ *    `assertMayAttach` asks of `sys_attachment`), the field's writability as
+ *    the security service answers it, and the field's own `readonly`
+ *    declaration. A conditional lock (`readonlyWhen`) and every other rule
+ *    are judged by the create itself. Only a file field: an attachment needs
+ *    its record.
+ *  - **The file id is the link row's id**, answered at once (`fileIds`), so
+ *    the flow is two calls and one upload. Until the upload, the uploader's
+ *    write naming it is refused as an upload that never completed, and every
+ *    other write, a system one included, as a file it cannot open.
+ *  - **Using it** stores the bytes and turns the link row into the user's
+ *    committed file, which no record holds, carrying the binding a write is
+ *    judged by (`pre-record-upload.ts`): only that user's write, into that
+ *    object and field, within {@link PRE_RECORD_CLAIM_WINDOW_SECONDS} of the
+ *    upload, and into one record. Once a record has let it go, it is that
+ *    record's released file like any other. The field's `accept` / `maxSize` are
+ *    judged when the bytes arrive, so a file the field cannot take is refused
+ *    then, and nothing is stored.
+ *  - **What reclaims it**: a link never used is a `pending` row, reaped by
+ *    the pending-upload retention. A file uploaded and never put in a record
+ *    is a committed file no record holds, as an upload the console's form
+ *    never saved is; `verify-file-references` reports it.
+ *
+ * ## Several files through one link
+ *
+ * [#32747] Ruling A: a link for a file field declared `multiple: true` takes
+ * several files in its one submit, at most {@link UPLOAD_LINK_MAX_FILES}.
+ * A single-file field link and an attachments link take one, as before.
+ *
+ *  - **One submit spends the link once.** Every file in it is judged before
+ *    the spend: the doors' size verdict for each, and, on a link that takes
+ *    several, the field's own `accept` / `maxSize` for each, however many the
+ *    submit carries. One refusal refuses the whole submit, nothing is stored,
+ *    and the link stays usable. A link that takes one file is judged exactly
+ *    as it was before this rule (to a record, the record's write judges the
+ *    field's constraints), and takes its body as the file, whatever its
+ *    content type, as it did before links took several.
+ *  - **The several-file form** is a `multipart/form-data` body marked by
+ *    the form header, read only on a link that takes several files; any other
+ *    body is the file itself. It names `count`, at most the link's cap, and
+ *    the door refuses a form whose `count` is over the link's cap or whose
+ *    parts disagree with it before it reads any part's bytes.
+ *  - **All or nothing after the spend.** A link naming a record stores every
+ *    file, then writes the field once, appending all of them. When any store
+ *    or the write fails, every file of the submit is discarded, bytes and
+ *    row (a key whose upload was tried is deleted even when the upload threw), so the record holds what it held before and no row of the submit is
+ *    left.
+ *  - **A link naming no record answers every id when it is minted**: the
+ *    agent asks for `count` files, the link row is the first id and `count - 1`
+ *    reservation rows (`pending`, owned by the caller, holding no bytes) are
+ *    the others. The submit must carry exactly `count` files, each stored
+ *    under its id with the binding a single upload gets. Before the upload a
+ *    reserved id is refused to every write, the uploader's own included, by
+ *    the arms that refuse the link's own id; nothing serves it, because it is
+ *    `pending`; and the pending-upload retention reaps it with the link.
+ *
  * ## What counts the upload
  *
  * The bytes go through the doors' own size verdict (`max_upload_mb`, 413
@@ -107,9 +203,6 @@ export const UPLOAD_LINK_TTL_SECONDS = 10 * 60;
 /** The upload link's secret: 32 random bytes (256 bits), base64url in the link. */
 const UPLOAD_LINK_SECRET_BYTES = 32;
 
-/** The marker a link row's `metadata` carries, so no other pending row reads as a link. */
-const UPLOAD_LINK_KIND = 'upload_link';
-
 /**
  * A link row's `name` while the link is open, and once it is used. The state
  * lives in `name` because the one conditional write that spends a link
@@ -117,6 +210,8 @@ const UPLOAD_LINK_KIND = 'upload_link';
  */
 const LINK_NAME_OPEN = 'upload-link';
 const LINK_NAME_USED = 'upload-link (used)';
+/** [#32747] A row reserving a later file's id for a link that names no record; never a link itself. */
+const LINK_NAME_RESERVED = 'upload-link (reserved)';
 
 /** The most attachments {@link RecordFileAccess.listRecordFilesAs} lists for one record. */
 const ATTACHMENT_LIST_LIMIT = 100;
@@ -129,6 +224,14 @@ export type RecordFileTarget = { field: string; fileId?: string } | { attachment
 
 /** Where an upload link lands: a file field, or the record's attachments list. */
 export type UploadLinkTarget = { field: string } | { attachments: true };
+
+/**
+ * [#32686] Where a link that names no record lands: a file field of the record
+ * to be created. [#32747] `count`: how many files the user will upload through
+ * it (1 when absent; more only for a multi-file field, at most
+ * {@link UPLOAD_LINK_MAX_FILES}); the link answers that many ids.
+ */
+export type NewRecordUploadLinkTarget = { field: string; count?: number };
 
 /** One file a record carries, as {@link RecordFileAccess.listRecordFilesAs} lists it. */
 export interface RecordFileEntry {
@@ -171,10 +274,76 @@ export interface UploadLinkGrant {
   field?: string;
 }
 
+/**
+ * [#32712] Ruling B′: what the page names for the link's own user, every name
+ * read as that user when the page opens (`inspectUploadLink`'s `names`
+ * option). Each member is present only when that user may read it, and in the
+ * page's language; a missing one is not shown. ⛔ Never an id, an API name, a
+ * user or an organization.
+ */
+export interface UploadLinkNames {
+  /** The object's label. Absent when the object declares none: the API name is never shown in its place. */
+  objectLabel?: string;
+  /**
+   * The record's title as that user's own read serves it, unmasked; only
+   * beside `objectLabel`. Absent for a link that names no record.
+   */
+  recordTitle?: string;
+  /** The file field's label, for a field link whose field that user may read. */
+  fieldLabel?: string;
+}
+
 /** What the link's page may show: that it is usable, until when, and where the file lands. */
 export interface UploadLinkView {
   expiresAt: string;
   target: 'field' | 'attachments';
+  /**
+   * [#32712] The names the page shows its user (ruling B′), present only when
+   * asked for (the page's `GET`) and readable; absent, the page names nothing,
+   * as before.
+   */
+  names?: UploadLinkNames;
+  /** [#32686] The link names no record: the file waits for the record the agent creates. */
+  newRecord?: true;
+  /**
+   * [#32747] How many files the link's one submit takes: `{ min: 1, max: 1 }`
+   * for a single-file field or the attachments list; up to
+   * {@link UPLOAD_LINK_MAX_FILES} for a multi-file field of a record; exactly
+   * the count asked for, for a link that names no record.
+   */
+  files: { min: number; max: number };
+}
+
+/**
+ * [#32686] {@link RecordFileAccess.createUploadLinkForNewRecordAs}'s answer:
+ * the link, and the ids the upload is stored under, to write into the field
+ * when the record is created. One id: a link takes one file. An array so
+ * that a link taking several files answers more entries, not a second key.
+ */
+export interface NewRecordUploadLinkGrant {
+  /** The link's token: the pending row's id and the secret. Shown once, never stored. */
+  token: string;
+  /** The link's path on this server: the storage base path, the segment and the token. */
+  path: string;
+  /** When the link stops working (ISO 8601). */
+  expiresAt: string;
+  object: string;
+  /** The file field the upload is for. */
+  field: string;
+  /** The file id(s) the upload is stored under. */
+  fileIds: string[];
+}
+
+/** [#32747] Where one submit's files landed, in the order they were sent. */
+export interface UploadLinkFilesOutcome {
+  object: string;
+  /** The record they landed on; absent for a link that names no record ([#32686]). */
+  recordId?: string;
+  /** The file field they now fill, for a field link. */
+  field?: string;
+  /** The `sys_attachment` row, for an attachments link (which takes one file). */
+  attachmentId?: string;
+  files: Array<{ fileId: string; size: number }>;
 }
 
 /** One upload arriving through a link. */
@@ -187,7 +356,8 @@ export interface UploadLinkUpload {
 /** Where an upload through a link landed. */
 export interface UploadLinkOutcome {
   object: string;
-  recordId: string;
+  /** The record it landed on; absent for a link that names no record ([#32686]). */
+  recordId?: string;
   fileId: string;
   size: number;
   /** The file field it now fills, for a field link. */
@@ -222,6 +392,15 @@ export interface ICallerRecordFileService {
     target: UploadLinkTarget,
     context: ExecutionContext,
   ): Promise<UploadLinkGrant>;
+  /**
+   * [#32686] A single-use upload link for a file field of a record not yet
+   * created, answering the file id the upload is stored under.
+   */
+  createUploadLinkForNewRecordAs(
+    object: string,
+    target: NewRecordUploadLinkTarget,
+    context: ExecutionContext,
+  ): Promise<NewRecordUploadLinkGrant>;
 }
 
 /**
@@ -231,14 +410,48 @@ export interface ICallerRecordFileService {
  * the one unusable-link refusal, and the link is not spent.
  */
 export interface UploadLinkDoor {
-  /** The link's view, or the one unusable-link refusal. Writes nothing. */
-  inspectUploadLink(token: string, callerUserId: string): Promise<UploadLinkView>;
+  /**
+   * The link's view, or the one unusable-link refusal. Writes nothing.
+   * [#32712] `options.names` asks for the names the page shows, read as the
+   * link's own user, in `options.names.lang`.
+   */
+  inspectUploadLink(token: string, callerUserId: string, options?: UploadLinkInspectOptions): Promise<UploadLinkView>;
   /** Spend the link on `upload`, landing it where the link is bound. */
   consumeUploadLink(token: string, upload: UploadLinkUpload, callerUserId: string): Promise<UploadLinkOutcome>;
+  /**
+   * [#32747] Spend the link on one submit carrying `uploads` (in the order
+   * picked), landing all of them where the link is bound, or none.
+   */
+  consumeUploadLinkFiles(
+    token: string,
+    uploads: UploadLinkUpload[],
+    callerUserId: string,
+  ): Promise<UploadLinkFilesOutcome>;
+}
+
+/** [#32712] What {@link UploadLinkDoor.inspectUploadLink} is asked for beyond the link's view. */
+export interface UploadLinkInspectOptions {
+  /** The names the page shows (ruling B′), in the page's language (`lang`, a locale code). */
+  names?: { lang: string };
 }
 
 /** The data-engine surface these verbs use: the reads and writes every engine has, plus its schema read. */
-export type RecordFileEngine = IDataEngine & { getObject?(objectName: string): unknown };
+export interface RecordFileEngine extends IDataEngine {
+  getObject?(objectName: string): unknown;
+  /**
+   * [#32768] The engine's write-free verdict on whether `field` takes the
+   * caller's write on this record now (ObjectQL's `judgeFieldWriteLock`): its
+   * own `readonlyWhen` evaluation, with the reason the update reports the
+   * field under and the words its strict refusal uses. Optional: an engine
+   * without it is not asked, and the upload's own write still refuses.
+   */
+  judgeFieldWriteLock?(
+    object: string,
+    id: unknown,
+    field: string,
+    options?: { context?: ExecutionContext },
+  ): Promise<{ reason: string; phrase: string } | null>;
+}
 
 /** What {@link RecordFileAccess} is composed over — each read at call time. */
 export interface RecordFileAccessDeps {
@@ -266,13 +479,34 @@ export interface RecordFileAccessDeps {
   getBasePath(): string;
   getSharing?(): AttachmentSharingLike | null | undefined;
   getSecurity?():
-    | (AttachmentSecurityLike & Partial<Pick<ISecurityService, 'getWritableFields'>>)
+    | (AttachmentSecurityLike &
+        Partial<Pick<ISecurityService, 'getWritableFields' | 'explain' | 'getReadableFields' | 'getQueryableFields'>>)
     | null
     | undefined;
+  /**
+   * [#32712] The i18n service, for the object and field labels the page shows
+   * in its language. Absent, or answering nothing for the language: the
+   * labels as the object declares them.
+   */
+  getI18n?(): UploadLinkLabelI18n | null | undefined;
+  /**
+   * [#32734] The approvals service, for whether a pending approval locks the
+   * record a field link would write. Absent (no approvals plugin), or without
+   * `getRecordLock`: no lock is judged when the link is minted, and the
+   * record-lock hook still refuses the write when it is used.
+   */
+  getApprovals?(): Partial<Pick<IApprovalService, 'getRecordLock'>> | null | undefined;
   logger: { warn(message: string): void; debug?(message: string): void };
   /** Clock (tests). */
   now?(): number;
 }
+
+/** [#32712] The i18n surface the page's labels are translated through (`II18nService`'s reads). */
+export type UploadLinkLabelI18n = Pick<II18nService, 'getLocales' | 'getTranslations'> &
+  Partial<Pick<II18nService, 'getFallbackLocale' | 'getDefaultLocale'>>;
+
+/** [#32747] One upload of a submit, its media type settled. */
+type TypedUpload = UploadLinkUpload & { mimeType: string };
 
 /** What a link row's `metadata` binds the link to, every value a string (`sys_file.metadata` is a JSON object of strings). */
 interface UploadLinkState {
@@ -280,11 +514,18 @@ interface UploadLinkState {
   secret_sha256: string;
   expires_at: string;
   object: string;
-  record_id: string;
+  /** The record the upload lands on; absent for a field link that names no record ([#32686]). */
+  record_id?: string;
   target: 'field' | 'attachments';
   field?: string;
   user_id: string;
   organization_id?: string;
+  /**
+   * [#32747] A link that names no record and takes several files: the ids
+   * reserved for the second file on, comma-separated, in order (the link
+   * row's own id is the first).
+   */
+  reserved_ids?: string;
 }
 
 /** An ADR-0112-enveloped refusal: `code` and `status` on the thrown error. */
@@ -301,6 +542,28 @@ function refuseUnusableLink(): never {
 
 function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+/**
+ * [#32734] When `err` is the engine's strict-write refusal
+ * (`strictReadonlyWrites`: the update would have stripped a caller-supplied
+ * field, so it wrote nothing), throw the link's refusal for it: the field is
+ * read-only, `FIELD_NOT_ACCESSIBLE` / 403, the reason taken from the
+ * refusal's own `drops`. The engine's message speaks to a developer about
+ * write options, so it is not the one the link's holder reads. Anything else
+ * returns, for the caller to rethrow as it was.
+ */
+function readonlyRefusalOf(err: unknown, object: string, field: string): void {
+  const e = err as { code?: unknown; drops?: unknown } | null;
+  if (!e || e.code !== 'ERR_READONLY_FIELD_REJECTED') return;
+  const drops = Array.isArray(e.drops) ? (e.drops as DroppedFieldsEvent[]) : [];
+  refuse(
+    'FIELD_NOT_ACCESSIBLE',
+    403,
+    drops.some((d) => d?.reason === 'readonly_when')
+      ? `Nothing was attached: ${object}.${field} is read-only on this record in its current state, so it cannot take a file.`
+      : `Nothing was attached: ${object}.${field} is read-only, so it cannot take a file.`,
+  );
 }
 
 /** These verbs serve a user; nothing here acts as the system. */
@@ -345,12 +608,61 @@ function openLinkStateOf(row: FileRecord | null): UploadLinkState | null {
   }
   const s = parsed as Partial<UploadLinkState> | null;
   if (!s || typeof s !== 'object' || s.kind !== UPLOAD_LINK_KIND) return null;
-  for (const key of ['secret_sha256', 'expires_at', 'object', 'record_id', 'user_id'] as const) {
+  for (const key of ['secret_sha256', 'expires_at', 'object', 'user_id'] as const) {
     if (!nonEmptyString(s[key])) return null;
   }
   if (s.target !== 'field' && s.target !== 'attachments') return null;
   if (s.target === 'field' && !nonEmptyString(s.field)) return null;
+  // [#32686] Only a field link may name no record: an attachment needs its record.
+  if (s.target === 'attachments' && !nonEmptyString(s.record_id)) return null;
+  if (s.record_id !== undefined && !nonEmptyString(s.record_id)) return null;
+  // [#32747] Reserved ids only on a field link that names no record.
+  if (s.reserved_ids !== undefined) {
+    if (s.target !== 'field' || s.record_id !== undefined || typeof s.reserved_ids !== 'string') return null;
+    const ids = s.reserved_ids.split(',');
+    if (ids.length < 1 || ids.length >= UPLOAD_LINK_MAX_FILES || !ids.every((id) => LINK_ID.test(id))) return null;
+    // Each id names one file of the submit: none twice, and none the link's own.
+    if (new Set(ids).size !== ids.length || ids.includes(row.id)) return null;
+  }
   return s as UploadLinkState;
+}
+
+/** [#32747] The ids a link that names no record reserved beyond its own, in order. */
+function reservedIdsOf(state: UploadLinkState): string[] {
+  return state.reserved_ids === undefined ? [] : state.reserved_ids.split(',');
+}
+
+/** [#32747] `sys_file.metadata` of a reservation row: the link it belongs to, and the slot. */
+function reservationMetadata(state: UploadLinkState, linkId: string): string {
+  return JSON.stringify({
+    kind: UPLOAD_LINK_KIND,
+    link_id: linkId,
+    object: state.object,
+    target: 'field',
+    field: state.field,
+    user_id: state.user_id,
+    ...(state.organization_id !== undefined ? { organization_id: state.organization_id } : {}),
+  });
+}
+
+/** [#32747] Is `row` still the reservation `linkId` made for its user, holding nothing? */
+function isOpenReservation(row: FileRecord | null, linkId: string, userId: string): boolean {
+  if (!row || row.status !== 'pending' || row.name !== LINK_NAME_RESERVED || row.owner_id !== userId) return false;
+  if (typeof row.metadata !== 'string') return false;
+  try {
+    const s = JSON.parse(row.metadata) as Record<string, unknown> | null;
+    return !!s && s.kind === UPLOAD_LINK_KIND && s.link_id === linkId && s.user_id === userId && s.target === 'field';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * [#32747] The refusal of a submit carrying a number of files the link does
+ * not take, before the link is spent.
+ */
+function refuseFileCount(range: { min: number; max: number }, sent: number): never {
+  refuse(UPLOAD_LINK_FILE_COUNT_CODE, UPLOAD_LINK_FILE_COUNT_STATUS, uploadLinkFileCountMessage(range, sent));
 }
 
 /** `sys_file.metadata` for a link's binding. */
@@ -360,11 +672,12 @@ function linkMetadata(state: UploadLinkState): string {
     secret_sha256: state.secret_sha256,
     expires_at: state.expires_at,
     object: state.object,
-    record_id: state.record_id,
+    ...(state.record_id !== undefined ? { record_id: state.record_id } : {}),
     target: state.target,
     ...(state.field !== undefined ? { field: state.field } : {}),
     user_id: state.user_id,
     ...(state.organization_id !== undefined ? { organization_id: state.organization_id } : {}),
+    ...(state.reserved_ids !== undefined ? { reserved_ids: state.reserved_ids } : {}),
   });
 }
 
@@ -373,6 +686,31 @@ function sameDigest(a: string, b: string): boolean {
   const left = Buffer.from(a, 'hex');
   const right = Buffer.from(b, 'hex');
   return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
+}
+
+/**
+ * [#32712] A record's title as the page may show it: a scalar, not blank, and
+ * never the record's own id. Anything else is no title.
+ */
+function titleOf(value: unknown, recordId: string): string | undefined {
+  if (value === null || value === undefined || typeof value === 'object') return undefined;
+  const title = String(value).trim();
+  return title && title !== recordId ? title : undefined;
+}
+
+/**
+ * [#32712] The i18n service's translations as one bundle keyed by locale, the
+ * shape `translateObject` reads (the glue `RestServer.buildTranslationBundle`
+ * and the analytics service's label pass build the same way); `undefined`
+ * when it holds none.
+ */
+function translationBundleOf(i18n: UploadLinkLabelI18n): TranslationBundle | undefined {
+  const bundle: Record<string, unknown> = {};
+  for (const locale of i18n.getLocales()) {
+    const data = i18n.getTranslations(locale);
+    if (data && typeof data === 'object') bundle[locale] = data;
+  }
+  return Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined;
 }
 
 /** The stored file ids a file field's raw value holds (one id, or an array of them). */
@@ -592,7 +930,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     const engine = this.engineOrRefuse();
     const field = 'field' in target ? target.field : undefined;
 
-    if (field !== undefined) requireFileField(engine, object, field);
+    const fieldDef = field !== undefined ? requireFileField(engine, object, field) : undefined;
     // A record the caller cannot read answers as one that does not exist, at
     // this door as at `get_record`.
     await this.readRecordAs(engine, object, recordId, caller);
@@ -623,8 +961,133 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       if (Array.isArray(writable) && !writable.includes(field)) {
         refuse('FIELD_NOT_ACCESSIBLE', 403, `You cannot attach a file to ${object}.${field}: you cannot edit that field.`);
       }
+      // [#32734] A `readonly` field takes no value from a user's write: the
+      // update strips it, so a link to it could never attach anything.
+      if (fieldDef?.readonly === true) {
+        refuse('FIELD_NOT_ACCESSIBLE', 403, `You cannot attach a file to ${object}.${field}: the field is read-only.`);
+      }
+      // [#32768] Nor a field whose `readonlyWhen` holds now: the update would
+      // take it back out, so the upload would be refused when it arrives. The
+      // engine's own judgement, not a second evaluation here; the refusal
+      // names the lock in the words the update's strict refusal uses.
+      if (typeof engine.judgeFieldWriteLock === 'function') {
+        const lock = await engine.judgeFieldWriteLock(object, recordId, field, { context: caller });
+        if (lock) {
+          refuse('FIELD_NOT_ACCESSIBLE', 403, `You cannot attach a file to ${object}.${field}: the field is ${lock.phrase}.`);
+        }
+      }
+      // [#32734] Nor does a record a pending approval locks: every edit of it
+      // is refused until the approval is decided, recalled or rejected. The
+      // approvals service's own answer, judged as the record-lock hook judges
+      // a write; `null` is a record the caller cannot read, refused above.
+      const approvals = this.deps.getApprovals?.();
+      if (approvals && typeof approvals.getRecordLock === 'function') {
+        const lock = await approvals.getRecordLock(object, recordId, caller);
+        if (lock?.locked === true) {
+          refuse(
+            'RECORD_LOCKED',
+            409,
+            `You cannot attach a file to ${object}/${recordId} now: it is locked while an approval is in progress.`,
+          );
+        }
+      }
     }
 
+    const link = await this.mintLink(engine, caller, object, recordId, field);
+    return {
+      token: link.token,
+      path: link.path,
+      expiresAt: link.expiresAt,
+      object,
+      recordId,
+      ...(field !== undefined ? { field } : {}),
+    };
+  }
+
+  /**
+   * [#32686] Ruling A: a link for a file field of a record the caller is
+   * about to create. Asks what creating it will need of the caller (see the
+   * module comment), mints the same single-use link, and answers the link
+   * row's id as the file id the upload is stored under.
+   */
+  async createUploadLinkForNewRecordAs(
+    object: string,
+    target: NewRecordUploadLinkTarget,
+    context: ExecutionContext,
+  ): Promise<NewRecordUploadLinkGrant> {
+    const caller = requireUserContext(context);
+    const engine = this.engineOrRefuse();
+    const field = target && typeof target === 'object' ? (target as { field?: unknown }).field : undefined;
+    if (!nonEmptyString(field)) {
+      refuse(
+        'VALIDATION_ERROR',
+        400,
+        'A link for a record not yet created fills a file field: name the field. An attachment needs its record; create the record first.',
+      );
+    }
+    const fieldDef = requireFileField(engine, object, field);
+    // The object's create verdict, as the security service answers it for
+    // the caller with no write. A kernel with no security service enforces
+    // no object permission on the create either, so there is nothing to ask.
+    const security = this.deps.getSecurity?.();
+    if (security && typeof security.explain === 'function') {
+      const decision = await security.explain({ object, operation: 'create' }, caller);
+      if (!decision?.allowed) {
+        refuse('PERMISSION_DENIED', 403, `You cannot upload a file for a new ${object}: you cannot create ${object} records.`);
+      }
+    }
+    const writable = await security?.getWritableFields?.(object, caller);
+    if (Array.isArray(writable) && !writable.includes(field)) {
+      refuse('FIELD_NOT_ACCESSIBLE', 403, `You cannot upload a file for ${object}.${field}: you cannot edit that field.`);
+    }
+    if (fieldDef.readonly === true) {
+      refuse('FIELD_NOT_ACCESSIBLE', 403, `You cannot upload a file for ${object}.${field}: the field is read-only.`);
+    }
+    // [#32747] How many files, so the answer can name every id now.
+    const count = (target as { count?: unknown }).count;
+    let files = 1;
+    if (count !== undefined) {
+      if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > UPLOAD_LINK_MAX_FILES) {
+        refuse(
+          'VALIDATION_ERROR',
+          400,
+          `count is how many files the user will upload through the link: a whole number from 1 to ${UPLOAD_LINK_MAX_FILES}.`,
+        );
+      }
+      if (count > 1 && fieldDef.multiple !== true) {
+        refuse(
+          'VALIDATION_ERROR',
+          400,
+          `${object}.${field} holds one file, so a link for it takes one: omit count, or name a multi-file field.`,
+        );
+      }
+      files = count;
+    }
+    const reserved = Array.from({ length: files - 1 }, () => randomUUID());
+    const link = await this.mintLink(engine, caller, object, undefined, field, reserved);
+    return {
+      token: link.token,
+      path: link.path,
+      expiresAt: link.expiresAt,
+      object,
+      field,
+      fileIds: [link.id, ...reserved],
+    };
+  }
+
+  /**
+   * Write the link's `pending` row, owned by the caller, holding the binding
+   * and the SHA-256 of the secret, and answer the token. `recordId` absent:
+   * a field link that names no record ([#32686]).
+   */
+  private async mintLink(
+    engine: RecordFileEngine,
+    caller: ExecutionContext,
+    object: string,
+    recordId: string | undefined,
+    field: string | undefined,
+    reserved: string[] = [],
+  ): Promise<{ id: string; token: string; path: string; expiresAt: string }> {
     const organizationId = nonEmptyString(caller.tenantId) ? caller.tenantId : null;
     const id = randomUUID();
     const secret = randomBytes(UPLOAD_LINK_SECRET_BYTES).toString('base64url');
@@ -634,11 +1097,12 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       secret_sha256: sha256Hex(secret),
       expires_at: expiresAt,
       object,
-      record_id: recordId,
+      ...(recordId !== undefined ? { record_id: recordId } : {}),
       target: field === undefined ? 'attachments' : 'field',
       ...(field !== undefined ? { field } : {}),
       user_id: caller.userId as string,
       ...(organizationId !== null ? { organization_id: organizationId } : {}),
+      ...(reserved.length > 0 ? { reserved_ids: reserved.join(',') } : {}),
     };
     const store = new StorageMetadataStore(engine);
     await store.createFile(
@@ -655,15 +1119,39 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       },
       { organizationId },
     );
+    // [#32747] The later files' ids: rows that hold nothing until the upload.
+    // A failure here takes the link back, so no link answers ids it lacks.
+    const made: string[] = [];
+    try {
+      for (const reservedId of reserved) {
+        await store.createFile(
+          {
+            id: reservedId,
+            key: buildKey(FIELD_UPLOAD_SCOPE, reservedId, LINK_NAME_OPEN),
+            name: LINK_NAME_RESERVED,
+            size: 0,
+            scope: FIELD_UPLOAD_SCOPE,
+            acl: 'private',
+            status: 'pending',
+            owner_id: caller.userId as string,
+            metadata: reservationMetadata(state, id),
+          },
+          { organizationId },
+        );
+        made.push(reservedId);
+      }
+    } catch (err) {
+      for (const rowId of [id, ...made]) {
+        try {
+          await store.deleteFile(rowId, { organizationId });
+        } catch {
+          // A pending row the retention reaps; the refusal is what is thrown.
+        }
+      }
+      throw err;
+    }
     const token = `${id}.${secret}`;
-    return {
-      token,
-      path: `${this.deps.getBasePath()}/${UPLOAD_LINK_SEGMENT}/${token}`,
-      expiresAt,
-      object,
-      recordId,
-      ...(field !== undefined ? { field } : {}),
-    };
+    return { id, token, path: `${this.deps.getBasePath()}/${UPLOAD_LINK_SEGMENT}/${token}`, expiresAt };
   }
 
   /**
@@ -692,26 +1180,227 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     return { row, state };
   }
 
-  async inspectUploadLink(token: string, callerUserId: string): Promise<UploadLinkView> {
-    const { state } = await this.openLink(new StorageMetadataStore(this.engineOrRefuse()), token, callerUserId);
-    return { expiresAt: state.expires_at, target: state.target };
+  async inspectUploadLink(
+    token: string,
+    callerUserId: string,
+    options: UploadLinkInspectOptions = {},
+  ): Promise<UploadLinkView> {
+    const engine = this.engineOrRefuse();
+    const { state } = await this.openLink(new StorageMetadataStore(engine), token, callerUserId);
+    const view: UploadLinkView = {
+      expiresAt: state.expires_at,
+      target: state.target,
+      ...(state.record_id === undefined ? { newRecord: true as const } : {}),
+      files: this.fileRangeOf(engine, state),
+    };
+    if (!options.names) return view;
+    const names = await this.namesForLinkUser(engine, state, options.names.lang);
+    return names ? { ...view, names } : view;
+  }
+
+  /**
+   * [#32712] Ruling B′: the names the page shows the link's own user, read as
+   * that user now — asked only once {@link openLink} has found the link open,
+   * unexpired and that user's, so whoever else holds the token gets the one
+   * refusal before anything is read.
+   *
+   *  - **The user** is resolved as the upload resolves them
+   *    ({@link RecordFileAccessDeps.resolveUserContext}); ⛔ nothing here reads
+   *    as the system.
+   *  - **The record** is read through the engine as that user, the read
+   *    {@link readRecordAs} does for `read_file`: the engine's own security
+   *    answers which rows and fields they are served. A record they cannot
+   *    read now — the read answers none, or refuses `403` / `404` — and a user
+   *    who can no longer act in the link's organization answer the one
+   *    unusable-link refusal, exactly as a stranger's request does.
+   *  - **The title** is the object's display field (`resolveDisplayField`,
+   *    ADR-0079) as that read serves it, shown only when the security service
+   *    answers it queryable for that user (readable and not masked, the
+   *    `getQueryableFields` rule); never the id, and never a blank. An
+   *    explicit `nameField` is honoured even when it is not title-typed, so
+   *    the column must also be title-eligible (`isTitleEligible`, or the
+   *    autonumber primary) and declare no masking rule, the gate the
+   *    engine's own title disclosure applies: a lookup, user or select
+   *    display field serves a foreign id or a machine value, and the row
+   *    then shows the object's label only.
+   *  - **The field's label** only when the field is readable for that user
+   *    (`getReadableFields`). A security service that cannot answer either
+   *    question shows less, never more. No security service: no field-level
+   *    rule exists, and what the read serves is the answer.
+   *  - **Labels** are the object's and the field's own, in `lang`
+   *    (`translateObject`); a missing one is left out, ⛔ never replaced by an
+   *    API name.
+   *
+   * Any other failure answers `undefined`: the page names nothing, as before.
+   */
+  private async namesForLinkUser(
+    engine: RecordFileEngine,
+    state: UploadLinkState,
+    lang: string,
+  ): Promise<UploadLinkNames | undefined> {
+    const degrade = (what: string, err: unknown): undefined => {
+      this.deps.logger.warn(
+        `[storage] upload-link page names nothing: ${what} failed (${err instanceof Error ? err.message : String(err)})`,
+      );
+      return undefined;
+    };
+    let user: ExecutionContext | null;
+    try {
+      user = await this.deps.resolveUserContext(state.user_id, state.organization_id ?? null);
+    } catch (err) {
+      return degrade("resolving the link's user", err);
+    }
+    if (!user) refuseUnusableLink();
+
+    let record: Record<string, unknown> | null = null;
+    if (state.record_id !== undefined) {
+      try {
+        record = await engine.findOne(state.object, { where: { id: state.record_id } }, { context: user });
+      } catch (err) {
+        const status = (err as { status?: unknown })?.status;
+        if (status === 403 || status === 404) refuseUnusableLink();
+        return degrade('reading the record as its user', err);
+      }
+      if (!record) refuseUnusableLink();
+    }
+
+    try {
+      const schema = engine.getObject?.(state.object) as
+        | { label?: unknown; fields?: Record<string, { label?: unknown; type?: string; maskingRule?: unknown }> }
+        | undefined;
+      const labels = this.labelsIn(schema, state.object, state.field, lang);
+      const names: UploadLinkNames = {};
+      if (labels.objectLabel !== undefined) {
+        names.objectLabel = labels.objectLabel;
+        const titleField = resolveDisplayField(schema as never);
+        const title = record && titleField ? titleOf(record[titleField], state.record_id as string) : undefined;
+        const titleDef = titleField ? schema?.fields?.[titleField] : undefined;
+        const titleTyped = !!titleDef
+          && (isTitleEligible(titleDef as never) || titleDef.type === 'autonumber')
+          && titleDef.maskingRule == null;
+        if (title !== undefined && titleTyped && titleField !== 'id' && titleField !== '_id') {
+          if (await this.servedUnmasked(state.object, titleField as string, user)) names.recordTitle = title;
+        }
+      }
+      if (state.target === 'field' && labels.fieldLabel !== undefined) {
+        if (await this.servedReadable(state.object, state.field as string, user)) names.fieldLabel = labels.fieldLabel;
+      }
+      return names;
+    } catch (err) {
+      return degrade('reading the names', err);
+    }
+  }
+
+  /** [#32712] Is `field` served to `user` unmasked? The security service's queryable set says. */
+  private async servedUnmasked(object: string, field: string, user: ExecutionContext): Promise<boolean> {
+    const security = this.deps.getSecurity?.();
+    if (!security) return true;
+    if (typeof security.getQueryableFields !== 'function') return false;
+    const queryable = await security.getQueryableFields(object, user as never);
+    return Array.isArray(queryable) && queryable.includes(field);
+  }
+
+  /** [#32712] Is `field` readable for `user`? The security service's readable set says. */
+  private async servedReadable(object: string, field: string, user: ExecutionContext): Promise<boolean> {
+    const security = this.deps.getSecurity?.();
+    if (!security) return true;
+    if (typeof security.getReadableFields !== 'function') return false;
+    const readable = await security.getReadableFields(object, user as never);
+    return Array.isArray(readable) && readable.includes(field);
+  }
+
+  /**
+   * [#32712] The object's label, and the file field's, in `lang`: the
+   * translator `GET /meta/object/:name` serves labels through
+   * (`translateObject`), over the i18n service's bundle; without one, the
+   * labels as declared. A label that is not a non-empty string is absent.
+   */
+  private labelsIn(
+    schema: { label?: unknown; fields?: Record<string, { label?: unknown }> } | undefined,
+    object: string,
+    field: string | undefined,
+    lang: string,
+  ): { objectLabel?: string; fieldLabel?: string } {
+    const declared = (value: unknown) => (typeof value === 'string' && value.trim() ? value : undefined);
+    const objectLabel = declared(schema?.label);
+    const fieldLabel = field !== undefined ? declared(schema?.fields?.[field]?.label) : undefined;
+    const doc: ObjectLike = {
+      name: object,
+      ...(objectLabel !== undefined ? { label: objectLabel } : {}),
+      fields: field !== undefined ? { [field]: { name: field, ...(fieldLabel !== undefined ? { label: fieldLabel } : {}) } } : {},
+    };
+    const i18n = this.deps.getI18n?.();
+    const bundle = i18n ? translationBundleOf(i18n) : undefined;
+    if (!i18n || !bundle) return { objectLabel, fieldLabel };
+    const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+    const defaultLocale = typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+    const translated = translateObject(doc, bundle, {
+      locale: lang,
+      ...(fallback ? { fallbackChain: [fallback] } : {}),
+      ...(defaultLocale ? { defaultLocale } : {}),
+    });
+    const fields = translated.fields as Record<string, { label?: unknown }> | Array<{ name?: string; label?: unknown }> | undefined;
+    const translatedField = field === undefined
+      ? undefined
+      : Array.isArray(fields)
+        ? fields.find((f) => f?.name === field)
+        : fields?.[field];
+    return {
+      objectLabel: objectLabel !== undefined ? (declared(translated.label) ?? objectLabel) : undefined,
+      fieldLabel: fieldLabel !== undefined ? (declared(translatedField?.label) ?? fieldLabel) : undefined,
+    };
+  }
+
+  /**
+   * [#32747] How many files the link's one submit takes. A field link naming
+   * a record reads the field's declaration now, as its write will.
+   */
+  private fileRangeOf(engine: RecordFileEngine, state: UploadLinkState): { min: number; max: number } {
+    if (state.target !== 'field') return { min: 1, max: 1 };
+    if (state.record_id === undefined) {
+      const files = 1 + reservedIdsOf(state).length;
+      return { min: files, max: files };
+    }
+    return fieldDefOf(engine, state.object, state.field as string)?.multiple === true
+      ? { min: 1, max: UPLOAD_LINK_MAX_FILES }
+      : { min: 1, max: 1 };
   }
 
   async consumeUploadLink(token: string, upload: UploadLinkUpload, callerUserId: string): Promise<UploadLinkOutcome> {
+    const outcome = await this.consumeUploadLinkFiles(token, [upload], callerUserId);
+    const [file] = outcome.files;
+    return {
+      object: outcome.object,
+      ...(outcome.recordId !== undefined ? { recordId: outcome.recordId } : {}),
+      fileId: file.fileId,
+      size: file.size,
+      ...(outcome.field !== undefined ? { field: outcome.field } : {}),
+      ...(outcome.attachmentId !== undefined ? { attachmentId: outcome.attachmentId } : {}),
+    };
+  }
+
+  async consumeUploadLinkFiles(
+    token: string,
+    uploads: UploadLinkUpload[],
+    callerUserId: string,
+  ): Promise<UploadLinkFilesOutcome> {
     const engine = this.engineOrRefuse();
     const storage = this.storageOrRefuse();
     const store = new StorageMetadataStore(engine);
     const { row, state } = await this.openLink(store, token, callerUserId);
 
-    if (!nonEmptyString(upload.filename)) refuse('VALIDATION_ERROR', 400, 'The upload names no file.');
-    if (!Buffer.isBuffer(upload.data)) refuse('VALIDATION_ERROR', 400, 'The upload carries no bytes.');
-    // The doors' own size verdict, before the link is spent.
-    const tooLarge = uploadSizeRefusal(
-      upload.data.byteLength,
-      resolveStorageLimits(this.deps.getLimitsSnapshot()).maxUploadBytes,
-      (n) => `The file is ${n} bytes`,
-    );
-    if (tooLarge !== null) refuse(UPLOAD_TOO_LARGE_CODE, UPLOAD_TOO_LARGE_STATUS, tooLarge);
+    if (!Array.isArray(uploads) || uploads.length === 0) refuse('VALIDATION_ERROR', 400, 'The upload names no file.');
+    // [#32747] As many files as the link takes, before anything else is judged.
+    const range = this.fileRangeOf(engine, state);
+    if (uploads.length < range.min || uploads.length > range.max) refuseFileCount(range, uploads.length);
+    const maxUploadBytes = resolveStorageLimits(this.deps.getLimitsSnapshot()).maxUploadBytes;
+    for (const upload of uploads) {
+      if (!nonEmptyString(upload?.filename)) refuse('VALIDATION_ERROR', 400, 'The upload names no file.');
+      if (!Buffer.isBuffer(upload.data)) refuse('VALIDATION_ERROR', 400, 'The upload carries no bytes.');
+      // The doors' own size verdict, before the link is spent.
+      const tooLarge = uploadSizeRefusal(upload.data.byteLength, maxUploadBytes, (n) => `The file is ${n} bytes`);
+      if (tooLarge !== null) refuse(UPLOAD_TOO_LARGE_CODE, UPLOAD_TOO_LARGE_STATUS, tooLarge);
+    }
 
     // The user the link was minted for, resolved now: a grant revoked since
     // refuses the upload, and the writes below run as them.
@@ -725,6 +1414,36 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       );
     }
 
+    const typed: TypedUpload[] = uploads.map((upload) => ({
+      ...upload,
+      mimeType: nonEmptyString(upload.mimeType) ? upload.mimeType : 'application/octet-stream',
+    }));
+    // [#32686] A link that names no record writes no record now, so nothing
+    // judges the field's own `accept` / `maxSize` until the create does: they
+    // are judged here, before the link is spent, as the record's write would
+    // judge them, and a file the field cannot take is refused with nothing
+    // stored. [#32747] So are they for each file sent through a link that
+    // takes several (a multi-file field's), however many the submit carries:
+    // one file the field cannot take refuses them all with the link unspent.
+    // A link that takes one file to a record is judged by the record's write,
+    // as before.
+    const newRecord = state.record_id === undefined;
+    if (newRecord || range.max > 1) {
+      const def = requireFileField(engine, state.object, state.field as string);
+      for (const upload of typed) {
+        assertFileConstraints(def, state.field as string, {
+          name: upload.filename,
+          mime_type: upload.mimeType,
+          size: upload.data.byteLength,
+        });
+      }
+    }
+    // [#32747] Every reserved id must still be its link's untouched row.
+    const reserved = reservedIdsOf(state);
+    for (const reservedId of reserved) {
+      if (!isOpenReservation(await store.getFile(reservedId), row.id, state.user_id)) refuseUnusableLink();
+    }
+
     // Spend the link: exactly one use turns it from open to used.
     const writeContext: StorageWriteContext = { organizationId };
     const spent = await updateFileIfUnchanged(
@@ -736,12 +1455,18 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     );
     if (!spent) refuseUnusableLink();
 
+    // [#32686] The link row becomes the file: its id is the one the link answered.
+    // [#32747] The reserved rows become the later files, in order.
+    const recordId = state.record_id;
+    if (recordId === undefined) {
+      return await this.filesForNewRecordThroughLink(storage, store, [row.id, ...reserved], state, typed, writeContext);
+    }
+
     try {
-      const mimeType = nonEmptyString(upload.mimeType) ? upload.mimeType : 'application/octet-stream';
       const outcome =
         state.target === 'attachments'
-          ? await this.attachThroughLink(state, user, upload, mimeType, organizationId)
-          : await this.fillFieldThroughLink(engine, storage, store, state, user, upload, mimeType, writeContext);
+          ? await this.attachThroughLink(state, recordId, user, typed[0], typed[0].mimeType, organizationId)
+          : await this.fillFieldThroughLink(engine, storage, store, state, recordId, user, typed, writeContext);
       return outcome;
     } finally {
       // The link row has done its work, used or refused: it holds no bytes,
@@ -758,17 +1483,92 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     }
   }
 
+  /**
+   * [#32686] Store the bytes and turn the link's row into the user's
+   * committed file, which no record holds yet, under the id the link
+   * answered. Its `metadata` becomes the binding a record write is judged by
+   * (`pre-record-upload.ts`); the link's own secret digest goes with the old
+   * metadata. A failed store discards the bytes and the row, so the id is
+   * refused as unknown rather than ever reading as a file.
+   *
+   * [#32747] `fileIds[i]` takes `uploads[i]`: the link row the first, the
+   * reserved rows the rest, each with the same binding. A failure on any of
+   * them discards every one, the rows not reached yet included, so no id of
+   * the submit is left.
+   *
+   * [#33125] Each lands with `deleted_at` set to the upload time, so the
+   * platform sweep reclaims a file no record ever took once the `sys_file`
+   * ttl has passed (ruling A, record 6868819455).
+   */
+  private async filesForNewRecordThroughLink(
+    storage: IStorageService,
+    store: StorageMetadataStore,
+    fileIds: string[],
+    state: UploadLinkState,
+    uploads: TypedUpload[],
+    writeContext: StorageWriteContext,
+  ): Promise<UploadLinkFilesOutcome> {
+    const field = state.field as string;
+    const landedAt = new Date(this.now()).toISOString();
+    const claimUntil = new Date(this.now() + PRE_RECORD_CLAIM_WINDOW_SECONDS * 1000).toISOString();
+    const keys = fileIds.map((fileId, i) => buildKey(FIELD_UPLOAD_SCOPE, fileId, uploads[i].filename));
+    let attempted = 0;
+    try {
+      for (let i = 0; i < fileIds.length; i++) {
+        const upload = uploads[i];
+        attempted = i + 1;
+        await storage.upload(keys[i], upload.data, { contentType: upload.mimeType });
+        await store.updateFile(
+          fileIds[i],
+          {
+            key: keys[i],
+            name: upload.filename,
+            mime_type: upload.mimeType,
+            size: upload.data.byteLength,
+            status: 'committed',
+            // [#33125] The reclaim stamp: a committed file whose `deleted_at`
+            // is set is a candidate of the `sys_file` ttl once that window
+            // has passed. The write that names the file clears it, and the
+            // reap guard reclaims only a bound file no record ever held
+            // (`attachment-lifecycle.ts`, `isReclaimStampedUpload`).
+            deleted_at: landedAt,
+            metadata: preRecordBindingMetadata({
+              kind: PRE_RECORD_UPLOAD_KIND,
+              object: state.object,
+              field,
+              user_id: state.user_id,
+              ...(state.organization_id !== undefined ? { organization_id: state.organization_id } : {}),
+              claim_until: claimUntil,
+            }),
+          },
+          writeContext,
+        );
+      }
+    } catch (err) {
+      for (let i = 0; i < fileIds.length; i++) {
+        await this.discard(storage, store, fileIds[i], keys[i], writeContext, i < attempted);
+      }
+      throw err;
+    }
+    return {
+      object: state.object,
+      field,
+      files: fileIds.map((fileId, i) => ({ fileId, size: uploads[i].data.byteLength })),
+    };
+  }
+
   private async attachThroughLink(
     state: UploadLinkState,
+    recordId: string,
     user: ExecutionContext,
     upload: UploadLinkUpload,
     mimeType: string,
     organizationId: string | null,
-  ): Promise<UploadLinkOutcome> {
+  ): Promise<UploadLinkFilesOutcome> {
     const attached = await this.deps.attachments.attachFileAs(
       {
         parentObject: state.object,
-        parentId: state.record_id,
+        parentId: recordId,
         filename: upload.filename,
         mimeType,
         data: upload.data,
@@ -778,10 +1578,9 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     );
     return {
       object: state.object,
-      recordId: state.record_id,
-      fileId: attached.fileId,
-      size: attached.size,
+      recordId,
       attachmentId: attached.attachmentId,
+      files: [{ fileId: attached.fileId, size: attached.size }],
     };
   }
 
@@ -792,68 +1591,102 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
    * and check the field's `accept` / `maxSize`) all judge it. A multi-file
    * field gains the file beside the ones it holds; a single-file field takes
    * it in place of the one it held, which the lifecycle releases.
+   *
+   * [#32747] A multi-file field gains every file of the submit in that one
+   * write. Any store or the write failing discards every file the submit
+   * stored, bytes and row, so the record holds what it held before.
    */
   private async fillFieldThroughLink(
     engine: RecordFileEngine,
     storage: IStorageService,
     store: StorageMetadataStore,
     state: UploadLinkState,
+    recordId: string,
     user: ExecutionContext,
-    upload: UploadLinkUpload,
-    mimeType: string,
+    uploads: TypedUpload[],
     writeContext: StorageWriteContext,
-  ): Promise<UploadLinkOutcome> {
+  ): Promise<UploadLinkFilesOutcome> {
     const field = state.field as string;
     const def = requireFileField(engine, state.object, field);
-    const fileId = randomUUID();
-    const key = buildKey(FIELD_UPLOAD_SCOPE, fileId, upload.filename);
-    const size = upload.data.byteLength;
-    await store.createFile(
-      {
-        id: fileId,
-        key,
-        name: upload.filename,
-        mime_type: mimeType,
-        size,
-        scope: FIELD_UPLOAD_SCOPE,
-        acl: 'private',
-        status: 'pending',
-        owner_id: user.userId as string,
-      },
-      writeContext,
-    );
+    const files = uploads.map((upload) => {
+      const fileId = randomUUID();
+      return { fileId, key: buildKey(FIELD_UPLOAD_SCOPE, fileId, upload.filename), upload, created: false, attempted: false };
+    });
     try {
-      await storage.upload(key, upload.data, { contentType: mimeType });
-      // A record write takes only a completed upload.
-      await store.updateFile(fileId, { status: 'committed' }, writeContext);
-      let value: string | string[] = fileId;
-      if (def.multiple === true) {
-        const current = await this.readRecordAs(engine, state.object, state.record_id, user);
-        value = [...fileIdsIn(current[field]), fileId];
+      for (const file of files) {
+        const { upload } = file;
+        await store.createFile(
+          {
+            id: file.fileId,
+            key: file.key,
+            name: upload.filename,
+            mime_type: upload.mimeType,
+            size: upload.data.byteLength,
+            scope: FIELD_UPLOAD_SCOPE,
+            acl: 'private',
+            status: 'pending',
+            owner_id: user.userId as string,
+          },
+          writeContext,
+        );
+        file.created = true;
+        file.attempted = true;
+        await storage.upload(file.key, upload.data, { contentType: upload.mimeType });
+        // A record write takes only a completed upload.
+        await store.updateFile(file.fileId, { status: 'committed' }, writeContext);
       }
-      const updated = await engine.update(state.object, { [field]: value }, { where: { id: state.record_id }, context: user });
+      const ids = files.map((file) => file.fileId);
+      let value: string | string[] = ids[0];
+      if (def.multiple === true) {
+        const current = await this.readRecordAs(engine, state.object, recordId, user);
+        value = [...fileIdsIn(current[field]), ...ids];
+      }
+      // [#32734] Strict: a field the update would strip (`readonly`, or a
+      // `readonlyWhen` that holds now) refuses the whole write rather than
+      // answering success with the field left as it was, so an upload is never
+      // answered as attached when the field did not take it.
+      const updated = await engine.update(
+        state.object,
+        { [field]: value },
+        { where: { id: recordId }, context: user, strictReadonlyWrites: true },
+      );
       // A row the user's update no longer reaches (deleted, or out of their
       // scope since the link was minted) is refused, never answered as landed.
       if (updated == null || updated === 0) {
-        refuse('RECORD_NOT_FOUND', 404, `Record "${state.record_id}" not found in "${state.object}"`);
+        refuse('RECORD_NOT_FOUND', 404, `Record "${recordId}" not found in "${state.object}"`);
       }
     } catch (err) {
-      await this.discard(storage, store, fileId, key, writeContext);
+      for (const file of files) {
+        if (file.created) await this.discard(storage, store, file.fileId, file.key, writeContext, file.attempted);
+      }
+      readonlyRefusalOf(err, state.object, field);
       throw err;
     }
-    return { object: state.object, recordId: state.record_id, fileId, size, field };
+    return {
+      object: state.object,
+      recordId,
+      field,
+      files: files.map((file) => ({ fileId: file.fileId, size: file.upload.data.byteLength })),
+    };
   }
 
-  /** Undo a refused field upload: the bytes, then the row. Best-effort; the refusal is what is thrown. */
+  /**
+   * Undo a refused field upload: the bytes, then the row. Best-effort; the
+   * refusal is what is thrown. [#32747] `uploadAttempted` false: the row is
+   * all there is to take back (no upload of its bytes was tried). A tried
+   * upload's key is deleted even when the upload threw, as it may have
+   * written part of the bytes.
+   */
   private async discard(
     storage: IStorageService,
     store: StorageMetadataStore,
     fileId: string,
     key: string,
     writeContext: StorageWriteContext,
+    uploadAttempted = true,
   ): Promise<void> {
     try {
-      await storage.delete(key);
+      if (uploadAttempted) await storage.delete(key);
     } catch (err) {
       this.deps.logger.warn(
         `[storage] upload link: a refused upload could not delete its stored bytes (${(err as Error)?.message ?? err}). ` +

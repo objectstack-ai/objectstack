@@ -5,6 +5,7 @@ import { BaseResponseSchema } from './contract.zod';
 import { ErrorCode } from './error-code-ledger.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../automation/execution.zod';
+import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
 
 /**
  * Automation API Protocol
@@ -481,6 +482,22 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
       'What the run did - records selected / acted on, gate skips, per-node '
       + 'status. Set on a TERMINAL result (a paused run has not finished doing '
       + 'it yet).',
+    ),
+    // #32861 — mirrors `AutomationResult.droppedFields`; the element IS the
+    // data engine's `DroppedFieldsEventSchema`, so no new vocabulary. #33019
+    // rolled up the paused-child and `map`-item legs; the failed child and
+    // the operator-cancelled paused `map` item (#27971) are what remains.
+    droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
+      'Caller-supplied field values a write step of the run did not store (e.g. a `readonly` '
+      + 'field an `update_record` step wrote): the data engine\'s own drop events, one per object '
+      + 'and reason in first-seen order; a field named means at least one write dropped it, not every '
+      + 'write. The steps still succeeded and the run\'s outcome is unchanged - this tells '
+      + 'the caller which values never landed. Set on a terminal success only, and only when '
+      + 'a field was dropped. Delegated writes roll up here too: a `subflow` child\'s run and each '
+      + '`map` item\'s run, whether it completed without pausing or paused and resumed. A child run '
+      + 'that failed answers no drops, so where a `try_catch` or `fault` edge contains that failure '
+      + 'an absent member is not proof the failed child dropped nothing. A `map` item whose paused run '
+      + 'an operator cancelled answers none either (its slot in `results` holds the cancelled marker).',
     ),
   }),
 }));

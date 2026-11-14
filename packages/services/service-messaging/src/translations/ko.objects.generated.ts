@@ -28,15 +28,15 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "알림 이벤트",
-        help: "외래 키 → sys_notification(이 행이 구체화하는 L2 이벤트)"
+        help: "이 메시지가 전달하는 알림입니다. 메시지를 읽음으로 표시하면 이 알림에 대해 기록됩니다."
       },
       delivery_id: {
         label: "전송",
-        help: "외래 키 → sys_notification_delivery(발신함 행). P1 전까지 null"
+        help: "이 메시지의 전달 기록입니다. 인앱 메시지에는 채워지지 않습니다."
       },
       actor_id: {
-        label: "작업자",
-        help: "이벤트를 일으킨 사용자(멘션한 사람, 할당한 사람)로, sys_notification.actor_id와 의미가 같습니다. 클라이언트는 순수 로컬 비교만으로 자신이 일으킨 수신 확인을 숨길 수 있습니다. 다이제스트 행은 구조상 null입니다. 합쳐진 그룹에는 단일 작업자가 없기 때문입니다."
+        label: "트리거한 사람",
+        help: "이 알림을 발생시킨 작업을 한 사람입니다(예: 수신자를 멘션하거나 할당한 사람). 여러 알림을 묶은 메시지에서는 비어 있습니다."
       },
       topic: {
         label: "토픽"
@@ -86,11 +86,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "알림 이벤트",
-        help: "외래 키 → sys_notification(L2 이벤트)"
+        help: "이 수신 기록이 상태를 기록하는 알림입니다."
       },
       delivery_id: {
         label: "전송",
-        help: "외래 키 → sys_notification_delivery(발신함 행). P1 전까지 null"
+        help: "이 수신 기록이 속한 전달 기록입니다. 현재는 채워지지 않습니다."
       },
       user_id: {
         label: "수신 사용자"
@@ -131,7 +131,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "알림 이벤트",
-        help: "외래 키 → sys_notification(L2 이벤트)"
+        help: "이 전달이 보내는 알림입니다."
       },
       recipient_id: {
         label: "수신자",

@@ -68,7 +68,7 @@ const DELEGATOR_SET = { name: 'synth_delegator', label: 'Synthetic delegator', o
 
 const DELEGATOR_ID = 'u_delegator';
 
-type Deployment = { sets: PermissionSet[]; noBaseline?: boolean; delegatorPermissions?: string[] };
+type Deployment = { sets: PermissionSet[]; noBaseline?: boolean; delegatorPermissions?: string[]; delegatorMember?: boolean };
 
 async function boot(deployment: Deployment) {
   const middlewares: Array<(opCtx: any, next: () => Promise<void>) => Promise<void>> = [];
@@ -84,6 +84,16 @@ async function boot(deployment: Deployment) {
         assertEngineFindOnePredicate(object, query);
         return object === 'sys_user' && query?.where?.id === DELEGATOR_ID ? { id: DELEGATOR_ID, email: 'delegator@synth.test' } : null;
       }),
+      // The delegator is a current member of the organization the delegated
+      // request runs in (ADR-0093 D8.1, as amended: under every posture). Only
+      // on the delegator's deployments: an engine that answers `find` at all
+      // changes what the guest envelope's organization read meets.
+      ...(deployment.delegatorMember ? {
+        find: vi.fn(async (object: string, query: any) =>
+          (object === 'sys_member' && (query?.where?.user_id === undefined || query.where.user_id === DELEGATOR_ID)
+            ? [{ user_id: DELEGATOR_ID, organization_id: 'org-1', role: 'member' }]
+            : [])),
+      } : {}),
     },
     metadata: {
       get: async (_type: string, name: string) => SCHEMAS[name],
@@ -254,7 +264,7 @@ describe('[#21079] the second principal: a delegator who resolves no permission 
   };
 
   it('on an embedder with no baseline, the delegator resolves nothing: the middleware refuses, and the probes agree', async () => {
-    const booted = await boot({ sets: [AGENT_SET], noBaseline: true });
+    const booted = await boot({ sets: [AGENT_SET], noBaseline: true, delegatorMember: true });
     await expect((booted.plugin as any).resolvePermissionSetsForContext({ ...AGENT })).resolves.toHaveLength(1);
     expect(await run(booted.middleware, 'ledger', 'find', AGENT)).toEqual(REFUSED_AT_ADMISSION);
     expect(await run(booted.middleware, 'ledger', 'insert', AGENT)).toEqual(REFUSED_AT_ADMISSION);
@@ -265,7 +275,7 @@ describe('[#21079] the second principal: a delegator who resolves no permission 
     // The delegator's baseline is the set that grants `ledger`, so the only
     // difference from the case above is what the delegator resolves.
     const DELEGATOR_BASELINE = { ...DELEGATOR_SET, name: 'member_default' } as unknown as PermissionSet;
-    const booted = await boot({ sets: [AGENT_SET, DELEGATOR_BASELINE] });
+    const booted = await boot({ sets: [AGENT_SET, DELEGATOR_BASELINE], delegatorMember: true });
     expect(await run(booted.middleware, 'ledger', 'find', AGENT)).toEqual({ admitted: true });
     expect(await run(booted.middleware, 'ledger', 'insert', AGENT)).toEqual({ admitted: true });
     expect(await probes(booted, 'ledger', AGENT)).toEqual(ALL_TRUE);

@@ -2009,7 +2009,8 @@ async function composeServedPlatform(input: {
     authFamily.push(
       composeProviderForDeclarations(createIdentityObjectsPlugin()),
       composeProviderForDeclarations(new SecurityPlugin(appSecurityPluginOptions(config as any))),
-      composeProviderForDeclarations(new AuditPlugin()),
+      // [ADR-0154 D3] A declaration boot is not a server: no sealer.
+      composeProviderForDeclarations(new AuditPlugin({ armSealer: false })),
     );
   }
   notes.push(describeAuthFamilyComposition(decision.composes ? { composed: true } : { composed: false, reason: decision.reason }));

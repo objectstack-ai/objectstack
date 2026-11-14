@@ -60,7 +60,16 @@ import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 // The engine's own by-id predicates, which `ObjectQL.update` / `.delete`
 // dispatch on — the cross-object batch's up-front id check asks them.
 import { resolveEngineDeleteDispatch, resolveEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { applyDroppedFieldsHeader, handleRouteError } from './error-response.js';
+import { applyDroppedFieldsHeader, handleRouteError, type RouteErrorOptions } from './error-response.js';
+
+/**
+ * [#32250, ADR-0150 D5] What the whole-request `/data` batch exits ask of the
+ * error door: a write hook's package-scoped refusal (`409 RESOURCE_CONFLICT`)
+ * carries its holders as `details.candidates`, as the single-record doors
+ * answer it. The per-row reports carry them on each row's error instead
+ * (`toRowApiError`, `@objectstack/metadata-protocol`).
+ */
+const PACKAGE_SCOPED_CANDIDATES: RouteErrorOptions = { packageScopedCandidates: true };
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import {
     apiAccessDenialFromEnable,
@@ -88,6 +97,20 @@ export interface BatchRouteHost {
     enforceApiAccess: RestServer['enforceApiAccess'];
     enforceBatchSize: RestServer['enforceBatchSize'];
     loadObjectItem: RestServer['loadObjectItem'];
+}
+
+/**
+ * [#32604] Is `error` the engine's refusal to open a transaction it cannot roll
+ * back (`transaction(cb, base, { require: true })` on a default driver that
+ * fails `driverSupportsTransactions`, #5696)?
+ *
+ * Judged by the ADR-0112 `code`, as `TransactionUnsupportedError`'s own header
+ * prescribes for a check that crosses a package boundary. The constant is
+ * `TRANSACTION_UNSUPPORTED_CODE` in `@objectstack/objectql`, which this package
+ * takes only as a dev dependency, so the registered string is compared here.
+ */
+function isTransactionUnsupportedRefusal(error: unknown): boolean {
+    return (error as { code?: unknown } | null)?.code === 'ERR_TRANSACTION_UNSUPPORTED';
 }
 
 /** One operation of the cross-object batch, as the spec contract parses it. */
@@ -274,10 +297,12 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     Boolean(this.objectQLProvider),
                     async () => this.objectQLProvider!(await this.resolveRequestEnvironmentId(environmentId, req)),
                 );
+                // [#32604] One body for both "no transaction" answers: below, and the engine's refusal on a driver that cannot roll back.
+                const refuseNoTransaction = () => { res.status(501).json({ error: 'Transactional batch not supported by this runtime', code: 'NOT_IMPLEMENTED' }); };
                 if (!ql || typeof ql.transaction !== 'function') {
                     // Typed like every other 501 on this server (clone/search,
                     // #4067) so a client can key on the code, not the prose.
-                    res.status(501).json({ error: 'Transactional batch not supported by this runtime', code: 'NOT_IMPLEMENTED' });
+                    refuseNoTransaction();
                     return;
                 }
 
@@ -394,7 +419,29 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                 // index, since `results` entries are bare record echoes with no
                 // envelope to hang a per-row list on.
                 const dropped: Array<DroppedFieldsEvent & { index: number }> = [];
-                const results = await ql.transaction(async (trxCtx: any) => {
+                // [#32604] `{ require: true }` (#5696, ADR-0119 D1): this batch is
+                // all-or-nothing by construction, so it must never take the
+                // engine's declared degrade. Without it, a default driver that
+                // cannot roll back (no `beginTransaction`, or one inherited and
+                // denied by `supports.transactionsUnsupported`, as `TursoDriver`
+                // declares on its remote transport) ran this callback with no
+                // transaction: a later op's failure left the earlier ops' rows
+                // in place under a route that promises atomicity. The engine now
+                // refuses BEFORE the callback runs, and the refusal answers the
+                // same typed 501 as an engine without `transaction()` above.
+                // Discovery's `transactionalBatch` reads the same default driver
+                // through the same predicate (`engineCanRollBack` →
+                // `driverSupportsTransactions`), so the advertisement and this
+                // refusal agree wherever a default driver resolves. With none
+                // resolved, discovery still says `true` and this answers 501:
+                // the refusal side, so nothing is written.
+                //
+                // `entered` keeps the mapping to the engine's own up-front
+                // refusal: an error carrying that code from inside the callback
+                // is not "this runtime cannot roll back", and keeps its own answer.
+                let entered = false;
+                const runOps = async (trxCtx: any): Promise<any[]> => {
+                    entered = true;
                     const out: any[] = [];
                     for (const [index, op] of ops.entries()) {
                         const data = resolveRefs(op.data, out);
@@ -459,7 +506,17 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                         }
                     }
                     return out;
-                }, context);
+                };
+                let results: any[];
+                try {
+                    results = await ql.transaction(runOps, context, { require: true });
+                } catch (error: unknown) {
+                    if (!entered && isTransactionUnsupportedRefusal(error)) {
+                        refuseNoTransaction();
+                        return;
+                    }
+                    throw error;
+                }
 
                 const answer = { results, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) };
                 // [#3431] The ops' strips in the header too: one token per
@@ -475,7 +532,9 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                 // UNRECOGNISED error to — a handler `TypeError` inside a
                 // batch transaction vanished here. The shared predicate
                 // keeps that one loud while staying quiet on the coded 4xx.
-                handleRouteError(res, error);
+                // [#32250] A package-scoped refusal names its candidates
+                // (`details.candidates`), as on every `/data` door.
+                handleRouteError(res, error, undefined, PACKAGE_SCOPED_CANDIDATES);
             }
         },
         metadata: {
@@ -594,7 +653,9 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     // with the header the success path sets.
                     const earned = earnedWriteDespiteStaleSummary(error, res, req.params?.object);
                     if (earned) { res.status(201).json(earned); return; }
-                    handleRouteError(res, error, req.params?.object);
+                    // [#32250] A hook's package-scoped refusal names its
+                    // candidates, as the single create does.
+                    handleRouteError(res, error, req.params?.object, PACKAGE_SCOPED_CANDIDATES);
                 }
             },
             metadata: {

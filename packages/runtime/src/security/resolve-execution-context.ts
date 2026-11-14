@@ -254,8 +254,9 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     // verified result's `organizationId`, carried where a session carries its
     // active organization. So the session arm vets it on every request by the
     // rule it applies to a browser session (`vetOrganizationClaim`): kept while
-    // a current membership backs it under a walled posture; dropped — no
-    // organization, only global grants — once none does. The D10 delegator is
+    // a current membership backs it — under every posture since ADR-0093 D8.1
+    // was amended; dropped — no organization, only global grants — once none
+    // does. The D10 delegator is
     // then resolved in that organization. ⛔ Never the union of the user's
     // organizations, never the organization their browser session has selected
     // now, never a widened global grant. A token minted before consents bound

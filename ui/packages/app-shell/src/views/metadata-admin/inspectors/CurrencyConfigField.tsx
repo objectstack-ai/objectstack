@@ -14,11 +14,13 @@
  *    currency displays;
  *  - `fixed`: one currency, `defaultCurrency`;
  *  - `record`: each record names its own, in the sibling code field
- *    `currencyField` points at.
+ *    `currencyField` points at, or a master-detail child takes its parent's,
+ *    through a `currencyField` path `<master_detail>.<parent code field>`.
  *
  * The pointer is picked from the object's own record-currency code fields —
  * `text` fields declaring `valueDomain: 'iso_4217_currency'`, the only fields
- * the spec accepts there — and "Create currency field" writes one such field
+ * the spec accepts there — or from those of a parent reached through one of
+ * the object's `master_detail` fields; and "Create currency field" writes one such field
  * with explicit metadata and points at it, so the author never has to know the
  * convention to get a valid declaration. Nothing here guesses a code or a
  * pointer: an unpicked pointer stays absent and the spec's own refusal says so
@@ -35,7 +37,8 @@ import * as React from 'react';
 import { Button } from '@object-ui/components';
 import { Plus } from 'lucide-react';
 import { InspectorSelectField, InspectorTextField } from './_shared.js';
-import type { FieldEntry } from '../previews/object-fields-io.js';
+import { readFields, type FieldEntry } from '../previews/object-fields-io.js';
+import { useMetadataClient } from '../useMetadata.js';
 
 /** The record-currency code field's value domain (ADR-0144 D2). */
 export const CURRENCY_CODE_VALUE_DOMAIN = 'iso_4217_currency';
@@ -141,6 +144,83 @@ export function currencyCodeFieldCandidates(entries: readonly FieldEntry[], self
   return entries.filter((e) => e.name !== self && isCurrencyCodeFieldDef(e.def)).map((e) => e.name);
 }
 
+/** A `master_detail` field of this object and the parent object it names. */
+export interface MasterDetailParent {
+  via: string;
+  reference: string;
+}
+
+/**
+ * The `master_detail` fields of `entries` (other than `self`) with the parent
+ * object each names: the relations a `record`-mode pointer may follow to the
+ * parent's code field (ADR-0144 D2 as amended, `MASTER_DETAIL.CODE`). A
+ * `lookup` is not one; only a master-detail child takes its parent's currency.
+ */
+export function masterDetailParents(entries: readonly FieldEntry[], self: string): MasterDetailParent[] {
+  return entries.flatMap((e) =>
+    e.name !== self && e.def.type === 'master_detail' && typeof e.def.reference === 'string' && e.def.reference
+      ? [{ via: e.name, reference: e.def.reference }]
+      : [],
+  );
+}
+
+/**
+ * The parent paths a `record`-mode pointer may name, `<master_detail>.<code
+ * field>`, one per code field of each parent in `parentFields` (keyed by
+ * object name). A parent not read yet offers nothing.
+ */
+export function parentCurrencyCodeFieldCandidates(
+  parents: readonly MasterDetailParent[],
+  parentFields: Readonly<Record<string, readonly FieldEntry[]>>,
+): string[] {
+  return parents.flatMap(({ via, reference }) =>
+    (parentFields[reference] ?? []).filter((e) => isCurrencyCodeFieldDef(e.def)).map((e) => `${via}.${e.name}`),
+  );
+}
+
+/**
+ * Every pointer the `record`-mode picker of `self` offers: this object's own
+ * code fields, then the parent code fields reached through its `master_detail`
+ * fields, read from each parent object (draft-overlaid, as every Studio picker
+ * reads an object). A stored parent path through one of those relations is
+ * kept while its parent is unread or the read failed, so it reads as the
+ * author's pick rather than as missing; once the parent is read, a path to a
+ * field it does not have is left out and reads as not found.
+ */
+export function useCurrencyCodeFieldCandidates(entries: readonly FieldEntry[], self: string, stored?: string): string[] {
+  const client = useMetadataClient();
+  const parents = masterDetailParents(entries, self);
+  const references = [...new Set(parents.map((p) => p.reference))].sort().join('\u0000');
+  const [parentFields, setParentFields] = React.useState<Readonly<Record<string, readonly FieldEntry[]>>>({});
+  React.useEffect(() => {
+    if (!references) return;
+    let cancelled = false;
+    for (const reference of references.split('\u0000')) {
+      client
+        .withPreviewDrafts(true)
+        .get<Record<string, unknown>>('object', reference)
+        .then((obj) => {
+          if (cancelled || !obj) return;
+          const read = readFields((obj as { fields?: unknown }).fields).entries;
+          setParentFields((prev) => ({ ...prev, [reference]: read }));
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [client, references]);
+  const own = currencyCodeFieldCandidates(entries, self);
+  const viaParent = parentCurrencyCodeFieldCandidates(parents, parentFields);
+  const out = [...own, ...viaParent];
+  const dot = stored ? stored.indexOf('.') : -1;
+  if (stored && dot > 0 && !out.includes(stored)) {
+    const parent = parents.find((p) => p.via === stored.slice(0, dot));
+    if (parent && !parentFields[parent.reference]) out.push(stored);
+  }
+  return out;
+}
+
 /** `currency_code`, or `currency_code_2`, `_3`, … when the name is taken. */
 export function nextCurrencyCodeFieldName(entries: readonly FieldEntry[]): string {
   const taken = new Set(entries.map((e) => e.name));
@@ -190,7 +270,7 @@ export function CurrencyConfigField({
   tr,
 }: {
   config: CurrencyConfigDraft | undefined;
-  /** {@link currencyCodeFieldCandidates} of the object this field belongs to. */
+  /** {@link useCurrencyCodeFieldCandidates} of the object this field belongs to. */
   candidates: readonly string[];
   /**
    * {@link homeAmountCandidates} of the object; absent where `homeAmount` is
@@ -297,4 +377,20 @@ export function CurrencyConfigField({
       )}
     </div>
   );
+}
+
+/**
+ * {@link CurrencyConfigField} for the field `self` of an object whose fields
+ * are `entries`: the pointer picker offers {@link useCurrencyCodeFieldCandidates}.
+ */
+export function ObjectCurrencyConfigField({
+  entries,
+  self,
+  ...rest
+}: Omit<React.ComponentProps<typeof CurrencyConfigField>, 'candidates'> & {
+  entries: readonly FieldEntry[];
+  self: string;
+}) {
+  const candidates = useCurrencyCodeFieldCandidates(entries, self, rest.config?.currencyField);
+  return <CurrencyConfigField {...rest} candidates={candidates} />;
 }

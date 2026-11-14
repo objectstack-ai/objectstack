@@ -37,6 +37,8 @@ import {
   EmailTemplateAmbiguousError,
   createRegistryEmailTemplateLoader,
 } from './template-loader.js';
+import { PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE } from '@objectstack/core';
+import { BUILTIN_AUTH_TEMPLATES } from './templates/auth-templates.js';
 
 type AnyRecord = Record<string, any>;
 
@@ -326,5 +328,315 @@ describe('createRegistryEmailTemplateLoader — the name resolves by (package, n
     expect((err as Error).message).toContain(`"${OTHER_PACKAGE}"`);
     // No locale escapes it: the name is refused before any bundle is read.
     await expect(loader.load('auth.password_reset', undefined)).rejects.toBeInstanceOf(EmailTemplateAmbiguousError);
+  });
+});
+
+describe('the auth mails the platform sends are the platform-requested email template names (ADR-0150 D3 Exceptions, #31699)', () => {
+  it('core\'s list is exactly the names of the built-in auth templates, so every one keeps one overriding package', () => {
+    expect([...(PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE.email_template ?? [])].sort())
+      .toEqual([...new Set(BUILTIN_AUTH_TEMPLATES.map((t) => t.name))].sort());
+  });
+});
+
+/**
+ * [ADR-0150 D3, #31699 F1] The send resolves the template name from the
+ * package it is made from, so two namespaces' same-named templates are each
+ * sent by their own package; a send that names no package keeps the bare-name
+ * meaning, one rung at a time.
+ */
+describe('createRegistryEmailTemplateLoader — the send resolves the name from the caller\'s package (ADR-0150 D3, #31699)', () => {
+  const ALPHA = 'com.example.alpha';
+  const BETA = 'com.example.beta';
+  const GAMMA = 'com.example.gamma';
+  const DELTA = 'com.example.delta';
+  const tpl = (packageId: string, over: AnyRecord = {}): AnyRecord => ({
+    name: 'welcome', label: 'Welcome', subject: `${packageId.split('.').pop()} welcome`, bodyHtml: '<p>hi</p>',
+    _packageId: packageId, ...over,
+  });
+
+  /** A real registry: each `[id, deps]` installed as a code package of its own namespace, shipping `items`. */
+  function registryOf(packages: Array<[string, string[]]>, shipped: AnyRecord[]): SchemaRegistry {
+    const reg = new SchemaRegistry();
+    reg.logLevel = 'silent';
+    for (const [id, deps] of packages) {
+      reg.installPackage({
+        id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+        ...(deps.length ? { dependencies: Object.fromEntries(deps.map((d) => [d, '^1.0.0'])) } : {}),
+      } as never, 'code');
+    }
+    for (const item of shipped) {
+      const { _packageId: id, ...body } = item;
+      reg.registerItem('email_template', body, 'name' as never, id);
+    }
+    return reg;
+  }
+
+  /** The execution list, honouring the address a request names (`packageId`): that package's own items. */
+  function addressedProtocol(items: AnyRecord[]) {
+    const requests: AnyRecord[] = [];
+    return {
+      requests,
+      async getMetaItemsForExecution(request: { type: string; packageId?: string }) {
+        requests.push({ ...request });
+        const list = request.packageId === undefined ? items : items.filter((i) => i._packageId === request.packageId);
+        return { type: request.type, items: list.map((i) => ({ ...i })) };
+      },
+    };
+  }
+
+  const subjectOf = async (loader: ReturnType<typeof createRegistryEmailTemplateLoader>, callerPackageId?: string | null, locale = 'en-US') =>
+    (await loader.load('welcome', locale, callerPackageId === undefined ? undefined : { callerPackageId }))?.subject;
+
+  const twoNamespaces = () => {
+    const items = [tpl(ALPHA), tpl(BETA)];
+    const reg = registryOf([[ALPHA, []], [BETA, []], [GAMMA, [ALPHA]], [DELTA, []]], items);
+    const protocol = addressedProtocol(items);
+    return { protocol, loader: createRegistryEmailTemplateLoader({ protocol, registry: reg }) };
+  };
+
+  it('two namespaces ship the name: each package\'s send is its own template, read at its own address', async () => {
+    const { protocol, loader } = twoNamespaces();
+    expect(await subjectOf(loader, ALPHA)).toBe('alpha welcome');
+    expect(await subjectOf(loader, BETA)).toBe('beta welcome');
+    expect(protocol.requests.map((r) => r.packageId)).toEqual([ALPHA, BETA]);
+  });
+
+  it('a package that holds no template of the name sends the one holder of its declared closure', async () => {
+    const { loader } = twoNamespaces();
+    expect(await subjectOf(loader, GAMMA)).toBe('alpha welcome');
+  });
+
+  it('a package whose closure reaches no holder is refused with the 409 conflict naming the holders — never a pick', async () => {
+    const { loader } = twoNamespaces();
+    const err = await loader.load('welcome', 'en-US', { callerPackageId: DELTA }).then(() => undefined, (e: unknown) => e);
+    expect(err).toBeInstanceOf(EmailTemplateAmbiguousError);
+    expect(err).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect((err as EmailTemplateAmbiguousError).candidates).toEqual([
+      { kind: 'package', packageId: ALPHA },
+      { kind: 'package', packageId: BETA },
+    ]);
+  });
+
+  it('a send with no package: two holders are refused naming both, whether the caller is omitted or null', async () => {
+    const { loader } = twoNamespaces();
+    for (const caller of [undefined, null]) {
+      const err = await loader.load('welcome', 'en-US', caller === undefined ? undefined : { callerPackageId: caller })
+        .then(() => undefined, (e: unknown) => e);
+      expect(err).toBeInstanceOf(EmailTemplateAmbiguousError);
+      expect((err as EmailTemplateAmbiguousError).candidates.map((c) => (c as { packageId?: string }).packageId)).toEqual([ALPHA, BETA]);
+    }
+  });
+
+  it('a send with no package: the one package holder, read from the environment-wide list as before', async () => {
+    const items = [tpl(ALPHA)];
+    const protocol = addressedProtocol(items);
+    const loader = createRegistryEmailTemplateLoader({ protocol, registry: registryOf([[ALPHA, []]], items) });
+    expect(await subjectOf(loader)).toBe('alpha welcome');
+    // A package caller of a one-holder name reads the same list, at no address.
+    expect(await subjectOf(loader, ALPHA)).toBe('alpha welcome');
+    expect(protocol.requests).toEqual([{ type: 'email_template' }, { type: 'email_template' }]);
+  });
+
+  it('a send with no package: the environment\'s own template, when no package holds the name', async () => {
+    const env = { name: 'welcome', label: 'Welcome', subject: 'environment welcome', bodyHtml: '<p>e</p>' };
+    const reg = registryOf([[ALPHA, []]], []);
+    reg.registerItem('email_template', env, 'name' as never);
+    const loader = createRegistryEmailTemplateLoader({ protocol: addressedProtocol([env]), registry: reg });
+    expect(await subjectOf(loader)).toBe('environment welcome');
+  });
+
+  it('a dependent\'s added locale meets its base: the dependent\'s send reads its base\'s address, never the other namespace\'s', async () => {
+    const items = [tpl(ALPHA), tpl(BETA), tpl(GAMMA, { locale: 'fr-FR', subject: 'gamma fr' })];
+    const reg = registryOf([[ALPHA, []], [BETA, []], [GAMMA, [ALPHA]]], items);
+    const protocol = addressedProtocol(items);
+    const loader = createRegistryEmailTemplateLoader({ protocol, registry: reg });
+    expect(await subjectOf(loader, GAMMA)).toBe('alpha welcome');
+    expect(protocol.requests[protocol.requests.length - 1]).toEqual({ type: 'email_template', packageId: ALPHA });
+  });
+
+  it('with no protocol, the registry\'s own list is narrowed to the resolved holder alike', async () => {
+    const items = [tpl(ALPHA), tpl(BETA)];
+    const reg = registryOf([[ALPHA, []], [BETA, []]], items);
+    const loader = createRegistryEmailTemplateLoader({ registry: reg });
+    expect(await subjectOf(loader, BETA)).toBe('beta welcome');
+    expect(await subjectOf(loader, ALPHA)).toBe('alpha welcome');
+  });
+});
+
+/**
+ * [ADR-0150 D3, #32183, epic ruling R4-A] The send door counts every holder, a
+ * disabled package's included, so a reversible disable moves neither the
+ * address the door asks the list for nor the refusal it throws: the door
+ * answers as before this change. Judging the served holders here is #32670,
+ * because the door reads a flat list after the resolve.
+ *
+ * The parity pin: each state, in both registration orders and on both reads
+ * the loader takes, with every set of its holders disabled, gives every
+ * caller the same ask as the same registry with nothing disabled. The ask is
+ * spied, never the list's answer, so no stored row is needed: on the protocol
+ * read it is the request's address; on the registry read, a probe list (an
+ * environment-wide sentinel first, then one item per package) shows which
+ * address the loader kept.
+ */
+describe('createRegistryEmailTemplateLoader — a disabled holder still counts at the send (ADR-0150 D3, #32183)', () => {
+  const ALPHA = 'com.example.alpha';
+  const BETA = 'com.example.beta';
+  const BOTH = 'com.example.both';
+  const VIA_BETA = 'com.example.viabeta';
+  const NEITHER = 'com.example.neither';
+  const DEPENDENT = 'com.example.dependent';
+  const PACKAGES: Array<[string, string[]]> = [
+    [ALPHA, []], [BETA, []], [BOTH, [ALPHA, BETA]], [VIA_BETA, [BETA]], [NEITHER, []], [DEPENDENT, [ALPHA]],
+  ];
+  /** None (omitted, null), each holder, a closure holding both, a closure through BETA only, neither, the dependent. */
+  const CALLERS: ReadonlyArray<[string, string | null | undefined]> = [
+    ['omitted', undefined], ['null', null], ['ALPHA', ALPHA], ['BETA', BETA], ['BOTH', BOTH],
+    ['VIA_BETA', VIA_BETA], ['NEITHER', NEITHER], ['DEPENDENT', DEPENDENT],
+  ];
+  /** The `welcome` members each state ships, as `[package, locale]`; the dependent's is an added locale. */
+  const STATES: Array<[string, Array<[string, string]>]> = [
+    ['one holder', [[ALPHA, 'en-US']]],
+    ['one holder and a dependent\'s addition', [[ALPHA, 'en-US'], [DEPENDENT, 'fr-FR']]],
+    ['two holders', [[ALPHA, 'en-US'], [BETA, 'en-US']]],
+    ['two holders and a dependent\'s addition', [[ALPHA, 'en-US'], [BETA, 'en-US'], [DEPENDENT, 'fr-FR']]],
+  ];
+  const ORDERS: Array<[string, boolean]> = [['as listed', false], ['reversed', true]];
+  const READS = ['protocol', 'registry'] as const;
+  const ENVIRONMENT_WIDE = 'environment-wide';
+
+  /** A real registry: PACKAGES installed and `shipped` registered in order (or reversed), then `disabled` disabled. */
+  function registryOf(shipped: Array<[string, string]>, reversed: boolean, disabled: readonly string[]): SchemaRegistry {
+    const reg = new SchemaRegistry();
+    reg.logLevel = 'silent';
+    const packages = reversed ? [...PACKAGES].reverse() : PACKAGES;
+    for (const [id, deps] of packages) {
+      reg.installPackage({
+        id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+        ...(deps.length ? { dependencies: Object.fromEntries(deps.map((d) => [d, '^1.0.0'])) } : {}),
+      } as never, 'code');
+    }
+    for (const [id, locale] of reversed ? [...shipped].reverse() : shipped) {
+      reg.registerItem('email_template', {
+        name: 'welcome', label: 'Welcome', locale, subject: `${id} ${locale}`, bodyHtml: '<p>hi</p>',
+      }, 'name' as never, id);
+    }
+    for (const id of disabled) reg.disablePackage(id);
+    return reg;
+  }
+
+  /** Every non-empty set of `ids`. */
+  function nonEmptySets(ids: readonly string[]): string[][] {
+    return ids.reduce<string[][]>((sets, id) => [...sets, ...sets.map((s) => [...s, id]), [id]], [])
+      .sort((a, b) => a.length - b.length);
+  }
+
+  type Ask = { address: string | null } | { refused: number; candidates: string[]; message: string };
+
+  /** What the door asks for one caller: the list's address (`null`: the environment-wide list), or its refusal. */
+  async function askOf(reg: SchemaRegistry, read: (typeof READS)[number], caller: string | null | undefined): Promise<Ask> {
+    const requested: Array<string | null> = [];
+    const probe = [
+      { name: 'welcome', label: 'Welcome', subject: ENVIRONMENT_WIDE, bodyHtml: '<p>e</p>' },
+      ...PACKAGES.map(([id]) => ({ name: 'welcome', label: 'Welcome', subject: id, bodyHtml: '<p>p</p>', _packageId: id })),
+    ];
+    const scoped = Object.fromEntries((['getPackage', 'getAllPackages', 'packageScopedHoldersOf', 'getPackageScopedItem', 'getEnvironmentScopedItem'] as const)
+      .map((method) => [method, (reg[method] as (...args: unknown[]) => unknown).bind(reg)]));
+    const loader = createRegistryEmailTemplateLoader(read === 'protocol'
+      ? {
+        registry: reg,
+        protocol: {
+          async getMetaItemsForExecution(request: { type: string; packageId?: string }) {
+            requested.push(request.packageId ?? null);
+            return { items: [] };
+          },
+        },
+      }
+      : { registry: { ...scoped, listItems: () => probe.map((i) => ({ ...i })) } as never });
+    try {
+      const row = await loader.load('welcome', 'en-US', caller === undefined ? undefined : { callerPackageId: caller });
+      if (read === 'protocol') {
+        expect(requested).toHaveLength(1);
+        return { address: requested[0] };
+      }
+      return { address: row?.subject === ENVIRONMENT_WIDE ? null : (row?.subject ?? 'NO ROW') };
+    } catch (e) {
+      if (!(e instanceof EmailTemplateAmbiguousError)) throw e;
+      expect(requested).toEqual([]);
+      return {
+        refused: e.status,
+        candidates: e.candidates.map((c) => (c.kind === 'package' ? c.packageId : c.kind)),
+        message: e.message,
+      };
+    }
+  }
+
+  const asksOf = async (reg: SchemaRegistry, read: (typeof READS)[number]) => {
+    const asks: Record<string, Ask> = {};
+    for (const [label, caller] of CALLERS) asks[label] = await askOf(reg, read, caller);
+    return asks;
+  };
+
+  /** The asks with nothing disabled, as `main` answers them (refusal candidates sorted, message left out). */
+  const refused = (...candidates: string[]) => ({ refused: 409, candidates: [...candidates].sort() });
+  const at = (address: string | null) => ({ address });
+  const ONE_HOLDER = {
+    omitted: at(null), null: at(null), ALPHA: at(null), BETA: refused(ALPHA), BOTH: at(null),
+    VIA_BETA: refused(ALPHA), NEITHER: refused(ALPHA), DEPENDENT: at(null),
+  };
+  const TWO_HOLDERS = {
+    omitted: refused(ALPHA, BETA), null: refused(ALPHA, BETA), ALPHA: at(ALPHA), BETA: at(BETA),
+    BOTH: refused(ALPHA, BETA), VIA_BETA: at(BETA), NEITHER: refused(ALPHA, BETA), DEPENDENT: at(ALPHA),
+  };
+  /** A dependent's addition holds no name for anyone else, so it moves no ask. */
+  const MAIN = (state: string) => (state.startsWith('one holder') ? ONE_HOLDER : TWO_HOLDERS);
+
+  describe.each(READS)('read: %s', (read) => {
+    describe.each(STATES)('%s', (state, shipped) => {
+      describe.each(ORDERS)('registered %s', (_order, reversed) => {
+        it('CONTROL — nothing disabled: each caller\'s ask is main\'s', async () => {
+          const asks = await asksOf(registryOf(shipped, reversed, []), read);
+          const comparable = Object.fromEntries(Object.entries(asks).map(([label, ask]) => [label,
+            'refused' in ask ? refused(...ask.candidates) : ask]));
+          expect(comparable).toEqual(MAIN(state));
+        });
+
+        const holders = [...new Set(shipped.map(([id]) => id))];
+        it.each(nonEmptySets(holders).map((set): [string, string[]] => [set.join(' + '), set]))(
+          '%s disabled: every caller asks the same address, or is refused the same, as with nothing disabled',
+          async (_label, disabled) => {
+            const enabled = await asksOf(registryOf(shipped, reversed, []), read);
+            expect(await asksOf(registryOf(shipped, reversed, disabled), read)).toEqual(enabled);
+          },
+        );
+      });
+    });
+  });
+
+  /**
+   * [epic ruling R4-F] The built-in package as the caller, with nothing
+   * disabled: a name the built-in and one package hold sends the package's
+   * template, as on `main` (the built-in ranks below any package).
+   */
+  describe.each(READS)('CONTROL — the built-in package as the caller (read: %s)', (read) => {
+    it.each(ORDERS)('registered %s: a non-auth name held by the built-in and one package sends the package\'s template', async (_order, reversed) => {
+      const shipped: AnyRecord[] = [
+        { name: 'welcome', label: 'Welcome', subject: 'built-in welcome', bodyHtml: '<p>b</p>', _packageId: BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID },
+        { name: 'welcome', label: 'Welcome', subject: 'alpha welcome', bodyHtml: '<p>a</p>', _packageId: ALPHA },
+      ];
+      const items = reversed ? [...shipped].reverse() : shipped;
+      expect([...(PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE.email_template ?? [])]).not.toContain('welcome');
+      const reg = new SchemaRegistry();
+      reg.logLevel = 'silent';
+      for (const item of items) {
+        const { _packageId: id, ...body } = item;
+        reg.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: String(id).split('.').pop() } as never, 'code');
+        reg.registerItem('email_template', body, 'name' as never, id);
+      }
+      const loader = createRegistryEmailTemplateLoader(read === 'protocol'
+        ? { protocol: layeredProtocol(items), registry: reg }
+        : { registry: reg });
+      const row = await loader.load('welcome', 'en-US', { callerPackageId: BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID });
+      expect(row?.subject).toBe('alpha welcome');
+    });
   });
 });

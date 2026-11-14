@@ -26,6 +26,7 @@ import {
     isObjectSchemaMaskingEnabled,
     relateObjectSchemaMaskPosture,
     resolveObjectSchemaMaskPosture,
+    objectSchemaReadDelegateSource,
     type ObjectSchemaMaskPosture,
     // [#12702 · ADR-0131 D6] Which callers a `/meta` item write admits:
     // `manage_metadata` (or `isSystem`), the one predicate the REST doors run
@@ -433,11 +434,22 @@ export async function resolveObjectMasker(
     }
     const security = await deps.resolveService(context, 'security').catch(() => undefined);
     const execCtx = (context as any)?.executionContext;
+    // [decision 6840464379] Where an object's declared `schemaReadDelegate` is
+    // found — this request's kernel, as `RestServer.resolveObjectMasker` finds
+    // it, so the two transports give the same verdict. Resolved only when an
+    // object the read check refused needs it. One fault differs: a lookup that
+    // fails here reads as not registered (the object stays absent), where
+    // REST's environment leg answers 5xx; ADR-0106 allows both.
+    const schemaReadDelegates = objectSchemaReadDelegateSource({
+        engine: () => deps.resolveService(context, 'objectql'),
+        service: (name) => deps.resolveService(context, name),
+    });
     return (objectName: string) => resolveObjectSchemaMaskPosture({
         objectName,
         context: execCtx,
         security: security as any,
         enabled: true,
+        schemaReadDelegates,
         telemetry: {
             warn: (message, meta) => {
                 (globalThis as any).console?.warn?.(message, meta);
@@ -447,11 +459,30 @@ export async function resolveObjectMasker(
 }
 
 /**
+ * A masker that asks its posture once per object name for the life of one
+ * request — for a door that reads the posture before its store read and
+ * again to project what it serves, so the posture (and its D6 notices) is
+ * resolved once. A rejection is kept too: the same request, the same answer.
+ */
+function onePosturePerName(
+    masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
+): (objectName: string) => Promise<ObjectSchemaMaskPosture> {
+    const asked = new Map<string, Promise<ObjectSchemaMaskPosture>>();
+    return (objectName) => {
+        let posture = asked.get(objectName);
+        if (!posture) asked.set(objectName, (posture = masker(objectName)));
+        return posture;
+    };
+}
+
+/**
  * Project one served object schema, or report the D6 tier-3 fault.
  *
  * `'fault'` covers both the throw tier and the empty-projection case — see
  * `applyObjectSchemaMask`'s `emptied` for why an empty-fields 200 is not an
- * option the ADR leaves open.
+ * option the ADR leaves open. [ruling record 6787890900] `ok: false` with
+ * `hidden` is not a fault: the caller may not read the object, and the exit
+ * answers as for a name that names no object.
  *
  * [#20408] The projection is the shared `projectMetaObjectSchema`, so the
  * answer carries the `Cache-Control` an undetermined posture owes (ADR-0106 D6
@@ -463,7 +494,7 @@ export async function maskObjectSchema(
     masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
     objectName: string,
     document: any,
-): Promise<{ ok: true; document: any; cacheControl?: string } | { ok: false }> {
+): Promise<{ ok: true; document: any; cacheControl?: string } | { ok: false; hidden?: true }> {
     let posture: ObjectSchemaMaskPosture;
     try {
         posture = await masker(objectName);
@@ -559,9 +590,26 @@ function metaItemReadGateSources(
             const registry = (await deps.getObjectQL(context))?.registry;
             if (typeof (registry as { isPackageDisabled?: unknown } | undefined)?.isPackageDisabled !== 'function') return false;
             // [#32076] At the member the layers were read at (`MetaItemReadGateSources.isItemOfDisabledPackage`).
-            const envelope = await protocol.getMetaItem({
-                type, name, ...(packageId ? { packageId } : {}), ...(member !== undefined ? { member } : {}),
-            });
+            let envelope: Awaited<ReturnType<NonNullable<typeof protocol.getMetaItem>>>;
+            try {
+                envelope = await protocol.getMetaItem({
+                    type, name, ...(packageId ? { packageId } : {}), ...(member !== undefined ? { member } : {}),
+                });
+            } catch (error) {
+                // [#32607] The plain read's refusal of a name several packages
+                // hold only as stored rows is step 1c's to answer: the
+                // package-less writes' own refusal (#28337), as `RestServer`'s
+                // owner step leaves it. Only that refusal, which the protocol
+                // marks under the registered key below
+                // (`protocol-meta-item-face.ts`); every other error is
+                // rethrown (contract review S1).
+                if (!packageId && (error as Record<symbol, unknown> | null)?.[Symbol.for('objectstack.metadata-protocol.storedRowHoldersRefusal')] === true
+                    && typeof protocol.packagelessLayeredReadRefusal === 'function'
+                    && await protocol.packagelessLayeredReadRefusal({ type, name, ...(member !== undefined ? { member } : {}) }) !== undefined) {
+                    return false;
+                }
+                throw error;
+            }
             return envelope?.item == null && isServiceItemOfDisabledPackage(registry, { _packageId: envelope?.packageId });
         },
         ...(typeof protocol?.packagelessLayeredReadRefusal === 'function'
@@ -940,6 +988,10 @@ async function answerMetaLayered(
     headers: Readonly<Record<string, string | undefined>> = {},
 ): Promise<HttpDispatcherResult> {
     const { type, name, packageId, maskPosture, memberSelector = {} } = request;
+    // [ruling record 6787890900] An object the caller may not read is the
+    // layered chain's absence, answered BEFORE the store is read, so no store
+    // answer about it (a disabled package's refusal among them) reaches them.
+    if (maskPosture.kind === 'hidden') return withHeaders(deps.error('Not found', 404), headers);
     const mayWriteItem = saveVerdict().allowed;
     // [#29814] The pending draft layer, asked for only when this caller may
     // read pending drafts ({@link mayReadPendingDrafts}, admitted in its own
@@ -1280,6 +1332,17 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const arity = metaQueryArityRefusal('state', query);
         if (arity) return queryRefusalAnswer(deps, arity);
         const from = query?.from !== undefined ? String(query.from) : undefined;
+        // [ruling record 6787890900] This door reads an object's schema, so it
+        // resolves the caller's posture first: an object the caller may not read
+        // is this door's answer for no object, before the registry is read.
+        let statePosture: ObjectSchemaMaskPosture;
+        try {
+            statePosture = await (await resolveObjectMasker(deps, _context, 'object'))(name);
+        } catch (maskError) {
+            if (maskError instanceof ObjectSchemaMaskEvaluationError) return fieldVisibilityFault(deps, name);
+            throw maskError;
+        }
+        if (statePosture.kind === 'hidden') return { handled: true, response: deps.error('Object not found', 404) };
         const qlService = await deps.getObjectQL(_context);
         // [#7557, #24210] An API door reading the registry, a resolution
         // reader: an object of a disabled package gets the item read's answer.
@@ -1460,7 +1523,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // serving must be answered as itself — never fall through to the
         // snapshot as though no overlay existed.
         const publishedType = pluralToSingular(type);
-        const publishedMasker = publishedType === 'object' ? await resolveObjectMasker(deps, _context, publishedType) : undefined;
+        // Asked once per name for the whole request: the early verdict below and
+        // the projection in `servePublished` read the same posture.
+        const publishedMasker = publishedType === 'object'
+            ? onePosturePerName(await resolveObjectMasker(deps, _context, publishedType))
+            : undefined;
         const servePublished = async (document: any): Promise<HttpDispatcherResult> => {
             const gated = await gateMetaItemDocument(deps, _context, protocol, publishedType, name, document);
             if (!gated.ok) return { handled: true, response: gated.response };
@@ -1468,6 +1535,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             let cacheControl: string | undefined;
             if (publishedMasker) {
                 const masked = await maskObjectSchema(publishedMasker, name, served);
+                // [ruling record 6787890900] An object the caller may not read
+                // is this door's answer for a name with nothing published.
+                if (!masked.ok && masked.hidden) return { handled: true, response: deps.error('Not found', 404) };
                 if (!masked.ok) return fieldVisibilityFault(deps, name);
                 served = masked.document;
                 // [#20408] ADR-0106 D6 tier 2 — as `RestServer`'s `/published`.
@@ -1489,6 +1559,21 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             return successWithHeaders(deps, served, { 'Cache-Control': cacheControl });
         };
 
+        // [ruling record 6787890900] An object the caller may not read is this
+        // door's answer for a name with nothing published behind it, BEFORE any
+        // store is read, so no store answer about it (a disabled package's
+        // refusal among them) reaches the caller.
+        if (publishedMasker) {
+            let earlyPosture: ObjectSchemaMaskPosture;
+            try {
+                earlyPosture = await publishedMasker(name);
+            } catch (maskError) {
+                if (maskError instanceof ObjectSchemaMaskEvaluationError) return fieldVisibilityFault(deps, name);
+                throw maskError;
+            }
+            if (earlyPosture.kind === 'hidden') return { handled: true, response: deps.error('Not found', 404) };
+        }
+
         // [#7557, #24210] A disabled package's item is answered as a name with
         // nothing behind it (every exit below ends in this same `404`), as
         // `RestServer`'s `/published` answers it: the owner the plain read's
@@ -1497,9 +1582,17 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // knows a disable. A throw of that read is the item read's answer for
         // it. An object is the layered read's own refusal below; `package` is
         // never hidden.
+        // [#32183, contract review M4] The package the plain read answered, for
+        // a name of a type the registry reads by package that only disabled
+        // packages hold besides it (the read the protocol takes at that
+        // package's address, `servedHolderAddressOf`), and every registry
+        // holder of the name, as `RestServer`'s `/published` reads them. Two
+        // served holders are refused by the plain read.
+        let mixedOwner: string | undefined;
+        let mixedHolders: readonly string[] = [];
         if (publishedType !== 'object' && publishedType !== 'package'
             && protocol && typeof protocol.getMetaItem === 'function') {
-            const registry = (await deps.getObjectQL(_context))?.registry;
+            const registry = (await deps.getObjectQL(_context))?.registry as any;
             if (typeof (registry as { isPackageDisabled?: unknown } | undefined)?.isPackageDisabled === 'function') {
                 let owner: unknown;
                 try {
@@ -1510,10 +1603,31 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 if (isServiceItemOfDisabledPackage(registry, { _packageId: owner })) {
                     return { handled: true, response: deps.error('Not found', 404) };
                 }
+                if (typeof owner === 'string' && typeof registry.packageScopedHoldersOf === 'function'
+                    && typeof registry.readsByPackage === 'function' && registry.readsByPackage(publishedType) === true) {
+                    const holders: readonly string[] = registry.packageScopedHoldersOf(
+                        publishedType, name, null, { includeDisabledPackages: true },
+                    ) ?? [];
+                    if (holders.length > 1 && holders.includes(owner)
+                        && holders.every((holder) => holder === owner || registry.isPackageDisabled(holder) === true)) {
+                        mixedOwner = owner;
+                        mixedHolders = holders;
+                    }
+                }
             }
         }
 
         let publishedOverlay: unknown;
+        // [#32183, contract review M4] The layered read's code layer, read at
+        // the plain read's address: what the snapshot exit below serves for a
+        // mixed name when the metadata service's copy is another holder's.
+        let publishedCode: unknown;
+        const notAnotherHoldersCopy = (copy: unknown): unknown => {
+            const stamp = (copy as { _packageId?: unknown } | null | undefined)?._packageId;
+            return mixedOwner !== undefined && typeof stamp === 'string' && stamp !== mixedOwner && mixedHolders.includes(stamp)
+                ? publishedCode
+                : copy;
+        };
         if (protocol && typeof protocol.getMetaItemLayered === 'function') {
             try {
                 // [ADR-0131 D6] No organization, as `RestServer`'s `/published`:
@@ -1522,6 +1636,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     type,
                     name,
                 });
+                publishedCode = layered?.code ?? undefined;
                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
                     // [#21002, #21986, ADR-0126 §2, ADR-0062 D4] As
                     // `RestServer`'s `/published`: when the layered read put a
@@ -1562,7 +1677,19 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // CANONICAL types. Handed the raw segment it answered 404 under a
             // recognised plural and 200 under the singular twin — of the same
             // code-published item.
-            const data = await (metadataService as any).getPublished(canonicalMetaUrlType(type), name);
+            //
+            // [#32183, contract review M4] For a mixed name, the metadata
+            // service is read at the plain read's package, so a type it stores
+            // per `(package, name)` answers that package's copy and never
+            // refuses naming a disabled holder. A type it keys by name alone
+            // keeps the body registered last, which can be the disabled
+            // holder's: a copy stamped with another holder of the name is
+            // never served, and the layered read's code layer at the plain
+            // read's address is served in its place (the protocol's
+            // `isAnotherHoldersCopy`, which its layered read asks).
+            const data = notAnotherHoldersCopy(await (metadataService as any).getPublished(
+                canonicalMetaUrlType(type), name, ...(mixedOwner !== undefined ? [mixedOwner] : []),
+            ));
             if (data === undefined) return { handled: true, response: deps.error('Not found', 404) };
             return servePublished(data);
         }
@@ -1572,7 +1699,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             let fallbackData: unknown;
             try {
                 // [commit 67ceb9aef] Same fold — this slot reads the same canonical store.
-                fallbackData = await (metaSvc as any).getPublished(canonicalMetaUrlType(type), name);
+                fallbackData = notAnotherHoldersCopy(await (metaSvc as any).getPublished(
+                    canonicalMetaUrlType(type), name, ...(mixedOwner !== undefined ? [mixedOwner] : []),
+                ));
             } catch { /* fall through */ }
             if (fallbackData !== undefined) return servePublished(fallbackData);
         }
@@ -2063,6 +2192,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
             // Try specific calls based on type
             if (type === 'objects' || type === 'object') {
+                // [ruling record 6787890900] An object the caller may not read
+                // is this branch's answer for a name with nothing behind it,
+                // BEFORE any store is read, so no store answer about it (a
+                // disabled package's refusal among them) reaches the caller —
+                // whether or not a member is named, as `RestServer`'s plain read
+                // answers it.
+                if (maskPosture.kind === 'hidden') {
+                    return { handled: true, response: deps.error('Not found', 404) };
+                }
                 // Check whether the kernel is project-scoped. When it is,
                 // the process-wide SchemaRegistry is unsafe to query
                 // directly — it would return objects that other projects
@@ -2561,6 +2699,19 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // `book`) serves an object SCHEMA. An anonymous caller never reaches
             // a schema — the deny it skipped is answered here instead.
             if (anonymous) return anonymousDeny();
+            // [ruling record 6787890900] An object the caller may not read is
+            // this exit's answer for a name that names nothing (below), BEFORE
+            // the registry is asked about it.
+            // Asked once for the whole request: the projection below reads it too.
+            const legacyMasker = onePosturePerName(await resolveObjectMasker(deps, _context, 'object'));
+            let legacyPosture: ObjectSchemaMaskPosture;
+            try {
+                legacyPosture = await legacyMasker(typeOrName);
+            } catch (maskError) {
+                if (maskError instanceof ObjectSchemaMaskEvaluationError) return fieldVisibilityFault(deps, typeOrName);
+                throw maskError;
+            }
+            if (legacyPosture.kind === 'hidden') return { handled: true, response: deps.error('Not found', 404) };
             // [#7557, #24210] The registry keeps serving a disabled package's
             // object (a resolution reader), so this exit answers it as the item
             // read does.
@@ -2581,8 +2732,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 );
                 if (!gated.ok) return { handled: true, response: gated.response };
                 const masked = await maskObjectSchema(
-                    await resolveObjectMasker(deps, _context, 'object'), typeOrName, gated.document,
+                    legacyMasker, typeOrName, gated.document,
                 );
+                // [ruling record 6787890900] An object the caller may not read
+                // is the answer below for a name that names nothing.
+                if (!masked.ok && masked.hidden) return { handled: true, response: deps.error('Not found', 404) };
                 if (!masked.ok) return fieldVisibilityFault(deps, typeOrName);
                 // [#20408] ADR-0106 D6 tier 2's `private, no-store`, as every
                 // other object exit here serves it.

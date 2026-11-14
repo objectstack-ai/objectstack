@@ -193,7 +193,12 @@ describe('PageSchema refuses `priority` — the contract the removal rests on', 
   // same-spelling keys of a DIFFERENT kind in this repo (validation rules,
   // hooks, action-handler registration, and a plain data field on business
   // objects). Parsing cannot be fooled by any of them.
-  const base = { name: 'x_user_detail', label: 'User', type: 'record', object: 'sys_user' };
+  // It places a component: a `full` record page that places none is refused at `regions`
+  // (objectstack#32434), which this contract is not about.
+  const base = {
+    name: 'x_user_detail', label: 'User', type: 'record', object: 'sys_user',
+    regions: [{ name: 'main', components: [{ type: 'record:details' }] }],
+  };
 
   it('is strict: a nonsense key is refused (negative control)', () => {
     const r = PageSchema.safeParse({ ...base, zzzNotAKey: 1 });

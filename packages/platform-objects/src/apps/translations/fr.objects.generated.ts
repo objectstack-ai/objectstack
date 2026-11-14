@@ -1209,11 +1209,12 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motif de la révocation",
-        help: "Motif de la révocation de la clé, lorsqu'il détermine qui peut la restaurer. Réinitialisation du mot de passe par un administrateur : seul un administrateur de la plateforme peut restaurer la clé. Fin de l'appartenance à l'organisation : le propriétaire a quitté l'organisation et personne ne peut restaurer la clé ; un membre en crée une nouvelle. Suspendue par un administrateur : un administrateur de la plateforme a révoqué une clé qui ne lui appartient pas, et seul un administrateur de la plateforme peut la restaurer. Effacé lorsque la clé est restaurée. Vide pour une clé que son propriétaire a révoquée depuis la liste Clés API.",
+        help: "Motif de la révocation de la clé, lorsqu'il détermine qui peut la restaurer. Réinitialisation du mot de passe par un administrateur : seul un administrateur de la plateforme peut restaurer la clé. Fin de l'appartenance à l'organisation : le propriétaire a quitté l'organisation et personne ne peut restaurer la clé ; un membre en crée une nouvelle. Suspendue par un administrateur : un administrateur de la plateforme a révoqué une clé qui ne lui appartient pas, et seul un administrateur de la plateforme peut la restaurer. Désactivée par l'annuaire : l'annuaire de l'organisation (SCIM) a désactivé ou supprimé le propriétaire, et personne ne peut restaurer la clé, même après la réactivation du propriétaire ; le propriétaire en crée une nouvelle. Effacé lorsque la clé est restaurée. Vide pour une clé que son propriétaire a révoquée depuis la liste Clés API.",
         options: {
           admin_password_reset: "Réinitialisation du mot de passe par un administrateur",
           organization_membership_ended: "Fin de l'appartenance à l'organisation",
-          administrator_suspended: "Suspendue par un administrateur"
+          administrator_suspended: "Suspendue par un administrateur",
+          scim_deactivated: "Désactivée par l'annuaire"
         }
       },
       key: {
@@ -2110,6 +2111,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Lire les revendications uniquement depuis le jeton d’ID",
         help: "OIDC uniquement. Lit l’e-mail, le nom et les groupes depuis le jeton d’ID vérifié du fournisseur d’identité, sans appeler son point de terminaison userinfo. À activer pour Microsoft Entra ID, dont la réponse userinfo ne contient ni groupes ni preferred_username. Désactivé par défaut : un fournisseur doté d’un point de terminaison userinfo lit ses revendications dans cette réponse. Modifiez-le avec « Modifier les options de connexion »."
       },
+      sign_out_of_idp: {
+        label: "Sign Out of the Company Sign-In Too",
+        help: "When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "Enregistré par",
         help: "Utilisateur qui a enregistré ce fournisseur"
@@ -2220,6 +2225,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Facultatif. Format de NameID SAML demandé. Par défaut, le format configuré sur l’IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options."
+          },
           mapEmail: {
             label: "Mappage : attribut e-mail",
             helpText: "Facultatif. Attribut d’assertion mappé à l’e-mail de l’utilisateur. Par défaut « email », puis le NameID. Entra ID : http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -2304,6 +2313,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           keepCurrentCert: {
             label: "Continuer à faire confiance au certificat actuel",
             helpText: "Pendant la bascule de l’IdP, accepter les assertions signées par l’un ou l’autre certificat. Modifiez à nouveau sans cette option pour retirer l’ancien."
+          },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one."
           }
         },
         resultDialog: {
@@ -3079,6 +3092,34 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "Par sujet"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "Envoyer un message dans l’application",
+        description: "Envoyez un message à tous les membres de votre organisation, ou aux membres que vous choisissez. Il apparaît dans les notifications de chaque destinataire.",
+        successMessage: "Message envoyé. Destinataires : {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "Tout le monde dans cette organisation",
+            helpText: "Envoyer à chaque membre de votre organisation actuelle. Laissez désactivé pour choisir les destinataires ci-dessous."
+          },
+          recipients: {
+            label: "Destinataires",
+            helpText: "Les membres de votre organisation à qui envoyer, lorsque le message n’est pas pour tout le monde."
+          },
+          title: {
+            label: "Titre",
+            helpText: "La ligne que chaque destinataire voit dans ses notifications."
+          },
+          body: {
+            label: "Contenu du message"
+          },
+          link: {
+            label: "Lien",
+            helpText: "Facultatif. Une page de cette application (commençant par /) ou une adresse web que le message ouvre."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3765,9 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "Version"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "Type d’opération",

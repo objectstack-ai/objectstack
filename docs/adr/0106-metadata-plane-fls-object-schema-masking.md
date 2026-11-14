@@ -1,6 +1,6 @@
 # ADR-0106: Metadata-Plane Field-Level Security — Per-Caller Masking of Object Schemas
 
-**Status**: Accepted (2026-07-27; implemented 2026-08-08 — #3682)
+**Status**: Accepted (2026-07-27; implemented 2026-08-08 — #3682) · **Amended** (2026-11-11, ruling record 6787890900 — an object the caller may not read is absent from every schema-serving outlet; see "Amendment (2026-11-11): object-level visibility"; its one exception, maintainer decision 6840464379 of 2026-11-13, serves the definitions of `sys_approval_request` and `sys_approval_action`, never their rows, to the callers admitted by the `schemaReadDelegate` their owner declares — see "Exception (2026-11-13)")
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove, fail-posture discipline), [ADR-0066](./0066-unified-authorization-model.md) (unified authz; D3 field `requiredPermissions` — mask on read, deny on write), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) (permission set as the only capability container; `readable`/`editable` FLS bits), [ADR-0046](./0046-package-docs-as-metadata.md) (§6.7 audience gate — the existing per-caller metadata read gate this ADR generalizes from)
 **Tracking**: #3661 (steps ① ② shipped client-side as objectui#2866; this ADR is step ③)
@@ -237,6 +237,14 @@ gets the full schema; a non-admin hitting any route gets the projection.
    `$metadata`/describe-style surfaces, client SDK describe calls); anything
    found either routes through the same projection or is filed per Prime
    Directive #10.
+5. *(Amendment 2026-11-11.)* The outlets the audit and later work brought under
+   the same projection, each of which also applies the object-level rule of
+   the amendment below: the published, layered and diff reads of an object,
+   the MCP `list_objects`, `describe_object` and `validate_expression` tools
+   on both transports, and the stdio MCP bridge's object view. The object
+   state-machine read applies the object-level rule only, not the field
+   projection; that it does not apply the field projection is a known
+   residual.
 
 ### D6 — Failure posture: three tiers, never silent, never empty-200
 
@@ -278,6 +286,89 @@ UI correctness. ①'s client-side gates are **not** superseded: the schema
 mask handles existence; the client channel still drives
 readable-but-disabled rendering and payload stripping. The two layers are
 complementary by design.
+
+### Amendment (2026-11-11): object-level visibility
+
+*Ruling record 6787890900.*
+
+- Every schema-serving outlet leaves out of its lists an object the caller may
+  not read, and answers a read of such an object exactly as that outlet
+  answers a name that names no object.
+- Whether the caller may read the object is decided once, in the same posture
+  resolution that decides the field projection, and every schema-serving
+  outlet reaches the same answer from that verdict, so no two outlets disagree
+  about whether an object exists for the caller. The metadata API's reads of
+  one object by name — `GET /meta/object/:name` (cached, uncached, layered,
+  published and diff reads), the object state-machine read, and the runtime
+  `/metadata` catch-all's read of one object — answer that verdict before
+  they read any store.
+- The D4 exemptions and the D8 switch are unchanged and are decided first;
+  with the D8 switch set, the object rule is off as well.
+- A readable object's reference field may still name an object the caller may
+  not read.
+- What is enforced when a read cannot be evaluated: a fault in the field
+  question answers the D6 tier-3 fault (5xx), and is asked first; an object
+  admission that throws answers that fault too, never an empty list; a fault
+  the security service's object admission folds into "not admitted" is
+  answered as the object not existing, which fails closed.
+- A security service that answers field visibility but offers no object-level
+  read admission narrows no object; the runtime says so once, at warn.
+- A caller with no principal, or with no resolved permission set, is served no
+  object. The D7 fallback set decides fields only, never which objects exist
+  for the caller.
+- The doors that judge an action against its object — the action list, the
+  action read and the run doors — keep judging it on that object's field
+  projection; this amendment does not change their verdicts.
+- Known residuals, not narrowed by this amendment: outlets that carry only
+  object names and labels (the API description document, label bundles),
+  navigation entries that name an object, and the object state-machine read's
+  field level — it applies the object-level rule, not the field projection.
+
+#### Exception (2026-11-13): two approval definitions, through an owner-declared delegate
+
+*Maintainer decision 6840464379, an exception to ruling record 6787890900.*
+
+- The definitions of `sys_approval_request` and `sys_approval_action` are
+  served to the callers the approvals door admits. Both objects are closed on
+  the data door to ordinary members, and the request page the approvals door
+  links to renders from both definitions. Every other object keeps the
+  amendment's answer.
+- The object's owner declares the exception; the object-level rule carries no
+  list of names. Each definition names a kernel service in
+  `schemaReadDelegate`, here `approvals`, and that service's
+  `authorizeSchemaRead` answers for the caller. The declaration is read from
+  the object's registered definition at each resolution.
+- The delegate is asked inside the posture resolution that decides the
+  object-level rule, so no outlet decides the exception for itself. It is
+  asked after the D8 switch and the D4 exemptions, only for a caller the
+  object read check did not admit, whatever the reason, and never on an
+  undetermined field posture (D6 tier 2), which would serve the definition
+  unmasked: the object stays absent then. Only a verdict of `true` admits.
+- A `true` verdict serves the definition alone, exactly as a reader of the
+  object is served it: listed, read by name, under the caller's own field
+  projection, and never more. It opens no row: the data door still refuses
+  the caller, and the rows reach them only through `/api/v1/approvals/*`.
+- What is enforced when the delegate cannot answer: an outlet that gives the
+  resolution no way to find the delegate, and a named service that is not
+  registered or lacks `authorizeSchemaRead` (said once per object, at warn),
+  leave the object absent. A delegate or a lookup that throws answers the D6
+  tier-3 fault (5xx); a fault that a delegate folds into its refusal, or a
+  transport's service lookup into "not registered", is answered as the
+  object not existing, which fails closed.
+- A delegate answers by its own door's rule, and only for the objects it
+  owns: any definition may name it, and the posture resolution does not check
+  the pairing. `approvals` refuses every other name. It admits its door's
+  override holder, and a caller the door serves at least one request, pending
+  or closed, as submitter, current approver or past actor, inside the
+  organization scope its request read keeps. That is narrower than the door:
+  the opt-in record-reader tier, which is evaluated only against a named
+  record, is not counted. A member party to no such request keeps the absent
+  answer.
+- The key is not a general opt-out from the object-level rule. A later
+  declaration, whether another object names a delegate or another service
+  answers as one, moves an object off the amendment's answer: it is a further
+  exception to ruling record 6787890900, recorded here and reviewed against
+  every rule above before it ships.
 
 ---
 

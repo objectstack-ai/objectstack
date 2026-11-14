@@ -108,6 +108,14 @@ export interface PackageScopedQuery extends PackageScopedHoldersQuery {
   readonly type: PackageScopedType;
   /** For a bundled type (`email_template`): one member, as `getItem` takes it. */
   readonly member?: string;
+  /**
+   * [#32183] Judge over every holder, a disabled package's included — the
+   * read a DURABLE judgment takes (a backfill binding a stored row, the
+   * stored-reference report), so its answer never moves with a reversible
+   * disable. Omitted, a disabled package holds no name: the served holders
+   * ({@link SchemaRegistry.packageScopedHoldersOf}), which every door reads.
+   */
+  readonly includeDisabledPackages?: boolean;
 }
 
 /** The registry slice the registry adapter reads — every member of it, and no other. */
@@ -144,8 +152,10 @@ export function resolvePackageScopedName<T = unknown>(
   return resolvePackageScopedHolders<T>(
     query,
     {
-      // The caller's own holding counts for its step 1 even as a bundle addition.
-      packageHolders: registry.packageScopedHoldersOf(type, name, query.callerPackageId),
+      // The caller's own holding counts for its step 1 even as a bundle
+      // addition, and even when its package is disabled.
+      packageHolders: registry.packageScopedHoldersOf(type, name, query.callerPackageId,
+        query.includeDisabledPackages === true ? { includeDisabledPackages: true } : undefined),
       packageItem: (packageId) => registry.getPackageScopedItem<T>(type, name, packageId, member),
       environmentItem: () => registry.getEnvironmentScopedItem<T>(type, name, member),
     },
@@ -183,8 +193,9 @@ export type PackageScopedFunctionEngine = Pick<ObjectQL, 'registry' | 'functionH
  * calling flow's armed package as the caller. An action `target` is no
  * reader: it names a handler key in the action registry, which E2 resolves
  * by package, never a registered function. `resolveFunction` /
- * `resolveFunctionEntry` keep answering the one last-registered function per
- * name for any other caller.
+ * `resolveFunctionEntry` answer the one last-registered function per name for
+ * any other caller, and refuse a name two packages hold (#31700, epic seat
+ * ruling R2-C).
  */
 export function resolvePackageScopedFunction(
   engine: PackageScopedFunctionEngine,

@@ -6,11 +6,13 @@
  * `/automation/trigger/:ns/:name`, `/automation/connectors/:ns/:name/connection`
  * and the same under `_env` (`./automation-address.ts`).
  *
- * The engine keeps one slot per bare name and is not re-keyed, so an admitted
- * address is served as its bare path; what is pinned here is WHICH addresses
- * are admitted, what the refused ones answer, that every gate still judges the
- * bare shape ahead of the address, and that a bare name the resolver refuses
- * answers `409` naming every candidate.
+ * An address naming the holder the bare name resolves to is served as its
+ * bare path; what is pinned here is WHICH addresses are admitted, what the
+ * refused ones answer, that every gate still judges the bare shape ahead of
+ * the address, and that a bare name the resolver refuses answers `409` naming
+ * every candidate. [ADR-0150 D4/D9, #31696] A flow name two packages hold is
+ * held by the engine in one slot per holder: each holder's address is served
+ * from its own slot, and the definition writes keep their `409`.
  *
  * Driven through the real `HttpDispatcher`, with an automation slot double and
  * an ObjectQL registry double answering the holder table the resolver reads.
@@ -130,7 +132,7 @@ describe('/automation/:ns/:name — an installed namespace names its flow', () =
         expect(automation.execute).not.toHaveBeenCalled();
     });
 
-    it('a bare name two packages hold: its address is refused naming both, since the engine serves no package\'s flow under it', async () => {
+    it('a bare name two packages hold, on an engine with no slot entries: its address is refused naming both, nothing run (fail closed)', async () => {
         const { call, automation } = dispatcherWith(TWO_HOLDERS);
         const answer = await call('/crm/send_digest/trigger', 'POST');
         expect([answer.status, codeOf(answer)]).toEqual([409, 'RESOURCE_CONFLICT']);
@@ -143,6 +145,93 @@ describe('/automation/:ns/:name — an installed namespace names its flow', () =
         expect((await call('/send_digest/trigger', 'POST')).status).toBe(200);
         expect((await call('/sales/send_digest', 'GET')).handled).toBe(false);
         expect(automation.execute.mock.calls.map((c: any[]) => c[0])).toEqual(['send_digest']);
+    });
+});
+
+/**
+ * [ADR-0150 D4] The engine's slot entries for `send_digest`, which `CRM` and
+ * `HR` both hold: one slot each, filed under `PACKAGE/NAME`. The bare entries
+ * refuse the shared name, as the engine's do.
+ */
+function withSlots(automation: Record<string, any>, name = 'send_digest', holders: string[] = [CRM, HR]) {
+    const keyOf = (pkg: string | null) => (pkg !== null && holders.includes(pkg) ? `${pkg}/${name}` : undefined);
+    const shared = (n: string) => Object.assign(new Error(`Flow '${n}' is held by several packages`), { code: 'RESOURCE_CONFLICT', status: 409 });
+    const bareGetFlow = automation.getFlow;
+    automation.getFlow = vi.fn(async (n: string) => { if (n === name) throw shared(n); return bareGetFlow(n); });
+    automation.execute = vi.fn(async (n: string) => (n === name ? { success: false, error: shared(n).message } : { success: true, output: {} }));
+    automation.toggleFlow = vi.fn(async (n: string) => { if (n === name) throw shared(n); });
+    automation.flowSlotKey = vi.fn((pkg: string | null, n: string) => (n === name ? keyOf(pkg) : undefined));
+    automation.getFlowSlot = vi.fn((pkg: string | null, n: string) => (n === name && keyOf(pkg) ? { name, label: `${pkg} flow` } : null));
+    automation.executeSlot = vi.fn(async () => ({ success: true, output: {} }));
+    automation.toggleFlowSlot = vi.fn(async () => {});
+    automation.getRun = vi.fn(async (runId: string) => ({ id: runId, flowName: runId === 'r-crm' ? `${CRM}/${name}` : `${HR}/${name}` }));
+    return automation;
+}
+
+describe('[ADR-0150 D4/D9, #31696] a flow name two namespaces\' packages hold: each address is served from its holder\'s own slot', () => {
+    const slotted = () => {
+        const d = dispatcherWith(TWO_HOLDERS);
+        return { ...d, automation: withSlots(d.automation) };
+    };
+
+    it('read, run, legacy trigger, toggle and runs of `crm`\'s address reach CRM\'s flow; `hr`\'s reach HR\'s; the bare name is never read', async () => {
+        const { call, automation } = slotted();
+        const read = await call('/crm/send_digest', 'GET');
+        expect([read.status, read.body?.data?.label], JSON.stringify(read.body)).toEqual([200, `${CRM} flow`]);
+        expect((await call('/hr/send_digest', 'GET')).body?.data?.label).toBe(`${HR} flow`);
+        expect((await call('/crm/send_digest/trigger', 'POST')).status).toBe(200);
+        expect((await call('/trigger/hr/send_digest', 'POST')).status).toBe(200);
+        expect((await call('/hr/send_digest/toggle', 'POST', ADMIN, { enabled: false })).status).toBe(200);
+        expect((await call('/crm/send_digest/runs', 'GET')).status).toBe(200);
+        expect(automation.executeSlot.mock.calls.map((c: any[]) => [c[0], c[1]])).toEqual([[CRM, 'send_digest'], [HR, 'send_digest']]);
+        expect(automation.toggleFlowSlot.mock.calls.map((c: any[]) => [c[0], c[1], c[2]])).toEqual([[HR, 'send_digest', false]]);
+        expect(automation.listRunsPage.mock.calls.map((c: any[]) => c[0])).toEqual([`${CRM}/send_digest`]);
+        expect(automation.getFlow).not.toHaveBeenCalled();
+        expect(automation.execute).not.toHaveBeenCalled();
+        expect(automation.toggleFlow).not.toHaveBeenCalled();
+    });
+
+    it('a run read under `crm`\'s address answers CRM\'s run, named as the flow; HR\'s run is not found there', async () => {
+        const { call } = slotted();
+        const own = await call('/crm/send_digest/runs/r-crm', 'GET');
+        expect(own.status, JSON.stringify(own.body)).toBe(200);
+        const other = await call('/crm/send_digest/runs/r-hr', 'GET');
+        expect([other.status, codeOf(other)], JSON.stringify(other.body)).toEqual([404, 'RUN_NOT_FOUND']);
+    });
+
+    it('the definition writes keep their 409 naming both: an address names a slot to read and run, never one to write', async () => {
+        const { call, automation } = slotted();
+        for (const [path, method, body] of [
+            ['/crm/send_digest', 'PUT', { name: 'send_digest', type: 'autolaunched' }],
+            ['/crm/send_digest', 'DELETE', {}],
+            ['/crm/send_digest/clone', 'POST', { name: 'send_digest_copy' }],
+        ] as const) {
+            const answer = await call(path, method, ADMIN, body);
+            expect([path, method, answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([path, method, 409, 'RESOURCE_CONFLICT']);
+            expect(candidatesOf(answer)).toEqual([{ kind: 'package', packageId: CRM }, { kind: 'package', packageId: HR }]);
+        }
+        expect(automation.executeSlot).not.toHaveBeenCalled();
+        expect(automation.getFlowSlot).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL — the bare name is still refused 409 naming both, nothing read or run', async () => {
+        const { call, automation } = slotted();
+        for (const [path, method] of [['/send_digest/trigger', 'POST'], ['/send_digest', 'GET'], ['/send_digest/runs', 'GET']] as const) {
+            const answer = await call(path, method);
+            expect([path, answer.status, codeOf(answer)]).toEqual([path, 409, 'RESOURCE_CONFLICT']);
+            expect(candidatesOf(answer)).toEqual([{ kind: 'package', packageId: CRM }, { kind: 'package', packageId: HR }]);
+        }
+        expect(automation.executeSlot).not.toHaveBeenCalled();
+        expect(automation.getFlowSlot).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL — a namespace that holds neither is refused naming both, nothing read or run', async () => {
+        const d = dispatcherWith({ ...TWO_HOLDERS, namespaces: { [CRM]: 'crm', [HR]: 'hr', 'com.ops.pkg': 'ops' } });
+        const automation = withSlots(d.automation);
+        const answer = await d.call('/ops/send_digest/trigger', 'POST');
+        expect([answer.status, codeOf(answer)]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(candidatesOf(answer)).toEqual([{ kind: 'package', packageId: CRM }, { kind: 'package', packageId: HR }]);
+        expect(automation.executeSlot).not.toHaveBeenCalled();
     });
 });
 

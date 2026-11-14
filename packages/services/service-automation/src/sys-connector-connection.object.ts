@@ -31,7 +31,17 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * One row per `(organization, connector instance)` (Q1 = A: a connection is
  * shared by its organization, and every run of that organization dispatches
  * with it). The organization column is explicit so the row is bound to the
- * organization that connected it, not to whatever context reads it.
+ * organization that connected it, not to whatever context reads it. A
+ * connector instance is identified by `(package, name)` (ADR-0150 D4), so the
+ * declared unique key is (`organization_id`, `connector_package`,
+ * `connector_name`) (#31699, ruled "unique by package and name"): one
+ * organization may connect two packages' instances of one name. A connection
+ * naming no package (an instance the environment authored or a plugin
+ * registers in code) is held to one per organization and name by the runtime
+ * partial index `uniq_sys_connector_connection_packageless`, which the
+ * declared surface cannot spell (metadata-protocol's
+ * `connector-connection-packageless-index.ts`; driver-mongodb's runtime-owned
+ * uniques).
  *
  * ⛔ Not a sign-in account (D6). Nothing here is a better-auth `account` row,
  * and no sign-in path reads it: an integration grant never lets anyone sign in,
@@ -83,8 +93,8 @@ export const SysConnectorConnection = ObjectSchema.create({
     // boot from the instance's one package holder
     // (`stored-reference-package-backfill.ts`); empty for an instance the
     // environment authored or a plugin registers in code, and for a name no
-    // single package holds. Nothing reads it yet, no writer stamps it, and the
-    // unique key is unchanged. Width: the package-id class.
+    // single package holds. A key part of the unique key below (#31699).
+    // Width: the package-id class.
     connector_package: Field.text({
       label: 'Connector Package',
       required: false,
@@ -178,8 +188,19 @@ export const SysConnectorConnection = ObjectSchema.create({
 
   indexes: [
     // One connection per instance in an organization — the connect door's
-    // upsert key (ADR-0143 Q1 = A).
-    { fields: ['connector_name'], unique: 'organization' },
+    // upsert key (ADR-0143 Q1 = A). [ADR-0150 D4 and D8 row R11, #31699] An
+    // instance is (package, name), so the key carries the package column, and
+    // one organization may connect both packages' instances of one name.
+    // `unique: 'global'` materializes exactly the listed columns, the
+    // organization column among them, and it is the spelling the drivers'
+    // widening arms retire the old `(organization_id, connector_name)` key
+    // under, create-before-drop, once the package-less guard stands beside it
+    // (`uniq_sys_connector_connection_packageless`, metadata-protocol's
+    // `connector-connection-packageless-index.ts`): `connector_package` is
+    // NULL-distinct, so that guard holds connections naming no package to one
+    // per organization and instance. Spelled `'organization'`, the old key
+    // would read as an orphan whose drop is destructive (measured).
+    { fields: ['organization_id', 'connector_package', 'connector_name'], unique: 'global' },
   ],
 
   enable: {

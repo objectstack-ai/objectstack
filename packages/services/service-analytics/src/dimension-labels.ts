@@ -38,7 +38,7 @@
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { referenceTargetOf } from '@objectstack/spec/data';
+import { isVirtualSearchField, referenceTargetOf } from '@objectstack/spec/data';
 import { bucketDateKey, bucketKeyToCalendarRange, isBucketGranularity } from '@objectstack/core';
 
 /** The minimal field shape this resolver needs. */
@@ -155,6 +155,47 @@ function referenceLabelTarget(meta: FieldMetaLite | undefined): string | undefin
 }
 
 /**
+ * A dimension as the label passes read it: its row key (`name`), the `field`
+ * the dataset declares (a column of the base object, or a relationship path
+ * `hop.column`), and — for a path — `columnObject`, the object the path's
+ * COLUMN lives on.
+ *
+ * `columnObject` is the answer of the one hop resolver (`columnObjectOf`,
+ * `hop-object.ts`) the query joins the hop with, computed by the caller that
+ * holds the compiled cube and the host's hop reference. ⛔ This module walks no
+ * path itself: a second copy of that walk could name a different object than
+ * the one the query read.
+ */
+export interface LabelDimension {
+  name: string;
+  field: string;
+  /** The object the field's column lives on; omitted ⇒ the base object, `field` read verbatim. */
+  columnObject?: string;
+}
+
+/**
+ * Where a dimension's column is declared: the object and the column's name on
+ * it. A relationship path `account.owner_id` with `columnObject: 'crm_account'`
+ * reads `owner_id` on `crm_account`; a dimension without `columnObject` reads
+ * `field` verbatim on the base object, so a dotted path nobody resolved finds
+ * no field meta and its stored value renders as itself.
+ */
+function dimensionColumn(baseObject: string, dim: LabelDimension): { object: string; column: string } {
+  if (!dim.columnObject) return { object: baseObject, column: dim.field };
+  return { object: dim.columnObject, column: dim.field.slice(dim.field.lastIndexOf('.') + 1) };
+}
+
+/** The field meta a dimension's column declares, on the object it lives on. */
+function dimensionFieldMeta(
+  baseObject: string,
+  dim: LabelDimension,
+  deps: DimensionLabelDeps,
+): { object: string; column: string; meta: FieldMetaLite | undefined } {
+  const { object, column } = dimensionColumn(baseObject, dim);
+  return { object, column, meta: deps.getObjectFields(object)?.[column] };
+}
+
+/**
  * Sort-key label resolution for `DatasetSelection.order` (#3680).
  *
  * The executor sorts the assembled grid BEFORE `queryDataset` rewrites stored
@@ -199,35 +240,39 @@ export interface OrderLabelResolver {
  */
 export function createOrderLabelResolver(
   baseObject: string,
-  dims: Array<{ name: string; field: string }>,
+  dims: LabelDimension[],
   deps: DimensionLabelDeps,
   resolveScope?: LabelScopeResolver,
   context?: ExecutionContext,
 ): OrderLabelResolver {
   const dimByName = new Map(dims.map((d) => [d.name, d]));
-  const metaFor = (dimension: string): FieldMetaLite | undefined => {
+  // A relationship-path dimension's meta is its column's, on the object the
+  // path's last hop reaches (`columnObject`) — the same reading the display
+  // pass makes, so the sort keys are the labels the rows render.
+  const columnFor = (dimension: string) => {
     const dim = dimByName.get(dimension);
-    return dim ? deps.getObjectFields(baseObject)?.[dim.field] : undefined;
+    return dim ? dimensionFieldMeta(baseObject, dim, deps) : undefined;
   };
   return {
     isLabelBearing(dimension) {
-      const meta = metaFor(dimension);
+      const meta = columnFor(dimension)?.meta;
       if (!meta) return false;
       if (Array.isArray(meta.options) && meta.options.length > 0) return true;
       return !!referenceLabelTarget(meta);
     },
     async resolveLabels(dimension, values) {
-      const meta = metaFor(dimension);
-      if (!meta) return undefined;
+      const col = columnFor(dimension);
+      const meta = col?.meta;
+      if (!col || !meta) return undefined;
       if (Array.isArray(meta.options) && meta.options.length > 0) {
         // [#22178] Sort by the label the display pass renders: the options
         // `translateSelectOptions` answers for this request's locale, else the
         // authored ones, exactly as `resolveDimensionLabels` reads them below.
         // Sorting by the authored label while rendering the translated one
         // ordered a localized grid, and windowed its `limit`, by text the user
-        // never sees. `meta` was found through this dimension, so it is known.
-        const field = dimByName.get(dimension)!.field;
-        const translated = deps.translateSelectOptions?.(baseObject, field, meta.options, context?.locale);
+        // never sees. Translated under the object and column that declare the
+        // options — the hop object's, for a relationship path.
+        const translated = deps.translateSelectOptions?.(col.object, col.column, meta.options, context?.locale);
         const labelByValue = new Map<unknown, string>();
         for (const opt of translated ?? meta.options) {
           if (opt && opt.label != null) labelByValue.set(opt.value, String(opt.label));
@@ -404,9 +449,10 @@ export function formatDateBucket(value: unknown, granularity?: DateGranularity |
 /**
  * Replace raw dimension values with display labels, in place.
  *
- * @param baseObject - the dataset's base object (where the dimension fields live)
- * @param dims - selected dimensions as `{ name, field, type?, dateGranularity? }`
- *   (row key = `name`)
+ * @param baseObject - the dataset's base object (where a base-field dimension's column lives)
+ * @param dims - selected dimensions as `{ name, field, columnObject?, type?, dateGranularity? }`
+ *   (row key = `name`; `columnObject` = the object a relationship path's column
+ *   lives on, see {@link LabelDimension})
  * @param rows - result rows, mutated in place
  * @param deps - injected runtime capabilities
  * @param resolveScope - (ADR-0021 D-C, #3602) resolves the referenced object's
@@ -421,18 +467,21 @@ export function formatDateBucket(value: unknown, granularity?: DateGranularity |
  */
 export async function resolveDimensionLabels(
   baseObject: string,
-  dims: Array<{ name: string; field: string; type?: string; dateGranularity?: DateGranularity | string }>,
+  dims: Array<LabelDimension & { type?: string; dateGranularity?: DateGranularity | string }>,
   rows: Record<string, unknown>[],
   deps: DimensionLabelDeps,
   resolveScope?: LabelScopeResolver,
   context?: ExecutionContext,
 ): Promise<void> {
   if (!rows.length || !dims.length) return;
-  const fields = deps.getObjectFields(baseObject);
-  if (!fields) return;
+  if (!deps.getObjectFields(baseObject)) return;
 
   for (const dim of dims) {
-    const meta = fields[dim.field];
+    // The column's own meta, on the object that declares it: the base object
+    // for a base field, the hop object (`columnObject`) for a relationship
+    // path. Reading a path on the base object's field map found nothing, and
+    // the stored FK id was served in place of the name.
+    const { object: columnObject, column, meta } = dimensionFieldMeta(baseObject, dim, deps);
 
     // ── date: epoch / ISO → human bucket label ────────────────────────
     // A date dimension's grouped value is a raw timestamp (or a bucket start);
@@ -455,7 +504,7 @@ export async function resolveDimensionLabels(
       // and fall back to the authored label when no translation is available
       // (no i18n service configured, nothing for this locale, or the option's
       // value carries no bundle entry at all).
-      const translated = deps.translateSelectOptions?.(baseObject, dim.field, meta.options, context?.locale);
+      const translated = deps.translateSelectOptions?.(columnObject, column, meta.options, context?.locale);
       const options = translated ?? meta.options;
       const labelByValue = new Map<unknown, string>();
       for (const opt of options) {
@@ -506,14 +555,35 @@ export async function resolveDimensionLabels(
 }
 
 /**
- * Pick the display field for an object from its field map, by convention:
- * an explicit `name`/`title`/`label` field, else the first text-like field.
- * Returns `undefined` when nothing suitable exists.
+ * Pick the display field a reference dimension's label is read from, on the
+ * TARGET object.
+ *
+ * 1. The object's declared `nameField` (ADR-0079: "the stored field used as
+ *    the record display name") — the title every other surface shows for the
+ *    record — when the field map declares it and it is stored. The registry
+ *    designates one on every owned object that has a title-eligible field,
+ *    and an author may point it at any stored field (an `autonumber` order
+ *    number is the common case). A `formula` title (the spec's
+ *    `isVirtualSearchField`) has no column the label read can group by, so it
+ *    falls through to the convention below, as before.
+ * 2. Otherwise, by convention: an explicit `name`/`title`/`label` field, else
+ *    the first text-like field.
+ *
+ * Returns `undefined` when nothing suitable exists. Before step 1, a target
+ * titled by an `autonumber` with no `name`/`title`/`label` field was read
+ * through its first text field — on most objects the platform-injected
+ * ownership `queue`, null on every row — so no label came back and the stored
+ * id was served.
  */
 export function pickDisplayField(
   fields: Record<string, FieldMetaLite> | undefined,
+  nameField?: string,
 ): string | undefined {
   if (!fields) return undefined;
+  if (typeof nameField === 'string' && nameField !== '') {
+    const declared = fields[nameField];
+    if (declared && !isVirtualSearchField(declared)) return nameField;
+  }
   for (const preferred of ['name', 'title', 'label']) {
     if (fields[preferred]) return preferred;
   }

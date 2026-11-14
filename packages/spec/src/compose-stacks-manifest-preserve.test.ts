@@ -324,11 +324,19 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
   // halves. Readers were converted first (every one resolves `packages[]`);
   // this is the emitter that stops feeding the flat copy.
 
-  const withObjects = (manifest: Record<string, unknown>, object: string, field = 'a'): ObjectStackDefinition =>
+  // `withApp: false` for a package composed beside another one's app under a
+  // flat manifest option, as a reference or control: two apps under the one
+  // manifest a flat composition keeps are refused (ADR-0019 D3 as amended).
+  const withObjects = (
+    manifest: Record<string, unknown>,
+    object: string,
+    field = 'a',
+    withApp = true,
+  ): ObjectStackDefinition =>
     raw({
       manifest,
       objects: [{ name: object, label: object, fields: { [field]: { type: 'text', label: field } } }],
-      apps: [{ name: `${object}_app`, label: object }],
+      ...(withApp ? { apps: [{ name: `${object}_app`, label: object }] } : {}),
     });
 
   /**
@@ -336,32 +344,27 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
    * does the union across the package bodies reproduce what the pick-one
    * composition flattens?
    *
-   * ⚠️ It is spelled once and applied to BOTH a disjoint and a COLLIDING
+   * ⚠️ It is spelled once and applied to BOTH a disjoint and a DIVERGING
    * fixture, because a criterion asserted only where it holds cannot fail. The
    * first shape of this block asserted it on the disjoint fixture alone and was
-   * blind to the case that matters: composition RECONCILES two packages'
-   * same-named objects, and the reconciled copy lives only in the flattened
-   * half (review of PR #19666).
+   * blind to the case that matters: composition RECONCILES something the
+   * bodies do not carry (an action bound onto a sibling package's object), and
+   * the reconciled copy lives only in the flattened half (review of PR #19666).
    */
   const bodiesReproduceFlattened = (
     stacks: ObjectStackDefinition[],
     key: 'objects' | 'apps' | 'actions',
-    objectConflict?: 'merge' | 'override',
   ): boolean => {
-    // The SAME conflict strategy on both sides — otherwise the flattened half
-    // is composed under a rule the preserve run never used, and a colliding
-    // fixture would die in the default strategy's refusal instead of being
-    // measured.
-    const preserved = composeStacks(stacks, { manifest: 'preserve', ...(objectConflict ? { objectConflict } : {}) });
+    const preserved = composeStacks(stacks, { manifest: 'preserve' });
     const bodies = (preserved.packages ?? []).map((p) => p.manifest as Record<string, unknown>);
     const fromBodies = bodies.flatMap((b) => (b[key] as unknown[]) ?? []);
-    const flattened = (composeStacks(stacks, objectConflict ? { objectConflict } : undefined) as unknown as Record<string, unknown>)[key] as unknown[] ?? [];
+    const flattened = (composeStacks(stacks) as unknown as Record<string, unknown>)[key] as unknown[] ?? [];
     const norm = (items: unknown[]): string => JSON.stringify(items.map((i) => JSON.stringify(i)).sort());
     return norm(fromBodies) === norm(flattened);
   };
 
   it('a multi-package artifact carries its collections ONCE, in the package bodies', () => {
-    const stacks = [withObjects(crmManifest, 'crm_account'), withObjects(cpqManifest, 'cpq_quote')];
+    const stacks = [withObjects(crmManifest, 'crm_account'), withObjects(cpqManifest, 'cpq_quote', 'a', false)];
     const preserved = composeStacks(stacks, { manifest: 'preserve' });
 
     // Nothing flattened: the two package-owned collections these inputs carry
@@ -381,31 +384,24 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
   });
 
   it.each(['merge', 'override'] as const)(
-    "keeps the flattened copy when `objectConflict: '%s'` RECONCILED two packages' object",
+    "refuses two packages' same-named object under `objectConflict: '%s'` instead of reconciling it",
     (strategy) => {
-      // ⭐ The case the first shape of this block could not see. Both packages
-      // declare `crm_account`; composition reconciles them into ONE object and
-      // the package bodies keep the two unreconciled halves, so the flattened
-      // copy is not a copy of anything the bodies carry. Deleting it would hand
-      // a consumer two conflicting partial objects where it receives one
-      // reconciled object today.
-      const stacks = [withObjects(crmManifest, 'crm_account', 'from_crm'), withObjects(cpqManifest, 'crm_account', 'from_cpq')];
-      const preserved = composeStacks(stacks, { manifest: 'preserve', objectConflict: strategy });
+      // Both packages declare `crm_account`. Each keeps its own body under
+      // 'preserve', so a reconciled flattened copy could only sit beside two
+      // bodies that each still declare the name — measured through a real
+      // boot, that artifact is refused (DUPLICATE_ARTIFACT_OBJECT_NAME). The
+      // composition is refused instead, under every strategy.
+      const stacks = [withObjects(crmManifest, 'crm_account', 'from_crm'), withObjects(cpqManifest, 'crm_account', 'from_cpq', false)];
+      let caught: { code?: string; status?: number } | undefined;
+      try {
+        composeStacks(stacks, { manifest: 'preserve', objectConflict: strategy });
+      } catch (e) {
+        caught = e as { code?: string; status?: number };
+      }
+      expect([caught?.code, caught?.status]).toEqual(['STACK_COMPOSE_OBJECT_CONFLICT', 422]);
 
-      // The criterion is FALSE here — asserted, so the helper above is
-      // exercised in the direction that can fail.
-      expect(bodiesReproduceFlattened(stacks, 'objects', strategy)).toBe(false);
-
-      // …so the emitter keeps today's additive shape, and what it keeps is the
-      // RECONCILED object, byte-for-byte what the pick-one composition built.
-      expect(preserved.objects).toEqual(composeStacks(stacks, { objectConflict: strategy }).objects);
-      expect((preserved.objects ?? []).map((o) => o.name)).toEqual(['crm_account']);
-
-      // The bodies still carry their own halves, and the package list is intact.
-      const bodies = (preserved.packages ?? []).map((p) => p.manifest as Record<string, unknown>);
-      expect(bodies.flatMap((b) => (b.objects as { name: string }[]) ?? []).map((o) => o.name))
-        .toEqual(['crm_account', 'crm_account']);
-      expect(idsOf(preserved)).toEqual(['com.example.crm', 'com.example.crm.cpq']);
+      // CONTROL: the default manifest still reconciles them into one object.
+      expect((composeStacks(stacks, { objectConflict: strategy }).objects ?? []).map((o) => o.name)).toEqual(['crm_account']);
     },
   );
 

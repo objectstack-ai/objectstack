@@ -119,7 +119,7 @@ export const NotificationDelivery = ObjectSchema.create({
             // transitivity from the id itself, the same sourcing the
             // plugin-audit record-id pins assert by value.
             maxLength: 255,
-            description: 'FK → sys_notification (L2 event)',
+            description: 'The notification this delivery sends.',
         }),
         // The address the delivery is sent to — a `sys_user` id, or an email
         // address or phone number kept verbatim — and part of the dedup key.

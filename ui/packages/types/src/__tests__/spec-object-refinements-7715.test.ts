@@ -90,6 +90,10 @@ describe('objectui#7715 — tripwire: the ListView calendar-visualization refusa
 // ── The Page site ────────────────────────────────────────────────────────────
 
 const specPage = (extra: Record<string, unknown>) => ({ name: 'home_page', label: 'Home', ...extra });
+// A control whose subject is not the page type parses on the spec as a `home` page, the kind the
+// page-kind node is given below: a `full` record page (the spec's default type) that places no
+// component is refused at `regions` since objectstack#32434.
+const specHomePage = (extra: Record<string, unknown>) => specPage({ type: 'home', ...extra });
 const pageNode = (extra: Record<string, unknown>) => ({ type: 'page', ...extra });
 
 describe('objectui#7715 — the Page source-completeness refusal reaches objectui', () => {
@@ -111,7 +115,7 @@ describe('objectui#7715 — the Page source-completeness refusal reaches objectu
 
   it('controls: a sourced page, and a page whose kind carries no source, pass on both doors', () => {
     for (const extra of [{ kind: 'html', source: '<section>x</section>' }, {}, { kind: 'full' }]) {
-      expect(SpecPageSchema.safeParse(specPage(extra)).success).toBe(true);
+      expect(SpecPageSchema.safeParse(specHomePage(extra)).success).toBe(true);
       expect(PageNodeSchema.safeParse(pageNode(extra)).success).toBe(true);
       expect(safeValidateSchema(pageNode(extra)).success).toBe(true);
     }
@@ -205,7 +209,7 @@ describe('objectui#12626 — the Page region-placement refusal reaches objectui'
       { template: 'dashboard', regions: regions('header', 'kpis', 'pipeline') },
       { kind: 'slotted', regions: regions('left_sidebar') },
     ]) {
-      expect(SpecPageSchema.safeParse(specPage(extra)).success).toBe(true);
+      expect(SpecPageSchema.safeParse(specHomePage(extra)).success).toBe(true);
       expect(PageNodeSchema.safeParse(pageNode(extra)).success).toBe(true);
       expect(safeValidateSchema(pageNode(extra)).success).toBe(true);
     }
@@ -227,7 +231,8 @@ describe('objectui#12626 — the Page `isDefault` placement refusal reaches the 
   });
 
   it('controls: a bound record page with `isDefault` passes on the spec and the kind node, and the `page` node does not judge it', () => {
-    const bound = { type: 'record', object: 'account', isDefault: true };
+    // It places a component: a `full` record page that places none is refused at `regions`.
+    const bound = { type: 'record', object: 'account', isDefault: true, regions: [{ name: 'main', components: [{ type: 'record:details' }] }] };
     expect(SpecPageSchema.safeParse(specPage(bound)).success).toBe(true);
     expect(safeValidateSchema(bound).success).toBe(true);
     // The `page` node's `type` is the discriminator, so the check is not attached there:
@@ -264,7 +269,7 @@ describe('objectui#12971 — the Page `main` region width refusal reaches object
       { regions: [region('main')] },
       { regions: [region('main'), region('aside', 'large')] },
     ]) {
-      expect(SpecPageSchema.safeParse(specPage(extra)).success).toBe(true);
+      expect(SpecPageSchema.safeParse(specHomePage(extra)).success).toBe(true);
       expect(PageNodeSchema.safeParse(pageNode(extra)).success).toBe(true);
       expect(safeValidateSchema(pageNode(extra)).success).toBe(true);
       expect(safeValidateSchema({ ...extra, type: 'home' }).success).toBe(true);
@@ -300,6 +305,56 @@ describe('objectui#12971 — the Page `record` binding placement refusal reaches
       const r = PageNodeSchema.safeParse(pageNode(extra));
       expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
     }
+  });
+});
+
+describe('objectstack#32478 — the Page record-places-component refusal reaches the page-kind node, and only there', () => {
+  const places = [{ name: 'main', components: [{ type: 'record:details' }] }];
+
+  it.each([
+    ['a bound `record` page with no `regions`', { type: 'record', object: 'account' }],
+    ['a bound `record` page whose region places nothing', { type: 'record', object: 'account', regions: [{ name: 'main', components: [] }] }],
+    ['a `record` page that binds no object', { type: 'record', regions: [] }],
+  ])('%s: the spec refuses at `regions`, and the kind node refuses with the spec\'s own issue', (_label, extra) => {
+    const spec = SpecPageSchema.safeParse(specPage(extra));
+    expect(spec.success).toBe(false);
+    const specIssue = spec.error!.issues.find((i) => i.path.join('.') === 'regions');
+    expect(specIssue?.code).toBe('custom');
+
+    const r = safeValidateSchema(extra);
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.'), message: i.message })))
+      .toContainEqual({ code: 'custom', path: 'regions', message: specIssue!.message });
+  });
+
+  it('attached as-is: a bound `record` kind node carrying only `children` is refused at `regions` too, and the spec refuses that document', () => {
+    const extra = { type: 'record', object: 'account' };
+    const specIssue = SpecPageSchema.safeParse(specPage(extra)).error!.issues.find((i) => i.path.join('.') === 'regions')!;
+    const r = safeValidateSchema({ ...extra, children: [{ type: 'text', content: 'x' }] });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.'), message: i.message })))
+      .toContainEqual({ code: 'custom', path: 'regions', message: specIssue.message });
+    // The spec's page declares no `children`: a page that places a component (and so passes
+    // the spec without it) is refused for `children` alone, never at `regions`.
+    const withChildren = SpecPageSchema.safeParse(specPage({ ...extra, regions: places, children: [] }));
+    expect(withChildren.success).toBe(false);
+    expect(withChildren.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.'), keys: (i as { keys?: string[] }).keys })))
+      .toEqual([{ code: 'unrecognized_keys', path: '', keys: ['children'] }]);
+  });
+
+  it('controls: a `record` kind node that places a component, a `slotted` one, and a `home` one without regions pass the spec and the kind node; the `page` node does not judge it', () => {
+    for (const extra of [
+      { type: 'record', object: 'account', regions: places },
+      { type: 'record', object: 'account', kind: 'slotted' },
+      { type: 'home' },
+    ]) {
+      expect(SpecPageSchema.safeParse(specPage(extra)).success).toBe(true);
+      const r = safeValidateSchema(extra);
+      expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+    }
+    // The `page` node's `type` is the discriminator, so the check is not attached there.
+    const r = PageNodeSchema.safeParse(pageNode({ object: 'account' }));
+    expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
   });
 });
 
@@ -387,7 +442,12 @@ const SITES = [
     // `record` by the page's `type` the same way, so attached here it would refuse every `record`,
     // a `pageType: 'app'` page's included; `PageKindNodeSchema` attaches it (objectui#12971,
     // measured in its describe block above).
-    notAttachable: ['checkPagePrintComposition', 'checkPageDefaultPlacement', 'checkPageRecordBindingPlacement'],
+    // `checkPageRecordPlacesComponent` joined after 18.3.0 (objectstack#32434): a `full` record page
+    // that places no component is refused at `regions`. It judges by the page's `type` the same way,
+    // and on this node `type` is the component discriminator `'page'`, so attached here it would
+    // never fire; `PageKindNodeSchema` attaches it as-is (objectstack#32478, measured in its describe
+    // block above).
+    notAttachable: ['checkPagePrintComposition', 'checkPageDefaultPlacement', 'checkPageRecordBindingPlacement', 'checkPageRecordPlacesComponent'],
   },
   {
     site: 'ListViewSchema (objectql.zod.ts)',

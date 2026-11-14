@@ -56,6 +56,7 @@ import { registerAgentCeilingGrantRefusal, registerPositionAgentCeilingGate } fr
 import { registerAgentAccountGrantRefusal } from './agent-account-grant-refusal.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
 import { backfillStoredPermissionSetPackagesAtBoot } from './stored-permission-set-package-backfill.js';
+import { createPositionRenameCarryRuns } from './position-renamed-holder-carry.js';
 import {
   reportAccessUpgrade,
   SHARING_RULES_SERVICE,
@@ -372,6 +373,20 @@ export function registerStartHooks(
   // rewrite (`os migrate organization-ownership --apply`, ADR-0131 D10),
   // never at boot. It writes nothing. Only at `kernel:bootstrapped`: run any earlier, it
   // would judge a catalog that is still being filled. See `catalog-reference-report.ts`.
+  //
+  // [#32983, #33238] The position-rename holder carry runs at `kernel:bootstrapped`
+  // over every claim (below, ahead of the report), and on each `metadata:reloaded`
+  // after it over the claims of what the announcement names as registered then:
+  // `app/ID` of a package the registry holds (the marketplace install-local
+  // door's hot install or upgrade; its uninstall names a withdrawn package and
+  // carries nothing) and `position/NAME` (the per-item publish, the package
+  // publish-drafts route). An artifact reload names a file path, so it carries
+  // nothing. One runner, so the runs never overlap and a reload heard before
+  // the boot run is ignored. The catalog read is built at each run. See
+  // `position-renamed-holder-carry.ts`, "When it runs".
+  const positionRenameCarry = createPositionRenameCarryRuns(ql as any, () => ({
+    catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
+  }), ctx.logger);
   if (typeof (ctx as any).hook === 'function') {
     (ctx as any).hook('kernel:bootstrapped', async (): Promise<void> => {
       // [ADR-0150 D8 rows R1, R3] Grants and audience-binding suggestions
@@ -383,6 +398,19 @@ export function registerStartHooks(
         await backfillStoredPermissionSetPackagesAtBoot(ql as any, (ql as any)?.registry, ctx.logger);
       } catch (e) {
         ctx.logger.warn('[security] the permission-set package backfill did not run — it is tried again at the next boot', {
+          error: (e as Error)?.message,
+        });
+      }
+      // [#32983, ruling A1; ADR-0150 D7 addendum] A declared position rename
+      // (`PositionSchema.renamedFrom`) carries its HOLDERS, as the system, in
+      // every organization, before the report below judges them — so a moved
+      // holder is not reported as naming no position. Holders only: every other
+      // reference to an old name is named, never written. Never fails the boot.
+      // See `position-renamed-holder-carry.ts`.
+      try {
+        await positionRenameCarry.atBoot();
+      } catch (e) {
+        ctx.logger.warn('[security] position renames: the holder carry did not run — it is tried again at the next boot', {
           error: (e as Error)?.message,
         });
       }
@@ -447,6 +475,20 @@ export function registerStartHooks(
             'upgrade left behind goes unreported for this boot',
           { error: (e as Error)?.message },
         );
+      }
+    });
+    // [#33238] A hot install or upgrade announces `metadata:reloaded` once its
+    // package is registered: carry the holders of the positions THAT package or
+    // position renamed now, not at the next restart. Only what the announcement
+    // names is judged (ruling A1 condition 2 on the reload path); ignored until
+    // the boot run above has started; never fails the announcing door.
+    (ctx as any).hook('metadata:reloaded', async (payload?: unknown): Promise<void> => {
+      try {
+        await positionRenameCarry.afterReload(payload);
+      } catch (e) {
+        ctx.logger.warn('[security] position renames: the holder carry did not run after a reload — it is tried again at the next install, publish or boot', {
+          error: (e as Error)?.message,
+        });
       }
     });
   }

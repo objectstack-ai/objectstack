@@ -503,15 +503,15 @@ describe('the per-provider sign-in toggles are written by the provider writer, d
     await providerOwnedBy(manager, userId);
 
     const reader = withSystemReadContext(engine as never) as never;
-    expect(await readSsoProviderSignInOptions(reader, 'acme-okta')).toEqual({ allowIdpInitiated: false, allowJit: false });
+    expect(await readSsoProviderSignInOptions(reader, 'acme-okta')).toEqual({ allowIdpInitiated: false, allowJit: false, signOutOfIdp: false });
 
     const on = await postUpdate(send, cookie, { allowIdpInitiated: true, allowJit: true });
     expect(on.status, await on.clone().text()).toBe(200);
-    expect(await readSsoProviderSignInOptions(reader, 'acme-okta')).toEqual({ allowIdpInitiated: true, allowJit: true });
+    expect(await readSsoProviderSignInOptions(reader, 'acme-okta')).toEqual({ allowIdpInitiated: true, allowJit: true, signOutOfIdp: false });
 
     const off = await postUpdate(send, cookie, { allowJit: false });
     expect(off.status, await off.clone().text()).toBe(200);
-    expect(await readSsoProviderSignInOptions(reader, 'acme-okta')).toEqual({ allowIdpInitiated: true, allowJit: false });
+    expect(await readSsoProviderSignInOptions(reader, 'acme-okta')).toEqual({ allowIdpInitiated: true, allowJit: false, signOutOfIdp: false });
   });
 
   it('a value that is not a boolean is refused 400, and nothing is written', async () => {
@@ -531,6 +531,7 @@ describe('the per-provider sign-in toggles are written by the provider writer, d
     expect(await readSsoProviderSignInOptions(withSystemReadContext(engine as never) as never, 'acme-okta')).toEqual({
       allowIdpInitiated: false,
       allowJit: false,
+      signOutOfIdp: false,
     });
   });
 
@@ -551,6 +552,7 @@ describe('the per-provider sign-in toggles are written by the provider writer, d
     expect(await readSsoProviderSignInOptions(withSystemReadContext(engine as never) as never, 'acme-okta')).toEqual({
       allowIdpInitiated: false,
       allowJit: false,
+      signOutOfIdp: false,
     });
   });
 
@@ -606,6 +608,8 @@ describe('the per-provider sign-in toggles are written by the provider writer, d
         allowIdpInitiated: presented ?? false,
         allowJit: presented ?? false,
         skipUserInfo: false,
+        // Off as registered; saving it off is never refused.
+        signOutOfIdp: false,
       });
 
       const res = await send(
@@ -620,6 +624,7 @@ describe('the per-provider sign-in toggles are written by the provider writer, d
       expect(await readSsoProviderSignInOptions(withSystemReadContext(engine as never) as never, 'acme-okta')).toEqual({
         allowIdpInitiated: expected,
         allowJit: expected,
+        signOutOfIdp: false,
       });
     });
   }

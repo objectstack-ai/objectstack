@@ -209,7 +209,9 @@ describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.s
     }
     await new Promise((r) => setTimeout(r, 1000));
     fresh = (await deliveries()).filter((d) => !before.has(String(d.id)));
-    expect(fresh.map((d) => d.ref_id), 'one delivery, from the declaration').toEqual([`declared:${FIXTURE_NAMES.webhook}`]);
+    // [ADR-0150 D5/D10, #31699 PR 2] One delivery, from the showcase's own slot: the
+    // declaration's reference names its package now, and nothing dispatches it twice.
+    expect(fresh.map((d) => d.ref_id), 'one delivery, from the declaration').toEqual([`declared:com.example.showcase/${FIXTURE_NAMES.webhook}`]);
   });
 
   it('3. every 18.0 row of every reshaped table is where the ceremony put it, with its key columns', async () => {

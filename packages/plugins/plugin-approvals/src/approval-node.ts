@@ -51,6 +51,8 @@ export interface ApprovalAutomationSurface {
     }>;
   }): void;
   resume?(runId: string, signal?: { output?: Record<string, unknown>; branchLabel?: string }): Promise<unknown>;
+  /** [#31696] The key the run `context`'s flow is filed under (`AutomationEngine.flowKeyOfRun`). */
+  flowKeyOfRun?(context: unknown): string | undefined;
 }
 
 interface MinimalLogger {
@@ -191,6 +193,7 @@ export function registerApprovalNode(
           nodeId: node.id,
           config,
           flowName,
+          flowKey: automation.flowKeyOfRun?.(context),
           flowLabel,
           nodeLabel: typeof node.label === 'string' ? node.label : undefined,
           // The run's trigger user, not `context.userId`: after a decision

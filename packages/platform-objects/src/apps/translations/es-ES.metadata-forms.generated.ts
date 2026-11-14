@@ -638,7 +638,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "currencyConfig.currencyField": {
         label: "Campo de moneda",
-        helpText: "Solo en modo record, y obligatorio en él: el campo de este objeto que guarda el código ISO 4217 de cada registro — un campo de texto con valueDomain iso_4217_currency, por convención currency_code."
+        helpText: "Solo en modo record, y obligatorio en él: el campo de este objeto que guarda el código ISO 4217 de cada registro — un campo de texto con valueDomain iso_4217_currency, por convención currency_code. En un hijo master-detail puede nombrar en su lugar el campo de código del padre como <campo master_detail>.<campo de código del padre> (p. ej. invoice.currency_code): el registro sigue entonces la moneda de su padre, y se rechaza un cambio del código del padre mientras exista un hijo así."
       },
       "currencyConfig.defaultCurrency": {
         label: "Moneda predeterminada",

@@ -179,3 +179,33 @@ describe('ADR-0150 D4 — the coordinate a handler is registered under', () => {
     expect(r.status === 'resolved' ? actionHolderCoordinate(r) : 'x').toBe(ENVIRONMENT_ACTION_COORDINATE);
   });
 });
+
+// [contract review S2] Both registration orders.
+describe.each([
+  { order: 'enabled first', packages: [A, B] },
+  { order: 'disabled first', packages: [B, A] },
+])('#32183 — a disabled package holds no action name (the served holders), $order', ({ packages }) => {
+  // BASE (main de141e32): every caller but the two holders was refused naming both.
+  beforeEach(() => {
+    install(A);
+    install(B);
+    install(P);
+    for (const id of packages) ship('approve', id, 'account');
+    registry.disablePackage(B);
+  });
+
+  it('a caller with no package resolves the enabled holder', () => {
+    expect(resolve('account', 'approve', null)).toMatchObject({ status: 'resolved', holder: { kind: 'package', packageId: A } });
+    expect(label(resolve('account', 'approve'))).toBe('alpha account');
+  });
+
+  it('a caller outside both closures is refused naming the enabled holder only', () => {
+    expect(resolve('account', 'approve', P)).toMatchObject({
+      status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'package', packageId: A }],
+    });
+  });
+
+  it("the disabled package's own caller still resolves its own declaration", () => {
+    expect(resolve('account', 'approve', B)).toMatchObject({ status: 'resolved', via: 'own', holder: { kind: 'package', packageId: B } });
+  });
+});

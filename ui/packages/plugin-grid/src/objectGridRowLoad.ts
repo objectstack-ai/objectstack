@@ -11,6 +11,7 @@
 import React, { useEffect } from 'react';
 import type { ObjectGridSchema, DataSource, DependsOnInput, ViewData } from '@object-ui/types';
 import { useDataInvalidation } from '@object-ui/react';
+import { recordCurrencyReadField } from '@object-ui/i18n';
 import { resolveDependsOnFields, declaredNameField, buildExpandFields, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, isProjectableField, convertSortToQueryParams, normalizeSortEntries, type QuerySortEntry } from '@object-ui/core';
 import type { usePermissions } from '@object-ui/permissions';
 import { findParamsSignature } from './objectGridQuery';
@@ -436,6 +437,20 @@ export function useObjectGridRowLoad({
                   .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
                   .filter((f) => passesProjectionGate(f))
               : [];
+            // [ADR-0144 D2] A shown RECORD-MODE amount's code. The cell reads
+            // it off the ROW (`resolveFieldCurrency`): the sibling code field,
+            // or, for a parent path, the `master_detail` it starts with, which
+            // the `$expand` below also resolves to the parent row. Unasked, a
+            // grid not showing that field drew the amount with no symbol and
+            // at the no-currency width. Asked of the columns this projection
+            // keeps and the grid draws, then the same two gates as the
+            // harvests above.
+            const recordCurrencyFields = declared
+              ? recordCurrencyReadFieldsOf(shownColumns, declared as Record<string, unknown>, passesProjectionGate)
+                  .map((read) => read.field)
+                  .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
+                  .filter((f) => passesProjectionGate(f))
+              : [];
             // [objectui#13107] The object's DECLARED name field. The bulk
             // confirm step names each affected record from the row this
             // projection fetched (`getRecordDisplayName`, ADR-0079), so a
@@ -452,7 +467,7 @@ export function useObjectGridRowLoad({
               : [];
             // A UNION, never an append: a grouping field that IS also a column
             // must not produce a duplicate `$select` entry.
-            const extraFields = [...predicateFields, ...groupingFields, ...concurrencyFields, ...rowColorFields, ...deadlineFields, ...referenceViaFields, ...dependsOnFields, ...nameFields];
+            const extraFields = [...predicateFields, ...groupingFields, ...concurrencyFields, ...rowColorFields, ...deadlineFields, ...referenceViaFields, ...dependsOnFields, ...nameFields, ...recordCurrencyFields];
             const withHarvestedFields = (list: any[]): any[] => {
               if (extraFields.length === 0) return list;
               const names = new Set(list.map((f: any) => columnIdentity(f)));
@@ -641,9 +656,16 @@ export function useObjectGridRowLoad({
             return perms.checkField(objectName, fieldName, 'read');
           };
           const expandColumns = schemaColumns ?? schemaFields;
+          // [ADR-0144 D2] A shown amount that follows its parent reads the
+          // parent's code off the expanded `master_detail` (harvested above).
+          const parentCurrencyRoots = expandColumns && resolvedSchema?.fields
+            ? recordCurrencyReadFieldsOf(expandColumns as unknown[], resolvedSchema.fields as Record<string, unknown>, () => true)
+                .filter((read) => read.expand)
+                .map((read) => read.field)
+            : [];
           const expand = buildExpandFields(
             resolvedSchema?.fields,
-            expandColumns ? [...(expandColumns as any[]), ...groupingFieldRefs] : undefined,
+            expandColumns ? [...(expandColumns as any[]), ...groupingFieldRefs, ...parentCurrencyRoots] : undefined,
           ).filter(expandReadable);
           if (expand.length > 0) {
             params.$expand = expand;
@@ -747,4 +769,23 @@ export function useObjectGridRowLoad({
   }, [objectName, schemaFilter, schemaSort, headerSort, querySearchTerm]);
 
   return { invalidationNonce };
+}
+
+/**
+ * What each shown, not authored-hidden, record-mode amount column needs on its
+ * row for its currency (ADR-0144 D2): {@link recordCurrencyReadField} of its
+ * declared field. `passes` is the caller's column gate, so a column the
+ * principal may not read pulls nothing.
+ */
+export function recordCurrencyReadFieldsOf(
+  columns: readonly unknown[],
+  declared: Readonly<Record<string, unknown>>,
+  passes: (entry: unknown) => boolean,
+): { field: string; expand: boolean }[] {
+  return columns
+    .filter((entry) => !(entry && typeof entry === 'object' && (entry as { hidden?: unknown }).hidden === true))
+    .filter(passes)
+    .map((entry) => recordCurrencyReadField(declared[columnIdentity(entry) ?? ''] as Parameters<typeof recordCurrencyReadField>[0]))
+    .filter((read): read is { field: string; expand: boolean } => read !== undefined)
+    .map((read) => ({ field: read.field, expand: read.expand }));
 }

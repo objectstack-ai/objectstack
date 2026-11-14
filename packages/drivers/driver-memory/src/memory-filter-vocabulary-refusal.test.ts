@@ -339,3 +339,79 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
     }
   });
 });
+
+describe('[#32252] a class-instance where root is judged as the engine admits it, not skipped', () => {
+  // The engine admits a `where` whose tag is `[object Object]`
+  // (`isWhereFilterObject`), a class instance included, and this driver's
+  // translator then reads that root by its own keys. Before, the shape gate
+  // returned early on any root that is not a plain object, so the translator
+  // met the malformed operand ungated: measured through `driver.find`, a class
+  // instance carrying `{ $and: [[…]] }` answered `[]` and one carrying
+  // `{ $or: [null] }` threw an uncoded `TypeError`, where the literal twin of
+  // each is refused INVALID_FILTER / 400. The root is now walked like a literal
+  // one; only the operands below it must be plain objects.
+  class FilterBox {
+    constructor(props: Record<string, unknown>) { Object.assign(this, props); }
+  }
+
+  let driver: InMemoryDriver;
+
+  beforeEach(async () => {
+    driver = new InMemoryDriver({ persistence: false });
+    await driver.syncSchema('deal', {
+      fields: {
+        id: { type: 'text', name: 'id' },
+        stage: { type: 'text', name: 'stage' },
+        owner: { type: 'text', name: 'owner' },
+        score: { type: 'number', name: 'score' },
+      },
+    });
+    for (const row of ROWS) await driver.create('deal', { ...row });
+  });
+
+  const ids = async (where: unknown): Promise<string[]> => {
+    const rows = await driver.find('deal', { fields: ['id'], where: where as FilterCondition });
+    return (rows as Array<Record<string, unknown>>).map((r) => String(r.id)).sort();
+  };
+
+  const refusalOf = async (where: unknown): Promise<WireBearingError> => {
+    const err = await ids(where).then(() => undefined, (e) => e as WireBearingError);
+    expect(err, 'expected the live query path to refuse this filter, but it answered').toBeInstanceOf(Error);
+    return err!;
+  };
+
+  const NODE_REFUSED: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+    ['a condition array as a $and element', { $and: [[{ stage: 'won' }]] }],
+    ['null as a $or element', { $or: [null] }],
+    ['a string as the $not operand', { $not: 'won' }],
+    ['a $and operand that is not a list', { $and: { stage: 'won' } }],
+  ];
+
+  for (const [name, props] of NODE_REFUSED) {
+    it(`${name}: refused INVALID_FILTER / 400 in the words its literal twin is refused in`, async () => {
+      const literal = await refusalOf({ ...props });
+      const boxed = await refusalOf(new FilterBox(props));
+      expect(boxed.code, boxed.message).toBe('INVALID_FILTER');
+      expect(boxed.status).toBe(400);
+      expect(boxed.message).toBe(literal.message);
+      // The one gate, called directly, says the same.
+      expect(() => assertFilterConditionShape(new FilterBox(props), 'filter')).toThrow(literal.message);
+    });
+  }
+
+  // CONTROL — a class-instance root carrying a valid filter answers what its
+  // literal twin answers.
+  const OBJECT_FORM: ReadonlyArray<readonly [Record<string, unknown>, string[]]> = [
+    [{ stage: 'won' }, ['1']],
+    [{ $or: [{ stage: 'won' }, { owner: 'u2' }] }, ['1', '2']],
+    [{ $and: [{ owner: 'u1' }, { score: { $gt: 15 } }] }, ['3']],
+    [{ $not: { stage: 'won' } }, ['2', '3']],
+  ];
+
+  for (const [props, expected] of OBJECT_FORM) {
+    it(`a class instance carrying ${JSON.stringify(props)} → [${expected.join(', ')}], as its literal twin`, async () => {
+      expect(await ids({ ...props })).toEqual(expected);
+      expect(await ids(new FilterBox(props))).toEqual(expected);
+    });
+  }
+});

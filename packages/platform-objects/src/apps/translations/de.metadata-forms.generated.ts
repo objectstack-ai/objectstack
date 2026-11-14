@@ -638,7 +638,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyField": {
         label: "Währungsfeld",
-        helpText: "Nur im Modus record und dort erforderlich: das Feld dieses Objekts, das den ISO-4217-Code jedes Datensatzes enthält – ein Textfeld mit valueDomain iso_4217_currency, üblicherweise currency_code."
+        helpText: "Nur im Modus record und dort erforderlich: das Feld dieses Objekts, das den ISO-4217-Code jedes Datensatzes enthält – ein Textfeld mit valueDomain iso_4217_currency, üblicherweise currency_code. Bei einem Master-Detail-Kind kann es stattdessen das Codefeld des übergeordneten Datensatzes als <master_detail-Feld>.<Codefeld des übergeordneten Datensatzes> benennen (z. B. invoice.currency_code): Der Datensatz folgt dann der Währung seines übergeordneten Datensatzes, und eine Änderung dessen Codes wird abgelehnt, solange ein solches Kind existiert."
       },
       "currencyConfig.defaultCurrency": {
         label: "Standardwährung",

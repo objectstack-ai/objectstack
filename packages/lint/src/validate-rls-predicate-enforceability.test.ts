@@ -15,6 +15,7 @@ import {
 } from './validate-rls-predicate-enforceability.js';
 import { AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
 import { explainRule } from './rule-explanations.js';
+import { SECURITY_UPDATE_POLICY_NO_CHECK } from './validate-security-posture.js';
 
 // [#22161] Each finding of the five ids is one verdict sentence; the reasoning
 // it used to carry is the id's `os explain` entry. Every call below records
@@ -699,9 +700,13 @@ describe('validateRlsPredicateEnforceability — a field permission `when` is ju
       // Every other finding the table produces is about something else entirely
       // (the object declares no `sharingModel`), and is identical for the
       // SHIPPED predicate — so it is background, not a second report of this.
-      const others = findings.filter((f) => !f.rule.startsWith('rls-predicate')).map((f) => f.rule);
+      // `security-update-policy-no-check` is set aside on both sides: it reads
+      // which caller column a check-less update policy keys on, so it differs
+      // between `current_user.id` and `current_user.nope` and reports neither miss.
+      const background = (f: { rule: string }) => f.rule !== SECURITY_UPDATE_POLICY_NO_CHECK;
+      const others = findings.filter((f) => !f.rule.startsWith('rls-predicate') && background(f)).map((f) => f.rule);
       const shipped = siteWith('using', 'is_private == false || owner_id == current_user.id');
-      const baseline = runAuthoringRules('lint', { normalized: shipped, parsed: shipped }).map((f) => f.rule);
+      const baseline = runAuthoringRules('lint', { normalized: shipped, parsed: shipped }).filter(background).map((f) => f.rule);
       expect(others).toEqual(baseline);
     }
   });

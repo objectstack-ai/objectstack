@@ -56,7 +56,8 @@ const surface = (ns: string, objectName: string) => ({
     dimensions: [{ name: 'stage', label: 'Stage', field: 'name', type: 'string' }],
     measures: [{ name: 'total', label: 'Count', aggregate: 'count' }],
   }],
-  pages: [{ name: `${ns}_home`, label: `${ns} Home` }],
+  // A `home` page: with no `type` it is a record page, refused at parse when it places no component.
+  pages: [{ name: `${ns}_home`, label: `${ns} Home`, type: 'home' }],
   reports: [{ name: `${ns}_summary`, label: `${ns} Summary`, type: 'summary', dataset: `${ns}_metrics`, values: ['total'] }],
   flows: [{
     name: `${ns}_wizard`,

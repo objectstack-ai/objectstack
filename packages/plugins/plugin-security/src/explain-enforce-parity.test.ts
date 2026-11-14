@@ -64,10 +64,11 @@
  * disagreement itself, so they turn red the day either face moves, and the row
  * then joins the invariant:
  *
- * - `CLAIM_KEPT_UNDER_A_WALL` (enforcement's side): with `org-scoping` and no
- *   `tenancy` service, admission reads no posture and never drops a removed
- *   member's organization claim, while this plugin walls Layer 0 at
- *   `isolated`. Explain vets the claim under the posture the plugin walls with.
+ * None is open. `CLAIM_KEPT_UNDER_A_WALL` (enforcement's side: with
+ * `org-scoping` and no `tenancy` service, admission read no posture and so
+ * never dropped a removed member's organization claim) joined the invariant
+ * when ADR-0093 D8.1 was amended: admission vets the claim under every posture
+ * and with no posture supplied.
  *
  * `@objectstack/core` and `@objectstack/plugin-sharing` resolve through their
  * built `dist/` here, as this package's other suites read them.
@@ -1263,17 +1264,6 @@ function principalRows(
 }
 
 /**
- * With `org-scoping` and no `tenancy` service, admission hands the resolver no
- * posture, so a removed member's organization claim is never dropped, while
- * this plugin probes `org-scoping` and walls Layer 0 at `isolated`. Explain
- * vets the claim under the posture this plugin walls with. Enforcement's side
- * (a claim never dropped under a walled Layer 0); a finding of this card, not
- * fixed here.
- */
-const CLAIM_KEPT_UNDER_A_WALL =
-  'with no `tenancy` service, admission keeps a removed member\'s claim while Layer 0 walls at `isolated`';
-
-/**
  * #24646 ruling item 3, as rows: an on-behalf-of caller's record-grained
  * `update` / `delete` verdict against its by-id PATCH / DELETE, under one
  * posture, with the delegators' own requests as the controls. `walled` names
@@ -1446,20 +1436,17 @@ const TABLE: Row[] = [
   // [ADR-0131 D8] The `single` rows joined the invariant: the driver's read
   // scope is the wall's verdict, and under `single` that verdict is `none`, so
   // the engine no longer narrows the read to the context organization that
-  // explain's tenant layer (correctly) never reported.
-  ...principalRows('#20580 control · #20604 P3', { tenancy: 'single' }, '`single`', {
-    removed: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
+  // explain's tenant layer (correctly) never reported. [ADR-0093 D8.1, as
+  // amended] The removed member's claim is dropped under `single` too, so its
+  // rows answer as under the walled postures.
+  ...principalRows('#20580 · #20604 P3', { tenancy: 'single' }, '`single`', {
+    removed: { LEDGER: REFUSED_DENIED, PROBE: REFUSED_DENIED, NOTES: REFUSED_DENIED },
     member: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
   }),
-  // The posture-source asymmetry: the member's rows hold; the removed member's are enforcement's finding.
+  // The posture source that hands admission no posture: the claim is vetted all the same.
   ...principalRows('#20604 A4', { orgScopingOnly: true }, '`org-scoping` with no `tenancy` service', {
-    removed: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
+    removed: { LEDGER: REFUSED_DENIED, PROBE: REFUSED_DENIED, NOTES: REFUSED_DENIED },
     member: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
-  }, {
-    removed: Object.fromEntries(
-      ['sets', 'allowed:LEDGER', 'readFilter:LEDGER', 'record:l_alpha', 'allowed:PROBE', 'readFilter:PROBE']
-        .map((k) => [k, CLAIM_KEPT_UNDER_A_WALL]),
-    ),
   }),
 ];
 

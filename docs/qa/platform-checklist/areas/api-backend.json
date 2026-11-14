@@ -2733,7 +2733,7 @@
       "title": "RestServerConfig.metadata is the metadata surface's construction contract: prefix moves every metadata mount and their discovery advertisement, four endpoint switches each gate exactly the face its name states (#15542/#15854), maskObjectFields is the ADR-0106 D8 disclosure gate, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2759,9 +2759,9 @@
         "as the restricted persona (a member bound to the showcase_client_liaison position) GET /api/v1/meta/object/showcase_project and diff the served fields against the admin's copy of the same document",
         "harness: construct with { metadata: { prefix: '/metadata' } } and confirm every metadata mount re-bases and the discovery body advertises the new prefix",
         "harness: construct with { metadata: { endpoints: { types: false } } } — GET {prefix} and GET {prefix}/types both disappear (one handler, two paths)",
-        "harness: construct with { metadata: { endpoints: { items: false } } } and enumerate what leaves: GET {prefix}/:type and NOTHING else — exactly the one mount its describe() names (#15542 moved the whole-store family off this switch; a run that still sees /diagnostics, /_drafts or POST /_migrate-stored leave with it is the old radius returning)",
-        "harness: construct with { metadata: { endpoints: { maintenance: false } } } and enumerate: GET {prefix}/diagnostics, GET {prefix}/_drafts and the POST {prefix}/_migrate-stored write door — three whole-store operations, the key #15542 created so that closing a listing read stops disarming a migration door",
-        "harness: construct with { metadata: { endpoints: { item: false } } } and enumerate: the WHOLE per-item face — GET, PUT and DELETE {prefix}/:type/:name, /:type/:name/references, /:type/:name/layers, the history family (/history, /audit, /diff, /published, /publish, /rollback), {prefix}/book/:name/tree and the app metadata bundle GET {prefix}/app/:appId/bundle; thirteen mounts, writes included (#15854; the bundle since #27627, which registers it through the same per-item registrar because every bundle member is the item read's own answer)",
+        "harness: construct with { metadata: { endpoints: { items: false } } } and enumerate what leaves: GET {prefix}/:type and NOTHING else — exactly the one mount its describe() names (#15542 moved the whole-store family off this switch; a run that still sees /diagnostics, /_drafts, POST /_migrate-stored or POST /_migrate-record-currency-codes leave with it is the old radius returning)",
+        "harness: construct with { metadata: { endpoints: { maintenance: false } } } and enumerate: GET {prefix}/diagnostics, GET {prefix}/_drafts and two write doors, POST {prefix}/_migrate-stored and POST {prefix}/_migrate-record-currency-codes (the record-currency code backfill, ADR-0144 ruling 6670707546 item B, behind this switch as _migrate-stored is) — four whole-store operations, the key #15542 created so that closing a listing read stops disarming a migration door",
+        "harness: construct with { metadata: { endpoints: { item: false } } } and enumerate: the WHOLE per-item face — GET, PUT and DELETE {prefix}/:type/:name, /:type/:name/references, /:type/:name/layers, the history family (/history, /audit, /diff, /published, /publish, /rollback), {prefix}/book/:name/tree, the app metadata bundle GET {prefix}/app/:appId/bundle and the qualified by-name read GET {prefix}/:type/:ns/:name; fourteen mounts, writes included (#15854; the bundle since #27627, which registers it through the same per-item registrar because every bundle member is the item read's own answer; the qualified read since ADR-0150 D5, #31691, which rides the item read's own handler)",
         "harness: construct with { metadata: { enableCache: false } } and confirm the item read takes the uncached branch; then with enableCache true against an app-type, a dashboard-type, a draft read, a preview-drafts read, a package-scoped read, a member-addressed read (?member=, #22877) and an audience-gated type — each is a carve-out that bypasses the cached path even when the switch is on",
         "harness: construct with { metadata: { maskObjectFields: false } }; separately construct with the default and metaType != 'object'",
         "harness: construct with { metadata: { cacheTtl: 3600 } }, then 0, then -1, then { metadata: { endpoints: { schema: false } } }; capture each refusal text"
@@ -2780,7 +2780,7 @@
           "evidence": "route table + discovery body at the non-default prefix"
         },
         {
-          "clause": "each of the FOUR endpoint switches gates exactly the face its name states, and the run must ENUMERATE what each removes rather than trust the describe(): `types` takes two paths (one handler at {prefix} and {prefix}/types), `items` takes exactly one ({prefix}/:type), `maintenance` takes the three whole-store operations INCLUDING the POST {prefix}/_migrate-stored write door, `item` takes the whole per-item face (thirteen mounts, PUT and DELETE, the history family and GET {prefix}/app/:appId/bundle included)",
+          "clause": "each of the FOUR endpoint switches gates exactly the face its name states, and the run must ENUMERATE what each removes rather than trust the describe(): `types` takes two paths (one handler at {prefix} and {prefix}/types), `items` takes exactly one ({prefix}/:type), `maintenance` takes the four whole-store operations INCLUDING both write doors, POST {prefix}/_migrate-stored and POST {prefix}/_migrate-record-currency-codes, `item` takes the whole per-item face (fourteen mounts, PUT and DELETE, the history family, GET {prefix}/app/:appId/bundle and GET {prefix}/:type/:ns/:name included)",
           "oracle": "test",
           "verify": "per-switch route-table diffs against the all-true baseline; the diff sets must be exactly the routes enumerated in the steps, in both directions — a switch that GROWS a route is as much a FAIL as one that loses one. ⛔ The run records the real radius whatever it finds: the describe() strings now claim to be exhaustive (#15542/#15854), so a diff that disagrees with them is a defect in the code or in the declaration, never a reason to relax this clause",
           "evidence": "the four route-table diffs"
@@ -2813,8 +2813,8 @@
         "knob:prefix",
         "switch:endpoints.types (2 mounts)",
         "switch:endpoints.items (1 mount)",
-        "switch:endpoints.item (13 mounts)",
-        "switch:endpoints.maintenance (3 mounts)",
+        "switch:endpoints.item (14 mounts)",
+        "switch:endpoints.maintenance (4 mounts)",
         "switch:enableCache (+6 carve-outs)",
         "switch:maskObjectFields",
         "tombstone:cacheTtl",
@@ -2891,6 +2891,12 @@
           "date": "2026-11-02",
           "change": "the `item` radius is thirteen mounts, not twelve: #27627 registered GET {prefix}/app/:appId/bundle through the per-item registrar, and packages/rest/src/rest-config-mount-table.pin.test.ts moved to thirteen with it, but steps[7], acceptance[2].clause and the variants row still enumerated twelve, so the 18.3.0 release-candidate run #28929 scored the describe() drift as a FAIL. Triage ruled the radius intended and the declaration wrong (6569524266): steps[7], acceptance[2].clause and the variant now name the bundle, and the title's stale 'prefix moves eleven mounts' (the default table has twenty) says 'every metadata mount', which is what acceptance[1] asserts. Measured at base 135054eb",
           "ref": "#28934"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-14",
+          "change": "the `maintenance` and `item` radii re-counted, as the #15542 ruling (comment 5557095147) keeps the item doing: the run still ENUMERATES each switch's real radius from a route-table diff, and only the expected sets moved (stale spec, QA run #33081 acceptance[2], card #33086 item 1). packages/rest/src/rest-config-mount-table.pin.test.ts measures maintenance at FOUR, since the record-currency code backfill POST {prefix}/_migrate-record-currency-codes joined it (ADR-0144, ruling 6670707546 item B), and item at FOURTEEN, since the qualified by-name read GET {prefix}/:type/:ns/:name rides the item read's handler (ADR-0150 D5, #31691). steps[5], steps[6], steps[7], acceptance[2].clause and the two variant rows now name them. The obligation is unchanged: a switch that grows or loses a route against these sets is a FAIL, and a describe() that disagrees with the diff is a defect in the code or the declaration. Read at base e540baf8",
+          "ref": "#33086"
         }
       ]
     },
@@ -3014,7 +3020,7 @@
       "title": "Every read that reaches a NON-addressed object asks that object's own `enable` block (nested-relation filter → 404/405, $expand withheld to the bare id, search skips it), and an `internal: true` field is refused 400 INVALID_FIELD in every evaluate position (filter, sort, groupBy, aggregate, $expand where/orderBy)",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3071,7 +3077,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/metadata-protocol/src/protocol.relation-condition-target-exposure.test.ts + packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts + packages/metadata-protocol/src/protocol.data-door-internal-field-positions.test.ts + packages/objectql/src/internal-field-positions.test.ts (acceptance[0], protocol and engine) + packages/qa/dogfood/test/second-object-exposure.dogfood.test.ts (acceptance[1]–[3] over HTTP on a booted fixture app: the nested-relation refusal located at filter.REL, the withheld $expand, and the internal field refused in every evaluate position naming object and field, for admin and member) + packages/qa/dogfood/test/internal-field-data-door-positions.dogfood.test.ts (acceptance[3] on sys_api_key.key)"
+        "ref": "packages/metadata-protocol/src/protocol.relation-condition-target-exposure.test.ts + packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts + packages/objectql/src/protocol-data-door-internal-field-positions.test.ts + packages/metadata-protocol/src/protocol.data-door-internal-field-delegation.test.ts + packages/objectql/src/internal-field-positions.test.ts (acceptance[0], protocol and engine) + packages/qa/dogfood/test/second-object-exposure.dogfood.test.ts (acceptance[1]–[3] over HTTP on a booted fixture app: the nested-relation refusal located at filter.REL, the withheld $expand, and the internal field refused in every evaluate position naming object and field, for admin and member) + packages/qa/dogfood/test/internal-field-data-door-positions.dogfood.test.ts (acceptance[3] on sys_api_key.key)"
       },
       "source": [
         "packages/spec/src/data/api-derivation.ts#canServeApiOperation",
@@ -3097,6 +3103,12 @@
           "date": "2026-10-27",
           "change": "acceptance[1] and [3] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a1 half-asserted and a3 partial). second-object-exposure.dogfood.test.ts now asserts the located position `filter.REL` on both doors, and its fixture carries an `internal: true` field on the source object, refused 400 INVALID_FIELD naming object and field in the filter, sort, groupBy and aggregate positions over HTTP for both personas. automated.ref names the dogfood files and both verify texts say what they read. Measured at base 74db43ef. No clause changed",
           "ref": "#26572"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-14",
+          "change": "automated.ref re-pointed (stale ref, QA run #33081 acceptance[0], card #33086 item 2): packages/metadata-protocol/src/protocol.data-door-internal-field-positions.test.ts no longer exists, and acceptance[0].verify says a missing file is not a pass. The data door's internal-field evaluate refusal moved into the engine, and its position pin with it, to packages/objectql/src/protocol-data-door-internal-field-positions.test.ts; the door's own half (that it asks the engine's gate, with what, before what) is packages/metadata-protocol/src/protocol.data-door-internal-field-delegation.test.ts, which the ref now names beside it. The move is b388cfeca6 (#29003), read from the commit listing of both paths; the card named bca2a515 (#32128), which touches neither file. No clause changed. Read at base e540baf8",
+          "ref": "#33086"
         }
       ]
     },
@@ -3312,7 +3324,7 @@
       "title": "Error answers made honest on v18: a hook refusal on a hand-built write route answers 400 with the hook's own sentence, a crash answers a generic 500 that withholds the caught message, and a unique-constraint refusal is 409 UNIQUE_VIOLATION with details at the action door, MCP and sandboxed bodies too",
       "since": "v18",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3345,9 +3357,9 @@
           "evidence": "the body"
         },
         {
-          "clause": "the duplicate insert through the action door → 409 UNIQUE_VIOLATION with `details` in the composite shape: exactly `object` (the object's name) and `developerMessage`, no `field` — a field's `unique: true` is a tenancy-scoped composite index, so the driver names no single column (`field` is added only when the refusal states one)",
+          "clause": "the duplicate insert through the action door → 409 UNIQUE_VIOLATION with `details` exactly `developerMessage`, `field` and `object`: `object` the object's name and `field` the duplicated column. A field's `unique: true` is the tenancy-scoped composite index (organization_id, FIELD), whose organization part is the implied scope, so the refusal names FIELD (`field` is added only when the refusal determinably states one column)",
           "oracle": "api",
-          "verify": "status + error.code + the key set of error.details (exactly developerMessage and object) + details.object. error-sentences-live.dogfood.test.ts asserts all four over HTTP: a declarative `operation: 'update'` action whose patch repeats a `unique: true` email, POST /api/v1/actions/OBJECT/ACTION → 409 UNIQUE_VIOLATION, and the row keeps its own email. dispatcher-unique-violation-wire-code.test.ts holds the same answer at the engine layer (HttpDispatcher over a real ObjectQL engine and SqlDriver, no Hono adapter)",
+          "verify": "status + error.code + the key set of error.details (exactly developerMessage, field and object) + details.field (the duplicated column, email) + details.object (packages/types/src/unique-violation.ts#uniqueViolationField). error-sentences-live.dogfood.test.ts asserts all five over HTTP: a declarative `operation: 'update'` action whose patch repeats a `unique: true` email, POST /api/v1/actions/OBJECT/ACTION → 409 UNIQUE_VIOLATION, and the row keeps its own email. dispatcher-unique-violation-wire-code.test.ts holds the same answer at the engine layer (HttpDispatcher over a real ObjectQL engine and SqlDriver, no Hono adapter)",
           "evidence": "the body"
         },
         {
@@ -3359,7 +3371,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts + packages/rest/src/rest-hook-script-fault-envelope.test.ts + packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts + packages/services/service-storage/src/storage-routes.server-fault-withheld.test.ts (acceptance[0], unit and engine; the first two also hold acceptance[1]'s HOOK_ABORTED below HTTP — the nested-envelope rows at 400 HOOK_ABORTED, and mapDataError's HOOK_ABORTED with no declaredCode) + packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts (acceptance[1]–[3] over HTTP on the scratch app packages/qa/dogfood/test/fixtures/error-sentences-fixture.ts: the hook's sentence at 400 with code HOOK_ABORTED on the /data doors, 409 UNIQUE_VIOLATION with details exactly developerMessage + object at the action door, and a storage route's 500 INTERNAL withholding the caught text)"
+        "ref": "packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts + packages/rest/src/rest-hook-script-fault-envelope.test.ts + packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts + packages/services/service-storage/src/storage-routes.server-fault-withheld.test.ts (acceptance[0], unit and engine; the first two also hold acceptance[1]'s HOOK_ABORTED below HTTP — the nested-envelope rows at 400 HOOK_ABORTED, and mapDataError's HOOK_ABORTED with no declaredCode) + packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts (acceptance[1]–[3] over HTTP on the scratch app packages/qa/dogfood/test/fixtures/error-sentences-fixture.ts: the hook's sentence at 400 with code HOOK_ABORTED on the /data doors, 409 UNIQUE_VIOLATION with details exactly developerMessage + field + object at the action door, and a storage route's 500 INTERNAL withholding the caught text)"
       },
       "source": [
         "packages/types/src/sandbox-business-message.ts#sandboxBusinessMessage",
@@ -3416,15 +3428,21 @@
           "date": "2026-11-10",
           "change": "steps[0]: the per-object /batch door's status for a report with a failed row is 207 Multi-Status, no longer 200 (the bulk doors answer 207 when any row failed and 200 when none did; bulkReportStatus in packages/rest/src/batch-routes.ts). The door still never answers the clause's 400, so it stays out of the doors this item reads. No clause changed",
           "ref": "#32280"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-14",
+          "change": "acceptance[2] (clause, verify) and automated.ref re-pointed to the widened details (stale spec, QA run #33025 acceptance[2], card #33032 item 2; the same clause #33086 lists as still open, done once here). 28a15270 (#32935) made the 409 UNIQUE_VIOLATION details for a duplicate in an organization-scoped unique field {developerMessage, field, object}: the composite key (organization_id, FIELD) now names FIELD (packages/types/src/unique-violation.ts#uniqueViolationField). r8 expected exactly developerMessage and object, no field. Both pins already assert the new set: packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts ('details exactly { developerMessage, field, object }', field 'email') and packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts. Status, code and the row keeping its email are unchanged. Read at base e540baf8",
+          "ref": "#33032"
         }
       ]
     },
     {
       "id": "api-backend.actions-namespace-address",
-      "title": "An action call names its holder: POST /api/v1/actions/:ns/:object/:action[/:recordId], /actions/:ns/global/:action and the _env forms run that namespace's (or the environment's) declaration, an action another package binds to an object is reachable by its namespace, and the bare call is unchanged",
+      "title": "An action call names its holder: POST /api/v1/actions/:ns/:object/:action[/:recordId], /actions/:ns/global/:action and the _env forms run that namespace's (or the environment's) declaration, an action another package binds to an object is reachable by its namespace, and the bare call is refused 409 naming both when two packages hold the action on one object",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin (the seeded admin): every call"],
@@ -3436,7 +3454,7 @@
         ]
       },
       "steps": [
-        "POST /api/v1/actions/qa_a_ticket/escalate/RID (bare); record which handler ran",
+        "POST /api/v1/actions/qa_a_ticket/escalate/RID (bare); record the status and body, and whether any handler ran",
         "POST /api/v1/actions/qa_a/qa_a_ticket/escalate/RID and POST /api/v1/actions/qa_b/qa_a_ticket/escalate/RID; record which handler ran for each",
         "POST /api/v1/actions/qa_a/global/qa_a_ping, then POST /api/v1/actions/qa_b/global/qa_a_ping",
         "POST /api/v1/actions/_env/global/qa_env_ping, then POST /api/v1/actions/_env/global/qa_a_ping",
@@ -3444,10 +3462,10 @@
       ],
       "acceptance": [
         {
-          "clause": "the bare call is unchanged: /actions/qa_a_ticket/escalate/RID runs the object's own embedded action (qa_a's)",
+          "clause": "the bare call names no holder: while qa_a embeds escalate on qa_a_ticket and qa_b binds its own escalate to the same object, /actions/qa_a_ticket/escalate/RID is refused 409 RESOURCE_CONFLICT naming both packages, and runs neither handler",
           "oracle": "api",
-          "verify": "the answer carries qa_a's result. A first segment that is no installed namespace reads as the bare grammar (packages/spec/src/kernel/address-grammar.ts#readNamespacePositionSegment)",
-          "evidence": "the bare answer"
+          "verify": "the answer is 409 RESOURCE_CONFLICT whose message names the action escalate, com.qa.addr-a and com.qa.addr-b, and carries no handler result: two package holders of one object-bound action key are refused, never picked (packages/runtime/src/action-execution.ts#pickActionHolder, #31697, ruling record 6729825528 letter A; the refusal is packages/core/src/package-scoped-resolution.ts#PackageScopedNameRefusedError, code RESOURCE_CONFLICT, status 409). A first segment that is no installed namespace reads as the bare grammar (packages/spec/src/kernel/address-grammar.ts#readNamespacePositionSegment)",
+          "evidence": "the 409 body"
         },
         {
           "clause": "a namespace segment runs that namespace's declaration: qa_a's embedded escalate for /actions/qa_a/…, and qa_b's standalone escalate bound to qa_a's object for /actions/qa_b/…",
@@ -3475,21 +3493,21 @@
         }
       ],
       "negative": [
-        "the bare call running qa_b's standalone action is a FAIL: #31993 changed the qualified call only",
+        "the bare call running either package's escalate is a FAIL while both hold it on qa_a_ticket: the bare door refuses two package holders of one object-bound key, it never picks one by package or by listing order (ruling record 6729825528, letter A)",
         "an addressed call that runs another namespace's declaration when its own has none is a FAIL: a miss is 404, never a fallback",
-        "reading a missing 409 for two packages binding one action name to one object as a defect is wrong: that refusal is not landed and stays with #31697"
+        "the bare call answering 200 with qa_a's result while qa_b binds escalate to qa_a_ticket is a FAIL: that was the answer before #31697. With qa_b's escalate removed, one holder is left and the same bare call answers 200 with qa_a's result"
       ],
       "traps": ["dispatcher-vs-hono-route"],
       "automated": {
         "kind": "unit",
-        "ref": "packages/runtime/src/domains/actions-addressed-route.test.ts and packages/runtime/src/action-execution-addressed-exposure-refusal.test.ts; no live spec drives the scratch-package pair"
+        "ref": "packages/runtime/src/domains/actions-addressed-route.test.ts, packages/runtime/src/action-package-addressing.test.ts (the bare two-holder 409) and packages/runtime/src/action-execution-addressed-exposure-refusal.test.ts; no live spec drives the scratch-package pair"
       },
       "source": [
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D5 (the actions row, the router order, _env)",
         "packages/runtime/src/action-execution.ts#resolveAddressedRouteActionDeclaration and #addressedActionHits (holder resolution and the 404 sentences)",
         "packages/runtime/src/domains/actions.ts (the addressed-path arm, the _activation 404 and the three-segment limit)",
         "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (the three addressed rows: POST /actions/:ns/:object/:action, /actions/:ns/global/:action, /actions/:ns/:object/:action/:recordId)",
-        "#31979 (G1 /actions), #31993 (a standalone action bound to another package's object)"
+        "#31979 (G1 /actions), #31993 (a standalone action bound to another package's object), #31697 (the bare call refused 409 when two packages hold one object's action; ruling record 6729825528, letter A)"
       ],
       "history": [
         {
@@ -3503,6 +3521,12 @@
           "date": "2026-11-10",
           "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
           "ref": "#32330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-13",
+          "change": "stale-spec re-point of acceptance[0] and negative[2] (and the title, steps[0] and negative[0] that described the same answer). #31697 landed: a bare POST /actions/OBJECT/ACTION/ID while two packages hold the action on one object is refused 409 RESOURCE_CONFLICT naming both (ruling record 6729825528, letter A; packages/runtime/src/action-execution.ts#pickActionHolder), so the clause no longer expects the embedding package's result and the negative no longer calls the refusal unlanded. Found by the 18.4.0 acceptance run #32940 (F-9, R4 F4; wave anchor #32908): 409 naming com.qa.addr-a and com.qa.addr-b, 2 reproductions, and 200 with qa_a's result once qa_b's escalate was removed. Re-read at main 25ee5076. Card #32946",
+          "ref": "#32946"
         }
       ]
     },

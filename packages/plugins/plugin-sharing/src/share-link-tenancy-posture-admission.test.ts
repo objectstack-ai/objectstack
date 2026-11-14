@@ -43,9 +43,11 @@
  *     `organization_id`, and inventing one for it would be a fixture asserting
  *     about itself.
  *  4. **The ablation is held PERMANENTLY**, §4: the `tenancy` service — the
- *     wiring fact this seam reads — is removed and the measured leak returns,
- *     byte-identical fixture otherwise. A pin that cannot go red has measured
- *     nothing.
+ *     wiring fact this seam reads — is removed, byte-identical fixture
+ *     otherwise. A pin that cannot go red has measured nothing. Since ADR-0093
+ *     D8.1 was amended the membership rule reads no posture, so the handle
+ *     moves only the posture-conditional `organization_required` row; the
+ *     membership row stays refused with it removed.
  *
  * ## The section the REST sibling did not need: §5
  *
@@ -476,20 +478,23 @@ describe('[#15349] §3 — an organization-less key under `isolated`', () => {
 // (the engine, the keys, the routes, the store) is byte-identical to §2.
 // ---------------------------------------------------------------------------
 
-describe('[#15349] §4 — ablation: with no `tenancy` service, the measured leak returns', () => {
-    it('the ex-member MINTS A LINK on the other organization\'s record again — 201, read back from the store', async () => {
+describe('[#15349] §4 — ablation: with no `tenancy` service, the posture-conditional admission returns', () => {
+    // [ADR-0093 D8.1, as amended] The membership rule reads no posture, so the
+    // ablation's handle no longer moves the key its owner's membership does not
+    // back: it stays refused. What the handle still moves is the posture-
+    // conditional refusal, `organization_required`.
+    it('a key its owner\'s membership no longer backs is refused without a posture too — 401, NO LINK LANDS', async () => {
         const h = await boot({ tenancy: 'unregistered' });
         const res = await post(h, apiKey(RAW_EXMEMBER_KEY));
-        expect(res.status).toBe(201);
-        const landed = h.store();
-        expect(landed).toHaveLength(1);
-        expect(landed[0]).toMatchObject({ object_name: OBJECT, record_id: REC_ALPHA, created_by: 'u_exmember' });
+        expect(res.status).toBe(401);
+        expect(errorCode(res)).toBe('UNAUTHENTICATED');
+        expect(h.store()).toHaveLength(0);
     });
 
-    it('the ex-member reads again — the listing is 200', async () => {
+    it('the listing refuses it too — 401', async () => {
         const h = await boot({ tenancy: 'unregistered' });
         const res = await get(h, apiKey(RAW_EXMEMBER_KEY));
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(401);
     });
 
     it('the organization-less key is admitted again — 201', async () => {
@@ -503,11 +508,13 @@ describe('[#15349] §4 — ablation: with no `tenancy` service, the measured lea
         expect(errorCode(res)).toBe('FORBIDDEN');
     });
 
-    it('and NOTHING is said about any of it — no refusal line, because no refusal was decided', async () => {
+    it('the one line said is the membership refusal — the posture-conditional refusal was not decided', async () => {
         const h = await boot({ tenancy: 'unregistered' });
         await post(h, apiKey(RAW_EXMEMBER_KEY));
         await post(h, apiKey(RAW_ORGLESS_KEY));
-        expect(h.warnings().filter((l) => l.includes('API key refused'))).toHaveLength(0);
+        const lines = h.warnings().filter((l) => l.includes('API key refused'));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain('organization_membership_ended');
     });
 
     it('NARROWNESS: the member control is UNCHANGED by the ablation — the wiring is what moved, not the fixture', async () => {
@@ -576,12 +583,12 @@ describe('[#15349] §6 — an ex-member\'s browser SESSION claim', () => {
         expect(h.store()).toHaveLength(0);
     });
 
-    it('ABLATION: with no `tenancy` service the same session mints the link again — 201, read back from the store', async () => {
+    it('[ADR-0093 D8.1, as amended] with no `tenancy` service the unbacked claim is dropped too — 403, nothing lands', async () => {
         const h = await boot({ tenancy: 'unregistered', session: exMemberSession });
         const res = await post(h, cookie);
-        expect(res.status).toBe(201);
-        expect(h.store()).toHaveLength(1);
-        expect(h.store()[0]).toMatchObject({ record_id: REC_ALPHA, created_by: 'u_exmember' });
+        expect(res.status).toBe(403);
+        expect(errorCode(res)).toBe('FORBIDDEN');
+        expect(h.store()).toHaveLength(0);
     });
 
     it('CONTROL: a CURRENT member\'s session is untouched in BOTH wirings — 201 either way', async () => {
@@ -597,11 +604,11 @@ describe('[#15349] §6 — an ex-member\'s browser SESSION claim', () => {
 // §7 — `group`, MEASURED rather than assumed unaffected.
 //
 // The two guards do not answer alike under it, and the asymmetry is in the
-// resolver, not here: `organization_membership_ended` keys on
-// `postureEnforcesWall` (true for `group`), while `organization_required` adds
-// `&& !postureUsesUnionScope` — under `group` an organization-less key already
-// reads the union of its owner's memberships, so refusing it would break
-// working deployments for no security gain.
+// resolver, not here: `organization_membership_ended` reads no posture at all
+// (ADR-0093 D8.1, as amended), while `organization_required` keys on
+// `postureEnforcesWall && !postureUsesUnionScope` — under `group` an
+// organization-less key already reads the union of its owner's memberships, so
+// refusing it would break working deployments for no security gain.
 // ---------------------------------------------------------------------------
 
 describe('[#15349] §7 — under `group`', () => {
@@ -651,11 +658,13 @@ describe('[#15349] §8 — the seam testkit can reproduce a posture-conditional 
         expect(ctx.accessible_org_ids).toEqual([ORG_BETA]);
     });
 
-    it('DEFAULT (no posture, a `tenancy`-less host): the same claim survives — byte-identical to before', async () => {
+    it('[ADR-0093 D8.1, as amended] DEFAULT (no posture, a `tenancy`-less host): the unbacked claim is dropped too', async () => {
         const ctx: any = await bootRequestContext(
             { userId: 'u_exmember', activeOrganizationId: ORG_ALPHA, memberships: [{ organization_id: ORG_BETA }] },
         );
-        expect(ctx.tenantId).toBe(ORG_ALPHA);
+        expect(ctx.userId).toBe('u_exmember');
+        expect(ctx.tenantId).toBeUndefined();
+        expect(ctx.accessible_org_ids).toEqual([ORG_BETA]);
     });
 
     it('CONTROL: a backed claim survives under the same wall-enforcing posture', async () => {

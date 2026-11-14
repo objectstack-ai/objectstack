@@ -1405,8 +1405,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const {
     bulkFanoutParams, resolvedTotalMatching, summaries, hasSummary,
   } = useObjectGridSummaries({
-    schema, dataSource, objectName, objectSchema, data, hasInlineData, externalManualPagination,
-    hostFindParams, hostRowCount, lastFindParamsRef, totalMatching, refreshKey, serverPage,
+    schema, dataSource, objectName, objectSchema, objectFields, objectTypesPending, data, hasInlineData,
+    externalManualPagination, hostFindParams, hostRowCount, lastFindParamsRef, totalMatching, refreshKey, serverPage,
     fetchWindow, serverGroupedFetch, isGrouped,
   });
 

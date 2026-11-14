@@ -195,10 +195,49 @@ export interface ThrownHttpError {
   userMessage?: string;
   /**
    * Structured context: spec-validation `issues[]`, record-validation
-   * `fields[]`. Absent rather than `{}` when the throw carried none, so an
-   * empty object never reads as "there is context here".
+   * `fields[]`, a package-scoped refusal's `candidates[]` (#32250,
+   * {@link packageScopedRefusalCandidates}). Absent rather than `{}` when the
+   * throw carried none, so an empty object never reads as "there is context
+   * here".
    */
   details?: Record<string, unknown>;
+}
+
+/**
+ * [#32250, ADR-0150 D5] The holders a package-scoped refusal names, or
+ * `undefined` for any other thrown value.
+ *
+ * The refusal is the `409 RESOURCE_CONFLICT` a by-name read or write throws
+ * when its name means more than one item here (core's
+ * `PackageScopedNameRefusedError`, e.g. a permission-set grant naming a set two
+ * packages ship). D5 says every ambiguous by-name answer names its candidates,
+ * so each door answers them as `details.candidates`, in the shape the
+ * `/actions`, `/automation` and activation doors answer
+ * (`[{ kind: 'package', packageId }, …]`, verbatim from the refusal).
+ *
+ * Recognised by SHAPE — `code === 'RESOURCE_CONFLICT'`, a declared 4xx status,
+ * and a `refusal` whose `status` is `'refused'` and whose `candidates` is a
+ * list — because this package depends on nothing but `@objectstack/spec` and
+ * cannot name core's class. The class satisfies the shape, and so does an
+ * error that crossed a second copy of `@objectstack/core`. Read here, by
+ * {@link resolveThrownHttpError}, by the `/data` classification and by the
+ * batch row error, so no door carries a second recogniser.
+ */
+export function packageScopedRefusalCandidates(error: unknown): readonly unknown[] | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const e = error as { code?: unknown; status?: unknown; statusCode?: unknown; refusal?: { status?: unknown; candidates?: unknown } | null };
+  if (e.code !== 'RESOURCE_CONFLICT') return undefined;
+  // A declared 4xx, read in the two spellings {@link resolveThrownHttpError}
+  // reads (`status`, else `statusCode`), so the resolver, the `/data`
+  // classification and the batch row error gate the member alike. The
+  // interval is read as membership (`>= 400 && < 500`), so a number that
+  // compares false both ways (`NaN`) is outside it, as it is for the
+  // classification.
+  const declared = typeof e.status === 'number' ? e.status : typeof e.statusCode === 'number' ? e.statusCode : undefined;
+  if (declared === undefined || !(declared >= 400 && declared < 500)) return undefined;
+  const refusal = e.refusal;
+  if (typeof refusal !== 'object' || refusal === null || refusal.status !== 'refused') return undefined;
+  return Array.isArray(refusal.candidates) ? refusal.candidates : undefined;
 }
 
 /**
@@ -215,6 +254,7 @@ export interface ThrownHttpError {
  * | declaredCode | `VALIDATION_FAILED` if it is one → any non-empty string `.code` → the derived code if it is an unevaluable hook condition → absent |
  * | message | `.message` when it is a string → `String(error)` |
  * | userMessage | a non-empty string `.userMessage` → absent (see {@link declaredUserMessage}) |
+ * | details | a non-string `.code`, `.issues`, a validation failure's `fields`, a package-scoped refusal's `candidates` → absent |
  *
  * Both status spellings are read because both are produced in this repo:
  * `plugin-approvals`' lifecycle hooks and `metadata-protocol` throw
@@ -273,6 +313,9 @@ export function resolveThrownHttpError(error: unknown, fallbackStatus = 500): Th
       ?? (undeclaredHookAbort ? UNDECLARED_HOOK_REFUSAL_CODE : standardErrorCodeForHttpStatus(status)));
 
   const issues = Array.isArray(e?.issues) ? e.issues : undefined;
+  // [#32250] A package-scoped refusal's holders, so every door that answers
+  // from this resolver names them (ADR-0150 D5).
+  const candidates = packageScopedRefusalCandidates(e);
   const details: Record<string, unknown> = {
     // A truthy NON-string `code` (a driver errno, say) is context and stays
     // context — promoting it would put a number in the field callers branch on,
@@ -280,6 +323,7 @@ export function resolveThrownHttpError(error: unknown, fallbackStatus = 500): Th
     ...(!validation && e?.code && typeof e.code !== 'string' ? { code: e.code } : {}),
     ...(issues ? { issues } : {}),
     ...(validation ? { fields: validation.fields } : {}),
+    ...(candidates ? { candidates } : {}),
   };
 
   const userMessage = declaredUserMessage(error);

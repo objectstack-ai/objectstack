@@ -186,6 +186,10 @@ export function createRegistryModuleMock(
     // [#31564] …and records, for a run another caller opened, the engine's
     // own entries a body writes. The double opens no run, so it records nothing.
     recordRestoreOnRefusal: vi.fn(),
+    // [#31700] …and `registerApp` asks this member to judge the body's picklist
+    // arrival before it registers. The double holds no picklist and is never
+    // sealed, so it judges nothing and runs the body as given.
+    admitPicklistArrival: vi.fn((_manifests: unknown, register: () => unknown) => register()),
     // [#30215] Every engine subscribes in its constructor, so its manifest map
     // forgets a package the registry uninstalls. The double never uninstalls,
     // so it never announces: it records the subscription and answers the

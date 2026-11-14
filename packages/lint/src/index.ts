@@ -75,6 +75,19 @@ export type { DatasetMeasureAggregateFinding, GroupKeyClass } from './validate-d
 
 export { validateStackExpressions, fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } from './validate-expressions.js';
 export type { ExprIssue } from './validate-expressions.js';
+// [#32872] The gate's verdict on one validation rule, formula field or
+// (#33147) flow condition, the MCP `validate_expression` tool's second half
+// (the shared validator is its first).
+export {
+  judgeAuthoredSiteExpression,
+  authoredExpressionHopTargets,
+  AUTHORED_RULE_NAME,
+  AUTHORED_FORMULA_FIELD_NAME,
+  AUTHORED_FLOW_NAME,
+  AUTHORED_CONDITION_ID,
+} from './authored-site-expression.js';
+export type { AuthoredSiteExpression, AuthoredExpressionSite, AuthoredFlowTrigger } from './authored-site-expression.js';
+export { STORED_EXPRESSION_CROSS_RECORD_INPUT, STORED_EXPRESSION_VOLATILE_INPUT } from './stored-expression-inputs.js';
 
 // #4763 — `has(x)` reads as a null guard and is not one. The decision procedure
 // is exported on its own so other authoring surfaces (cloud graph-lint, the AI
@@ -368,6 +381,7 @@ export {
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_UPDATE_POLICY_NO_CHECK,
   holdsSuperuserBypass,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
@@ -562,6 +576,7 @@ export {
   SORT_FIELD_UNKNOWN,
   SORT_FIELD_UNSORTABLE,
   SORT_FIELD_UNPROVISIONED,
+  GRID_AGGREGATION_FIELD_TYPE_REFUSED,
 } from './validate-sortable-fields.js';
 export type {
   SortableFieldFinding,
@@ -594,11 +609,14 @@ export type {
 // over another object than the one the list view lists.
 // [#28018] Its EIGHTH: a `kanban.lanes` entry that is not an option of the
 // group field, or a lane listed twice.
+// [#32449] Its NINTH: a column summary whose function the aggregate door
+// refuses over the aggregated field's declaration.
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   LIST_VIEW_GROUP_ORDER_UNORDERABLE,
+  LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED,
   LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
   LIST_VIEW_KANBAN_LANE_UNKNOWN,
   LIST_VIEW_KANBAN_LANE_REPEATED,
@@ -1065,6 +1083,7 @@ export {
   FLOW_INERT_NODE_CONDITION,
   FLOW_NODE_UNREACHABLE,
   FLOW_START_NODE_MISSING,
+  FLOW_AFTER_SAVE_INLINE_RETRY,
   FLOW_MULTI_WRITE_UNFILTERED,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,
@@ -1203,6 +1222,16 @@ export type {
   AuthoringSeverity,
   AuthoringSurface,
 } from './authoring-rules.js';
+
+// A finding's USER-FACING sentence in the request's language (ruling record
+// 6819749037), rendered from the producers' own catalogs under the locale
+// ladder (request locale, then the workspace default, then `en`) over the
+// platform locale table. The door that holds the request puts it on the wire
+// as `RuntimeAuthoringIssueSchema.userMessage`; also on
+// `@objectstack/lint/runtime`. The catalogs and the ladder itself stay
+// internal: `findingUserMessage` is their one caller-facing door.
+export { findingUserMessage } from './finding-user-text.js';
+export type { UserTextParams } from './finding-user-text.js';
 
 // The runtime publish gate over that registry. Also published as the
 // `@objectstack/lint/runtime` subpath — the entry the kernel boot path imports.

@@ -191,6 +191,14 @@ const HOLDS: Record<string, string> = {
 const makeQl = () => bindTestSecurityCatalog({
   find: async (object: string, opts: any) => {
     const where = opts?.where ?? {};
+    // Every caller is a current member of `o1`, the organization it acts in
+    // (ADR-0093 D8.1, as amended).
+    if (object === 'sys_member') {
+      const ids = Object.values(USERS).filter((id) => where.user_id === undefined || where.user_id === id);
+      return where.organization_id === undefined || where.organization_id === 'o1'
+        ? ids.map((id) => ({ id: `mem_${id}`, user_id: id, organization_id: 'o1', role: 'member' }))
+        : [];
+    }
     if (object === 'sys_user_permission_set') {
       const setId = HOLDS[where.user_id as string];
       return setId

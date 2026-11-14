@@ -81,7 +81,7 @@ describe('resolveAuthzContext — single source of truth', () => {
   it('resolves a custom role granted via sys_user_position (the REST-drift bug)', async () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1', email: 'ada@x.com' }],
-      sys_member: [],
+      sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: 'o1' }],
       sys_user_permission_set: [],
     });
@@ -103,7 +103,7 @@ describe('resolveAuthzContext — single source of truth', () => {
   it('resolves role-bound permission sets (sys_position_permission_set)', async () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
-      sys_member: [],
+      sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: 'o1' }],
       sys_user_permission_set: [],
       sys_position: [{ id: 'r1', name: 'contributor' }],
@@ -131,7 +131,7 @@ describe('resolveAuthzContext — single source of truth', () => {
   it('does NOT derive platform_admin from an ORGANIZATION-LESS admin_full_access grant — it anchors nothing', async () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
-      sys_member: [],
+      sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_organization: [{ id: 'org_default', slug: 'default' }],
       sys_user_position: [],
       sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: null }],
@@ -755,7 +755,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
   it('an expired sys_user_position row does not resolve', async () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
-      sys_member: [],
+      sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_user_position: [
         { user_id: 'u1', position: 'approver', organization_id: 'o1', valid_until: PAST },
         { user_id: 'u1', position: 'contributor', organization_id: 'o1' },
@@ -770,7 +770,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
   it('a not-yet-active sys_user_position row (future valid_from) does not resolve', async () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
-      sys_member: [],
+      sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: 'o1', valid_from: FUTURE }],
       sys_user_permission_set: [],
     });
@@ -781,7 +781,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
   it('a row inside its [from, until) window resolves; until is exclusive', async () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
-      sys_member: [],
+      sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_user_position: [
         { user_id: 'u1', position: 'stand_in', organization_id: 'o1', valid_from: PAST, valid_until: FUTURE },
         // Boundary: valid_until exactly NOW → inactive AT the bound (half-open).
@@ -813,7 +813,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
   it('fails closed on an unparseable valid_until', async () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
-      sys_member: [],
+      sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: 'o1', valid_until: 'not-a-date' }],
       sys_user_permission_set: [],
     });
@@ -931,7 +931,10 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
     // into (D): that row is standing authority in its own right, carrying its
     // OWN ADR-0091 window, and revoking someone else's grant row from a read
     // path is not this resolver's job. Both are pinned below so the boundary is
-    // a measured fact rather than an assumption.
+    // a measured fact rather than an assumption. Since ADR-0093 D8.1 was
+    // amended (2026-11-11) the organization claim itself needs a current
+    // membership under every posture, so (D)'s row stays in place but has no
+    // organization to apply in — the last case below.
     const orgOwnerPositionTables = (memberRow: Record<string, unknown>) => ({
       sys_user: [{ id: 'esc' }],
       sys_member: [{ user_id: 'esc', role: 'owner', organization_id: 'o1', ...memberRow }],
@@ -969,24 +972,32 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
       expect(ctx.accessible_org_ids).toEqual([]);
     });
 
-    it('the boundary: a DIRECT org-admin grant is standing authority and survives the lapse — by design', async () => {
+    it('the boundary: a DIRECT org-admin grant row outlives the lapse, but applies in no organization without a current membership (ADR-0093 D8.1, as amended)', async () => {
       // Route (D). The role is only the PROVISIONING source (ADR-0095 D3); the
-      // grant row it caused is separate authority with its own window. So the
-      // role projection goes quiet while the capability keeps resolving. This
-      // is the correct layering, not a residual hole — but it IS the reason the
-      // rung can outlive the membership, so it is pinned rather than assumed.
-      const ql = makeQl({
+      // grant row it caused is separate authority with its own window, and this
+      // resolver does not revoke it. What it does decide is the organization:
+      // the claim needs a current membership under every posture, so the
+      // org-scoped row is never collected and the rung falls with the claim.
+      const tables = (memberRow: Record<string, unknown>) => ({
         sys_user: [{ id: 'esc2' }],
-        sys_member: [{ user_id: 'esc2', role: 'owner', organization_id: 'o1', valid_until: PAST }],
+        sys_member: [{ user_id: 'esc2', role: 'owner', organization_id: 'o1', ...memberRow }],
         sys_user_position: [],
         sys_user_permission_set: [{ user_id: 'esc2', permission_set_id: 'psO', permission_set: 'organization_admin', organization_id: 'o1' }],
         sys_permission_set: [{ id: 'psO', name: 'organization_admin' }],
       });
-      const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('esc2', { org: 'o1' }), nowMs: NOW });
-      expect(ctx.positions).not.toContain('org_owner'); // the role projection is closed
-      expect(ctx.permissions).toContain('organization_admin'); // the grant row is not
-      expect(ctx.posture).toBe('TENANT_ADMIN');
-      expect(ctx.accessible_org_ids).toEqual([]); // and access is still withheld
+      for (const tenancyPosture of [undefined, 'single', 'isolated', 'group'] as const) {
+        const lapsed = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: makeQl(tables({ valid_until: PAST })), headers: H(), getSession: session('esc2', { org: 'o1' }), nowMs: NOW, tenancyPosture });
+        expect(lapsed.positions).not.toContain('org_owner');
+        expect(lapsed.permissions).not.toContain('organization_admin');
+        expect(lapsed.posture).toBe('MEMBER');
+        expect(lapsed.tenantId).toBeUndefined();
+        expect(lapsed.accessible_org_ids).toEqual([]);
+        // CONTROL — the same row under a current membership resolves the rung.
+        const current = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: makeQl(tables({})), headers: H(), getSession: session('esc2', { org: 'o1' }), nowMs: NOW, tenancyPosture });
+        expect(current.permissions).toContain('organization_admin');
+        expect(current.posture).toBe('TENANT_ADMIN');
+        expect(current.tenantId).toBe('o1');
+      }
     });
   });
 });
@@ -1151,7 +1162,7 @@ describe('resolveUserAuthzGrants — userId-driven authz for non-HTTP surfaces (
   it('matches resolveAuthzContext for the same user — one resolver, one envelope', async () => {
     const tables = {
       sys_user: [{ id: 'u1', email: 'ada@x.com' }],
-      sys_member: [],
+      sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: 'o1' }],
       sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'contributor_ps', organization_id: 'o1' }],
       sys_position: [{ id: 'r1', name: 'contributor' }],
@@ -1283,15 +1294,25 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
   });
 
   /**
-   * Under `single` there is no organization boundary to cross, and a
-   * deployment with no membership rows at all would otherwise have every
-   * stamped key refused.
+   * [ADR-0093 D8.1, as amended] The membership check applies under `single`
+   * and with no posture supplied too: a person's data access requires a
+   * current membership in the organization, judged on each request, and an API
+   * key is its owner's credential (ADR-0090 D10) — the owner's rule is the key's.
    */
-  it('does NOT apply the membership check under `single`', async () => {
-    const ql = makeQl(tables([]));
-    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: keyHeaders(), tenancyPosture: 'single' });
-    expect(ctx.userId).toBe('u1');
-    expect(apiKeyRefusalLines(warnSpy)).toHaveLength(0);
+  it('applies the membership check under `single` and with no posture supplied — the owner\'s rule is the key\'s', async () => {
+    for (const tenancyPosture of ['single', undefined] as const) {
+      warnSpy.mockClear();
+      const ended = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: makeQl(tables([])), headers: keyHeaders(), tenancyPosture });
+      expect(ended.userId).toBeUndefined();
+      expect(ended.tenantId).toBeUndefined();
+      expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_membership_ended']);
+      // CONTROL — the same key whose owner is a current member is admitted.
+      warnSpy.mockClear();
+      const held = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: makeQl(tables([{ user_id: 'u1', organization_id: 'org_a', role: 'member' }])), headers: keyHeaders(), tenancyPosture });
+      expect(held.userId).toBe('u1');
+      expect(held.tenantId).toBe('org_a');
+      expect(apiKeyRefusalLines(warnSpy)).toHaveLength(0);
+    }
   });
 
   /**
@@ -1402,7 +1423,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
     ({ metadata_type, name, package_id: null, active });
   const withActive = (v: unknown) => ({
     sys_user: [{ id: 'u1' }],
-    sys_member: [],
+    sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
     sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: 'o1' }],
     sys_user_permission_set: [],
     sys_position: [{ id: 'r1', name: 'contributor' }],
@@ -1502,7 +1523,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
   it('deactivating ONE position leaves the others granting', async () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
-      sys_member: [],
+      sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_user_position: [
         { user_id: 'u1', position: 'contributor', organization_id: 'o1' },
         { user_id: 'u1', position: 'reviewer', organization_id: 'o1' },
@@ -1534,7 +1555,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
   it('a DEACTIVATED permission set grants nothing — name, capabilities and tabs', async () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
-      sys_member: [],
+      sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_user_position: [],
       sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: 'o1' }],
       sys_permission_set: [{
@@ -1578,7 +1599,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
   it('deactivating ONE set leaves the others granting', async () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
-      sys_member: [],
+      sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_user_position: [],
       sys_user_permission_set: [
         { user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: 'o1' },
@@ -1600,7 +1621,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
     // separate authority and the position's deactivation may not touch it.
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
-      sys_member: [],
+      sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: 'o1' }],
       sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: 'o1' }],
       sys_position: [{ id: 'r1', name: 'contributor' }],
@@ -1875,35 +1896,48 @@ describe('[#15409] a session organization claim that no membership backs', () =>
   });
 
   /**
-   * Under `single` there is no organization boundary to cross, and a deployment
-   * with no membership rows at all would otherwise lose every session's active
-   * organization. Same scoping the API-key arm carries, same reason.
+   * [ADR-0093 D8.1, as amended] Under `single` too: a person's data access
+   * requires a current membership in the organization, judged on each request.
+   * The same drop, the same line, the same surviving principal as the walled
+   * postures above.
    */
-  it('does NOT apply under `single` — no wall, nothing to justify a claim against', async () => {
+  it('applies under `single` too — the claim needs a current membership in every posture', async () => {
     const ql = makeQl(tables());
     const ctx = await resolveAuthzContext({
       userAuthGates: undefined,
       apiKeyLifecycle: undefined,
       ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'single',
     });
-    expect(ctx.tenantId).toBe('org_alpha');
+    expect(ctx.userId).toBe('u_ex');
+    expect(ctx.tenantId).toBeUndefined();
+    expect(ctx.accessible_org_ids).toEqual(['org_beta']);
+    expect(dropLines()).toHaveLength(1);
+    // CONTROL — the backed claim is adopted untouched under `single` as well.
+    warnSpy.mockClear();
+    const backed = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
+      ql: makeQl(tables()), headers: H(), getSession: sessionAs('u_ex', 'org_beta'), tenancyPosture: 'single',
+    });
+    expect(backed.tenantId).toBe('org_beta');
     expect(dropLines()).toHaveLength(0);
   });
 
   /**
-   * An unwired caller is never made WORSE, only less strict — the doctrine
-   * `ResolveAuthzInput.tenancyPosture` already states for the two API-key
-   * refusals. A transport that supplies no posture keeps its old behaviour.
+   * The posture no longer decides the rule, so a transport that supplies no
+   * posture is asked the same question — there is no lenient default left to
+   * fall back to.
    */
-  it('does NOT apply when the transport supplies no posture', async () => {
+  it('applies when the transport supplies no posture — the posture does not decide it', async () => {
     const ql = makeQl(tables());
     const ctx = await resolveAuthzContext({
       userAuthGates: undefined,
       apiKeyLifecycle: undefined,
       ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'),
     });
-    expect(ctx.tenantId).toBe('org_alpha');
-    expect(dropLines()).toHaveLength(0);
+    expect(ctx.userId).toBe('u_ex');
+    expect(ctx.tenantId).toBeUndefined();
+    expect(dropLines()).toHaveLength(1);
   });
 
   it('a session with NO claim at all is not a drop — nothing was claimed', async () => {
@@ -2000,9 +2034,13 @@ describe('[#20580] vetOrganizationClaim — the organization a claim resolves in
     expect(vetOrganizationClaim('org_gamma', HELD, 'group')).toBe('org_gamma');
   });
 
-  it('no wall (`single`, or no posture supplied): the claim stands whatever the memberships', () => {
-    expect(vetOrganizationClaim('org_alpha', HELD, 'single')).toBe('org_alpha');
-    expect(vetOrganizationClaim('org_alpha', [], undefined)).toBe('org_alpha');
+  it('[ADR-0093 D8.1, as amended] every posture, and no posture supplied: the same membership rule', () => {
+    expect(vetOrganizationClaim('org_alpha', HELD, 'single')).toBeUndefined();
+    expect(vetOrganizationClaim('org_alpha', [], undefined)).toBeUndefined();
+    expect(vetOrganizationClaim('org_alpha', HELD)).toBeUndefined();
+    // CONTROL — a claim a current membership backs stands, whatever the posture.
+    expect(vetOrganizationClaim('org_beta', HELD, 'single')).toBe('org_beta');
+    expect(vetOrganizationClaim('org_gamma', HELD)).toBe('org_gamma');
   });
 
   it('no claim resolves in no organization', () => {

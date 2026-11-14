@@ -2080,7 +2080,7 @@
       "title": "`os migrate organization-ownership` upgrades a database 17.x or an 18.0 pre-release (18.0.0-next.*) created (18.x): a bare run writes the reviewed plan and changes nothing; `--apply --plan-file PLAN --backup-taken` runs every step — attribution through the moves, the declared webhook and sharing-rule settlements, the column drops and NOT NULL — and certifies the marker at this release's ownership shape generation; the served boot refuses an uncertified database, naming the command, and boots a certified one; `os migrate apply --allow-destructive` still withholds every organization_id drop the ceremony owns, and `os migrate comment-reactions --apply` stays pinned",
       "since": "v18",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -2145,7 +2145,7 @@
         {
           "clause": "an 18.0 pre-release database (one an 18.0.0-next.* release created and served) takes the same path as a v17 one and keeps its data: the served boot refuses it, the reviewed apply completes, and the next boot serves it with its identity mail, its global setting audit, its pending mail jobs and its declared webhook carried over",
           "oracle": "build",
-          "verify": "steps[5], each leg read at its own layer. Boot output: the first `os serve` exits 1 before any listening line, opening \"This database carries no organization-ownership marker\" and naming the tables still carrying organization_id (sys_flow_credential and sys_secret on 18.0.0-next.5); a database an 18.0.0-next.3 ceremony already certified at shape generation 0 is refused instead with \"… certified by an organization-ownership ceremony of shape generation 0, and this release requires generation 1 …\". The apply exits 0 with complete true and blocking 0, and the second boot reaches its serving line. Row reads, before the plan and after the second boot: every identity mail row (related_object sys_user, which is the reset and verification mail, and any magic-link mail) is in sys_identity_email under its original id, equal over the columns both tables hold, and gone from sys_email, while organization invitations stay in sys_email (packages/cli/src/utils/organization-ownership-apply.ts#SIBLING_MOVES); every sys_setting_audit row with scope 'global' is in sys_platform_setting_audit and gone from sys_setting_audit; every pending or running email.send.async or email.attachment.reclaim job naming a moved mail carries object sys_identity_email in its payload and metadata, while completed jobs and the organization-invitation job are unchanged; and no row disappears outside the apply report: each pre-existing table's count after equals its count before, less what the report's steps say they moved or deleted. On the cli-18-prerelease-db restore, sys_automation_run in the telemetry sibling keeps its count across the second boot but not two of its ids: the recipe's knownGaps[3] says why, and those two ids are not data the apply lost. The door's answer: each pre-release user signs in with its 18.0 password (200; a wrong one 401); the token read from the moved reset mail resets (200); and the one showcase_task PATCH writes exactly one sys_http_delivery row whose ref_id is declared:showcase_task_changed",
+          "verify": "steps[5], each leg read at its own layer. Boot output: the first `os serve` exits 1 before any listening line, opening \"This database carries no organization-ownership marker\" and naming the tables still carrying organization_id (sys_flow_credential and sys_secret on 18.0.0-next.5); a database an 18.0.0-next.3 ceremony already certified at shape generation 0 is refused instead with \"… certified by an organization-ownership ceremony of shape generation 0, and this release requires generation 1 …\". The apply exits 0 with complete true and blocking 0, and the second boot reaches its serving line. Row reads, before the plan and after the second boot: every identity mail row (related_object sys_user, which is the reset and verification mail, and any magic-link mail) is in sys_identity_email under its original id, equal over the columns both tables hold, and gone from sys_email, while organization invitations stay in sys_email (packages/cli/src/utils/organization-ownership-apply.ts#SIBLING_MOVES); every sys_setting_audit row with scope 'global' is in sys_platform_setting_audit and gone from sys_setting_audit; every pending or running email.send.async or email.attachment.reclaim job naming a moved mail carries object sys_identity_email in its payload and metadata, while completed jobs and the organization-invitation job are unchanged; and no row disappears outside the apply report: each pre-existing table's count after equals its count before, less what the report's steps say they moved or deleted. On the cli-18-prerelease-db restore, sys_automation_run in the telemetry sibling keeps its count across the second boot but not two of its ids: the recipe's knownGaps[3] says why, and those two ids are not data the apply lost. The door's answer: each pre-release user signs in with its 18.0 password (200; a wrong one 401); the token read from the moved reset mail resets (200); and the one showcase_task PATCH writes exactly one sys_http_delivery row whose ref_id is declared:com.example.showcase/showcase_task_changed (the declaring package's id, then the name: packages/qa/dogfood/test/upgrade-18x-harness.dogfood.test.ts pins it)",
           "evidence": "the refused boot's excerpt and exit code, the apply report's complete and blocking, the serving line; the before and after reads of sys_email, sys_identity_email, sys_setting_audit, sys_platform_setting_audit and the mail jobs, with per-table counts; the sign-in, reset and delivery answers"
         }
       ],
@@ -2222,6 +2222,12 @@
           "date": "2026-11-08",
           "change": "steps[1], steps[3] and steps[4]: `os migrate apply` and `os migrate comment-reactions` take no `--dev` flag; only `os migrate organization-ownership` and `os serve` of the ceremony's commands do. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
           "ref": "#31499"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-14",
+          "change": "acceptance[5].verify's delivery reference follows the per-holder slot a declared webhook is dispatched under since its ref_id names the declaring package: ref_id declared:com.example.showcase/showcase_task_changed, as packages/qa/dogfood/test/upgrade-18x-harness.dogfood.test.ts pins. The bare declared:showcase_task_changed failed a correct product. No clause weakened; read from source at base 4c152685",
+          "ref": "#33016"
         }
       ]
     },
@@ -2309,10 +2315,10 @@
     },
     {
       "id": "cli.validate-v18-authoring-verdicts",
-      "title": "`os validate` / `os build` verdicts new on v18: an unknown seed record key (with did-you-mean), a misspelt record[…] / previous[…] field, a duplicate stack entry name, a controlled_by_parent object without exactly one required master_detail (also through objectExtensions), a component-props finding (now an error), and a credential in stack email/sms config each fail the build",
+      "title": "`os validate` / `os build` verdicts new on v18: an unknown seed record key (with did-you-mean), a misspelt record[…] / previous[…] field, a duplicate stack entry name, a controlled_by_parent object with no master_detail or with two required ones (also through objectExtensions), a component-props finding (now an error), and a credential in stack email/sms config each fail the build",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2326,8 +2332,9 @@
         ]
       },
       "steps": [
-        "for each arm run `os validate --json` and `os build`, recording exit code + rule id + path: seed key created_atx; record[\"typo\"] in a validation; two datasources named alike; a cbp object whose master_detail is not required; an object-grid with defaultFilters; email:{apiKey:\"x\"}",
-        "controls: seed key created_at, record.name == \"record.typo\", email.provider — all pass"
+        "for each arm run `os validate --json` and `os build`, recording exit code + rule id + path: seed key created_atx; record[\"typo\"] in a validation; two datasources named alike; a cbp object with no master_detail; a cbp object with two master_details both declared required: true, once inline and once with the second arriving through objectExtensions; an object-grid with defaultFilters; email:{apiKey:\"x\"}",
+        "controls: seed key created_at, record.name == \"record.typo\", email.provider, and a cbp object whose ONLY master_detail declares required: false (the optional master, ruling A of #30905) — all pass",
+        "the os lint arm: in the scratch app author a cbp object as a plain object literal (not through ObjectSchema.create(), which forces an omitted required to true) whose ONLY master_detail omits `required`; run `os lint`, then `os validate --json` and `os build`, recording each exit code and rule id"
       ],
       "acceptance": [
         {
@@ -2346,17 +2353,23 @@
           "clause": "the controls pass",
           "oracle": "build",
           "verify": "exit 0",
-          "evidence": "three lines"
+          "evidence": "four lines"
+        },
+        {
+          "clause": "the lint-only shape is `os lint`'s verdict, not the build's: a cbp object whose ONLY master_detail omits `required` fails `os lint` with relationship/master-detail-required at error, while `os validate` and `os build` accept it",
+          "oracle": "build",
+          "verify": "`os lint` exits ≠ 0 naming relationship/master-detail-required at the master_detail's path (it is a lintDataModel rule, packages/lint/src/data-model-rules.ts#RELATIONSHIP_MASTER_DETAIL_REQUIRED, which `os lint` runs and `os validate` / `os build` do not); `os validate --json` and `os build` exit 0, because the parse reads the parsed `required: false` and admits the optional master (packages/spec/src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal, ruling A of #30905). An explicit `required: false` on the ONLY master_detail is the optional master and passes all three (a control, steps[1]); the rule's cases are pinned at unit by packages/lint/src/data-model-rules.master-detail-required.test.ts, acceptance[0]'s pin",
+          "evidence": "the os lint, os validate and os build exits + the lint finding line"
         }
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/spec/src/data/define-seed-record-keys.test.ts + packages/formula/src/validate-field-existence-spellings.test.ts + packages/spec/src/stack-duplicate-entry.test.ts + packages/lint/src/data-model-rules.master-detail-required.test.ts + packages/spec/src/stack-cbp-extension-master.test.ts + packages/lint/src/validate-component-props.test.ts + packages/spec/src/stack-email-sms.test.ts — acceptance[0] ONLY, the clause that scores these seven spec, formula and lint unit files themselves. None of them runs `os validate` or `os build`, so no pin covers acceptance[1] (each arm's `os validate` exit and rule at its path, and the build refusing) or acceptance[2] (the controls pass): drive them by hand with the CLI"
+        "ref": "packages/spec/src/data/define-seed-record-keys.test.ts + packages/formula/src/validate-field-existence-spellings.test.ts + packages/spec/src/stack-duplicate-entry.test.ts + packages/lint/src/data-model-rules.master-detail-required.test.ts + packages/spec/src/stack-cbp-extension-master.test.ts + packages/lint/src/validate-component-props.test.ts + packages/spec/src/stack-email-sms.test.ts — acceptance[0] ONLY, the clause that scores these seven spec, formula and lint unit files themselves. None of them runs `os validate` or `os build`, so no pin covers acceptance[1] (each arm's `os validate` exit and rule at its path, and the build refusing), acceptance[2] (the controls pass) or acceptance[3] (the os lint arm's three exits): drive them by hand with the CLI"
       },
       "source": [
         "packages/spec/src/data/seed.zod.ts#defineSeed",
         "packages/spec/src/stack.zod.ts#collectDuplicateEntryErrors",
-        "packages/spec/src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal",
+        "packages/spec/src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal (the parse refuses no master_detail, two required ones, two with none required and a readonly / system master; ADR-0055 §1 as amended by ruling A of #30905 admits the ONLY master_detail declared required: false as an optional master)",
         "packages/spec/src/system/email-config.zod.ts#StackEmailConfigSchema",
         "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22149-define-seed-record-keys, 22212-lint-sibling-spellings, 22428-field-existence-every-spelling, 22386-spec-object-attached-on-read, 22386-validator-attached-on-read-leaf, 22902-stack-functions-array-duplicate-name-refused, 22934-stack-collection-duplicate-entry-refused, 23210-cbp-extension-merged-master, 9139-cbp-master-detail-required-error, 23100-cbp-one-required-master, 23026-retired-component-prop-refused, 23147-component-props-every-finding-refused, 22748-stack-email-sms-door"
       ],
@@ -2372,6 +2385,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause — checklist-accuracy finding C8 of QA run #24786 (wave anchor #24579 round 13, round 6's theme-B rule): the ref listed seven spec, formula and lint unit pins with no clause qualifier, though acceptance[1] and acceptance[2] need os validate and os build. None of the seven runs the CLI (read at base 7697ddcf94). The pins are acceptance[0]'s own subject, so `automated` stays, narrowed to it. No clause changed",
           "ref": "#24850"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-14",
+          "change": "the controlled_by_parent arm re-worded and its lint-only shape moved to a new `os lint` clause, acceptance[3] (stale spec, QA run #33081 acceptance[1], card #33086 item 3). Ruling A of #30905 admits a cbp object's ONLY master_detail declared required: false as an optional master (packages/spec/src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal, asked by ObjectSchema's refuseControlledByParentWithoutOneMaster), so steps[0]'s arm 'a cbp object whose master_detail is not required' passes `os validate` and `os build`, as QA reproduced twice. steps[0] and the title now plant the shapes the parse refuses: no master_detail, and two required master_details, inline and through objectExtensions. steps[1] gains the optional master as a control, so acceptance[2] reads four lines. The shape only a lint rule reports, an omitted `required` on the only master_detail, is relationship/master-detail-required (packages/lint/src/data-model-rules.ts#RELATIONSHIP_MASTER_DETAIL_REQUIRED), which `os lint` runs and validate and build do not, so it moves to acceptance[3] with oracle build and a new steps[2]; automated.ref and source[2] follow. Read at base e540baf8; the os lint exits are read from the rule's reach note and its unit pin, not driven live by this edit",
+          "ref": "#33086"
         }
       ]
     },
@@ -2626,7 +2645,7 @@
       "title": "The address grammar reserves its segments: a bucket 2/3 name led by _ is refused at defineStack and os validate; a namespace that spells a grammar literal is refused by os validate and os build (exit 1, no artifact) and at the running install door, while a package the boot registers keeps booting with a warning; and lint's namespace-prefix rule judges only capabilities and positions",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["developer at the CLI", "admin (the seeded admin): the install leg"],
@@ -2660,7 +2679,7 @@
         {
           "clause": "the running install door refuses a namespace that spells a grammar literal with 422 naming it",
           "oracle": "api",
-          "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message names the namespace hooks (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry raises 422 NAMESPACE_CONFLICT through packages/spec/src/kernel/address-grammar.ts#validateNamespaceNotAddressLiteral; #NAMESPACE_REFUSED_LITERALS holds actions, connectors, global, hooks, oauth and trigger)",
+          "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message names the namespace hooks (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry raises 422 NAMESPACE_CONFLICT through packages/spec/src/kernel/address-grammar.ts#validateNamespaceNotAddressLiteral; #NAMESPACE_REFUSED_LITERALS holds actions, connectors, global, hooks, oauth, runs and trigger)",
           "evidence": "the 422 body"
         },
         {
@@ -2698,6 +2717,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child P, the G1 install refusal and the build doors' refusal (#31765, #31959, #31968). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e and, after #31968 landed, at 0f7389cc; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-11",
+          "change": "the install-door clause's list of NAMESPACE_REFUSED_LITERALS gains runs: the inbound hook's namespace position now carries it (the run doors of a flow named hooks serve it there), so the same judge refuses it at the same three doors. Steps, fixtures and the other clauses are unchanged; read from source, no live run made",
+          "ref": "#32075"
         }
       ]
     },
@@ -2910,7 +2935,7 @@
       "title": "os deploy to a self-hosted runtime builds, previews the upgrade plan and installs: --dry-run prints the plan and installs nothing, --json writes one document to stdout with every human line on stderr, and an install that needs a confirmation says so and how",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2920,7 +2945,7 @@
         "app": "showcase",
         "requires": [
           "a showcase boot as the target runtime: `pnpm dev -- --fresh -p PORT --seed-admin`, and an osk_ admin key minted on it via POST /api/v1/keys",
-          "a scratch app directory outside examples/ holding a defineStack project (manifest id com.qa.deploy, version 1.0.0, one object qa_deploy_item with fields name and note) that `objectstack build` compiles; v1.1.0 of it drops the note field",
+          "a scratch app directory outside examples/ holding a defineStack project (manifest id com.qa.deploy, version 1.0.0, one object qa_deploy_item with fields name and note) that `objectstack build` compiles; v1.1.0 of it renames the note field to memo with no renamedFrom (note removed and memo added on one object: a suspected rename)",
           "`os environments use-runtime http://localhost:PORT --token osk_…` run once in the scratch directory, so os deploy targets the runtime"
         ]
       },
@@ -2928,7 +2953,7 @@
         "run `os deploy --dry-run` at v1.0.0; then GET /api/v1/packages",
         "run `os deploy --dry-run --json`, keeping stdout and stderr apart",
         "run `os deploy` (off a TTY); GET /api/v1/packages and the qa_deploy_item list",
-        "create two qa_deploy_item rows with a note; bump to v1.1.0; run `os deploy --dry-run`, then `os deploy --json` off a TTY"
+        "create two qa_deploy_item rows with a note; bump to v1.1.0 (note renamed memo); run `os deploy --dry-run`, then `os deploy --json` off a TTY"
       ],
       "acceptance": [
         {
@@ -2952,7 +2977,7 @@
         {
           "clause": "an upgrade that needs a confirmation is previewed as stopping, and refused off a TTY with the command that confirms it",
           "oracle": "log",
-          "verify": "the dry run warns 'Deploying this build would stop for your confirmation — N finding(s):' with the dropped field; the --json run exits non-zero with result 'refused', the runtime's refusal verbatim and confirm 'os deploy --confirm-upgrade FINDINGSET'; no question is asked off a TTY",
+          "verify": "the dry run warns 'Deploying this build would stop for your confirmation — 1 finding(s):' with the suspected rename (qa_deploy_item.note is removed while qa_deploy_item.memo is added, and no `renamedFrom` links them); the --json run exits non-zero with result 'refused', the runtime's 409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED refusal verbatim and confirm 'os deploy --confirm-upgrade FINDINGSET'; no question is asked off a TTY (packages/metadata-core/src/package-upgrade-verdict.ts#schemaUpgradeVerdict: a suspected rename, or a needs_confirm or destructive type change, stops; a removed field keeps its column and is refused by nothing)",
           "evidence": "both outputs and the exit codes"
         },
         {
@@ -2964,7 +2989,7 @@
       ],
       "negative": [
         "a dry run that installs, or a --json run whose stdout carries a human line, is a FAIL",
-        "an off-TTY run that waits on a question is a FAIL"
+        "an off-TTY run that waits on a question is a FAIL; a v1.1.0 that only drops a field is a fixture error, never a verdict: the field's column stays, so nothing asks for a confirmation and the --json run installs"
       ],
       "traps": [
         "stale-dist"
@@ -2985,6 +3010,12 @@
           "date": "2026-11-10",
           "change": "initial — os deploy to a self-hosted runtime: the plan, --dry-run and --json. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-13",
+          "change": "assertion-defect correction of acceptance[3] (with fixtures.requires[1], steps[3] and a negative). The fixture's v1.1.0 dropped the note field, and a removed field keeps its column, so the upgrade verdict finds nothing to confirm and the --json run installs (packages/metadata-core/src/package-upgrade-verdict.ts#schemaUpgradeVerdict). v1.1.0 now renames note to memo with no renamedFrom, a suspected rename, which the runtime stops with 409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED and the confirm command; the clause names that finding and that refusal. Found by the 18.4.0 acceptance run #32940 (F-4 to F-8 and its R4/R5 comments; wave anchor #32908). Re-read at main cf1b55c0. Card #32945",
+          "ref": "#32945"
         }
       ]
     },

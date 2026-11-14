@@ -21,7 +21,10 @@
 //    nothing a package holds stay null;
 //  - CONTROL: the administrator's resolved permissions answer byte-identically
 //    with the column null, filled, and forged to a package that holds nothing
-//    — no reader reads it;
+//    — no reader reads it. Since #32164 (F3) the engine refuses to write that
+//    forged value for every writer, a system column-only bind included, so the
+//    forge is asserted refused there and then written below the engine, as a
+//    raw write or an earlier release could leave it;
 //  - a further boot moves no row it bound (a forged value stays forged: a row
 //    that names a package is never a candidate) and rewrites nothing.
 
@@ -54,7 +57,11 @@ interface Engine {
     find(object: string, options?: unknown): Promise<Array<Record<string, unknown>>>;
     insert(object: string, data: unknown, options?: unknown): Promise<Record<string, unknown>>;
     update(object: string, data: unknown, options?: unknown): Promise<unknown>;
+    getDriverForObject(object: string): unknown;
 }
+
+/** The SQL driver's own query builder, for a write that must not pass the engine's hooks. */
+type Knex = (table: string) => { whereIn(column: string, values: unknown[]): { update(data: Record<string, unknown>): Promise<number> } };
 
 describe('security and sharing references name the package that holds them (SQL driver, one database file)', () => {
     let stack: VerifyStack | undefined;
@@ -154,10 +161,26 @@ describe('security and sharing references name the package that holds them (SQL 
     it('CONTROL: forged to a package that holds nothing, the column changes no answer, and a further boot neither moves it nor rewrites a bound row', async () => {
         const ql = await engine();
         const before = (await rowsOf('sys_user_permission_set', { permission_set: SHOWCASE_SET }))[0];
-        for (const g of await rowsOf('sys_user_permission_set', { user_id: admin.userId })) {
-            if (g.permission_set === SHOWCASE_SET) continue;
-            await ql.update('sys_user_permission_set', { id: g.id, permission_set_package: FORGED }, { context: SYSTEM_CTX });
+        const others = (await rowsOf('sys_user_permission_set', { user_id: admin.userId }))
+            .filter((g) => g.permission_set !== SHOWCASE_SET);
+        expect(others.length).toBeGreaterThan(0);
+        // [#32164 F3] The engine refuses the forge: a named package that does not
+        // hold the set is `409 RESOURCE_CONFLICT`, `not-held-by-qualifier`, for a
+        // system column-only bind too, and the row is left as it was.
+        for (const g of others) {
+            const refused = await ql
+                .update('sys_user_permission_set', { id: g.id, permission_set_package: FORGED }, { context: SYSTEM_CTX })
+                .then(() => undefined, (e: unknown) => e as { code?: string; refusal?: { status?: string; reason?: string } });
+            expect([refused?.code, refused?.refusal?.status, refused?.refusal?.reason], String(g.permission_set))
+                .toEqual(['RESOURCE_CONFLICT', 'refused', 'not-held-by-qualifier']);
         }
+        const unchanged = (await rowsOf('sys_user_permission_set', { user_id: admin.userId }))
+            .filter((g) => g.permission_set !== SHOWCASE_SET);
+        expect(unchanged.map((g) => g.permission_set_package)).toEqual(others.map((g) => g.permission_set_package));
+        // So the forged value is written below the engine, straight through the driver.
+        const knex = (ql.getDriverForObject('sys_user_permission_set') as { knex: Knex }).knex;
+        expect(await knex('sys_user_permission_set').whereIn('id', others.map((g) => g.id)).update({ permission_set_package: FORGED }))
+            .toBe(others.length);
         await restart();
 
         expect(await adminPermissions()).toBe(permissionsAtFirstBoot);

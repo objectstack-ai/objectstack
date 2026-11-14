@@ -133,9 +133,20 @@ export async function handleAuthRequest(deps: DomainHandlerDeps, _path: string, 
         // failures with a `Response` rather than by throwing (the reason
         // `AuthPlugin`'s wildcard logs >=500 responses proactively), so a real
         // 401/403/404/422 is still returned below with its own body untouched.
+        // [#32637] With the transport's peer, the way this dispatcher's identity
+        // step reads it (`IHttpRequest.remoteAddress` on `context.request`): the
+        // auth service establishes the request's client address from it under
+        // its own trust rule, and its mount-layer checks judge by that address.
+        // A Fetch `Request` carries none, which is "no peer", never a value
+        // made up here. `IAuthService.handleRequest` declares the request alone;
+        // `AuthManager`'s takes the transport as an optional second argument,
+        // and a one-parameter implementation ignores it.
+        const handle: (request: Request, transport?: { remoteAddress?: string }) => Promise<Response> =
+            authService.handleRequest.bind(authService);
+        const remoteAddress = remoteAddressOf(context.request);
         let response: Response;
         try {
-            response = await authService.handleRequest(context.request as Request);
+            response = await handle(context.request as Request, remoteAddress ? { remoteAddress } : {});
         } catch (err) {
             const logger = deps.logger ?? console;
             logger?.error?.(
@@ -178,4 +189,10 @@ export async function handleAuthRequest(deps: DomainHandlerDeps, _path: string, 
     // 404 on sign-in sends the operator hunting for a routing bug — without
     // the lie it used to answer that concern.
     return { handled: true, response: deps.error('Auth service not available — register @objectstack/plugin-auth to enable authentication', 501) };
+}
+
+/** The transport's peer address (`IHttpRequest.remoteAddress`), when the request carries one. */
+function remoteAddressOf(request: unknown): string | undefined {
+    const address = (request as { remoteAddress?: unknown } | undefined)?.remoteAddress;
+    return typeof address === 'string' && address ? address : undefined;
 }

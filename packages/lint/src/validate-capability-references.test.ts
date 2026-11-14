@@ -184,6 +184,60 @@ describe('validateCapabilityReferences (ADR-0066 ⑨)', () => {
     });
   });
 
+  // [#32575] The runtime folds the grants of every held set, whichever package
+  // declared it, so a gate in one package of an artifact is satisfied by a
+  // grant in a sibling. The per-package author-time pass hands this rule one
+  // package body plus the artifact's `packages[]` (the CLI's
+  // `packageBodyAsStack`: `{ ...body, manifest: body, packages }`) — that exact
+  // shape is built here.
+  describe('providers over the artifact being built — a sibling package provides', () => {
+    const marketing = {
+      id: 'com.acme.marketing',
+      apps: [{ name: 'crm_marketing', label: 'Marketing', requiredPermissions: ['crm_marketing_app'] }],
+    };
+    const appPackage = {
+      id: 'com.acme.app',
+      permissions: [{ name: 'marketing_user', systemPermissions: ['crm_marketing_app'] }],
+    };
+    const asPackageStack = (body: Record<string, unknown>, siblings: Array<Record<string, unknown>>) =>
+      ({ ...body, manifest: body, packages: siblings.map((manifest) => ({ manifest })) });
+
+    it('passes a capability one package requires and a sibling package grants via systemPermissions', () => {
+      expect(validateCapabilityReferences(asPackageStack(marketing, [marketing, appPackage]))).toEqual([]);
+    });
+
+    it('passes a capability a sibling package declares via defineCapability', () => {
+      const declaring = { id: 'com.acme.caps', capabilities: [{ name: 'crm_marketing_app', label: 'Marketing', scope: 'org' }] };
+      expect(validateCapabilityReferences(asPackageStack(marketing, [marketing, declaring]))).toEqual([]);
+    });
+
+    it('still warns on a capability no package of the artifact provides — the gate does fail closed', () => {
+      const typo = {
+        id: 'com.acme.marketing',
+        apps: [
+          { name: 'crm_marketing', requiredPermissions: ['crm_marketing_app'] },
+          { name: 'crm_campaigns', requiredPermissions: ['crm_markting_app'] },
+        ],
+      };
+      const findings = validateCapabilityReferences(asPackageStack(typo, [typo, appPackage]));
+      expect(findings.map((f) => [f.rule, f.severity, f.where, f.path])).toEqual([
+        [CAPABILITY_REFERENCE_UNKNOWN, 'warning', 'app "crm_campaigns"', 'apps[1].requiredPermissions'],
+      ]);
+      expect(findings[0].message).toContain('"crm_markting_app"');
+    });
+
+    it('reads siblings for resolution only — a sibling\'s own references are not judged here', () => {
+      const siblingWithTypo = {
+        ...appPackage,
+        apps: [{ name: 'crm_admin', requiredPermissions: ['crm_admn_app'] }],
+      };
+      expect(validateCapabilityReferences(asPackageStack(marketing, [marketing, siblingWithTypo]))).toEqual([]);
+      // Lit control: the same sibling judged as its own package stack reports it.
+      expect(validateCapabilityReferences(asPackageStack(siblingWithTypo, [marketing, siblingWithTypo]))
+        .map((f) => f.path)).toEqual(['apps[0].requiredPermissions']);
+    });
+  });
+
   it('does NOT flag systemPermissions itself (the declaration side)', () => {
     // A package introduces a new capability by GRANTING it — never a warning.
     const findings = validateCapabilityReferences({
@@ -225,6 +279,7 @@ describe('[#22161] one-line verdicts — capability-reference-unknown', () => {
       'each flow\'s',
       'a dashboard',
       'other installed packages',
+      'every package of the artifact being built',
     ]) {
       expect(text, `explanation names ${fact}`).toContain(fact);
     }
@@ -242,6 +297,9 @@ describe('[#22161] one-line verdicts — capability-reference-unknown', () => {
     for (const source of [
       { capabilities: [{ name: 'approve_invoice', label: 'Approve', scope: 'org' }] },
       { permissions: [{ name: 'p', systemPermissions: ['approve_invoice'] }] },
+      // The same two sources, read off a sibling package of the artifact.
+      { packages: [{ manifest: { id: 'sib', permissions: [{ name: 'p', systemPermissions: ['approve_invoice'] }] } }] },
+      { packages: [{ manifest: { id: 'sib', capabilities: [{ name: 'approve_invoice', label: 'Approve', scope: 'org' }] } }] },
     ]) {
       expect(validateCapabilityReferencesUnrecorded({ ...gated, ...source }), JSON.stringify(source)).toEqual([]);
     }

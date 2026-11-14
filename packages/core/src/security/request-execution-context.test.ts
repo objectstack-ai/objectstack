@@ -31,6 +31,7 @@ const GUEST_SET = 'storefront_reader';
 const KEY = 'osk_request_ctx_key';
 const EX_MEMBER_KEY = 'osk_request_ctx_ex_member';
 const REVOKED_KEY = 'osk_request_ctx_revoked';
+const ORGLESS_KEY = 'osk_request_ctx_orgless';
 const COOKIE = 'better-auth.session_token=tok3n.c2ln';
 const FUTURE = '2999-01-01T00:00:00Z';
 
@@ -54,6 +55,10 @@ function fakeEngine() {
       // Stamped with ORG; its owner is a member of no organization.
       { id: 'k_ex', key: hashApiKey(EX_MEMBER_KEY), revoked: false, user_id: 'u_ex', active_organization_id: ORG, expires_at: FUTURE },
       { id: 'k_revoked', key: hashApiKey(REVOKED_KEY), revoked: true, user_id: 'u_key', expires_at: FUTURE },
+      // Carries no organization; its owner is a current member. Refused only
+      // under the `isolated` posture (`organization_required`), so it is what
+      // tells a read posture from an unread one.
+      { id: 'k_orgless', key: hashApiKey(ORGLESS_KEY), revoked: false, user_id: 'u_key', expires_at: FUTURE },
     ],
     sys_member: [
       { user_id: 'u_key', organization_id: ORG, role: 'member' },
@@ -249,12 +254,21 @@ describe('credentials and sessionApi', () => {
 });
 
 describe('tenancy — the classification of the door\'s own resolution', () => {
-  it('undefined reads no posture; a walled posture refuses the key its owner no longer backs', async () => {
+  it('undefined reads no posture; a walled posture refuses the key that carries no organization', async () => {
     const { engine } = fakeEngine();
-    const noPosture = await resolveRequestExecutionContext(input({ ql: engine, headers: keyHeaders(EX_MEMBER_KEY) }));
-    expect(noPosture).toMatchObject({ userId: 'u_ex', tenantId: ORG });
-    const walled = await resolveRequestExecutionContext(input({ ql: engine, headers: keyHeaders(EX_MEMBER_KEY), tenancy: () => ({ posture: 'isolated' as const }) }));
+    const noPosture = await resolveRequestExecutionContext(input({ ql: engine, headers: keyHeaders(ORGLESS_KEY) }));
+    expect(noPosture).toMatchObject({ userId: 'u_key' });
+    const walled = await resolveRequestExecutionContext(input({ ql: engine, headers: keyHeaders(ORGLESS_KEY), tenancy: () => ({ posture: 'isolated' as const }) }));
     expect(walled).toBeUndefined();
+  });
+
+  it('[ADR-0093 D8.1, as amended] a key its owner\'s membership no longer backs is refused with or without a posture', async () => {
+    const { engine } = fakeEngine();
+    for (const tenancy of [undefined, () => ({ posture: 'single' as const }), () => ({ posture: 'isolated' as const })]) {
+      expect(await resolveRequestExecutionContext(input({ ql: engine, headers: keyHeaders(EX_MEMBER_KEY), ...(tenancy ? { tenancy } : {}) }))).toBeUndefined();
+      // CONTROL — the key a current member owns is admitted in its organization.
+      expect(await resolveRequestExecutionContext(input({ ql: engine, headers: keyHeaders(KEY), ...(tenancy ? { tenancy } : {}) }))).toMatchObject({ userId: 'u_key', tenantId: ORG });
+    }
   });
 
   it('a service never registered is quiet; one that failed to build is the 503 outage', async () => {
@@ -263,10 +277,10 @@ describe('tenancy — the classification of the door\'s own resolution', () => {
     const { engine } = fakeEngine();
 
     const unregistered = new ObjectKernel({ logger: { level: 'error' }, gracefulShutdown: false, skipSystemValidation: true });
-    const quiet = await resolveRequestExecutionContext(input({ ql: engine, headers: keyHeaders(EX_MEMBER_KEY), tenancy: () => unregistered.getServiceAsync('tenancy') as never }));
-    expect(quiet?.userId).toBe('u_ex');
+    const quiet = await resolveRequestExecutionContext(input({ ql: engine, headers: keyHeaders(ORGLESS_KEY), tenancy: () => unregistered.getServiceAsync('tenancy') as never }));
+    expect(quiet?.userId).toBe('u_key');
 
-    const err = await rejectionOf(resolveRequestExecutionContext(input({ ql: engine, headers: keyHeaders(EX_MEMBER_KEY), tenancy: () => kernel.getServiceAsync('tenancy') as never })));
+    const err = await rejectionOf(resolveRequestExecutionContext(input({ ql: engine, headers: keyHeaders(ORGLESS_KEY), tenancy: () => kernel.getServiceAsync('tenancy') as never })));
     expect(isAuthzStoreUnavailableError(err)).toBe(true);
     expect(err?.code).toBe('SERVICE_UNAVAILABLE');
     expect(err?.status).toBe(503);

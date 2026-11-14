@@ -88,7 +88,11 @@
  */
 
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
-import { admitInboundHookAddress, inboundHookRefusalResponse, type InboundHookRouteMatch } from '@objectstack/core';
+import {
+    admitInboundHookAddress,
+    inboundHookRefusalResponse,
+    type InboundHookRouteMatch,
+} from '@objectstack/core';
 import { automationAddressRegistryOf } from './automation-address.js';
 import type { ITriggerApiService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -110,6 +114,34 @@ function decodeHookSegment(segment: string): string {
     }
 }
 
+/** [ADR-0150 D5, #31696] What the engine's `inboundHookSlot` answers (the trigger plugin reads the same). */
+type InboundHookSlotAnswer =
+    | { readonly status: 'served'; readonly key: string }
+    | { readonly status: 'unadmitted' }
+    | { readonly status: 'refused'; readonly candidates: readonly unknown[] };
+
+/**
+ * [#31696] The `trigger-api` service's slot door, beside the contract's
+ * member: the hook armed under a slot's key, served as `handleInboundHook`
+ * serves a name. Not on the contract: only this route calls it, and only for
+ * a slot the engine routed a qualified address to.
+ */
+interface InboundHookSlotDoor {
+    handleInboundSlotHook?(request: Request, hook: { readonly key: string; readonly hookId: string }): Promise<Response>;
+}
+
+/** The slice of the request kernel's automation engine the hook's address reads. */
+interface InboundHookEngine {
+    packagedFlowOwner?(name: string): string | undefined;
+    inboundHookSlot?(
+        flowName: string,
+        address?: { readonly qualifier: string; readonly namespaceOwners: readonly string[] },
+    ): InboundHookSlotAnswer | undefined;
+}
+
+/** The slice of the registry the hook's address reads: the namespace table. */
+type InboundHookRegistry = NonNullable<ReturnType<typeof automationAddressRegistryOf>>;
+
 /**
  * [ADR-0150 D5, child G1] Does the qualified hook's qualifier name the package
  * that ships its flow? The engine's own read (`packagedFlowOwner`) and the
@@ -117,26 +149,25 @@ function decodeHookSegment(segment: string): string {
  * one predicate — the one the self-hosted mount asks. A kernel that cannot
  * answer either read admits no namespace (`_env` then reads "no package").
  */
-async function isInboundHookAddressAdmitted(
-    deps: DomainHandlerDeps,
-    context: HttpProtocolContext,
+function isInboundHookAddressAdmitted(
+    engine: InboundHookEngine | undefined,
     qualifier: string,
     flowName: string,
-): Promise<boolean> {
-    const engine = await deps.resolveService(context, 'automation', context.environmentId) as
-        { packagedFlowOwner?(name: string): string | undefined } | undefined;
-    let registry: ReturnType<typeof automationAddressRegistryOf>;
-    try {
-        registry = typeof deps.getObjectQL === 'function' ? automationAddressRegistryOf(await deps.getObjectQL(context)) : undefined;
-    } catch {
-        registry = undefined;
-    }
+    namespaceOwners: readonly string[],
+): boolean {
     if (!engine || typeof engine.packagedFlowOwner !== 'function') return false;
-    return admitInboundHookAddress({
-        qualifier,
-        flowOwner: engine.packagedFlowOwner(flowName),
-        namespaceOwners: typeof registry?.getNamespaceOwners === 'function' ? registry.getNamespaceOwners(qualifier) ?? [] : [],
-    });
+    return admitInboundHookAddress({ qualifier, flowOwner: engine.packagedFlowOwner(flowName), namespaceOwners });
+}
+
+/** The request kernel's registry, or `undefined` when it holds none that can answer. */
+async function inboundHookRegistry(deps: DomainHandlerDeps, context: HttpProtocolContext): Promise<InboundHookRegistry | undefined> {
+    try {
+        return typeof deps.getObjectQL === 'function'
+            ? automationAddressRegistryOf(await deps.getObjectQL(context)) as InboundHookRegistry | undefined
+            : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 /**
@@ -203,29 +234,40 @@ export async function handleInboundHookRequest(
     // consumed-body 500 above is asked first for the same reason). So neither
     // the answer nor its timing tells an installed namespace from another. The
     // cause goes to the server log only.
+    //
+    // [#31696] THE SLOT OF A NAME TWO PACKAGES HOLD. Its hook is armed under
+    // the slot's key (`PACKAGE/NAME`) and reached only by its qualified
+    // address: the request kernel's engine says which slot a qualified
+    // address reaches (`inboundHookSlot`), and the slot's hook is served by
+    // the member's slot door (`handleInboundSlotHook`), handed the key. An
+    // address no slot answers, a slot key in its name position included, is
+    // the same one refusal, once the body is read. The bare route is
+    // untouched: the member refuses a slot key there, and the bare hook of a
+    // name two packages hold with the same one refusal, its cause logged
+    // (`shared-name`). Any other name is judged as before.
+    const flowName = decodeHookSegment(hook.flowName);
+    const hookId = decodeHookSegment(hook.hookId);
     if (hook.qualifier !== undefined) {
-        const flowName = decodeHookSegment(hook.flowName);
         const qualifier = decodeHookSegment(hook.qualifier);
-        if (!(await isInboundHookAddressAdmitted(deps, context, qualifier, flowName))) {
+        const engine = await deps.resolveService(context, 'automation', context.environmentId) as InboundHookEngine | undefined;
+        const registry = await inboundHookRegistry(deps, context);
+        const namespaceOwners = typeof registry?.getNamespaceOwners === 'function' ? registry.getNamespaceOwners(qualifier) ?? [] : [];
+        const slot = typeof engine?.inboundHookSlot === 'function' ? engine.inboundHookSlot(flowName, { qualifier, namespaceOwners }) : undefined;
+        if (slot?.status === 'served' && typeof (service as InboundHookSlotDoor).handleInboundSlotHook === 'function') {
+            const door = service as InboundHookSlotDoor;
             try {
-                await request.text();
+                return { handled: true, result: await door.handleInboundSlotHook!(request, Object.freeze({ key: slot.key, hookId })) };
             } catch (err) {
                 return memberFaultAnswer(deps, logger, err);
             }
-            logger?.warn?.(
-                '[automation-hooks] refused an inbound post (unadmitted-address): its qualifier (a namespace, or '
-                + '`_env`) does not name the package that ships the flow it names (ADR-0150 D5). The sender got the '
-                + 'one answer every unverified post gets; this line is the only record of the cause.',
-                { cause: 'unadmitted-address', flowName, qualifier },
-            );
-            return { handled: true, result: inboundHookRefusalResponse() };
+        }
+        // A slot the member has no door for (a trigger older than the engine) is refused, never served by name.
+        if (slot !== undefined || !isInboundHookAddressAdmitted(engine, qualifier, flowName, namespaceOwners)) {
+            return refuseUnaddressed(request, deps, logger, flowName, qualifier);
         }
     }
 
-    const params = Object.freeze({
-        flowName: decodeHookSegment(hook.flowName),
-        hookId: decodeHookSegment(hook.hookId),
-    });
+    const params = Object.freeze({ flowName, hookId });
     try {
         return { handled: true, result: await service.handleInboundHook(request, params) };
     } catch (err) {
@@ -235,6 +277,32 @@ export async function handleInboundHookRequest(
         // original error goes to the server log.
         return memberFaultAnswer(deps, logger, err);
     }
+}
+
+/**
+ * [ADR-0150 D5] The door's one refusal for an address that names no flow's
+ * hook, answered once the body has been read in full (see the qualified hook
+ * note), its cause logged only.
+ */
+async function refuseUnaddressed(
+    request: Request,
+    deps: DomainHandlerDeps,
+    logger: DomainHandlerDeps['logger'],
+    flowName: string,
+    qualifier: string,
+): Promise<HttpDispatcherResult> {
+    try {
+        await request.text();
+    } catch (err) {
+        return memberFaultAnswer(deps, logger, err);
+    }
+    logger?.warn?.(
+        '[automation-hooks] refused an inbound post (unadmitted-address): its qualifier (a namespace, or '
+        + '`_env`) does not name the package that ships the flow it names (ADR-0150 D5). The sender got the '
+        + 'one answer every unverified post gets; this line is the only record of the cause.',
+        { cause: 'unadmitted-address', flowName, qualifier },
+    );
+    return { handled: true, result: inboundHookRefusalResponse() };
 }
 
 /**

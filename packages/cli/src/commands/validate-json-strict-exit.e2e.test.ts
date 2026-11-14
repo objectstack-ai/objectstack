@@ -220,6 +220,43 @@ export default defineStack({
 }, { strict: false });
 `;
 
+/**
+ * The severity minimal pair — `CLEAN_SOURCE`'s shape plus ONE registry finding,
+ * graded `info` in one member and `warning` in the other:
+ *
+ *  - `info`: a permission set granting `allowRead` on the private object with no
+ *    `readScope` (`security-private-no-readscope`, an `info` finding);
+ *  - `warning`: a tool declaring the `experimental` `outputSchema` key (a
+ *    `warning` finding).
+ *
+ * Both are registry findings that ride the payload's `warnings`, so the pair
+ * discriminates on the SEVERITY and not on which list a finding sits in; each
+ * member's payload is pinned to exactly one entry of its severity below.
+ */
+const severityPairSource = (finding: 'info' | 'warning'): string => `
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
+  manifest: { id: 'com.example.strictexit', name: 'strictexit', version: '1.0.0', type: 'app', namespace: 'strictexit' },
+  objects: [{
+    name: 'strictexit_ticket',
+    label: 'Ticket',
+    sharingModel: 'private',
+    fields: { title: { type: 'text', label: 'Title' } },
+  }],
+  apps: [{ name: 'strictexit_app', label: 'Strict Exit App' }],
+${finding === 'info'
+    ? `  permissions: [{ name: 'strictexit_reader', label: 'Reader', objects: { strictexit_ticket: { allowRead: true } } }],`
+    : `  tools: [{
+    name: 'strictexit_lookup',
+    label: 'Lookup',
+    description: 'Look up a ticket',
+    parameters: { type: 'object', properties: {} },
+    outputSchema: { type: 'object' },
+  }],`}
+}, { strict: false });
+`;
+
 interface Run {
   code: number;
   stdout: string;
@@ -251,6 +288,8 @@ let warnsDir: string;
 let cleanDir: string;
 let conversionsDir: string;
 let conversionsCanonDir: string;
+let infoOnlyDir: string;
+let warningOnlyDir: string;
 
 beforeAll(() => {
   warnsDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-warns-'));
@@ -265,6 +304,12 @@ beforeAll(() => {
   conversionsCanonDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-conversions-canon-'));
   writeFileSync(join(conversionsCanonDir, 'objectstack.config.ts'), calloutFlowSource('http'));
   linkSpec(conversionsCanonDir);
+  infoOnlyDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-info-only-'));
+  writeFileSync(join(infoOnlyDir, 'objectstack.config.ts'), severityPairSource('info'));
+  linkSpec(infoOnlyDir);
+  warningOnlyDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-warning-only-'));
+  writeFileSync(join(warningOnlyDir, 'objectstack.config.ts'), severityPairSource('warning'));
+  linkSpec(warningOnlyDir);
 });
 
 afterAll(() => {
@@ -272,6 +317,8 @@ afterAll(() => {
   rmSync(cleanDir, { recursive: true, force: true });
   rmSync(conversionsDir, { recursive: true, force: true });
   rmSync(conversionsCanonDir, { recursive: true, force: true });
+  rmSync(infoOnlyDir, { recursive: true, force: true });
+  rmSync(warningOnlyDir, { recursive: true, force: true });
 });
 
 describe('#11174 — --strict reaches the same exit status on both faces', () => {
@@ -402,4 +449,55 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
     const json = await runCli(['validate', '--json'], warnsDir);
     expect(json.code, `--json without --strict must stay 0:\n${json.stdout}\n${json.stderr}`).toBe(0);
   }, 120_000);
+});
+
+describe('--strict promotes warnings; an info finding stays advisory on both faces', () => {
+  const STRICT_VERDICT = 'Strict mode: warnings treated as errors';
+  type Payload = { valid?: unknown; warnings?: Array<{ severity?: unknown; rule?: unknown }> };
+
+  it('an info-only stack exits 0 under --strict on both faces, still reports the finding, and claims no strict verdict', async () => {
+    const text = await runCli(['validate', '--strict'], infoOnlyDir);
+    const json = await runCli(['validate', '--json', '--strict'], infoOnlyDir);
+
+    // Anti-vacuity: the member raises exactly one finding, and it is `info`.
+    const payload = JSON.parse(json.stdout) as Payload;
+    expect(
+      (payload.warnings ?? []).map((w) => ({ severity: w.severity, rule: w.rule })),
+      'the info member raises one info finding and nothing else',
+    ).toEqual([{ severity: 'info', rule: 'security-private-no-readscope' }]);
+
+    expect(text.code, `text --strict:\n${text.stdout}\n${text.stderr}`).toBe(0);
+    expect(json.code, `json --strict:\n${json.stdout}\n${json.stderr}`).toBe(0);
+    expect(payload.valid).toBe(true);
+
+    // Printed, under the advisory glyph, and no verdict is claimed.
+    expect(text.stdout).toMatch(/ℹ .*readScope/);
+    expect(text.stdout, 'an info finding never wears the warning glyph').not.toMatch(/⚠ .*readScope/);
+    expect(text.stdout, 'no strict verdict was made, so none may be claimed').not.toContain(STRICT_VERDICT);
+  }, 120_000);
+
+  it('a warning-only stack exits 1 under --strict on both faces, naming the verdict', async () => {
+    const text = await runCli(['validate', '--strict'], warningOnlyDir);
+    const json = await runCli(['validate', '--json', '--strict'], warningOnlyDir);
+
+    // Anti-vacuity: the member raises exactly one finding, and it is a `warning`.
+    const payload = JSON.parse(json.stdout) as Payload;
+    const findings = payload.warnings ?? [];
+    expect(findings.map((w) => w.severity), 'the warning member raises one warning and nothing else').toEqual(['warning']);
+
+    expect(text.code, `text --strict:\n${text.stdout}\n${text.stderr}`).toBe(1);
+    expect(json.code, `json --strict:\n${json.stdout}\n${json.stderr}`).toBe(1);
+    expect(payload.valid).toBe(true);
+    expect(text.stdout).toMatch(/⚠ .*outputSchema/);
+    expect(text.stdout).toContain(STRICT_VERDICT);
+  }, 120_000);
+
+  it('without --strict, both members exit 0 on both faces', async () => {
+    for (const dir of [infoOnlyDir, warningOnlyDir]) {
+      const text = await runCli(['validate'], dir);
+      expect(text.code, `text:\n${text.stdout}\n${text.stderr}`).toBe(0);
+      const json = await runCli(['validate', '--json'], dir);
+      expect(json.code, `json:\n${json.stdout}\n${json.stderr}`).toBe(0);
+    }
+  }, 240_000);
 });

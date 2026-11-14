@@ -37,6 +37,7 @@
     "driver-sqlite",
     "driver-turso",
     "field-value",
+    "hook-body-doors",
     "picklist",
     "recycle-bin",
     "seed-file"

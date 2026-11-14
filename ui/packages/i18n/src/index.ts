@@ -165,12 +165,16 @@ export { LocalizationProvider, useLocalization, type LocalizationValue } from '.
 export {
   resolveFieldCurrency,
   recordCurrencyField,
+  recordCurrencyPath,
+  recordCurrencyReadField,
+  withFollowedParent,
   homeAmountSourceOf,
   withHomeAmountSource,
   readHomeAmountSource,
   HOME_AMOUNT_SOURCE_KEY,
   type FieldCurrencyConfig,
   type HomeAmountSource,
+  type RecordCurrencyPath,
 } from './currency.js';
 
 // The one number-display formatter (objectui#4033) and the locale it formats

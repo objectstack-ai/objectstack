@@ -154,3 +154,27 @@ describe('R20 — a legacy email template row gains the package that holds its t
         });
     });
 });
+
+describe('#32183 — a binding never moves with a reversible disable: the backfill judges every holder', () => {
+    it('a name two packages hold stays refused while one of them is disabled, and a disabled sole holder still binds', async () => {
+        registry.disablePackage(B);
+        registry.registerItem('email_template', { name: 'beta_only', label: 'b', subject: 'b', body: 'b', locale: 'en-US', _packageId: B }, 'name' as never, B);
+        // [contract review S2] The reverse registration order: the disabled holder first.
+        for (const id of [B, A]) {
+            registry.registerItem('email_template', { name: 'reversed_notice', label: 'r', subject: 'r', body: 'r', locale: 'en-US', _packageId: id }, 'name' as never, id);
+        }
+        const engine = await boot();
+        await seed(engine);
+        await engine.insert('sys_email_template', row('t8', 'beta_only'), { context: SYS_ORG });
+        await engine.insert('sys_email_template', row('t9', 'reversed_notice'), { context: SYS_ORG });
+
+        const report = await backfillTemplatePackages(engine, registry);
+
+        expect(report.ambiguous).toEqual([
+            { name: 'shared_notice', rows: 1, candidates: [`package "${A}"`, `package "${B}"`] },
+            { name: 'reversed_notice', rows: 1, candidates: [`package "${B}"`, `package "${A}"`] },
+        ]);
+        expect(report.bound).toContainEqual({ name: 'beta_only', rows: 1, packageId: B });
+        expect((await packages(engine)).t4).toBeNull();
+    });
+});

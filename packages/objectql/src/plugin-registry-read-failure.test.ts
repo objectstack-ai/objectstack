@@ -169,7 +169,7 @@ function makePlugin(objects: ServiceObject[], driver?: unknown) {
   for (const obj of objects) engine.registerObject(obj as any);
   const plugin = new ObjectQLPlugin();
   (plugin as any).ql = engine;
-  return { rec, engine, plugin, ctx: { logger: rec.logger } as any };
+  return { rec, engine, plugin, ctx: { logger: rec.logger, trigger: async () => {} } as any };
 }
 
 // ───────────────────────────────────────────────────────────────────────────

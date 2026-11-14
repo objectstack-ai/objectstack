@@ -791,3 +791,59 @@ describe('sys_metadata overlay key — the bundle member part (#22877)', () => {
         expect(msg).toContain('restart');
     });
 });
+
+/**
+ * [#32540, ADR-0150 D4/D6; ruling C1/C4] `@objectstack/metadata`'s
+ * `DatabaseLoader` keeps a row per binding of one package's action name: an
+ * object-bound action row names its object in `bundle_member`, an object-less
+ * one leaves it NULL. The column is shared, the reading is the action's own —
+ * ⛔ `action` is not an `ITEM_KEY_DISCRIMINATORS` type. So:
+ *
+ *  - the real index (this module's DDL) holds the bindings as distinct rows
+ *    with no DDL change, and still refuses a second row of one binding;
+ *  - this package's member readers never read an action row's member: the
+ *    repository's member predicate (`overlayMemberValue`), the body reading
+ *    (`overlayMemberOfBody`) and the pre-column backfill
+ *    (`backfillOverlayBundleMembers`) all answer "no member" for `action`.
+ */
+describe('sys_metadata overlay key — an action\'s bound object in `bundle_member` (#32540)', () => {
+    let db: DatabaseSync;
+    beforeEach(() => {
+        db = new DatabaseSync(':memory:');
+        db.exec(`CREATE TABLE sys_metadata (
+            id TEXT PRIMARY KEY, type TEXT, name TEXT,
+            organization_id TEXT, package_id TEXT, state TEXT, bundle_member TEXT, metadata TEXT
+        );`);
+    });
+    afterEach(() => db.close());
+    const insert = (id: string, member: string | null, objectName?: string) => {
+        try {
+            db.prepare(
+                'INSERT INTO sys_metadata (id, type, name, organization_id, package_id, state, bundle_member, metadata) VALUES (?,?,?,?,?,?,?,?)',
+            ).run(id, 'action', 'digest', null, 'com.acme.alpha', 'active', member, JSON.stringify({ name: 'digest', ...(objectName ? { objectName } : {}) }));
+            return 'ok';
+        } catch (e) {
+            return e instanceof Error ? e.message : String(e);
+        }
+    };
+
+    it('the index holds one package\'s bindings on o1, o2 and object-less as three rows, and refuses a second row of one binding', async () => {
+        await ensureMetadataOverlayIndexes(async (sql: string) => db.exec(sql));
+        expect([insert('a-o1', 'o1', 'o1'), insert('a-o2', 'o2', 'o2'), insert('a-global', null)]).toEqual(['ok', 'ok', 'ok']);
+        expect(insert('a-o1-again', 'o1', 'o1')).toContain('UNIQUE constraint failed');
+        expect(insert('a-global-again', null)).toContain('UNIQUE constraint failed');
+    });
+
+    it('no member reader of this package reads an action row\'s member: the predicate, the body reading and the backfill answer none', async () => {
+        expect(overlayMemberValue('action', 'o1')).toBeUndefined();
+        expect(overlayMemberOfBody('action', { name: 'digest', objectName: 'o1' })).toBeUndefined();
+        expect(overlayMemberWhere('action', 'o1')).toEqual(overlayMemberWhere('action', undefined));
+        insert('legacy', null, 'o1');
+        const updates: unknown[] = [];
+        await backfillOverlayBundleMembers({
+            find: async (table: string, options: any) => db.prepare(`SELECT * FROM ${table} WHERE type = ?`).all(options.where.type) as any[],
+            update: async (_table: string, data: Record<string, unknown>) => { updates.push(data); return {}; },
+        } as unknown as OverlayMemberBackfillEngine);
+        expect(updates, 'the backfill leaves an action row\'s member to its writer').toEqual([]);
+    });
+});

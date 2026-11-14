@@ -119,7 +119,7 @@ type Row = Record<string, unknown>;
 interface DatasetResultTotals { dimensions: string[]; rows: Row[] }
 interface DatasetResult { rows: Row[]; fields?: DatasetResultField[]; object?: string; dimensionFields?: Record<string, string>; drillRawRows?: Row[]; drillRanges?: Array<Record<string, DatasetDrillRange>>; totals?: DatasetResultTotals[]; drillScopes?: Record<string, unknown> }
 interface DatasetCapableSource {
-  queryDataset?: (dataset: string, selection: unknown, options?: { packageId?: string }) => Promise<DatasetResult>;
+  queryDataset?: (dataset: string, selection: unknown, options?: { callerPackage?: string }) => Promise<DatasetResult>;
 }
 
 /**
@@ -683,11 +683,13 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   heading?: DatasetMetricHeading;
   /**
    * The package of the dashboard this widget belongs to, as served
-   * (`servedPackageId` of the dashboard document, ADR-0150 D5). The widget's
-   * `dataset` was authored against it, so the query names it as `?package=`.
-   * Absent for a dashboard authored in the environment: the query then sends
-   * the bare name, and a name two packages hold is refused with the server's
-   * sentence naming both, which the error state shows as it came.
+   * (`servedPackageId` of the dashboard document). The widget's `dataset` was
+   * authored against it, so the query names it as the reader's package,
+   * `callerPackage` (ADR-0150 D3): the server reads the dashboard's own
+   * dataset, else the unique holder in its dependency closure plus `sys`, else
+   * refuses `409` naming the candidates. Absent for a dashboard authored in
+   * the environment: the query then sends the bare name. A refusal is shown as
+   * the server's sentence and never retried bare.
    */
   packageId?: string;
   /**
@@ -984,7 +986,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
       ...(dateGranularity ? { dateGranularity } : {}),
       ...(order ? { order } : {}),
       ...(limit != null ? { limit } : {}),
-    }, ...(packageId ? [{ packageId }] : []))
+    }, ...(packageId ? [{ callerPackage: packageId }] : []))
       .then((res) => {
         if (cancelled) return;
         setState({ status: 'ok', rows: Array.isArray(res?.rows) ? res.rows : [], fields: Array.isArray(res?.fields) ? res.fields : [], object: res?.object, dimensionFields: res?.dimensionFields, drillRawRows: Array.isArray(res?.drillRawRows) ? res.drillRawRows : undefined, drillRanges: Array.isArray(res?.drillRanges) ? res.drillRanges : undefined, totals: Array.isArray(res?.totals) ? res.totals : undefined, drillScopes: res?.drillScopes, signature });

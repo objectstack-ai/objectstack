@@ -23,6 +23,9 @@ import type { TranslateFn } from '@object-ui/i18n';
  * copy sends the person to an administrator instead of promising a reset that
  * cannot arrive. Absent (an older server, or a config not read yet) keeps the
  * reset promise, as the forgot-password form does.
+ *
+ * A key spelled `CODE:cause` answers a refusal whose body names that cause in
+ * `details.cause`; `LoginForm` tries it before the bare code (objectstack#32432).
  */
 export interface SignInRefusalContext {
   emailDelivery?: boolean;
@@ -47,6 +50,13 @@ export function signInRefusalMessages(
           }),
     EMAIL_NOT_VERIFIED: t('auth.login.errors.emailNotVerified', {
       defaultValue: 'Please verify your email address before signing in.',
+    }),
+    // objectstack#32432 — the account's identity provider deactivated it
+    // through SCIM: plugin-auth answers better-auth's `BANNED_USER` with
+    // `details.cause: 'scim_deactivated'`. An administrator's ban has no
+    // cause and keeps the server's own wording.
+    'BANNED_USER:scim_deactivated': t('auth.login.errors.accountDeactivated', {
+      defaultValue: 'Your account has been deactivated by your organization. Contact your administrator.',
     }),
     // objectstack#29105 — refusals of the two-factor step (better-auth's
     // `twoFactor()` codes). A wrong code is shown on the step itself; a spent

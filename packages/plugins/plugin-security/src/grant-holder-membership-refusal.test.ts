@@ -25,7 +25,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { resolveThrownHttpError } from '@objectstack/types';
+import { isUniqueViolationError, resolveThrownHttpError } from '@objectstack/types';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { ORGANIZATION_ADMIN } from '@objectstack/spec/identity';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
@@ -569,6 +569,64 @@ describe('a refused grant holder the caller cannot read is answered as a holder 
       expectOneHolderAnswer(answers);
     });
   }
+
+  // [#32164, contract review 6817263634 should-fix A] The one-grant check steps aside on the same holders.
+  // BASE (ec39bd8e5): it answered first, 409 DUPLICATE_RECORD. CONTROL: a holder the caller reads gets the 409.
+  describe('[#32164] a holder the caller cannot read that already holds the set: the same one answer, never a 409', () => {
+    const SET = 'qa_rep_set';
+    const held = async (h: Harness, user: string) => h.engine.insert(
+      'sys_user_permission_set', { id: `held_${user}`, user_id: user, permission_set: SET, organization_id: ORG_A },
+      { context: { isSystem: true, tenantId: ORG_A } } as any,
+    );
+
+    it('an insert naming it: one answer in every store, the reference refusal at user_id; nothing new is stored', async () => {
+      const answers = new Map<Store, unknown>();
+      for (const store of STORES) {
+        const h = await bootWith(store);
+        if (store !== 'no such user') await held(h, HOLDER);
+        answers.set(store, await refusalOf(() => h.engine.insert(
+          'sys_user_permission_set', { user_id: HOLDER, permission_set: SET }, { context: OWN_ROW_ADMIN_A } as any,
+        )));
+        expect(await rowsOf(h, 'sys_user_permission_set', { user_id: HOLDER }), store).toHaveLength(store === 'no such user' ? 0 : 1);
+      }
+      expectOneHolderAnswer(answers);
+    });
+
+    it('an update by id moving a grant onto it: one answer in every store; the stored row is untouched', async () => {
+      const answers = new Map<Store, unknown>();
+      for (const store of STORES) {
+        const h = await bootWith(store);
+        if (store !== 'no such user') await held(h, HOLDER);
+        await held(h, 'u_member_a');
+        answers.set(store, await refusalOf(() => h.engine.update(
+          'sys_user_permission_set', { id: 'held_u_member_a', user_id: HOLDER }, { context: OWN_ROW_ADMIN_A } as any,
+        )));
+        const [stored] = await rowsOf(h, 'sys_user_permission_set', { id: 'held_u_member_a' });
+        expect(stored?.user_id, store).toBe('u_member_a');
+      }
+      expectOneHolderAnswer(answers);
+    });
+
+    it('CONTROL: a holder the caller reads that already holds the set is refused as a second grant: the engine\'s 409 duplicate-record refusal', async () => {
+      const h = await bootWith('member here');
+      await held(h, 'u_member_a');
+      const err = await refusalOf(() => h.engine.insert(
+        'sys_user_permission_set', { user_id: 'u_member_a', permission_set: SET }, { context: OWN_ROW_MEMBER_A } as any,
+      ));
+      expect(envelopeOf(err)).toMatchObject({ status: 409, code: 'DUPLICATE_RECORD' });
+      expect(isUniqueViolationError(err)).toBe(true);
+      expect(await rowsOf(h, 'sys_user_permission_set', { user_id: 'u_member_a' })).toHaveLength(1);
+    });
+
+    it('one partial batch: each row is judged on the holder it names, as written; a readable non-member is refused on membership, nothing stored', async () => {
+      const h = await bootWith('member elsewhere');
+      const rows = [' u_admin_a', 'u_admin_a'].map((user_id) => ({ user_id, permission_set: SET }));
+      const err = await refusalOf(() => (h.engine as any).insertMany('sys_user_permission_set', rows, { context: OWN_ROW_ADMIN_A }));
+      expectMembershipRefusal(err);
+      expect(envelopeOf(err).fields[0]?.constraint?.target).toBe('sys_member');
+      expect(await rowsOf(h, 'sys_user_permission_set', {})).toEqual([]);
+    });
+  });
 
   it("a holder the caller cannot read is read only through the caller's own door, projected to its id, and no membership is read for it", async () => {
     for (const store of STORES) {

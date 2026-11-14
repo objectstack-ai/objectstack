@@ -42,7 +42,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       permission_set_package: {
         label: "Permission Set Package",
-        help: "The app the permission set comes from. Filled in by the platform; empty when the set was created here, or when more than one app provides a set of that name."
+        help: "The app the permission set comes from. A grant names it to choose between apps that provide a set of the same name; otherwise the platform fills it in. Empty when the set was created here, or when more than one app provides a set of that name and the grant names none."
       },
       granted_by: {
         label: "Concedido por",

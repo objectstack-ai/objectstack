@@ -110,6 +110,14 @@ export interface RenderSkillOptions {
    */
   fileTools?: boolean;
   /**
+   * [#32686] Whether the host's bridge also serves an upload link for a
+   * record not yet created (`createUploadLinkForNewRecord`), so
+   * `create_upload_link` takes no `recordId` with a `field`. Renders only
+   * with `create_upload_link`'s own entry ({@link fileTools}, `data:write`).
+   * Default false: the renderer cannot see the bridge, so the host says so.
+   */
+  newRecordUploadLinks?: boolean;
+  /**
    * [ADR-0149 D2] Whether the host's bridge carries the dataset pair
    * (`list_datasets` / `query_dataset`, `registerDatasetTools`). The entries,
    * and the D3 selection rule that teaches a client when to use them, render
@@ -118,6 +126,24 @@ export interface RenderSkillOptions {
    * renderer cannot see the bridge, so the host says so.
    */
   datasetTools?: boolean;
+  /**
+   * [#32766] The text a host that mounts a build door adds to the DATA-ONLY
+   * skill — the same string it passes as `dataOnlyInstructions` on the
+   * authoring injection of `handleHttpRequest`, so `initialize` and this file
+   * say the same thing (for example, that building needs an OAuth connection
+   * with `metadata:write`). Markdown, rendered verbatim as its own block
+   * after the tool list.
+   *
+   * It renders only when {@link authoringTools} names at least one tool (the
+   * host has a build door to point at) AND {@link grantedScopes} do NOT admit
+   * the family (`grantsAuthoringTools`): the exact complement of the
+   * authoring section, so a skill carries one or the other and never both. A
+   * host that injects no authoring tools — and the public `GET /mcp/skill`
+   * route of this framework, which passes none — renders the data skill
+   * byte-identical to before (cloud#4329, ruled B: the hint only where a
+   * build door is mounted).
+   */
+  dataOnlyInstructions?: string;
 }
 
 const URL_PLACEHOLDER = '<YOUR_ENV_MCP_URL>'; // e.g. https://<env>.objectos.app/api/v1/mcp
@@ -195,11 +221,30 @@ const READ_FILE_TOOL_LINES = `- **read_file({ objectName, recordId, field?, file
 
 /** [#30892] `create_upload_link`'s entry, rendered where `registerFileTools` registers it (`data:write`). */
 const UPLOAD_LINK_TOOL_LINES = `- **create_upload_link({ objectName, recordId, field? | attachments: true })** —
-  a link through which the user uploads one file onto a record: into a file
-  field, or as an attachment. Give the link to the user to open where they
-  are signed in to this deployment; it works only for them, once, for that
-  record and field only, and expires at \`expiresAt\`. The upload is stored
-  as the user, so they must be able to edit the record.
+  a link through which the user uploads a file onto a record: into a file
+  field, or as an attachment. A multi-file field's link takes up to 10 files,
+  picked and sent together; one the field does not take refuses them all.
+  Give the link to the user to open where they are signed in to this
+  deployment; it works only for them, once, for that record and field only,
+  and expires at \`expiresAt\`. The upload is stored as the user, so they
+  must be able to edit the record.
+`;
+
+/**
+ * [#32686] The two-call flow for a record whose file field must be filled
+ * when it is created, rendered under `create_upload_link`'s entry where the
+ * bridge serves a link with no record.
+ */
+const NEW_RECORD_UPLOAD_LINK_LINES = `  For a record you have not created yet (a required file field, such as an
+  expense line's invoice), omit \`recordId\` and name \`field\`: the answer
+  carries \`fileIds\`. For several files into a multi-file field, send
+  \`count\` (up to 10): \`fileIds\` holds that many, and the user picks exactly
+  that many. Once the user has uploaded, call \`create_record\` with the field
+  set to \`fileIds[0]\` (the array, for a multi-file field); before the
+  upload, that create is refused as an upload that never completed. Each id
+  goes only into that field of that object, in one record, by this user's
+  own write, within an hour of the upload. The user must be able to create
+  such records.
 `;
 
 /**
@@ -249,7 +294,10 @@ function renderFileToolLines(options: RenderSkillOptions): string {
   // Mirrors the gates in `registerFileTools` (`!scopes || scopes.includes(…)`).
   const read = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
   const write = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_WRITE);
-  return (read ? READ_FILE_TOOL_LINES : '') + (write ? UPLOAD_LINK_TOOL_LINES : '');
+  return (
+    (read ? READ_FILE_TOOL_LINES : '') +
+    (write ? UPLOAD_LINK_TOOL_LINES + (options.newRecordUploadLinks === true ? NEW_RECORD_UPLOAD_LINK_LINES : '') : '')
+  );
 }
 
 /**
@@ -270,6 +318,13 @@ export function renderSkillMarkdown(options: RenderSkillOptions = {}): string {
       ? options.authoringTools
       : undefined;
   const description = authoringTools ? OBJECTSTACK_SKILL_DESCRIPTION_WITH_AUTHORING : OBJECTSTACK_SKILL_DESCRIPTION;
+  // [#32766] The host's data-only text: only beside a build door it injected
+  // tools for, and only where the authoring section does not render.
+  const dataOnlyText = options.dataOnlyInstructions?.trim();
+  const dataOnlyBlock =
+    !authoringTools && dataOnlyText && options.authoringTools && options.authoringTools.length > 0
+      ? `\n${dataOnlyText}\n`
+      : '';
   // Mirrors the native data gate in `wireBridgeTools` (`!scopes || scopes.includes(data:read)`).
   const describeObjectRegistered = !options.grantedScopes || options.grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
 
@@ -349,16 +404,28 @@ create/update payload.
 
 ## Tools
 
-- **list_objects()** — list available objects (system \`sys_*\` objects are hidden).
+- **list_objects()** — list available objects. System \`sys_*\` objects are hidden,
+  except the few declared readable by agents, such as \`sys_user\` (read only).
 - **describe_object({ objectName })** — an object's fields and features.
-- **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject? })** — check a CEL
+- **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject?, startCondition?, field? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
-  unknown fields/functions) and advisory warnings (text/boolean fields misused
-  in arithmetic; an error at a \`validation\` site, worded for the rule's
-  \`severity\`, and at a \`flow_condition\` of a record-triggered or
-  time-relative flow, where it fails the run; a warning on any other flow), plus the fields and
-  stdlib functions in scope. \`site\` is \`formula\` | \`validation\` |
+  unknown fields/functions; at a \`formula\` or \`validation\` site, every other
+  refusal the publish gate gives there: a reference read both through the
+  relationship and as a value, more than one hop, a hop to a field the target
+  does not declare or into a stored-metadata table, and at a \`validation\` site
+  an unguarded nullable field or a read of \`parent\`; at a \`flow_condition\`
+  of a record-triggered flow, an unguarded nullable \`record.\`/\`previous.\`
+  read) and advisory warnings
+  (text/boolean fields misused in arithmetic; an error at a \`validation\` site,
+  worded for the rule's \`severity\`, and at a \`flow_condition\` of a
+  record-triggered or time-relative flow, where it fails the run; a warning on
+  any other flow; at a \`formula\`, \`validation\` or \`flow_condition\` site,
+  a read of an external object's unprovisioned system column; for a stored
+  (non-formula) \`field\`, a read of another record, the clock, the user or a
+  permission), plus the fields and stdlib
+  functions in scope. A hop target follows the same system-object fence as
+  \`describe_object\`. \`site\` is \`formula\` | \`validation\` |
   \`flow_condition\` | \`template\` (default \`formula\`). Pass the rule's
   \`severity\` or the flow's \`triggerKind\` (\`record_change\` by default) to
   get the verdict the publish gate gives that rule or flow; for a
@@ -366,6 +433,12 @@ create/update payload.
   as \`objectName\`: its conditions read rows of that object, and a start whose
   \`objectName\` names another object is refused at publish
   (\`flow-time-relative-object-mismatch\`). \`sweepObject\` names that same object.
+  At a \`flow_condition\` the verdict is the runtime publish gate's, the one a
+  flow saved through MCP meets: \`os validate\` also judges bare names and
+  unbound roots over the whole flow, so write \`record.<field>\`, and pass the
+  flow's \`startCondition\` for an edge or \`decision\` condition after it. Pass
+  \`field\` (formula) to be judged as that field: its type, and the formula
+  cycle it would close; a field not yet declared is judged as a new formula.
 - **query_records({ objectName, where?, fields?, limit?, offset?, orderBy? })** —
   read records. \`where\` is a field→value match, e.g. \`{ "status": "open" }\`.
   Results are page-capped; use \`limit\`/\`offset\` to page.
@@ -389,9 +462,12 @@ create/update payload.
   stops the call and names the record it stopped at. Over OAuth it needs both
   \`data:read\` and \`data:write\`.
 - **list_actions()** — list the business actions available to you (only those
-  the app author exposed to AI and you are permitted to run), with each
+  the app author exposed to AI and your permissions allow), with each
   action's declared parameters, whether it operates on a record, and whether
-  it is flagged destructive.
+  it is flagged destructive. An action that carries \`unavailable\` is listed
+  but \`run_action\` would refuse it for you (your credential, or your role in
+  this organization): \`unavailable.reason\` says why and what would let it
+  run, so tell your human instead of calling it.
 - **run_action({ actionName, objectName?, recordId?, params?, confirm? })** —
   invoke a business action by name. Invocation is permission-gated, but the
   action body executes the app's registered logic as trusted code (it can
@@ -401,15 +477,20 @@ create/update payload.
   \`confirm: true\` on an action \`list_actions\` reports as
   \`requiresConfirmation\` — the server REFUSES such a call without it
   (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing runs. Ask your human first;
-  the flag asserts an approval, it does not obtain one.
+  the flag asserts an approval, it does not obtain one. Under an AI service
+  account's own key (an agent acting for itself, for no person) the call is
+  refused whatever it sends and nothing runs: hand the action to a person, or
+  its author declares \`ai.requiresConfirmation: false\` when it is safe
+  unattended.
 - **resume_run({ runId, values?, confirm? })** — continue a flow run that
   \`run_action\` answered with \`status: "paused"\` and a \`screen\` (a form the
   flow needs filled in). Send the screen's field values in \`values\`, keyed by
   the names in \`screen.fields\`. The run completes, or pauses again on its next
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
-  (including \`confirm: true\` for an action flagged \`requiresConfirmation\`).
-${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}
+  (including \`confirm: true\` for an action flagged \`requiresConfirmation\`,
+  and its refusal under an AI service account's own key whatever the call sends).
+${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}${dataOnlyBlock}
 ## Conventions & gotchas
 
 - **Permissions/RLS apply to every call.** Fewer rows than expected, or a
@@ -420,6 +501,13 @@ ${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.feder
 - **Writes are real and immediate.** There is no implicit dry-run. Confirm
   destructive actions (\`delete_record\`, bulk updates) with the user.
 - **Page large reads.** Use \`limit\`/\`offset\` rather than asking for everything.
+- **People are \`sys_user\` records.** A person field (owner, approver,
+  employee) holds a user id. Find it with \`query_records\` on \`sys_user\`:
+  \`where: { "email": "..." }\` for exactly one person, or
+  \`{ "name": { "$contains": "..." } }\`. Names repeat: when several people
+  share a name, tell them apart by email, and ask your human which one if
+  unsure. You see the colleagues your console's person picker shows you (your
+  organization, directory fields), and \`sys_user\` is read only.
 - **Prefer actions over hand-edits.** When \`list_actions\` offers an action for
   the task (approve, convert, close, …), call it instead of updating the
   records yourself — actions carry the app's validation and side effects.

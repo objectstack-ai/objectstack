@@ -26,10 +26,20 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
+import {
+    bindSecurityCatalogReader,
+    createSecurityCatalogReader,
+    holdsPlatformPermissionSet,
+    ObjectKernel,
+    PERMISSION_SET_SHARED_NAMESPACES,
+    permissionSetHoldersMeet,
+    resolveUserAuthzGrants,
+} from '@objectstack/core';
+import { namespacedHoldersMeet } from '@objectstack/spec/kernel';
+import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 import { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
-import { findPackageHeldSecurityCatalogNames } from './registry.js';
+import { findPackageHeldSecurityCatalogNames, RESERVED_NAMESPACES, SecurityCatalogNameConflictError } from './registry.js';
 
 type Stores = Map<string, Map<string, Record<string, unknown>>>;
 
@@ -200,5 +210,219 @@ describe('the metadata doors read who holds a permission-set name through the re
             { name: 'qa_other_editor', binding: OTHER },
             { name: 'qa_env_editor', binding: null },
         ]);
+    });
+});
+
+
+/**
+ * [ADR-0150 D2/D9, #31698] A permission set is one name per NAMESPACE, judged
+ * by ONE predicate — `permissionSetHoldersMeet` (`@objectstack/core`) — that
+ * the install gate (the registry's package door and its item seam) and the
+ * metadata save door both ask. Each row below runs all three doors over the
+ * real composition, FROM `main` → TO this change:
+ *
+ * | pair (holder + incoming)            | install gate         | item seam            | save door            | sibling `namespacedHoldersMeet` |
+ * |-------------------------------------|----------------------|----------------------|----------------------|---------------------------------|
+ * | `crm` + `hr` (CONTROL)              | refused → admitted   | refused → admitted   | refused → admitted   | admits                          |
+ * | `sys` + `crm`                       | refused (unchanged)  | refused (unchanged)  | refused (unchanged)  | admits ← the difference         |
+ * | `base` + `crm`                      | refused (unchanged)  | refused (unchanged)  | refused (unchanged)  | admits ← the difference         |
+ * | `guest_portal`, `crm` + `hr`        | refused (unchanged)  | refused (unchanged)  | refused (unchanged)  | admits ← the difference         |
+ * | no namespace + `crm`                | refused (unchanged)  | refused (unchanged)  | refused (unchanged)  | refuses, as here                |
+ */
+describe('[#31698] a permission set is one name per namespace: one predicate, three doors', () => {
+    const live: ObjectKernel[] = [];
+    afterEach(async () => {
+        while (live.length) {
+            const kernel = live.pop()!;
+            if (kernel.getState() === 'running') await kernel.shutdown();
+        }
+    });
+
+    async function bootBare(): Promise<{ engine: ObjectQL; protocol: any }> {
+        const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+        live.push(kernel);
+        const engine = new ObjectQL();
+        engine.registerDriver(makeMemoryDriver(new Map()), true);
+        await kernel.use(new ObjectQLPlugin({ ql: engine }));
+        await kernel.bootstrap();
+        engine.registry.logLevel = 'silent';
+        return { engine, protocol: (kernel as any).getService('protocol') };
+    }
+
+    const HOLDING = 'com.qa.holding';
+    const INCOMING = 'com.qa.incoming';
+    const manifest = (id: string, namespace: string | undefined, sets: string[] = []) =>
+        ({ id, name: id, version: '1.0.0', ...(namespace ? { namespace } : {}), ...(sets.length ? { permissions: sets.map(permissionSet) } : {}) }) as any;
+
+    /**
+     * Each door's answer for the incoming package: `admitted`, or `refused` with the rule's own error.
+     * `disableHolder` disables the holding package before the incoming one arrives.
+     */
+    async function doors(holderNs: string | undefined, incomingNs: string | undefined, name: string, opts: { disableHolder?: boolean } = {}) {
+        const answer = async (run: () => unknown, refusedBy: (e: any) => boolean) => {
+            try { await run(); return 'admitted'; } catch (error) {
+                if (refusedBy(error)) return 'refused';
+                throw error;
+            }
+        };
+        const conflict = (e: any) => e instanceof SecurityCatalogNameConflictError;
+        // The install gate: the holder's claim, then the incoming manifest declaring the name.
+        const install = await bootBare();
+        install.engine.registry.installPackage(manifest(HOLDING, holderNs, [name]), 'authored');
+        if (opts.disableHolder) install.engine.registry.disablePackage(HOLDING);
+        const installGate = await answer(() => install.engine.registry.installPackage(manifest(INCOMING, incomingNs, [name]), 'authored'), conflict);
+        // The item seam: the incoming package installed with no claim, then registering the set's item.
+        const seam = await bootBare();
+        seam.engine.registry.installPackage(manifest(HOLDING, holderNs, [name]), 'authored');
+        if (opts.disableHolder) seam.engine.registry.disablePackage(HOLDING);
+        seam.engine.registry.installPackage(manifest(INCOMING, incomingNs), 'authored');
+        const itemSeam = await answer(() => seam.engine.registry.registerItem('permission', permissionSet(name), 'name', INCOMING), conflict);
+        // The save door: the incoming package (holding no item of the name) saves a set of it.
+        const save = await bootBare();
+        save.engine.registry.installPackage(manifest(HOLDING, holderNs, [name]), 'authored');
+        if (opts.disableHolder) save.engine.registry.disablePackage(HOLDING);
+        save.engine.registry.installPackage(manifest(INCOMING, incomingNs), 'authored');
+        const saveDoor = await answer(
+            () => save.protocol.saveMetaItem({ type: 'permission', name, item: permissionSet(name), packageId: INCOMING }),
+            (e: any) => e?.code === 'NAMESPACE_CONFLICT' && e?.status === 422,
+        );
+        return { installGate, itemSeam, saveDoor };
+    }
+
+    const refusedEverywhere = { installGate: 'refused', itemSeam: 'refused', saveDoor: 'refused' };
+
+    it('CONTROL crm + hr: admitted at all three doors (FROM refused at all three)', async () => {
+        expect(await doors('crm', 'hr', 'qa_reader')).toEqual({ installGate: 'admitted', itemSeam: 'admitted', saveDoor: 'admitted' });
+    });
+
+    it('⛔ crm + hr where crm STORES its set (no shipped one): the save door still refuses hr\'s, and crm\'s set stays served at its package', async () => {
+        const { engine, protocol } = await bootBare();
+        engine.registry.installPackage(manifest(HOLDING, 'crm'), 'authored');
+        engine.registry.installPackage(manifest(INCOMING, 'hr'), 'authored');
+        await protocol.saveMetaItem({ type: 'permission', name: 'qa_reader', item: permissionSet('qa_reader'), packageId: HOLDING });
+        expect(engine.registry.packageScopedHoldersOf('permission', 'qa_reader', null)).toEqual([HOLDING]);
+        const error = await protocol.saveMetaItem({ type: 'permission', name: 'qa_reader', item: permissionSet('qa_reader'), packageId: INCOMING })
+            .then(() => undefined, (e: any) => e);
+        expect([error?.code, error?.status]).toEqual(['NAMESPACE_CONFLICT', 422]);
+        expect(String(error?.message)).toContain(`package "${HOLDING}"`);
+        expect(String(error?.message)).toContain('a set another package stores holds its name');
+        // Nothing moved: crm's stored set is the one the registry serves at crm.
+        expect(engine.registry.packageScopedHoldersOf('permission', 'qa_reader', null)).toEqual([HOLDING]);
+        expect(engine.registry.getPackageScopedItem('permission', 'qa_reader', HOLDING)).toBeDefined();
+    });
+
+    it.each([
+        ['sys + crm', 'sys', 'crm', 'qa_reader'],
+        ['crm + sys', 'crm', 'sys', 'qa_reader'],
+        ['base + crm', 'base', 'crm', 'qa_reader'],
+        ['guest_portal, crm + hr', 'crm', 'hr', 'guest_portal'],
+        ['no namespace + crm', undefined, 'crm', 'qa_reader'],
+    ] as const)('%s: refused at all three doors, unchanged', async (_pair, holderNs, incomingNs, name) => {
+        expect(await doors(holderNs, incomingNs, name)).toEqual(refusedEverywhere);
+    });
+
+    it('the difference from the sibling predicate: sys, base and guest_portal stay one holder here', () => {
+        const rows = [
+            { pair: 'crm + hr', a: 'crm', b: 'hr', name: 'qa_reader' },
+            { pair: 'sys + crm', a: 'sys', b: 'crm', name: 'qa_reader' },
+            { pair: 'base + crm', a: 'base', b: 'crm', name: 'qa_reader' },
+            { pair: 'guest_portal, crm + hr', a: 'crm', b: 'hr', name: 'guest_portal' },
+            { pair: 'no namespace + crm', a: undefined, b: 'crm', name: 'qa_reader' },
+        ];
+        expect(rows.map((r) => ({ pair: r.pair, sibling: namespacedHoldersMeet(r.a, r.b), permission: permissionSetHoldersMeet(r.a, r.b, r.name) }))).toEqual([
+            { pair: 'crm + hr', sibling: false, permission: false },
+            { pair: 'sys + crm', sibling: false, permission: true },
+            { pair: 'base + crm', sibling: false, permission: true },
+            { pair: 'guest_portal, crm + hr', sibling: false, permission: true },
+            { pair: 'no namespace + crm', sibling: true, permission: true },
+        ]);
+    });
+
+    it('the predicate\'s shared namespaces are the registry\'s shareable ones', () => {
+        expect([...PERMISSION_SET_SHARED_NAMESPACES].sort()).toEqual([...RESERVED_NAMESPACES, 'sys'].sort());
+    });
+
+    it('two admitted holders: both claims are remembered, each released by its own uninstall', async () => {
+        const { engine } = await bootBare();
+        engine.registry.installPackage(manifest(HOLDING, 'crm', ['qa_reader']), 'authored');
+        engine.registry.installPackage(manifest(INCOMING, 'hr', ['qa_reader']), 'authored');
+        const holders = () => findPackageHeldSecurityCatalogNames(engine.registry)
+            .filter((entry) => entry.catalogType === 'permission' && entry.name === 'qa_reader')
+            .flatMap((entry) => entry.packageIds).sort();
+        expect(holders()).toEqual([HOLDING, INCOMING]);
+        expect(engine.registry.securityCatalogNamesHeldBy(INCOMING, 'permission')).toEqual(['qa_reader']);
+        engine.registry.uninstallPackage(INCOMING);
+        expect(holders()).toEqual([HOLDING]);
+        // …and a third package that meets the holder (no namespace) is still refused beside it.
+        expect(() => engine.registry.installPackage(manifest('com.qa.third', undefined, ['qa_reader']), 'authored')).toThrow(SecurityCatalogNameConflictError);
+    });
+
+    /**
+     * [#31698, 6816011109 row 9] Two holders of one name, one of them disabled.
+     * `holdsPlatformPermissionSet` reads a name held with no address over the
+     * registry's holders; its "platform holder enabled, other holder disabled"
+     * row needs a second holder of a set a platform (`sys`) package holds,
+     * which the doors refuse, while that holder is disabled too. The column-less
+     * grant of a name two namespaces hold, one disabled, is the reachable half:
+     * its pinned answer is `main`'s at this change's merge.
+     */
+    it('row 9: a second holder of a platform (sys) set is refused at every door, also while the holder is disabled', async () => {
+        expect(await doors('sys', 'crm', 'qa_reader', { disableHolder: true })).toEqual(refusedEverywhere);
+    });
+
+    // Row 9's own state is the platform holder ENABLED beside a DISABLED other
+    // holder. Reached in the other order: the other holder is installed and
+    // disabled first, and the platform package arrives second.
+    it('row 9: a platform (sys) package arriving beside a disabled holder of the name is refused at every door', async () => {
+        expect(await doors('crm', 'sys', 'qa_reader', { disableHolder: true })).toEqual(refusedEverywhere);
+    });
+
+    /**
+     * Row 9's verdict through this change's doors: `holdsPlatformPermissionSet`
+     * for a context holding the name with no address. The platform holder is
+     * the one holder: every door refuses the second, so the verdict follows the
+     * platform holder alone — `true` while enabled, and `main`'s answer at this
+     * change's merge while it is disabled.
+     */
+    it('row 9: the verdict for a name with no address follows the one platform holder, the second holder refused (main at the merge)', async () => {
+        const { engine } = await bootBare();
+        engine.registry.installPackage(manifest(HOLDING, 'sys'), 'authored');
+        engine.registry.registerItem('permission', permissionSet('qa_reader') as any, 'name', HOLDING);
+        const verdict = () => holdsPlatformPermissionSet(engine, { permissions: ['qa_reader'] }, 'qa_reader');
+        expect(verdict()).toBe(true);
+        engine.registry.installPackage(manifest(INCOMING, 'crm'), 'authored');
+        expect(() => engine.registry.registerItem('permission', permissionSet('qa_reader') as any, 'name', INCOMING)).toThrow(SecurityCatalogNameConflictError);
+        // CONTROL: an address carried with the name answers by that holder alone.
+        expect(holdsPlatformPermissionSet(engine, { permissions: ['qa_reader'], permissionSetAddresses: [{ packageId: INCOMING, name: 'qa_reader' }] }, 'qa_reader')).toBe(false);
+        engine.registry.disablePackage(HOLDING);
+        expect(() => engine.registry.registerItem('permission', permissionSet('qa_reader') as any, 'name', INCOMING)).toThrow(SecurityCatalogNameConflictError);
+        expect(verdict()).toBe(false);
+    });
+
+    it('row 9: a column-less grant of a name crm and hr hold, hr disabled, confers what main answers (the bound grants as CONTROLs)', async () => {
+        const { engine } = await bootBare();
+        const set = (cap: string) => ({ ...permissionSet('qa_reader'), systemPermissions: [cap] });
+        engine.registry.installPackage(manifest(HOLDING, 'crm'), 'authored');
+        engine.registry.installPackage(manifest(INCOMING, 'hr'), 'authored');
+        engine.registry.registerItem('permission', set('cap_crm') as any, 'name', HOLDING);
+        engine.registry.registerItem('permission', set('cap_hr') as any, 'name', INCOMING);
+        const catalog = createSecurityCatalogReader({ registry: engine.registry as any, metadata: { get: () => undefined, list: () => [] } as any });
+        /** What one grant of `qa_reader` with this column confers, read by the authorization resolver. */
+        const confers = async (column: string | null) => {
+            const rows: Record<string, unknown[]> = {
+                sys_user: [{ id: 'u1', email: 'u1@example.com' }],
+                sys_member: [{ user_id: 'u1', organization_id: 'org_a', role: 'member' }],
+                sys_user_permission_set: [{ user_id: 'u1', permission_set: 'qa_reader', permission_set_package: column, organization_id: 'org_a' }],
+            };
+            const ql = { registry: engine.registry, find: async (object: string) => rows[object] ?? [], findOne: async (object: string, query?: any) => { assertEngineFindOnePredicate(object, query); return rows[object]?.[0]; }, count: async () => 0 };
+            bindSecurityCatalogReader(ql, catalog);
+            return (await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'org_a' })).systemPermissions;
+        };
+        const read = async () => ({ columnLess: await confers(null), crm: await confers(HOLDING), hr: await confers(INCOMING) });
+        expect(await read()).toEqual({ columnLess: [], crm: ['cap_crm'], hr: ['cap_hr'] });
+        engine.registry.disablePackage(INCOMING);
+        // main's answer at the merge: the column-less grant stays refused, and the
+        // disabled holder's grant is never re-targeted to the enabled holder's set.
+        expect(await read()).toEqual({ columnLess: [], crm: ['cap_crm'], hr: [] });
     });
 });

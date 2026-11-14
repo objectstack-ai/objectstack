@@ -22,11 +22,12 @@
 // read door returns it every row (the system asker's cells below).
 //
 // Ruling C (#22851) settles how a REFUSED read (a declared 4xx, such as no
-// read grant on the object) is classified, on that same read: for an asker
-// explaining another user it is "cannot read", the nonexistent id's answer;
-// for a principal explaining itself it is not, because that principal's own
-// by-id write doors do not treat it as absence, so its explanation shows what
-// those doors do (the edit-only principal's cells).
+// read grant on the object) is classified for an asker explaining another
+// user, on that same read: it is "cannot read", the nonexistent id's answer.
+// A principal explaining itself whose read is refused gets the nonexistent
+// id's answer too, with the read's refusal as the decider (ruling of record
+// 6787890900; the edit-only principal's cells, and
+// `explain-self-refused-read-one-answer.test.ts`).
 //
 // ## The rig
 //
@@ -77,8 +78,8 @@ const MEMBER = 'usr_ag_member';
  * The organization the rig runs in. A grant applies only in its own
  * organization, so the member's grant rows are this organization's and every
  * asker acts in it: the explained member is resolved in the asker's
- * organization (#20515), and under `single` the claim stands without a
- * membership row.
+ * organization (#20515) — a current member of it, since the claim needs a
+ * current membership under every posture (ADR-0093 D8.1, as amended).
  */
 const ORG = 'org_ag';
 
@@ -107,7 +108,8 @@ const USER_ADMIN_SET = PermissionSetSchema.parse({
 /** `manage_users` alone: no data grant at all (it is not a data-read grant). */
 const USERS_ONLY_SET = PermissionSetSchema.parse({ name: 'qa_ag_users_only', objects: {}, systemPermissions: ['manage_users'] });
 
-const SELF = { userId: MEMBER, tenantId: ORG, positions: [] as string[], permissions: [MEMBER_SET.name] };
+/** The member as its request resolves it: a current member of {@link ORG}, so it holds `org_member`. */
+const SELF = { userId: MEMBER, tenantId: ORG, positions: ['org_member'], permissions: [MEMBER_SET.name], accessible_org_ids: [ORG] };
 const ADMIN = { userId: 'usr_ag_admin', tenantId: ORG, positions: [] as string[], permissions: [USER_ADMIN_SET.name] };
 /** A user administrator held to the member's read policy. */
 const BLIND_ADMIN = { userId: 'usr_ag_blind', tenantId: ORG, positions: [] as string[], permissions: [MEMBER_SET.name, USERS_ONLY_SET.name] };
@@ -183,6 +185,10 @@ beforeAll(async () => {
   const e = engine as unknown as { insert: (o: string, row: unknown, opts: never) => Promise<unknown> };
   for (const id of [MEMBER, ADMIN.userId, BLIND_ADMIN.userId, DELEGATE.userId, REFUSED_ADMIN.userId, REFUSED_DELEGATE.userId, EDIT_ONLY_USER]) {
     await e.insert('sys_user', { id, name: id, email: `${id}@example.test` }, SYS);
+  }
+  // The explained users are current members of the rig's organization.
+  for (const id of [MEMBER, EDIT_ONLY_USER]) {
+    await e.insert('sys_member', { id: `mem_${id}`, user_id: id, organization_id: ORG, role: 'member' }, SYS);
   }
   // [C8 stage 8b] The catalogue rows below carry no organization: under `single`
   // the engine stamps or refuses such a platform insert (ADR-0131 D9), so the
@@ -415,7 +421,7 @@ const doorAs = (ctx: Record<string, unknown>, verb: ExplainOperation, id: string
     : landed(engine.update(BOARD, verb === 'transfer' ? { owner_id: 'usr_ag_successor' } : { name: 'edited' },
         { where: { id }, context: { ...ctx } } as never));
 
-describe('[#22851] ruling C: a refused read is "cannot read" only for an asker explaining another user', () => {
+describe('[#22851] ruling C: a refused read is "cannot read" for an asker explaining another user', () => {
   it('armed: the refused askers\' and the edit-only principal\'s own reads are REFUSED, for a stored row and a nonexistent id alike', async () => {
     for (const [who, asker] of [
       ['the refused administrator', REFUSED_ADMIN],
@@ -451,24 +457,12 @@ describe('[#22851] ruling C: a refused read is "cannot read" only for an asker e
   // by-id UPDATE of the owner, which asks the same edit grant. So the write
   // verbs get their own control below, and this one keeps the read verbs.
   for (const verb of VERBS.filter((v) => !WRITE_VERBS.includes(v))) {
-    it(`control, ${verb}: a principal explaining itself keeps the write path's notion, so a refused read is not the missing record`, async () => {
-      const id = WRITE_VERBS.includes(verb) ? editOnlyRowOf(verb) : HIDDEN;
-      const self = await explainAs(EDIT_ONLY, verb, id);
+    it(`${verb}: a principal explaining itself whose read is refused gets the nonexistent id's explanation, decided by the read's refusal`, async () => {
+      const self = await explainAs(EDIT_ONLY, verb, HIDDEN);
       const nonexistent = await explainAs(EDIT_ONLY, verb, NONEXISTENT);
-      // Today's answer: the stored row's own story, the one a system asker is told about this principal.
-      const bySystem = await explainAs(SYSTEM, verb, id, EDIT_ONLY_USER);
-      expect(self.record, verb).toEqual(bySystem.record);
-      expect(self.layers.map((l) => l.record), verb).toEqual(bySystem.layers.map((l) => l.record));
-      expect(withoutRecordId(self), verb).not.toEqual(withoutRecordId(nonexistent));
-      expect(layerRecord(self, 'owd_baseline')?.outcome, verb).toBe('admitted');
-      expect(layerRecord(nonexistent, 'owd_baseline')?.outcome, verb).toBe('not_evaluated');
-      if (WRITE_VERBS.includes(verb)) {
-        // ...which is what that principal's own door does with the row.
-        expect(self.record, verb).toMatchObject({ visible: true });
-        expect(await doorAs(EDIT_ONLY, verb, id), `${verb} door`).toEqual({ kind: 'admitted' });
-      } else {
-        expect(self.record, verb).toEqual({ recordId: id, visible: false, decidedBy: 'object_crud' });
-      }
+      expect(self.record, verb).toEqual({ recordId: HIDDEN, visible: false, decidedBy: 'object_crud' });
+      expect(withoutRecordId(self), verb).toEqual(withoutRecordId(nonexistent));
+      expect(layerRecord(self, 'owd_baseline')?.outcome, verb).toBe('not_evaluated');
     });
   }
 
@@ -480,6 +474,7 @@ describe('[#22851] ruling C: a refused read is "cannot read" only for an asker e
       expect(self.layers.find((l) => l.layer === 'object_crud')?.verdict, verb).toBe('denies');
       expect(self.record, verb).toEqual({ recordId: id, visible: false, decidedBy: 'object_crud' });
       expect(nonexistent.record, verb).toEqual({ recordId: NONEXISTENT, visible: false, decidedBy: 'object_crud' });
+      expect(withoutRecordId(self), verb).toEqual(withoutRecordId(nonexistent));
       const row = await doorAs(EDIT_ONLY, verb, id);
       expect(row, `${verb} door`).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
       expect(await doorAs(EDIT_ONLY, verb, NONEXISTENT), `${verb} door, nonexistent`).toEqual(row);

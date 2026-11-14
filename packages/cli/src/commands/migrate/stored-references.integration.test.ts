@@ -17,10 +17,14 @@
  *  - C (`m31693c`) declares the picklist `m31693_hue`, which A does not depend on.
  *
  * A and B also each declare the agent `m31693_helper`, the skill
- * `m31693_triage` and the object-less action `m31693_digest`: two namespaces'
- * holders of one agent, one skill and one object-less action name, which the
- * one-holder rule no longer calls a clash (#31701, #31697, ADR-0150 D2/D9), so
- * the sealed-clash section never lists them.
+ * `m31693_triage`, the object-less action `m31693_digest`, the email
+ * template `m31693_notice` and the tool `m31693_lookup`: two namespaces'
+ * holders of one agent, one skill, one object-less action, one email template
+ * and one tool name, which the one-holder rule no longer calls a clash
+ * (#31701, #31697, #31699, #31985; ADR-0150 D2/D9), so the sealed-clash
+ * section never lists them; nor the picklist `m31693_tone` they both declare
+ * (#31700). The clash the seal still records is the connector `m31693_link`
+ * both declare: a connector name is held once per deployment.
  *
  * Over a database an older release left: two managed `sys_sharing_rule` rows
  * naming `m31693_share` (two holders: ambiguous) and `m31693_only_a` (one
@@ -91,11 +95,15 @@ const rule = (name: string) => ({
   accessLevel: 'read', sharedWith: { type: 'user', value: 'u1' }, active: true,
 });
 const list = (name: string) => ({ name, label: name, options: [{ label: 'One', value: 'one' }] });
-/** The agent, the skill (#31701) and the object-less action (#31697) A and B both declare, in their own namespaces. */
+/** The connector A and B both declare: a connector name is still held once per deployment, the sealed clash. */
+const link = (tag: string) => ({ name: 'm31693_link', label: `${tag} link`, type: 'api', description: `${tag} link`, enabled: false });
+/** The agent, the skill (#31701), the object-less action (#31697), the email template (#31699) and the tool (#31985) A and B both declare, in their own namespaces. */
 const ai = (tag: string) => ({
   agents: [{ name: 'm31693_helper', label: `${tag} helper`, role: `${tag} role`, instructions: `${tag} helper instructions` }],
   skills: [{ name: 'm31693_triage', label: `${tag} triage`, description: `${tag} triage`, instructions: `${tag} triage instructions`, tools: [] }],
   actions: [{ name: 'm31693_digest', label: `${tag} digest`, type: 'script', body: { language: 'js', source: `return '${tag}';`, capabilities: [] } }],
+  emailTemplates: [{ name: 'm31693_notice', label: `${tag} notice`, locale: 'en-US', subject: `${tag} notice`, bodyHtml: `<p>${tag}</p>`, active: true }],
+  tools: [{ name: 'm31693_lookup', label: `${tag} lookup`, description: `${tag} lookup`, parameters: { type: 'object', properties: {} } }],
 });
 const pkgA = {
   manifest: {
@@ -109,6 +117,7 @@ const pkgA = {
     }],
     sharingRules: [rule('m31693_share'), rule('m31693_only_a')],
     picklists: [list('m31693_tone')],
+    connectors: [link('a')],
     ...ai('a'),
   },
 };
@@ -117,6 +126,7 @@ const pkgB = {
     id: B, name: 'm31693b', version: '1.0.0', type: 'app', namespace: 'm31693b', dependencies: { [A]: '^1.0.0' },
     sharingRules: [rule('m31693_share')],
     picklists: [list('m31693_tone')],
+    connectors: [link('b')],
     ...ai('b'),
   },
 };
@@ -297,8 +307,10 @@ describe('os migrate stored-references (the report)', () => {
       d8: 'R17', object: 'm31693a_task', field: 'hue', packageId: A, name: 'm31693_hue', reason: 'outside-closure',
       candidates: [{ holder: 'package', packageId: C, address: 'm31693c/m31693_hue' }],
     }]);
-    // [#31701, #31697] Only the picklist: never the agent, the skill and the object-less action A and B hold in two namespaces.
-    expect(payload.sealedClashes).toEqual([{ type: 'picklist', name: 'm31693_tone', candidates: [`package "${A}"`, `package "${B}"`] }]);
+    // [#31701, #31697, #31699, #31700, #31985] Only the connector: never the
+    // agent, the skill, the object-less action, the email template, the
+    // picklist and the tool A and B hold in two namespaces.
+    expect(payload.sealedClashes).toEqual([{ type: 'connector', name: 'm31693_link', candidates: [`package "${A}"`, `package "${B}"`] }]);
     // The served platform carries no automation or approvals table here: named, not silently skipped.
     expect(payload.tablesNotCarried).toEqual(expect.arrayContaining(['sys_automation_run', 'sys_flow_credential', 'sys_approval_request']));
   }, CASE_TIMEOUT_MS);
@@ -406,6 +418,41 @@ describe('os migrate stored-references bind', () => {
     expect((await shareRow(db)).package_id).toBe(A);
   }, CASE_TIMEOUT_MS);
 
+  // [#31699] A table whose unique key carries the package column (R1's grant,
+  // R11's connection) refuses a bind that would make the row a second row of
+  // one key. The bind says so by name and writes nothing, never a crash.
+  // Simulated on R5's row: the update is refused the way the database refuses
+  // it (a UNIQUE constraint failure), as the connection table's widened key does.
+  it('a bind the database refuses as a unique violation is refused by name (`duplicate`), writing nothing', async () => {
+    const db = caseDb();
+    const share = await shareRow(db);
+    const stack = await bootSchemaStack({
+      jsonOutput: true, databaseUrl: `file:${db}`, projectRoot: dir,
+      composeHostStack: true, composeServedPlatform: true, composeAuthGatedSecurity: true,
+    });
+    try {
+      const engine = stack.kernel.getService('objectql') as StoredReferenceEngine & { registry: any };
+      const refusing: StoredReferenceEngine = {
+        find: (object, options) => engine.find(object, options),
+        update: async () => {
+          throw Object.assign(new Error('UNIQUE constraint failed: sys_sharing_rule.package_id'), { code: 'SQLITE_CONSTRAINT_UNIQUE' });
+        },
+      };
+      const outcome = await bindStoredPackageReference(refusing, engine.registry, { table: 'sys_sharing_rule', id: String(share.id), packageId: B });
+      expect(outcome).toMatchObject({ outcome: 'refused', reason: 'duplicate' });
+      expect((outcome as { message: string }).message).toContain('would be a second one');
+      expect((outcome as { candidates?: Array<{ packageId?: string }> }).candidates?.map((c) => c.packageId)).toEqual([A, B]);
+
+      // CONTROL: any other refused write is still thrown.
+      const failing: StoredReferenceEngine = { ...refusing, update: async () => { throw new Error('disk full'); } };
+      await expect(bindStoredPackageReference(failing, engine.registry, { table: 'sys_sharing_rule', id: String(share.id), packageId: B }))
+        .rejects.toThrow('disk full');
+    } finally {
+      await stack.shutdown();
+    }
+    expect((await shareRow(db)).package_id ?? null).toBeNull();
+  }, CASE_TIMEOUT_MS);
+
   it('CONTROL: a database of one package has nothing to bind', async () => {
     writeArtifact(CONTROL);
     const db = caseDb(controlDb);
@@ -473,7 +520,10 @@ async function columnsOf(dbFile: string, table: string): Promise<string[]> {
 /**
  * [#32095] The database as the release before D8 (18.3.0) left it: a copy of
  * the template with every D8 package column dropped, and each index naming one
- * (that release declared neither). Returns the file and the `TABLE.COLUMN`s
+ * (that release declared neither), in its key or in a partial index's `WHERE`:
+ * the template's write boot builds `sys_user_permission_set`'s package-less
+ * guard (#32164), whose `WHERE permission_set_package IS NULL` SQLite will not
+ * let the column go from under. Returns the file and the `TABLE.COLUMN`s
  * dropped.
  */
 async function unbootedDb(): Promise<{ db: string; dropped: string[] }> {
@@ -485,8 +535,9 @@ async function unbootedDb(): Promise<{ db: string; dropped: string[] }> {
     for (const { table, packageColumn } of STORED_PACKAGE_REFERENCES) {
       if (!packageColumn || !(await knex.schema.hasTable(table)) || !(await knex.schema.hasColumn(table, packageColumn))) continue;
       const indexes: Array<{ name: string }> = await knex.raw(
-        'SELECT DISTINCT il.name AS name FROM pragma_index_list(?) AS il, pragma_index_info(il.name) AS ii WHERE ii.name = ?',
-        [table, packageColumn],
+        'SELECT DISTINCT il.name AS name FROM pragma_index_list(?) AS il, pragma_index_info(il.name) AS ii WHERE ii.name = ? ' +
+          "UNION SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND instr(sql, ?) > 0",
+        [table, packageColumn, table, packageColumn],
       );
       for (const { name } of indexes) await knex.raw('DROP INDEX ??', [name]);
       await knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, packageColumn]);

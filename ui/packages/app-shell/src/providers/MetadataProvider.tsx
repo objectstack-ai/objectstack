@@ -26,6 +26,7 @@ import {
   useMetadata,
   type AnsweredLoadFailure,
   type MetadataContextValue,
+  type MetadataItemReadOptions,
   type MetadataCacheState,
   type MetadataTypeStatus,
 } from '@object-ui/react';
@@ -106,6 +107,16 @@ function failedReadAnswer(err: unknown): AnsweredLoadFailure | undefined {
  * other code is not an answer this build understands: the read failed.
  */
 const ANSWERED_REFUSAL_CODES: readonly string[] = ['OBJECT_PACKAGE_DISABLED'];
+
+/** What a by-name read that threw `err` answers: the one classification every by-name read shares. */
+function itemReadFailure(err: unknown): ItemRead {
+  // A thrown absence is an answer; anything else is not (objectui#13009).
+  if (isMetaItemAbsentError(err)) return { item: null, failed: false };
+  // objectui#13052 — and so is a definite refusal, named.
+  const refusal = ANSWERED_REFUSAL_CODES.find((code) => errorCodeIs(err, code));
+  if (refusal) return { item: null, failed: false, refusal };
+  return { item: null, failed: true, answer: failedReadAnswer(err) };
+}
 
 type ItemPromiseMap = Map<string, Promise<ItemRead>>;
 
@@ -1370,12 +1381,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         .catch((err: unknown) => {
           pending!.delete(name);
           debug(`fetch item failed type=${type} name=${name}`, err);
-          // A thrown absence is an answer; anything else is not (objectui#13009).
-          if (isMetaItemAbsentError(err)) return { item: null, failed: false };
-          // objectui#13052 — and so is a definite refusal, named.
-          const refusal = ANSWERED_REFUSAL_CODES.find((code) => errorCodeIs(err, code));
-          if (refusal) return { item: null, failed: false, refusal };
-          return { item: null, failed: true, answer: failedReadAnswer(err) };
+          return itemReadFailure(err);
         });
 
       pending.set(name, promise);
@@ -1384,10 +1390,43 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
     [getEntry, readObjectThroughAdapter],
   );
 
+  // [ADR-0150 D5] The read that names the package holding the item
+  // (`?package=`, the exact qualifier): the item that package holds, or the
+  // door's refusal naming the holders. A bare name two enabled packages hold
+  // answers `409 RESOURCE_CONFLICT`, so a reader that holds the package (a
+  // nav item of a packaged app) reads it this way. Not cached: `byName` holds
+  // the BARE name's answer, and a package's item stored there would answer
+  // every bare reader of the name with that one package's item.
+  const readPackagedItem = useCallback(
+    (type: string, name: string, packageId: string): Promise<ItemRead> => {
+      const preview = previewClientRef.current;
+      const fetchItem: Promise<unknown> = preview
+        ? preview.get(type, name, { packageId })
+        : adapterRef.current.getClient().meta.getItem(type, name, { packageId });
+      return fetchItem.then(
+        (res: unknown) => {
+          const item = extractItem(res);
+          // The by-name serve path's object canonicalization (objectui#7650), as above.
+          if (type === 'object' && item) normalizeSchemaReferenceKeys(item);
+          debug(`fetched item type=${type} name=${name} package=${packageId}`);
+          return { item, failed: false };
+        },
+        (err: unknown) => {
+          debug(`fetch item failed type=${type} name=${name} package=${packageId}`, err);
+          return itemReadFailure(err);
+        },
+      );
+    },
+    [],
+  );
+
   // The published read: `null` for "none came back", whichever way.
   const getItem = useCallback(
-    (type: string, name: string): Promise<any | null> => readItem(type, name).then((read) => read.item),
-    [readItem],
+    (type: string, name: string, options?: MetadataItemReadOptions): Promise<any | null> =>
+      (options?.packageId ? readPackagedItem(type, name, options.packageId) : readItem(type, name)).then(
+        (read) => read.item,
+      ),
+    [readItem, readPackagedItem],
   );
 
   // ── objectui#12811 — package-scoped object reads ─────────────────────────

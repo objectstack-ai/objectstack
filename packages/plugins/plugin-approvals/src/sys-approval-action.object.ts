@@ -42,6 +42,14 @@ export const SysApprovalAction = ObjectSchema.create({
   // service already owns the rule for seeing a decision (visibility of the
   // parent request, exactly as `listActions` applies it), so it answers.
   fileAccessDelegate: 'approvals',
+  // [decision 6840464379] …and its DEFINITION reaches the same people the same
+  // way. The metadata API answers this object as absent to a caller the object
+  // read check refuses (ADR-0106, ruling record 6787890900), and the request
+  // page the approvals door links to needs it, so the approvals service answers
+  // who else is served it: the callers its door serves a request to
+  // (`ApprovalService.authorizeSchemaRead`). Field security still projects it,
+  // and the rows stay closed.
+  schemaReadDelegate: 'approvals',
 
   // The display columns (`step_label`, `acted_as_label`) and the record pointer
   // (`object_name` + `record_id`) are written by `ApprovalService` with the row,
@@ -330,6 +338,13 @@ export const SysApprovalAction = ObjectSchema.create({
   indexes: [
     { fields: ['request_id', 'created_at'] },
     { fields: ['request_id', 'step_index', 'action'] },
+    // The participant rule's already-acted probe (`participantProbes` in
+    // approval-service.ts): did the caller act (`actor_id`), or did anyone act
+    // under a slot the caller holds (`acted_as`) — each its own column, each
+    // scoped by tenant. Read by the approvals door and by the schema-read
+    // delegate, which every hidden-object list read by a member asks.
+    { fields: ['actor_id', 'organization_id'] },
+    { fields: ['acted_as', 'organization_id'] },
   ],
 
   enable: {

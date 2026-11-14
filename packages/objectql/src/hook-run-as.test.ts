@@ -297,7 +297,8 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
   describe("[#24497] a 'user' pin carries the user's grants and peer list, through the request path's resolver", () => {
     /**
      * A recording engine that also answers the reads `resolveUserAuthzGrants`
-     * issues: organisation `org_1` holds `usr_operator` and `usr_peer`, and
+     * issues: organisation `org_1` holds `usr_operator` and `usr_peer`
+     * (`usr_operator`'s own membership read answers that row), and
      * `usr_operator`'s stored `sys_user` row carries {@link STORED_EMAIL}.
      * `failReads` makes every read throw, as an unreadable permission store does.
      */
@@ -308,6 +309,9 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
         if (opts.failReads) throw new Error('permission store unreachable');
         if (object === 'sys_user' && query?.where?.id === 'usr_operator') {
           return [{ id: 'usr_operator', email: STORED_EMAIL }];
+        }
+        if (object === 'sys_member' && query?.where?.user_id === 'usr_operator') {
+          return [{ id: 'm1', user_id: 'usr_operator', organization_id: 'org_1', role: 'member' }];
         }
         if (object === 'sys_member' && query?.where?.organization_id === 'org_1') {
           return [
@@ -359,13 +363,58 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       // (`resolveAuthzContext`), so it needs nothing (#24639).
       const engine = grantsEngine();
       const context = await hookWrite({
-        ...OPERATOR, org_user_ids: ['usr_operator', 'usr_x'], email: 'session@example.test',
+        ...OPERATOR, org_user_ids: ['usr_operator', 'usr_x'], accessible_org_ids: ['org_1'], email: 'session@example.test',
       } as ExecutionContext, engine);
       expect(reads(engine)).toEqual([]);
+      expect(context.accessible_org_ids).toEqual(['org_1']);
       expect(context.org_user_ids).toEqual(['usr_operator', 'usr_x']);
       expect(context.positions).toEqual(OPERATOR.positions);
       expect(context.permissions).toEqual(OPERATOR.permissions);
       expect(context.email).toBe('session@example.test');
+    });
+
+    describe('[ADR-0093 D8.1] the pin carries the user\'s membership set, which the organization wall reads under every posture', () => {
+      it('a hand-built { isSystem: true, userId, tenantId } trigger: the pin carries the memberships the resolver reads', async () => {
+        const context = await hookWrite({ isSystem: true, userId: 'usr_operator', tenantId: 'org_1' } as ExecutionContext, grantsEngine());
+        expect(context.accessible_org_ids).toEqual(['org_1']);
+      });
+
+      it('a user who holds no membership is pinned with an empty set', async () => {
+        const context = await hookWrite({ isSystem: true, userId: 'usr_gone', tenantId: 'org_1' } as ExecutionContext, grantsEngine());
+        expect(context.accessible_org_ids).toEqual([]);
+      });
+
+      it('a carried set is kept verbatim, an empty one included, and asks the resolver nothing', async () => {
+        const engine = grantsEngine();
+        const context = await hookWrite({
+          ...OPERATOR, org_user_ids: ['usr_operator'], accessible_org_ids: [], email: 'session@example.test',
+        } as ExecutionContext, engine);
+        expect(reads(engine)).toEqual([]);
+        expect(context.accessible_org_ids).toEqual([]);
+      });
+
+      it('a context carrying grants, peers and email but no set resolves, and takes the set alone', async () => {
+        const context = await hookWrite({
+          ...OPERATOR, org_user_ids: ['usr_operator', 'usr_x'], email: 'session@example.test',
+        } as ExecutionContext, grantsEngine());
+        expect(context.accessible_org_ids).toEqual(['org_1']);
+        expect(context.org_user_ids).toEqual(['usr_operator', 'usr_x']);
+        expect(context.permissions).toEqual(OPERATOR.permissions);
+        expect(context.email).toBe('session@example.test');
+      });
+
+      it('a membership the hook could not read is not a current one: the pin carries an empty set', async () => {
+        const context = await hookWrite({ isSystem: true, userId: 'usr_operator', tenantId: 'org_1' } as ExecutionContext, grantsEngine({ failReads: true }));
+        expect(context.isSystem).toBe(false);
+        expect(context.accessible_org_ids).toEqual([]);
+      });
+
+      it('a carried set survives a failed resolution of the rest', async () => {
+        const context = await hookWrite({
+          isSystem: true, userId: 'usr_operator', tenantId: 'org_1', accessible_org_ids: ['org_1'],
+        } as ExecutionContext, grantsEngine({ failReads: true }));
+        expect(context.accessible_org_ids).toEqual(['org_1']);
+      });
     });
 
     it('a trigger with no organisation: the peer list is the user alone, as an organisation-less request\'s is', async () => {

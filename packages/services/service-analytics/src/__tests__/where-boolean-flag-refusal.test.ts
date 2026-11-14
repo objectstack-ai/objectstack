@@ -135,6 +135,10 @@ function expectFlagRefusal(err: Refusal, op: string, field: string, path: string
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** `sql` with every bare one of `columns` written quoted, as the native compiler writes them (#33138). */
+const quotedColumns = (sql: string, columns: readonly string[]): string =>
+  columns.reduce((out, column) => out.replace(new RegExp(`(?<![\\w"])${column}(?![\\w"])`, 'g'), `"${column}"`), sql);
+
 describe('[#20040] the `where` door refuses every non-boolean flag, in every position', () => {
   for (const op of FLAGS) {
     for (const [label, value] of NON_BOOLEAN) {
@@ -419,7 +423,9 @@ describe('[#20040] every analytics face over a real engine', () => {
         expect(tree(where), `${shape}: tree`).toEqual(want.tree);
         reset();
         expect(await WHERE_FACES[0][1](where), `${shape}: native rows`).toEqual(want.rows);
-        expect(statements, `${shape}: native SQL`).toEqual([{ sql: want.sql, params: want.params }]);
+        // The native compiler writes its columns quoted (`"stage"`, #33138); the
+        // echo below writes them bare. The predicate is what this pins.
+        expect(statements, `${shape}: native SQL`).toEqual([{ sql: quotedColumns(want.sql, ['id', 'stage']), params: want.params }]);
         const echo = await new ObjectQLStrategy().generateSql(q(where), ctxFor(false));
         expect(echo, `${shape}: echo SQL`).toEqual({ sql: want.sql, params: want.params });
         reset();

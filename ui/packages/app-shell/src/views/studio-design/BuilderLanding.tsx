@@ -29,7 +29,7 @@ import { useRecentItemLabel } from '../../hooks/useRecentItemLabel.js';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { PackageFormDialog } from '../metadata-admin/PackageFormDialog.js';
 import { isMarketplaceEnabled } from '../../runtime-config.js';
-import { fetchPackages, duplicatePackage, isSpecPackageId, type PkgEntry } from './packages-io.js';
+import { fetchPackages, fetchListedPackageIds, duplicatePackage, isSpecPackageId, type PkgEntry } from './packages-io.js';
 import { fetchPackageCustomizationCounts, type PackageCustomizationCounts } from './packageCustomizations-io.js';
 import { customizationPackageId, isCustomizationPackage } from '@objectstack/spec/kernel';
 import { PackageIdInput } from './PackageIdInput.js';
@@ -66,6 +66,9 @@ export function BuilderLanding(): React.ReactElement {
   const navigate = useNavigate();
   const locale = useMetadataLocale();
   const [pkgs, setPkgs] = React.useState<PkgEntry[] | null>(null);
+  // objectstack#32615 — every id the same list answer names, the kernel
+  // packages `pkgs` hides included: what "Recently viewed" is filtered by.
+  const [listedPackageIds, setListedPackageIds] = React.useState<ReadonlySet<string> | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   // The new-package deep link (`studioNewPackage.ts`): Home's and the `/ai`
   // screen's "New in Studio" land here with the create dialog open. Read once,
@@ -89,6 +92,14 @@ export function BuilderLanding(): React.ReactElement {
 
   React.useEffect(() => {
     let cancelled = false;
+    // Asked beside the entries read, so both share its one request
+    // (`GET /api/v1/packages`). A failure is reported once, by the entries read.
+    fetchListedPackageIds().then(
+      (ids) => {
+        if (!cancelled) setListedPackageIds(ids);
+      },
+      () => {},
+    );
     fetchPackages()
       .then((list) => {
         if (!cancelled) setPkgs(list);
@@ -109,13 +120,18 @@ export function BuilderLanding(): React.ReactElement {
   // loaded, so a renamed package shows its new name (objectui#11678's shape).
   // Listed only once that list has answered, so no entry is drawn as its id
   // while it loads; nothing is listed when there are none.
+  // objectstack#32615 — and only a package that list still names: a package
+  // deleted since the visit is not listed (the delete in Studio also drops its
+  // entry from the store, `PackageSwitcher`). Filtered here, not dropped, for
+  // a package removed anywhere else: the list is the active organization's,
+  // and the store is the user's.
   const { recentItems } = useRecentItems();
   const recentLabel = useRecentItemLabel({ packages: pkgs });
   const recentPackages =
-    pkgs === null
+    pkgs === null || listedPackageIds === null
       ? []
       : recentItems
-          .filter((item): item is RecentNamedItem => item.type === 'package')
+          .filter((item): item is RecentNamedItem => item.type === 'package' && listedPackageIds.has(item.name))
           .slice(0, RECENT_PACKAGES_SHOWN);
 
   // ADR-0146 D3 — a base's `.custom` pair has no card of its own: it is

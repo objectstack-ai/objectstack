@@ -237,7 +237,9 @@ those responses are **per-caller**, and the rules below are what keep that safe.
 - To deliberately restore the old, unmasked behaviour on a trusted deployment,
   the supported switch is `OS_ALLOW_UNMASKED_OBJECT_METADATA=1` (or per-server
   `metadata.maskObjectFields: false`) — not a caching rule that hides the
-  per-caller dimension.
+  per-caller dimension. The switch also governs object visibility: with it
+  set, every caller is served every object, including objects they may not
+  read, which the mask otherwise answers as objects that do not exist.
 
 ## What's NOT in the runtime (yet)
 

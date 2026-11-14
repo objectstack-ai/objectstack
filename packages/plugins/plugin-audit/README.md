@@ -8,8 +8,9 @@ rows, and they are read-only through the data API and in Setup), the
 
 `AuditPlugin` does three things when the kernel starts it:
 
-1. **Registers six system objects** — `sys_audit_log`, `sys_activity`, `sys_comment`,
-   `sys_comment_reaction`, and the audit seal's `sys_audit_checkpoint` and `sys_audit_signing_key`.
+1. **Registers seven system objects** — `sys_audit_log`, `sys_activity`, `sys_comment`,
+   `sys_comment_reaction`, and the audit seal's `sys_audit_checkpoint`, `sys_audit_signing_key`
+   and `sys_audit_amendment`.
 2. **Installs ObjectQL hook subscribers** that write ledger and activity rows on data
    mutations, plus record-level access gates for `sys_comment`.
 3. **Installs the record-view writer** — an `afterFind` hook that records `read` rows for

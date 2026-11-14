@@ -438,7 +438,7 @@
       "title": "Metadata draft→publish lifecycle: drafts staged not served, publish flips visibility atomically, conflicts and invalid drafts refused, and the history/audit/diff/rollback forensics tell the truth",
       "since": "v16",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors drafts)", "end user (must not see drafts)"],
@@ -508,7 +508,7 @@
         {
           "clause": "Studio chrome tells the truth: the item header's 'Draft · N unpublished' line and the numbered pill on the Changes button while pending, cleared after publish",
           "oracle": "screenshot",
-          "verify": "for a draft staged in a writable package (an env-wide draft is counted in no package scope, so it shows no pill): the draft line and the pill visible pre-publish, both gone post-publish and after a reload. A publish made outside Studio (the REST publish of steps[3]) shows in Studio only after a reload; Studio's own 'Publish all' clears them at once (QA run #24604) (the audit found this model 'reads consistently everywhere')",
+          "verify": "for a draft staged in a writable package (an env-wide draft is counted in no package scope, so it shows no pill): the draft line and the pill visible pre-publish, both gone post-publish and after a reload. A publish made outside Studio (the REST publish of steps[3]) shows in an open Studio tab without a reload: at once on switching back to the tab, or within the poll interval while the tab stays visible (ui/packages/app-shell/src/preview/usePendingDrafts.ts#PENDING_DRAFTS_POLL_MS); Studio's own 'Publish all' clears them at once (QA run #24604) (the audit found this model 'reads consistently everywhere')",
           "evidence": "before/after Studio screenshots"
         },
         {
@@ -571,7 +571,8 @@
         { "revision": 9, "date": "2026-10-27", "change": "acceptance[8] (clause, verify) and steps[9] follow the diff's shipped granularity, and acceptance[5].verify names the earlier refusal (checklist-accuracy findings c8 and c5 of the coordinator leg of QA run #26715, at 3fcafcd3; re-read at 43731031). (1) The clause expected the edited widget's own key (widgets[0].title); the door answered changed [{ path: 'widgets', from, to }]. diffMetaItem's diff is shallow by contract (protocol.ts diffShallow: top-level keys only, deep structural diffs out of scope), so the clause now asks for the changed top-level key and no unchanged one — still never a whole-document dump. (2) A stray widget key is refused at the draft save (422 INVALID_METADATA, unrecognized_keys), so there is no invalid draft to publish; that refusal now scores the invalid-draft clause beside the unchanged live read", "ref": "#26715" },
         { "revision": 10, "date": "2026-10-31", "change": "acceptance[10] names which denials the audit trail records, in place of 'attempts (allowed and denied)'. The protocol writes a denied row only for item_locked, metadata_conflict (the save door's 409 on a stale If-Match included, packages/metadata-protocol/src/protocol-save-conflict.ts) and the batch publish's batch_aborted, namespace_prefix and stored_type_not_canonical; a 422 INVALID_METADATA spec refusal and a 404 NO_DRAFT write none. The verify gains steps[5]'s 409 as a denied metadata_conflict row with its actor, which this item already drives, so the clause is stronger. The other denial codes the sys_metadata_audit object documents (not_overridable, not_creatable, invalid_metadata, destructive_change) have no writer in packages/metadata-protocol at this base. Accuracy finding of QA run #27441. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27441" },
         { "revision": 11, "date": "2026-11-02", "change": "acceptance[10] (clause, verify) re-pointed to #28355: revision 10 said a 422 INVALID_METADATA spec refusal writes no row, and #28355 now stamps one denied row per catalogued refusal at the four single-item doors (protocol-refusal-audit.ts, REFUSAL_AUDIT_CODES = NOT_OVERRIDABLE, NOT_CREATABLE, INVALID_METADATA, DESTRUCTIVE_CHANGE, stored lower-case). The clause names those four beside item_locked, metadata_conflict and the batch codes, and keeps NO_DRAFT, INVALID_REQUEST and 5xx as writing none; the verify asks for steps[7]'s 422 as exactly one denied invalid_metadata save row with the actor, and for no row from steps[12]'s 400 or a NO_DRAFT publish. acceptance[3] spells the wire code METADATA_CONFLICT and says the stale If-Match must be sent while a draft row exists. Measured at base 0a41075a through the real protocol doors with a throwaway probe (deleted): the stray-key dashboard draft save answered 422 INVALID_METADATA with one denied invalid_metadata row carrying the actor; a publish with no draft answered 404 NO_DRAFT and a rollback with no toVersion 400 INVALID_REQUEST, neither writing a row; a draft save carrying the published version as If-Match with no draft row answered 409 METADATA_CONFLICT (current is null). Stronger, not weaker: the 422 that scored a row as a FAIL now owes one. QA run #29002 clause FAIL", "ref": "#29013" },
-        { "revision": 12, "date": "2026-11-04", "change": "acceptance[3].verify corrected from QA run #29890 (W5-FAIL, at 589049b0): a GET with ?mode=draft answers 400 (the read's parameters are closed; the draft read is ?state=draft), so the no-overwrite proof is the next publish serving the newer draft. Read at base f68b47ca", "ref": "#29906" }
+        { "revision": 12, "date": "2026-11-04", "change": "acceptance[3].verify corrected from QA run #29890 (W5-FAIL, at 589049b0): a GET with ?mode=draft answers 400 (the read's parameters are closed; the draft read is ?state=draft), so the no-overwrite proof is the next publish serving the newer draft. Read at base f68b47ca", "ref": "#29906" },
+        { "revision": 13, "date": "2026-11-13", "change": "acceptance[6].verify drops the expectation that a publish made outside Studio shows only after a reload: phase 1 of the #32592 ruling (6844196863) has usePendingDrafts read the ledger again when the tab becomes visible or gains focus, and on a poll while it stays visible, sending the tab's metadata-refresh pulse when the answer moved, so the item header line and the Changes pill follow an outside publish or draft without a reload. A hidden tab sends nothing (hiddenTabPollStop.ts). No other clause changed", "ref": "#32592" }
       ]
     },
     {
@@ -2668,10 +2669,10 @@
     },
     {
       "id": "studio-authoring.flow-status-matches-runtime",
-      "title": "The flow state Studio shows is the state the deployment runs: the rail dot and the header read what GET /api/v1/automation/_status reports — Switched on, Switched off, Not running here with the platform's reason — and an enabled record-triggered flow actually runs",
+      "title": "The flow state Studio shows is the state the deployment runs: the rail dot and the header read what GET /api/v1/automation/_status reports — Switched on, Switched off, Not running here with its cause and the platform's reason — and an enabled record-triggered flow actually runs",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2689,7 +2690,7 @@
         "on the default boot open /_console/studio/PKG/automations; for every flow read the rail dot's words (the visually hidden text and the row title) and the header's status, then GET /api/v1/automation/_status and pair each flow's row (enabled, bound, reason)",
         "enable the record-triggered flow with the header switch (it was Off by default); read the toast ('Switched on — publish to apply', engine.studio.auto.enabledToast); publish; re-read the rail, the header and _status",
         "create a record of the watched object (POST /api/v1/data/OBJ) and read the flow's runs for it",
-        "read the schedule flow on the default boot: its dot and header read 'Not running here', titled with the platform's reason, and Problems carries a note (not counted as a problem); _status answers bound: false with that same reason",
+        "read the schedule flow on the default boot: its dot and header read 'Not running here', titled with the cause line (the worded unboundCause where _status names a known one, on a default boot deployment_policy: 'This deployment keeps scheduled work that comes with a package switched off. Whoever operates this deployment can switch it on.'; otherwise the platform's reason), and Problems carries a note (not counted as a problem) whose detail, the hover title of its cause line, is the platform's reason verbatim; _status answers bound: false with that reason and its unboundCause",
         "boot the launch entry showcase-scheduled-work-3778 (OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1) beside the default boot and author the schedule flow there; re-read the schedule flow in Studio and _status, and wait for its first run",
         "on the default boot, disable the record-triggered flow; publish; create another record and confirm no new run"
       ],
@@ -2701,10 +2702,10 @@
           "evidence": "the pairing table"
         },
         {
-          "clause": "Not running here carries the platform's own reason verbatim — in the rail title, the header and the Problems note — and the note is not counted as a problem",
+          "clause": "Not running here carries a cause line in the rail title and the header (the worded `unboundCause` when the platform names a known one, otherwise the platform's reason), and the platform's reason verbatim on the Problems note (its detail), and the note is not counted as a problem",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the pillar rendered, the schedule flow's title text equals _status's reason string; Problems lists it as a note with a zero problem count",
-          "evidence": "the title / note text beside the _status reason"
+          "verify": "after a screenshot confirms the pillar rendered, the schedule flow's rail and header title equals the worded cause for _status's unboundCause (engine.studio.auto.unboundCause.CAUSE in the console's locale) where the row names a known cause, and _status's reason string where it names none; the Problems note (data-testid flow-run-status-note) shows the same cause line, and its detail, that line's title attribute, equals the reason string verbatim (ui/packages/app-shell/src/views/metadata-admin/previews/flow-problems.ts#describeFlowRunStatus words the title from the cause and keeps the reason as detail); Problems lists it as a note with a zero problem count",
+          "evidence": "the rail and header titles and the note's text and detail, beside the _status reason and unboundCause"
         },
         {
           "clause": "the switch is the runtime switch: enabled and published, the record-triggered flow runs on a create; disabled and published, it does not",
@@ -2729,10 +2730,10 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.flowStatusTruth-11779.test.tsx + FlowStatusDot.test.tsx + StudioDesignSurface.railUnboundReason-11281.test.tsx: jsdom pins of the reading against a _status double — evidence for acceptance[0] and [1] at the component layer; the live pairing and the runs stay the run's"
+        "ref": "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.flowStatusTruth-11779.test.tsx + FlowStatusDot.test.tsx + StudioDesignSurface.railUnboundReason-11281.test.tsx + ui/packages/app-shell/src/views/metadata-admin/previews/flow-problems.runStatus-11779.test.ts ('a known cause reads its designer row in zh and en; the platform sentence moves to the detail'): jsdom and unit pins of the reading against a _status double — evidence for acceptance[0] and [1] at the component layer; the live pairing and the runs stay the run's"
       },
       "source": [
-        "ui/packages/app-shell/src/views/studio-design/AutomationsFlowRail.tsx (FlowStatusDot and flowRailStatus: green On, grey Not running here titled with the reason, amber Refused, hollow Off; objectui#11779, #11281, #12454)",
+        "ui/packages/app-shell/src/views/studio-design/AutomationsFlowRail.tsx (FlowStatusDot and flowRailStatus: green On, grey Not running here titled with the cause line describeFlowRunStatus words (the known unboundCause's designer row, else the reason), amber Refused, hollow Off; objectui#11779, #11281, #12454)",
         "packages/services/service-automation/src/engine.ts (getFlowRuntimeStates — the rows GET /automation/_status passes through)",
         "RUNNER.md environment facts (package-authored scheduled work is OFF unless OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1)",
         "cross-ref: the API kill switch ({enabled} at the automation door) is automation.flow-toggle-kill-switch; scheduled-work policy itself is the RUNNER.md fact, not a defect"
@@ -2767,6 +2768,12 @@
           "date": "2026-11-04",
           "change": "fixtures.requires[2] and steps[4] name the .claude/launch.json entry showcase-scheduled-work-3778 as the schedule leg's second boot. QA run #29672 could not reboot with the switch, because a runner that starts servers only from launch.json had no such entry. That entry has its own port and DB, so it runs beside the default boot, the step authors the schedule flow again there, and steps[5] stays on the default boot. acceptance[3].clause now reads 'a schedule flow authored the same way' instead of 'the same schedule flow', since that boot holds a re-authored copy; what it asserts is unchanged",
           "ref": "#29819"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "acceptance[1] (clause, verify, evidence) re-pointed with steps[3], the title, automated.ref and source[0] (stale spec, QA run #33048 acceptance[1], card #33054). For a known unboundCause the console words the rail and header title from the cause code and keeps the engine's sentence as the Problems note's detail, on purpose (ui/packages/app-shell/src/views/metadata-admin/previews/flow-problems.ts#describeFlowRunStatus; pinned by flow-problems.runStatus-11779.test.ts, now in automated.ref). QA read the default boot's schedule flow so: _status reason 'disabled by deployment policy — …' with unboundCause deployment_policy, the titles reading engine.studio.auto.unboundCause.deployment_policy, the reason on the note's hover title. r5 asked for the reason verbatim in all three places. The clause now asks for the cause line in the rail and the header, the reason verbatim as the note's detail, and still no problem counted; a row naming no known cause keeps the reason as its title. negative[] is unchanged (ruling 6545938831 item ① on #28345). Read at base e540baf8",
+          "ref": "#33054"
         }
       ]
     },

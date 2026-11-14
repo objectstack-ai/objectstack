@@ -167,7 +167,7 @@ async function runLifecycle(opts: {
     await plugin.start(ctx);
 
     return {
-        manifest, logs,
+        manifest, logs, plugin, services,
         engine: services.get('automation') as AutomationEngine,
         errors: () => logs.filter(l => l.level === 'error').map(l => l.msg).join('\n'),
         /**
@@ -257,8 +257,10 @@ describe('durable suspended-run wiring (#4420)', () => {
         // [#20790] The one object it does register is the write-only flow
         // credential channel's, which every composition needs — [#27237] with
         // the connector credential store beside it, for the same reason, and
-        // [ADR-0143 D3] the connector connection record beside that.
-        expect(h.registeredObjects()).toEqual(['sys_flow_credential', 'sys_connector_credential', 'sys_connector_connection']);
+        // [ADR-0143 D3] the connector connection record beside that, and
+        // [ADR-0153 D7] the pull's run record, whose read position needs its
+        // table whatever the suspended-run store is.
+        expect(h.registeredObjects()).toEqual(['sys_flow_credential', 'sys_connector_credential', 'sys_connector_connection', 'sys_sync_run']);
         expect((h.engine as any).store).toBeUndefined();
         expect(h.errors()).toBe('');
     });
@@ -280,5 +282,53 @@ describe('durable suspended-run wiring (#4420)', () => {
         const plugin = new AutomationServicePlugin();
         expect(plugin.optionalDependencies).toContain('com.objectstack.engine.objectql');
         expect(plugin.dependencies).toEqual([]);
+    });
+});
+
+describe('[ADR-0153 D7] the pull run record, wired by the plugin', () => {
+    /** The fake engine, with every `sys_sync_run` update recorded and answered with an affected-row count. */
+    function recordingSyncRuns(data: ReturnType<typeof fakeDataEngine>) {
+        const updates: Array<{ data: any; options: any }> = [];
+        const update = data.update.bind(data);
+        data.update = (async (object: string, d: any, options: any) => {
+            if (object !== 'sys_sync_run') return update(object, d, options);
+            updates.push({ data: d, options });
+            return options?.multi ? 2 : update(object, d, options);
+        }) as never;
+        return updates;
+    }
+
+    for (const suspendedRunStore of ['auto', 'memory'] as const) {
+        it(`closes the pulls a stopped server left running at start (${suspendedRunStore} store)`, async () => {
+            const data = fakeDataEngine();
+            const updates = recordingSyncRuns(data);
+            const h = await runLifecycle({ manifestPhase: 'init', data, suspendedRunStore });
+            expect(h.registeredObjects()).toContain('sys_sync_run');
+            expect(updates).toHaveLength(1);
+            expect(updates[0].options).toMatchObject({ where: { status: 'running' }, multi: true });
+            expect(updates[0].data).toMatchObject({ status: 'failed', failure_reason: 'interrupted' });
+            expect(h.errors()).toBe('');
+        });
+    }
+
+    it('closes nothing when sys_sync_run never reached a manifest', async () => {
+        const data = fakeDataEngine();
+        const updates = recordingSyncRuns(data);
+        await runLifecycle({ manifestPhase: 'never', data });
+        expect(updates).toEqual([]);
+    });
+
+    it('a pull through the plugin opens a run row and closes it with the refusal', async () => {
+        const data = fakeDataEngine();
+        const updates = recordingSyncRuns(data);
+        const h = await runLifecycle({ manifestPhase: 'init', data });
+        h.services.set('protocol', { getMetaItem: async () => undefined });
+        await expect(h.plugin.pullConnectorSource({ mapping: 'orders_pull', context: { isSystem: true } }))
+            .rejects.toMatchObject({ reason: 'mapping_not_found' });
+        const opened = [...data.rows.values()].filter((r) => r.mapping === 'orders_pull');
+        expect(opened).toHaveLength(1);
+        expect(opened[0]).toMatchObject({ status: 'failed', failure_reason: 'mapping_not_found' });
+        // The boot close, then the run's own close.
+        expect(updates.map((u) => u.data.status)).toEqual(['failed', 'failed']);
     });
 });

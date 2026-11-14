@@ -32,7 +32,7 @@ import {
     isActionWithheldByDisabledPackage,
     isItemOfDisabledPackage,
 } from './protocol-authoring-refusals.js';
-import { soleShippingPackage } from './protocol-environment-rows.js';
+import { shippingPackageIds } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { mergePackageAwareOverlay, servedViewExpansion, withoutServedRowName } from './protocol-overlay-merge.js';
@@ -47,8 +47,9 @@ import {
 } from './protocol-package-bindings.js';
 import { storedEntryRow } from './protocol-stored-overlay-types.js';
 import { viewIdentityPatch } from './protocol-view-normalization.js';
-import { isServedOverrideRowOf } from './served-override.js';
+import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { declinesPackageLessRowAt, holdsNameForExactRead, packageLessRowWithheld, pairMemberWithheldAt } from './protocol-exact-qualifier.js';
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItems`; the method's docblock there is its contract. */
 export async function getMetaItems(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean }) {
@@ -193,6 +194,11 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // the list's membership stays the items the package ships. A stand-in
     // no layer seated is recorded here and dropped after the last merge.
     const unseated = packageId ? new WeakSet<object>() : undefined;
+    // [#32606] A moved edit's former owner is asked whether it ships any
+    // member of the name over the registry the list serves, not over the
+    // merge's base items, which a scoped list draws from one package alone.
+    const shipsName = (name: string, shipper: string): boolean =>
+        shippingPackageIds(host.shippedArtifactsOf(request.type, name)).has(shipper);
     try {
         // [#21442] The row set this read consults — the overlay cache
         // included — is {@link readActiveOverlayRows}, and each row is
@@ -256,8 +262,12 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             }));
             // [#21817] The package-less rows, placed the same way, as
             // stand-ins: the same parse and the same stored-row rule.
+            // [epic ruling 6761802819 on #31699] …except one of a name two or
+            // more packages hold: it is no holder's own, so no holder's list
+            // serves it ({@link packageLessRowWithheld}).
             const standIns = host.storedOverlayEntries(request, standInRows)
                 .filter((entry) => !host.declinesStoredRow(request.type, (entry.data as { name?: unknown } | null)?.name, storedEntryRow(entry)))
+                .filter((entry) => !packageLessRowWithheld(host, request.type, entry.name ?? (entry.data as { name?: unknown } | null)?.name))
                 .map(({ name, data, type: recType }) => ({
                     data, packageId: undefined, stored: { type: recType, name }, standIn: true,
                 }));
@@ -289,7 +299,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                 return host.foldObjectExtendersFromRegistry(
                     request.type, (data as { name?: unknown } | null)?.name, data, onlyExtensionsOf,
                 );
-            }, unseated, { servedOverride, installed });
+            }, unseated, { servedOverride, installed, shipsName });
 
             // [#13407] Expand any aggregated `defineView` container this
             // READ just merged in, INLINE into this response's own `items`
@@ -545,7 +555,16 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             // package-less rows. The by-name preview arm naming the
             // package serves that draft when the package has none.
             const packageAgnosticDrafts = packageId ? await queryDrafts(undefined) : [];
-            const standInDraftRecords = packageAgnosticDrafts.filter((record) => (record?.package_id ?? null) === null);
+            // [#32568] …except one the by-name preview naming the package
+            // does not serve there: an overlay type's draft of a name two or
+            // more packages hold ({@link packageLessRowWithheld}, as the
+            // active arm leaves it out), and a sealed type's, which is
+            // declined ({@link declinesPackageLessRowAt}, as the active arm
+            // declines its row).
+            const standInDraftRecords = packageAgnosticDrafts
+                .filter((record) => (record?.package_id ?? null) === null)
+                .filter((record) => !packageLessRowWithheld(host, request.type, record?.name)
+                    && !declinesPackageLessRowAt(host, request.type, String(record?.name ?? ''), record as ServedOverrideRow));
             // [#28409] …and the pair's drafts, as stand-ins, as its active
             // arm previews the pair's rows: the pending edit of the
             // package's declared override previews over its slot.
@@ -588,7 +607,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                 items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                     if (data && typeof data === 'object') (data as any)._draft = true;
                     return data;
-                }, unseated, { servedOverride, installed });
+                }, unseated, { servedOverride, installed, shipsName });
             }
         } catch (error) {
             // [#5532] Same rule as the active-overlay read above. Serving
@@ -703,8 +722,15 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             if (!(it && typeof it === 'object' && unseated.has(it))) continue;
             const bound = boundPackageOf(it._packageId);
             if (bound === undefined || !pairsOfList.includes(bound) || typeof it.name !== 'string') continue;
-            if (host.shipsBundleName(request.type, it.name, packageId, typeShipping)
-                && host.baseServesBundleMember(request.type, it.name, packageId, it, typeShipping)) {
+            // [#33131 item 5] …or holds it for the exact read: a package
+            // holding the name only through its own stored row (no code
+            // artifact) is the holder its exact read serves the pair's added
+            // member at, so its list and execution list carry that member too.
+            if ((host.shipsBundleName(request.type, it.name, packageId, typeShipping)
+                || holdsNameForExactRead(host, request.type, it.name, packageId))
+                && host.baseServesBundleMember(request.type, it.name, packageId, it, typeShipping)
+                // [#31699 F2] …unless the row could be two holders' member.
+                && !pairMemberWithheldAt(host, request.type, it.name, packageId, bound, it)) {
                 unseated.delete(it);
             }
         }
@@ -764,19 +790,46 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // ({@link baseServesBundleMember}), so a locale the customer adds in
     // `.custom` is listed and executed (the email loader reads this list).
     // A dependent's member under the name is still dropped here.
+    //
+    // [#32613, ADR-0150 D4] …and a name two or more packages ship drops the
+    // pair's own slot of a row that declares one shipper's override: the
+    // merges above have served that row in its shipper's slot, under its
+    // shipper's provenance, so its pair's slot is the same row a second time.
+    // Kept, it was enveloped by the name's first shipper
+    // ({@link lookupArtifactItem} with the pair's id finds no own artifact), so
+    // the list served one holder's override under another holder's package,
+    // by registration order (red line 2). Judged by the one served-override
+    // predicate on the item's own binding (the pair, its `package_id` column)
+    // and body, against each shipper. Every other item of such a name is kept
+    // as before (ADR-0048 §3.3), and a name one package ships is narrowed
+    // above as before, which already drops the pair's slot.
+    // [#33131] …for every type, not `flow` and `action` alone: measured for
+    // the six sealed types and a dashboard, report and email template, the
+    // pair's slot of the second holder's declared override was listed under
+    // the FIRST holder's package beside its own slot. A bundle's row is
+    // dropped only at a member its declared base ships, where the base's slot
+    // serves it; a pair's added member is kept, as the sole-shipper rule keeps
+    // it ({@link baseServesBundleMember}).
     if (servedOverride && !packageId && request.type !== 'package') {
         const typeShipping = host.shippingPackagesOf(request.type);
         const isBundle = ITEM_KEY_DISCRIMINATORS[request.type] !== undefined;
-        const soleShipperOf = new Map<string, string | undefined>();
+        const shippersOf = new Map<string, ReadonlySet<string>>();
         items = (items as any[]).filter((it) => {
             const itemName = it?.name;
             const bound = boundPackageOf(it?._packageId);
             if (typeof itemName !== 'string' || bound === undefined) return true;
-            if (!soleShipperOf.has(itemName)) {
-                soleShipperOf.set(itemName, soleShippingPackage(host.shippedArtifactsOf(request.type, itemName, typeShipping)));
+            if (!shippersOf.has(itemName)) {
+                shippersOf.set(itemName, shippingPackageIds(host.shippedArtifactsOf(request.type, itemName, typeShipping)));
             }
-            const soleShipper = soleShipperOf.get(itemName);
-            if (soleShipper === undefined || soleShipper === bound) return true;
+            const shippers = shippersOf.get(itemName)!;
+            if (shippers.has(bound)) return true;
+            if (shippers.size > 1) {
+                return ![...shippers].some((shipper) =>
+                    isServedOverrideRowOf({ type: request.type, package_id: bound, metadata: it }, shipper, installed)
+                    && (!isBundle || !host.baseServesBundleMember(request.type, itemName, shipper, it, typeShipping)));
+            }
+            if (shippers.size === 0) return true;
+            const [soleShipper] = shippers;
             return isBundle && host.baseServesBundleMember(request.type, itemName, soleShipper, it, typeShipping);
         });
     }

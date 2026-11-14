@@ -536,6 +536,7 @@ describe('MetadataPlugin', () => {
   // We mock NodeMetadataManager to avoid filesystem side effects.
   vi.mock('./node-metadata-manager', () => {
     const MockNodeMetadataManager = class {
+      constructor(public options?: unknown) {}
       loadMany = vi.fn().mockResolvedValue([]);
       registerLoader = vi.fn();
       stopWatching = vi.fn();
@@ -543,6 +544,7 @@ describe('MetadataPlugin', () => {
       setDatabaseDriver = vi.fn();
       setDataEngine = vi.fn();
       register = vi.fn();
+      useHostLogger = vi.fn();
     };
     return { NodeMetadataManager: MockNodeMetadataManager };
   });
@@ -575,6 +577,24 @@ describe('MetadataPlugin', () => {
     await plugin.init(ctx);
 
     expect(ctx.registerService).toHaveBeenCalledWith('metadata', expect.anything());
+  });
+
+  it('[#32154] init hands the kernel logger to the manager, before the plugin logs anything', async () => {
+    const { MetadataPlugin } = await import('./plugin.js');
+    const plugin = new MetadataPlugin({ rootDir: '/tmp/test', watch: false });
+    const manager = (plugin as any).manager as { options: any; useHostLogger: ReturnType<typeof vi.fn> };
+    // Built before any kernel exists, told to hold its chatter for the host's logger.
+    expect(manager.options).toMatchObject({ awaitHostLogger: true });
+    expect(manager.useHostLogger).not.toHaveBeenCalled();
+
+    const ctx = createMockPluginContext();
+    await plugin.init(ctx);
+
+    expect(manager.useHostLogger).toHaveBeenCalledTimes(1);
+    expect(manager.useHostLogger).toHaveBeenCalledWith(ctx.logger);
+    // First: the manager follows the kernel's level before any init-time line.
+    expect(manager.useHostLogger.mock.invocationCallOrder[0])
+      .toBeLessThan(ctx.logger.info.mock.invocationCallOrder[0]);
   });
 
   it('should register metadata storage objects in the ObjectOS manifest', async () => {

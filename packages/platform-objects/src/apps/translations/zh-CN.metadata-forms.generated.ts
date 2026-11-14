@@ -638,7 +638,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "currencyConfig.currencyField": {
         label: "币种字段",
-        helpText: "仅用于 record 模式，且在该模式下必填：本对象上保存每条记录 ISO 4217 币种代码的字段——一个声明了 valueDomain iso_4217_currency 的文本字段，惯例命名为 currency_code。"
+        helpText: "仅用于 record 模式，且在该模式下必填：本对象上保存每条记录 ISO 4217 币种代码的字段——一个声明了 valueDomain iso_4217_currency 的文本字段，惯例命名为 currency_code。在主从子对象上，也可改为以 <master_detail 字段>.<父对象币种字段>（如 invoice.currency_code）指向父记录的币种字段：此时记录沿用父记录的币种，且只要存在这样的子记录，父记录的币种代码就不允许修改。"
       },
       "currencyConfig.defaultCurrency": {
         label: "默认货币",

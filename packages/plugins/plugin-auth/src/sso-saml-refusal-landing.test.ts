@@ -751,3 +751,317 @@ describe('[#32086] the attribute mapping decides the email and name a SAML sign-
     expect(rp.engine.tables.get('sys_user')?.map((u: any) => u.email).sort()).toEqual(['admin@acme.com', 'mia.chen@acme.com']);
   });
 });
+
+// ── With SSO domain verification on, a provider creates an account only at a domain it has proven ──
+//
+// `sso-account-at-proven-domain.ts` states the rule. Every case runs with
+// verification on, the provider's `domain_verified` on and its JIT toggle on,
+// and one human already present, so the audience gate would admit each
+// newcomer: the rule alone decides.
+
+describe('with SSO domain verification on, a SAML provider creates an account only at a domain it has proven', () => {
+  const VERIFICATION_ON = { plugins: { sso: true, ssoDomainVerification: true } };
+  const verifiedRp = async (domain = 'acme.com', provider: Record<string, unknown> = {}) => {
+    const rp = await makeRp({ config: VERIFICATION_ON, provider: { domain, domainVerified: true, allowJit: true, ...provider } });
+    await seedAdmin(rp);
+    return rp;
+  };
+  /** What a sign-in left behind besides the seeded admin. */
+  const written = (rp: Rp) => ({
+    users: (rp.engine.tables.get('sys_user') ?? []).map((u: any) => u.email).filter((e: string) => e !== 'admin@acme.com'),
+    accounts: (rp.engine.tables.get('sys_account') ?? []).length,
+    members: (rp.engine.tables.get('sys_member') ?? []).length,
+    sessions: (rp.engine.tables.get('sys_session') ?? []).length,
+  });
+  const NOTHING = { users: [], accounts: 0, members: 0, sessions: 0 };
+
+  const expectAdmitted = (res: Response) => {
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location'), res.headers.get('location') ?? '').toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=[^;]/);
+  };
+  const expectRefused = (rp: Rp, res: Response) => {
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: FAILED, error: 'EMAIL_DOMAIN_NOT_ALLOWED' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(written(rp)).toEqual(NOTHING);
+  };
+
+  it('admits an address exactly at the single listed domain', async () => {
+    const rp = await verifiedRp();
+    expectAdmitted(await signInThroughIdp(rp, 'bob@acme.com'));
+    expect(written(rp).users).toEqual(['bob@acme.com']);
+  });
+
+  it('admits an address exactly at the second entry of a multi-entry list', async () => {
+    const rp = await verifiedRp('acme.com, acme.co.uk');
+    expectAdmitted(await signInThroughIdp(rp, 'bob@acme.co.uk'));
+  });
+
+  const refused: Array<[string, string, string?]> = [
+    ['another domain', 'bob@other.example'],
+    ['a subdomain of a listed domain', 'bob@eng.acme.com'],
+    ['a parent of a listed domain', 'bob@acme.com', 'eng.acme.com'],
+    ['a look-alike of a listed domain', 'bob@acme.com.other.example'],
+    ['an asserted email that is not an address', 'bob.acme.com'],
+    ['a domain part with a port', 'bob@acme.com:443'],
+    ['a domain part with a path', 'bob@acme.com/x'],
+    ['a domain part with a trailing dot', 'bob@acme.com.'],
+    ['a full-width spelling of a listed domain', 'bob@\uFF41\uFF43\uFF4D\uFF45.com'],
+    ['an address at a listed entry that is not written as a bare host', 'ceo@victim.example', 'victim.example\\@evil.example'],
+  ];
+  for (const [what, email, domain] of refused) {
+    it(`refuses ${what}, and writes no user, account, membership or session`, async () => {
+      const rp = await verifiedRp(domain);
+      expectRefused(rp, await signInThroughIdp(rp, email));
+    });
+  }
+
+  it('case, and punycode against Unicode for an internationalised name, are one domain', async () => {
+    for (const [domain, email] of [
+      ['acme.com', 'Bob@ACME.com'],
+      ['bücher.de', 'bob@xn--bcher-kva.de'],
+      ['xn--bcher-kva.de', 'bob@bücher.de'],
+    ]) {
+      const rp = await verifiedRp(domain);
+      expectAdmitted(await signInThroughIdp(rp, email));
+    }
+  });
+
+  it('no carve-out: the first human of a deployment, at an outside domain, is refused', async () => {
+    // JIT off: without the rule, the first-human carve-out alone would admit.
+    const rp = await makeRp({ config: VERIFICATION_ON, provider: { domainVerified: true, allowJit: false } });
+    const email = 'bob@other.example';
+    expectRefused(rp, await signInThroughIdp(rp, email));
+    expect(rp.engine.tables.get('sys_user') ?? []).toEqual([]);
+  });
+
+  it('no carve-out: an outside-domain address holding a pending invitation is refused', async () => {
+    // JIT off: without the rule, the invitation alone would admit.
+    const rp = await verifiedRp('acme.com', { allowJit: false });
+    const email = 'bob@other.example';
+    await inviteForAudienceGate(rp.engine, email);
+    expectRefused(rp, await signInThroughIdp(rp, email));
+  });
+
+  it('CONTROL (stays green under ablation): a provider whose domain is not verified signs nobody in', async () => {
+    // The vendor refuses this before any account is judged, so it does not
+    // pin the rule above.
+    const rp = await makeRp({ config: VERIFICATION_ON, provider: { domainVerified: false, allowJit: true } });
+    await seedAdmin(rp);
+    const start = await rp.manager.handleRequest(
+      new Request(`${AUTH}/sign-in/sso`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE },
+        body: JSON.stringify({ providerId: PROVIDER_ID, callbackURL: AFTER, errorCallbackURL: FAILED }),
+      }),
+    );
+    expect(start.status).toBe(401);
+    expect(written(rp)).toEqual(NOTHING);
+  });
+
+  it('CONTROL: with verification off, the outside-domain account is created as today', async () => {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(rp);
+    expectAdmitted(await signInThroughIdp(rp, 'bob@other.example'));
+    expect(written(rp).users).toEqual(['bob@other.example']);
+  });
+
+  it('CONTROL: an existing linked account at an outside domain still signs in', async () => {
+    const rp = await verifiedRp();
+    // The account is made while the environment reports verification off (as
+    // it was before it was turned on); the vendor's own provider gate stays on.
+    const off = vi.spyOn(rp.manager, 'isSsoDomainVerificationEnabled').mockReturnValue(false);
+    expectAdmitted(await signInThroughIdp(rp, 'bob@other.example'));
+    off.mockRestore();
+    expect(rp.manager.isSsoDomainVerificationEnabled()).toBe(true);
+    expectAdmitted(await signInThroughIdp(rp, 'bob@other.example'));
+    expect(written(rp).users).toEqual(['bob@other.example']);
+  });
+
+  it('CONTROL: invite_only without allowJit still answers SELF_REGISTRATION_CLOSED for an on-domain stranger', async () => {
+    const rp = await verifiedRp('acme.com', { allowJit: false });
+    const res = await signInThroughIdp(rp, 'bob@acme.com');
+    expect(landing(res)).toEqual({ base: FAILED, error: 'SELF_REGISTRATION_CLOSED' });
+    expect(written(rp)).toEqual(NOTHING);
+  });
+});
+
+// ── Sign out of the company sign-in too: SAML single logout ─────────────────
+//
+// Ruling record 6866334319 (`sso-sign-out-of-idp.ts`). The IdP side of single
+// logout is played with the same `samlify`: a LogoutRequest the IdP sends when
+// the person signs out there, and the LogoutResponse it answers the platform's
+// own LogoutRequest with, each signed with the IdP key above or unsigned.
+
+describe('sign out of the company sign-in too: SAML single logout', () => {
+  const REDIRECT = 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect';
+  const IDP_SLO = 'https://idp.acme.example/slo';
+  const POST = 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST';
+  const SP_SLO = `${AUTH}/sso/saml2/sp/slo/${PROVIDER_ID}`;
+  // As the IdP Logout URL field stores it (`samlLogoutServiceOf`): one address, both bindings.
+  const withLogoutAddress = {
+    idpMetadata: {
+      entityID: IDP_ENTITY,
+      singleLogoutService: [
+        { Binding: REDIRECT, Location: IDP_SLO },
+        { Binding: POST, Location: IDP_SLO },
+      ],
+    },
+  };
+
+  const sessionOf = async (rp: Rp, cookie: string): Promise<{ user?: { email?: string } } | null> => {
+    const res = await rp.manager.handleRequest(new Request(`${AUTH}/get-session`, { headers: { cookie } }));
+    const body = (await res.json().catch(() => null)) as { user?: { email?: string } } | null;
+    return body?.user ? body : null;
+  };
+
+  const signOut = (rp: Rp, cookie: string, body: Record<string, unknown> = {}): Promise<Response> =>
+    rp.manager.handleRequest(
+      new Request(`${AUTH}/sign-out`, {
+        method: 'POST',
+        headers: { cookie, origin: BASE, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  /** The IdP's view of this SP, built from configuration (not the SP metadata, which advertises single logout only while it is on). */
+  const spAsIdpSees = (signed: boolean) =>
+    samlify.ServiceProvider({
+      entityID: SP_ENTITY,
+      assertionConsumerService: [{ Binding: 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST', Location: ACS }],
+      singleLogoutService: [{ Binding: POST, Location: SP_SLO }, { Binding: REDIRECT, Location: SP_SLO }],
+      wantLogoutRequestSigned: signed,
+      wantLogoutResponseSigned: signed,
+    });
+  const idpWithLogout = () =>
+    samlify.IdentityProvider({
+      entityID: IDP_ENTITY,
+      privateKey: idpKeyPem,
+      signingCert: idpCert,
+      nameIDFormat: [EMAIL_FORMAT],
+      singleSignOnService: [{ Binding: REDIRECT, Location: IDP_SSO }],
+      singleLogoutService: [{ Binding: REDIRECT, Location: IDP_SLO }, { Binding: POST, Location: IDP_SLO }],
+    });
+
+  /** A logout message the IdP's page posts to the SP's logout endpoint (HTTP-POST binding, no cookie). */
+  const postToSpSlo = (rp: Rp, type: string, context: string): Promise<Response> =>
+    rp.manager.handleRequest(
+      new Request(SP_SLO, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ [type]: context }).toString(),
+      }),
+    );
+
+  /** The IdP's LogoutRequest for `email` (the person signed out at the IdP). */
+  const idpLogoutRequest = (rp: Rp, email: string, signed: boolean): Promise<Response> => {
+    const { context, type } = idpWithLogout().createLogoutRequest(spAsIdpSees(signed), 'post', { logoutNameID: email });
+    return postToSpSlo(rp, type, context);
+  };
+
+  /** The IdP's LogoutResponse to a LogoutRequest of the SP. */
+  const idpLogoutResponse = (rp: Rp, signed: boolean): Promise<Response> => {
+    const { context, type } = idpWithLogout().createLogoutResponse(
+      spAsIdpSees(signed),
+      { extract: { request: { id: `_${crypto.randomUUID()}` } } },
+      'post',
+    );
+    return postToSpSlo(rp, type, context);
+  };
+
+  it('CONTROL, switch off: sign-out ends the platform session only, and the IdP logout endpoint stays closed', async () => {
+    const rp = await makeRp({ samlConfig: withLogoutAddress });
+    const signedIn = cookiesOf(await signInThroughIdp(rp, 'ann@acme.com'));
+    expect((await sessionOf(rp, signedIn))?.user?.email).toBe('ann@acme.com');
+
+    // The IdP's signed LogoutRequest is refused, and the session stands.
+    const refused = await idpLogoutRequest(rp, 'ann@acme.com', true);
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { code?: string }).code).toBe('SINGLE_LOGOUT_NOT_ENABLED');
+    expect((await sessionOf(rp, signedIn))?.user?.email).toBe('ann@acme.com');
+
+    const out = await signOut(rp, signedIn);
+    expect(out.status).toBe(200);
+    const body = (await out.json()) as { success?: boolean; url?: string };
+    expect(body.success).toBe(true);
+    expect(body.url).toBeUndefined();
+    expect(out.headers.get('location')).toBeNull();
+    expect(await sessionOf(rp, signedIn)).toBeNull();
+  });
+
+  it('on: sign-out also signs out at the IdP through its single logout, and the session ends', async () => {
+    const rp = await makeRp({ provider: { signOutOfIdp: true }, samlConfig: withLogoutAddress });
+    const signedIn = cookiesOf(await signInThroughIdp(rp, 'ann@acme.com'));
+
+    const out = await signOut(rp, signedIn, { callbackURL: AFTER });
+    expect(out.status).toBe(200);
+    const body = (await out.json()) as { success?: boolean; url?: string; redirect?: boolean };
+    expect(body).toMatchObject({ success: true, redirect: true });
+    const url = new URL(body.url!);
+    expect(`${url.origin}${url.pathname}`).toBe(IDP_SLO);
+    expect(out.headers.get('location')).toBe(body.url);
+    const logoutRequest = inflateRawSync(Buffer.from(url.searchParams.get('SAMLRequest')!, 'base64')).toString('utf8');
+    expect(logoutRequest).toContain('LogoutRequest');
+    expect(logoutRequest).toContain('ann@acme.com');
+    expect(await sessionOf(rp, signedIn)).toBeNull();
+  });
+
+  it('on: an unsigned LogoutRequest and an unsigned LogoutResponse from the IdP are each refused', async () => {
+    const rp = await makeRp({ provider: { signOutOfIdp: true }, samlConfig: withLogoutAddress });
+    const signedIn = cookiesOf(await signInThroughIdp(rp, 'ann@acme.com'));
+
+    const request = await idpLogoutRequest(rp, 'ann@acme.com', false);
+    expect(request.status).toBe(400);
+    expect(((await request.json()) as { code?: string }).code).toBe('INVALID_LOGOUT_REQUEST');
+    expect((await sessionOf(rp, signedIn))?.user?.email).toBe('ann@acme.com');
+
+    const response = await idpLogoutResponse(rp, false);
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { code?: string }).code).toBe('INVALID_LOGOUT_RESPONSE');
+
+    // CONTROL: the same LogoutResponse, signed, is accepted (and lands on the app's root).
+    const signed = await idpLogoutResponse(rp, true);
+    expect(signed.status).toBe(302);
+    expect(signed.headers.get('location')).toBe(BASE);
+  });
+
+  it('on: a signed message in the HTTP-Redirect binding is refused too (the vendor verifies no redirect signature): fail closed', async () => {
+    const rp = await makeRp({ provider: { signOutOfIdp: true }, samlConfig: withLogoutAddress });
+    const signedIn = cookiesOf(await signInThroughIdp(rp, 'ann@acme.com'));
+    const { context } = idpWithLogout().createLogoutRequest(spAsIdpSees(true), 'redirect', { logoutNameID: 'ann@acme.com' });
+    expect(new URL(context).searchParams.get('Signature')).toBeTruthy();
+    const res = await rp.manager.handleRequest(new Request(context));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: string }).code).toBe('INVALID_LOGOUT_REQUEST');
+    expect((await sessionOf(rp, signedIn))?.user?.email).toBe('ann@acme.com');
+  });
+
+  it('on: a signed LogoutRequest ends only the session it names', async () => {
+    // `allowJit`: under the default invite-only posture only the first person is admitted without it.
+    const rp = await makeRp({ provider: { signOutOfIdp: true, allowJit: true }, samlConfig: withLogoutAddress });
+    const ann = cookiesOf(await signInThroughIdp(rp, 'ann@acme.com'));
+    const bob = cookiesOf(await signInThroughIdp(rp, 'bob@acme.com'));
+    expect((await sessionOf(rp, ann))?.user?.email).toBe('ann@acme.com');
+    expect((await sessionOf(rp, bob))?.user?.email).toBe('bob@acme.com');
+
+    const res = await idpLogoutRequest(rp, 'ann@acme.com', true);
+    // The vendor answers the IdP in the binding the request came in: a POST form carrying its LogoutResponse.
+    expect(res.status, await res.clone().text()).toBe(200);
+    const form = await res.text();
+    expect(form).toContain(IDP_SLO);
+    expect(form).toContain('SAMLResponse');
+
+    expect(await sessionOf(rp, ann)).toBeNull();
+    expect((await sessionOf(rp, bob))?.user?.email).toBe('bob@acme.com');
+  });
+
+  it('the SP metadata advertises the logout service only while the switch is on', async () => {
+    const metadataOf = async (rp: Rp) =>
+      (await rp.manager.handleRequest(new Request(`${AUTH}/sso/saml2/sp/metadata?providerId=${PROVIDER_ID}`))).text();
+    expect(await metadataOf(await makeRp({ samlConfig: withLogoutAddress }))).not.toContain('SingleLogoutService');
+    expect(await metadataOf(await makeRp({ provider: { signOutOfIdp: true }, samlConfig: withLogoutAddress }))).toContain(
+      'SingleLogoutService',
+    );
+  });
+});

@@ -18,7 +18,7 @@ import {
   assertReadScopePlaceholdersResolvable,
 } from './read-scope-sql.js';
 import { readScopeUnresolvedError } from './read-scope-refusal.js';
-import { readAdmissionUnresolvedError } from './read-admission.js';
+import { readAdmissionUnresolvedError, type ObjectReadAdmissionProvider } from './read-admission.js';
 // [#16206] The narrowing from a driver's FOUR-name `dialectName` to the THREE
 // this package's config hook declares — see the bridge below.
 import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.js';
@@ -234,6 +234,26 @@ export interface AnalyticsServicePluginOptions {
     context?: ExecutionContext,
   ) => boolean | Promise<boolean>;
   /**
+   * A host's NARROWING of the object-level read admission — composed with the
+   * provider this plugin wires ({@link AnalyticsServicePluginOptions.admitObjectRead}
+   * when supplied, otherwise the `security` bridge), never a replacement for it.
+   *
+   * Asked only for an object that provider ADMITS, and the read is admitted
+   * only when this answers exactly `true`; so it can refuse a read the
+   * plugin's own provider admits and can never admit one it refuses. A host
+   * that must narrow per actor scope composes here instead of replacing the
+   * provider, and keeps the security verdict underneath its own.
+   *
+   * Refusals keep the gate's existing envelopes: `false` — or any answer that
+   * is not `true` — refuses with `PERMISSION_DENIED` / 403, and a THROW
+   * refuses, fail-closed, with `SERVICE_UNAVAILABLE` / 503, because no
+   * verdict was reached. When omitted, the plugin's provider is wired as is.
+   */
+  narrowObjectReadAdmission?: (
+    objectName: string,
+    context?: ExecutionContext,
+  ) => boolean | Promise<boolean>;
+  /**
    * ADR-0021 D-C — join allowlist per cube (the dataset's declared `include`).
    * Typically wired from the dataset registry's compiled `allowedRelationships`.
    */
@@ -251,6 +271,28 @@ export interface AnalyticsServicePluginOptions {
    * choice", which the service resolves to development-only.
    */
   debugSql?: boolean;
+}
+
+/**
+ * Compose a host's NARROWING over the provider the plugin wired
+ * ({@link AnalyticsServicePluginOptions.narrowObjectReadAdmission}).
+ *
+ * The composition can only refuse more, never admit more: the narrowing is
+ * asked only once `base` has admitted — by the same truthiness test the gate
+ * (`assertObjectsReadable`) applies to any provider — and it admits only on
+ * exactly `true`, so a malformed answer refuses, as the `explain` bridge's
+ * `allowed === true` does. A throw from either side is left to propagate, so
+ * the gate answers it as it answers any throwing provider: fail-closed,
+ * `SERVICE_UNAVAILABLE` / 503.
+ */
+function composeNarrowedReadAdmission(
+  base: ObjectReadAdmissionProvider,
+  narrowing: ObjectReadAdmissionProvider,
+): ObjectReadAdmissionProvider {
+  return async (objectName, context) => {
+    if (!(await base(objectName, context))) return false;
+    return (await narrowing(objectName, context)) === true;
+  };
 }
 
 /**
@@ -846,6 +888,12 @@ export class AnalyticsServicePlugin implements Plugin {
       };
       autoBridgedReadAdmission = true;
     }
+    // The host's narrowing composes over whichever provider was wired above,
+    // so a host scoping reads per actor keeps the security verdict underneath
+    // its own instead of replacing it (`narrowObjectReadAdmission`).
+    if (this.options.narrowObjectReadAdmission) {
+      admitObjectRead = composeNarrowedReadAdmission(admitObjectRead, this.options.narrowObjectReadAdmission);
+    }
 
     // [#20917] The FIELD-LEVEL half of the same read
     // (`AnalyticsServiceConfig.getReadableFields`), bridged the same way and
@@ -1049,7 +1097,10 @@ export class AnalyticsServicePlugin implements Plugin {
       getObjectFields: (objectName) => dataEngine()?.getObject?.(objectName)?.fields,
       fetchRecordLabels: async (targetObject, ids, scope, context) => {
         const map = new Map<unknown, string>();
-        const displayField = pickDisplayField(dataEngine()?.getObject?.(targetObject)?.fields);
+        // The target's declared `nameField` first (ADR-0079), then the
+        // name/title/label/first-text convention — see `pickDisplayField`.
+        const target = dataEngine()?.getObject?.(targetObject);
+        const displayField = pickDisplayField(target?.fields, target?.nameField);
         if (!displayField || !executeAggregate || ids.length === 0) return map;
         // [#14329] The FOURTH read-scope door, and the same guard the other
         // three answer with. #13640 guarded the ObjectQL engine merge and

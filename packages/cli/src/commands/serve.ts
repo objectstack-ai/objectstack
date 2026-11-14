@@ -415,6 +415,25 @@ type PortProbe = (port: number) => Promise<boolean>;
  * skip**. ⚠️ Nearby cards have described this search as hopping over ports; it
  * does not, and a diagnostic written from that reading would be wrong.
  */
+/**
+ * The mark `@objectstack/mcp` leaves on `process.stdout` when its stdio
+ * transport claims the stream (`PROTOCOL_STDOUT_CLAIM`,
+ * `packages/mcp/src/protocol-stdout.ts`, which says why it is a `Symbol.for`
+ * key). Read here by key rather than imported, so the boot-quiet window does
+ * not load the MCP package to ask; the same key on both sides is pinned by
+ * `serve-stdio-stdout-purity.e2e.test.ts`, which boots the real transport.
+ */
+const PROTOCOL_STDOUT_CLAIM = Symbol.for('@objectstack/mcp:protocol-stdout-claimed');
+
+/**
+ * Whether a stdio MCP transport has claimed this process's stdout — i.e.
+ * whether this process has started serving calls over stdio. `serve`'s
+ * boot-quiet window stops holding back the console from that moment.
+ */
+export function isProtocolStdoutClaimed(stream: NodeJS.WriteStream = process.stdout): boolean {
+  return (stream as unknown as Record<symbol, unknown>)[PROTOCOL_STDOUT_CLAIM] === true;
+}
+
 export class PortSearchExhaustedError extends Error {
   /** The first port probed — the walk's own record of it, not the caller's. */
   readonly startPort: number;
@@ -2784,6 +2803,30 @@ export default class Serve extends Command {
       return lines.length > 0 ? { lines, dropped: bootLogs.droppedCount } : undefined;
     };
 
+    /**
+     * Whether the boot-quiet window still holds back what is written to the
+     * console and to `process.stdout` — the window is open AND nothing is being
+     * served yet.
+     *
+     * The second half is the stdio MCP transport. Its client writes `initialize`
+     * at spawn and its first `tools/call` the moment that is answered, and the
+     * transport attaches inside `runtime.start()` — so those calls are served
+     * while this window is still open. Everything a host plugin
+     * `console.log`ged from one (an interceptor's audit line, a hook's trace)
+     * was dropped as boot chatter, and reached neither stream. So the window
+     * ends for the console once the transport has claimed stdout
+     * ({@link isProtocolStdoutClaimed}): from that moment a line may be a call's
+     * output, and the stream cannot tell it from the rest of the boot, so
+     * nothing is held back. It still goes to stderr — `origStdoutWrite` is the
+     * stderr forwarder — never to stdout, which carries the protocol only.
+     *
+     * Read per write, never once: the claim happens during the window. An
+     * HTTP-only boot never claims, so its window is exactly as before, and the
+     * console output of the boot up to the claim (every plugin's `init()`, the
+     * starts ahead of the MCP plugin's) is still held back under stdio too.
+     */
+    const quietHolds = () => bootQuiet && !isProtocolStdoutClaimed();
+
     const restoreOutput = () => {
       bootQuiet = false;
       process.stdout.write = origStdoutWrite;
@@ -2808,7 +2851,7 @@ export default class Serve extends Command {
       bootQuiet = !verboseBoot;
       if (!verboseBoot) {
         process.stdout.write = (chunk: any, ...rest: any[]) => {
-          if (bootQuiet) {
+          if (quietHolds()) {
             bootLogs.write(chunk, typeof rest[0] === 'string' ? rest[0] : undefined);
             // Honor the write callback so a caller awaiting drain still resumes.
             const cb = rest.find((a) => typeof a === 'function');
@@ -2817,8 +2860,8 @@ export default class Serve extends Command {
           }
           return (origStdoutWrite as any)(chunk, ...rest);
         };
-        console.log = (...args: any[]) => { if (!bootQuiet) originalConsoleLog(...args); };
-        console.debug = (...args: any[]) => { if (!bootQuiet) originalConsoleDebug(...args); };
+        console.log = (...args: any[]) => { if (!quietHolds()) originalConsoleLog(...args); };
+        console.debug = (...args: any[]) => { if (!quietHolds()) originalConsoleDebug(...args); };
       }
 
       // Load configuration
@@ -4409,6 +4452,16 @@ export default class Serve extends Command {
         trackPlugin('OrganizationOwnershipBootGuard');
       }
 
+      // The ONE secret crypto provider, built below (`createHostCryptoProvider`,
+      // after the stack's plugins are checked) and declared here, because the
+      // AuditPlugin of 5d is composed before it exists and reads it when its
+      // sealer starts, at `kernel:ready` [ADR-0154 D2, D6].
+      let hostCrypto: ReturnType<typeof createHostCryptoProvider> | undefined;
+      // `OS_MIGRATE_AND_EXIT=1` makes this boot a one-shot job (it exits below,
+      // once the plugins have started): the audit sealer is not armed on it
+      // [ADR-0154 D3], as on every one-shot command.
+      const migrateAndExit = process.env.OS_MIGRATE_AND_EXIT === '1';
+
       // 5d. Auto-register AuthPlugin (and paired Security/Audit) when the
       // 'auth' tier is enabled and no auth plugin is already configured.
       // The Console expects /api/v1/auth/* to be served by better-auth via
@@ -4886,10 +4939,15 @@ export default class Serve extends Command {
             // `Serve.CAPABILITY_PROVIDERS.audit` — the `requires:` resolver is
             // NOT auth-gated and already carries the `configKey` mechanism
             // `analytics` uses — not this line.
+            //
+            // [ADR-0154 D2, D6] The one option it IS handed is not config: the
+            // host's own crypto provider, which the sealer seals its seeds and
+            // signing key under. It is read when the sealer starts, since the
+            // provider is built further down.
             try {
               const auditPkg = '@objectstack/plugin-audit';
               const { AuditPlugin } = await import(/* webpackIgnore: true */ auditPkg);
-              await kernel.use(new AuditPlugin());
+              await kernel.use(new AuditPlugin({ cryptoProvider: () => hostCrypto?.provider, armSealer: !migrateAndExit }));
               trackPlugin('Audit');
             } catch {
               // optional
@@ -5311,13 +5369,13 @@ export default class Serve extends Command {
       // for customer-managed keys — by registering it as the kernel service
       // CRYPTO_PROVIDER_SERVICE during its init; without one this host keeps
       // its own LocalCryptoProvider (AES-256-GCM keyed off `OS_SECRET_KEY` or a
-      // persisted key file), exactly as before the seam existed. All three
-      // consumers hold `hostCrypto.provider`, which chooses once every plugin
+      // persisted key file), exactly as before the seam existed. Every
+      // consumer holds `hostCrypto.provider` (declared above 5d, for the audit
+      // sealer), which chooses once every plugin
       // has initialized (`createHostCryptoProvider`). The fallback is the
       // deferred LocalCryptoProvider: built at that choice, not here, because
       // the key file is settled only once the database is open (the settings
       // service's `start()`).
-      let hostCrypto: ReturnType<typeof createHostCryptoProvider> | undefined;
       let hostCryptoUnavailable: unknown;
       try {
         const { deferredLocalCryptoProvider } = await import(
@@ -5439,10 +5497,14 @@ export default class Serve extends Command {
           // host's one crypto provider (above), not a LocalCryptoProvider of its
           // own: a provider a plugin registers then holds the settings' keys
           // too. Without a registration the shared one is that same local
-          // provider — same constructor, same key source.
+          // provider — same constructor, same key source. [ADR-0154 D2, D6]
+          // So does an AuditPlugin `requires: ['audit']` mounts: its sealer
+          // seals checkpoint seeds and the signing key under it.
           const ctorArg: any = cap === 'settings' && hostCrypto
             ? { ...(arg ?? {}), cryptoProvider: hostCrypto.provider }
-            : arg;
+            : cap === 'audit' && hostCrypto
+              ? { ...(arg ?? {}), cryptoProvider: hostCrypto.provider, armSealer: !migrateAndExit }
+              : arg;
           const provider = ctorArg !== undefined ? new Ctor(ctorArg) : new Ctor();
           await kernel.use(provider);
           resolverMounted.push(provider);
@@ -5937,7 +5999,7 @@ export default class Serve extends Command {
       // then exit. The HTTP server has already bound `port` at this point
       // but we never accept a request — shutdown immediately so the
       // deploy pipeline can move on.
-      if (process.env.OS_MIGRATE_AND_EXIT === '1') {
+      if (migrateAndExit) {
         // This path exits before the banner, so it has to replay the boot
         // diagnostics itself — a deploy pipeline is precisely where a
         // degraded-boot warning must not vanish (#4012).

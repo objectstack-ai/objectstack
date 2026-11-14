@@ -49,7 +49,8 @@ const recordPage = (name: string, object: string, isDefault: boolean, extra: Rec
   type: 'record' as const,
   object,
   isDefault,
-  regions: [],
+  // One component: a `full` record page places at least one (it draws nothing else).
+  regions: [{ name: 'main', components: [{ type: 'record:details' }] }],
   ...extra,
 });
 
@@ -74,7 +75,7 @@ describe('defaultRecordPageObject — the one reading every door asks', () => {
     const { type: _omit, ...untyped } = recordPage('p', 'drp_task', true);
     expect(defaultRecordPageObject(untyped)).toBe('drp_task');
     // The constant it reads is the one the schema's default is built from.
-    expect(PageSchema.parse({ name: 'probe_page', label: 'Probe' }).type).toBe('record');
+    expect(PageSchema.parse({ name: 'probe_page', label: 'Probe', regions: [{ name: 'main', components: [{ type: 'record:details' }] }] }).type).toBe('record');
   });
 
   it.each([

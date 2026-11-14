@@ -40,8 +40,11 @@
 # checkout and nothing else, so the run's ONLY write path is the App token,
 # and it exists only inside the execute step's environment.
 #
-# The private key never reaches a script: `actions/create-github-app-token`
+# The App's private key never reaches a script: `actions/create-github-app-token`
 # reads the organization secret and hands the executor a token through `env:`.
+# One other secret reaches the executor, for one row: the relay's NOTE key, a
+# repository secret, handed to the execute step only for an `advisory_note`
+# stroke so the executor can open a note sealed to it (step 4's env below).
 # The executor prints no token, writes none to a file, and scrubs every line
 # it emits; the runner's own secret masking is the second net.
 #
@@ -151,9 +154,9 @@ jobs:
           # also reaches cancel, re-run, delete, cache and artifact endpoints; the op table has no
           # row for any of them, and `validate.mjs --self-test` pins that none is reachable.
           permission-actions: ${{ steps.validate.outputs.permission_actions }}
-          # FIVE write consumers, one at a time: the advisory rows — `advisory_report` (one private report),
-          # `advisory_create` (one draft advisory), `advisory_collaborators_add`, `advisory_versions` and
-          # `advisory_state` (one advisory's PATCH). Minted ONLY for a stroke carrying one of them, which
+          # SIX write consumers, one at a time: the advisory rows — `advisory_report` (one private report),
+          # `advisory_create` (one draft advisory), `advisory_collaborators_add`, `advisory_versions`,
+          # `advisory_state` and `advisory_note` (one advisory's PATCH). Minted ONLY for a stroke carrying one of them, which
           # travels alone, the same way as `permission-actions`: the validator writes
           # `permission_repository_advisories=write` for it and an EMPTY value for every other stroke.
           # Separately, TWO read consumers, each also alone, get a READ-ONLY mint through this same input:
@@ -185,4 +188,11 @@ jobs:
         env:
           FLEET_WRITE_SENDER: ${{ github.event.sender.login }}
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          # ONE consumer: the `advisory_note` row, whose note arrives SEALED to the relay's committed public key
+          # (`ADVISORY_NOTE_RELAY_PUBLIC_KEY`, `scripts/pm/fleet-write/ops.mjs`, "The one row that APPENDS to an
+          # advisory"). The private half is the repository secret `OS_FLEET_ADVISORY_NOTE_KEY`, by the maintainer's
+          # ruling; it reaches this step ONLY for a stroke the validator marks `advisory_note=yes`, and every other
+          # stroke's step gets an empty value. The runner masks it; the executor reads it once, drops it from its own
+          # environment and never prints it. `validate.mjs --self-test` pins that this is the one line naming it.
+          FLEET_WRITE_ADVISORY_NOTE_KEY: ${{ steps.validate.outputs.advisory_note == 'yes' && secrets.OS_FLEET_ADVISORY_NOTE_KEY || '' }}
         run: node scripts/pm/fleet-write/execute.mjs

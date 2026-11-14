@@ -50,9 +50,25 @@
  * `preserveAudit` with the row's stored `updated_at`, as the other `os migrate`
  * data runs that rewrite a computed column do: `updated_at` does not move.
  * Hooks, roll-ups over the column and the audit writers see each write as any
- * write. One row's failure does not stop the run; it is listed. Idempotent: a
+ * write. [#32527] A row another write changed after the run read it is not
+ * written over: each write is conditional on the stamp the read saw
+ * (`writeUnlessMovedSince`). [#32732] Such a row is judged again as it stands,
+ * under the definition live now: one that holds the value is counted
+ * (`concurrentRows`); one that does not — the other write ran on a node still
+ * serving the old definition, or did not go through the engine — is written
+ * under its new stamp, or listed as a failure when it moved again.
+ * One row's failure does not stop the run; it is listed. Idempotent: a
  * second run finds nothing to fill. No `sys_migration` flag is recorded:
  * nothing gates on the run (the `summary-nulls` reasoning).
+ *
+ * ## At the change
+ *
+ * [#32527] A definition changed through the metadata doors — a save in
+ * publish mode, a publish — is filled by the door itself: it captures the
+ * object's stored computed fields before the change goes live
+ * ({@link captureStoredExpressions}) and, once it is served, runs this walk
+ * over the fields that compute something new, written. The command stays for
+ * a definition changed in a repository and booted, which no door sees.
  *
  * ## The boot advisory
  *
@@ -69,7 +85,8 @@
 import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
 import { objectNotFoundError, withTransientRetry, type RetryOptions } from '@objectstack/core';
 
-import { planStoredExpressions } from './engine-top-level.js';
+import { WRITE_PRECONDITION_OPTION, planStoredExpressions } from './engine-top-level.js';
+import { CONCURRENT_UPDATE_CODE } from './concurrent-update-error.js';
 import { isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
 
 /** The engine surface the run needs: the declarations, a read, the stored-expression computation and the update. */
@@ -96,6 +113,13 @@ export interface StoredExpressionBackfillOptions {
   objects?: string[];
   /** One stored computed field of the ONE object named in `objects` (default: every one it declares). */
   field?: string;
+  /**
+   * [#32527] Several stored computed fields of the ONE object named in
+   * `objects`, walked in ONE pass — the fields a change made live. One walk,
+   * because a row's write computes every stored field: a second walk would
+   * find the first one's writes and count them under no field.
+   */
+  fields?: string[];
   /** Also rewrite rows whose stored (non-NULL) value differs from the expression — after an expression changed. */
   changed?: boolean;
   /** Write the computed values. Omit for a read-only dry run. */
@@ -120,6 +144,13 @@ export interface StoredExpressionBackfillFieldOutcome {
   faultedRows: number;
   /** Values written (an apply run). */
   written: number;
+  /**
+   * [#32527] Rows another write changed or deleted between this run's read and
+   * its write (an apply run) that, read again, hold what the expression
+   * computes now: not written over. [#32732] A moved row that does not hold it
+   * is written (`written`) or listed as a failure, never counted here.
+   */
+  concurrentRows: number;
   /** A few record ids with a hole, so an operator can go and look. */
   sampleRecordIds: string[];
 }
@@ -154,6 +185,11 @@ export interface StoredExpressionBackfillReport {
   skippedRows: number;
   /** Rows written (an apply run). */
   writtenRows: number;
+  /**
+   * [#32527] Rows another write changed or deleted after this run read them, and which hold what the expression
+   * computes now: left to that write (an apply run). [#32732] Judged on the row read again, never assumed.
+   */
+  concurrentRows: number;
   /** The scope: NULL holes only (false), or every stale value too (true). */
   changed: boolean;
   applied: boolean;
@@ -201,6 +237,7 @@ function storedExpressionFields(engine: Pick<StoredExpressionBackfillEngine, 'ge
 function resolveScope(engine: StoredExpressionBackfillEngine, options: StoredExpressionBackfillOptions): Map<string, string[]> {
   const scope = new Map<string, string[]>();
   const named = options.objects;
+  if (options.fields !== undefined) return resolveFieldsScope(engine, options.fields, named);
   if (options.field !== undefined && named?.length !== 1) {
     throw invalidField(
       `[stored-expression-backfill] field '${options.field}' names a field of ONE object: give exactly one object with it. `
@@ -236,6 +273,39 @@ function resolveScope(engine: StoredExpressionBackfillEngine, options: StoredExp
     scope.set(object, options.field !== undefined ? [options.field] : fields);
   }
   return scope;
+}
+
+/**
+ * [#32527] The scope of `fields`: the same judgement as `field`, for several —
+ * exactly one object, which exists, and every name one of its stored computed
+ * fields — refused as a whole before any row is read.
+ */
+function resolveFieldsScope(
+  engine: StoredExpressionBackfillEngine,
+  fields: string[],
+  named: string[] | undefined,
+): Map<string, string[]> {
+  if (named?.length !== 1 || fields.length === 0) {
+    throw invalidField(
+      '[stored-expression-backfill] `fields` names one or more fields of ONE object: give exactly one object '
+        + 'and at least one field with it. Refused before the walk read or wrote any row.',
+    );
+  }
+  const object = named[0];
+  if (!engine.getObject(object)) throw objectNotFoundError(object);
+  const declared = storedExpressionFields(engine, object);
+  const unknown = fields.filter((field) => !declared.includes(field));
+  if (unknown.length > 0) {
+    throw invalidField(
+      `[stored-expression-backfill] ${unknown.map((f) => `'${object}.${f}'`).join(', ')} `
+        + `${unknown.length === 1 ? 'is not a stored computed field' : 'are not stored computed fields'}. The ones `
+        + `'${object}' declares: ${declared.length > 0 ? declared.map((f) => `'${f}'`).join(', ') : 'none'}. `
+        + 'Refused before the walk read or wrote any row.',
+      unknown[0],
+    );
+  }
+  // Declaration order, each once: the report's order whatever the caller's.
+  return new Map([[object, declared.filter((field) => fields.includes(field))]]);
 }
 
 const isBlank = (value: unknown): boolean => value === null || value === undefined;
@@ -305,6 +375,189 @@ async function computePage(
 }
 
 /**
+ * What one row owes under the definition live NOW, judged over the row as
+ * stored and the values the write computes there: the patch, whether it holds
+ * a hole or a stale value, and whether a field that does not evaluate there
+ * holds a value the write would erase. The walk and the re-check of a moved
+ * row ({@link fillRowUnlessMovedSince}) judge a row by this one predicate.
+ */
+interface RowVerdict {
+  patch: Record<string, unknown>;
+  hole: boolean;
+  stale: boolean;
+  blocked: boolean;
+  /** Per field in scope: what it holds against the expression. */
+  fields: Map<string, { kind: 'fault'; error: string; blocksWrite: boolean } | { kind: 'hole' | 'stale' | 'same' }>;
+}
+
+function judgeRow(
+  row: Record<string, unknown>,
+  value: Record<string, unknown> | undefined,
+  faults: ReadonlyMap<string, string>,
+  fields: readonly string[],
+): RowVerdict {
+  const verdict: RowVerdict = { patch: {}, hole: false, stale: false, blocked: false, fields: new Map() };
+  for (const field of fields) {
+    const stored = row[field];
+    const fault = faults.get(field);
+    if (fault !== undefined) {
+      const blocksWrite = !isBlank(stored);
+      if (blocksWrite) verdict.blocked = true;
+      verdict.fields.set(field, { kind: 'fault', error: fault, blocksWrite });
+      continue;
+    }
+    const computed = value?.[field] ?? null;
+    if (isBlank(stored)) {
+      if (isBlank(computed)) {
+        verdict.fields.set(field, { kind: 'same' });
+        continue;
+      }
+      verdict.fields.set(field, { kind: 'hole' });
+      verdict.hole = true;
+      verdict.patch[field] = computed;
+    } else if (!sameStoredValue(stored, computed)) {
+      verdict.fields.set(field, { kind: 'stale' });
+      verdict.stale = true;
+      verdict.patch[field] = computed;
+    } else {
+      verdict.fields.set(field, { kind: 'same' });
+    }
+  }
+  // The write computes EVERY stored field of the row, the ones this run was not asked about too.
+  for (const [field] of faults) if (!fields.includes(field) && !isBlank(row[field])) verdict.blocked = true;
+  return verdict;
+}
+
+/** Does the verdict owe a write in this run's scope: a hole always, a stale value under `changed`? */
+const owesWrite = (verdict: RowVerdict, changed: boolean): boolean => verdict.hole || (changed && verdict.stale);
+
+/**
+ * [#32732] How one row's write landed:
+ *  - `written`: the fill wrote the row; `fields` are the fields its patch
+ *    named, and `computedElsewhere` the fields of the first patch another
+ *    write had already stored before the fill re-wrote the row (none when the
+ *    first write landed);
+ *  - `moved`: another write changed or deleted the row after the run read it,
+ *    and the row as it stands NOW owes nothing under the live definition —
+ *    that write stored the value itself, or there is no row left to fill;
+ *  - `left`: another write changed the row and it still owes a value the fill
+ *    did not store — moved again before the re-judged patch landed, or
+ *    holding a value a faulting field would erase; `reason` says which.
+ */
+type RowLanding =
+  | { kind: 'written'; fields: string[]; computedElsewhere: string[] }
+  | { kind: 'moved'; fields: string[] }
+  | { kind: 'left'; reason: string };
+
+/** Re-judges a row read again after another write moved it, under the definition live now. */
+type RowRejudge = (row: Record<string, unknown>) => Promise<RowVerdict>;
+
+/**
+ * [#32527] One row's write, never over a write that landed after this run read
+ * the row. The apply keeps the row's `updated_at` (`preserveAudit`), so a plain
+ * write would put the stamp of the page read back over the stamp of a user's
+ * edit made in between — routine once the fill runs at a live server's save
+ * door, not only under the command's occupancy gate.
+ *
+ * So the write carries the read stamp as the engine's own precondition
+ * (ADR-0142 D4: the driver's conditional update over `{ id, updated_at }`, the
+ * claim gate's mechanism). It matching no row answers `CONCURRENT_UPDATE`;
+ * the row is then read again, and:
+ *  - it is gone: deleted after the read, nothing left to fill — `'moved'`;
+ *  - it holds another stamp: another write moved it. [#32732] That write is
+ *    NOT trusted to have computed the field under the definition live now: a
+ *    peer node that has not applied the change yet, or a write that did not go
+ *    through the engine, stores the old value or none. The row as it stands is
+ *    judged again by the walk's own predicate (`rejudge`, the live
+ *    definition): owing nothing, it is `'moved'` and nothing is written over
+ *    it; owing a value, its new patch is written under the NEW stamp, with the
+ *    same precondition, ONCE — a second move, or a faulting field holding a
+ *    value there, answers `'left'` for the caller to report, never a loop;
+ *  - it holds the SAME stamp (a driver that hands back a spelling of the
+ *    stamp its own predicate does not equal — a timestamp read back at a
+ *    coarser precision than stored): nothing moved it, and it is written as
+ *    before this guard existed, unconditionally; `onStampUnmatched` is told,
+ *    so the run can say once that the guard is off on that driver.
+ * A row with no stamp (no `updated_at`, or a blank one) has none to regress,
+ * and is written unconditionally. Runs inside the caller's retry: a
+ * `CONCURRENT_UPDATE` is an answer, never retried.
+ */
+async function fillRowUnlessMovedSince(
+  engine: StoredExpressionBackfillEngine,
+  object: string,
+  id: unknown,
+  patch: Record<string, unknown>,
+  stamp: unknown,
+  rejudge: RowRejudge,
+  changed: boolean,
+  onStampUnmatched: () => void,
+): Promise<RowLanding> {
+  const first = await writeUnlessMovedSince(engine, object, id, patch, stamp, onStampUnmatched);
+  if (first.kind === 'written') return { kind: 'written', fields: Object.keys(patch), computedElsewhere: [] };
+  if (first.kind === 'gone') return { kind: 'moved', fields: Object.keys(patch) };
+  const verdict = await rejudge(first.row);
+  if (!owesWrite(verdict, changed)) return { kind: 'moved', fields: Object.keys(patch) };
+  if (verdict.blocked) {
+    return {
+      kind: 'left',
+      reason: 'another write changed the row while the fill ran and it still owes the value, but a stored computed '
+        + 'field that does not evaluate there holds a value the write would replace with NULL, so it was not written',
+    };
+  }
+  const nextStamp = isBlank(first.row.updated_at) ? undefined : first.row.updated_at;
+  const second = await writeUnlessMovedSince(engine, object, id, verdict.patch, nextStamp, onStampUnmatched);
+  if (second.kind === 'written') {
+    return {
+      kind: 'written',
+      fields: Object.keys(verdict.patch),
+      computedElsewhere: Object.keys(patch).filter((field) => !(field in verdict.patch)),
+    };
+  }
+  if (second.kind === 'gone') return { kind: 'moved', fields: Object.keys(patch) };
+  return {
+    kind: 'left',
+    reason: 'another write changed the row twice while the fill ran, and the value it stores is not what the '
+      + 'expression computes now, so it was not written',
+  };
+}
+
+/**
+ * One conditional write of `patch` keeping `stamp`: `written`, or what the
+ * re-read found when the precondition matched no row — `gone`, or `moved`
+ * with the row as it stands. The same stamp read back is written unconditionally.
+ */
+async function writeUnlessMovedSince(
+  engine: StoredExpressionBackfillEngine,
+  object: string,
+  id: unknown,
+  patch: Record<string, unknown>,
+  stamp: unknown,
+  onStampUnmatched: () => void,
+): Promise<{ kind: 'written' } | { kind: 'gone' } | { kind: 'moved'; row: Record<string, unknown> }> {
+  const write = (expect: Record<string, unknown> | undefined) => engine.update(
+    object,
+    { id, ...patch, ...(stamp !== undefined ? { updated_at: stamp } : {}) },
+    { context: { ...SYSTEM_PRESERVING_CTX }, ...(expect ? { [WRITE_PRECONDITION_OPTION]: expect } : {}) },
+  );
+  if (stamp === undefined) {
+    await write(undefined);
+    return { kind: 'written' };
+  }
+  try {
+    await write({ updated_at: stamp });
+    return { kind: 'written' };
+  } catch (err) {
+    if ((err as { code?: unknown })?.code !== CONCURRENT_UPDATE_CODE) throw err;
+  }
+  const [now] = await engine.find(object, { where: { id }, limit: 1, context: { ...SYSTEM_CTX } });
+  if (!now) return { kind: 'gone' };
+  if (!sameStoredValue(now.updated_at, stamp)) return { kind: 'moved', row: now };
+  onStampUnmatched();
+  await write(undefined);
+  return { kind: 'written' };
+}
+
+/**
  * Fill the stored computed fields of stored rows — the NULL holes by default,
  * every stale value too under `options.changed`.
  *
@@ -331,6 +584,7 @@ export async function backfillStoredExpressions(
     faultedRows: 0,
     skippedRows: 0,
     writtenRows: 0,
+    concurrentRows: 0,
     changed,
     applied: apply,
     truncated: false,
@@ -344,13 +598,29 @@ export async function backfillStoredExpressions(
     report.scannedObjects.push(object);
     const outcomes = new Map<string, StoredExpressionBackfillFieldOutcome>();
     for (const field of fields) {
-      const outcome = { object, field, nullRows: 0, staleRows: 0, faultedRows: 0, written: 0, sampleRecordIds: [] };
+      const outcome = { object, field, nullRows: 0, staleRows: 0, faultedRows: 0, written: 0, concurrentRows: 0, sampleRecordIds: [] };
       outcomes.set(field, outcome);
       report.fields.push(outcome);
     }
     // The stamp the apply keeps; a federated object's injected columns are not provisioned, so its write sends none.
     const schema = engine.getObject(object);
     const hasUpdatedAt = 'updated_at' in (schema?.fields ?? {}) && !isFederatedUnprovisionedInjectedColumn(schema, 'updated_at');
+
+    // [#32732] A row another write moved is judged again over the row as it stands, under the definition live now.
+    const rejudge: RowRejudge = async (now) => {
+      const { values, faults } = await computePage(engine, object, [now]);
+      return judgeRow(now, values[0], faults[0], fields);
+    };
+    let stampUnmatchedSaid = false;
+    const onStampUnmatched = (): void => {
+      if (stampUnmatchedSaid) return;
+      stampUnmatchedSaid = true;
+      logger.warn(
+        `[stored-expression-backfill] ${object}: the driver's conditional write did not match the updated_at it reads `
+          + 'back on a row nothing else changed, so this run writes such rows unconditionally: on this driver a write '
+          + 'landing between the fill\'s read and its write can have its updated_at put back to the one the fill read.',
+      );
+    };
 
     // Seek by `id`: this run's claim is about EVERY stored row, which an offset walk cannot promise.
     const walk = keysetWalk<Record<string, unknown>>(
@@ -366,58 +636,50 @@ export async function backfillStoredExpressions(
           report.scannedRecords++;
           if (row.id == null || row.id === '') continue;
           const recordId = String(row.id);
-          const patch: Record<string, unknown> = {};
-          let hole = false;
-          let stale = false;
-          let blocked = false;
-          for (const field of fields) {
+          const verdict = judgeRow(row, values[i], faults[i], fields);
+          for (const [field, held] of verdict.fields) {
             const outcome = outcomes.get(field)!;
-            const stored = row[field];
-            const fault = faults[i].get(field);
-            if (fault !== undefined) {
+            if (held.kind === 'fault') {
               outcome.faultedRows++;
               report.faultedRows++;
-              const blocksWrite = !isBlank(stored);
-              if (blocksWrite) blocked = true;
-              if (report.faults.length < maxListed) report.faults.push({ object, field, recordId, error: fault, blocksWrite });
+              if (report.faults.length < maxListed) report.faults.push({ object, field, recordId, error: held.error, blocksWrite: held.blocksWrite });
               else report.faultsTruncated = true;
-              continue;
-            }
-            const value = values[i]?.[field] ?? null;
-            if (isBlank(stored)) {
-              if (isBlank(value)) continue;
+            } else if (held.kind === 'hole') {
               outcome.nullRows++;
               report.nullRows++;
               if (outcome.sampleRecordIds.length < MAX_SAMPLE_IDS) outcome.sampleRecordIds.push(recordId);
-              hole = true;
-              patch[field] = value;
-            } else if (!sameStoredValue(stored, value)) {
+            } else if (held.kind === 'stale') {
               outcome.staleRows++;
               report.staleRows++;
-              stale = true;
-              patch[field] = value;
             }
           }
-          if (!(hole || (changed && stale))) continue;
-          // The write computes EVERY stored field of the row, the ones this run was not asked about too.
-          for (const [field] of faults[i]) if (!fields.includes(field) && !isBlank(row[field])) blocked = true;
-          if (blocked) {
+          if (!owesWrite(verdict, changed)) continue;
+          if (verdict.blocked) {
             report.skippedRows++;
             continue;
           }
           if (!apply) continue;
           try {
-            await withTransientRetry(
-              () => engine.update(
-                object,
-                { id: row.id, ...patch, ...(hasUpdatedAt && !isBlank(row.updated_at) ? { updated_at: row.updated_at } : {}) },
-                { context: { ...SYSTEM_PRESERVING_CTX } },
-              ),
+            // [#32527] The stamp the page read: the write keeps it, and is made only while the row still holds it.
+            const stamp = hasUpdatedAt && !isBlank(row.updated_at) ? row.updated_at : undefined;
+            const landed = await withTransientRetry(
+              () => fillRowUnlessMovedSince(engine, object, row.id, verdict.patch, stamp, rejudge, changed, onStampUnmatched),
               options.retry ?? {},
             );
             // Bumped AFTER the retry settles, never inside the retried closure.
+            if (landed.kind === 'left') {
+              logger.warn(`[stored-expression-backfill] ${object} record ${recordId}: ${landed.reason}`);
+              report.failures.push({ object, recordId, error: `${landed.reason}; a re-run fills it` });
+              continue;
+            }
+            if (landed.kind === 'moved') {
+              report.concurrentRows++;
+              for (const field of landed.fields) outcomes.get(field)!.concurrentRows++;
+              continue;
+            }
             report.writtenRows++;
-            for (const field of Object.keys(patch)) outcomes.get(field)!.written++;
+            for (const field of landed.fields) outcomes.get(field)!.written++;
+            for (const field of landed.computedElsewhere) outcomes.get(field)!.concurrentRows++;
           } catch (err) {
             // One row's failure must not abort the rest; a re-run revisits it, because it still holds the hole.
             const message = (err as Error)?.message ?? String(err);
@@ -492,6 +754,12 @@ export function formatStoredExpressionBackfillReport(report: StoredExpressionBac
     }
     if (report.faultedRows > MAX_SAMPLE_IDS) lines.push(`  … and ${report.faultedRows - MAX_SAMPLE_IDS} more`);
   }
+  if (report.concurrentRows > 0) {
+    lines.push(
+      `· ${report.concurrentRows} row(s) were changed or deleted by another write after this run read them, and read `
+        + 'again hold what the expression computes, so they were not written over (their updated_at stays the newer one).',
+    );
+  }
   if (report.skippedRows > 0) {
     lines.push(
       `✗ ${report.skippedRows} row(s) listed and NOT written: a field that does not evaluate there holds a value the write `
@@ -510,6 +778,108 @@ export function formatStoredExpressionBackfillReport(report: StoredExpressionBac
   // which can switch a SQLite file's journal mode (its header, no row). The command appends that note on SQLite.
   if (!report.applied && pending.length > 0) lines.push('Dry run — no row or table was written. Re-run with --apply to write.');
   return lines;
+}
+
+/**
+ * [#32527] What a stored computed field computes, as one comparable string:
+ * the keys its value depends on — the expression, the type it is stored as
+ * and the scale it is rounded to — in a key order that does not depend on
+ * how the definition was spelled.
+ */
+function storedExpressionSignature(def: Record<string, unknown>): string {
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === 'object' && !(value instanceof Date)) {
+      return Object.fromEntries(
+        Object.keys(value as Record<string, unknown>).sort().map((k) => [k, canonical((value as Record<string, unknown>)[k])]),
+      );
+    }
+    return value;
+  };
+  return JSON.stringify(canonical({ type: def.type, expression: def.expression, scale: def.scale }) ?? null);
+}
+
+/** `object`'s stored computed fields, each with its {@link storedExpressionSignature}. */
+function storedExpressionSignatures(schema: { fields?: Record<string, unknown> } | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const { name } of planStoredExpressions(schema)) {
+    out.set(name, storedExpressionSignature((schema?.fields?.[name] ?? {}) as Record<string, unknown>));
+  }
+  return out;
+}
+
+/**
+ * [#32527] The stored computed fields of `after` that compute something new
+ * relative to `before`: each one `before` did not have as a stored computed
+ * field (added, or turned from a `formula` or from a plain field into one),
+ * and each one whose expression, stored type or scale changed. In `after`'s
+ * declaration order.
+ */
+function changedSince(before: ReadonlyMap<string, string>, after: { fields?: Record<string, unknown> } | undefined): string[] {
+  return [...storedExpressionSignatures(after)].filter(([name, signature]) => before.get(name) !== signature).map(([name]) => name);
+}
+
+/**
+ * [#32527] One object's stored computed fields, taken by a metadata door
+ * before its change goes live, and the fill that change owes.
+ */
+export interface StoredExpressionCapture {
+  readonly object: string;
+  /** The stored computed fields the object serves NOW that compute something new relative to the capture; reads no row. */
+  changedFields(): string[];
+  /**
+   * Fill what the change made live: every stored computed field the object
+   * serves NOW that computes something new relative to the capture
+   * ({@link StoredExpressionCapture.changedFields}), over EVERY stored row, written.
+   * `undefined` when the change made no such field live — nothing was read.
+   */
+  fillChanged(): Promise<StoredExpressionBackfillReport | undefined>;
+}
+
+/**
+ * [#32527] Ruling 6816429574, letter A: the save or publish that
+ * adds a stored computed field, changes its expression, or turns a formula
+ * into one fills the object's existing rows with the write's own computation,
+ * and reports the count per field. Not opt-in: a row the change left NULL, or
+ * holding what the old expression computed, never holds the value the field
+ * declares.
+ *
+ * The door captures BEFORE the change goes live (before its registry
+ * write-through) and calls {@link StoredExpressionCapture.fillChanged} after
+ * the object is served and its storage synced. The fill IS
+ * {@link backfillStoredExpressions} — the walk `os migrate stored-expressions
+ * --changed --apply` runs, scoped to the changed fields — so it writes what
+ * the command writes, the way the command writes it: unscoped (every
+ * organization's rows, the value is the expression's and not the caller's),
+ * under `preserveAudit`, every row's failure listed and the walk continued.
+ * Unbounded: the change is live for every row, so the fill reads every row;
+ * the answer waits for it.
+ *
+ * A boot never calls this: rewriting data at a boot fires hooks and audit
+ * rows nobody ordered (the module header). The save or publish is the order.
+ */
+export function captureStoredExpressions(
+  engine: StoredExpressionBackfillEngine,
+  logger: StoredExpressionBackfillLogger,
+  object: string,
+): StoredExpressionCapture {
+  const before = storedExpressionSignatures(engine.getObject(object));
+  const changedFields = (): string[] => changedSince(before, engine.getObject(object));
+  return {
+    object,
+    changedFields,
+    async fillChanged() {
+      const fields = changedFields();
+      if (fields.length === 0) return undefined;
+      return backfillStoredExpressions(engine, logger, {
+        objects: [object],
+        fields,
+        changed: true,
+        apply: true,
+        maxRecordsPerObject: Number.POSITIVE_INFINITY,
+      });
+    },
+  };
 }
 
 /** One object's holes in the advisory's sample. */

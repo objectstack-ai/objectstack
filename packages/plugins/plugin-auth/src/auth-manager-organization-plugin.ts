@@ -79,6 +79,7 @@ import {
 } from './auth-manager.js';
 import { buildOrganizationPluginSchema } from './auth-schema-config.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
+import { resolveInvitationLimitOption } from './invitation-limit.js';
 import { invitationAcceptPath } from './invitation-link-action.js';
 import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-role-cap.js';
 import { blankInvitationRoleRefusal } from './invite-role-not-found-code.js';
@@ -102,6 +103,7 @@ export interface OrganizationPluginHost {
   readonly config: AuthManager['config'];
   emailLocaleArg: AuthManager['emailLocaleArg'];
   getAppName: AuthManager['getAppName'];
+  getAudience: AuthManager['getAudience'];
   getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
   getEmailService: AuthManager['getEmailService'];
@@ -178,6 +180,7 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
   // VERY object the vendor plugin was constructed with — it is what the
   // vendor's own `getOrgAdapter(ctx.context, options)` reads, and the
   // declaration it honours lives on it.
+  const invitationLimit = resolveInvitationLimitOption();
   const organizationOptions = {
     schema: buildOrganizationPluginSchema(),
     // Enable the team sub-feature so the framework's `sys_team` /
@@ -234,6 +237,12 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
     // also travels through option plumbing that may assume a finite number,
     // and nine quadrillion members is unlimited by any measure that matters.
     membershipLimit: resolveMembershipLimitOption(),
+    // How many PENDING invitations one organization may hold. better-auth
+    // refuses the next one with 403 `INVITATION_LIMIT_REACHED` and uses 100
+    // when no `invitationLimit` is passed. `OS_ORG_INVITATION_LIMIT` sets it:
+    // unset passes nothing (the vendor's 100, unchanged), N is N, `off` is no
+    // limit. Spread, so an unset value adds no key at all.
+    ...(invitationLimit === undefined ? {} : { invitationLimit }),
     ...(customOrgRoles ? { roles: customOrgRoles } : {}),
     // ── Slug-change guard ─────────────────────────────────────
     // An org's slug is baked into every env hostname at creation
@@ -534,7 +543,9 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
       },
       // [#24948] The teams, their members and the organization-admin
       // grants are the organization's own auth structure, and better-auth's
-      // delete leaves them behind. They go here, inside the request's
+      // delete leaves them behind; so is the self-registration grant
+      // [#32787], by the set the deployment declares now, the one the
+      // `hooks.before` refusal left out of its count. They go here, inside the request's
       // transaction (`handleRequest`), after the `hooks.before` refusal has
       // found no records left. The Default Organization is the
       // last-administrator guard's to answer, so its structure is not
@@ -545,7 +556,9 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
         const organizationId = organization?.id;
         if (!engine || typeof organizationId !== 'string' || !organizationId) return;
         if (await isDefaultOrganizationTarget(engine, organization, postureEnforcesWall(resolveTenancyPosture()))) return;
-        await removeOrganizationAuthStructure(engine, organizationId);
+        await removeOrganizationAuthStructure(engine, organizationId, {
+          selfRegistrationSet: this.getAudience().selfRegistrationPermissionSet,
+        });
       },
     },
     // No mailer is wired in framework yet — log the accept URL so

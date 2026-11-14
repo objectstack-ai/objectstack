@@ -169,6 +169,7 @@ import {
 } from './data-model-rules.js';
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { UserTextParams } from './finding-user-text.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -225,6 +226,15 @@ export interface AuthoringFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's USER-FACING sentence interpolates (object, field,
+   * permission-set names), present exactly when the rule's producer authors one
+   * in its `<rule file>.user-text.ts` catalog. The sentence itself is rendered
+   * per locale by `findingUserMessage` (`finding-user-text.ts`) at the door that
+   * holds the request: it is `RuntimeAuthoringIssueSchema.userMessage` on the
+   * wire. `message` / `hint` stay the developer-facing English.
+   */
+  userTextParams?: UserTextParams;
 }
 
 /**
@@ -344,6 +354,14 @@ export interface AuthoringRuleContext {
    * platform names, a platform-prefixed name advised at `warning`) applies.
    */
   runtimeWriteType?: string;
+  /**
+   * [#32666] Set by the runtime gate on its SUBJECT pass only, which judges
+   * the subject collections it withholds from every other pass
+   * (`RuntimeStackContext.flows` on an object write). Read by the
+   * reference-integrity suite, the one entry whose members declare a subject;
+   * the gate runs no other entry on that pass.
+   */
+  subjectPass?: boolean;
   /**
    * [#16546] `hooks[*].handler` ref strings whose metadata `body` was minted
    * by `lowerCallables` from the author's inline `handler` function, rather
@@ -803,12 +821,38 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // shipped corpus at `6021b5e837`: 0 findings across examples/**,
     // platform-objects and plugin-approvals, against one for a planted unbound
     // hole; #25709 re-measured 0 sentences of the holeless `${…}` shape there.
+    //
+    // [#33072] `object_extension` joins, for ONE pass: the field-formula pass
+    // over each field the written extension adds — the extension walk #32875
+    // gave `os build` / `os validate`, which refuses a computed field there
+    // that this door published with a 200 (Studio's add-field on a `.custom`
+    // pair and the `/meta` doors write the item). On an extension write
+    // `runStackExpressionPasses` runs that walk alone, by construction, over
+    // the written entry (the sole member of `objectExtensions`) against the
+    // door's live objects as served, so a refusal carries the build's rule id
+    // and location (`object 'TARGET' · objectExtensions[0] · field 'F'
+    // expression`). MEASURED first: 0 first-party `objectExtensions` entries
+    // carry a computed field (examples/**, packages/**, HotCRM), so the
+    // crossing refuses nothing the repository ships. A package-wide draft
+    // publish (`publishPackageDrafts`) whose drafts depend on a sibling
+    // extension draft is refused, because that batch's pending set carries no
+    // extension drafts (#33152); publishing the extension first through the
+    // per-item door works.
+    //
+    // [#33154] The same walk judges each `validations[]` rule the written
+    // extension adds, by the object walk's own rule pass, so a rule the
+    // registry merges onto the target is refused at this door and in the
+    // build alike (`object 'TARGET' · objectExtensions[0] · validation 'N'`).
+    // MEASURED first: 0 first-party `objectExtensions` entries carry a
+    // validation rule (examples/**, packages/**, HotCRM).
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page'],
+    runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page', 'object_extension'],
     run: (stack, ctx) =>
       runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
         severity: i.severity ?? 'error',
-        rule: EXPRESSION_INVALID,
+        // [#32529, #32554] The stored-expression input member names its own
+        // two ids; every other finding of the pass is `expression-invalid`.
+        rule: i.rule ?? EXPRESSION_INVALID,
         where: i.where,
         // [#26858] The slot's key path where the pass spells one (a flow edge's
         // `condition`, #27828 a flow node's config value), so a draft's
@@ -2008,6 +2052,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         path: f.path,
         message: f.message,
         hint: f.hint,
+        // The user sentence's names ride through the re-map, so the save door
+        // can render this advisory in the request's language.
+        ...(f.userTextParams !== undefined ? { userTextParams: f.userTextParams } : {}),
       })),
   },
   // [#29049] ADR-0031 region shape: a flow whose `loop` body, `parallel`
@@ -2055,6 +2102,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         path: f.path,
         message: f.message,
         hint: f.hint,
+        // The user sentence's names ride through the re-map, so the save door
+        // can render this advisory in the request's language.
+        ...(f.userTextParams !== undefined ? { userTextParams: f.userTextParams } : {}),
       })),
   },
   // The spec-liveness loop on the author side: a property the ledger marks
@@ -2176,6 +2226,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         path: f.path,
         message: f.message,
         hint: f.hint,
+        // The user sentence's names ride through the re-map, so the save door
+        // can render this advisory in the request's language.
+        ...(f.userTextParams !== undefined ? { userTextParams: f.userTextParams } : {}),
       })),
   },
   // A format like `{plan_no}{000}` makes the referenced field part of the
@@ -2201,6 +2254,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         path: f.where,
         message: f.message,
         hint: f.hint,
+        ...(f.userTextParams ? { userTextParams: f.userTextParams } : {}),
       })),
   },
   // #2554 — a `type:'form'` action target naming a missing or LIST view opens a

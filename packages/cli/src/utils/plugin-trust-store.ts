@@ -26,7 +26,8 @@ export async function trustStorePlugins(write: boolean): Promise<unknown[]> {
   const plugins: unknown[] = [new PlatformObjectsPlugin()];
   if (write) {
     const { AuditPlugin } = await import('@objectstack/plugin-audit');
-    plugins.push(new AuditPlugin());
+    // [ADR-0154 D3] A one-shot write is not a server: no sealer.
+    plugins.push(new AuditPlugin({ armSealer: false }));
   }
   return plugins;
 }

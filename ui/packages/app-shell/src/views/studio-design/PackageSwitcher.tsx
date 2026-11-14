@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { studioOrgScopePath } from './studioScope.js';
 import { useHomePath } from '../../hooks/useHomePath.js';
+import { useRecentItems } from '../../context/RecentItemsProvider.js';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { CreatePackageDialog, PackageDetailSheet, type InstalledPackageRow } from '../metadata-admin/PackagesPage.js';
 import { fetchPackages, type PkgEntry } from './packages-io.js';
@@ -90,6 +91,7 @@ export function PackageSwitcher({
   // other package is left to open: the DECLARED landing, the launcher only when
   // the deployment declares none.
   const homePath = useHomePath();
+  const { removeRecentItem } = useRecentItems();
   const [open, setOpen] = React.useState(false);
   const [pkgs, setPkgs] = React.useState<PkgEntry[] | null>(null);
   /**
@@ -364,6 +366,12 @@ export function PackageSwitcher({
     // either way: the author stays put, and the managed snapshot below is
     // still refreshed (that call reports its own outcome).
     if (list !== null && !list.some((p) => p.id === managedId)) {
+      // objectstack#32615 — the delete happened here, so the Studio landing's
+      // "Recently viewed" row forgets it now, from storage as well: the entry
+      // `StudioRoute` recorded (`package:<id>`) names a package that is gone.
+      // The landing also hides any entry the package list does not hold, for a
+      // package removed anywhere else.
+      removeRecentItem(`package:${managedId}`);
       // Deleted — only navigate away if it was the package we're editing.
       // While other packages remain, that is the Studio landing
       // (objectui#11784), where the author picks the next one or creates one;
@@ -450,7 +458,7 @@ export function PackageSwitcher({
       );
       setManageOpen(false);
     }
-  }, [manage, packageId, navigate, fetchFullPackage, locale, homePath]);
+  }, [manage, packageId, navigate, fetchFullPackage, locale, homePath, removeRecentItem]);
 
   return (
     // Radix Popover (portaled to <body>) — the top bar is `overflow-x-auto`,

@@ -58,6 +58,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// The source under test reaches `@objectstack/metadata` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/metadata';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher, type HttpDispatcherResult } from '../http-dispatcher.js';
 import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
@@ -112,10 +116,13 @@ const ORG = 'org_1';
 /**
  * The permission store the shared authz resolver reads, in its shipped shapes.
  * A grant applies only in its own organization, so the caller's session names
- * the organization that owns it (kept under `single` without a membership row).
+ * the organization that owns it, and the caller is a current member there: the
+ * claim is kept only while a membership backs it, under every tenancy posture
+ * (ADR-0093 D8.1, as amended).
  */
 const TABLES: Record<string, any[]> = {
     sys_user: [{ id: 'u_admin', email: 'u_admin@example.com' }],
+    sys_member: [{ id: 'mem_admin', user_id: 'u_admin', organization_id: ORG, role: 'member' }],
     sys_user_permission_set: [{ user_id: 'u_admin', permission_set_id: 'ps_pkg', permission_set: 'pkg_admin', organization_id: ORG }],
     sys_permission_set: [
         { id: 'ps_pkg', name: 'pkg_admin', system_permissions: ['manage_metadata', 'studio.access'] },

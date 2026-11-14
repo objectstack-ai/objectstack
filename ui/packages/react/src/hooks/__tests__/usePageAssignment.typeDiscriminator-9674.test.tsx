@@ -104,7 +104,12 @@ describe('usePageAssignment — `type` is the one record-page discriminator (obj
 });
 
 describe('PageSchema refuses `pageType` — the contract the removal rests on', () => {
-  const base = { name: 'account_record', label: 'Account', type: 'record', object: OBJECT };
+  // It places a component: a `full` record page that places none is refused at `regions`
+  // (objectstack#32434), which this contract is not about.
+  const base = {
+    name: 'account_record', label: 'Account', type: 'record', object: OBJECT,
+    regions: [{ name: 'main', components: [{ type: 'record:details' }] }],
+  };
 
   it('accepts the canonical spelling (positive control)', () => {
     // Without this leg the refusal below would also be produced by a schema

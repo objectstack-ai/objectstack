@@ -536,7 +536,11 @@ const W_VIEWER = 'usr_onm_viewer';
 const W_MODIFIER = 'usr_onm_modifier';
 /** Edits every account (Modify All on the master) and reads every detail row; owns none. */
 const W_EDITOR = 'usr_onm_editor';
-/** Delegators bound by no floor (no `sys_member` row): one reads every detail row, one holds Modify All on them. */
+/**
+ * Delegators bound by no floor — current members whose role (`admin` →
+ * `org_admin`) sits outside the members-only floor's `org_member` domain: one
+ * reads every detail row, one holds Modify All on them.
+ */
 const W_DEL_VIEW = 'usr_onm_del_view';
 const W_DEL_MODIFY = 'usr_onm_del_modify';
 
@@ -678,8 +682,13 @@ describe('[#30906] the write gate judges a row whose OPTIONAL master is empty �
     })), W_SYS);
     await engine.insert('sys_organization', [{ id: W_ORG, name: 'ONM', slug: 'onm' }], W_SYS);
     // Each delegator holds its set through a stored direct grant row owned by
-    // the organization, and NO `sys_member` row, so no ownership floor binds
+    // the organization, and a membership outside the floor's `org_member`
+    // domain — a delegation needs the delegator's current membership under
+    // every posture (ADR-0093 D8.1, as amended) — so no ownership floor binds
     // its pass: on a delegated write the gate's delegator pass is what is left.
+    await engine.insert('sys_member', [W_DEL_VIEW, W_DEL_MODIFY].map((id) => ({
+      id: `mem_${id}`, user_id: id, organization_id: W_ORG, role: 'admin',
+    })), W_SYS);
     const grants = (engine as any).getDriver('sys_user_permission_set');
     await grants.create('sys_user_permission_set', {
       id: 'ups_onm_del_view', user_id: W_DEL_VIEW, permission_set: W_VIEWER_SET.name, organization_id: W_ORG,

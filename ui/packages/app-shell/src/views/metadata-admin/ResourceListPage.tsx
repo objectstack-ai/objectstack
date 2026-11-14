@@ -72,12 +72,30 @@ import {
 import {
   audienceAnchorsOf,
   hasCatalogActivation,
-  isCatalogItemActive,
-  readCatalogActivation,
+  isCatalogHolderActive,
+  ledgerAfterSwitch,
+  readCatalogLedger,
   writeCatalogActivation,
 } from './catalog-activation.js';
 import { countsCatalogHolders, readCatalogHolderCount } from './catalog-holders.js';
-import { CatalogActiveCell, DeactivateConfirmDialog, type CatalogLedger, type PendingDeactivation } from './CatalogActiveSwitch.js';
+import {
+  CatalogActiveCell,
+  DeactivateConfirmDialog,
+  type CatalogLedger,
+  type PendingDeactivation,
+} from './CatalogActiveSwitch.js';
+import {
+  holderKey,
+  holdersOfName,
+  holdingFromPick,
+  holdingPackage,
+  PermissionSetHolderConflict,
+  servedHolderOf,
+  type PermissionSetHolder,
+  type PermissionSetHolderCandidate,
+  type PermissionSetHolding,
+} from './permission-set-holder.js';
+import { PermissionSetHolderPickDialog, type PendingHolderPick } from './PermissionSetHolderPick.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { declarationOnlyAuthoredObject } from './sharing-rule-catalog.js';
 import { resolveAffordance, type SchemaLike } from '@object-ui/core';
@@ -97,6 +115,11 @@ const DECLARATION_CLONE_DIALOGS: Readonly<Record<string, React.ComponentType<Sha
 
 export interface MetadataResourceListPageProps {
   type?: string;
+}
+
+/** The switch a row draws: its name, and the holder where the list shows more than one (objectstack#32537). */
+function switchKeyOf(name: string, holding: PermissionSetHolding | undefined): string {
+  return holding ? `${name}@${holderKey(holding.packageId)}` : name;
 }
 
 type ItemRow = {
@@ -237,6 +260,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // server when the confirm opens (`catalog-holders.ts`). Switching on asks
   // nothing. `holders` is `null` while the count is read.
   const [pendingOff, setPendingOff] = React.useState<PendingDeactivation | null>(null);
+  // objectstack#32537 — a switch the door refused by name, naming the holders,
+  // waiting on the administrator's pick; with the state it asked for.
+  const [pendingPick, setPendingPick] = React.useState<(PendingHolderPick & { enabled: boolean }) | null>(null);
   const adapter = useAdapter();
   const locale = useMetadataLocale();
   // objectui#12982 — a declaration-only catalog (declared sharing rules): the
@@ -428,10 +454,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       return;
     }
     const controller = new AbortController();
-    Promise.all([readCatalogActivation(type, controller.signal), audienceAnchorsOf(type)])
-      .then(([states, anchors]) => {
+    Promise.all([readCatalogLedger(type, controller.signal), audienceAnchorsOf(type)])
+      .then(([read, anchors]) => {
         if (controller.signal.aborted) return;
-        setLedger({ states, anchors });
+        setLedger({ states: read.states, permissionRows: read.permissionRows, anchors });
         setLedgerRefusal(null);
       })
       .catch((err: unknown) => {
@@ -442,41 +468,46 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     return () => controller.abort();
   }, [activation, type, refreshKey]);
 
-  const recordSwitched = React.useCallback((itemName: string, now: boolean) => {
-    setLedger((prev) => {
-      if (!prev || prev === 'error') return prev;
-      const states = new Map(prev.states);
-      states.set(itemName, now);
-      return { ...prev, states };
-    });
+  const recordSwitched = React.useCallback((itemName: string, now: boolean, holding?: PermissionSetHolding) => {
+    setLedger((prev) => (!prev || prev === 'error' ? prev : ledgerAfterSwitch(prev, itemName, now, holding)));
   }, []);
 
   // The item's label for the confirm and the toast, read through a ref so the
-  // callbacks below do not re-key on every list load.
+  // callbacks below do not re-key on every list load. objectstack#32774 — the
+  // label of the holder switched, where the page lists more than one holder of
+  // the name: ⛔ never the first row of the name, which can be another holder's.
   const itemsRef = React.useRef<ItemRow[]>([]);
-  const labelOf = React.useCallback((itemName: string): string => {
-    const row = itemsRef.current.find((r) => String(r.item.name ?? '') === itemName);
+  const labelOf = React.useCallback((itemName: string, holding?: PermissionSetHolding): string => {
+    const row = itemsRef.current.find(
+      (r) =>
+        String(r.item.name ?? '') === itemName &&
+        (!holding || holding.holders.length <= 1 || servedHolderOf(r.item) === holding.packageId),
+    );
     const label = row?.item.label;
     return typeof label === 'string' && label ? label : itemName;
   }, []);
 
   const writeActive = React.useCallback(
-    async (itemName: string, enabled: boolean) => {
-      setSwitching(itemName);
+    async (itemName: string, enabled: boolean, holding?: PermissionSetHolding) => {
+      setSwitching(switchKeyOf(itemName, holding));
       setSwitchError(null);
       try {
-        const now = await writeCatalogActivation(type, itemName, !enabled);
-        recordSwitched(itemName, now);
+        const now = await writeCatalogActivation(type, itemName, !enabled, holdingPackage(holding));
+        recordSwitched(itemName, now, holding);
         // objectui#13338 — a toast confirms the change either way.
         if (countsCatalogHolders(type)) {
           toast.success(
             tFormat(now ? 'engine.catalog.active.switchedOn' : 'engine.catalog.active.switchedOff', locale, {
-              name: labelOf(itemName),
+              name: labelOf(itemName, holding),
             }),
           );
         }
       } catch (err: any) {
-        setSwitchError(err?.message ?? String(err));
+        if (err instanceof PermissionSetHolderConflict) {
+          setPendingPick({ name: itemName, label: labelOf(itemName, holding), conflict: err, enabled });
+        } else {
+          setSwitchError(err?.message ?? String(err));
+        }
       } finally {
         setSwitching(null);
       }
@@ -484,18 +515,29 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     [type, recordSwitched, locale, labelOf],
   );
 
+  // objectstack#32537 — the administrator picked a holder the door named: the
+  // write is sent again for that holder. ⛔ Nothing is picked here.
+  const pickHolder = React.useCallback(
+    (candidate: PermissionSetHolderCandidate) => {
+      if (!pendingPick) return;
+      setPendingPick(null);
+      void writeActive(pendingPick.name, pendingPick.enabled, holdingFromPick(pendingPick.conflict, candidate));
+    },
+    [pendingPick, writeActive],
+  );
+
   // The holder-count read of the confirm now open; a newer open (or a close)
   // makes an older answer stale.
   const holderReadRef = React.useRef(0);
   const toggleActive = React.useCallback(
-    (itemName: string, enabled: boolean) => {
+    (itemName: string, enabled: boolean, holding?: PermissionSetHolding) => {
       if (!enabled || !countsCatalogHolders(type)) {
-        void writeActive(itemName, enabled);
+        void writeActive(itemName, enabled, holding);
         return;
       }
       const read = ++holderReadRef.current;
-      setPendingOff({ name: itemName, label: labelOf(itemName), holders: null });
-      readCatalogHolderCount(adapter, metadataStoreRef.current, type, itemName)
+      setPendingOff({ name: itemName, label: labelOf(itemName, holding), holders: null, holding });
+      readCatalogHolderCount(adapter, metadataStoreRef.current, type, itemName, holding)
         .then((holders) => {
           if (holderReadRef.current !== read) return;
           setPendingOff((prev) => (prev && prev.name === itemName ? { ...prev, holders } : prev));
@@ -579,6 +621,29 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     [items, activePackage, config, envScope, allLeg, pairId],
   );
 
+  // objectstack#32537 (ADR-0150 D4) — a permission set is identified by
+  // `(package, name)`. Where the environment-scope list serves more than one
+  // holder of a name, each row's switch reads and writes its own holder's set;
+  // a name with one holder passes none, so its row is read and written by the
+  // name, as before.
+  const holdersByName = React.useMemo(() => {
+    const out = new Map<string, PermissionSetHolder[]>();
+    if (!activation || type !== 'permission') return out;
+    const listed = items.map((row) => row.item);
+    for (const row of items) {
+      const name = row.item.name;
+      if (typeof name === 'string' && name && !out.has(name)) out.set(name, holdersOfName(listed, name));
+    }
+    return out;
+  }, [activation, type, items]);
+  const holdingOfRow = React.useCallback(
+    (row: ItemRow): PermissionSetHolding | undefined => {
+      const holders = holdersByName.get(String(row.item.name ?? ''));
+      return holders && holders.length > 1 ? { packageId: servedHolderOf(row.item), holders } : undefined;
+    },
+    [holdersByName],
+  );
+
   // The customization mark of each row, from the base's served read only.
   const markPrimaryKey = config.primaryKey ?? 'name';
   const markMemberField = config.bundleMemberField;
@@ -616,7 +681,8 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       // Only a KNOWN state filters: while the ledger is unread or unreadable,
       // no item is either active or inactive to this filter.
       if (!ledger || ledger === 'error') return false;
-      if ((statusFilter === 'active') !== isCatalogItemActive(ledger.states, String(row.item.name ?? ''))) return false;
+      const name = String(row.item.name ?? '');
+      if ((statusFilter === 'active') !== isCatalogHolderActive(ledger, name, holdingOfRow(row))) return false;
     }
     return true;
   });
@@ -838,7 +904,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             declaration={cloning}
             declaredNames={scopedItems.map((r) => String(r.item.name ?? ''))}
             sourceActive={
-              ledger && ledger !== 'error' ? isCatalogItemActive(ledger.states, String(cloning.name ?? '')) : undefined
+              ledger && ledger !== 'error' ? isCatalogHolderActive(ledger, String(cloning.name ?? ''), undefined) : undefined
             }
             locale={locale}
             onClose={() => setCloning(null)}
@@ -855,9 +921,17 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
           locale={locale}
           onCancel={closeConfirm}
           onConfirm={(name) => {
+            const holding = pendingOff?.holding;
             closeConfirm();
-            void writeActive(name, true);
+            void writeActive(name, true, holding);
           }}
+        />
+        <PermissionSetHolderPickDialog
+          pending={pendingPick}
+          locale={locale}
+          busy={switching !== null}
+          onPick={pickHolder}
+          onCancel={() => setPendingPick(null)}
         />
 
         {/* Body */}
@@ -952,15 +1026,19 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                 {filtered.map((row, i) => {
                   const pk = config.primaryKey ?? 'name';
                   const name = String(row.item[pk] ?? `(unnamed-${i})`);
+                  const rowHolding = holdingOfRow(row);
                   // ADR-0048 — link to this row's OWNING package so the editor
                   // resolves the right item even in the unscoped "all" list
                   // where two packages may ship the same name. Falls back to the
                   // workspace suffix for runtime/overlay-only rows (no real
                   // package, or the `sys_metadata` rehydration sentinel).
                   const rowPkg = (row.item as any)._packageId as string | undefined;
-                  // The environment scope keeps its own scope instead: a
-                  // catalog name has ONE holder per deployment (ADR-0131), so
-                  // the editor resolves it by name alone.
+                  // The environment scope keeps its own scope instead: the
+                  // editor reads the name as a caller with no package does
+                  // (ADR-0150 D5, `holdingOfRead`) — the name's one holder, or
+                  // the environment's own set where it holds the name; a name
+                  // two packages hold is refused by name alone, and the editor
+                  // then draws no holder's sections (objectstack#32774).
                   const rowEditSuffix = envScope
                     ? pkgSuffix
                     : rowPkg && rowPkg !== 'sys_metadata'
@@ -1137,12 +1215,13 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                         <td className={cn(cellClass, activeCellPin)}>
                           <CatalogActiveCell
                             itemName={name}
+                            holding={rowHolding}
                             ledger={ledger}
                             refusal={ledgerRefusal}
                             canSwitch={canAuthor && !walled}
-                            busy={switching === name}
+                            busy={switching === switchKeyOf(name, rowHolding)}
                             locale={locale}
-                            onToggle={toggleActive}
+                            onToggle={(itemName, enabled) => toggleActive(itemName, enabled, rowHolding)}
                           />
                         </td>
                       )}

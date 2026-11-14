@@ -148,8 +148,12 @@ export function listedHoldersView(registry: PackageScopedRegistry): PackageScope
   return {
     getPackage: (id) => registry.getPackage(id),
     getAllPackages: () => registry.getAllPackages(),
-    packageScopedHoldersOf: (type, name) =>
-      registry.packageScopedHoldersOf(type, name).filter((id) => !isDisabled.call(registry, id)),
+    // [#32183] The caller and the options reach the registry. Asked over every
+    // holder (`includeDisabledPackages`), the view hides none.
+    packageScopedHoldersOf: (type, name, callerPackageId, options) => {
+      const holders = registry.packageScopedHoldersOf(type, name, callerPackageId, options);
+      return options?.includeDisabledPackages === true ? holders : holders.filter((id) => !isDisabled.call(registry, id));
+    },
     getPackageScopedItem: (type, name, packageId, member) => registry.getPackageScopedItem(type, name, packageId, member),
     getEnvironmentScopedItem: (type, name, member) => registry.getEnvironmentScopedItem(type, name, member),
   } as PackageScopedRegistry;

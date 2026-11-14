@@ -178,11 +178,6 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   const { context, currentAppName } = useNavigationContext();
   const { user, activeOrganization } = useAuth();
   const { isAdmin: isWorkspaceAdmin } = useWorkspaceAdminStatus();
-  // `type: 'action'` nav items dispatch through here (framework#4509). The
-  // sidebar renders inside ConsoleShell's GlobalActionRuntimeProvider, so this
-  // resolves to the fully-wired console runner — confirm/param/result dialogs
-  // included — with no provider of its own.
-  const dispatchNavAction = useNavActionDispatch();
   // An entry with no `label` shows its target's CURRENT label, read from the
   // metadata cache at render time (objectui#9868). `nav:menu` wires the same
   // hook, so the two surfaces cannot name one entry two ways.
@@ -249,6 +244,17 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   const activeApps = apps.filter((a: any) => a.active !== false && a.hidden !== true);
   // ADR-0048 (A) — route segment may be a package id; match by it (name fallback).
   const activeApp = matchAppBySegment(apps.filter((a: any) => a.active !== false), activeAppName || currentAppName) || activeApps[0];
+  // `type: 'action'` nav items dispatch through here (framework#4509). The
+  // sidebar renders inside ConsoleShell's GlobalActionRuntimeProvider, so this
+  // resolves to the fully-wired console runner — confirm/param/result dialogs
+  // included — with no provider of its own. An app's entries read their action
+  // from the app's package (ADR-0150 D5); Home's entries are the shell's own
+  // and name no package.
+  const dispatchNavAction = useNavActionDispatch(
+    context === 'app' && typeof activeApp?._packageId === 'string' && activeApp._packageId
+      ? activeApp._packageId
+      : undefined,
+  );
   // The app's identity — `branding.logo`, or its `icon` on a tile — is drawn
   // by the top bar's app pill on desktop, so this sidebar draws no logo header
   // there (objectui#12201, which retired the one objectui#10827 added). On a

@@ -59,6 +59,15 @@
  *  (f) `DELETE /Users/{id}` leaves the tombstoned account disabled (the
  *      vendor no longer deletes the better-auth user on 1.7.2).
  *  (g) `POST /Users` with `active: false` provisions the account disabled.
+ *  (h) ADR-0135 D4: a SCIM-provisioned user reads `idp_provisioned` from its
+ *      create (and from a tombstone re-link), so `admin/set-user-manager`
+ *      refuses it as directory-owned; a local password still flips it to
+ *      `env_native` and a later sync leaves that; the boot backfill marks a
+ *      user provisioned before the mark existed, once. The mark fails closed
+ *      on a create (the request fails and nothing persists) and never undoes
+ *      a deprovision (a deactivation still bans when the mark is refused);
+ *      `admin/set-user-password` on a cloud-managed environment refuses the
+ *      SCIM user.
  *      And, under (d): a deactivation makes an administrator's EXPIRING ban
  *      permanent, so the vendor's auto-lift cannot re-admit a deactivated
  *      principal.
@@ -68,6 +77,7 @@ import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
+import { runAdminBanUser, runAdminUnbanUser } from './admin-ban-endpoints.js';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
@@ -76,6 +86,18 @@ import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-
 import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './identity-write-guard.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { SCIM_DEACTIVATION_BAN_REASON } from './user-ban-write.js';
+import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
+import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
+import { FORCED_RESET_REVOKE_REASON } from './forced-reset-revocation.js';
+import { MEMBERSHIP_ENDED_REVOKE_REASON } from './membership-ended-session.js';
+import { SCIM_DEACTIVATION_REVOKE_REASON } from './scim-deactivation-key-revocation.js';
+import { SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON, SERVICE_ACCOUNT_OWNER_LEFT_REASON } from './service-account-owner-leaves.js';
+import { runResumeServiceAccount, type ServiceAccountLifecycleDeps } from './service-account-lifecycle.js';
+import { runSetUserManager } from './admin-set-user-manager.js';
+import { runAdminSetUserPassword } from './admin-user-endpoints.js';
+import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_STATUS } from './cloud-managed.js';
+import { hashApiKey, resetCloudManagedForTesting, resolveApiKeyAdmission } from '@objectstack/core';
+import { backfillScimProvisionedIdentitySource, type ScimIdentitySourceEngine } from './scim-identity-source.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit.js';
 import { sqliteEnginePool, type BootedSqliteEngine } from './__tests__/sqlite-engine-pool.testkit.js';
@@ -250,10 +272,15 @@ async function bootEngine(): Promise<BootedSqliteEngine> {
   // break-glass guard, like the resolver, resolves a grant's set name to.
   bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
 
-  // The two engine guards `auth-plugin.ts` registers at `kernel:ready`, in
-  // the same order (ADR-0092 at priority 10, break-glass at 20).
+  // The engine guards `auth-plugin.ts` registers at `kernel:ready`, in the
+  // same order (ADR-0092 at priority 10, the API key restore guard at 15,
+  // break-glass at 20), with the whitelists it registers before them.
   registerManagedUpdateWhitelist('sys_user', SYS_USER_PROFILE_EDIT_FIELDS);
+  for (const [object, fields] of Object.entries(MANAGED_EXTENSION_EDITABLE_FIELDS)) {
+    if (object !== 'sys_user') registerManagedUpdateWhitelist(object, fields);
+  }
   registerIdentityWriteGuard(engine, { packageId: 'test.identity-write-guard' });
+  registerApiKeyRestoreGuard(engine, { packageId: 'test.api-key-restore-guard' });
   registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, {
     packageId: 'test.last-admin-guard',
   });
@@ -499,6 +526,132 @@ describe('[#14360] SCIM active:false disables the account through the platform b
     expect((await setActive(h, dana.scimId, true)).status).toBe(200);
     expect((await setActive(h, dana.scimId, true)).status).toBe(200);
     expect(isBanned(await userRow(h, dana.email))).toBe(false);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// The refusal's cause — a deactivation and an administrator's ban, told apart
+// ---------------------------------------------------------------------------
+
+/** A sign-in's answer, read once: the status and the parsed body. */
+async function signInAnswer(
+  h: Harness,
+  email: string,
+  password = PASSWORD,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const res = await h.send(
+    new Request(`${AUTH}/sign-in/email`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: BASE },
+      body: JSON.stringify({ email, password }),
+    }),
+  );
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+}
+
+/**
+ * An administrator's ban, through the ban mount's own handler (the platform
+ * administrator gate in front of it is not the subject). The target must not
+ * be the last local-credential holder, or the mount refuses the ban.
+ */
+async function adminBan(h: Harness, userId: string, banReason?: string): Promise<void> {
+  const res = await runAdminBanUser(
+    { getAuthContext: () => h.manager.getAuthContext() },
+    { id: 'usr_platform_admin' } as never,
+    new Request(`${AUTH}/admin/ban-user`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId, ...(banReason !== undefined ? { banReason } : {}) }),
+    }),
+  );
+  expect(res.status, `admin ban failed: ${JSON.stringify(res.body)}`).toBe(200);
+}
+
+describe('a sign-in refused for a SCIM deactivation names that cause; an administrator\'s ban does not', () => {
+  it('SCIM active:false ⇒ 403 BANNED_USER with details.cause scim_deactivated, under any spelling of the address', async () => {
+    const h = await boot();
+    const dana = await provision(h, 'dana');
+    await attachPassword(h, dana);
+    expect((await setActive(h, dana.scimId, false)).status).toBe(200);
+    expect((await userRow(h, dana.email))?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+
+    for (const spelling of [dana.email, dana.email.toUpperCase()]) {
+      const { status, body } = await signInAnswer(h, spelling);
+      expect(status, `${spelling}: ${JSON.stringify(body)}`).toBe(403);
+      expect(body.code).toBe('BANNED_USER');
+      // The whole of `details`: one machine token, nothing about the directory.
+      expect(body.details).toEqual({ cause: 'scim_deactivated' });
+    }
+  }, 60_000);
+
+  it('SCIM DELETE /Users/{id} ⇒ the same cause', async () => {
+    const h = await boot();
+    const gus = await provision(h, 'gus');
+    await attachPassword(h, gus);
+    expect((await h.send(scimRequest(h, 'DELETE', `/Users/${gus.scimId}`))).status).toBe(204);
+
+    const { status, body } = await signInAnswer(h, gus.email);
+    expect(status, JSON.stringify(body)).toBe(403);
+    expect(body.code).toBe('BANNED_USER');
+    expect(body.details).toEqual({ cause: 'scim_deactivated' });
+  }, 60_000);
+
+  it('an administrator\'s ban ⇒ 403 BANNED_USER exactly as before: no details, the same message', async () => {
+    const h = await boot();
+    const frank = await provision(h, 'frank');
+    await attachPassword(h, frank);
+    // A second local-password holder, so the ban mount's last-credential guard lets the ban through.
+    const dana = await provision(h, 'dana');
+    await attachPassword(h, dana);
+    await adminBan(h, frank.userId, 'Policy violation');
+    await adminBan(h, dana.userId);
+    expect((await userRow(h, dana.email))?.ban_reason).toBe('No reason');
+
+    const withReason = await signInAnswer(h, frank.email);
+    const noReason = await signInAnswer(h, dana.email);
+    for (const { status, body } of [withReason, noReason]) {
+      expect(status, JSON.stringify(body)).toBe(403);
+      expect(body.code).toBe('BANNED_USER');
+      expect(body).not.toHaveProperty('details');
+    }
+
+    // The deactivation's refusal differs from an administrator's by `details`
+    // alone: the vendor's status, code and message are kept.
+    expect((await setActive(h, dana.scimId, true)).status).toBe(200); // the IdP cannot lift an administrator's ban
+    await h.engine.update('sys_user', { id: dana.userId, banned: false, ban_reason: null }, SYSTEM);
+    expect((await setActive(h, dana.scimId, false)).status).toBe(200);
+    const deactivated = await signInAnswer(h, dana.email);
+    expect(deactivated.body.details).toEqual({ cause: 'scim_deactivated' });
+    const { details: _cause, ...rest } = deactivated.body;
+    expect(rest).toEqual(withReason.body);
+  }, 60_000);
+
+  it('a deactivation over an administrator\'s ban keeps the administrator\'s reason, and answers as that ban', async () => {
+    const h = await boot();
+    const frank = await provision(h, 'frank');
+    await attachPassword(h, frank);
+    const dana = await provision(h, 'dana');
+    await attachPassword(h, dana);
+    await adminBan(h, frank.userId, 'Policy violation');
+    expect((await setActive(h, frank.scimId, false)).status).toBe(200);
+    expect((await userRow(h, frank.email))?.ban_reason).toBe('Policy violation');
+
+    const { status, body } = await signInAnswer(h, frank.email);
+    expect(status, JSON.stringify(body)).toBe(403);
+    expect(body.code).toBe('BANNED_USER');
+    expect(body).not.toHaveProperty('details');
+  }, 60_000);
+
+  it('a wrong password for a deactivated account is the ordinary credential refusal: the cause is told only to the password holder', async () => {
+    const h = await boot();
+    const dana = await provision(h, 'dana');
+    await attachPassword(h, dana);
+    expect((await setActive(h, dana.scimId, false)).status).toBe(200);
+
+    const { status, body } = await signInAnswer(h, dana.email, 'not-the-password-14360');
+    expect(status, JSON.stringify(body)).toBe(401);
+    expect(body.code).toBe('INVALID_EMAIL_OR_PASSWORD');
+    expect(body).not.toHaveProperty('details');
   }, 60_000);
 });
 
@@ -828,5 +981,675 @@ describe('[#14360] DELETE /Users/{id} leaves the tombstoned account disabled', (
     expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
     expect(await sessionCount(h, gus.userId)).toBe(0);
     await expectSignInBanned(h, gus.email);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// (i) — a directory deactivation revokes the user's API keys
+// ---------------------------------------------------------------------------
+
+/** Mint a key the way `POST /api/v1/keys` writes the row (system context, hash only). */
+async function mintKey(h: Harness, userId: string, id: string): Promise<string> {
+  const raw = `osk_${id}_${'x'.repeat(24)}`;
+  await h.engine.insert(
+    'sys_api_key',
+    { id, name: id, key: hashApiKey(raw), prefix: raw.slice(0, 12), user_id: userId, revoked: false },
+    SYSTEM,
+  );
+  return raw;
+}
+
+async function keyRow(h: Harness, id: string): Promise<{ revoked: boolean; revoked_reason: string | null }> {
+  const found = (await h.engine.findOne(
+    'sys_api_key',
+    { where: { id }, fields: ['id', 'revoked', 'revoked_reason'] },
+    SYSTEM,
+  )) as Record<string, unknown> | null;
+  expect(found, `sys_api_key '${id}' must still exist`).toBeTruthy();
+  return {
+    revoked: found!.revoked === true || found!.revoked === 1,
+    revoked_reason: (found!.revoked_reason as string | null | undefined) ?? null,
+  };
+}
+
+/** The key door's verdict for a raw key: `admitted`, a lifecycle code, or a refusal reason. */
+async function keyDoor(h: Harness, raw: string): Promise<string> {
+  const admission = await resolveApiKeyAdmission(h.engine, { 'x-api-key': raw }, Date.now(), undefined, undefined, undefined);
+  if (admission.outcome === 'lifecycle') return admission.refusal.code;
+  if (admission.outcome === 'refused') return `refused:${admission.reason}`;
+  return admission.outcome;
+}
+
+const SCIM_REVOKED = { revoked: true, revoked_reason: SCIM_DEACTIVATION_REVOKE_REASON };
+const LIVE = { revoked: false, revoked_reason: null };
+
+/** The owner's own restore through the data path, as the Restore API Key action sends it. */
+async function ownerRestore(h: Harness, userId: string, keyId: string): Promise<{ code?: string; status?: number } | undefined> {
+  return h.engine
+    .update('sys_api_key', { id: keyId, revoked: false }, { context: { userId, positions: [], permissions: [] } } as never)
+    .then(() => undefined, (e: { code?: string; status?: number }) => ({ code: e?.code, status: e?.status }));
+}
+
+describe('a directory deactivation revokes the user\'s API keys, and a re-activation re-arms none of them', () => {
+  it('(i) active:false revokes every key with scim_deactivated; active:true leaves them revoked and the key door refuses them', async () => {
+    const h = await boot();
+    const kai = await provision(h, 'kai');
+    const rawA = await mintKey(h, kai.userId, 'key_kai_a');
+    const rawB = await mintKey(h, kai.userId, 'key_kai_b');
+    // Control: before the directory deactivates, both keys work.
+    expect([await keyDoor(h, rawA), await keyDoor(h, rawB)]).toEqual(['admitted', 'admitted']);
+
+    expect((await setActive(h, kai.scimId, false)).status).toBe(200);
+    expect([await keyRow(h, 'key_kai_a'), await keyRow(h, 'key_kai_b')]).toEqual([SCIM_REVOKED, SCIM_REVOKED]);
+    expect(await keyDoor(h, rawA)).toBe('API_KEY_REVOKED');
+
+    const res = await setActive(h, kai.scimId, true);
+    expect(res.status, `SCIM PATCH active:true failed: ${await res.clone().text()}`).toBe(200);
+    // The ban is lifted (the directory's to lift) …
+    expect(isBanned(await userRow(h, kai.email))).toBe(false);
+    // … and the keys stay revoked: the door refuses them on their own state.
+    expect([await keyRow(h, 'key_kai_a'), await keyRow(h, 'key_kai_b')]).toEqual([SCIM_REVOKED, SCIM_REVOKED]);
+    expect([await keyDoor(h, rawA), await keyDoor(h, rawB)]).toEqual(['API_KEY_REVOKED', 'API_KEY_REVOKED']);
+
+    // The re-activated owner cannot restore one either; a new key is the road.
+    expect(await ownerRestore(h, kai.userId, 'key_kai_a')).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(await keyRow(h, 'key_kai_a')).toEqual(SCIM_REVOKED);
+    const fresh = await mintKey(h, kai.userId, 'key_kai_new');
+    expect(await keyDoor(h, fresh)).toBe('admitted');
+  }, 60_000);
+
+  it('(i) a key revoked earlier with a reason someone could lift is restamped; organization_membership_ended is kept', async () => {
+    const h = await boot();
+    const lea = await provision(h, 'lea');
+    await mintKey(h, lea.userId, 'key_lea_owner_revoked');
+    await h.engine.update('sys_api_key', { id: 'key_lea_owner_revoked', revoked: true }, SYSTEM);
+    await mintKey(h, lea.userId, 'key_lea_reset');
+    await h.engine.update('sys_api_key', { id: 'key_lea_reset', revoked: true, revoked_reason: FORCED_RESET_REVOKE_REASON }, SYSTEM);
+    await mintKey(h, lea.userId, 'key_lea_left');
+    await h.engine.update('sys_api_key', { id: 'key_lea_left', revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON }, SYSTEM);
+
+    expect((await setActive(h, lea.scimId, false)).status).toBe(200);
+
+    expect(await keyRow(h, 'key_lea_owner_revoked')).toEqual(SCIM_REVOKED);
+    expect(await keyRow(h, 'key_lea_reset')).toEqual(SCIM_REVOKED);
+    expect(await keyRow(h, 'key_lea_left')).toEqual({ revoked: true, revoked_reason: MEMBERSHIP_ENDED_REVOKE_REASON });
+
+    expect((await setActive(h, lea.scimId, true)).status).toBe(200);
+    expect(await ownerRestore(h, lea.userId, 'key_lea_owner_revoked')).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(await keyRow(h, 'key_lea_owner_revoked')).toEqual(SCIM_REVOKED);
+  }, 60_000);
+
+  it('(i) DELETE /Users/{id} keeps the key rows and revokes them the same way; a re-link through the tombstone re-arms none', async () => {
+    const h = await boot();
+    const body = {
+      schemas: [USER_SCHEMA],
+      userName: 'mia@example.com',
+      externalId: 'ext-mia',
+      name: { givenName: 'mia', familyName: 'Example' },
+      displayName: 'mia Example',
+      emails: [{ value: 'mia@example.com', primary: true, type: 'work' }],
+      active: true,
+    };
+    const created = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(created.status, `SCIM POST /Users failed: ${await created.clone().text()}`).toBe(201);
+    const scimId = ((await created.json()) as { id: string }).id;
+    const userId = String((await userRow(h, 'mia@example.com'))!.id);
+    const raw = await mintKey(h, userId, 'key_mia');
+
+    const del = await h.send(scimRequest(h, 'DELETE', `/Users/${scimId}`));
+    expect(del.status, `SCIM DELETE /Users/{id} failed: ${await del.clone().text()}`).toBe(204);
+    // The user row and its key rows survive the vendor's tombstone; the key is revoked.
+    expect(await keyRow(h, 'key_mia')).toEqual(SCIM_REVOKED);
+    expect(await keyDoor(h, raw)).toBe('API_KEY_REVOKED');
+
+    const again = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(again.status, `SCIM re-link POST /Users failed: ${await again.clone().text()}`).toBe(201);
+    expect(String((await userRow(h, 'mia@example.com'))!.id), 'the tombstone re-links the same user').toBe(userId);
+    expect(isBanned(await userRow(h, 'mia@example.com'))).toBe(false);
+    expect(await keyRow(h, 'key_mia')).toEqual(SCIM_REVOKED);
+    expect(await keyDoor(h, raw)).toBe('API_KEY_REVOKED');
+  }, 60_000);
+
+  it('(i) CONTROL: an administrator\'s ban and unban leave the keys as they are, and the key works again after the unban', async () => {
+    const h = await boot();
+    const ned = await provision(h, 'ned');
+    const raw = await mintKey(h, ned.userId, 'key_ned');
+
+    await adminBan(h, ned.userId, 'Policy violation');
+    expect(await keyRow(h, 'key_ned')).toEqual(LIVE);
+    // Refused while the ban holds, on the owner's ban, not on the key.
+    expect(await keyDoor(h, raw)).toBe('refused:owner_banned');
+
+    const unban = await runAdminUnbanUser(
+      { getAuthContext: () => h.manager.getAuthContext() },
+      { id: 'usr_platform_admin' } as never,
+      new Request(`${AUTH}/admin/unban-user`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: ned.userId }),
+      }),
+    );
+    expect(unban.status, `admin unban failed: ${JSON.stringify(unban.body)}`).toBe(200);
+    expect(await keyRow(h, 'key_ned')).toEqual(LIVE);
+    expect(await keyDoor(h, raw)).toBe('admitted');
+  }, 60_000);
+
+  it('(i) a key revocation that cannot be written still bans the account, and says so once at error', async () => {
+    const h = await boot();
+    const ora = await provision(h, 'ora');
+    const raw = await mintKey(h, ora.userId, 'key_ora');
+    let refused = 0;
+    const real = h.engine;
+    const refusing = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'update') {
+          return (object: string, data: Record<string, unknown>, options?: unknown) => {
+            if (object === 'sys_api_key') {
+              refused += 1;
+              throw new Error('key revocation write refused (test)');
+            }
+            return target.update(object, data as never, options as never);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(refusing as never);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await setActive(h, ora.scimId, false);
+      expect(res.status, `SCIM PATCH failed: ${await res.clone().text()}`).toBe(200);
+      expect(refused).toBe(1);
+      const row = await userRow(h, ora.email);
+      expect(isBanned(row)).toBe(true);
+      expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+      expect(await keyRow(h, 'key_ora')).toEqual(LIVE);
+      expect(await keyDoor(h, raw)).toBe('refused:owner_banned');
+      expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('API key revocation INCOMPLETE'))).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// (j) — a directory deactivation suspends the person's AI service accounts
+// ---------------------------------------------------------------------------
+
+/** The organization the accounts below belong to (the SCIM connection's). */
+const AGENT_ORG = 'org_scim_8b';
+const AGENT_OTHER_ORG = 'org_agents_other';
+
+/**
+ * An AI service account `ownerId` is accountable for, a member of `org`, with
+ * one key, written as the registration door writes it (system context). The
+ * owner is made a member of `org` too, as registration requires.
+ */
+async function agentAccount(h: Harness, ownerId: string, id: string, org = AGENT_ORG): Promise<string> {
+  await h.engine.insert(
+    'sys_user',
+    { id, name: id, email: `${id}@agents.example`, email_verified: false, principal_kind: 'agent', accountable_user_id: ownerId },
+    SYSTEM,
+  );
+  await h.engine.insert('sys_member', { id: `mem_${id}`, user_id: id, organization_id: org, role: 'member' }, SYSTEM);
+  const ownerThere = await h.engine.find('sys_member', { where: { user_id: ownerId, organization_id: org } }, SYSTEM);
+  if (!Array.isArray(ownerThere) || ownerThere.length === 0) {
+    await h.engine.insert('sys_member', { id: `mem_${ownerId}_${org}`, user_id: ownerId, organization_id: org, role: 'member' }, SYSTEM);
+  }
+  return mintKey(h, id, `key_${id}`);
+}
+
+async function accountBan(h: Harness, id: string): Promise<{ banned: boolean; ban_reason: string | null }> {
+  const row = (await h.engine.findOne('sys_user', { where: { id }, fields: ['id', 'banned', 'ban_reason'] }, SYSTEM)) as
+    | Record<string, unknown>
+    | null;
+  expect(row, `sys_user '${id}' must exist`).toBeTruthy();
+  return { banned: isBanned(row), ban_reason: (row!.ban_reason as string | null | undefined) ?? null };
+}
+
+const DIRECTORY_SUSPENDED = { banned: true, ban_reason: SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON };
+const RUNNING = { banned: false, ban_reason: null };
+
+/** `POST /service-account/resume` by a platform administrator, through the door's own handler. */
+async function platformResume(h: Harness, accountId: string): Promise<{ status: number; code?: string }> {
+  const deps: ServiceAccountLifecycleDeps = {
+    getDataEngine: () => h.engine as never,
+    runAtomically: (work) => work(),
+  };
+  const res = await runResumeServiceAccount(
+    deps,
+    { id: 'usr_platform_admin', isPlatformAdmin: true, activeOrganizationId: AGENT_ORG } as never,
+    new Request(`${AUTH}/service-account/resume`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: accountId }),
+    }),
+  );
+  const error = (res.body as { error?: { code?: string } }).error;
+  return { status: res.status, ...(error?.code ? { code: error.code } : {}) };
+}
+
+describe('a directory deactivation suspends the AI service accounts the person is accountable for, and a re-activation resumes none', () => {
+  it('(j) active:false suspends each account in every organization; active:true leaves them suspended; resume waits for the re-activation', async () => {
+    const h = await boot();
+    const pia = await provision(h, 'pia');
+    const other = await provision(h, 'quinn');
+    const rawA = await agentAccount(h, pia.userId, 'usr_agent_pia_a');
+    const rawB = await agentAccount(h, pia.userId, 'usr_agent_pia_b', AGENT_OTHER_ORG);
+    const rawOther = await agentAccount(h, other.userId, 'usr_agent_quinn');
+    // Control: before the directory deactivates, every account's key works.
+    expect([await keyDoor(h, rawA), await keyDoor(h, rawB), await keyDoor(h, rawOther)]).toEqual(['admitted', 'admitted', 'admitted']);
+
+    expect((await setActive(h, pia.scimId, false)).status).toBe(200);
+    expect([await accountBan(h, 'usr_agent_pia_a'), await accountBan(h, 'usr_agent_pia_b')]).toEqual([DIRECTORY_SUSPENDED, DIRECTORY_SUSPENDED]);
+    // Suspension is the ban: nothing is revoked, and the keys are refused on it.
+    expect([await keyRow(h, 'key_usr_agent_pia_a'), await keyRow(h, 'key_usr_agent_pia_b')]).toEqual([LIVE, LIVE]);
+    expect([await keyDoor(h, rawA), await keyDoor(h, rawB)]).toEqual(['refused:owner_banned', 'refused:owner_banned']);
+    // Another person's account is not this person's to stop.
+    expect(await accountBan(h, 'usr_agent_quinn')).toEqual(RUNNING);
+    expect(await keyDoor(h, rawOther)).toBe('admitted');
+
+    // Resume is refused while the owner is still deactivated.
+    expect(await platformResume(h, 'usr_agent_pia_a')).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+    expect(await accountBan(h, 'usr_agent_pia_a')).toEqual(DIRECTORY_SUSPENDED);
+
+    const res = await setActive(h, pia.scimId, true);
+    expect(res.status, `SCIM PATCH active:true failed: ${await res.clone().text()}`).toBe(200);
+    // The person's ban is lifted (the directory's to lift) …
+    expect(isBanned(await userRow(h, pia.email))).toBe(false);
+    // … and the accounts stay suspended: a re-activation resumes none of them.
+    expect([await accountBan(h, 'usr_agent_pia_a'), await accountBan(h, 'usr_agent_pia_b')]).toEqual([DIRECTORY_SUSPENDED, DIRECTORY_SUSPENDED]);
+    expect([await keyDoor(h, rawA), await keyDoor(h, rawB)]).toEqual(['refused:owner_banned', 'refused:owner_banned']);
+
+    // An administrator's resume, with the re-activated owner kept, lets the same key work again.
+    expect(await platformResume(h, 'usr_agent_pia_a')).toEqual({ status: 200 });
+    expect(await accountBan(h, 'usr_agent_pia_a')).toEqual(RUNNING);
+    expect(await keyDoor(h, rawA)).toBe('admitted');
+    expect(await accountBan(h, 'usr_agent_pia_b')).toEqual(DIRECTORY_SUSPENDED);
+  }, 60_000);
+
+  it('(j) DELETE /Users/{id} suspends them the same way; a re-link through the tombstone resumes none', async () => {
+    const h = await boot();
+    const body = {
+      schemas: [USER_SCHEMA],
+      userName: 'rio@example.com',
+      externalId: 'ext-rio',
+      name: { givenName: 'rio', familyName: 'Example' },
+      displayName: 'rio Example',
+      emails: [{ value: 'rio@example.com', primary: true, type: 'work' }],
+      active: true,
+    };
+    const created = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(created.status, `SCIM POST /Users failed: ${await created.clone().text()}`).toBe(201);
+    const scimId = ((await created.json()) as { id: string }).id;
+    const userId = String((await userRow(h, 'rio@example.com'))!.id);
+    const raw = await agentAccount(h, userId, 'usr_agent_rio');
+
+    const del = await h.send(scimRequest(h, 'DELETE', `/Users/${scimId}`));
+    expect(del.status, `SCIM DELETE /Users/{id} failed: ${await del.clone().text()}`).toBe(204);
+    expect(await accountBan(h, 'usr_agent_rio')).toEqual(DIRECTORY_SUSPENDED);
+    expect(await keyDoor(h, raw)).toBe('refused:owner_banned');
+
+    const again = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(again.status, `SCIM re-link POST /Users failed: ${await again.clone().text()}`).toBe(201);
+    expect(isBanned(await userRow(h, 'rio@example.com'))).toBe(false);
+    expect(await accountBan(h, 'usr_agent_rio')).toEqual(DIRECTORY_SUSPENDED);
+    expect(await keyDoor(h, raw)).toBe('refused:owner_banned');
+  }, 60_000);
+
+  it('(j) an account already suspended keeps its own reason', async () => {
+    const h = await boot();
+    const sol = await provision(h, 'sol');
+    await agentAccount(h, sol.userId, 'usr_agent_sol_left');
+    await h.engine.update('sys_user', { id: 'usr_agent_sol_left', banned: true, ban_reason: SERVICE_ACCOUNT_OWNER_LEFT_REASON, ban_expires: null }, SYSTEM);
+    await agentAccount(h, sol.userId, 'usr_agent_sol_stopped');
+    await h.engine.update('sys_user', { id: 'usr_agent_sol_stopped', banned: true, ban_reason: 'Stopped by a platform administrator', ban_expires: null }, SYSTEM);
+
+    expect((await setActive(h, sol.scimId, false)).status).toBe(200);
+    expect(await accountBan(h, 'usr_agent_sol_left')).toEqual({ banned: true, ban_reason: SERVICE_ACCOUNT_OWNER_LEFT_REASON });
+    expect(await accountBan(h, 'usr_agent_sol_stopped')).toEqual({ banned: true, ban_reason: 'Stopped by a platform administrator' });
+  }, 60_000);
+
+  it('(j) CONTROL: an administrator\'s ban of the owner leaves the account as it is', async () => {
+    const h = await boot();
+    const tam = await provision(h, 'tam');
+    const raw = await agentAccount(h, tam.userId, 'usr_agent_tam');
+
+    await adminBan(h, tam.userId, 'Policy violation');
+    expect(await accountBan(h, 'usr_agent_tam')).toEqual(RUNNING);
+    expect(await keyDoor(h, raw)).toBe('admitted');
+  }, 60_000);
+
+  it('(j) a suspension that cannot be written still deprovisions the person, and says so once at error', async () => {
+    const h = await boot();
+    const uma = await provision(h, 'uma');
+    const raw = await agentAccount(h, uma.userId, 'usr_agent_uma');
+    let refused = 0;
+    const real = h.engine;
+    const refusing = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'update') {
+          return (object: string, data: Record<string, unknown>, options?: unknown) => {
+            if (object === 'sys_user' && data?.id === 'usr_agent_uma') {
+              refused += 1;
+              throw new Error('account suspension write refused (test)');
+            }
+            return target.update(object, data as never, options as never);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(refusing as never);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await setActive(h, uma.scimId, false);
+      expect(res.status, `SCIM PATCH failed: ${await res.clone().text()}`).toBe(200);
+      expect(refused).toBe(1);
+      const row = await userRow(h, uma.email);
+      expect(isBanned(row)).toBe(true);
+      expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+      expect(await accountBan(h, 'usr_agent_uma')).toEqual(RUNNING);
+      expect(await keyDoor(h, raw)).toBe('admitted');
+      expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('AI service account suspension INCOMPLETE'))).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
+
+    // The next directory write that leaves the person inactive (here an
+    // attribute sync) retries it.
+    vi.mocked(h.manager.getDataEngine).mockReturnValue(real as never);
+    expect((await setDisplayName(h, uma.scimId, 'uma Renamed')).status).toBe(200);
+    expect(await accountBan(h, 'usr_agent_uma')).toEqual(DIRECTORY_SUSPENDED);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// (h) — ADR-0135 D4: a SCIM-provisioned identity is marked directory-managed
+// ---------------------------------------------------------------------------
+
+async function sourceOf(h: Harness, userId: string): Promise<unknown> {
+  const row = (await h.engine.findOne(
+    'sys_user',
+    { where: { id: userId }, fields: ['id', 'source'] },
+    SYSTEM,
+  )) as { source?: unknown } | null;
+  return row?.source;
+}
+
+/** A row a directory provisioned before the SCIM write path carried the mark. */
+async function unmark(h: Harness, userId: string): Promise<void> {
+  await h.engine.update('sys_user', { id: userId, source: 'env_native' }, SYSTEM);
+  expect(await sourceOf(h, userId)).toBe('env_native');
+}
+
+/** Count the `sys_user` writes a call makes, through the same real engine. */
+function countingUserWrites(h: Harness): { engine: ScimIdentitySourceEngine; writes: () => number } {
+  let writes = 0;
+  return {
+    engine: {
+      find: (object, query) => h.engine.find(object, query as never) as Promise<unknown[]>,
+      update: (object, data, options) => {
+        if (object === 'sys_user') writes += 1;
+        return h.engine.update(object, data as never, options as never);
+      },
+    },
+    writes: () => writes,
+  };
+}
+
+describe('[ADR-0135 D4] a user the directory provisions reads idp_provisioned from the moment SCIM creates it', () => {
+  it('(h) POST /Users marks the created user directory-managed, with no sys_account row to key on', async () => {
+    const h = await boot();
+    const hana = await provision(h, 'hana');
+
+    expect(await sourceOf(h, hana.userId)).toBe('idp_provisioned');
+    // The mark does not wait for an account link: the vendor writes none.
+    const accounts = await h.engine.find('sys_account', { where: { user_id: hana.userId } }, SYSTEM);
+    expect(accounts).toHaveLength(0);
+  }, 60_000);
+
+  it('(h) POST /Users that re-links a deleted user through its tombstone marks that user directory-managed', async () => {
+    const h = await boot();
+    const body = {
+      schemas: [USER_SCHEMA],
+      userName: 'iris@example.com',
+      externalId: 'ext-iris',
+      name: { givenName: 'iris', familyName: 'Example' },
+      displayName: 'iris Example',
+      emails: [{ value: 'iris@example.com', primary: true, type: 'work' }],
+      active: true,
+    };
+    const first = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(first.status, `SCIM POST /Users failed: ${await first.clone().text()}`).toBe(201);
+    const scimId = ((await first.json()) as { id: string }).id;
+    const userId = String((await userRow(h, 'iris@example.com'))!.id);
+
+    const del = await h.send(scimRequest(h, 'DELETE', `/Users/${scimId}`));
+    expect(del.status, `SCIM DELETE /Users/{id} failed: ${await del.clone().text()}`).toBe(204);
+    await unmark(h, userId);
+
+    const again = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(again.status, `SCIM re-link POST /Users failed: ${await again.clone().text()}`).toBe(201);
+    expect(String((await userRow(h, 'iris@example.com'))!.id), 'the tombstone re-links the same user').toBe(userId);
+    expect(await sourceOf(h, userId)).toBe('idp_provisioned');
+  }, 60_000);
+
+  it('(h) control: a directory-provisioned user who gains a local password reads env_native, and a later directory sync leaves it so', async () => {
+    const h = await boot();
+    const jo = await provision(h, 'jo');
+    expect(await sourceOf(h, jo.userId)).toBe('idp_provisioned');
+
+    // The credential branch of `stampIdentitySource` (ADR-0135 D4/D5.2): a
+    // local password flips the row back.
+    await attachPassword(h, jo);
+    expect(await sourceOf(h, jo.userId)).toBe('env_native');
+
+    // The SCIM mark holds the same exception, so a directory write after the
+    // flip does not undo it.
+    const res = await setDisplayName(h, jo.scimId, 'Jo Renamed');
+    expect(res.status, `SCIM PATCH failed: ${await res.clone().text()}`).toBe(200);
+    expect(await sourceOf(h, jo.userId)).toBe('env_native');
+  }, 60_000);
+});
+
+describe('[ADR-0135 D4] set-user-manager refuses a SCIM-provisioned user as a directory-owned identity', () => {
+  it('(h) the refusal is 403 PERMISSION_DENIED with reason idp_provisioned, and manager_id is not written', async () => {
+    const h = await boot();
+    const kai = await provision(h, 'kai');
+    const lux = await provision(h, 'lux');
+
+    const res = await runSetUserManager(
+      { getDataEngine: () => h.engine as never },
+      { id: 'usr_admin_32113' },
+      new Request(`${AUTH}/admin/set-user-manager`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: kai.userId, managerId: lux.userId }),
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe('PERMISSION_DENIED');
+    expect(res.body.error?.details?.reason).toBe('idp_provisioned');
+    const row = (await h.engine.findOne(
+      'sys_user',
+      { where: { id: kai.userId }, fields: ['id', 'manager_id'] },
+      SYSTEM,
+    )) as { manager_id?: unknown } | null;
+    expect(row?.manager_id ?? null).toBeNull();
+  }, 60_000);
+});
+
+describe('[ADR-0135 D4] the boot backfill marks directory-provisioned users once, from their stored SCIM subject rows', () => {
+  it('(h) a pre-existing SCIM user is marked, a second pass writes nothing, a password holder and a non-SCIM user are untouched', async () => {
+    const h = await boot();
+    const mia = await provision(h, 'mia');
+    await unmark(h, mia.userId);
+    const ned = await provision(h, 'ned');
+    await attachPassword(h, ned);
+    expect(await sourceOf(h, ned.userId)).toBe('env_native');
+
+    // A user no directory provisioned and with no local password either, so
+    // the only thing keeping it out of the pass is the missing subject row.
+    const local = { id: 'usr_local_ola' };
+    await h.engine.insert(
+      'sys_user',
+      { id: local.id, email: 'ola@example.com', name: 'Ola Local', email_verified: false, source: 'env_native' },
+      SYSTEM,
+    );
+    expect(await sourceOf(h, local.id)).toBe('env_native');
+
+    const first = countingUserWrites(h);
+    expect(await backfillScimProvisionedIdentitySource(first.engine)).toEqual({ directoryProvisioned: 2, marked: 1 });
+    expect(first.writes()).toBe(1);
+    expect(await sourceOf(h, mia.userId)).toBe('idp_provisioned');
+    expect(await sourceOf(h, ned.userId)).toBe('env_native');
+    expect(await sourceOf(h, local.id)).toBe('env_native');
+
+    const second = countingUserWrites(h);
+    expect(await backfillScimProvisionedIdentitySource(second.engine)).toEqual({ directoryProvisioned: 2, marked: 0 });
+    expect(second.writes()).toBe(0);
+  }, 60_000);
+
+  it('(h) the backfill pages by subject id and reaches every page', async () => {
+    const h = await boot();
+    const users = [await provision(h, 'pia'), await provision(h, 'quin'), await provision(h, 'rae')];
+    for (const u of users) await unmark(h, u.userId);
+
+    const pass = countingUserWrites(h);
+    expect(await backfillScimProvisionedIdentitySource(pass.engine, 2)).toEqual({ directoryProvisioned: 3, marked: 3 });
+    for (const u of users) expect(await sourceOf(h, u.userId)).toBe('idp_provisioned');
+  }, 60_000);
+
+  it('(h) a subject row whose user row is gone is not counted as directory-provisioned', async () => {
+    const h = await boot();
+    const vic = await provision(h, 'vic');
+    await unmark(h, vic.userId);
+    await h.engine.insert(
+      'sys_scim_subject',
+      { id: 'zz_orphan_subject', user_id: 'usr_gone_32113', revision: 1, created_at: new Date(), updated_at: new Date() },
+      SYSTEM,
+    );
+    const pass = countingUserWrites(h);
+    expect(await backfillScimProvisionedIdentitySource(pass.engine)).toEqual({ directoryProvisioned: 1, marked: 1 });
+    expect(await sourceOf(h, vic.userId)).toBe('idp_provisioned');
+  }, 60_000);
+});
+
+/**
+ * The manager's data engine with the directory-managed mark write refused —
+ * a `sys_user` update carrying `source` throws, every other call reaches the
+ * real engine (and so the vendor's ambient transaction) unchanged.
+ */
+function refuseMarkWrites(h: Harness): () => number {
+  let refused = 0;
+  const real = h.engine;
+  const refusing = new Proxy(real, {
+    get(target, prop, receiver) {
+      if (prop === 'update') {
+        return (object: string, data: Record<string, unknown>, options?: unknown) => {
+          if (object === 'sys_user' && data && 'source' in data) {
+            refused += 1;
+            throw new Error('mark write refused (test)');
+          }
+          return target.update(object, data as never, options as never);
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(refusing as never);
+  return () => refused;
+}
+
+describe('[ADR-0135 D4] the SCIM create fails closed on the directory-managed mark', () => {
+  it('(h) a mark that cannot be written fails POST /Users, and neither the user nor its SCIM source persists', async () => {
+    const h = await boot();
+    const refused = refuseMarkWrites(h);
+    const res = await h.send(
+      scimRequest(h, 'POST', '/Users', {
+        schemas: [USER_SCHEMA],
+        userName: 'sol@example.com',
+        name: { givenName: 'sol', familyName: 'Example' },
+        displayName: 'sol Example',
+        emails: [{ value: 'sol@example.com', primary: true, type: 'work' }],
+        active: true,
+      }),
+    );
+    expect(refused()).toBeGreaterThan(0);
+    expect(res.status, await res.clone().text()).toBe(500);
+    const body = (await res.json()) as { schemas?: string[]; status?: string };
+    expect(body.schemas).toContain(SCIM_ERROR_SCHEMA);
+    expect(body.status).toBe('500');
+    expect(await userRow(h, 'sol@example.com')).toBeNull();
+    expect(await h.engine.find('sys_scim_user', { where: { user_name: 'sol@example.com' } }, SYSTEM)).toHaveLength(0);
+    expect(await h.engine.find('sys_scim_subject', {}, SYSTEM)).toHaveLength(0);
+  }, 60_000);
+});
+
+describe('[ADR-0135 D4] a SCIM deprovision lands even when the directory-managed mark cannot be written', () => {
+  it('(h) PATCH active:false with the mark refused still bans the account with the SCIM reason', async () => {
+    const h = await boot();
+    const tia = await provision(h, 'tia');
+    await unmark(h, tia.userId);
+    const refused = refuseMarkWrites(h);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await setActive(h, tia.scimId, false);
+      expect(res.status, `SCIM PATCH failed: ${await res.clone().text()}`).toBe(200);
+      expect(refused()).toBe(1);
+      const row = await userRow(h, tia.email);
+      expect(isBanned(row)).toBe(true);
+      expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+      // The mark stayed unwritten, and said so once.
+      expect(await sourceOf(h, tia.userId)).toBe('env_native');
+      expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('identity-source mark was NOT written'))).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
+  }, 60_000);
+});
+
+describe('[ADR-0135 D4/D5.2] admin/set-user-password refuses a SCIM-provisioned user on a cloud-managed environment', () => {
+  it('(h) the refusal is 409 RESOURCE_CONFLICT and no local credential is written', async () => {
+    const h = await boot();
+    const uma = await provision(h, 'uma');
+    const prev = process.env.OS_CLOUD_MANAGED;
+    process.env.OS_CLOUD_MANAGED = '1';
+    resetCloudManagedForTesting();
+    try {
+      const res = await runAdminSetUserPassword(
+        {
+          getAuthApi: () => h.manager.getApi() as never,
+          getAuthContext: () => h.manager.getAuthContext(),
+          getDataEngine: () => h.engine as never,
+          assertPasswordComplexity: async () => {},
+          noteMustChangePasswordIssued: () => {},
+        },
+        new Request(`${AUTH}/admin/set-user-password`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ userId: uma.userId, newPassword: PASSWORD }),
+        }),
+        { id: 'usr_admin_32113' },
+      );
+      expect(res.status).toBe(CLOUD_MANAGED_REFUSAL_STATUS);
+      expect(res.body.error?.code).toBe(CLOUD_MANAGED_REFUSAL_CODE);
+      const credentials = await h.engine.find(
+        'sys_account',
+        { where: { user_id: uma.userId, provider_id: 'credential' } },
+        SYSTEM,
+      );
+      expect(credentials).toHaveLength(0);
+      expect(await sourceOf(h, uma.userId)).toBe('idp_provisioned');
+    } finally {
+      if (prev === undefined) delete process.env.OS_CLOUD_MANAGED;
+      else process.env.OS_CLOUD_MANAGED = prev;
+      resetCloudManagedForTesting();
+    }
   }, 60_000);
 });

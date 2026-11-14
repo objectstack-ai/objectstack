@@ -11,6 +11,7 @@ import type { IDataDriver } from '@objectstack/spec/contracts';
 import type { MetadataHistoryRetentionPolicy } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import type { DatabaseLoader } from '../loaders/database-loader.js';
+import { PACKAGE_SLOTTED_STORE_TYPES } from '../package-slotted-store.js';
 
 /**
  * Types whose runtime transaction rows pin a specific historical body
@@ -23,6 +24,45 @@ function executionPinnedTypes(): string[] {
   return DEFAULT_METADATA_TYPE_REGISTRY
     .filter((entry) => entry.executionPinned)
     .map((entry) => entry.type);
+}
+
+/**
+ * [ADR-0150 D3/D4] The retention bucket of a history row of a type stored per
+ * `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`): its `package_id` column.
+ * Two packages (and the environment) each keep their own row of one name, and
+ * their snapshots share ONE `(type, name, version)` sequence, so a count kept
+ * per `(type, name)` let one package's saves evict another package's rollback
+ * targets. Each value of the column is its own bucket: a package, the
+ * environment's `sys_metadata` marker, and NULL — a row attributed to nobody
+ * (written before the column existed, or by `SysMetadataRepository`) — which
+ * is one bucket of its own, never folded into a package's.
+ */
+function retentionBucketOf(row: Record<string, unknown>): string | null {
+  return typeof row.package_id === 'string' ? row.package_id : null;
+}
+
+/**
+ * The rows past the retention limit of one `(type, name)`, given its rows
+ * newest version first. A type stored per `(package, name)` keeps the latest
+ * `maxVersions` per {@link retentionBucketOf}; every other type keeps the
+ * latest `maxVersions` of the name, as it always has. Both walks —
+ * `runCleanup()`'s delete and `getCleanupStats()`'s preview — count through
+ * here, so the preview cannot drift from what the delete removes.
+ */
+function rowsPastRetention(
+  type: string,
+  newestFirst: Array<Record<string, unknown>>,
+  maxVersions: number,
+): Array<Record<string, unknown>> {
+  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return newestFirst.slice(maxVersions);
+  const buckets = new Map<string | null, Array<Record<string, unknown>>>();
+  for (const row of newestFirst) {
+    const bucket = retentionBucketOf(row);
+    const rows = buckets.get(bucket);
+    if (rows) rows.push(row);
+    else buckets.set(bucket, [row]);
+  }
+  return [...buckets.values()].flatMap((rows) => rows.slice(maxVersions));
 }
 
 /**
@@ -115,7 +155,9 @@ export class HistoryCleanupManager {
         }
       }
 
-      // Count-based cleanup per metadata item
+      // Count-based cleanup per metadata item: the latest N per (type, name),
+      // or per (type, name, package_id) for a by-package type
+      // (`rowsPastRetention`).
       if (this.policy.maxVersions) {
         try {
           // Get all unique metadata items keyed by (type, name)
@@ -145,11 +187,11 @@ export class HistoryCleanupManager {
               const historyRecords = await driver.find(historyTableName, {
                 where: filter,
                 orderBy: [{ field: 'version', order: 'desc' as const }],
-                fields: ['id'],
+                fields: PACKAGE_SLOTTED_STORE_TYPES.has(type) ? ['id', 'package_id'] : ['id'],
               });
 
               if (historyRecords.length > this.policy.maxVersions) {
-                const toDelete = historyRecords.slice(this.policy.maxVersions);
+                const toDelete = rowsPastRetention(type, historyRecords, this.policy.maxVersions);
                 const ids = toDelete.map(r => r.id as string).filter(Boolean);
                 const result = await this.bulkDeleteByIds(driver, historyTableName, ids);
                 deleted += result.deleted;
@@ -285,6 +327,17 @@ export class HistoryCleanupManager {
         for (const key of uniqueKeys) {
           const [type, name] = key.split('\x1f');
           const filter: Record<string, unknown> = { type, name, ...baseWhere };
+
+          if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
+            // Counted per bucket, as `runCleanup()` deletes (`rowsPastRetention`).
+            const rows = await driver.find(historyTableName, {
+              where: filter,
+              orderBy: [{ field: 'version', order: 'desc' as const }],
+              fields: ['package_id'],
+            });
+            recordsByCount += rowsPastRetention(type, rows, this.policy.maxVersions).length;
+            continue;
+          }
 
           const count = await driver.count(historyTableName, {
             where: filter,

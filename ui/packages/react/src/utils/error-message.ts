@@ -314,6 +314,19 @@ export function unmarkedRefusalLines(
  * A delegated-admin scope refusal is a 403 too, so this answers true for it:
  * a caller that shows that refusal's reason asks
  * {@link delegationScopeMessage} first.
+ *
+ * The text match below is the last resort for a refusal its producer did not
+ * classify. A refusal that names BOTH a client-error status other than 401 and
+ * 403 AND a machine code has been classified by its producer, and that code
+ * decides: it is not a denial, whatever its sentence says. A file-field
+ * `400 ERR_FILE_CONSTRAINT` reads "File type 'text/plain' is not permitted by
+ * the accept list declared for 'invoice_file' …", and matching "not permitted"
+ * in it told the submitter they lacked permission when the file type was the
+ * problem. Every denial the server answers is a `403` (or carries
+ * `PERMISSION_DENIED` / `FORBIDDEN`), which the two reads above it already
+ * answer true for, so a real denial still reads as one (ruling B′ on
+ * objectstack#24914). A refusal with no code, a 401 or a 5xx keeps the text
+ * match as before.
  */
 export function isPermissionError(err: unknown): boolean {
   const e = err as Record<string, any> | null | undefined;
@@ -322,6 +335,9 @@ export function isPermissionError(err: unknown): boolean {
   if (status === 403) return true;
   const code = firstString(e.code, e.details?.code) ?? '';
   if (code === 'PERMISSION_DENIED' || code === 'FORBIDDEN') return true;
+  if (code && typeof status === 'number' && status >= 400 && status < 500 && status !== 401) {
+    return false;
+  }
   const text = `${typeof e.message === 'string' ? e.message : ''} ${
     e.details?.error ?? e.error ?? ''
   }`;

@@ -38,6 +38,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The dispatcher's reach loads this dependency in a function body; paid here,
+// at collection, not inside the first case's clocked window.
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { validationFailureDetails } from '../validation-failure.js';
@@ -138,7 +141,16 @@ const EXEMPLAR_FACET_FLOOR = 10;
  * engine rather than the route. What is under test is which definition the
  * route hands over.
  */
-function makeDispatcher(seed: Record<string, unknown>[] = [packagedExemplar()]) {
+function makeDispatcher(
+    seed: Record<string, unknown>[] = [packagedExemplar()],
+    /**
+     * The messaging service's known channels, for the save door's notify
+     * channel check: given, the kernel reads as past `kernel:ready`, the
+     * fake engine answers the definition it stored (the real one answers its
+     * parsed flow) and can withdraw a name. Absent, the rig is as it was.
+     */
+    channels?: ReadonlyArray<{ id: string; configured: boolean }>,
+) {
     const flows = new Map<string, Record<string, unknown>>(
         seed.map((f) => [f.name as string, f]),
     );
@@ -146,14 +158,18 @@ function makeDispatcher(seed: Record<string, unknown>[] = [packagedExemplar()]) 
         getFlow: vi.fn(async (name: string) => flows.get(name) ?? null),
         registerFlow: vi.fn((name: string, definition: unknown) => {
             flows.set(name, definition as Record<string, unknown>);
+            return channels ? definition : undefined;
         }),
+        ...(channels ? { unregisterFlow: vi.fn((name: string) => { flows.delete(name); }) } : {}),
     };
     const services: Record<string, unknown> = { automation: spies, ...packageLanding() };
+    if (channels) services.messaging = { getKnownChannels: () => channels.map((entry) => ({ ...entry })) };
     const resolve = (name: string) => services[name];
     const kernel: any = {
         getService: resolve,
         getServiceAsync: async (name: string) => resolve(name),
         context: { getService: resolve },
+        ...(channels ? { hasBootPhaseSettled: (phase: string) => phase === 'kernel:ready' } : {}),
     };
     return { dispatcher: new HttpDispatcher(kernel), spies, flows, protocol: services.protocol as PackageLandingProtocol };
 }
@@ -578,5 +594,45 @@ describe('#12156 — the source, the notice, and the gate', () => {
 
         expect(result.response?.status).not.toBe(403);
         expect(execute).toHaveBeenCalled();
+    });
+});
+
+describe('the clone door refuses a copy whose notify node names a channel no plugin registers (ruling 6810493176, letter B)', () => {
+    /** The exemplar with its notify node naming `channels` (and not the legacy `channel` key it carries above). */
+    const sourceNaming = (channels: unknown): Record<string, unknown> => {
+        const source = packagedExemplar();
+        const nodes = (source.nodes as Array<Record<string, unknown>>).map((node) =>
+            node.type === 'notify' ? { ...node, config: { recipients: 'team:ops', title: 'Deal in negotiation', channels } } : node);
+        return { ...source, nodes };
+    };
+    const STOCK = [{ id: 'inbox', configured: true }, { id: 'email', configured: true }];
+
+    it('answers 400 VALIDATION_FAILED at the node\'s channels, and nothing is landed, saved or left registered', async () => {
+        const source = sourceNaming('emial');
+        const { dispatcher, flows, protocol } = makeDispatcher([source], STOCK);
+
+        const result = await dispatcher.handleAutomation(clonePath(source.name as string), 'POST', NEW, CTX);
+
+        expect(result.response?.status).toBe(400);
+        const error = result.response?.body?.error;
+        expect(error?.code).toBe('VALIDATION_FAILED');
+        expect(String(error?.message)).toContain("node 'notify' (`notify`) names channel 'emial' at nodes.1.config.channels");
+        expect(String(error?.message)).toContain('The channels this deployment registers: `inbox`, `email`.');
+        expect((error?.details?.fields ?? []).map((f: { field?: string }) => f.field)).toEqual(['nodes.1.config.channels']);
+        expect(protocol.ensureCustomizationPackage).not.toHaveBeenCalled();
+        expect(protocol.saveMetaItem).not.toHaveBeenCalled();
+        expect(flows.has(NEW.name)).toBe(false);
+        expect(flows.get(source.name as string)).toEqual(source);
+    });
+
+    it('the control: a copy naming registered channels lands and saves', async () => {
+        const source = sourceNaming(['inbox', 'email']);
+        const { dispatcher, flows, protocol } = makeDispatcher([source], STOCK);
+
+        const result = await dispatcher.handleAutomation(clonePath(source.name as string), 'POST', NEW, CTX);
+
+        expect(result.response?.status).toBe(200);
+        expect(protocol.saveMetaItem).toHaveBeenCalledTimes(1);
+        expect(flows.has(NEW.name)).toBe(true);
     });
 });

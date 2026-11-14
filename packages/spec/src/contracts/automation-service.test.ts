@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import type { IAutomationService, AutomationResult, FlowRuntimeState, FlowUnboundCause, ConnectorSourcePullRequest } from './automation-service';
 import type { OwnershipQueueCallerPackage } from './ownership-queue-service';
+import type { JobRunTrigger } from './job-service';
 import { FLOW_UNBOUND_CAUSES } from './automation-service';
 import type { FlowParsed } from '../automation/flow.zod';
 import { FlowSchema } from '../automation/flow.zod';
@@ -61,7 +62,7 @@ export type FlowRuntimeStateUnboundCauseIsTheClosedTuple = Assert<
   Eq<FlowRuntimeState['unboundCause'], (typeof FLOW_UNBOUND_CAUSES)[number] | undefined>
 >;
 export type FlowUnboundCauseIsTheTupleUnion = Assert<
-  Eq<FlowUnboundCause, 'deployment_policy' | 'disabled_subflow' | 'notice_after_suspending_subflow' | 'suspending_subflow_in_region' | 'missing_trigger' | 'binding_failure'>
+  Eq<FlowUnboundCause, 'deployment_policy' | 'disabled_subflow' | 'notice_after_suspending_subflow' | 'suspending_subflow_in_region' | 'retried_callout_in_subflow' | 'missing_trigger' | 'binding_failure'>
 >;
 
 describe('Automation Service Contract', () => {
@@ -517,9 +518,13 @@ type PullRequestKeys = keyof ConnectorSourcePullRequest;
 export type PullRequestCallerPackageIsTheSiblingType = Assert<
   Eq<ConnectorSourcePullRequest['callerPackageId'], OwnershipQueueCallerPackage | undefined>
 >;
-export type PullRequestKeysAreTheFourKnown = Assert<
-  Eq<PullRequestKeys, 'mapping' | 'context' | 'environmentId' | 'callerPackageId'>
+// [ADR-0153 D7] `jobRunId` and `trigger`: the job run that drove the pull,
+// for its run record. Optional, so the lit control below still holds.
+export type PullRequestKeysAreTheSixKnown = Assert<
+  Eq<PullRequestKeys, 'mapping' | 'context' | 'environmentId' | 'callerPackageId' | 'jobRunId' | 'trigger'>
 >;
+export type PullRequestJobRunIdIsText = Assert<Eq<ConnectorSourcePullRequest['jobRunId'], string | undefined>>;
+export type PullRequestTriggerIsTheJobTrigger = Assert<Eq<ConnectorSourcePullRequest['trigger'], JobRunTrigger | undefined>>;
 /** LIT CONTROL: the pre-existing required member alone still satisfies the contract. */
 export type PullRequestCallerPackageIsOptional = Assert<{ mapping: string } extends ConnectorSourcePullRequest ? true : false>;
 

@@ -52,9 +52,11 @@
  *  4. **The ablation is held PERMANENTLY** (§4). Its handle is the wiring this
  *     package shipped before this card: a `PluginContext` with no `getKernel`
  *     at all, which is byte-identically what every other suite here still
- *     mounts (`storage-service-plugin.test.ts`'s `makeCtx`). Remove the fix's
- *     one input and the ex-member downloads again, capability and all. A pin
- *     that cannot go red has measured nothing.
+ *     mounts (`storage-service-plugin.test.ts`'s `makeCtx`). A pin that cannot
+ *     go red has measured nothing. Since ADR-0093 D8.1 was amended the
+ *     membership rule reads no posture, so the handle moves only the
+ *     posture-conditional `organization_required` row; the membership row
+ *     stays refused with it removed.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -508,31 +510,36 @@ describe('[#15352] §3 — an organization-less key under `isolated`', () => {
 describe('[#15352] §4 — ablation: with no kernel to read the posture from, the admission returns', () => {
   const ABLATED: Wiring = { kind: 'no-kernel' };
 
-  it('the ex-member DOWNLOADS again — 200, and the adapter MINTS the capability', async () => {
+  // [ADR-0093 D8.1, as amended] The membership rule reads no posture, so the
+  // ablation's handle no longer moves the key its owner's membership does not
+  // back: it stays refused. What the handle still moves is the posture-
+  // conditional refusal, `organization_required`.
+  it('a key its owner\'s membership no longer backs is refused without a posture too — 401, nothing minted', async () => {
     const h = await mount(ABLATED);
     const res = await h.call('url', FILE_OPEN, RAW_EXMEMBER_KEY);
-    expect(res.status).toBe(200);
-    expect(String((res.json?.data as { url?: string } | undefined)?.url)).toContain('/_local/raw/');
-    expect(h.minted()).toBe(1);
+    expect(res.status).toBe(401);
+    expect(h.minted()).toBe(0);
   });
 
-  it('the redirect door hands the ex-member a Location again', async () => {
+  it('the redirect door refuses it too — no Location', async () => {
     const h = await mount(ABLATED);
     const res = await h.call('redirect', FILE_OPEN, RAW_EXMEMBER_KEY);
-    expect(res.status).toBe(302);
-    expect(res.headers.Location).toContain('/_local/raw/');
+    expect(res.status).toBe(401);
+    expect(res.headers.Location).toBeUndefined();
   });
 
-  it('the organization-less key is admitted again too', async () => {
+  it('the organization-less key is admitted again', async () => {
     const h = await mount(ABLATED);
     expect((await h.call('url', FILE_OPEN, RAW_ORGLESS_KEY)).status).toBe(200);
   });
 
-  it('and NOTHING is said about any of it — no refusal line, because no refusal was decided', async () => {
+  it('the one line said is the membership refusal — the posture-conditional refusal was not decided', async () => {
     const h = await mount(ABLATED);
     await h.call('url', FILE_OPEN, RAW_EXMEMBER_KEY);
     await h.call('url', FILE_OPEN, RAW_ORGLESS_KEY);
-    expect(refusalLines(h)).toHaveLength(0);
+    const lines = refusalLines(h);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('organization_membership_ended');
   });
 
   it('NARROWNESS: the member and reachability controls are UNCHANGED by the ablation', async () => {
@@ -555,11 +562,13 @@ describe('[#15352] §5 — a `tenancy` service that was NEVER REGISTERED resolve
     expect((await h.call('url', FILE_OPEN, RAW_MEMBER_KEY)).status).toBe(200);
   });
 
-  it('and it runs NO posture-conditional refusal — behaviour is exactly what it was', async () => {
+  it('and it runs NO posture-conditional refusal; the membership rule, which reads no posture, still refuses', async () => {
     const h = await mount(UNREGISTERED);
-    expect((await h.call('url', FILE_OPEN, RAW_EXMEMBER_KEY)).status).toBe(200);
+    expect((await h.call('url', FILE_OPEN, RAW_EXMEMBER_KEY)).status).toBe(401);
     expect((await h.call('url', FILE_OPEN, RAW_ORGLESS_KEY)).status).toBe(200);
-    expect(refusalLines(h)).toHaveLength(0);
+    const lines = refusalLines(h);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('organization_membership_ended');
   });
 });
 
@@ -666,18 +675,20 @@ describe('[#15352] §6 — the `group` posture, measured on this door', () => {
 });
 
 // ---------------------------------------------------------------------------
-// §7 — `single`. The posture that enforces no wall admits everyone it did.
+// §7 — `single`. The posture that enforces no wall between organizations.
 // ---------------------------------------------------------------------------
 
-describe('[#15352] §7 — under `single` nothing changes', () => {
+describe('[#15352] §7 — under `single`', () => {
   const SINGLE: Wiring = { kind: 'posture', posture: 'single' };
 
-  it('every key is admitted, stamped or not', async () => {
+  it('[ADR-0093 D8.1, as amended] a stamped key needs its owner\'s current membership; an organization-less key is admitted', async () => {
     const h = await mount(SINGLE);
     expect((await h.call('url', FILE_OPEN, RAW_MEMBER_KEY)).status).toBe(200);
-    expect((await h.call('url', FILE_OPEN, RAW_EXMEMBER_KEY)).status).toBe(200);
+    expect((await h.call('url', FILE_OPEN, RAW_EXMEMBER_KEY)).status).toBe(401);
     expect((await h.call('url', FILE_OPEN, RAW_ORGLESS_KEY)).status).toBe(200);
-    expect(refusalLines(h)).toHaveLength(0);
+    const lines = refusalLines(h);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('organization_membership_ended');
   });
 
   it('and the two non-posture refusals still stand', async () => {

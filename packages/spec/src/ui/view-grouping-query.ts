@@ -532,6 +532,36 @@ function summaryAggregationNodes(
 }
 
 /**
+ * The `ColumnSummary` members whose header-row value is the aggregated
+ * field's STORED value rather than a number: an extreme is one of the values
+ * it ranged over, so `min` over a `date` field is a date.
+ */
+type ColumnSummaryExtreme = 'min' | 'max';
+
+/** The member a summary declaration names — the shorthand, or the object form's `type`. */
+type ColumnSummaryMemberOf<S> = S extends ColumnSummaryConfig ? S['type'] : S;
+
+/** What one member reads back as — distributes over a union of members. */
+type ColumnSummaryMemberValue<M> = M extends 'none' ? never : M extends ColumnSummaryExtreme ? unknown : number;
+
+/**
+ * What {@link deriveColumnSummary} answers for a summary declaration, besides
+ * `null` (the aggregate answered no value) and `undefined` (no column / `none`):
+ *
+ *   * `count`, `count_unique`, `sum`, `avg`, `count_filled`, `count_empty`,
+ *     `percent_filled`, `percent_empty` — a `number`;
+ *   * `min`, `max` — `unknown`: the aggregated field's stored value, as the
+ *     header row carries it (text for a date-family field, a number for a
+ *     numeric one), never converted;
+ *   * `none` — nothing (`never`): it reads `undefined`.
+ *
+ * A summary typed as the whole `ColumnSummary` union may be `min` / `max`, so
+ * it reads `unknown`; a literal member reads its own value.
+ */
+export type ColumnSummaryValue<S extends ColumnSummary | ColumnSummaryConfig = ColumnSummary> =
+  ColumnSummaryMemberValue<ColumnSummaryMemberOf<S>>;
+
+/**
  * The table row for one summary value, or the refusal the contract gives it:
  * `summary_unknown` (`INVALID_QUERY` / 400) for a value that is no
  * `ColumnSummary` member at all, `summary_unmapped` (`NOT_IMPLEMENTED` /
@@ -588,19 +618,33 @@ function columnSummaryMapping(
  * `summary` is the member, or the `{ type, field }` object form; `field` is
  * the column's own field, which the object form's `field` overrides — the
  * same resolution {@link compileListViewGroupQuery} applies.
+ *
+ * The declared value is {@link ColumnSummaryValue} of the member: a number
+ * for every counting, arithmetic and derived member, and for `min` / `max`
+ * the aggregated field's STORED value, returned as the row carries it —
+ * ISO text for a `datetime`, `YYYY-MM-DD` for a `date`, a number for a
+ * numeric field. Nothing is converted here: a date turned into a number
+ * would throw away the value a renderer draws, so the type says what the
+ * row holds and the consumer reads it as the field's own cell would.
  */
+export function deriveColumnSummary<S extends ColumnSummary | ColumnSummaryConfig>(
+  row: ListViewGroupHeaderRow,
+  summary: S,
+  field: string,
+): ColumnSummaryValue<S> | null | undefined;
 export function deriveColumnSummary(
   row: ListViewGroupHeaderRow,
   summary: ColumnSummary | ColumnSummaryConfig,
   field: string,
-): number | null | undefined {
+): unknown {
   const member: ColumnSummary = typeof summary === 'string' ? summary : summary.type;
   const aggregatedField = typeof summary === 'string' ? field : (summary.field ?? field);
   const mapping = columnSummaryMapping(member, [], `field "${aggregatedField}"`);
   if (mapping.kind === 'none') return undefined;
   if (mapping.kind === 'aggregate') {
-    const value = row[columnSummaryAlias(mapping.function, mapping.fieldless ? undefined : aggregatedField)];
-    return value === undefined ? undefined : (value as number | null);
+    // `count` / `count_distinct` / `sum` / `avg` answer a number, `min` /
+    // `max` the field's stored value: either way, the row's own value.
+    return row[columnSummaryAlias(mapping.function, mapping.fieldless ? undefined : aggregatedField)];
   }
   const raw = row[columnSummaryAlias(mapping.from, aggregatedField)];
   if (raw === undefined || raw === null) return undefined;

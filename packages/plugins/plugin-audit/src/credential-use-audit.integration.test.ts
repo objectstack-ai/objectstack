@@ -43,7 +43,7 @@ import {
 } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
-import { SysApiKey, SysOauthApplication, SysOauthConsent, SysUser } from '@objectstack/platform-objects/identity';
+import { SysApiKey, SysMember, SysOauthApplication, SysOauthConsent, SysUser } from '@objectstack/platform-objects/identity';
 
 import { AuditPlugin } from './audit-plugin.js';
 import { CREDENTIAL_USE_AUDIT_ACTION, type CredentialUseAuditWriter } from './credential-use-audit.js';
@@ -71,11 +71,14 @@ async function boot(withAudit: boolean): Promise<Rig> {
   const driver = new SqliteWasmDriver({ filename: ':memory:' });
   await driver.connect();
   engine.registerDriver(driver, true);
-  for (const object of [SysUser, SysApiKey, SysOauthConsent, SysOauthApplication]) {
+  for (const object of [SysUser, SysMember, SysApiKey, SysOauthConsent, SysOauthApplication]) {
     engine.registry.registerObject(object as any, 'com.objectstack.audit.test.credential-use');
   }
   await engine.syncSchemas();
   await engine.insert('sys_user', { id: USER, email: 'cu@credential-use.example.com', name: 'Cu' }, SYS);
+  // The key's owner is a current member of the key's organization: an API key
+  // follows its owner's membership under every posture (ADR-0093 D8.1, as amended).
+  await engine.insert('sys_member', { id: 'mem_31796', user_id: USER, organization_id: ORG, role: 'member' }, SYS);
   return { kernel, engine };
 }
 

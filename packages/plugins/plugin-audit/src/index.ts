@@ -174,6 +174,24 @@ export type {
   KeyMaterialMigrationOptions,
   KeyMaterialMigrationReport,
 } from './key-material-copy-migration.js';
+// [#32442] The columns no ledger copy carries because they hold another
+// record's field values, the one helper the writer and the at-rest rewrite
+// apply, and that rewrite's planners and runners.
+export { SIDE_COPY_COLUMNS, SIDE_COPY_OBJECTS, sideCopyColumnsOf, omitSideCopyFromCopy } from './side-copy-columns.js';
+export {
+  migrateSideCopies,
+  migrateArchivedSideCopies,
+  planSideCopyAuditRowPatch,
+  planSideCopyActivityRowPatch,
+  SIDE_COPY_TABLES,
+} from './side-copy-migration.js';
+export type {
+  SideCopyArchiveDriver,
+  SideCopyTable,
+  SideCopyMigrationEngine,
+  SideCopyMigrationOptions,
+  SideCopyMigrationReport,
+} from './side-copy-migration.js';
 // [ADR-0139 E6] The stored-row backfill of `sys_activity`'s two writer-stamped
 // read-rule columns, and the one planner it, the CRUD mirror and the
 // before-insert hook stamp by. The CLI command
@@ -201,11 +219,19 @@ export type {
 // [ADR-0154] The audit ledger's tamper evidence. Only what a package outside
 // this one reads: the `sys_secret` reference union (`@objectstack/cli`) finds
 // the sealer's secrets through the holder list, the coordinate predicate and
-// the two sealing contexts. The rest of the pure core (`./audit-seal/`) is
-// reached by path inside this package.
+// the two sealing contexts, and `os audit verify` runs the live check (D9),
+// writes its proof bundle, and checks one offline.
+// The rest of the pure core (`./audit-seal/`) is reached by path inside this
+// package.
 export {
+  AUDIT_PROOF_BUNDLE_FORMAT,
+  AUDIT_ROW_VERDICTS,
   AUDIT_SEAL_SECRET_HOLDERS,
+  AuditProofBundleError,
   checkpointSeedContext,
   isAuditSealSecretCoordinate,
   signingKeyContext,
+  verifyAuditLedger,
+  verifyAuditProofBundle,
 } from './audit-seal/index.js';
+export type { AuditProofBundle, AuditRowVerdict, AuditVerifyReport } from './audit-seal/index.js';

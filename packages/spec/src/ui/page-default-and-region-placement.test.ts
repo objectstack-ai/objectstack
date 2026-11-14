@@ -56,6 +56,13 @@ const region = (name: string, width?: 'small' | 'medium' | 'large' | 'full') => 
   components: [],
 });
 
+/**
+ * A `main` region placing one component — what a `full` record page carries in
+ * these rows so `checkPageRecordPlacesComponent` stays silent and each row is
+ * about the check it names.
+ */
+const PLACED_MAIN = { name: 'main', components: [{ type: 'record:details' }] };
+
 function refusalOf(value: unknown) {
   const r = PageSchema.safeParse(value);
   expect(r.success, 'expected a refusal').toBe(false);
@@ -97,8 +104,8 @@ describe('Q1 — `isDefault: true` on a page that is not a record page bound to 
 
   it('refuses it on a record page bound to no object — `type` left out (the `record` default) too — naming `object`', () => {
     for (const page of [
-      { name: 'orphan_record', label: 'Orphan', type: 'record', isDefault: true },
-      { name: 'orphan_record', label: 'Orphan', isDefault: true },
+      { name: 'orphan_record', label: 'Orphan', type: 'record', isDefault: true, regions: [PLACED_MAIN] },
+      { name: 'orphan_record', label: 'Orphan', isDefault: true, regions: [PLACED_MAIN] },
     ]) {
       const issues = refusalOf(page);
       expect(issues.map((i) => i.path.join('.'))).toEqual(['isDefault']);
@@ -124,7 +131,7 @@ describe('Q1 — `isDefault: true` on a page that is not a record page bound to 
   });
 
   it.each([
-    ['a default record page bound to an object', { name: 'acct_detail', label: 'Account', type: 'record', object: 'account', isDefault: true }],
+    ['a default record page bound to an object', { name: 'acct_detail', label: 'Account', type: 'record', object: 'account', isDefault: true, regions: [PLACED_MAIN] }],
     ['a `home` page with `isDefault: false`', { name: 'pgs_home', label: 'Home', type: 'home', isDefault: false }],
     ['a `home` page that leaves `isDefault` out', { name: 'pgs_home', label: 'Home', type: 'home' }],
   ])('CONTROL — %s parses', (_label, page) => {
@@ -316,7 +323,7 @@ describe('the ledger — the D3 entries, and the retired D2 entries data at rest
   // authoring door, pinned above, still refuses the row as written.
   it.each([
     ['a non-record `isDefault`', { name: 'sales_home_page', label: 'Home', type: 'home', isDefault: true, regions: [] }, 'page-is-default-off-record-page-removed', 'isDefault', { name: 'sales_home_page', label: 'Home', type: 'home', regions: [] }],
-    ['the retired `full-width`', { name: 'pg_page', label: 'P', type: 'record', object: 'invoice', template: 'full-width', regions: [region('main')] }, 'page-template-full-width-to-default', 'template', { name: 'pg_page', label: 'P', type: 'record', object: 'invoice', template: 'default', regions: [region('main')] }],
+    ['the retired `full-width`', { name: 'pg_page', label: 'P', type: 'record', object: 'invoice', template: 'full-width', regions: [PLACED_MAIN] }, 'page-template-full-width-to-default', 'template', { name: 'pg_page', label: 'P', type: 'record', object: 'invoice', template: 'default', regions: [PLACED_MAIN] }],
   ])('a STORED row with %s converts on read, with the named notice, and the converted row parses', (_label, row, conversionId, path, converted) => {
     expect(refusalOf(row).map((i) => i.path.join('.'))).toEqual([path]);
     const notices: ConversionNotice[] = [];

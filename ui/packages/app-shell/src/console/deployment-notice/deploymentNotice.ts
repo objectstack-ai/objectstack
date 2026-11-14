@@ -18,6 +18,16 @@
  * fingerprint of what was acknowledged. A finding that appears later changes
  * the fingerprint, so the notice comes back.
  *
+ * ## Mail is not one of the console's findings (objectstack#32643)
+ *
+ * The server also serves `email_not_configured` whenever its email service
+ * does not report itself configured. The console draws it no more: on the
+ * maintainer's ruling mail is an optional setting, and the notice speaks about
+ * mail only when something needs mail and cannot send it. The server states no
+ * such thing today (an unset transport is all `email_not_configured` says), so
+ * the finding is left out here like any finding this console has no words for,
+ * and the server's fingerprint, which still names it, is what a hide sends.
+ *
  * @module
  */
 
@@ -27,8 +37,7 @@ export type DeploymentFindingId =
   | 'database_local_file'
   | 'auth_secret_generated'
   | 'data_key_file'
-  | 'file_storage_local'
-  | 'email_not_configured';
+  | 'file_storage_local';
 
 export interface DeploymentFinding {
   id: DeploymentFindingId;
@@ -51,7 +60,6 @@ const KNOWN_FINDINGS: ReadonlySet<string> = new Set<DeploymentFindingId>([
   'auth_secret_generated',
   'data_key_file',
   'file_storage_local',
-  'email_not_configured',
 ]);
 
 /**

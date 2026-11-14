@@ -275,7 +275,7 @@ storage service is installed:
 | `list_actions` / `run_action` | Discover and invoke your business actions by name |
 | `resume_run` | Finish a flow action that paused on a screen, by submitting the screen's values |
 | `read_file` | Read a file a record carries: its text (text files, PDF, Word `.docx`) or the image itself, with its size, the byte cap and a short-lived download link |
-| `create_upload_link` | Hand the user a single-use link that uploads one file onto a record's file field or its attachments |
+| `create_upload_link` | Hand the user a single-use link that uploads a file onto a record's file field or its attachments (up to 10 files, sent together, for a multi-file field) |
 
 ### Files: `read_file` and `create_upload_link`
 
@@ -301,13 +301,56 @@ record means no file**, refused with the same `RECORD_NOT_FOUND`.
   write). It answers a link and its expiry (ten minutes). The user opens the
   link in a browser where they are signed in to this deployment, picks one
   file, and it lands on exactly that record and field, or as an attachment of
-  that record. On a phone, they sign in there first. The link works only for
+  that record. On a phone, they sign in there first. A link for a
+  `multiple: true` file field takes several files in its one use: the user
+  picks up to 10 and sends them together, every file of the send, however
+  many, is checked (the maximum upload size, and the field's own `accept` and
+  `maxSize`) before the link is spent, and the field gains all of them in one write, or none: one file the
+  field cannot take, or more than 10 (`400` `VALIDATION_ERROR`), refuses the
+  whole send with the link still usable, and a failure after that leaves the
+  record as it was. A single-file field link and an attachments link take one
+  file. The link works only for
   the user it was made for, and only once: without a session it answers
   `401`, and a second use, an expired link, an unknown link and another user's
   link all get the same `404`. The upload is stored as that user, with their
   access checked again when the file arrives, and it meets the storage
-  service's maximum upload size before the link is spent. Sending a file's
-  bytes through the MCP protocol itself is not supported yet.
+  service's maximum upload size before the link is spent. A field that cannot
+  take the upload now gets no link: a `readonly` field, or one whose
+  `readonlyWhen` holds on this record as it stands (refused `403`
+  `FIELD_NOT_ACCESSIBLE`, naming the lock in the words the engine update's
+  strict refusal (`strictReadonlyWrites`) uses for it; `update_record` reports
+  the same lock under `droppedFields` with reason `readonly_when`), and a
+  record a pending approval locks (`409`
+  `RECORD_LOCKED`). Those are a field link's refusals: an attachments link
+  asks only what attaching asks (the permission to create attachments and a
+  record the caller may edit), so a record a pending approval locks still
+  takes attachments. A field that becomes read-only, or a record that becomes
+  locked, after the link was made refuses the upload when it arrives,
+  attaching nothing. Sending a file's bytes through the MCP protocol itself
+  is not supported yet.
+- **A record not created yet.** A record whose file field is `required` (an
+  expense line and its invoice, say) cannot be created before the file
+  exists, so `create_upload_link` also takes `objectName` and `field` with no
+  `recordId`. That needs a user who may create records of the object and
+  write the field, and a field that is not `readonly`; an attachments link
+  still needs its record. The answer carries `fileIds`, the id the upload is
+  stored under. For several files into a multi-file field, the agent sends
+  `count` (up to 10): `fileIds` then holds that many ids, and the user must
+  pick exactly that many. Once the user has uploaded (the page says the file was
+  received), the agent calls `create_record` with the field set to
+  `fileIds[0]`, or the array for a multi-file field; before the upload that
+  create is refused as an upload that never completed, as is every other
+  write naming one of the ids. The field's own
+  `accept` and `maxSize` are checked when the file arrives, before the link is
+  spent. Until a record holds the file, the id works only for that user's own
+  `create_record` or `update_record` into that field of that object, within
+  one hour of the upload: the uploader's write into another field or object,
+  or after the hour, is refused at the field with the reason, and another
+  user's or a system write is refused as a file they cannot open. Within the
+  hour, a second record naming it while the first holds it is refused too.
+  After that it is the record's file like any other, and a file the record
+  lets go is judged as any released file. Until a record has held the file,
+  only the user who uploaded it can download it.
 
 Reading a PDF or Word document's text runs on a pool of worker threads, so the
 server keeps answering other requests while it does. Two host settings bound it, so
@@ -330,7 +373,26 @@ usable on an app with hundreds of objects. Which objects and actions that spine
 can reach is the **default exposure policy (v1)**:
 
 - **Objects are exposed automatically** — except `sys_*` system objects, which
-  are blocked fail-closed.
+  are blocked fail-closed. A system object whose author declared
+  `enable.aiReadable: true` is open to the read tools only (`list_objects`,
+  `describe_object`, `query_records`, `get_record`, `aggregate_records`), read
+  as you under every gate a read already runs (your permissions, row-level
+  security, the object's own read rules, field masking); no write tool opens
+  it, and the stored-metadata tables stay refused. `sys_approval_request`
+  declares it: every signed-in member reads the requests they take part in
+  (submitted, waiting on them, or acted on) and no others, so an agent can
+  list the approvals waiting on you with `pending_approvers` contains
+  `{current_user_id}` — answered for a slot that names you by email, position
+  or team too, not only by user id.
+  `sys_user` declares it too, so an agent can fill a person field (an owner, an
+  approver, an employee): it finds a colleague with `query_records` on
+  `sys_user`, by `email` for exactly one person or by `name` (`$contains`), and
+  gets their id. It reads exactly what your console's person picker shows you:
+  your own row and your organization's members, never another organization's
+  users, with the `Admin` field group (sign-in trail, lockout, ban reason,
+  sign-in phone) withheld, on results and on filters. Names repeat, so where
+  several people share one, the agent tells them apart by email. No write tool
+  opens it.
 - **Actions require the author's opt-in**: `ai: { exposed: true }` plus an
   `ai.description` of at least 40 characters, and the action must be callable
   without a UI. In the open framework that means three types — `script`
@@ -365,6 +427,25 @@ can reach is the **default exposure policy (v1)**:
   identity routes that accept a signed-in session only, so an agent connected
   over OAuth sees them listed, but a call that reaches the identity route is
   refused there (`401`) and changes nothing.
+- **An approver's decisions are exposed to the approver's agent.** The four
+  decisions on an approval request (`sys_approval_request`): approve, reject,
+  reassign and send back, are exposed with `ai.requiresConfirmation: true`, so
+  `run_action` decides only once the call carries `confirm: true`. Each forwards
+  to its approvals route as the caller, and the approval service admits the
+  same people the console's buttons admit: a current approver of the request,
+  and, for approve, reject and reassign, the administrator who may override it.
+  Anyone else, the submitter
+  included, is refused and the request stays pending.
+- **A submitter's recall and resubmit are exposed to the submitter's agent.**
+  Recall (withdraw a pending request, or abandon one sent back for revision) and
+  resubmit (send a request that was sent back for revision into review again)
+  are exposed the same way, with `ai.requiresConfirmation: true`, and forward to
+  their approvals routes as the caller. The approval service admits the
+  submitter, and for recalling a pending request the administrator who may
+  override it; anyone else is refused (`FORBIDDEN`) and the request does not
+  move. A recalled request is closed: to send the record for approval again,
+  the agent uses the app's own submit action. Remind, request-info and comments
+  are not exposed.
 
 <Callout type="info">
 This is the default policy, not a ceiling. A finer, **metadata-declared** exposure
@@ -376,10 +457,10 @@ to typed per-action tools) is the planned next step, consistent with ADR-0097's
 
 ## Prompts: your skills, served to the client
 
-Tools are not the only primitive. Every **skill** you author (`*.skill.ts`,
+Tools are not the only primitive. A **skill** you author (`*.skill.ts`,
 `defineSkill`) that carries `instructions` is served as an MCP **prompt** — so
 a connected client can list your app's playbooks by name and pull one into the
-conversation:
+conversation, on a connection that serves the tools the skill binds (below):
 
 ```typescript
 export const CaseTriageSkill = defineSkill({
@@ -405,15 +486,29 @@ prompts in their own picker. Nothing to enable — the surface appears as soon a
 the app has a skill with instructions, and `prompts/list` simply returns an
 empty list until then.
 
+**A skill is offered only where its tools are.** A skill's instructions teach
+the model to call the tools it binds, so `prompts/list` and `prompts/get` offer
+a skill only when the connection's own tool list carries every entry of its
+`tools`: a plain name by a tool of that name, a trailing wildcard (`describe_*`)
+by any listed tool it matches, and an `action_<name>` entry (or `action_*`) also
+by `run_action`. `case_triage` above is offered on a connection that lists
+`query_records` and `run_action`. A token without the `actions:execute` scope
+lists no `run_action`, so it is not offered `case_triage`, and `prompts/get`
+answers it as it answers an unknown prompt name. A skill that binds no tool is
+offered as before. When a prompt you expect is missing, connect with a grant
+that registers the skill's tools, or bind the skill only to tools its intended
+connections serve.
+
 **Only the instructions half projects.** A skill's `tools` / `surface` /
-`triggerConditions` are read by the **in-product agent runtime** (the `ask` /
+`triggerConditions` are bound by the **in-product agent runtime** (the `ask` /
 `build` agents, cloud / Enterprise), which is the thing that composes a tool set
 and decides when a skill activates. MCP has neither step: the model lives in
 *your* client, driving one flat tool list, and your AI-exposed actions are
 already reachable there as `list_actions` / `run_action`. So on the open
-framework a skill contributes its judgment (as a prompt), not its wiring — and
-the same skill file keeps its full meaning when the app runs on the cloud
-runtime. See [AI Agents](/docs/ai/agents#you-extend-the-platform-with-skills-not-agents).
+framework a skill contributes its judgment (as a prompt), not its wiring — its
+`tools` are read only to decide the offer above — and the same skill file keeps
+its full meaning when the app runs on the cloud runtime. See
+[AI Agents](/docs/ai/agents#you-extend-the-platform-with-skills-not-agents).
 
 <Callout type="warn">
 **Two different "skills" again.** These are **agent skills** — `defineSkill`
@@ -478,6 +573,10 @@ drive this MCP server. Same word, different layer.
   an action as a code-review-worthy act — that's the real security boundary.
 - An action can also declare `ai.requiresConfirmation`; destructive-looking
   actions (`confirmText`, danger variants) default to requiring it.
+- **An AI service account does not confirm an action for itself.** An action
+  declaring `ai.requiresConfirmation: true` refuses an AI service account's key
+  (`428` `ACTION_CONFIRMATION_REQUIRED`) at `run_action`, `resume_run` and REST
+  `/actions`, whatever the call carries; a person runs that action.
 - **`delete_record` needs `confirm: true` on every call.** A record delete over
   MCP is permanent, so the tool refuses a call without it with `run_action`'s
   refusal (`428` `ACTION_CONFIRMATION_REQUIRED`, its `details.actionName`

@@ -204,6 +204,30 @@ describe('[#32072] the dataset readers resolve a dataset by package (ADR-0150 D3
     expect(viaTool.isError, viaTool.text).toBe(false);
     expect(JSON.parse(viaTool.text).provenance.dataset.name).toBe(SOLO);
   });
+
+  // A selection naming no measure has nothing to project. The REST door
+  // refused it at its entry; the MCP tool reached the SQL driver and answered
+  // 500 DATABASE_ERROR with the driver's text (with dimensions, group rows
+  // carrying no measure). The two doors live in packages that do not depend on
+  // each other, so this is where one caller holds them to one answer: the same
+  // code, status and sentence.
+  it.each([
+    ['without dimensions', { measures: [] }],
+    ['with dimensions', { measures: [], dimensions: ['status'] }],
+  ])('measures: [] %s is refused 400 VALIDATION_FAILED, in the same words, on the REST door and the MCP tool', async (_case, selection) => {
+    const res = await stack.apiAs(admin, 'POST', '/analytics/dataset/query', { datasetName: SOLO, selection });
+    const restText = await res.text();
+    const rest = JSON.parse(restText);
+    expect(res.status, restText).toBe(400);
+    expect(codeOf(rest)).toBe('VALIDATION_FAILED');
+    expect(messageOf(rest)).toBe('body.selection.measures must be a non-empty array of measure names.');
+
+    const viaTool = await tool('query_dataset', { datasetName: SOLO, selection });
+    expect(viaTool.isError, viaTool.text).toBe(true);
+    const { error } = JSON.parse(viaTool.text);
+    expect({ code: error.code, status: error.status, message: error.message })
+      .toEqual({ code: codeOf(rest), status: res.status, message: messageOf(rest) });
+  });
 });
 
 // ── [#32310, ADR-0150 D3] the caller arm: `?callerPackage=` ─────────────────

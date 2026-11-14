@@ -37,9 +37,17 @@
  *   ships) is not told apart.
  * - `file_storage_local` (lower severity) — the live `storage.adapter` setting
  *   is `local`, on a composition that mounts the storage service.
- * - `email_not_configured` (lower severity) — `IEmailService.isConfigured()`
- *   does not answer `true`: the deliverability signal the auth plugin's public
- *   `features.emailDelivery` reads too.
+ *
+ * ## Mail is not a finding
+ *
+ * An unset mail transport is not something the deployment is missing: mail is
+ * an optional setting (the maintainer's ruling on objectstack#32643). The
+ * notice may speak about mail only when something needs mail and cannot send
+ * it, and no runtime states that today: the only mail fact is
+ * `IEmailService.isConfigured()` (the auth plugin's public
+ * `features.emailDelivery`), which says only whether a transport is set, and
+ * the flows that send mail already read it themselves. So the notice names no
+ * mail finding, and its fingerprint does not change when mail is configured.
  *
  * Production mode only (`NODE_ENV=production`, the signal `os start` sets and
  * the data key's own posture reads): outside it the notice has nothing to say.
@@ -63,13 +71,12 @@ const BOOT_FINDINGS_CHANNEL_ENV = 'OS_INTERNAL_DEPLOYMENT_FINDINGS';
 /** The capability that reads the notice and hides it — the infrastructure namespaces' gate. */
 export const DEPLOYMENT_NOTICE_CAPABILITY = 'manage_platform_settings';
 
-/** One thing a production deployment keeps on its own disk, or cannot do, because nobody set it. */
+/** One thing a production deployment keeps on its own disk because nobody set it. */
 export type DeploymentFindingId =
   | 'database_local_file'
   | 'auth_secret_generated'
   | 'data_key_file'
-  | 'file_storage_local'
-  | 'email_not_configured';
+  | 'file_storage_local';
 
 export interface DeploymentFinding {
   id: DeploymentFindingId;
@@ -85,7 +92,7 @@ export interface DeploymentFinding {
 export interface DeploymentNoticeState {
   /** Whether the deployment runs in production mode; outside it `findings` is always empty. */
   production: boolean;
-  /** In display order: the three `high` findings first, then the two `low` ones. */
+  /** In display order: the three `high` findings first, then the `low` one. */
   findings: DeploymentFinding[];
   /**
    * The findings' ids joined with `+`, `''` when there are none. A hide names
@@ -99,8 +106,6 @@ export interface DeploymentNoticeState {
 export interface DeploymentNoticeSources {
   /** The process environment. */
   env: () => Record<string, string | undefined>;
-  /** `IEmailService.isConfigured()`, or `undefined` when no email service is composed. */
-  emailDeliveryLive: () => boolean | undefined;
   /** The live `storage.adapter` value, or `undefined` when no storage service is composed. */
   storageAdapter: () => Promise<string | undefined>;
 }
@@ -157,9 +162,6 @@ export async function readDeploymentNotice(sources: DeploymentNoticeSources): Pr
   }
   if ((await sources.storageAdapter()) === 'local') {
     findings.push({ id: 'file_storage_local', severity: 'low' });
-  }
-  if (sources.emailDeliveryLive() !== true) {
-    findings.push({ id: 'email_not_configured', severity: 'low' });
   }
   return { production, findings, fingerprint: findings.map((f) => f.id).join('+') };
 }

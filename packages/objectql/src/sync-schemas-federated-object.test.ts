@@ -199,7 +199,7 @@ describe('the boot sync and ObjectQL.syncSchemas() agree on one fixture (#21777)
     const { engine, managed, external } = engineWith(rec.logger, false, FIXTURE);
     const plugin = new ObjectQLPlugin();
     (plugin as any).ql = engine;
-    await (plugin as any).syncRegisteredSchemas({ logger: rec.logger });
+    await (plugin as any).syncRegisteredSchemas({ logger: rec.logger, trigger: async () => {} });
     return { rec, calls: [...managed.calls, ...external.calls].sort() };
   }
 

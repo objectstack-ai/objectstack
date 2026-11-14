@@ -8,7 +8,7 @@
  */
 
 // Main Manager
-export { MetadataManager, type WatchCallback, type MetadataManagerOptions, type MetadataUnregisterOptions } from './metadata-manager.js';
+export { MetadataManager, type WatchCallback, type MetadataManagerOptions, type MetadataRegisterOptions, type MetadataUnregisterOptions } from './metadata-manager.js';
 
 // Plugin
 export {
@@ -22,7 +22,7 @@ export {
 export { type MetadataLoader, type MetadataKeyedItem, type MetadataLoaderDeleteOptions } from './loaders/loader-interface.js';
 export { MemoryLoader } from './loaders/memory-loader.js';
 export { RemoteLoader } from './loaders/remote-loader.js';
-export { DatabaseLoader, type DatabaseLoaderOptions } from './loaders/database-loader.js';
+export { DatabaseLoader, type DatabaseLoaderOptions, type MetadataHistoryAddress } from './loaders/database-loader.js';
 
 // [commit c1d274de7] The ambiguous-stem refusal. Published from the ROOT entry, not only
 // from `./node` beside `FilesystemLoader`: the error reaches consumers through
@@ -72,6 +72,12 @@ export { TypeScriptSerializer } from './serializers/typescript-serializer.js';
 // dependency and nothing here depends on it, so the import is the repair — a
 // fifth hand-copy of the chain is the defect, not the fix.
 export { deriveViewContainerObject } from './view-container-expansion.js';
+
+// [ADR-0150 D4, #32451] The types this package's store keeps per `(package, name)`.
+// Published so the metadata protocol's cluster peer can tell which types it
+// converges by package, from this one declaration: a copy of the list there
+// would drift the moment a type joins the set here.
+export { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
 
 // Re-export types from spec
 export type {

@@ -19,8 +19,10 @@ import type { ActionDescriptor } from '../automation/node-executor.zod';
 import type { ConnectorDescriptor, ConnectorState } from '../integration/connector-descriptor';
 import type { ConversionNotice, ConversionTodoNotice } from '../conversions/types';
 import type { ExecutionContext } from '../kernel/execution-context.zod';
+import type { JobRunTrigger } from './job-service';
 import type { FlowRegistration } from '../api/protocol.zod';
 import type { FlowInnerRefusal } from '../api/automation-api.zod';
+import type { DroppedFieldsEvent } from '../data/data-engine.zod';
 
 /**
  * The write a record-triggered run was dispatched inside (#28251) — see
@@ -822,6 +824,40 @@ export interface AutomationResult {
      * answer without a second round-trip through `getRun`.
      */
     summary?: FlowRunSummary;
+    /**
+     * #32861: the caller-supplied field values a write step of this run did
+     * NOT store — each element the data engine's own
+     * {@link DroppedFieldsEvent} (`object`, `fields`, `reason`), as the
+     * `create_record` / `update_record` step received it — one event per
+     * `(object, reason)`, its `fields` the union in first-seen order, so a
+     * loop that drops `status` on thirty rows is one fact, not thirty. A
+     * field named means at least one write dropped it, not every write.
+     *
+     * The step reports the strip as a warning and SUCCEEDS (#3407): a
+     * `readonly` field the flow wrote was removed from the payload and the
+     * write committed without it. Before this member that fact stopped at the
+     * run log, so a record button whose flow wrote a read-only `status`
+     * answered a plain success and the person who clicked it was told
+     * nothing. It rides the answer so the door that started the run can tell
+     * them, the way a record save's `droppedFields` already does.
+     *
+     * ⛔ Not a failure, and it moves nothing else: `success`, `status` and
+     * `summary` read exactly as they would without it. Set on a TERMINAL
+     * success only (the run's own write steps, before and after any pause
+     * it resumed from), and only when at least one step dropped a field —
+     * absent, never `[]`, otherwise.
+     *
+     * Delegated writes roll up onto this answer too: a `subflow` child's run
+     * and each `map` item's run, whether it completed without pausing or
+     * paused and resumed (#33019), as {@link summary} credits them. Unlike
+     * `summary`, a child run that FAILED answers no drops, so where a
+     * `try_catch` or `fault` edge contains that failure an absent member is
+     * not proof the failed child dropped nothing. A `map` item whose paused
+     * run an operator cancelled (#27971) answers none either: the map goes
+     * on with the cancelled marker in the item's `results` slot, and that
+     * run's drops, like its totals, reach the parent nowhere.
+     */
+    droppedFields?: DroppedFieldsEvent[];
 }
 
 /**
@@ -1004,6 +1040,14 @@ export interface FlowRuntimeState {
  *   at the region boundary the first time that child suspends. Author remedy:
  *   move the call onto the top-level graph, or republish the child without a
  *   node that suspends, and the flow arms.
+ * - `retried_callout_in_subflow` — the arming gate declined the flow because it
+ *   runs after a record change and a `subflow` / `map` node of it reaches a
+ *   child flow holding an inline outbound call (`http` without `durable: true`,
+ *   or `connector_action`) that something on the call chain retries: the save
+ *   waits for the run and the run for its child, so a failing call would hold
+ *   the user's save through every attempt and backoff delay. Author remedy:
+ *   make the child's `http` node durable, or remove the retry, and the flow
+ *   arms.
  * - `missing_trigger` — no trigger of the declared type is registered on this
  *   kernel. Author remedy: depend on the trigger package
  *   (`requires: ['triggers']`).
@@ -1015,6 +1059,7 @@ export const FLOW_UNBOUND_CAUSES = [
     'disabled_subflow',
     'notice_after_suspending_subflow',
     'suspending_subflow_in_region',
+    'retried_callout_in_subflow',
     'missing_trigger',
     'binding_failure',
 ] as const;
@@ -1096,6 +1141,20 @@ export interface ConnectorSourcePullRequest {
      * reads by no package whatever the caller sends.
      */
     callerPackageId?: string | null;
+    /**
+     * The job run that drove this pull (ADR-0153 D7): the `runId` the job
+     * service handed the job's handler (`JobHandler`), on the shipped adapters
+     * the `sys_job_run` id of this attempt. The pull's run record keeps it, as
+     * text, so a job-run retention sweep never reaches the pull's history.
+     * Absent for a pull no job drove, or a job service that wrote no run row.
+     */
+    jobRunId?: string;
+    /**
+     * Why the job run that drove this pull started (ADR-0153 D7): `schedule`
+     * or `manual`, as the job service handed it to the handler. Absent for a
+     * pull no job drove, or a job service that sends none.
+     */
+    trigger?: JobRunTrigger;
 }
 
 /**

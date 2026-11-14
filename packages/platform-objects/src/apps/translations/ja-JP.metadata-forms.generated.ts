@@ -638,7 +638,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "currencyConfig.currencyField": {
         label: "通貨フィールド",
-        helpText: "record モード専用で、同モードでは必須：各レコードの ISO 4217 通貨コードを保持する、このオブジェクト上のフィールド。valueDomain iso_4217_currency を宣言したテキストフィールドで、慣例名は currency_code。"
+        helpText: "record モード専用で、同モードでは必須：各レコードの ISO 4217 通貨コードを保持する、このオブジェクト上のフィールド。valueDomain iso_4217_currency を宣言したテキストフィールドで、慣例名は currency_code。主従（master_detail）の子オブジェクトでは、代わりに親のコードフィールドを <master_detail フィールド>.<親のコードフィールド>（例：invoice.currency_code）として指定できます。その場合レコードは親の通貨に従い、そのような子が存在する間は親のコードの変更は拒否されます。"
       },
       "currencyConfig.defaultCurrency": {
         label: "既定の通貨",

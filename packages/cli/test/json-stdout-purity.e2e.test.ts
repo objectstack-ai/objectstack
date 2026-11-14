@@ -86,6 +86,10 @@ const UTILS_DIR = resolve(HERE, '../src/utils');
  * member that needs a fixture as well as argv is prepared by {@link PREPARE}.
  */
 const FAMILY: Record<string, string[]> = {
+  // [ADR-0154 D9] Report-only, and it has no other form: a read-only boot
+  // (plugin-audit's objects registered) that reads the sealed ledger and writes
+  // nothing. On a fixture nothing is sealed, so it reports that and exits 0.
+  'audit verify': [],
   // Report-only is its DEFAULT and the only form driven here: without
   // `--delete` it boots read-only, reports and writes nothing.
   'db orphans': [],

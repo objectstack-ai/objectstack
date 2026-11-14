@@ -232,7 +232,7 @@ interface Action {
   params?: ActionParam[];       // Inputs collected before execution
   submitText?: I18nLabel;       // The param dialog's submit button verb (default "Confirm")
   cancelText?: I18nLabel;       // The confirm or param dialog's dismiss button label (default "Cancel")
-  preflight?: Preflight;        // A same-origin GET the param dialog shows before submit (planned: not drawn yet)
+  preflight?: Preflight;        // A same-origin GET the param dialog sends and shows above the params before submit
   method?: 'POST' | 'PATCH' | 'PUT' | 'DELETE'; // for type: 'api'
 
   // UX
@@ -565,7 +565,7 @@ cancelText: Keep invitation
 
 ### Showing a server read before submit: `preflight`
 
-> **Planned.** The key parses and is judged at parse today, but the console's param dialog does not send the read, draw the panel or fill a param yet. Declaring it now changes nothing an author sees until that reader lands.
+> **Live.** The console's param dialog sends the read once every `${param.NAME}` hole in `read.url` has a value, draws the answer at `path` above the params (each `fields` row as the result dialog draws it), and applies each `seed` only from the answer to the current URL. A seeded param is drawn read-only and submitted as shown. A refused, unbound or failed read leaves the seeds empty.
 
 Some actions need the user to see what the server says before they confirm: an upgrade that lists the schema changes it will make, and that wants a confirmation token from the same answer submitted with the action. `preflight` declares that read. The param dialog sends one `GET`, shows the answer above the params, and can fill params from it.
 

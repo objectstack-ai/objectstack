@@ -21,8 +21,17 @@
  *
  * Note the scope: `ActionNavItemSchema` is `.strict()` with exactly
  * `{ actionName, params? }` — there is no `objectName`, so a nav action is
- * inherently a GLOBAL action (ADR-0110's `'*'` scope). Resolution is by name
- * alone, and an object-scoped action is not addressable from a nav item.
+ * inherently a GLOBAL action (ADR-0110's `'*'` scope). Resolution is by name,
+ * and an object-scoped action is not addressable from a nav item.
+ *
+ * ## Whose action (ADR-0150 D5, row E2)
+ * A nav item is written inside its app's package, so the name is read from
+ * that package: the caller passes the package its app holds, and the read
+ * names it (`?package=`, the exact qualifier). A bare read of a name two
+ * enabled packages hold is refused `409 RESOURCE_CONFLICT`, so without the
+ * package each of two apps whose packages share an action name could open
+ * neither. An app with no package (an environment-authored app) keeps the
+ * bare read.
  *
  * Dispatch goes through `useAction()`, which under `GlobalActionRuntimeProvider`
  * (ConsoleShell) is the fully-wired console runner — api/flow/script handlers
@@ -44,7 +53,12 @@ import { useMetadata } from '../providers/MetadataProvider.js';
 
 type ActionDefLike = Record<string, unknown> & { name?: string; params?: unknown };
 
-export function useNavActionDispatch(): (item: NavigationItem) => void {
+/**
+ * @param packageId The id of the package whose app's navigation the
+ *   dispatched items belong to (`app._packageId`); omit it for an app with no
+ *   package.
+ */
+export function useNavActionDispatch(packageId?: string): (item: NavigationItem) => void {
   const { execute } = useAction();
   const { getItem } = useMetadata();
 
@@ -65,7 +79,9 @@ export function useNavActionDispatch(): (item: NavigationItem) => void {
 
       let def: ActionDefLike | null;
       try {
-        def = (await getItem('action', actionName)) as ActionDefLike | null;
+        def = (await (packageId
+          ? getItem('action', actionName, { packageId })
+          : getItem('action', actionName))) as ActionDefLike | null;
       } catch (err) {
         console.warn(`[nav] failed to resolve action '${actionName}'`, err);
         toast.error(`Could not load action "${actionName}".`);
@@ -101,5 +117,5 @@ export function useNavActionDispatch(): (item: NavigationItem) => void {
         toast.error(`Action "${actionName}" failed to run.`);
       }
     })();
-  }, [execute, getItem]);
+  }, [execute, getItem, packageId]);
 }

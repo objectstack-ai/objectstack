@@ -503,9 +503,11 @@ export interface ObjectChartProps {
   onSegmentClick?: (ev: ChartSegmentClickEvent) => void;
   /**
    * The package of the item the chart's `dataset` was authored in, as served
-   * (`servedPackageId`, ADR-0150 D5): a host-owned value, never a schema key.
-   * A dataset-bound chart names it as `?package=` on its query. A host that
-   * knows no package leaves it out, and the query sends the bare name.
+   * (`servedPackageId`): a host-owned value, never a schema key. A
+   * dataset-bound chart names it as the reader's package, `callerPackage`
+   * (ADR-0150 D3), on its query and on its dataset definition read, so both
+   * resolve the same dataset. A host that knows no package leaves it out, and
+   * both send the bare name.
    */
   packageId?: string;
 }
@@ -658,7 +660,13 @@ export const ObjectChart = (props: ObjectChartProps) => {
         } else if (schema.dataset) {
           // dataset path: dataset.object + first dimension's underlying field
           const dim0 = Array.isArray(schema.dimensions) && schema.dimensions.length ? schema.dimensions[0] : undefined;
-          const defRes = await doFetch(`/api/v1/meta/dataset/${encodeURIComponent(schema.dataset)}`, reqOpts);
+          // Read as the chart's reader (ADR-0150 D3), the dataset its query
+          // resolves. A refusal (a `409` naming the candidates) answers no
+          // definition, so the chart keeps the theme palette; it is never
+          // retried bare.
+          const callerQuery = props.packageId ? `?${new URLSearchParams({ callerPackage: props.packageId })}` : '';
+          const defRes = await doFetch(`/api/v1/meta/dataset/${encodeURIComponent(schema.dataset)}${callerQuery}`, reqOpts);
+          if (!defRes.ok) { if (!cancelled) setOptionMeta(null); return; }
           const defJson = await defRes.json().catch(() => null);
           datasetDef = defJson?.item ?? defJson?.data ?? defJson;
           objectName = datasetDef?.object;
@@ -719,7 +727,7 @@ export const ObjectChart = (props: ObjectChartProps) => {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.dataset, datasetKey, aggregateKey, schema.xAxisKey, apiFetch, dataSource]);
+  }, [schema.objectName, schema.dataset, datasetKey, aggregateKey, schema.xAxisKey, apiFetch, dataSource, props.packageId]);
 
   // ── The label net's OUTPUT, with the locale bundle applied (objectui#4030) ─
   // The net above RESOLVES a select dimension's option label; before this it
@@ -859,7 +867,7 @@ export const ObjectChart = (props: ObjectChartProps) => {
                   dimensions: Array.isArray(schema.dimensions) ? schema.dimensions : [],
                   measures: Array.isArray(schema.values) ? schema.values : [],
                   ...(runtimeFilter ? { runtimeFilter } : {}),
-              }, ...(props.packageId ? [{ packageId: props.packageId }] : []));
+              }, ...(props.packageId ? [{ callerPackage: props.packageId }] : []));
               if (mounted.current) {
                   setFetchedData(Array.isArray(res?.rows) ? res.rows : []);
                   setDatasetFields(Array.isArray(res?.fields) ? res.fields : null);

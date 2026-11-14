@@ -22,6 +22,7 @@ import {
   type ListDatasetsOutput,
   type QueryDatasetOutput,
 } from '@objectstack/spec/ai';
+import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from '@objectstack/spec/shared';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import { hasDatasetTools, type McpDataBridge } from './mcp-http-tools.js';
 import { createStdioDataBridge, type StdioDatasetToolsService } from './stdio-data-bridge.js';
@@ -336,5 +337,23 @@ describe('[ADR-0149 D2] the stdio bridge\'s dataset members', () => {
     createStdioDataBridge({ ...deps, datasetTools: service }).datasetToolDefinitions!();
     expect(await bound[0].loadDatasets(PRINCIPAL)).toEqual(SAVED);
     expect(metadataService.list).toHaveBeenCalledWith('dataset');
+  });
+});
+
+// CONTROL for the `strictToolInput` opt-out: the dataset pair's input is the
+// spec's own `strictObject` schema, which can carry a retirement kit like any
+// published spec schema, so its unknown-key refusal keeps the upgrade-guide
+// sentence the other MCP tools no longer print.
+describe('[ADR-0149 D2] dataset tools on MCP — the spec refusal is kept whole', () => {
+  it('list_datasets with an unknown top-level key is refused with the upgrade-guide sentence', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const bridge = makeBridge();
+    const json = await callTool(runtime, bridge, LIST_DATASETS_TOOL_NAME, { terms: ['营收'], zzUndeclaredProbeKey: 'x' });
+    const text = json.error?.message ?? json.result?.content[0]?.text ?? '';
+    expect(Boolean(json.error) || json.result?.isError === true).toBe(true);
+    expect(text).toContain('-32602');
+    expect(text).toContain('`zzUndeclaredProbeKey`');
+    expect(text).toContain(RETIRED_KEY_UPGRADE_GUIDE_SENTENCE);
+    expect(bridge.calls.filter((c) => c[0] === 'listDatasets')).toEqual([]);
   });
 });

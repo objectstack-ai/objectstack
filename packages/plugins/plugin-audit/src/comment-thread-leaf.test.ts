@@ -41,6 +41,8 @@ type Mw = (ctx: CommentReadMiddlewareCtx, next: () => Promise<void>) => Promise<
 /** A stand-in engine: one registry, the D5 questions answered by name, every find recorded. */
 function standIn(opts: {
   objects?: string[];
+  /** object → its declared `enable` block; absent: none declared. */
+  enable?: Record<string, unknown>;
   middleware?: string[];
   federated?: string[];
   declaresPair?: boolean;
@@ -75,7 +77,10 @@ function standIn(opts: {
     };
   }
   if (opts.classify !== false) {
-    engine.registry = { getAllObjects: () => (opts.objects ?? ['crm_case', 'sys_comment']).map((name) => ({ name })) };
+    engine.registry = {
+      getAllObjects: () =>
+        (opts.objects ?? ['crm_case', 'sys_comment']).map((name) => (opts.enable?.[name] ? { name, enable: opts.enable[name] } : { name })),
+    };
     engine.hasObjectMiddleware = (object: string) => (opts.middleware ?? []).includes(object);
     engine.resolveEffectiveDatasource = (object: string) => ((opts.federated ?? []).includes(object) ? 'warehouse' : undefined);
   }
@@ -308,5 +313,20 @@ describe('[ADR-0139 E7] the parent pair: one planner, stamped on create and on t
     const run = hooks(false);
     expect(await run('beforeInsert', { thread_id: 'crm_case:c1' })).toEqual({ thread_id: 'crm_case:c1' });
     expect(await run('beforeUpdate', { thread_id: 'crm_case:c1' })).toEqual({ thread_id: 'crm_case:c1' });
+  });
+});
+
+describe('a parent the data door does not serve: the comment gate writes no leaf for it', () => {
+  it('a parent whose enable block refuses get has no branch; one the door serves and one with no enable block keep theirs', async () => {
+    const s = standIn({
+      objects: ['crm_case', 'crm_deal', 'sys_comment', 'sys_flow_credential', 'sys_scim_connection_credential'],
+      enable: {
+        crm_deal: { apiMethods: ['get', 'list'] },
+        sys_flow_credential: { apiEnabled: false, apiMethods: [] },
+        sys_scim_connection_credential: { apiMethods: ['list'] },
+      },
+    });
+    installCommentReadVisibility(s.engine, silentLogger(), () => admission);
+    expect(leavesOf((await read(s.mw())).where)).toEqual(['crm_case', 'crm_deal']);
   });
 });

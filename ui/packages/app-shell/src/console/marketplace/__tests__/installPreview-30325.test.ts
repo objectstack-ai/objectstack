@@ -27,7 +27,7 @@ describe('installPreviewOf (objectstack#30325)', () => {
         { object: 'crm_account', externalId: 'name', records: records(4) },
         { object: 'crm_contact', externalId: 'email', records: records(3) },
       ],
-    })).toEqual({ objects: 3, permissionSets: 2, sampleRecords: 7, sampleRecordsAtMost: false, suggestedGrants: ['crm_user'] });
+    })).toEqual({ objects: 3, permissionSets: 2, sampleRecords: 7, sampleRecordsAtMost: false, suggestedGrants: ['crm_user'], objectExtensions: [] });
   });
 
   it('a flat body whose only `permissions` is the capability grant counts no permission set', () => {
@@ -35,7 +35,7 @@ describe('installPreviewOf (objectstack#30325)', () => {
       id: 'com.acme.tool', version: '1.0.0', type: 'plugin',
       permissions: { network: { hosts: ['x.test'] } },
       objects: { tool_item: { label: 'Item' }, tool_tag: { label: 'Tag' } },
-    })).toEqual({ objects: 2, permissionSets: 0, sampleRecords: 0, sampleRecordsAtMost: false, suggestedGrants: [] });
+    })).toEqual({ objects: 2, permissionSets: 0, sampleRecords: 0, sampleRecordsAtMost: false, suggestedGrants: [], objectExtensions: [] });
   });
 
   it('a multi-package artifact: objects and sets of every package body', () => {
@@ -45,7 +45,7 @@ describe('installPreviewOf (objectstack#30325)', () => {
         { manifest: { id: 'app.acme.suite', type: 'app', objects: [{ name: 'a_one' }], permissions: [{ name: 'suite_user', isDefault: true }] } },
         { manifest: { id: 'app.acme.suite.extra', type: 'module', objects: [{ name: 'b_one' }, { name: 'b_two' }] } },
       ],
-    })).toEqual({ objects: 3, permissionSets: 1, sampleRecords: 0, sampleRecordsAtMost: false, suggestedGrants: ['suite_user'] });
+    })).toEqual({ objects: 3, permissionSets: 1, sampleRecords: 0, sampleRecordsAtMost: false, suggestedGrants: ['suite_user'], objectExtensions: [] });
   });
 
   it('a dataset scoped by environment or locale makes the count an upper bound', () => {
@@ -66,5 +66,49 @@ describe('installPreviewOf (objectstack#30325)', () => {
     expect(installPreviewOf(undefined)).toBeNull();
     expect(installPreviewOf('nope')).toBeNull();
     expect(installPreviewOf([])).toBeNull();
+  });
+});
+
+describe('installPreviewOf reads what a package extends (objectstack#31542)', () => {
+  // The catalog's `object_extensions` shape, read from the served body for a
+  // catalog that does not serve the key: one entry per target, platform first.
+  it('a business and a platform target: both listed, the platform one first, each with what it adds', () => {
+    const preview = installPreviewOf({
+      manifest: { id: 'app.acme.ticket', version: '1.0.0', type: 'app' },
+      objects: [{ name: 'ext_ticket' }],
+      objectExtensions: [
+        { extend: 'crm_account', fields: { ticket_count: { type: 'number' } }, indexes: [{ fields: ['ticket_count'] }] },
+        {
+          extend: 'sys_user',
+          fields: { name: { type: 'text' } },
+          fieldPatches: { email: { label: 'Work email' } },
+          validations: [{ name: 'name_required', type: 'script' }, { type: 'script' }],
+          label: 'Member',
+        },
+      ],
+    });
+    expect(preview?.objects).toBe(1);
+    expect(preview?.objectExtensions).toEqual([
+      { object: 'sys_user', platform: true, fields: ['name'], field_patches: ['email'], validations: ['name_required', '(unnamed)'], indexes: 0, relabels: true },
+      { object: 'crm_account', platform: false, fields: ['ticket_count'], field_patches: [], validations: [], indexes: 1, relabels: false },
+    ]);
+  });
+
+  it('reads the body\'s `metadata` and every `packages[]` body, one entry per target object', () => {
+    const preview = installPreviewOf({
+      manifest: { id: 'app.acme.suite', version: '1.0.0', type: 'app' },
+      metadata: { objectExtensions: [{ extend: 'crm_account', fields: { a: {} } }] },
+      packages: [
+        { manifest: { id: 'app.acme.suite.extra', type: 'module', objectExtensions: [{ extend: 'crm_account', fields: { b: {} }, description: 'x' }, { extend: 'sys_session', validations: [{ name: 'deny' }] }] } },
+      ],
+    });
+    expect(preview?.objectExtensions).toEqual([
+      { object: 'sys_session', platform: true, fields: [], field_patches: [], validations: ['deny'], indexes: 0, relabels: false },
+      { object: 'crm_account', platform: false, fields: ['a', 'b'], field_patches: [], validations: [], indexes: 0, relabels: true },
+    ]);
+  });
+
+  it('a body that extends nothing: `[]`, never `null`', () => {
+    expect(installPreviewOf({ id: 'x', objects: [{ name: 'x_one' }] })?.objectExtensions).toEqual([]);
   });
 });

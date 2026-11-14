@@ -70,6 +70,7 @@ import '@objectstack/rest';
 import '@objectstack/metadata';
 import '@objectstack/plugin-hono-server';
 import '@objectstack/cloud-connection';
+import AuditVerify from '../commands/audit/verify.js';
 import DbOrphans from '../commands/db/orphans.js';
 import MigrateAccountIssuer from '../commands/migrate/account-issuer.js';
 import MigrateActivityChangedFields from '../commands/migrate/activity-changed-fields.js';
@@ -192,6 +193,12 @@ const invoke = (command: { run: (argv: string[], opts: { root: string }) => Prom
  * modes it has. The first case below holds this table equal to the source.
  */
 const CALLERS: Record<string, Caller> = {
+  'commands/audit/verify.ts': {
+    run: invoke(AuditVerify),
+    noWrite: [{ label: 'audit verify', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [],
+    note: 'report-only: it has no writing mode',
+  },
   'commands/db/orphans.ts': {
     run: invoke(DbOrphans),
     noWrite: [{ label: 'db orphans', argv: ['--database-url', '@DB@', '--json'] }],

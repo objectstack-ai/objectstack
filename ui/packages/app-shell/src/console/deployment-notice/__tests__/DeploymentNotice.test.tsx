@@ -8,7 +8,8 @@
  * each finding, the copy button's text, the hide (a POST, then remembered in
  * this browser by fingerprint), the one small line System Overview keeps after
  * a hide, and the refusals that draw nothing (a member, a server answering
- * 403, outside production). Who may read the state is the server's ruling;
+ * 403, outside production), and that an unset email service is not drawn
+ * (objectstack#32643). Who may read the state is the server's ruling;
  * its pins live in `@objectstack/service-settings`
  * (`deployment-notice.routes.test.ts`).
  */
@@ -27,7 +28,6 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 import { DeploymentNotice } from '../DeploymentNotice';
 import { HIDDEN_KEY_PREFIX, deploymentVariablesText, parseDeploymentNotice } from '../deploymentNotice';
-import { useHomeItemClaimed } from '../../home/homeItemClaims';
 
 const NOTICE = {
   production: true,
@@ -40,6 +40,8 @@ const NOTICE = {
   ],
   fingerprint: 'database_local_file+auth_secret_generated+data_key_file+file_storage_local+email_not_configured',
 };
+/** What the console draws of {@link NOTICE}: every finding but the unset email service (objectstack#32643). */
+const DRAWN_IDS = NOTICE.findings.map((f) => f.id).filter((id) => id !== 'email_not_configured');
 
 const envelope = (data: unknown) => ({ success: true, data });
 const json = (status: number, body: unknown) =>
@@ -87,7 +89,7 @@ describe('DeploymentNotice (objectstack#30120)', () => {
     const notice = screen.getByTestId('deployment-notice');
     expect(notice).toHaveAttribute('data-fingerprint', NOTICE.fingerprint);
     const ids = [...notice.querySelectorAll('[data-finding]')].map((li) => li.getAttribute('data-finding'));
-    expect(ids).toEqual(NOTICE.findings.map((f) => f.id));
+    expect(ids).toEqual(DRAWN_IDS);
     expect(notice).toHaveTextContent('/srv/app/.objectstack/data/app.db');
     expect(notice).toHaveTextContent('OS_DATABASE_URL');
     expect(notice).toHaveTextContent('OS_AUTH_SECRET');
@@ -189,13 +191,12 @@ describe('DeploymentNotice (objectstack#30120)', () => {
   });
 });
 
-/** What the first-run checklist reads before it draws its Email delivery row. */
-function MailClaimed() {
-  return <span data-testid="mail-claimed">{String(useHomeItemClaimed('mail'))}</span>;
-}
-
-describe('DeploymentNotice — owns the email line on Home (objectstack#32021 item 3)', () => {
-  const claimed = () => screen.getByTestId('mail-claimed').textContent;
+describe('DeploymentNotice — says nothing about an unset email service (objectstack#32643)', () => {
+  // The maintainer's ruling on the card: 「环境的新手清单中要求设置邮箱。我觉得这个不应该是必须的设置」.
+  // The notice speaks about mail only when something needs mail and cannot
+  // send it; the server's `email_not_configured` says only that no transport
+  // is set, so the console does not draw it.
+  const EMAIL_LINE = 'No email service is set up';
 
   beforeEach(() => {
     adminStatus = admin;
@@ -215,70 +216,40 @@ describe('DeploymentNotice — owns the email line on Home (objectstack#32021 it
     localStorage.clear();
   });
 
-  it('while it draws "no email service" on Home, it claims the item; hiding it gives the item back', async () => {
-    render(
-      <>
-        <MailClaimed />
-        <DeploymentNotice placement="home" />
-      </>,
-    );
-    await settle();
-    expect(screen.getByTestId('deployment-notice').querySelector('[data-finding="email_not_configured"]')).not.toBeNull();
-    expect(claimed()).toBe('true');
-
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('deployment-notice-hide'));
-    });
-    await settle();
-    expect(screen.queryByTestId('deployment-notice')).toBeNull();
-    expect(claimed()).toBe('false');
-  });
-
-  it('what the notice says is untouched: every finding is still drawn, the email line included', async () => {
+  it('beside other findings, the email line is not drawn and the rest are', async () => {
     render(<DeploymentNotice placement="home" />);
     await settle();
-    const ids = [...screen.getByTestId('deployment-notice').querySelectorAll('[data-finding]')].map((li) =>
-      li.getAttribute('data-finding'),
-    );
-    expect(ids).toEqual(NOTICE.findings.map((f) => f.id));
+    const notice = screen.getByTestId('deployment-notice');
+    expect(notice.querySelector('[data-finding="email_not_configured"]')).toBeNull();
+    expect(notice).not.toHaveTextContent(EMAIL_LINE);
+    expect([...notice.querySelectorAll('[data-finding]')].map((li) => li.getAttribute('data-finding'))).toEqual(DRAWN_IDS);
   });
 
-  it('CONTROL: a notice with no email finding claims nothing', async () => {
-    const findings = NOTICE.findings.filter((f) => f.id !== 'email_not_configured');
-    fetchMock.mockResolvedValue(json(200, envelope({ ...NOTICE, findings, fingerprint: 'x' })));
-    render(
-      <>
-        <MailClaimed />
-        <DeploymentNotice placement="home" />
-      </>,
+  it('a production deployment whose only finding is the unset email service draws nothing, on Home or System Overview', async () => {
+    fetchMock.mockResolvedValue(
+      json(200, envelope({ production: true, findings: [{ id: 'email_not_configured', severity: 'low' }], fingerprint: 'email_not_configured' })),
     );
+    render(<DeploymentNotice placement="home" />);
     await settle();
-    expect(screen.getByTestId('deployment-notice')).toBeInTheDocument();
-    expect(claimed()).toBe('false');
+    expect(screen.queryByTestId('deployment-notice')).toBeNull();
+    cleanup();
+
+    render(<DeploymentNotice placement="system-overview" />);
+    await settle();
+    expect(screen.queryByTestId('deployment-notice')).toBeNull();
+    expect(screen.queryByTestId('deployment-notice-hidden')).toBeNull();
   });
 
-  it('CONTROL: System Overview is not Home, and claims nothing there', async () => {
-    render(
-      <>
-        <MailClaimed />
-        <DeploymentNotice placement="system-overview" />
-      </>,
+  it('CONTROL: another lower-severity finding alone is still drawn', async () => {
+    fetchMock.mockResolvedValue(
+      json(200, envelope({ production: true, findings: [{ id: 'file_storage_local', severity: 'low' }], fingerprint: 'file_storage_local' })),
     );
+    render(<DeploymentNotice placement="home" />);
     await settle();
-    expect(screen.getByTestId('deployment-notice')).toBeInTheDocument();
-    expect(claimed()).toBe('false');
-  });
-
-  it('CONTROL: a member draws nothing and claims nothing', async () => {
-    adminStatus = { isAdmin: false, isResolved: true };
-    render(
-      <>
-        <MailClaimed />
-        <DeploymentNotice placement="home" />
-      </>,
-    );
-    await settle();
-    expect(claimed()).toBe('false');
+    const notice = screen.getByTestId('deployment-notice');
+    expect([...notice.querySelectorAll('[data-finding]')].map((li) => li.getAttribute('data-finding'))).toEqual([
+      'file_storage_local',
+    ]);
   });
 });
 
@@ -287,7 +258,7 @@ describe('deploymentNotice helpers', () => {
     expect(
       parseDeploymentNotice(envelope({ ...NOTICE, findings: [...NOTICE.findings, { id: 'something_new', severity: 'high' }] }))
         ?.findings.map((f) => f.id),
-    ).toEqual(NOTICE.findings.map((f) => f.id));
+    ).toEqual(DRAWN_IDS);
     expect(parseDeploymentNotice({ success: false, error: {} })).toBeNull();
     expect(parseDeploymentNotice(envelope({ production: true }))).toBeNull();
   });
@@ -302,10 +273,7 @@ describe('deploymentNotice helpers', () => {
   it('lower-severity findings put nothing on the clipboard', () => {
     expect(
       deploymentVariablesText(
-        [
-          { id: 'file_storage_local', severity: 'low' },
-          { id: 'email_not_configured', severity: 'low' },
-        ],
+        [{ id: 'file_storage_local', severity: 'low' }],
         t,
       ),
     ).toBe('');

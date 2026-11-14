@@ -43,7 +43,9 @@ const DELEGATOR_QL = {
     assertEngineFindOnePredicate(object, query);
     return { id: 'u_boss' };
   },
-  find: async () => [],
+  // The delegator is a current member of the organization the record-grained
+  // delegated reads run in (ADR-0093 D8.1, as amended: under every posture).
+  find: async (object: string) => (object === 'sys_member' ? [{ user_id: 'u_boss', organization_id: 'org1', role: 'member' }] : []),
 };
 
 function makeDeps(overrides: Partial<ExplainEngineDeps> & { sets?: any[]; schema?: any; rls?: any } = {}): ExplainEngineDeps {

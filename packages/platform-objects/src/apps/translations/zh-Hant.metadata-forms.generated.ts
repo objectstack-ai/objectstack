@@ -638,7 +638,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "currencyConfig.currencyField": {
         label: "幣別欄位",
-        helpText: "僅用於 record 模式，且在該模式下必填：本物件上儲存每筆記錄 ISO 4217 幣別程式碼的欄位——一個聲明瞭 valueDomain iso_4217_currency 的文字欄位，慣例命名為 currency_code。"
+        helpText: "僅用於 record 模式，且在該模式下必填：本物件上儲存每筆記錄 ISO 4217 幣別程式碼的欄位——一個聲明瞭 valueDomain iso_4217_currency 的文字欄位，慣例命名為 currency_code。在主從子物件上，也可改為以 <master_detail 欄位>.<父物件幣別欄位>（如 invoice.currency_code）指向父記錄的幣別欄位：此時記錄沿用父記錄的幣別，且只要存在這樣的子記錄，父記錄的幣別代碼就不允許修改。"
       },
       "currencyConfig.defaultCurrency": {
         label: "預設貨幣",

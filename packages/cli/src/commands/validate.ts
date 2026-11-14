@@ -37,7 +37,6 @@ import {
   formatConversionNotice,
   printAuthoringRuleErrors,
   authoringFindingDetailLines,
-  type AuthoringRuleFinding,
   printDocIssueErrors,
   JSON_FULL_LIST_REMEDY,
   createTimer,
@@ -120,7 +119,9 @@ export default class Validate extends Command {
   };
 
   static override flags = {
-    strict: Flags.boolean({ description: 'Treat warnings as errors' }),
+    strict: Flags.boolean({
+      description: 'Treat warnings as errors (exit 1); info findings stay advisory',
+    }),
     json: Flags.boolean({ description: 'Output results as JSON' }),
     target: Flags.string({
       description:
@@ -583,7 +584,7 @@ export default class Validate extends Command {
 
       // 2c-quater. [ADR-0150 D5, child G1] A namespace of this artifact spelling a
       //     literal segment of the address grammar (`actions`, `connectors`,
-      //     `global`, `hooks`, `oauth`, `trigger`) is REFUSED, naming the
+      //     `global`, `hooks`, `oauth`, `runs`, `trigger`) is REFUSED, naming the
       //     literal and the doors that serve it — the install door and
       //     `defineStack` ask the same judge (`validateNamespaceNotAddressLiteral`).
       //     `os build` makes the same call.
@@ -1313,19 +1314,30 @@ export default class Validate extends Command {
         warnings.push(formatConversionNotice(n));
       }
 
-      // Every advisory the registry raised. All of them feed `--strict` now:
-      // before, roughly half were printed inline and invisible to it, so
-      // `--strict` failed or passed depending on which gate happened to raise
-      // the finding — a second, quieter version of the same coverage drift.
+      // Every advisory the registry raised, all on this one list: before,
+      // roughly half were printed inline and invisible to `--strict`, so it
+      // failed or passed depending on which gate happened to raise the
+      // finding — a second, quieter version of the same coverage drift.
       //
       // [#22161] Each one also remembers its finding, so the text face below
       // prints its `fix:` and `rule:` lines (with the `os explain` pointer) the
       // way `os build` does — the warning line itself is one verdict sentence
       // now, and the rule id is how an author reaches the rest.
-      const registryFindingAt = new Map<number, AuthoringRuleFinding>();
+      //
+      // `--strict` promotes warnings, never info (maintainer ruling of record
+      // 6787890900): a registry finding graded `info` is printed — under `ℹ`,
+      // the glyph `os lint` gives the same finding as a suggestion — and rides
+      // the payload's `warnings`, but `strictFailing` below does not count it.
+      // Every other member of this list (conversion notices, doc, unknown-key,
+      // capability and structural advisories) is a warning and is counted.
+      // Keyed to the registry's own finding type (it carries `severity`), not
+      // the formatter's severity-free `AuthoringRuleFinding`.
+      const registryFindingAt = new Map<number, (typeof ruleAdvisories)[number]>();
+      let infoFindings = 0;
       for (const f of ruleAdvisories) {
         registryFindingAt.set(warnings.length, f);
         warnings.push(`${f.where}: ${f.message}`);
+        if (f.severity === 'info') infoFindings++;
       }
       for (const w of docWarnings) {
         warnings.push(`${w.path}: ${w.message}`);
@@ -1336,6 +1348,12 @@ export default class Validate extends Command {
       // four inline `if` blocks used to occupy, so the text face's warning ORDER
       // is byte-for-byte what it was.
       warnings.push(...structuralWarnings);
+
+      // The ONE count `--strict` reads, on both faces: every entry of
+      // `warnings` but the registry's `info` findings. The JSON face's exit
+      // status and the text face's strict verdict below both read it, so the
+      // two cannot disagree about which advisories fail a run.
+      const strictFailing = warnings.length - infoFindings;
 
       if (flags.json) {
         await emitJson(
@@ -1375,8 +1393,9 @@ export default class Validate extends Command {
             duration: timer.elapsed(),
           },
           // `--strict` means one thing — "treat warnings as errors" — and it now
-          // means it on both faces. The gate reads `warnings`, the text face's
-          // OWN list, rather than the payload's `warnings` field: the two differ
+          // means it on both faces. The gate reads `strictFailing`, counted off
+          // `warnings` (the registry's `info` findings left out), the text
+          // face's OWN list, rather than the payload's `warnings` field: the two differ
           // by the ADR-0087 conversion notices, which the text face folds into
           // its `⚠` block while the payload carries them under `conversions`.
           // Gating on the payload field would have left `--json --strict` at 0
@@ -1405,7 +1424,7 @@ export default class Validate extends Command {
           // `utils/format.exit-code.test.ts` and `test/migrate-exit-code.e2e.test.ts`),
           // and it emits the one document without an ExitError unwinding
           // through the catch below.
-          flags.strict && warnings.length > 0 ? 1 : 0,
+          flags.strict && strictFailing > 0 ? 1 : 0,
         );
         return;
       }
@@ -1428,17 +1447,20 @@ export default class Validate extends Command {
       if (warnings.length > 0) {
         console.log('');
         for (const [i, w] of warnings.entries()) {
-          console.log(chalk.yellow(`  ⚠ ${w}`));
           const finding = registryFindingAt.get(i);
+          // An `info` finding prints under `ℹ` in blue, the way `os lint`
+          // prints it as a suggestion: it is advisory under `--strict` too, so
+          // it must not wear the glyph of the lines that fail the run.
+          console.log(finding?.severity === 'info' ? chalk.blue(`  ℹ ${w}`) : chalk.yellow(`  ⚠ ${w}`));
           if (finding) {
             for (const line of authoringFindingDetailLines(finding)) console.log(chalk.dim(`    ${line}`));
           }
         }
         // The text face's half of the `--strict` gate. Its JSON counterpart is
         // the `CliExitCode` argument at the `emitJson` call above, reading this
-        // same `warnings` list — change one and change the other, or the two
-        // faces start disagreeing about the exit status again.
-        if (flags.strict) {
+        // same `strictFailing` count — so an info-only run neither fails nor
+        // claims a strict verdict on either face.
+        if (flags.strict && strictFailing > 0) {
           console.log('');
           printError('Strict mode: warnings treated as errors');
           this.exit(1);

@@ -8,18 +8,21 @@
 //
 // The registry's own pins (`registry-bare-name-one-holder-request-family.test.ts`)
 // drive the engine's package door, the item seam and the hook binder's bind
-// in-process. This file drives the rule at the doors a deployment reaches:
+// in-process. This file drives the rule at the doors a deployment reaches.
+// [ADR-0150 D2/D9, child B, #31700] All three have narrowed to the namespace
+// now (the object-less action first, #31697; the API and the function with
+// the picklist family, #31700):
 //
-//   - the cold boot of a deployment that already holds the clash — two
-//     `AppPlugin` packages, `alpha` and `beta`, shipping one API, one
-//     object-less action and one function under the same names — boots, and
-//     logs ONE warning line naming both packages (never the runtime's
-//     `app:<id>` handler owner) and the rename for the API and the function;
-//   - `POST /marketplace/install-local` of a third package declaring the held
-//     API name is 422 PLUGIN_REGISTER_FAILED naming both holders and the
-//     rename, installs nothing, and its endpoint path stays unserved;
-//   - the same door refusing a package that declares the held object-less
-//     action and the showcase's own API name, for the API alone (#31697);
+//   - the cold boot of two `AppPlugin` packages of two namespaces, `alpha`
+//     and `beta`, shipping one API, one object-less action and one function
+//     under the same names, boots with no bare-name warning naming them (it
+//     warned once for the API and the function before);
+//   - `POST /marketplace/install-local` of a package of a THIRD namespace
+//     declaring the held API name installs, and its endpoint is served at its
+//     own path (it was refused, naming both holders, before);
+//   - the same door installs a package of another namespace declaring the
+//     held object-less action and the showcase's own API name (the API was
+//     refused, naming the showcase, before); the showcase keeps its route;
 //   - CONTROL: a package declaring fresh names, and an action BOUND to its own
 //     object under the held object-less action's name, installs.
 //
@@ -143,11 +146,6 @@ async function captureOutput<T>(run: () => Promise<T>): Promise<{ value: T; line
   }
 }
 
-/** The level of one kernel-logger line (`<ISO time> <LEVEL> <message> …`), or `undefined`. */
-function levelOf(line: string): string | undefined {
-  return /^(?:\S+Z\s+)?(DEBUG|INFO|WARN|ERROR|FATAL)\b/.exec(line.trim())?.[1];
-}
-
 const codeOf = (body: any) =>
   (body?.error && typeof body.error === 'object' ? body.error.code : undefined) ?? body?.code ?? null;
 const messageOf = (body: any) =>
@@ -209,18 +207,11 @@ describe('one package holder per API, object-less action and function name, on a
     if (storageDir) rmSync(storageDir, { recursive: true, force: true });
   });
 
-  it('the cold boot of a deployment holding the clash boots, and warns once naming both packages and the rename for the API and the function — the object-less action is no clash between two namespaces (#31697)', async () => {
-    const warnings = bootLines.filter((l) => l.includes('Bare-name conflict at boot'));
-    expect(warnings, 'one warning line').toHaveLength(1);
-    const line = warnings[0]!;
-    expect(levelOf(line)).toBe('WARN');
-    expect(line).toContain(`the API "${API}"`);
-    expect(line).toContain(`the function "${FN}"`);
-    for (const name of [API, FN]) expect(line, `the rename of ${name}`).toContain(`"beta_${name}"`);
-    expect(line).not.toContain(`the object-less action "${ACTION}"`);
-    expect(line).toContain('package "com.qa.bare.alpha"');
-    expect(line).toContain('package "com.qa.bare.beta"');
-    expect(line, 'the package, never the handler owner').not.toContain('app:com.qa');
+  it('[#31700] the cold boot of two namespaces\' packages holding one API, object-less action and function name boots with no bare-name warning naming them', async () => {
+    const named = bootLines
+      .filter((l) => l.includes('Bare-name conflict at boot'))
+      .filter((l) => [API, ACTION, FN].some((name) => l.includes(`"${name}"`)));
+    expect(named, 'two namespaces\' holders are no clash').toEqual([]);
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
   });
 
@@ -320,31 +311,44 @@ describe('one package holder per API, object-less action and function name, on a
     expect([env.status, env.body?.data?.success ?? env.body?.success, env.ran], JSON.stringify(env.body)).toEqual([200, true, ['alpha-only']]);
   });
 
-  it('install-local of a third package declaring a held API name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed or served', async () => {
-    const before = await packageIds();
+  // install-local bridges a late package's OBJECTS to the metadata service,
+  // not its APIs, so an endpoint it installs is not served at its path (with
+  // a fresh name too); what the door decides is pinned here: the install, the
+  // registry's holders, and the cold boot's endpoints left as they were.
+  it('[#31700] install-local of a package of a THIRD namespace declaring the held API name installs; the bare read names all three holders, its address reaches its own, and the first two keep their routes', async () => {
     const { status, body } = await installLocal(inline('gamma', { apis: [api('gamma')] }));
-    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
-    const message = String(body?.error?.message ?? '');
-    expect(message).toContain(`the API "${API}"`);
-    expect(message).toContain('com.qa.bare.alpha');
-    expect(message).toContain('com.qa.bare.beta');
-    expect(message).toContain(`"gamma_${API}"`);
-    expect(await packageIds(), 'the package list is unchanged').toEqual(before);
-    expect((await stack.apiAs(admin, 'GET', '/apps/gamma/feed')).status, 'the refused endpoint is not served').toBe(404);
+    expect(status, JSON.stringify(body)).toBeLessThan(300);
+    expect(await packageIds()).toContain('com.qa.bare.gamma');
+    for (const p of ['alpha', 'beta'] as const) {
+      const r = await stack.apiAs(admin, 'GET', `/apps/${p}/feed`);
+      const served = (await r.json()) as any;
+      expect([r.status, served?.data?.object], `/apps/${p}/feed`).toEqual([200, `${p}_item`]);
+    }
+    const bare = await metaApi(`/meta/api/${API}`);
+    expect([bare.status, codeOf(bare.body)], JSON.stringify(bare.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    for (const holder of ['com.qa.bare.alpha', 'com.qa.bare.beta', 'com.qa.bare.gamma']) {
+      expect(messageOf(bare.body), holder).toContain(holder);
+    }
+    const own = await metaApi(`/meta/api/gamma/${API}`);
+    expect([own.status, own.item?.path, own.item?._packageId]).toEqual([200, '/api/v1/apps/gamma/feed', 'com.qa.bare.gamma']);
   });
 
-  it('install-local of a package declaring the held object-less action and the showcase\'s API name is refused for the API alone, naming the showcase — another namespace\'s action name is no clash (#31697)', async () => {
-    const before = await packageIds();
+  it('[#31700] install-local of a package of another namespace declaring the held object-less action and the showcase\'s API name installs; the showcase keeps its route and its address', async () => {
     const { status, body } = await installLocal(inline('delta', {
       apis: [api('delta', SHOWCASE_API)],
       actions: [action('delta')],
     }));
-    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
-    const message = String(body?.error?.message ?? '');
-    expect(message).toContain(`the API "${SHOWCASE_API}"`);
-    expect(message).toContain(SHOWCASE_PKG);
-    expect(message).not.toContain(`the object-less action "${ACTION}"`);
-    expect(await packageIds(), 'the package list is unchanged').toEqual(before);
+    expect(status, JSON.stringify(body)).toBeLessThan(300);
+    expect(await packageIds()).toContain('com.qa.bare.delta');
+    expect((await stack.apiAs(admin, 'GET', '/apps/showcase/tasks')).status, 'the showcase\'s route').toBe(200);
+    const theirs = await metaApi(`/meta/api/delta/${SHOWCASE_API}`);
+    expect([theirs.status, theirs.item?.path, theirs.item?._packageId]).toEqual([200, '/api/v1/apps/delta/feed', 'com.qa.bare.delta']);
+    const showcase = await metaApi(`/meta/api/${SHOWCASE_API}?package=${SHOWCASE_PKG}`);
+    expect([showcase.status, showcase.item?.path, showcase.item?._packageId]).toEqual([200, '/api/v1/apps/showcase/tasks', SHOWCASE_PKG]);
+    const bare = await metaApi(`/meta/api/${SHOWCASE_API}`);
+    expect([bare.status, codeOf(bare.body)], JSON.stringify(bare.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(messageOf(bare.body)).toContain(SHOWCASE_PKG);
+    expect(messageOf(bare.body)).toContain('com.qa.bare.delta');
   });
 
   it('install-local of a co-owner of `alpha`\'s namespace declaring the held object-less action is refused, naming `alpha` alone; nothing is installed', async () => {

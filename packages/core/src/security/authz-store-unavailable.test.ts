@@ -48,10 +48,12 @@ const qlEmpty = () => ({ find: async () => [] });
  * A store that actually grants something, so "resolves" is read against a real
  * grant: the grant row, and the set it names in the security catalog bound to
  * the engine (ADR-0131 D3/D4). The grant belongs to {@link ORG} and applies only
- * there, so it is resolved with {@link SESSION_IN_ORG}.
+ * there, so it is resolved with {@link SESSION_IN_ORG} — by a current member of
+ * it, since the claim needs one under every posture (ADR-0093 D8.1, as amended).
  */
 const qlHealthy = () => bindStaticSecurityCatalog({
   find: async (object: string) => {
+    if (object === 'sys_member') return [{ user_id: USER, organization_id: ORG, role: 'member' }];
     if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps', permission_set: 'pkg_admin', organization_id: ORG }];
     if (object === 'sys_permission_set') return [{ id: 'ps', name: 'pkg_admin' }];
     return [];

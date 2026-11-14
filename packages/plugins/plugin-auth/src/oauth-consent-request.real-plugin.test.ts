@@ -34,6 +34,13 @@ import {
   OAUTH_CONSENT_REQUEST_PATH,
   OAUTH_CONSENT_REQUEST_UNSIGNED_MESSAGE,
 } from './oauth-consent-request';
+import * as entry from './index';
+import {
+  oauthConsentRequestDepsFor,
+  runOAuthConsentRequestRead,
+  type OAuthConsentRequestManager,
+  type OAuthConsentRequestResult,
+} from './index';
 
 const SECRET = 'test-secret-at-least-32-chars-long-consent-request';
 const PASSWORD = 'S3cure!Passw0rd-consent-request';
@@ -182,6 +189,7 @@ const arrange = async () => {
   };
 
   return {
+    manager,
     cookie,
     post,
     registerWithoutCredential,
@@ -347,5 +355,42 @@ describe('POST /oauth-consent/request — what the consent page names about the 
     const garbled = await readJson(await rig.post(OAUTH_CONSENT_REQUEST_PATH, '{"oauth_query": ', { cookie: rig.cookie }));
     expect(garbled.status).toBe(400);
     expect(garbled.body.error.code).toBe('INVALID_REQUEST');
+  });
+});
+
+describe('the package entry publishes the read, for a host that forwards the auth routes to an AuthManager it did not mount', () => {
+  // A per-environment kernel runs AuthPlugin with `registerRoutes: false`, so its
+  // host answers this route itself, from the package root, with the env's
+  // AuthManager and the request: no AuthPlugin route, no Hono app.
+  const hostAnswer = (manager: OAuthConsentRequestManager, body: unknown, cookie?: string): Promise<OAuthConsentRequestResult> =>
+    runOAuthConsentRequestRead(oauthConsentRequestDepsFor(manager), {
+      raw: new Request(`${ORIGIN}${BASE}${OAUTH_CONSENT_REQUEST_PATH}`, {
+        method: 'POST',
+        headers: { origin: ORIGIN, 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+        body: JSON.stringify(body),
+      }),
+      queries: {},
+    });
+
+  it('names both functions on the package root', () => {
+    expect(Object.keys(entry)).toEqual(expect.arrayContaining(['runOAuthConsentRequestRead', 'oauthConsentRequestDepsFor']));
+  });
+
+  it('answers the signed redirect from the AuthManager alone, and a request with no session 401', async () => {
+    const rig = await arrange();
+    const clientId = await rig.registerWithoutCredential();
+    const query = await rig.signedConsentQuery(clientId, DCR_REDIRECT);
+
+    const answer = await hostAnswer(rig.manager, { oauth_query: query }, rig.cookie);
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    expect(answer.headers['Cache-Control']).toBe('no-store');
+    expect(answer.body).toEqual({
+      success: true,
+      data: { clientId, redirectUri: DCR_REDIRECT, registeredByAdministrator: false },
+    });
+
+    const anonymous = await hostAnswer(rig.manager, { oauth_query: query });
+    expect(anonymous.status).toBe(401);
+    expect(anonymous.body).toMatchObject({ success: false, error: { code: 'UNAUTHENTICATED' } });
   });
 });

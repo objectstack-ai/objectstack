@@ -76,12 +76,17 @@ describe('which doors ask the registry against its other objects (registry-quest
         ).toEqual([...recorded].sort());
     });
 
-    it('the two by-face save producers state the single-save faces, and the publish producers state their question', () => {
+    it('the three by-face save producers state the single-save faces, and the publish producers state their question', () => {
         const rest = readFileSync(join(ROOT, 'packages/rest/src/meta-item-write-routes.ts'), 'utf8');
         const dispatcher = readFileSync(join(ROOT, 'packages/runtime/src/domains/meta.ts'), 'utf8');
+        const tableImport = readFileSync(join(ROOT, 'packages/services/service-datasource/src/plugin.ts'), 'utf8');
         expect(rest).toContain("writeFace: 'meta-envelope'");
         expect(dispatcher).toContain("writeFace: 'meta-dispatch'");
-        expect([...AGAINST_REGISTRY_SAVE_FACES].sort()).toEqual(['meta-dispatch', 'meta-envelope']);
+        expect(tableImport).toContain("writeFace: 'external-import'");
+        // [#32369] `external-import` saves ONE object per import and relays its
+        // refusal: a single save, so it asks against the registry (moved from
+        // the batch, whose refusal was only logged and the object stored).
+        expect([...AGAINST_REGISTRY_SAVE_FACES].sort()).toEqual(['external-import', 'meta-dispatch', 'meta-envelope']);
         const publish = maskComments(readFileSync(join(ROOT, 'packages/metadata-protocol/src/protocol-history-and-publish.ts'), 'utf8'));
         expect(publish.split("PROMOTION_REGISTRY_QUESTION['item-publish']").length - 1).toBe(1);
         expect(publish.split("PROMOTION_REGISTRY_QUESTION['package-publish']").length - 1).toBe(1);
@@ -94,7 +99,8 @@ describe('which doors ask the registry against its other objects (registry-quest
         expect(saveRegistryQuestion({ mode: 'draft', writeFace: 'meta-envelope' })).toBe('body-only');
         expect(saveRegistryQuestion({ writeFace: 'meta-envelope' })).toBe('body-only');
         expect(saveRegistryQuestion({ mode: 'publish', writeFace: 'package-duplicate' })).toBe('body-only');
-        expect(saveRegistryQuestion({ mode: 'publish', writeFace: 'external-import' })).toBe('body-only');
+        expect(saveRegistryQuestion({ mode: 'publish', writeFace: 'external-import' })).toBe('against-registry');
+        expect(saveRegistryQuestion({ mode: 'draft', writeFace: 'external-import' })).toBe('body-only');
         expect(saveRegistryQuestion({ mode: 'publish' })).toBe('body-only');
     });
 });

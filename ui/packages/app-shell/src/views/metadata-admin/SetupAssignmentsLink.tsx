@@ -24,14 +24,20 @@ export type SetupAssignmentsKind = 'position' | 'permission';
 export function SetupAssignmentsLink({
   kind,
   name,
+  holderPackage,
 }: {
   /** `position` names the Position holders page, `permission` the Permission set assignment page. */
   kind: SetupAssignmentsKind;
   /** The item the Setup page opens on. */
   name: string;
+  /**
+   * objectstack#32537 — for `permission`, the package of the holder shown,
+   * where more than one package holds the name (`holdingPackage`).
+   */
+  holderPackage?: string;
 }): React.ReactElement {
   const locale = useMetadataLocale();
-  const href = kind === 'position' ? positionHoldersPagePath(name) : permissionSetAssignmentPagePath(name);
+  const href = kind === 'position' ? positionHoldersPagePath(name) : permissionSetAssignmentPagePath(name, holderPackage);
   return (
     <div
       className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-md border px-4 py-3"

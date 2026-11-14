@@ -34,14 +34,24 @@
  *    transport that reports itself unconfigured (the stock `log` one), true
  *    with a configured one. It describes the deployment, not an address: in
  *    all three a known and an unknown address get the same reset answer, and
- *    that answer is the same one whether mail leaves or not.
+ *    that answer is the same one whether mail leaves or not;
+ *  - a burst of concurrent reset requests for one address, counted by the
+ *    cache-backed rate-limit storage `AuthPlugin` wires
+ *    (`createLazyCacheRateLimitStorage` over the kernel cache adapter) under
+ *    the per-endpoint rule the auth settings bind writes, answers each request
+ *    200 or 429 and never 5xx: exactly the rule's `max` are admitted, every
+ *    admitted answer is the body an address with no account gets, every
+ *    refusal carries its message, nothing is logged at error, and each
+ *    admitted request for the account still sends its reset mail.
  */
 
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { MemoryCacheAdapter } from '@objectstack/service-cache';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
+import { createLazyCacheRateLimitStorage } from './rate-limit-storage.js';
 import { runAfterResponse } from './run-after-response.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 import { sqliteEnginePool } from './__tests__/sqlite-engine-pool.testkit';
@@ -370,4 +380,99 @@ describe('runAfterResponse', () => {
       process.off('unhandledRejection', unhandled);
     }
   });
+});
+
+describe('a burst of reset requests for one address answers 200 or 429, never 5xx', () => {
+  /** The per-endpoint rule the auth settings bind writes (`rate_limit_max` / `rate_limit_window_seconds`). */
+  const RULE = { window: 60, max: 3 } as const;
+  /** Requests in the burst: more than the rule admits, so both answers occur. */
+  const BURST = 8;
+
+  /**
+   * A deployment counting through the storage `AuthPlugin` hands better-auth
+   * (`rateLimit.customStorage`), over the kernel cache adapter, with the
+   * reset endpoint's rule as the settings bind writes it. Records every send,
+   * every server-side error line, and every console error (better-call's own
+   * unhandled-error line goes there).
+   */
+  async function burstDeployment(withAccount: boolean) {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const consoleErrors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const engine = await engines.take();
+    const logged: string[] = [];
+    const cache = new MemoryCacheAdapter();
+    const manager = new AuthManager({
+      secret: SECRET,
+      baseUrl: BASE,
+      dataEngine: engine as never,
+      rateLimit: {
+        enabled: true,
+        window: RULE.window,
+        max: RULE.max,
+        customRules: { '/request-password-reset': { ...RULE } },
+      },
+      rateLimitStorage: createLazyCacheRateLimitStorage({ resolveCache: async () => cache }),
+      logger: { warn: () => {}, error: (message: string) => logged.push(message) },
+    } as never);
+    const sends: Mail[] = [];
+    manager.setEmailService({
+      sendTemplate: async (input: Mail) => {
+        sends.push(input);
+        return { status: 'sent' };
+      },
+    } as never);
+    if (withAccount) {
+      const signedUp = await post(manager, '/sign-up/email', { email: EMAIL, password: PASSWORD, name: 'Reset' });
+      expect(signedUp.status, await signedUp.clone().text()).toBe(200);
+      sends.length = 0;
+    }
+    return { manager, sends, logged, consoleErrors };
+  }
+
+  /** Fire `BURST` reset requests for `email` at once; answer each status and body. */
+  async function burst(manager: AuthManager, email: string): Promise<Array<{ status: number; body: string }>> {
+    const answers = await Promise.all(
+      Array.from({ length: BURST }, () => post(manager, '/request-password-reset', { email, redirectTo: `${BASE}/reset` })),
+    );
+    return Promise.all(answers.map(async (res) => ({ status: res.status, body: await res.text() })));
+  }
+
+  it('an address with an account: the rule admits exactly max, refuses the rest with 429, and logs no error', async () => {
+    const d = await burstDeployment(true);
+
+    const answers = await burst(d.manager, EMAIL);
+
+    expect(answers.map((a) => a.status).sort()).toEqual([
+      ...Array.from({ length: RULE.max }, () => 200),
+      ...Array.from({ length: BURST - RULE.max }, () => 429),
+    ]);
+    const admitted = answers.filter((a) => a.status === 200);
+    expect(new Set(admitted.map((a) => a.body)).size).toBe(1);
+    for (const refused of answers.filter((a) => a.status === 429)) {
+      expect(JSON.parse(refused.body)).toEqual({ message: expect.any(String) });
+    }
+    // Each admitted request still sends its reset mail, after the response.
+    await vi.waitFor(() => expect(d.sends.map((m) => [m.template, m.to.address])).toEqual(
+      Array.from({ length: RULE.max }, () => ['auth.password_reset', EMAIL]),
+    ));
+    expect(d.logged).toEqual([]);
+    expect(d.consoleErrors).not.toHaveBeenCalled();
+  }, 60_000);
+
+  it('an address with no account answers the same burst the same way, with the same admitted body', async () => {
+    const withAccount = await burstDeployment(true);
+    const forAccount = await burst(withAccount.manager, EMAIL);
+    const without = await burstDeployment(false);
+    const forNobody = await burst(without.manager, NOBODY);
+
+    expect(forNobody.map((a) => a.status).sort()).toEqual(forAccount.map((a) => a.status).sort());
+    const admittedBodies = new Set(
+      [...forAccount, ...forNobody].filter((a) => a.status === 200).map((a) => a.body),
+    );
+    expect(admittedBodies.size).toBe(1);
+    await vi.waitFor(() => expect(withAccount.sends).toHaveLength(RULE.max));
+    expect(without.sends).toEqual([]);
+    expect([...withAccount.logged, ...without.logged]).toEqual([]);
+    expect(without.consoleErrors).not.toHaveBeenCalled();
+  }, 60_000);
 });

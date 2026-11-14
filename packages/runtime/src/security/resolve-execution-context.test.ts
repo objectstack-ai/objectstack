@@ -36,10 +36,16 @@ function makeQl(apiKeyRows: any[]) {
   // The owners the key rows name exist: an API key authenticates only as an
   // owner who exists.
   const owners = [...new Set(apiKeyRows.map((r) => r.user_id).filter((id) => typeof id === 'string' && id))].map((id) => ({ id }));
+  // [ADR-0093 D8.1, as amended] A key stamped with an organization is admitted
+  // only while its owner is a current member there, under every posture: the
+  // owners here are.
+  const members = apiKeyRows
+    .filter((r) => typeof r.active_organization_id === 'string' && r.active_organization_id)
+    .map((r) => ({ user_id: r.user_id, organization_id: r.active_organization_id, role: 'member' }));
   return {
     async find(object: string, opts: any) {
       const where = opts?.where ?? {};
-      const table = object === 'sys_api_key' ? apiKeyRows : object === 'sys_user' ? owners : undefined;
+      const table = object === 'sys_api_key' ? apiKeyRows : object === 'sys_user' ? owners : object === 'sys_member' ? members : undefined;
       if (!table) return [];
       return bounded(table.filter((row) => {
         for (const [k, v] of Object.entries(where)) {
@@ -219,6 +225,8 @@ describe('resolveExecutionContext — localization (timezone + locale)', () => {
       sys_api_key: apiKeyRows,
       // The key's owner exists: an API key authenticates only as an owner who exists.
       sys_user: [{ id: 'u1' }],
+      // ...and is a current member of the key's organization (ADR-0093 D8.1, as amended).
+      sys_member: [{ user_id: 'u1', organization_id: ORG, role: 'member' }],
       sys_user_preference: prefs,
       sys_setting: settings,
     };
@@ -643,8 +651,10 @@ describe('#6216 — this face keeps the EXPLICIT GUEST entry, and its own named 
 // the registry's own async accessor — branded on "never registered",
 // unbranded on "registered and could not be built" (#13905).
 //
-// Both keys are fixtures for the refusal the posture gates: one stamped with
-// an organization its owner has LEFT, one carrying no organization at all.
+// Two keys: one stamped with an organization its owner has LEFT, one carrying
+// no organization at all. Since ADR-0093 D8.1 was amended the first one's
+// refusal reads no posture, so the org-less key's `organization_required` —
+// the refusal the posture gates — is what tells "no posture" apart here.
 // ---------------------------------------------------------------------------
 
 describe('[#13906 decision 1 A, runtime door] the tenancy posture seam tells "never registered" from "registered and failed"', () => {
@@ -726,14 +736,18 @@ describe('[#13906 decision 1 A, runtime door] the tenancy posture seam tells "ne
     expect(orgLess.userId).toBeUndefined();
   });
 
-  it('SUPPORTED, unchanged: tenancy NEVER registered → the branded rejection is absorbed, no posture, no refusal', async () => {
-    // The no-tenancy composition: no wall exists, and an org-stamped key
+  it('SUPPORTED, unchanged: tenancy NEVER registered → the branded rejection is absorbed, no posture, no posture-conditional refusal', async () => {
+    // The no-tenancy composition: no wall exists, and an organization-less key
     // working there is by design. A repair that made this loud too would
     // break every single-organization embedder — the brand, not the catch,
     // is the discriminator.
+    const ctx = await resolveExecutionContext(viaKernel(kernelWith('unregistered'), { 'x-api-key': RAW_ORGLESS }));
+    expect(ctx.userId).toBe('u_orgless');
+  });
+
+  it('[ADR-0093 D8.1, as amended] with no posture, a key its owner\'s membership no longer backs is refused all the same (guest)', async () => {
     const ctx = await resolveExecutionContext(viaKernel(kernelWith('unregistered'), { 'x-api-key': RAW_EXMEMBER }));
-    expect(ctx.userId).toBe('u_exmember');
-    expect(ctx.tenantId).toBe('org_A');
+    expect(ctx.userId).toBeUndefined();
   });
 
   it('REPAIRED: tenancy REGISTERED AND FAILING (factory throws) → AuthzStoreUnavailableError, 503 SERVICE_UNAVAILABLE — never an admitted principal', async () => {
@@ -764,10 +778,10 @@ describe('[#13906 decision 1 A, runtime door] the tenancy posture seam tells "ne
   });
 
   it('THE COLLAPSE IS ENDED: "registered and failed" and "never registered" no longer answer alike', async () => {
-    const failed: any = await rejectionOf(resolveExecutionContext(viaKernel(kernelWith('factory-throws'), { 'x-api-key': RAW_EXMEMBER })));
-    const absent = await resolveExecutionContext(viaKernel(kernelWith('unregistered'), { 'x-api-key': RAW_EXMEMBER }));
+    const failed: any = await rejectionOf(resolveExecutionContext(viaKernel(kernelWith('factory-throws'), { 'x-api-key': RAW_ORGLESS })));
+    const absent = await resolveExecutionContext(viaKernel(kernelWith('unregistered'), { 'x-api-key': RAW_ORGLESS }));
     expect(isAuthzStoreUnavailableError(failed)).toBe(true);
-    expect(absent.userId).toBe('u_exmember');
+    expect(absent.userId).toBe('u_orgless');
   });
 
   it('the dispatcher-shaped PROBE facade (resolves `undefined`, never rejects) is untouched — quiet, no posture', async () => {
@@ -776,9 +790,9 @@ describe('[#13906 decision 1 A, runtime door] the tenancy posture seam tells "ne
     const ctx = await resolveExecutionContext({
       getService: async () => undefined,
       getQl: async () => qlWith(),
-      request: { headers: { 'x-api-key': RAW_EXMEMBER } },
+      request: { headers: { 'x-api-key': RAW_ORGLESS } },
     });
-    expect(ctx.userId).toBe('u_exmember');
+    expect(ctx.userId).toBe('u_orgless');
   });
 
   // -------------------------------------------------------------------------
@@ -820,9 +834,8 @@ describe('[#13906 decision 1 A, runtime door] the tenancy posture seam tells "ne
   it('[#17114] a SYNCHRONOUSLY thrown branded "never registered" is absorbed exactly like the rejected one — quiet, admitted', async () => {
     const branded = await brandedNotRegistered();
     expect(isServiceNotRegisteredError(branded), 'fixture: the kernel did not brand its miss').toBe(true);
-    const ctx = await resolveExecutionContext(throwingSync(branded, { 'x-api-key': RAW_EXMEMBER }) as any);
-    expect(ctx.userId).toBe('u_exmember');
-    expect(ctx.tenantId).toBe('org_A');
+    const ctx = await resolveExecutionContext(throwingSync(branded, { 'x-api-key': RAW_ORGLESS }) as any);
+    expect(ctx.userId).toBe('u_orgless');
   });
 
   it('[#17114] and a SYNCHRONOUSLY thrown UNBRANDED failure is the 503 outage — the two still answer differently', async () => {

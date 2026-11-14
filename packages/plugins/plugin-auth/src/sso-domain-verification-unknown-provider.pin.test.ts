@@ -66,7 +66,7 @@ interface Stack {
   manager: AuthManager;
   app: Hono;
   bearer: string;
-  /** Every request the mounts handed `AuthManager.handleRequest`, in order. */
+  /** Every request the mounts handed the manager's vendor entry (`handleVendorRequest`), in order. */
   dispatched: Request[];
 }
 
@@ -125,8 +125,8 @@ async function bootStack(ssoDomainVerification: boolean): Promise<Stack> {
   // every "vendor never asked" pin below passing on a dead counter. The
   // "asked once" pins are this counter's positive control.
   const dispatched: Request[] = [];
-  const handle = manager.handleRequest.bind(manager);
-  (manager as any).handleRequest = async (req: Request) => {
+  const handle = manager.handleVendorRequest.bind(manager);
+  (manager as any).handleVendorRequest = async (req: Request) => {
     dispatched.push(req);
     return handle(req);
   };

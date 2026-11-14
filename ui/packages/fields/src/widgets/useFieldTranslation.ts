@@ -111,6 +111,14 @@ const FIELD_DEFAULTS: Record<string, string> = {
   // the `en` pack.
   'fields.registryRef.loadFailed': 'The list could not be loaded. You can still type the name.',
   'fields.registryRef.notFound': '{{name}} (not found)',
+  // objectstack#32770 — a permission-set name more than one holder serves:
+  // each option names its holder, a stored name that addresses none is said
+  // so, and the note under a picker whose target names a set by its name
+  // only. Same values as the `en` pack.
+  'fields.registryRef.holderPackage': '{{item}} · package {{package}}',
+  'fields.registryRef.holderEnvironment': '{{item}} · defined in this environment',
+  'fields.registryRef.holderUnresolved': '{{name}} (several packages provide it; none named)',
+  'fields.registryRef.holderNeedsPackage': 'This form names a permission set by its name only. Where several packages provide a set of one name, only the one defined in this environment can be picked here.',
   // #30208 row 6 — the fillable arm (`notification-topic` /
   // `notification-channel`): the `*` entry's two faces, a channel the
   // deployment cannot send on, a value the list does not hold, and the row

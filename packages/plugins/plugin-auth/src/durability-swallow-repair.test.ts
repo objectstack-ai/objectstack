@@ -421,7 +421,7 @@ describe('#12981 batch 5 — plugin-auth durability swallows report instead of v
       vi.clearAllMocks();
     });
 
-    it('a refused SCIM provenance stamp is reported, and names why nothing retries it', async () => {
+    it('a refused adapter-level provenance stamp is reported, and names why nothing retries it', async () => {
       let stamp: ((hookCtx: unknown) => Promise<void>) | undefined;
       const engine = {
         // The stamp is the plugin package's own afterInsert; other triggers bind theirs under their own package id.
@@ -446,7 +446,7 @@ describe('#12981 batch 5 — plugin-auth durability swallows report instead of v
       ).resolves.toBeUndefined();
 
       expect(engine.update).toHaveBeenCalled();
-      expect(errorText()).toContain('SCIM identity-source stamp was NOT written');
+      expect(errorText()).toContain('identity-source stamp was NOT written');
       expect(errorText()).toContain('env_native');
       // The cause travels in the Error slot of the kernel Logger signature
       // (message, error, meta) — putting meta there would silently discard it.
@@ -468,7 +468,7 @@ describe('#12981 batch 5 — plugin-auth durability swallows report instead of v
       await plugin.start(ctx);
       await triggerReady();
 
-      expect(errorText()).toContain('SCIM identity-source stamp was NOT registered');
+      expect(errorText()).toContain('identity-source stamp was NOT registered');
       expect(errorText()).toContain('does NOT retry');
     });
 
@@ -476,6 +476,7 @@ describe('#12981 batch 5 — plugin-auth durability swallows report instead of v
       const engine = {
         registerHook: vi.fn(),
         count: vi.fn(async () => 0),
+        find: vi.fn(async () => []),
         findOne: vi.fn(async () => null),
         update: vi.fn(async () => ({ id: 'u1' })),
       };
@@ -486,7 +487,35 @@ describe('#12981 batch 5 — plugin-auth durability swallows report instead of v
       await triggerReady();
 
       expect(engine.registerHook).toHaveBeenCalled();
-      expect(errorText()).not.toContain('SCIM identity-source stamp');
+      expect(errorText()).not.toContain('identity-source stamp');
+      expect(errorText()).not.toContain('identity-source backfill');
+      // [ADR-0135 D4] The boot backfill ran and said how many it marked.
+      const infoText = (ctx.logger.info as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0])).join('\n');
+      expect(infoText).toContain('SCIM identity-source backfill: marked 0 of 0');
+    });
+
+    it('a boot backfill that cannot read is reported at error, naming what stays unmarked and the remedy', async () => {
+      const engine = {
+        registerHook: vi.fn(),
+        count: vi.fn(async () => 0),
+        find: vi.fn(async () => {
+          throw REFUSAL;
+        }),
+        findOne: vi.fn(async () => null),
+        update: vi.fn(async () => ({ id: 'u1' })),
+      };
+      ctx = build(engine);
+      const plugin = new AuthPlugin({ secret: SECRET, baseUrl: 'http://localhost:3000' } as never);
+      await plugin.init(ctx);
+      await plugin.start(ctx);
+      await triggerReady();
+
+      expect(errorText()).toContain('SCIM identity-source backfill did NOT complete');
+      expect(errorText()).toContain('env_native');
+      const call = (ctx.logger.error as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+        String(c[0]).includes('backfill did NOT complete'),
+      );
+      expect(call?.[1]).toBe(REFUSAL);
     });
   });
 });

@@ -196,9 +196,10 @@ describe('migrateKeyMaterialCopies (driven, paged)', () => {
     const report = await migrateKeyMaterialCopies(engine, logger());
     expect(report).toEqual({
       apply: false,
-      byObject: { sys_audit_log: { scanned: 6, rewritten: 5 }, sys_activity: { scanned: 3, rewritten: 2 } },
+      byObject: { sys_audit_log: { scanned: 6, rewritten: 5, refused: 0 }, sys_activity: { scanned: 3, rewritten: 2, refused: 0 } },
       scanned: 9,
       rewritten: 7,
+      refused: 0,
       failures: 0,
     });
     expect(JSON.stringify(tables)).toBe(before);
@@ -288,6 +289,6 @@ describe('migrateArchivedKeyMaterialCopies (an archive datasource, through its d
     const cold = new SqliteWasmDriver({ filename: ':memory:' });
     await cold.connect();
     const report = await migrateArchivedKeyMaterialCopies(cold, logger(), { apply: true, objects: ['sys_audit_log'] });
-    expect(report).toEqual({ apply: true, byObject: { sys_audit_log: { scanned: 0, rewritten: 0 } }, scanned: 0, rewritten: 0, failures: 0 });
+    expect(report).toEqual({ apply: true, byObject: { sys_audit_log: { scanned: 0, rewritten: 0, refused: 0 } }, scanned: 0, rewritten: 0, refused: 0, failures: 0 });
   });
 });

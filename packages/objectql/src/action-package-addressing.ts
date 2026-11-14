@@ -53,8 +53,8 @@ export function actionOwnerScopedRegistry(registry: PackageScopedRegistry, owner
   return {
     getPackage: (id) => registry.getPackage(id),
     getAllPackages: () => registry.getAllPackages(),
-    packageScopedHoldersOf: (type, name) => {
-      const holders = registry.packageScopedHoldersOf(type, name);
+    packageScopedHoldersOf: (type, name, callerPackageId, options) => {
+      const holders = registry.packageScopedHoldersOf(type, name, callerPackageId, options);
       if (type !== 'action') return holders;
       return holders.filter((packageId) => owns(registry.getPackageScopedItem(type, name, packageId)));
     },

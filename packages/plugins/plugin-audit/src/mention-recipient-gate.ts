@@ -124,8 +124,12 @@ export interface MentionGateInput {
 
 const SYSTEM_CONTEXT = { isSystem: true } as const;
 const USER_OBJECT = 'sys_user';
-/** Audience-spec prefixes the messaging service would EXPAND; a mention names one person. */
-const NON_USER_PREFIXES = ['role:', 'team:', 'owner_of:'];
+/**
+ * Audience-spec prefixes the messaging service would EXPAND; a mention names
+ * one person. Kept in step with the messaging `RecipientResolver`'s selector
+ * prefixes: `org:` is its organization-wide namespace (`org:members`).
+ */
+const NON_USER_PREFIXES = ['role:', 'team:', 'owner_of:', 'org:'];
 
 /**
  * The mentioned users who may be notified about this comment: each resolved
@@ -238,10 +242,10 @@ async function readableIn(
 
 /**
  * The envelope `uid` would read the record with: their own grants, in the
- * claimed organization only while a current membership backs the claim under
- * a walled posture — the session arm of `resolveAuthzContext`, which drops an
- * unbacked claim and re-resolves with no active organization (Layer 0 then
- * fails closed).
+ * claimed organization only while a current membership backs the claim —
+ * under every posture since ADR-0093 D8.1 was amended — the session arm of
+ * `resolveAuthzContext`, which drops an unbacked claim and re-resolves with no
+ * active organization (Layer 0 then fails closed).
  */
 async function contextForMentionedUser(
   engine: MentionRecipientGateEngine,
@@ -276,8 +280,8 @@ type MentionedUser = { ok: true; id: string } | { ok: false; reason: MentionWith
  * One `mentions` entry → the user it names. The field holds user ids; an
  * email-shaped entry is looked up to its user (identity only — whether that
  * user may be notified is the read check's question, never this lookup's).
- * An audience expansion (`role:` / `team:` / `owner_of:`) names no single
- * person and is not a mention.
+ * An audience expansion (`role:` / `team:` / `owner_of:` / `org:`) names no
+ * single person and is not a mention.
  *
  * An email is looked up the way sign-in looks one up: identity stores
  * `sys_user.email` lowercased, and sign-in queries the lowercased address, so

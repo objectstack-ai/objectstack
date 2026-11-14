@@ -991,6 +991,18 @@ export function filterNodeExpectedError(value: unknown, path: string): Error {
  * the whole tree at once, `$not` and every `$or` branch included, so the
  * refusal cannot depend on which row reaches which arm. Omitted ⇒ nothing is
  * judged JSON-stored (see {@link FilterFieldDeclarations}).
+ *
+ * ## The root is judged as its caller judged it (#32252)
+ *
+ * Only the operands BELOW the root must be {@link isFilterNode} plain objects,
+ * and each is checked before it is walked. The root itself is walked whenever
+ * it is a non-array object, whatever its prototype, because every caller reads
+ * it that way: the engine admits a `where` whose tag is `[object Object]` (a
+ * class instance included), and this package's translators read any object
+ * root by its own keys. Skipping a class-instance root let its malformed
+ * operand reach the translator ungated (`{ $and: [[…]] }` answered no row,
+ * `{ $or: [null] }` an uncoded `TypeError`) while its literal twin was refused.
+ * A root with no own keys (a `Date`) still walks to nothing, as before.
  */
 export function assertFilterConditionShape(
   node: unknown,
@@ -998,7 +1010,7 @@ export function assertFilterConditionShape(
   capabilities: FilterFaceCapabilities = DRIVER_FILTER_CAPABILITIES,
   declarations?: FilterFieldDeclarations,
 ): void {
-  if (!isFilterNode(node)) return;
+  if (node === null || typeof node !== 'object' || Array.isArray(node)) return;
   for (const [key, value] of Object.entries(node)) {
     const here = `${path}.${key}`;
     if (key === '$and' || key === '$or') {

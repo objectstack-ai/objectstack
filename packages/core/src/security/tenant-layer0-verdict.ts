@@ -36,7 +36,9 @@ export interface TenantLayer0Input {
    * [ADR-0105 D1] The tenancy posture actually IN FORCE (`tenancy.posture`) —
    * the single fact that decides what this layer enforces:
    *
-   * - `single`   → inert (no wall)
+   * - `single`   → no wall between organizations; only the organization's own
+   *                wall, for a caller {@link outsideEveryOrganization}
+   *                (ADR-0093 D8.1, as amended)
    * - `group`    → `organization_id IN accessibleOrgIds` (union / MOAC)
    * - `isolated` → `organization_id = organizationId` (the hard wall)
    *
@@ -55,6 +57,24 @@ export interface TenantLayer0Input {
    * with no membership has no group data reach.
    */
   accessibleOrgIds?: readonly string[];
+  /**
+   * [ADR-0093 D8.1, as amended] The caller is a PERSON who holds no current
+   * membership in any organization ({@link isOutsideEveryOrganization}). The
+   * rule is the same under every posture — a person's data access requires a
+   * current membership in the organization, judged on each request — and only
+   * `single` reads this field: the walled postures already deny such a caller
+   * (no active organization under `isolated`, an empty access set under
+   * `group`). Under `single` it is the organization's one wall: such a caller
+   * reaches none of the organization's tenant rows. Omitted or `false`,
+   * nothing changes.
+   *
+   * ⛔ Set it from {@link isOutsideEveryOrganization} over the operation's own
+   * execution context and from nothing else. A caller that derives it any
+   * other way — a flag of its own, a guess from `tenantId`, a second reading
+   * of `sys_member` — decides the organization's wall beside the one
+   * predicate every enforcer shares, and the two answers can then differ.
+   */
+  outsideEveryOrganization?: boolean;
   /**
    * Whether the object carries an `organization_id` column. `undefined` = the
    * schema/field-set could not be resolved yet (boot); treated as "assume tenant
@@ -129,21 +149,46 @@ const LAYER0_DENY: TenantLayer0Verdict = Object.freeze({ kind: 'deny' as const }
  * membership list; a repeated membership names one organization once), so a
  * reader may test `organizationIds.length === 1` and read no further.
  *
- * - `none` → the wall contributes nothing (`single` posture; non-tenant object;
- *   or an exempt platform admin).
+ * - `none` → the wall contributes nothing (`single` posture for a caller who
+ *   holds a membership; non-tenant object; or an exempt platform admin).
  * - `organization` → the `isolated` wall, `organization_id = <id>`.
  * - `organizations` → the `group` union wall, `organization_id IN <set>`
  *   (ADR-0105 D2).
  * - `deny` → a walled posture on a tenant object, but the context carries no
  *   organization scope to enforce with (no active org under `isolated`, empty
  *   access set under `group`); or a walled posture on an external object that
- *   states no organization scope (ADR-0015 §10) → fail closed (zero rows /
- *   write denied).
+ *   states no organization scope (ADR-0015 §10); or, under `single`, a tenant
+ *   object — or an external object that states no organization scope — read
+ *   or written by a person outside every organization (ADR-0093 D8.1, as
+ *   amended) → fail closed (zero rows / write denied).
  */
 export function computeTenantLayer0Verdict(input: TenantLayer0Input): TenantLayer0Verdict {
   // `single` posture (incl. a degraded deployment, which resolves to `single`)
-  // → parity with today's policy stripping.
-  if (!postureEnforcesWall(input.tenancyPosture)) return LAYER0_NONE;
+  // → no wall BETWEEN organizations: parity with today's policy stripping.
+  //
+  // [ADR-0093 D8.1, as amended] …but the organization keeps its own wall: a
+  // person's data access requires a current membership in the organization,
+  // judged on each request, under every posture. A person outside every
+  // organization therefore reaches none of the tenant rows here, exactly as the
+  // walled postures already answer such a person below (no active organization,
+  // an empty access set). The platform operator is never outside: platform
+  // standing is the deployment's, not a membership (ADR-0131 D5), and
+  // {@link isOutsideEveryOrganization} says so.
+  //
+  // For that person the object's own rungs are the walled ladder's, asked in
+  // the walled ladder's order, so the object classes answer as they do under
+  // `isolated` and `group`: an object outside tenancy contributes nothing; an
+  // external object that states no organization scope is denied ahead of the
+  // column question (ADR-0015 §10 — its `organization_id` may be the
+  // registry's anchor, not a column of its own); an object with no
+  // organization column contributes nothing; every other object is denied.
+  if (!postureEnforcesWall(input.tenancyPosture)) {
+    if (!input.outsideEveryOrganization) return LAYER0_NONE;
+    if (input.tenancyDisabled) return LAYER0_NONE;
+    if (input.externalOrganizationScopeUndeclared) return LAYER0_DENY;
+    if (input.objectHasOrgIdField === false) return LAYER0_NONE;
+    return LAYER0_DENY;
+  }
 
   // Not a tenant object: platform-global (tenancy disabled). Layer 0
   // contributes nothing — the object's own business RLS (Layer 1, e.g.
@@ -180,4 +225,64 @@ export function computeTenantLayer0Verdict(input: TenantLayer0Input): TenantLaye
   // `isolated`: the hard wall. Missing active org → fail closed.
   if (!input.organizationId) return LAYER0_DENY;
   return { kind: 'organization', organizationId: input.organizationId };
+}
+
+/**
+ * [ADR-0093 D8.1, as amended] Is the caller of this execution context a PERSON
+ * who holds no current membership in any organization?
+ *
+ * The rule it serves: under every tenancy posture, a person's data access
+ * requires a current membership in the organization, judged on each request.
+ * The membership is read by the resolver (`resolveUserAuthzGrants` →
+ * `accessible_org_ids`, validity windows applied), and this reads that
+ * answer — it never re-reads `sys_member`. The wall's enforcers ask it:
+ * `plugin-security` building its Layer 0 input and its write pre-test, and
+ * the engine deciding over its own facts, so the verdict they compute stays
+ * one verdict ({@link computeTenantLayer0Verdict}).
+ *
+ * `true` only when every part holds:
+ *
+ *  - a principal — a non-empty `userId` — and not a system context (`isSystem`),
+ *    which keeps the boot, seed, hook and backfill writes it always had;
+ *  - the context carries its membership set, `accessible_org_ids`, and the set is
+ *    EMPTY;
+ *  - not a platform operator: the `PLATFORM_ADMIN` rung is platform standing,
+ *    the deployment's rather than a membership's (ADR-0131 D5, ADR-0095 D3), and
+ *    it keeps the reach it had.
+ *
+ * The answer is only as complete as the set the context carries, so every
+ * person context the platform builds carries the resolver's set: a request's
+ * (`resolveAuthzContext`); a flow started at the launch door, which hands the
+ * run the request's; a `runAs: 'user'` run, whose setup resolves the acting
+ * user's beside their grants, resolves a decider's afresh, and takes an empty
+ * set when it cannot resolve one (`@objectstack/service-automation`); and a
+ * hook that runs as the user, whose grant seeding resolves it beside the
+ * grants (`@objectstack/objectql`). A
+ * context that carries no set at all is not judged here: an in-process caller
+ * that builds a person context by hand and leaves the set out keeps the rules
+ * it had — under `single` the organization's own wall does not judge it, and
+ * under the walled postures the wall's own rungs still do (no active
+ * organization under `isolated`, an absent or empty access set under
+ * `group`). A builder of a person context carries the set.
+ *
+ * An active organization on the context does not make a caller a member: the
+ * resolver keeps a claim only while a current membership backs it
+ * (`vetOrganizationClaim`), so a claim beside an empty set is exactly the claim
+ * that rule drops.
+ *
+ * An anonymous guest carries no `userId`, so the guest entry is not a person
+ * this asks about (ADR-0138).
+ */
+export function isOutsideEveryOrganization(context: unknown): boolean {
+  if (!context || typeof context !== 'object') return false;
+  const ctx = context as {
+    isSystem?: unknown;
+    userId?: unknown;
+    accessible_org_ids?: unknown;
+    posture?: unknown;
+  };
+  if (ctx.isSystem === true) return false;
+  if (typeof ctx.userId !== 'string' || ctx.userId === '') return false;
+  if (!Array.isArray(ctx.accessible_org_ids) || ctx.accessible_org_ids.length > 0) return false;
+  return ctx.posture !== 'PLATFORM_ADMIN';
 }

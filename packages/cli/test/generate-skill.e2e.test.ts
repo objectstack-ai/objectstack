@@ -320,9 +320,11 @@ describe('[#11071] the same rule reaches the other generators, end to end', () =
     const written = readdirSync(objectDir).filter(f => f !== 'index.ts')[0];
     const objectBarrel = readFileSync(join(objectDir, 'index.ts'), 'utf-8');
     // Rebuilt from the metadata name rather than the filename, this would read
-    // `'./customer'` and resolve to nothing.
+    // `'./customer'` and resolve to nothing. The line re-exports the scaffold's
+    // named binding, the starter's barrel shape (`exportsByName` on the `object`
+    // generator, commit 0dac4dcf3).
     expect(objectBarrel).toContain(
-      `export { default as customer } from './${written.replace(/\.ts$/, '')}';`,
+      `export { customer } from './${written.replace(/\.ts$/, '')}';`,
     );
   });
 });

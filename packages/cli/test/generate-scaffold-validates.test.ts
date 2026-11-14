@@ -366,3 +366,62 @@ describe('[#14087] the flow scaffold binds its trigger where the engine reads it
     expect(flow.edges.length).toBeGreaterThan(0);
   });
 });
+
+describe('[#32153] the generators write the starter\'s style, and each new variant passes every gate', () => {
+  it('`os g object` declares its field through the `Field.*` builder, in a field group, exported by name', async () => {
+    const source = target('object').generate(PREREQUISITE_STEM.object, NS);
+    // The starter's `note.object.ts` style: a builder, never a raw `type:` literal…
+    expect(source).toContain("import { ObjectSchema, Field } from '@objectstack/spec/data';");
+    expect(source).toMatch(/name: Field\.text\(\{/);
+    expect(source).not.toMatch(/type: 'text'/);
+    // …a named export (the barrel re-exports it by name)…
+    expect(source).toContain(`export const probeTarget = ObjectSchema.create({`);
+    expect(target('object').exportsByName).toBe(true);
+    // …and the field placed in a declared group.
+    const artifact = (await loadScaffold('object', source)) as {
+      fieldGroups?: { key: string }[];
+      fields: Record<string, { type?: string; group?: string }>;
+    };
+    expect(artifact.fieldGroups?.map((g) => g.key)).toEqual(['details']);
+    expect(artifact.fields.name).toMatchObject({ type: 'text', group: 'details' });
+  });
+
+  it('`os g action` in a stack that declares no flow writes a declarative update, with zero findings', async () => {
+    const project: Project = { items: [] };
+    await generateInto(project, 'object', PREREQUISITE_STEM.object);
+    const object = stackBindingCandidates(stackOf(project)).objects[0];
+    const artifact = await loadScaffold('action', target('action').generate(ITEM, NS, { object }));
+    project.items.push({ type: 'action', artifact });
+    expect(artifact).toMatchObject({ operation: 'update', objectName: object.name, params: [{ field: 'name' }] });
+    expect(artifact.target).toBeUndefined();
+    expect(findings(stackOf(project))).toEqual([]);
+  });
+
+  it('`os g view open_tickets --object …` writes a named list view, with zero findings', async () => {
+    const project: Project = { items: [] };
+    await generateInto(project, 'object', PREREQUISITE_STEM.object);
+    const object = stackBindingCandidates(stackOf(project)).objects[0];
+    const view = target('view');
+    const artifact = await loadScaffold('view', view.generate('open_tickets', NS, { object }));
+    project.items.push({ type: 'view', artifact });
+    expect(artifact.object).toBe(object.name);
+    expect(artifact.list).toBeUndefined();
+    expect((artifact.listViews as Record<string, { label?: string }>).open_tickets?.label).toBe('Open Tickets');
+    // Registered under its object, so that is the name the reach check reads.
+    expect(view.itemName('open_tickets', NS, { object })).toBe(object.name);
+    expect(findings(stackOf(project))).toEqual([]);
+  });
+
+  it('`os g dashboard` names the navigation entry that lists it, and the entry parses in an app', async () => {
+    const dashboard = target('dashboard');
+    const entry = dashboard.navEntry?.('overview', NS);
+    expect(entry).toBeDefined();
+    expect(dashboard.generate('overview', NS)).toContain(entry!);
+    const project: Project = { items: [] };
+    await generateInto(project, 'dashboard', 'overview');
+    const app = await generateInto(project, 'app', 'main');
+    // The printed line, pasted where the author is told to paste it.
+    (app.navigation as unknown[]).push(await loadScaffold('app', `export default ${entry!.replace(/,$/, '')};\n`));
+    expect(findings(stackOf(project))).toEqual([]);
+  });
+});

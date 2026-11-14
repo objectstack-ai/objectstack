@@ -359,6 +359,11 @@ const GRANT_TABLES: Record<string, any[]> = {
     sys_permission_set: Object.entries(SETS).map(([id, caps]) => ({
         id, name: id, system_permissions: JSON.stringify(caps), object_permissions: '{}',
     })),
+    // Every principal is a current member of `o1`, the organization it acts in
+    // (ADR-0093 D8.1, as amended).
+    sys_member: Object.values(PRINCIPALS).map((p) => ({
+        id: `mem_${p.userId}`, user_id: p.userId, organization_id: 'o1', role: 'member',
+    })),
 };
 
 function bounded<T>(rows: T[], opts: any): T[] {

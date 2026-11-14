@@ -32,11 +32,16 @@ definePermissionSet({
   objects: { deal: { allowRead: true, allowCreate: true, allowEdit: true } },
   fields:  { 'deal.commission': { readable: false } },     // FLS: hide a field
   rowLevelSecurity: [
-    { name: 'own_deals', object: 'deal', operation: 'all', using: 'owner_id == current_user.id' },
+    {
+      name: 'own_deals', object: 'deal', operation: 'all',
+      using: 'owner_id == current_user.id',   // the rows a rep reads, edits and deletes
+      check: 'owner_id == current_user.id',   // every row a rep's insert or update writes
+    },
   ],
 });
 ```
 
+- **Declare `check` on a write policy.** When no applicable policy declares `check`, each policy's `using` stands in as the write check, OR-combined with the platform's ownership floor (`created_by == current_user.id`) wherever the write's row gate keeps it, so a USING-only `owner_id` policy also admits an update by the deal's creator; once any applicable policy declares `check`, only the declared checks decide and the USING-only policies and the floor leave the check, so a creator who is not the owner loses update unless a `check` admits them.
 - **"My own"** vs **"my team's"** vs **"the org's"** is the RLS *depth* axis (`readScope` / `writeScope`: `own | own_and_reports | unit | unit_and_below | org`, ADR-0057). A manager set uses `unit`; a rep uses `own`. The hierarchy-relative scopes (`own_and_reports` / `unit` / `unit_and_below`) need the enterprise hierarchy resolver and **fail closed to `own`** without it — see [Access depth](/docs/permissions/permission-sets#access-depth--readscope--writescope-adr-0057-d1).
 - Grants combine **most-permissively** across a user's sets; the tenant-isolation policy `AND`s on top; the superuser bypass (`viewAllRecords` / `modifyAllRecords`) short-circuits RLS where the object's posture allows it (ADR-0066).
 - For genuinely sensitive objects, set `access: { default: 'private' }` so they are **not** covered by blanket wildcard grants — access needs an explicit grant.

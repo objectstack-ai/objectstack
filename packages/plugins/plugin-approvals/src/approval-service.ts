@@ -20,7 +20,11 @@ import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formul
 // (audit stamping, this approval-row writer, the automation-run recorder). A
 // writer-local re-derivation here was rejected by name (Option B): it would be
 // a third answer to a question the codebase already answered two ways.
-import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
+import {
+  createRecordOrganizationResolver,
+  type ObjectSchemaReadDelegate,
+  type RecordOrganizationResolver,
+} from '@objectstack/metadata-core';
 import { isObjectAbsentError, keysetWalk, strandedDecisionFailure } from '@objectstack/types';
 // [#15981 / #16166] Every built-in identity NAME is deliberately absent here:
 // both arms of `isOverrideActor` read an ADR-0095 capability rung, never a name.
@@ -70,15 +74,17 @@ import type { EnableLike, ObjectCapabilitiesParsed } from '@objectstack/spec/dat
 // (`approval_recall_not_submitter`) into it ahead of this consumer half.
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import {
+  describePackageScopedHolder,
   holdsPlatformPermissionSet,
   isGrantActive,
   omitInternalFieldsFromWriteResponse,
+  PackageScopedNameRefusedError,
   resolveReadableParentIds,
   resolveUserAuthzGrants,
   vetOrganizationClaim,
   withoutOperationPrivateKeys,
 } from '@objectstack/core';
-import type { HeldPermissionSets, PackageScopedRefusal } from '@objectstack/core';
+import type { HeldPermissionSets, PackageScopedHolder, PackageScopedRefusal } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import { normalizeTenancyPosture, postureEnforcesWall } from '@objectstack/spec/security';
 import {
@@ -245,6 +251,17 @@ export interface ApprovalResumeSurface {
    */
   armedFlowPackage?(name: string): string | undefined;
   /**
+   * [ADR-0150 D4, D8 row R7, #31696] A flow name's slots, each slot's key and
+   * body, and the body filed under a run's key: how a request reads its flow
+   * once two packages hold the name ({@link ApprovalService.requestFlow}).
+   * ⚠️ Methods `AutomationEngine` implements publicly. Optional: absent, every
+   * flow is read by its bare name.
+   */
+  getFlowSlots?(name: string): ReadonlyArray<{ packageId: string | null }>;
+  flowSlotKey?(packageId: string | null, name: string): string | undefined;
+  getFlowSlot?(packageId: string | null, name: string): any | null;
+  getRunFlow?(run: { flowName: string }): any | null;
+  /**
    * Terminally cancel a suspended run (ADR-0044). Used when a recall lands
    * during a revision window — the run is paused at the revise-window node,
    * which has no reject edge to resume down.
@@ -262,7 +279,7 @@ export interface ApprovalResumeSurface {
    * `null` — unknown run, evicted log, no durable store, no automation engine —
    * as "still alive".
    */
-  getRun?(runId: string): Promise<{ status?: string } | null>;
+  getRun?(runId: string): Promise<{ status?: string; flowName?: string } | null>;
   /**
    * Whether a suspension still exists for `runId` — the pre-flight that keeps
    * a decision from being recorded against a run that can never advance
@@ -1104,6 +1121,26 @@ export type ActionTokenOutcome =
 const SYSTEM_CTX: ExecutionContext = { isSystem: true, positions: [], permissions: [] };
 
 /**
+ * [decision 6840464379] The objects whose definition this service serves, as
+ * their `schemaReadDelegate`, to the callers its door admits
+ * ({@link ApprovalService.authorizeSchemaRead}). Both declare
+ * `schemaReadDelegate: 'approvals'`; the service refuses every other name.
+ */
+const SCHEMA_READ_DELEGATED_OBJECTS: ReadonlySet<string> = new Set(['sys_approval_request', 'sys_approval_action']);
+
+/**
+ * One read of the participant rule ({@link ApprovalService.participantProbes}):
+ * the table, its filter, the column holding the request id, and whether the
+ * filter already carries the caller's organization.
+ */
+interface ParticipantProbe {
+  object: 'sys_approval_approver' | 'sys_approval_request' | 'sys_approval_action';
+  where: Record<string, unknown>;
+  key: 'id' | 'request_id';
+  orgScoped: boolean;
+}
+
+/**
  * [#13568] Bound on the pending requests one deleted record can carry into
  * {@link ApprovalService.cancelForDeletedRecord}.
  *
@@ -1283,6 +1320,43 @@ function packageScopedRefusalOf(err: unknown): PackageScopedRefusal | undefined 
   return refusal?.status === 'refused' && typeof refusal.message === 'string' && typeof refusal.reason === 'string'
     ? refusal as PackageScopedRefusal
     : undefined;
+}
+
+/**
+ * [ADR-0150 D8 row R7, #32647] A request stamped with package
+ * `withdrawnPackageId` whose package the engine holds no slot of the flow
+ * for: uninstalled, or no longer shipping the flow. `holders` are the
+ * packages whose slots DO hold the name (`null`: the package-less slot) —
+ * each another package's flow, so none is the request's.
+ */
+interface WithdrawnRequestFlow {
+  readonly withdrawnPackageId: string;
+  readonly holders: ReadonlyArray<string | null>;
+}
+
+function isWithdrawnRequestFlow(slot: unknown): slot is WithdrawnRequestFlow {
+  return typeof (slot as Partial<WithdrawnRequestFlow> | undefined)?.withdrawnPackageId === 'string';
+}
+
+/**
+ * [ADR-0150 D5, D8 row R7, #32647] The refusal a read of a withdrawn request
+ * flow answers: the stamp is the request's exact qualifier and its package
+ * holds no item of the name (`not-held-by-qualifier`), and every holder is
+ * named. The sentence is the request's own — "address it by its holder", the
+ * qualifier read's remedy, is no move an approver has: the request was
+ * opened on the stamped package's flow, and only that package can answer it.
+ */
+function withdrawnRequestFlowRefusal(name: string, withdrawn: WithdrawnRequestFlow): PackageScopedRefusal {
+  const candidates: PackageScopedHolder[] = withdrawn.holders.map((packageId) =>
+    packageId === null ? { kind: 'environment' } : { kind: 'package', packageId });
+  const stamped = withdrawn.withdrawnPackageId;
+  const message = `The flow "${name}" this approval request was opened on is package "${stamped}"'s, and package `
+    + `"${stamped}" no longer holds it: it is held by ${candidates.map(describePackageScopedHolder).join('; ')}. `
+    + 'A request is answered only from the flow of the package it was opened on (ADR-0150 D8 row R7), never '
+    + `from another package's flow of the same name: install package "${stamped}" again to act on this request.`;
+  return {
+    status: 'refused', reason: 'not-held-by-qualifier', type: 'flow', name, callerPackageId: stamped, candidates, message,
+  };
 }
 
 /**
@@ -1926,7 +2000,7 @@ export function requestVisibilitySourceOf(service: ApprovalService): RequestVisi
   return source;
 }
 
-export class ApprovalService implements IApprovalService {
+export class ApprovalService implements IApprovalService, ObjectSchemaReadDelegate {
   private readonly engine: ApprovalEngine;
   private readonly clock: ApprovalClock;
   private readonly logger?: ApprovalServiceOptions['logger'];
@@ -1939,6 +2013,8 @@ export class ApprovalService implements IApprovalService {
   private objectReadAdmission?: ObjectReadAdmissionSource;
   /** [#11993] Lazily-resolved deployment i18n lookup for refusal copy. */
   private messageTranslator?: () => ValidationMessageTranslator | undefined;
+  /** [decision 6840464379] {@link authorizeSchemaRead}'s verdict, kept per request context. */
+  private readonly schemaReadVerdicts = new WeakMap<object, Promise<boolean>>();
   /** [#24863] Lazily-resolved `i18n` service for the reader-locale display labels. */
   private i18nServiceSource?: () => ReaderLabelI18n | undefined;
   /** [ADR-0142 D6] Lazily-resolved `ownership-queue` service a `queue` approver expands through. */
@@ -2033,6 +2109,16 @@ export class ApprovalService implements IApprovalService {
           }
         }
         return this.visibleRequestIds(context, tenantOrg, anchor);
+      },
+      // [#32442] "Waiting on me" for the read gate: the pending-approver index
+      // over the caller's acting addresses — the fold `visibleRequestIds`'
+      // current-approver probe and `listRequests`' approver filter read. The
+      // index holds rows only while a request is pending.
+      waitingOnCallerIds: async (context) => {
+        const tenantOrg = (context as any)?.organizationId ?? context?.tenantId ?? null;
+        const who = await this.actingCaller(context);
+        if (!who) return [];
+        return (await this.approverRequestIds(actingAddresses(who), tenantOrg)) ?? [];
       },
     });
   }
@@ -3683,12 +3769,90 @@ export class ApprovalService implements IApprovalService {
    * its own body, and `null` for an environment-authored override of it, a
    * flow authored in this deployment, a request with no flow, and an engine
    * that cannot say. ⛔ Not `packagedFlowOwner`: it names the package that
-   * ships the NAME, whichever body is armed under it.
+   * ships the NAME, whichever body is armed under it. [#31696] Asked by the
+   * key the request's flow is filed under ({@link requestFlowSlot}), the
+   * name itself while it is its one slot's key.
    */
-  private flowPackageOf(flowName: string | null | undefined): string | null {
-    if (!flowName || typeof this.automation?.armedFlowPackage !== 'function') return null;
-    const owner = this.automation.armedFlowPackage(flowName);
+  private flowPackageOf(flowKey: string | null | undefined): string | null {
+    if (!flowKey || typeof this.automation?.armedFlowPackage !== 'function') return null;
+    const owner = this.automation.armedFlowPackage(flowKey);
     return typeof owner === 'string' && owner !== '' ? owner : null;
+  }
+
+  /**
+   * [ADR-0150 D4, D8 row R7, #31696] The engine slot of a request's flow
+   * `name`: by the package stamped when the request opened
+   * (`process_package`), else by its run's key (`runKey`, or read from
+   * `runId`: its suspension, else its record), the run doors' lookup: the
+   * one slot filed under that key. `undefined` when the engine cannot say,
+   * or nothing names exactly one slot: the bare name is all a reader has,
+   * and the bare read refuses a name two packages hold, naming every holder.
+   * ⛔ Never a pick between holders.
+   *
+   * [ADR-0150 D8 row R7, #32647] A request stamped with a package belongs to
+   * that package's flow and to no other: when the stamped package holds no
+   * slot of `name` (it was uninstalled, or stopped shipping the flow), the
+   * answer is {@link WithdrawnRequestFlow}, naming the slots that DO hold the
+   * name — never the run's key and never the bare name, both of which would
+   * read another package's flow (the run's key is the bare name again once a
+   * second package holds it alone).
+   */
+  private async requestFlowSlot(
+    name: string,
+    request: { packageId?: unknown; runId?: unknown; runKey?: string },
+  ): Promise<{ packageId: string | null; key: string } | WithdrawnRequestFlow | undefined> {
+    const automation = this.automation;
+    if (typeof automation?.getFlowSlots !== 'function' || typeof automation.flowSlotKey !== 'function') return undefined;
+    const slots = automation.getFlowSlots(name)
+      .map(({ packageId }) => ({ packageId, key: automation.flowSlotKey!(packageId, name) ?? '' }));
+    const own = slots.find((slot) => slot.packageId !== null && slot.packageId === request.packageId);
+    if (own) return own;
+    if (typeof request.packageId === 'string' && request.packageId !== '') {
+      return { withdrawnPackageId: request.packageId, holders: slots.map((slot) => slot.packageId) };
+    }
+    let key = request.runKey;
+    if (key === undefined && typeof request.runId === 'string' && request.runId !== '') {
+      try {
+        key = (await automation.suspensionOf?.(request.runId))?.flowName ?? (await automation.getRun?.(request.runId))?.flowName;
+      } catch { /* unread: the bare name decides */ }
+    }
+    const filed = slots.filter((slot) => slot.key === key);
+    return filed.length === 1 ? filed[0] : undefined;
+  }
+
+  /**
+   * [ADR-0150 D4, D8 row R7, #31696] The flow body the request `raw` belongs
+   * to: its own slot's ({@link requestFlowSlot}), else the bare read of
+   * `name`, which answers a one-holder name as before and refuses a name two
+   * packages hold, naming every holder. The caller has checked `getFlow`.
+   *
+   * [ADR-0150 D8 row R7, #32647] A request whose stamped package holds no
+   * slot of `name` ({@link WithdrawnRequestFlow}): `null` while no slot holds
+   * the name either, the answer the bare read gives a deleted flow; else
+   * refused, `409 RESOURCE_CONFLICT` naming every holder, and nothing read.
+   */
+  private async requestFlow(raw: any, name: string): Promise<any | null> {
+    const slot = await this.requestFlowSlot(name, { packageId: raw?.process_package, runId: raw?.flow_run_id });
+    if (isWithdrawnRequestFlow(slot)) {
+      if (slot.holders.length === 0) return null;
+      throw new PackageScopedNameRefusedError(withdrawnRequestFlowRefusal(name, slot));
+    }
+    if (slot && typeof this.automation?.getFlowSlot === 'function') return this.automation.getFlowSlot(slot.packageId, name);
+    return this.automation!.getFlow!(name);
+  }
+
+  /**
+   * [#31696] The key the request `raw`'s flow is filed under ({@link requestFlowSlot}), else its name; `null` for none.
+   * [#32647] `null` too for a request whose stamped package holds no slot of
+   * the name ({@link WithdrawnRequestFlow}): its flow is gone, and the key
+   * another package's slot is filed under is not its key.
+   */
+  private async requestFlowKey(raw: any): Promise<string | null> {
+    const name = typeof raw?.process_name === 'string' && raw.process_name.startsWith('flow:') ? raw.process_name.slice('flow:'.length) : '';
+    if (!name) return null;
+    const slot = await this.requestFlowSlot(name, { packageId: raw.process_package, runId: raw.flow_run_id });
+    if (isWithdrawnRequestFlow(slot)) return null;
+    return slot?.key ?? name;
   }
 
   /**
@@ -4416,6 +4580,12 @@ export class ApprovalService implements IApprovalService {
       nodeId: string;
       config: ApprovalNodeConfig;
       flowName?: string;
+      /**
+       * [#31696] The key the run's flow is filed under (the engine's
+       * `flowKeyOfRun`), which names the run's own slot once two packages
+       * hold `flowName`.
+       */
+      flowKey?: string;
       /** Authored flow label, snapshotted for inbox display. */
       flowLabel?: string;
       /** Authored node label, snapshotted for inbox display. */
@@ -4496,8 +4666,12 @@ export class ApprovalService implements IApprovalService {
     const resolvedFrom: Record<string, unknown> = {};
     const exprCtx = { trigger: input.record ?? null, vars: input.variables ?? null };
     // [ADR-0150 D3] The package this step is declared in — its flow's — which
-    // every slate below reads a `queue` approver's name from.
-    const callerPackageId = this.flowPackageOf(input.flowName);
+    // every slate below reads a `queue` approver's name from. [#31696] Read
+    // from the run's own slot, whose package the request records (D8 R7).
+    const runSlot = input.flowName ? await this.requestFlowSlot(input.flowName, { runKey: input.flowKey, runId: input.runId }) : undefined;
+    // No package is asked here, so no stamp can have withdrawn.
+    const flowSlot = isWithdrawnRequestFlow(runSlot) ? undefined : runSlot;
+    const callerPackageId = this.flowPackageOf(flowSlot?.key ?? input.flowName);
     const submitterId = input.submitterId !== undefined ? input.submitterId : (context.userId ?? null);
     // [#25573] `excludeSubmitter: true` (ruling 6377888641, letter B): the
     // submitter is taken off every slate this request can open on. It runs on
@@ -4781,6 +4955,7 @@ export class ApprovalService implements IApprovalService {
     const row: any = {
       id,
       process_name: processName,
+      ...(flowSlot?.packageId ? { process_package: flowSlot.packageId } : {}),
       object_name: input.object,
       record_id: input.recordId,
       submitter_id: submitterId,
@@ -5278,6 +5453,9 @@ export class ApprovalService implements IApprovalService {
       await this.assertDecisionOutputsMatchDeclarations(acceptedOutputs, declaredDefs, org);
     }
 
+    // A decision attaches only files its caller uploaded, refused before any write.
+    await this.assertAttachmentsUploadedByCaller(input.attachments, org, context);
+
     // The run behind this request must still be resumable before ANY of it is
     // written down (#4420). Last of the refusals, first before the writes: a
     // decision recorded against a dead run is a zombie nothing later can undo,
@@ -5341,10 +5519,9 @@ export class ApprovalService implements IApprovalService {
           { approvers: config.approvers }, parseJson(raw.payload_json, undefined), org,
           {
             onDirectoryFailure: 'literal',
-            // [ADR-0150 D3] The step's flow is the row's `flow:<name>` process.
-            callerPackageId: this.flowPackageOf(
-              typeof raw.process_name === 'string' && raw.process_name.startsWith('flow:') ? raw.process_name.slice('flow:'.length) : null,
-            ),
+            // [ADR-0150 D3] The step's flow is the row's `flow:<name>` process,
+            // [#31696] read from the request's own slot.
+            callerPackageId: this.flowPackageOf(await this.requestFlowKey(raw)),
           },
         );
         groupMap = {};
@@ -5468,6 +5645,61 @@ export class ApprovalService implements IApprovalService {
    */
   private static resumeStatusOf(err: unknown): string | undefined {
     return (err as { resumeStatus?: string } | undefined)?.resumeStatus;
+  }
+
+  /**
+   * A decision or a comment attaches only files its caller uploaded.
+   *
+   * Every id in `attachments` must name a `sys_file` of the request's
+   * organization whose uploader is the caller (`owner_id === userId`) — the
+   * download door's own first rule ("the uploader may always download"), so
+   * no file is attached that its caller could not already open. Anything else
+   * is refused before any write, with one answer for every refused id: a file
+   * the caller did not upload, an id that names no file the request's
+   * organization reaches, a value that is not a list of ids, and a read of the
+   * file store that fails. Nothing tells those apart.
+   *
+   * Not judged: a system caller (its inputs are server-minted, as the
+   * file-reference rule treats every system write), and a kernel with no file
+   * store (`sys_file` not registered, so no file is served from it).
+   */
+  private async assertAttachmentsUploadedByCaller(
+    attachments: unknown,
+    organizationId: string | null,
+    context: ExecutionContext,
+  ): Promise<void> {
+    if (attachments === undefined || attachments === null) return;
+    if (Array.isArray(attachments) && attachments.length === 0) return;
+    if (context?.isSystem) return;
+    if (!this.engine.getSchema?.('sys_file')) return;
+
+    const refuse = (): never => {
+      throw new Error(
+        'VALIDATION_FAILED: attachments can only be files you uploaded yourself. '
+        + 'Upload the file, then attach it again.',
+      );
+    };
+    const userId = actingUserId(context);
+    if (!userId) refuse();
+    const ids = Array.isArray(attachments) ? attachments : [attachments];
+    if (!ids.every((id): id is string => typeof id === 'string' && id.length > 0)) refuse();
+    const wanted = [...new Set(ids as string[])];
+
+    let rows: any[] = [];
+    try {
+      rows = (await this.engine.find('sys_file', {
+        where: { id: { $in: wanted } },
+        fields: ['id', 'owner_id'],
+        limit: wanted.length,
+        context: organizationId ? { ...SYSTEM_CTX, tenantId: organizationId } : SYSTEM_CTX,
+      })) ?? [];
+    } catch {
+      refuse();
+    }
+    const uploadedByCaller = new Set(
+      rows.filter((r) => r?.owner_id != null && String(r.owner_id) === userId).map((r) => String(r.id)),
+    );
+    if (!wanted.every((id) => uploadedByCaller.has(id))) refuse();
   }
 
   /**
@@ -6203,7 +6435,10 @@ export class ApprovalService implements IApprovalService {
       const parent = batch.parent;
       if (!parent) return {};
       if (typeof this.automation?.getFlow !== 'function') return {};
-      const flow: any = await this.automation.getFlow(parent.flowName);
+      // [#31696] The parent's flow name is its slot key: read the body filed under it.
+      const flow: any = typeof this.automation.getRunFlow === 'function'
+        ? this.automation.getRunFlow({ flowName: parent.flowName })
+        : await this.automation.getFlow(parent.flowName);
       const node = Array.isArray(flow?.nodes) ? flow.nodes.find((n: any) => n?.id === parent.nodeId) : undefined;
       if (node?.type !== 'map') return {};
       batchRunId = parent.runId;
@@ -6647,7 +6882,7 @@ export class ApprovalService implements IApprovalService {
     if (!flowName || !nodeId || typeof this.automation?.getFlow !== 'function') {
       throw new Error('VALIDATION_FAILED: send-back requires the owning flow definition (automation engine unavailable)');
     }
-    const flow: any = await this.automation.getFlow(flowName);
+    const flow: any = await this.requestFlow(raw, flowName);
     const reviseEdges = Array.isArray(flow?.edges)
       ? flow.edges.filter((e: any) => e?.source === nodeId && e?.label === APPROVAL_BRANCH_LABELS.revise)
       : [];
@@ -7274,6 +7509,8 @@ export class ApprovalService implements IApprovalService {
     if (!context.isSystem && !isSubmitter && slot === undefined) {
       throw new Error(`FORBIDDEN: actor '${actorId}' is not on this request`);
     }
+    // A comment attaches only files its caller uploaded, refused before any write.
+    await this.assertAttachmentsUploadedByCaller(input.attachments, raw.organization_id ?? null, context);
 
     const now = this.clock.now().toISOString();
     await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
@@ -7967,7 +8204,7 @@ export class ApprovalService implements IApprovalService {
         `advances a step nobody decided`,
       );
     }
-    const flow: any = await this.automation.getFlow(flowName);
+    const flow: any = await this.requestFlow(raw, flowName);
     const nodeTypeById = new Map<string, string>(
       (Array.isArray(flow?.nodes) ? flow.nodes : [])
         .filter((n: any) => typeof n?.id === 'string')
@@ -8969,7 +9206,8 @@ export class ApprovalService implements IApprovalService {
    * builds a mentioned user's: their own grants by the resolver every request
    * envelope comes from (`resolveUserAuthzGrants`), with the organization kept
    * only while `vetOrganizationClaim` — the session arm of
-   * `resolveAuthzContext` — backs it under the posture in force. An e-mail
+   * `resolveAuthzContext` — backs it, under every posture since ADR-0093 D8.1
+   * was amended (the posture argument is no longer read). An e-mail
    * address names the account that carries it; one that no account carries
    * has no envelope (`undefined`).
    */
@@ -9401,12 +9639,8 @@ export class ApprovalService implements IApprovalService {
     targets: string[],
     tenantOrg: string | null,
   ): Promise<string[] | null> {
-    if (!targets.length) return null;
-    const addresses = [...new Set(targets.flatMap(equivalentApproverAddresses))];
-    const where: any = addresses.length === 1
-      ? { approver: addresses[0] }
-      : { approver: { $in: addresses } };
-    if (tenantOrg) where.organization_id = tenantOrg;
+    const where = this.approverIndexWhere(targets, tenantOrg);
+    if (!where) return null;
     const rows = await this.engine.find('sys_approval_approver', {
       where, fields: ['request_id'],
       limit: ApprovalService.APPROVER_INDEX_CAP, context: SYSTEM_CTX,
@@ -9418,6 +9652,72 @@ export class ApprovalService implements IApprovalService {
       });
     }
     return [...new Set<string>(list.map(r => String(r.request_id)))];
+  }
+
+  /**
+   * The `sys_approval_approver` filter for "a pending slot one of `targets`
+   * holds", scoped to `tenantOrg`; `null` when `targets` is empty. One filter
+   * for both of its readers: {@link approverRequestIds} and the current-approver
+   * probe of {@link participantProbes}.
+   */
+  private approverIndexWhere(targets: string[], tenantOrg: string | null): Record<string, unknown> | null {
+    if (!targets.length) return null;
+    const addresses = [...new Set(targets.flatMap(equivalentApproverAddresses))];
+    const where: any = addresses.length === 1
+      ? { approver: addresses[0] }
+      : { approver: { $in: addresses } };
+    if (tenantOrg) where.organization_id = tenantOrg;
+    return where;
+  }
+
+  /**
+   * The participant rule's reads, as data: one per fact, each naming its
+   * table, its filter and the column that holds the request id. Two read
+   * shapes ask the one rule — {@link visibleRequestIds} collects the ids (the
+   * door needs the set), {@link servesAnyRequest} asks only whether one
+   * exists — so the rule is written here once and ⛔ copied into neither.
+   *
+   * The facts, in the order the door reads them (see {@link visibleRequestIds}
+   * for why each one is a fact):
+   *
+   *   - current approver — a pending slot under one of the caller's acting
+   *     addresses, via the normalized `sys_approval_approver` index;
+   *   - submitter — the request row itself;
+   *   - already acted — the person (`actor_id` = the caller's user id) or the
+   *     slot (`acted_as` among the caller's acting addresses). ⛔ Neither is a
+   *     fallback for the other (#21411).
+   *
+   * `orgScoped` says whether `where` already carries the caller's
+   * organization. The already-acted probe does not: the door scopes the ids it
+   * collects on the request row instead.
+   */
+  private participantProbes(who: ActingCaller, tenantOrg: string | null): ParticipantProbe[] {
+    const uid = who.userId;
+    const acting = actingAddresses(who);
+    const orgWhere = tenantOrg ? { organization_id: tenantOrg } : {};
+    const probes: ParticipantProbe[] = [];
+    const approverWhere = this.approverIndexWhere(acting, tenantOrg);
+    if (approverWhere) {
+      probes.push({ object: 'sys_approval_approver', where: approverWhere, key: 'request_id', orgScoped: true });
+    }
+    probes.push({
+      object: 'sys_approval_request',
+      where: { submitter_id: uid, ...orgWhere },
+      key: 'id',
+      orgScoped: true,
+    });
+    probes.push({
+      object: 'sys_approval_action',
+      where: {
+        $or: [
+          { actor_id: uid },
+          { acted_as: acting.length === 1 ? acting[0] : { $in: acting } },
+        ],
+      },
+      key: 'request_id',
+      orgScoped: false,
+    });
+    return probes;
   }
 
   /**
@@ -9481,54 +9781,34 @@ export class ApprovalService implements IApprovalService {
     const who = caller === undefined ? await this.actingCaller(context) : caller;
     // A tokenless/anonymous caller participates in nothing. Fail closed.
     if (!who) return new Set<string>();
-    const uid = who.userId;
-    const acting = actingAddresses(who);
 
     const ids = new Set<string>();
     const cap = ApprovalService.APPROVER_INDEX_CAP;
-    const add = (rows: unknown, key: string) => {
+    const add = (rows: unknown, { object, key }: ParticipantProbe) => {
       const list: any[] = Array.isArray(rows) ? rows : [];
       for (const r of list) if (r?.[key] != null) ids.add(String(r[key]));
       if (list.length >= cap) {
         this.logger?.warn?.(
           '[approvals] participant-visibility probe hit its window — some requests may be hidden from a legitimate participant',
-          { cap, key },
+          { cap, object, key },
         );
       }
     };
 
     try {
-      // Current approver — via the normalized index, so every identity form
-      // the write path recorded is covered: the user id, the account's email,
-      // and every slot address of a position the caller holds (see the doc
-      // block above).
-      for (const id of (await this.approverRequestIds(acting, tenantOrg)) ?? []) ids.add(id);
-
-      const orgWhere = tenantOrg ? { organization_id: tenantOrg } : {};
-      add(
-        await this.engine.find('sys_approval_request', {
-          where: { submitter_id: uid, ...orgWhere },
-          fields: ['id'], limit: cap, context: SYSTEM_CTX,
-        }),
-        'id',
-      );
-      // Already acted on it: a past approver whose slot has moved on, or a
-      // commenter. They saw it legitimately; keep it that way. Two facts, each
-      // compared only with its own identity kind (see the doc block): the
-      // person who acted (`actor_id` = the caller's user id), and the slot it
-      // was taken as (`acted_as` among the current-approver probe's addresses).
-      add(
-        await this.engine.find('sys_approval_action', {
-          where: {
-            $or: [
-              { actor_id: uid },
-              { acted_as: acting.length === 1 ? acting[0] : { $in: acting } },
-            ],
-          },
-          fields: ['request_id'], limit: cap, context: SYSTEM_CTX,
-        }),
-        'request_id',
-      );
+      // The door needs the id set, so each fact is collected in its window.
+      // Current approver first — via the normalized index, so every identity
+      // form the write path recorded is covered (see the doc block above) —
+      // then the submitter, then already acted: a past approver whose slot has
+      // moved on, or a commenter, who saw it legitimately and keeps it.
+      for (const probe of this.participantProbes(who, tenantOrg)) {
+        add(
+          await this.engine.find(probe.object, {
+            where: probe.where, fields: [probe.key], limit: cap, context: SYSTEM_CTX,
+          }),
+          probe,
+        );
+      }
     } catch (err) {
       // Never widen on error: a failed probe yields whatever was collected.
       this.logger?.warn?.('[approvals] participant-visibility probe failed', {
@@ -10007,7 +10287,7 @@ export class ApprovalService implements IApprovalService {
     await this.enrichRows([row], served, context);
     const labels = this.readerLabels(context);
     if (labels) localizeRequestLabels(row, labels);
-    await this.attachFlowSteps(row, labels);
+    await this.attachFlowSteps(row, labels, raw);
     await this.attachDecisionProgress(row, raw);
     this.attachViewers([row], context, caller);
     return row;
@@ -10126,11 +10406,11 @@ export class ApprovalService implements IApprovalService {
    * else by the node's authored label. So the progress strip and the request's
    * `current_step_label` name the current step alike.
    */
-  private async attachFlowSteps(row: ApprovalRequestRow, labels: ReaderLabels | undefined): Promise<void> {
+  private async attachFlowSteps(row: ApprovalRequestRow, labels: ReaderLabels | undefined, raw: any): Promise<void> {
     try {
       const flowName = row.process_name?.startsWith('flow:') ? row.process_name.slice(5) : undefined;
       if (!flowName || typeof this.automation?.getFlow !== 'function') return;
-      const flow: any = await this.automation.getFlow(flowName);
+      const flow: any = await this.requestFlow(raw, flowName);
       if (!flow?.nodes?.length) return;
       const nodesById = new Map<string, any>(flow.nodes.map((n: any) => [n.id, n]));
       await this.attachFlowRoute(row, flowName, flow, nodesById, labels);
@@ -10306,5 +10586,112 @@ export class ApprovalService implements IApprovalService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * `ObjectSchemaReadDelegate` — may this caller, whom the object read check
+   * refuses, be served the DEFINITION of `sys_approval_request` or
+   * `sys_approval_action`? (ADR-0106 as amended by ruling record 6787890900;
+   * exception by maintainer decision 6840464379; declared by both objects'
+   * `schemaReadDelegate`.)
+   *
+   * Both objects are closed on the data side on purpose, and their rows reach
+   * a member only through this service's door. The request page that door
+   * links to needs both definitions to render, so the callers the door serves
+   * a request to are the callers who need them: this answers by the door's
+   * own rule, asked without a named request: does the door serve the caller
+   * at least one request? The participant rule `getRequest` and
+   * `listActions` apply ({@link participantProbes}, which
+   * {@link visibleRequestIds} reads), asked for one row rather than the id
+   * set ({@link servesAnyRequest}), then the door's own row read
+   * inside the caller's organization ({@link findRequestRow}'s scope): the
+   * already-acted probe is not organization-scoped, so an id it collects in
+   * another organization is one the door would not serve here, and must not
+   * count. That admits a current approver, the submitter, a past actor, and
+   * the override holder; a member party to no request in their organization
+   * is refused and keeps the absent answer.
+   *
+   * The record-reader tier is not asked: it is evaluated only against a named
+   * record, and a definition read names none.
+   *
+   * Any other object name is refused: any object may name this service, and
+   * the service speaks only for its own two. Seeing a definition confers
+   * nothing: the rows stay behind this service's door and the data door's
+   * read check. Errors propagate (the outlet answers them as its 5xx fault);
+   * a failed visibility probe already reads as "nothing collected".
+   *
+   * One answer per request: both objects ask the same question of the same
+   * caller, and an object list asks it for both, so the verdict is kept for
+   * the life of the context object the outlet resolved for this request.
+   */
+  async authorizeSchemaRead(objectName: string, context: ExecutionContext): Promise<boolean> {
+    if (!SCHEMA_READ_DELEGATED_OBJECTS.has(objectName)) return false;
+    if (context === null || typeof context !== 'object') return this.servesAnyRequest(context);
+    let verdict = this.schemaReadVerdicts.get(context);
+    if (!verdict) {
+      verdict = this.servesAnyRequest(context);
+      this.schemaReadVerdicts.set(context, verdict);
+    }
+    return verdict;
+  }
+
+  /**
+   * {@link authorizeSchemaRead}'s question, asked once: does the door serve
+   * this caller any request?
+   *
+   * An existence question, so it is asked as one: the participant rule's
+   * reads ({@link participantProbes}, the rule {@link visibleRequestIds}
+   * applies) each fetch at most ONE row, and a hit is confirmed by one row
+   * read of its request in the caller's organization — never the id windows
+   * the door collects. Every hidden-object list read by a member asks this,
+   * so its cost must not grow with the approval history: each probe is an
+   * equality read on an indexed column (`sys_approval_approver`'s
+   * `approver`, `sys_approval_request`'s `submitter_id`,
+   * `sys_approval_action`'s `actor_id` / `acted_as`).
+   *
+   * The already-acted probe, which the door scopes on the request row, is
+   * scoped here on the action row's own `organization_id` — stamped from its
+   * request's organization by every writer, and moved with it by the
+   * organization backfill — so the one row it fetches is one from this
+   * organization. Asked under no organization, nothing is scoped, as on the
+   * door.
+   *
+   * Errors as on the door: a failed participant probe reads as "nothing
+   * collected" (logged, never widened), a failed request read propagates.
+   */
+  private async servesAnyRequest(context: ExecutionContext): Promise<boolean> {
+    // `organizationId` is not on the envelope — see isOverrideActor().
+    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId ?? null;
+    if (this.isOverrideActor(context, tenantOrg)) return true;
+    const who = await this.actingCaller(context);
+    // A tokenless/anonymous caller participates in nothing. Fail closed.
+    if (!who) return false;
+    for (const probe of this.participantProbes(who, tenantOrg)) {
+      const where = tenantOrg && !probe.orgScoped ? { ...probe.where, organization_id: tenantOrg } : probe.where;
+      let hit: unknown;
+      try {
+        const rows = await this.engine.find(probe.object, {
+          where, fields: [probe.key], limit: 1, context: SYSTEM_CTX,
+        });
+        hit = Array.isArray(rows) ? rows[0]?.[probe.key] : undefined;
+      } catch (err) {
+        // Never widen on error, and ask no further fact: the door's probe
+        // stops collecting at the first failure too.
+        this.logger?.warn?.('[approvals] participant-visibility probe failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }
+      if (hit == null) continue;
+      // The submitter probe reads the request row itself, in the organization.
+      if (probe.object === 'sys_approval_request') return true;
+      const requestWhere: any = { id: String(hit) };
+      if (tenantOrg) requestWhere.organization_id = tenantOrg;
+      const requests = await this.engine.find('sys_approval_request', {
+        where: requestWhere, fields: ['id'], limit: 1, context: SYSTEM_CTX,
+      });
+      if (Array.isArray(requests) && requests.length > 0) return true;
+    }
+    return false;
   }
 }

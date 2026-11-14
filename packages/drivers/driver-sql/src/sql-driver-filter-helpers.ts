@@ -67,6 +67,7 @@ import type { OracleUuidBindingRole } from './sql-driver-oracle-dialect.js';
 import { jsonMembershipUnsupportedOnOracleError } from './sql-driver-predicate-emitters.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
+import { isDateOnInstantColumn, mysqlCalendarDaySql, sqliteCalendarDaySql, utcCalendarDaySql } from './date-on-instant-column.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link FilterHelpersFacet} read — every one of
@@ -96,6 +97,7 @@ export interface FilterHelpersHost {
   coercionKey: SqlDriver['coercionKey'];
   compileFilters: SqlDriver['compileFilters'];
   readonly dateFields: SqlDriver['dateFields'];
+  readonly dateFieldsOnInstantColumn: SqlDriver['dateFieldsOnInstantColumn'];
   readonly datetimeFields: SqlDriver['datetimeFields'];
   filterColumnExpr: SqlDriver['filterColumnExpr'];
   isJsonColumn: SqlDriver['isJsonColumn'];
@@ -357,7 +359,20 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#filterColumnExpr`; the method's docblock there is its contract. */
-  static filterColumnExpr(this: Pick<FilterHelpersHost, 'needsLegacyDatetimeRepair' | 'needsLegacyTimeRepair' | 'sqliteCanonicalDatetimeSql' | 'sqliteCanonicalTimeSql'>, table: string | null | undefined, field: string, column: string): { sql: string; bindings: any[] } | null {
+  static filterColumnExpr(this: Pick<FilterHelpersHost, 'dateFields' | 'dateFieldsOnInstantColumn' | 'isMysql' | 'isSqlite' | 'needsLegacyDatetimeRepair' | 'needsLegacyTimeRepair' | 'sqliteCanonicalDatetimeSql' | 'sqliteCanonicalTimeSql'>, table: string | null | undefined, field: string, column: string): { sql: string; bindings: any[] } | null {
+    // [#32851] A `Field.date` on a Postgres `timestamptz` column compares as its
+    // UTC calendar day, the day the read door presents — never cast in the
+    // session's zone. [#33002] On SQLite and MySQL such a column compares as
+    // its calendar day too, so a row written while the field was a `datetime`
+    // (an instant with a time of day) matches the day it reads as. See
+    // `date-on-instant-column.ts`.
+    if (isDateOnInstantColumn(this, table, field)) {
+      if (this.isSqlite) {
+        return { sql: sqliteCalendarDaySql(this.sqliteCanonicalDatetimeSql('??')), bindings: [column, column, column, column] };
+      }
+      if (this.isMysql) return { sql: mysqlCalendarDaySql('??'), bindings: [column] };
+      return { sql: utcCalendarDaySql('??'), bindings: [column] };
+    }
     if (this.needsLegacyDatetimeRepair(table, field)) {
       return {
         sql: this.sqliteCanonicalDatetimeSql('??'),
@@ -379,7 +394,13 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#temporalFilterColumnSql`; the method's docblock there is its contract. */
-  static temporalFilterColumnSql(this: Pick<FilterHelpersHost, 'needsLegacyDatetimeRepair' | 'needsLegacyTimeRepair' | 'sqliteCanonicalDatetimeSql' | 'sqliteCanonicalTimeSql'>, objectName: string, field: string, columnSql: string): string {
+  static temporalFilterColumnSql(this: Pick<FilterHelpersHost, 'dateFields' | 'dateFieldsOnInstantColumn' | 'isMysql' | 'isSqlite' | 'needsLegacyDatetimeRepair' | 'needsLegacyTimeRepair' | 'sqliteCanonicalDatetimeSql' | 'sqliteCanonicalTimeSql'>, objectName: string, field: string, columnSql: string): string {
+    // [#32851] [#33002] The outside-the-builder twin of `filterColumnExpr`'s arm.
+    if (isDateOnInstantColumn(this, objectName, field)) {
+      if (this.isSqlite) return sqliteCalendarDaySql(this.sqliteCanonicalDatetimeSql(columnSql));
+      if (this.isMysql) return mysqlCalendarDaySql(columnSql);
+      return utcCalendarDaySql(columnSql);
+    }
     if (this.needsLegacyDatetimeRepair(objectName, field)) {
       return this.sqliteCanonicalDatetimeSql(columnSql);
     }

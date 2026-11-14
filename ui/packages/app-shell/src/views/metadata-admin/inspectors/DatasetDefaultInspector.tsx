@@ -38,6 +38,7 @@ import { formatMeasure } from '@object-ui/core';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { type FilterCondition } from './datasetFilterCondition.js';
 import { FilterConditionField } from './FilterConditionField.js';
+import { DatasetMemberVocabulary, writeMemberVocabulary, type MemberVocabularyKey } from './DatasetMemberVocabulary.js';
 import {
   useObjectOptions,
   useDatasetFieldCatalog,
@@ -129,10 +130,16 @@ const CURRENCY_OPTIONS = [
   { value: 'AUD', label: 'AUD ($)' },
 ];
 
-type Dimension = { name?: string; label?: string; field?: string; type?: string; dateGranularity?: string };
+/**
+ * A member's business vocabulary (ADR-0149 D1): `synonyms` is a word list,
+ * `description` an `I18nLabel` (a string or an inline locale map). Both are
+ * edited by `DatasetMemberVocabulary`.
+ */
+type MemberVocabulary = { synonyms?: string[]; description?: unknown };
+type Dimension = { name?: string; label?: string; field?: string; type?: string; dateGranularity?: string } & MemberVocabulary;
 type DerivedSpec = { op?: string; of?: string[] };
 type DurationSpec = { from?: string; to?: string; unit?: string };
-type Measure = {
+type Measure = MemberVocabulary & {
   name?: string;
   label?: string;
   aggregate?: string;
@@ -440,6 +447,11 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
     onPatch({ dimensions: dimensions.map((d, idx) => (idx === i ? { ...d, ...patch } : d)) });
   const patchMeasure = (i: number, patch: Partial<Measure>) =>
     onPatch({ measures: measures.map((m, idx) => (idx === i ? { ...m, ...patch } : m)) });
+  // Vocabulary writes remove an emptied key rather than storing `[]` / `''`.
+  const writeDimensionVocabulary = (i: number, key: MemberVocabularyKey, value: unknown) =>
+    onPatch({ dimensions: dimensions.map((d, idx) => (idx === i ? writeMemberVocabulary(d, key, value) : d)) });
+  const writeMeasureVocabulary = (i: number, key: MemberVocabularyKey, value: unknown) =>
+    onPatch({ measures: measures.map((m, idx) => (idx === i ? writeMemberVocabulary(m, key, value) : m)) });
 
   // Picking a field auto-infers the dimension type from the field's framework
   // type (region:string, close_date:date, …) — the BI "pick field, type follows"
@@ -680,6 +692,7 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
               {d.type === 'date' && (
                 <InspectorSelectField label={tr('engine.inspector.dataset.dateBucket')} value={d.dateGranularity ?? ''} options={localizeOptions(DATE_GRANULARITY_OPTIONS, locale)} onCommit={(v) => patchDimension(i, { dateGranularity: v || undefined })} disabled={readOnly} />
               )}
+              <DatasetMemberVocabulary kind="dimensions" member={d} locale={locale} disabled={readOnly} onWrite={(key, value) => writeDimensionVocabulary(i, key, value)} />
             </Advanced>
           </div>
         ))}
@@ -731,6 +744,7 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
               {(() => { const rel = missingRelationship(m.field, include); return rel ? <RelWarning rel={rel} disabled={readOnly} locale={locale} onAdd={() => onPatch({ include: appendArray(include, rel) })} /> : null; })()}
               <Advanced locale={locale}>
                 <InspectorTextField label={tr('engine.inspector.dataset.labelOptional')} value={m.label ?? ''} onCommit={(v) => patchMeasure(i, { label: v || undefined })} placeholder={m.name || tr('engine.inspector.dataset.displayLabel')} disabled={readOnly} />
+                <DatasetMemberVocabulary kind="measures" member={m} locale={locale} disabled={readOnly} onWrite={(key, value) => writeMeasureVocabulary(i, key, value)} />
                 <MeasureFormatField
                   measure={m}
                   monetaryField={fieldOptions.find((o) => o.value === m.field)?.type === 'currency'}

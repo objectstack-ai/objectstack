@@ -71,6 +71,50 @@ export function isWideFieldType(type: string): boolean {
 }
 
 /**
+ * Field types whose value is a LIST of files once the object field declares
+ * `multiple: true` — the multi-capable upload types `@objectstack/spec`
+ * declares (`file`, `image`), in the same two spellings as
+ * {@link WIDE_FIELD_TYPES}: the bare spec name and the widget id
+ * `mapFieldTypeToFormType` maps it to.
+ *
+ * Kept OUT of `WIDE_FIELD_TYPES` on purpose: the type alone does not make the
+ * field wide — a single file is one short name and reads fine in one cell —
+ * so {@link isWideFieldType} keeps answering on the type alone, the question
+ * the entry form asks too.
+ */
+const MULTI_FILE_FIELD_TYPES = new Set(['file', 'image', 'field:file', 'field:image']);
+
+/** The object-field keys {@link isWideDetailField} reads. */
+export type DetailLayoutObjectFields = Record<
+  string,
+  { readonly multiple?: unknown; readonly [key: string]: unknown } | null | undefined
+>;
+
+/**
+ * Should this detail field take the full row?
+ *
+ * A wide type (see {@link isWideFieldType}), or a `file` / `image` field whose
+ * OBJECT field declares `multiple: true`: its value is a list of file names,
+ * and in one cell of a multi-column grid each name is cut short, so the reader
+ * cannot tell the files apart. The detail panel offers the author no width key
+ * (the form's `span` does not reach it), so the default is the only lever.
+ *
+ * `multiple` is read from the object field and nothing else: it is the
+ * field's declaration, and a detail-view entry declares no such key.
+ */
+export function isWideDetailField(
+  field: DetailViewField,
+  objectFields?: DetailLayoutObjectFields,
+): boolean {
+  if (!field.type) return false;
+  if (isWideFieldType(field.type)) return true;
+  return (
+    MULTI_FILE_FIELD_TYPES.has(field.type) &&
+    objectFields?.[field.name]?.multiple === true
+  );
+}
+
+/**
  * Infer optimal number of columns for a detail section based on field count.
  * When containerWidth is provided, limits columns for narrower viewports.
  *
@@ -112,7 +156,8 @@ export function inferDetailColumns(fieldCount: number, containerWidth?: number):
  */
 export function applyAutoSpan(
   fields: DetailViewField[],
-  columns: number
+  columns: number,
+  objectFields?: DetailLayoutObjectFields,
 ): DetailViewField[] {
   if (columns <= 1) return fields;
 
@@ -120,8 +165,8 @@ export function applyAutoSpan(
     // User-defined span takes priority
     if (field.span !== undefined) return field;
 
-    // Wide field types should span full row
-    if (field.type && isWideFieldType(field.type)) {
+    // Wide fields should span full row
+    if (isWideDetailField(field, objectFields)) {
       return { ...field, span: columns };
     }
 
@@ -136,16 +181,18 @@ export function applyAutoSpan(
  * @param fields - The section fields
  * @param schemaColumns - User-provided columns (from DetailViewSection or DetailViewSchema)
  * @param containerWidth - Optional container width in px for responsive column capping
+ * @param objectFields - The object's field definitions, for the `multiple` a multi-file field declares
  * @returns Object with processed fields and inferred columns
  */
 export function applyDetailAutoLayout(
   fields: DetailViewField[],
   schemaColumns: number | undefined,
-  containerWidth?: number
+  containerWidth?: number,
+  objectFields?: DetailLayoutObjectFields,
 ): { fields: DetailViewField[]; columns: number } {
   // If user explicitly set columns, respect it but still apply auto span
   if (schemaColumns !== undefined) {
-    const processed = applyAutoSpan(fields, schemaColumns);
+    const processed = applyAutoSpan(fields, schemaColumns, objectFields);
     return { fields: processed, columns: schemaColumns };
   }
 
@@ -153,7 +200,7 @@ export function applyDetailAutoLayout(
   const columns = inferDetailColumns(fields.length, containerWidth);
 
   // Apply auto span for wide fields
-  const processed = applyAutoSpan(fields, columns);
+  const processed = applyAutoSpan(fields, columns, objectFields);
 
   return { fields: processed, columns };
 }

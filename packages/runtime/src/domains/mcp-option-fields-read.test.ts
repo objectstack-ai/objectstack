@@ -3,6 +3,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a case's clock: the dispatcher's reach loads it lazily.
+import '@objectstack/metadata';
 
 /**
  * [#28715] The HTTP MCP bridge answers `optionFieldsOf(name)`: the fields of
@@ -91,10 +93,39 @@ describe('buildMcpBridge.optionFieldsOf reads the served object describeObject r
       const bridge = await bridgeFor(makeKernel({ withProtocol }));
       expect(await bridge.optionFieldsOf('qaformula_p4')).toEqual(['kind', 'stage', 'tier']);
       expect(await bridge.optionFieldsOf('qa_absent')).toBeNull();
-      // The same object `describe_object` describes, whose answer carries no options reading.
+      // The same object `describe_object` describes: [#32435] its answer carries
+      // the options of exactly the fields named above, by the same reading.
       const described = await bridge.describeObject('qaformula_p4');
       expect(described.fields.map((f: any) => f.name)).toEqual(['first', 'kind', 'stage', 'tier']);
-      for (const f of described.fields) expect(Object.keys(f).sort()).toEqual(['label', 'name', 'required', 'type']);
+      expect(described.fields.filter((f: any) => 'options' in f).map((f: any) => f.name)).toEqual(['kind', 'stage', 'tier']);
+    });
+  }
+});
+
+// [#32872] `servedObjectDefinitionOf(name)`: the object `describeObject`
+// projects, whole — what `validate_expression` hands the publish gate's own
+// passes at a validation rule or a formula field (a field's `required`, a
+// reference's target, the object's rules), rendered to nobody. Its masking
+// for each ADR-0106 tier is pinned in `mcp-object-schema-mask.test.ts`.
+describe('buildMcpBridge.servedObjectDefinitionOf reads the object describeObject reads (#32872)', () => {
+  const prev = process.env.OS_MCP_SERVER_ENABLED;
+  beforeEach(() => {
+    process.env.OS_MCP_SERVER_ENABLED = 'true';
+  });
+  afterEach(() => {
+    if (prev === undefined) delete process.env.OS_MCP_SERVER_ENABLED;
+    else process.env.OS_MCP_SERVER_ENABLED = prev;
+  });
+
+  for (const withProtocol of [true, false]) {
+    const read = withProtocol ? 'the merged listing' : 'the metadata service (no merged read)';
+    it(`answers the served definition whole from ${read}, and null for a name nothing serves`, async () => {
+      const bridge = await bridgeFor(makeKernel({ withProtocol }));
+      const def = await bridge.servedObjectDefinitionOf('qaformula_p4');
+      expect(def).toEqual(SERVED);
+      const described = await bridge.describeObject('qaformula_p4');
+      expect(Object.keys(def.fields)).toEqual(described.fields.map((f: any) => f.name));
+      expect(await bridge.servedObjectDefinitionOf('qa_absent')).toBeNull();
     });
   }
 });

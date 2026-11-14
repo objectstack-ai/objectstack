@@ -105,7 +105,7 @@ async function mountRoutes(engine: ObjectQL) {
   });
   await plugin.init(ctx);
   (plugin as unknown as { authManager: unknown }).authManager = {
-    handleRequest: async () => new Response(null, { status: 404 }),
+    handleVendorRequest: async () => new Response(null, { status: 404 }),
     getApi: async () => ({
       getSession: async () => ({ user: { id: 'usr_platform_admin', isPlatformAdmin: true } }),
     }),

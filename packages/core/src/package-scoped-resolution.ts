@@ -132,8 +132,21 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * `bare-name-one-holder.ts` module doc, "The narrowing"). Each type joins in
  * its own trailing change, once its by-name readers, its AI faces and its
  * stored references all carry the package: the AI family's `agent` and
- * `skill` first (#31701), then the object-less `action` (#31697). A type not
- * listed here keeps one package holder per deployment.
+ * `skill` first (#31701), then the object-less `action` (#31697), then
+ * `email_template` (#31699), then `flow` (#31696: the engine holds a flow per
+ * `(package, name)`, and its doors, flow actions and flow endpoints resolve a
+ * name by package), then the picklist family (#31700): `picklist`,
+ * `mapping` and `dataset`, the `api` and the engine's `function` registry,
+ * then `webhook` (#31699 PR 2), and `tool` beside the AI family (#31985),
+ * whose one by-name reader (`/meta/tool/NAME`) resolves by package. A type
+ * not listed here keeps one package holder per deployment.
+ *
+ * Every member but {@link ENGINE_FUNCTION_TYPE} is a metadata type ADR-0150
+ * addresses by package ({@link PACKAGE_SCOPED_TYPES}). The function registry
+ * is the engine's: it keeps every holder per package itself (ADR-0150 D4's
+ * last row) and has no by-name metadata read, so the stores and the reads
+ * keyed on this list (`@objectstack/metadata`'s slotted store, the metadata
+ * protocol's fail-closed read) never meet it.
  *
  * Here, not in objectql, so a reader objectql depends on can read it too: the
  * metadata protocol refuses a bare read of a narrowed type that an engine
@@ -143,7 +156,19 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
 export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
   'agent',
   'skill',
+  // the AI family's third type, in its own change (#31985)
+  'tool',
   'action',
+  'email_template',
+  'flow',
+  // the picklist family (#31700)
+  'picklist',
+  'mapping',
+  'dataset',
+  'api',
+  'function',
+  // #31699 PR 2
+  'webhook',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
@@ -267,13 +292,34 @@ export function isPackageScopedResolvableType(type: unknown): type is PackageSco
 /**
  * Names the PLATFORM requests by spelling, per type (ADR-0150 D3 Exceptions):
  * they resolve environment-wide whatever the caller's package, and keep one
- * holder. The same list as `@objectstack/cli`'s `PLATFORM_REQUESTED_BARE_NAMES`,
- * keyed by registry type instead of stack collection: the public form doors'
- * submit context requests the permission set `guest_portal` by name
- * (`packages/rest/src/form-routes.ts`).
+ * holder.
+ *
+ *  - `permission` — the public form doors' submit context requests the
+ *    permission set `guest_portal` by name (`packages/rest/src/form-routes.ts`);
+ *    the same entry as `@objectstack/cli`'s `PLATFORM_REQUESTED_BARE_NAMES`,
+ *    keyed by registry type instead of stack collection.
+ *  - `email_template` — the auth mails the platform sends by name with no
+ *    package (plugin-auth through `IEmailService.sendTemplate`): the
+ *    `auth.*` templates the email service code-declares as its overridable
+ *    baseline (`BUILTIN_AUTH_TEMPLATES`, plugin-email). An app overrides one by
+ *    declaring its name (ADR-0131 D10), and a deployment keeps one overriding
+ *    package per name even once the type's one-holder rule narrows to the
+ *    namespace (ADR-0150 D9, #31699): two would leave every password reset
+ *    refused as ambiguous. The CLI's prefix rule judges no email template, so
+ *    its list carries none.
  */
 export const PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE: Readonly<Partial<Record<PackageScopedType, readonly string[]>>> = Object.freeze({
   permission: Object.freeze(['guest_portal']),
+  email_template: Object.freeze([
+    'auth.password_reset',
+    'auth.verify_email',
+    'auth.magic_link',
+    'auth.invitation',
+    'auth.account_invitation',
+    'auth.two_factor_otp',
+    'auth.email_change_notice',
+    'auth.existing_account_sign_up',
+  ]),
 });
 
 /** Is `(type, name)` one the platform requests by spelling? */
@@ -306,16 +352,25 @@ export const RUNTIME_COMPATIBILITY_PACKAGE_ID = '__runtime__';
  * — or the platform: code a plugin or the host registers under no package (an
  * owner-less engine function), reachable from every caller like `sys` (D2;
  * epic seat ruling on #31733, 6729484996).
+ *
+ * [#32412] Or a stack's residual (ADR-0130 D4): the top level of the artifact
+ * whose id is `ownerId`, outside every package body (`UnclaimedTopLevel`,
+ * `ObjectQL#recordResidualOwner`). It is not a package — no package row
+ * answers `ownerId` unless a body carries it, and then the residual is still
+ * not that body — so it is never a `package` holder. The rule here never
+ * answers it; the app-artifact job binder's residual-twin refusal names it.
  */
 export type PackageScopedHolder =
   | Extract<BareNameHolder, { kind: 'package' }>
   | { readonly kind: 'environment' }
-  | { readonly kind: 'platform' };
+  | { readonly kind: 'platform' }
+  | { readonly kind: 'residual'; readonly ownerId: string };
 
 /** How a refusal names a holder. */
 export function describePackageScopedHolder(holder: PackageScopedHolder): string {
   if (holder.kind === 'environment') return 'the environment (an item authored in this environment, bound to no package)';
   if (holder.kind === 'platform') return 'the platform (registered by a plugin or the host, owned by no package)';
+  if (holder.kind === 'residual') return `the top level of stack "${holder.ownerId}" outside every package body (its residual)`;
   return describeBareNameHolder(holder);
 }
 
@@ -362,7 +417,8 @@ export type PackageScopedResolution<T = unknown> =
   | {
       readonly status: 'resolved';
       readonly item: T;
-      readonly holder: PackageScopedHolder;
+      /** [#32412] Never a residual: the rule answers no such holder (it is only ever a refusal's candidate). */
+      readonly holder: Exclude<PackageScopedHolder, { kind: 'residual' }>;
       readonly via: PackageScopedResolutionStep;
     }
   | { readonly status: 'not-found' }
@@ -476,7 +532,7 @@ function isBaseline(type: PackageScopedResolvableType, packageId: string): boole
   return isBareNameOneHolderType(type) && isOverridableBaseline(type, packageId);
 }
 
-const packageHolder = (packageId: string): PackageScopedHolder => ({ kind: 'package', packageId });
+const packageHolder = (packageId: string): Extract<PackageScopedHolder, { kind: 'package' }> => ({ kind: 'package', packageId });
 
 function typeLabel(type: PackageScopedResolvableType): string {
   switch (type) {
@@ -498,16 +554,40 @@ export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 
   const subject = `The ${typeLabel(refusal.type)} "${refusal.name}"`;
   const named = refusal.candidates.map(describePackageScopedHolder).join('; ');
   const platform = refusal.candidates.some((c) => c.kind === 'platform');
+  // A count of candidates is a count of PACKAGES only when every candidate
+  // is one: the environment's own item, the platform's or a stack's
+  // residual beside them makes it a count of holders.
+  const counted = refusal.candidates.every((c) => c.kind === 'package') ? 'packages' : 'holders';
   switch (refusal.reason) {
     case 'ambiguous-in-closure':
-      return `${subject} is held by ${refusal.candidates.length} ${platform ? 'holders' : 'packages'} in the declared dependency closure of ` +
+      return `${subject} is held by ${refusal.candidates.length} ${counted} in the declared dependency closure of ` +
         `package "${refusal.callerPackageId}"${platform ? ' and the platform' : ''}: ${named}. Nothing picks one of them: address it by its package.`;
     case 'ambiguous-in-environment':
-      return `${subject} is held by ${refusal.candidates.length} ${platform ? 'holders' : 'packages'} in this environment and the caller names ` +
+      return `${subject} is held by ${refusal.candidates.length} ${counted} in this environment and the caller names ` +
         `no package: ${named}. Nothing picks one of them: address it by its package.`;
-    case 'outside-closure':
-      return `${subject} is held outside the declared dependency closure of package "${refusal.callerPackageId}": ` +
-        `${named}. Declare a dependency on the package that holds it (ADR-0141).`;
+    case 'outside-closure': {
+      // [#32929] Two fixes, because the first is not always open: when the
+      // holder already depends on the caller (a module of the app that reads
+      // it), declaring the holder back is a dependency cycle the kernel
+      // refuses at boot. The sentence is static; the answer does not move.
+      const caller = refusal.callerPackageId;
+      const moveIn = `move the ${typeLabel(refusal.type)} into "${caller}"`;
+      const packages = refusal.candidates.filter((c) => c.kind === 'package').length;
+      const head = `${subject} is held outside the declared dependency closure of package "${caller}": ${named}.`;
+      // [#32967] Only the environment holds it (step 3's environment
+      // candidate): no package holds it, so there is nothing to depend on.
+      if (packages === 0) {
+        return `${head} No package holds it, so no dependency reaches it: ${moveIn} (ADR-0150 D3).`;
+      }
+      // [#32967] Two or more package holders: depending on every one would
+      // only turn this refusal into `ambiguous-in-closure`.
+      const declare = packages === 1
+        ? 'Declare a dependency on the package that holds it (ADR-0141).'
+        : `Declare a dependency on the one package whose ${typeLabel(refusal.type)} is meant; depending on more than one ` +
+          'leaves the name ambiguous (ADR-0141).';
+      return `${head} ${declare} If that package already depends on "${caller}", the dependency would be a cycle: ` +
+        `move what reads it into that package, or ${moveIn} (ADR-0150 D3).`;
+    }
     case 'not-held-by-qualifier':
       return `${subject} is not held by ${refusal.callerPackageId === null ? 'the environment' : `package "${refusal.callerPackageId}"`}, ` +
         `which the address names exactly (ADR-0150 D5): it is held by ${named}. Address it by its holder.`;
@@ -515,6 +595,29 @@ export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 
       return `${subject} is held by ${refusal.candidates.length} packages that share the namespace the address names ` +
         `(ADR-0150 D2): ${named}. Nothing picks one of them: address it by its package.`;
   }
+}
+
+/**
+ * [ADR-0150 D3, #32244] The sentence a refusal of an ACTION name appends to
+ * {@link packageScopedRefusalMessage}'s when its package holders each bind the
+ * name to their own object: two packages' actions of one name on two objects
+ * are two different actions, and a read that cannot see the object would pick
+ * one. Names each package with the object(s) it binds the name to, in the
+ * map's order; `undefined` is an object-less action. Where every package binds
+ * it to the one same object (or each holds it object-less), the sentence only
+ * names them, without calling them different actions.
+ */
+export function packageScopedActionOwnersSentence(
+  objectsByPackage: ReadonlyMap<string, ReadonlyArray<string | undefined>>,
+): string {
+  const owners = [...objectsByPackage].map(([packageId, objects]) => {
+    const named = [...new Set(objects)].map((object) => (object === undefined ? 'no object' : `object "${object}"`));
+    return `package "${packageId}" binds it to ${named.join(' and ')}`;
+  });
+  const objects = new Set([...objectsByPackage.values()].flatMap((bound) => [...bound]));
+  if (objects.size > 1) return `Each is a different action: ${owners.join('; ')}.`;
+  const sentence = owners.join('; ');
+  return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
 }
 
 /**

@@ -38,7 +38,11 @@
 //   - the admin door, the control: a valid escalation registers;
 //   - a flow with no `start` node, which can never run: the admin door answers
 //     `400 VALIDATION_FAILED` naming the missing node, and nothing registers;
-//     at package load the boot completes, refuses the flow and names it.
+//     at package load the boot completes, refuses the flow and names it;
+//   - a `notify` node naming a channel no plugin registers: the admin door
+//     answers `400 VALIDATION_FAILED` naming the node and the channel at its
+//     config path and listing the channels the composition registers, and
+//     nothing registers; the control, naming registered channels, registers.
 //
 // The fixture is built with `strict: false`, on purpose: the build door judges
 // the same flows on its own, and this file pins the two runtime doors behind
@@ -71,6 +75,27 @@ const DOOR_UNKNOWN_KEY = 'esc_value_door_unknown_key';
 const DOOR_VALID = 'esc_value_door_valid';
 const PACKAGED_NO_START = 'esc_value_packaged_no_start';
 const DOOR_NO_START = 'esc_value_door_no_start';
+const DOOR_UNKNOWN_CHANNEL = 'esc_value_door_unknown_channel';
+const DOOR_KNOWN_CHANNELS = 'esc_value_door_known_channels';
+
+/** A flow run by hand whose one step is a `notify` node naming `channels`. */
+function notifyFlow(name: string, channels: unknown) {
+  return {
+    name,
+    label: `Notify ${name}`,
+    type: 'autolaunched',
+    status: 'active',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: {} },
+      { id: 'tell', type: 'notify', label: 'Tell', config: { recipients: 'role:admin', title: 'Hello', channels } },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'tell' },
+      { id: 'e2', source: 'tell', target: 'end' },
+    ],
+  };
+}
 
 /** The config path the flow parse locates, on the approval node (`nodes[1]`). */
 const SUB_HOUR_PATH = 'nodes.1.config.escalation.timeoutHours';
@@ -341,6 +366,29 @@ describe('a flow node config its contract refuses is refused at registration, an
     const read = await call('GET', `/automation/${PACKAGED_NO_START}`);
     expect(read.status, JSON.stringify(read.json)).toBe(404);
     expect(bootLines(PACKAGED_NO_START, 'hold no `start` node').length, bootOutput.slice(-4000)).toBeGreaterThan(0);
+  });
+
+  it('a notify node naming a channel no plugin registers: the admin door answers 400 VALIDATION_FAILED naming it and the registered channels, and nothing registers', async () => {
+    const refused = await call('POST', '/automation', notifyFlow(DOOR_UNKNOWN_CHANNEL, ['inbox', 'emial']));
+    expect(refused.status, JSON.stringify(refused.json)).toBe(400);
+    expect(refused.json.error?.code).toBe('VALIDATION_FAILED');
+    const message = String(refused.json.error?.message);
+    expect(message).toMatch(new RegExp(`^Flow '${DOOR_UNKNOWN_CHANNEL}' rejected: 1 notify channel\\(s\\) no plugin registers:`));
+    expect(message).toContain("node 'tell' (`notify`) names channel 'emial' at nodes.1.config.channels.1");
+    // The roster is the composition's own: the inbox, and the messaging providers.
+    expect(message).toMatch(/The channels this deployment registers: `inbox`, .*`email`/);
+    const fields = refused.json.error?.details?.fields ?? [];
+    expect(fields.map((f) => f.field)).toEqual(['nodes.1.config.channels.1']);
+
+    const read = await call('GET', `/automation/${DOOR_UNKNOWN_CHANNEL}`);
+    expect(read.status, JSON.stringify(read.json)).toBe(404);
+  });
+
+  it('a notify node naming registered channels, the control: the admin door registers it', async () => {
+    const created = await call('POST', '/automation', notifyFlow(DOOR_KNOWN_CHANNELS, ['inbox', 'email']));
+    expect(created.status, JSON.stringify(created.json)).toBe(200);
+    const read = await call('GET', `/automation/${DOOR_KNOWN_CHANNELS}`);
+    expect(read.status, JSON.stringify(read.json)).toBe(200);
   });
 
   it('the admin door, the control: a valid escalation registers', async () => {

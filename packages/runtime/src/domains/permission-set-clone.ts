@@ -110,13 +110,35 @@
  * catalog is shared by every organization, so the clone is the platform
  * operator's. That is D3's own refusal ("the server refuses anyway"), not a new
  * gate; under `single` it is inert.
+ *
+ * ## A source two packages hold — `?package=` (ADR-0150 D3/D5, #32164)
+ *
+ * A permission set is identified by `(package, name)` (ADR-0150 D4). A source
+ * name two packages hold is the D3 refusal when the request names no package:
+ * `409 RESOURCE_CONFLICT`, the resolver's sentence and every candidate
+ * structured (`candidates: [{ kind: 'package', packageId }]`, the activation
+ * door's shape), nothing saved — never the "nothing to clone" `404` a miss
+ * answers. `?package=PKG`, the exact qualifier `/meta` reads, clones exactly
+ * PKG's set; a PKG that does not hold the name is refused `409` naming the
+ * holders. The query names the SOURCE's package because the body's `package`
+ * already names where the copy LANDS. A target name the rule refuses is a name
+ * the catalog holds, so it is taken (`409`), as a resolved one is. The query
+ * set is closed (AGENTS route rule 5): `package` alone, refused `400
+ * VALIDATION_ERROR` otherwise. With one holder, a request that names no
+ * package answers as before.
  */
 
 import { METADATA_READ_DECORATIONS, MetadataProtectionFields } from '@objectstack/spec/kernel';
 import { SnakeCaseIdentifierSchema } from '@objectstack/spec/shared';
 import { metaWriteCapabilityVerdict, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
-import { securityCatalogReaderOf, type SecurityCatalogEntry } from '@objectstack/core';
+import { resolveCatalogReference, securityCatalogReaderOf, type SecurityCatalogEntry } from '@objectstack/core';
+import {
+    PERMISSION_SET_DOOR_QUERY_PARAMS,
+    readPermissionSetPackageQuery,
+    refusedNameAnswer,
+    resolvePermissionSetAddress,
+} from './catalog-activation.js';
 import { isWritablePackage, kernelPackageScope, type ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { newSimilarTargetRefusal, newSimilarTargetRefusalAnswer } from './new-similar-target.js';
 import { validationFailure } from '../validation-failure.js';
@@ -417,14 +439,19 @@ function readCloneBody(body: unknown): { name: string; label: string; package?: 
  *  1. **Authority, first** — ahead of the path and body checks and of any
  *     lookup, so a refused caller learns nothing: neither the body contract nor
  *     whether the source exists.
- *  2. **Shape**: `['permission-sets', source, 'clone']`.
+ *  2. **Shape**: `['permission-sets', source, 'clone']`; then the closed
+ *     query set, `?package=` naming the source's package
+ *     ({@link readPermissionSetPackageQuery}).
  *  3. **Body**: closed `{ name, label, package? }`, the name meeting the
  *     metadata name rule — refused before the catalog is consulted.
  *  4. **Source**, through the catalog reader the security plugin binds to the
  *     engine — the read `resolveUserAuthzGrants` uses, registry first. ⛔ No
  *     `sys_permission_set` row is read. No reader bound, or one that cannot
- *     answer ⇒ 503; unknown ⇒ 404.
- *  5. **Target**: a name the catalog holds ⇒ 409.
+ *     answer ⇒ 503; unknown ⇒ 404; refused by the rule, or a `?package=` that
+ *     does not hold it ⇒ 409 naming every candidate
+ *     ({@link resolvePermissionSetAddress}).
+ *  5. **Target**: a name the catalog holds — or one the rule refuses, which it
+ *     holds more than once — ⇒ 409.
  *  6. **Landing**: the package the copy is saved in: a given target is judged
  *     by the shared rule (refused with nothing written), an omitted one
  *     ({@link resolveDefaultCloneLanding})
@@ -444,6 +471,7 @@ export async function handlePermissionSetCloneWrite(
     parts: readonly string[],
     body: unknown,
     context: HttpProtocolContext,
+    query?: unknown,
 ): Promise<HttpDispatcherResult> {
     // ── 1. authority ────────────────────────────────────────────────────────
     const ec: any = context.executionContext;
@@ -480,6 +508,10 @@ export async function handlePermissionSetCloneWrite(
             };
         }
         const sourceName = decodeURIComponent(parts[1]);
+        // [AGENTS route rule 5, ADR-0150 D5, #32164] The closed query set, read
+        // before the body and before any lookup.
+        const queryReading = readPermissionSetPackageQuery(deps, query, PERMISSION_SET_DOOR_QUERY_PARAMS);
+        if (queryReading.refusal) return queryReading.refusal;
 
         // ── 3. body ─────────────────────────────────────────────────────────
         const target = readCloneBody(body);
@@ -503,11 +535,16 @@ export async function handlePermissionSetCloneWrite(
             };
         }
         let source: SecurityCatalogEntry | undefined;
-        let taken: SecurityCatalogEntry | undefined;
+        let taken = false;
         try {
-            source = await reader.resolve(PERMISSION_METADATA_TYPE, sourceName);
+            // [ADR-0150 D3/D5, #32164] By name, or exactly `?package=`'s set:
+            // a refusal is an answer about the name, never a miss.
+            const address = await resolvePermissionSetAddress(reader, sourceName, queryReading.packageId);
+            if (address.status === 'refused') return refusedNameAnswer(deps, address.refusal);
+            source = address.status === 'resolved' ? address.entry : undefined;
             // ── 5. target (asked of the same read) ──────────────────────────
-            if (source) taken = await reader.resolve(PERMISSION_METADATA_TYPE, target.name);
+            // A name the rule refuses is held — more than once — so it is taken.
+            if (source) taken = (await resolveCatalogReference(reader, PERMISSION_METADATA_TYPE, target.name)).status !== 'not-found';
         } catch (err: any) {
             return {
                 handled: true,

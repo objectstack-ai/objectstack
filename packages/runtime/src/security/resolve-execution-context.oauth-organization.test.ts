@@ -347,8 +347,9 @@ describe('an OAuth token acts in the organization its consent bound — isolated
 /**
  * The open-core default composition the card measured (`single`: no wall).
  * The token's organization still decides which organization-scoped grants
- * count, and — no wall, no membership read — it stands as claimed, exactly
- * as a browser session's `activeOrganizationId` does there.
+ * count, and — as under every posture since ADR-0093 D8.1 was amended — it
+ * stands only while the user's current membership backs it, exactly as a
+ * browser session's `activeOrganizationId` does there.
  */
 describe('the same token under the single posture (no wall) — the real D10 middleware', () => {
   const r = rig('single');
@@ -367,29 +368,28 @@ describe('the same token under the single posture (no wall) — the real D10 mid
     await expect(r.run(ctx, 'find', LEAD)).rejects.toThrow(D10_DENIAL);
   });
 
-  it('BOUNDARY — a former member\'s token keeps the bound organization here, as their session would: no wall reads no membership', async () => {
+  it('[ADR-0093 D8.1, as amended] a former member\'s token does not keep the bound organization here, as their session would not: a current membership is required under every posture', async () => {
     const viaToken = await r.resolve(READ_TOKEN('u_ex', ALPHA));
     const viaSession = await r.resolveSession('u_ex', ALPHA);
-    expect(viaToken.tenantId).toBe(ALPHA);
-    expect(viaSession.tenantId).toBe(ALPHA);
-    expect(droppedClaimLines()).toEqual([]);
-    await expect(r.run(viaToken, 'find', LEAD)).resolves.toBeDefined();
+    expect(viaToken.tenantId).toBeUndefined();
+    expect(viaSession.tenantId).toBeUndefined();
+    await expect(r.run(viaToken, 'find', LEAD)).rejects.toThrow(D10_DENIAL);
   });
 });
 
 /**
  * The vetting is the session arm's, so the token's organization answers
  * exactly what a browser session's does in every posture: vetted against the
- * user's memberships where a wall is enforced (`isolated`, `group`), kept as
- * claimed where none is (`single`, or no `tenancy` service) — the same claim
- * a REST session's `activeOrganizationId` keeps there.
+ * user's current memberships under every posture (`isolated`, `group`,
+ * `single`, or no `tenancy` service — ADR-0093 D8.1, as amended), the same
+ * vetting a REST session's `activeOrganizationId` gets.
  */
 describe('the token\'s organization follows the session arm in every posture', () => {
   const CASES: Array<['isolated' | 'group' | 'single' | undefined, { member: string | undefined; stranger: string | undefined }]> = [
     ['isolated', { member: ALPHA, stranger: undefined }],
     ['group', { member: ALPHA, stranger: undefined }],
-    ['single', { member: ALPHA, stranger: GAMMA }],
-    [undefined, { member: ALPHA, stranger: GAMMA }],
+    ['single', { member: ALPHA, stranger: undefined }],
+    [undefined, { member: ALPHA, stranger: undefined }],
   ];
   for (const [posture, expected] of CASES) {
     it(`${posture ?? 'no tenancy service'}: a member organization ${expected.member ? 'is kept' : 'is dropped'}; a non-member one ${expected.stranger ? 'is kept' : 'is dropped'} — as for a session`, async () => {

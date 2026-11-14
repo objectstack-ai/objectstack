@@ -64,6 +64,7 @@ import {
     // `relateObjectSchemaMaskPosture`, read only by the published read's mask, moved with that
     // door to `meta-item-history-routes.ts` (#23050 slice 13e).
     resolveObjectSchemaMaskPosture,
+    objectSchemaReadDelegateSource,
     OBJECT_SCHEMA_MASK_NOT_APPLICABLE,
     // `foldVisibilityFingerprintIntoEtag`, `normalizeIfNoneMatch` and
     // `resolveObjectSchemaRuntimeView`, read only by the item read's conditional
@@ -2115,6 +2116,14 @@ export class RestServer {
      */
     private metadataServiceProvider?: (environmentId?: string) => Promise<unknown>;
     /**
+     * [decision 6840464379] Any kernel service, by name, in the request's
+     * environment — for the one lookup whose service name is DECLARED rather
+     * than known here: the `schemaReadDelegate` an object's definition names
+     * (`resolveObjectMasker`). `undefined` when no service is registered under
+     * that name.
+     */
+    private kernelServiceProvider?: (name: string, environmentId?: string) => Promise<unknown>;
+    /**
      * One-shot latch for the "no matcher wired" degradation notice below, so a
      * host that never wired {@link metadataServiceProvider} says so once per
      * server rather than once per request.
@@ -2169,6 +2178,12 @@ export class RestServer {
          * the export door records each export through.
          */
         auditServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
+        /**
+         * [decision 6840464379] Appended LAST for the #15256 reason above: the
+         * by-name service lookup an object's declared `schemaReadDelegate` is
+         * resolved through.
+         */
+        kernelServiceProvider?: (name: string, environmentId?: string) => Promise<unknown>,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -2191,6 +2206,7 @@ export class RestServer {
         this.metadataServiceProvider = metadataServiceProvider;
         this.tenancyServiceProvider = tenancyServiceProvider;
         this.auditServiceProvider = auditServiceProvider;
+        this.kernelServiceProvider = kernelServiceProvider;
     }
 
     /**
@@ -3716,7 +3732,23 @@ export class RestServer {
                     ...(member !== undefined ? { member } : {}),
                     ...(environmentId ? { environmentId } : {}),
                 };
-                const envelope = await p.getMetaItem(itemRequest) as { item?: unknown; packageId?: unknown } | undefined;
+                let envelope: { item?: unknown; packageId?: unknown } | undefined;
+                try {
+                    envelope = await p.getMetaItem(itemRequest) as typeof envelope;
+                } catch (error) {
+                    // [#32607] The plain read's refusal of a name several
+                    // packages hold only as stored rows is step 1c's to answer:
+                    // the package-less writes' own refusal (#28337). Only that
+                    // refusal, which the protocol marks under the registered
+                    // key below (`protocol-meta-item-face.ts`); every other
+                    // error is rethrown (contract review S1).
+                    if (!packageId && (error as Record<symbol, unknown> | null)?.[Symbol.for('objectstack.metadata-protocol.storedRowHoldersRefusal')] === true
+                        && typeof p.packagelessLayeredReadRefusal === 'function'
+                        && await p.packagelessLayeredReadRefusal({ type, name, ...(member !== undefined ? { member } : {}) }) !== undefined) {
+                        return false;
+                    }
+                    throw error;
+                }
                 return envelope?.item == null && registry.isPackageDisabled(envelope?.packageId) === true;
             },
             ...(typeof p.packagelessLayeredReadRefusal === 'function'
@@ -4402,6 +4434,14 @@ export class RestServer {
         // key, byte-identical to a read that never asked for one, so the answer
         // says nothing about whether a draft exists.
         const layeredCaller = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+        // [ruling record 6787890900] An object the caller may not read is the
+        // layered chain's absence, answered BEFORE the store is read, so no
+        // store answer about it (a disabled package's refusal among them)
+        // reaches the caller.
+        if (maskPosture.kind === 'hidden') {
+            RestServer.sendMetaReadRefusal(res, { reason: 'absent' });
+            return;
+        }
         const layeredOptions = { withDraft: mayReadPendingDrafts(layeredCaller) };
         const layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
         // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
@@ -4488,12 +4528,25 @@ export class RestServer {
                 } catch { /* metrics are never load-bearing */ }
             },
         };
+        // [decision 6840464379] Where an object's declared `schemaReadDelegate`
+        // is found: the request's environment's engine and kernel, the ones
+        // `security` was resolved from. Built once per request, and resolved
+        // only when an object the read check refused needs it. A lookup that
+        // throws is the posture's 5xx fault; one that finds nothing registered
+        // applies no exception, and the object stays absent.
+        let envId: Promise<string | undefined> | undefined;
+        const requestEnvironment = () => (envId ??= this.resolveRequestEnvironmentId(environmentId, req));
+        const schemaReadDelegates = objectSchemaReadDelegateSource({
+            engine: async () => this.objectQLProvider?.(await requestEnvironment()),
+            service: async (name) => this.kernelServiceProvider?.(name, await requestEnvironment()),
+        });
         return (objectName: string) => resolveObjectSchemaMaskPosture({
             objectName,
             context,
             security: security as any,
             enabled: true,
             telemetry,
+            schemaReadDelegates,
         });
     }
 
@@ -5658,6 +5711,7 @@ export class RestServer {
             get objectQLProvider() { return readObjectQLProvider(); },
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveObjectMasker: (...a) => this.resolveObjectMasker(...a),
         };
         registerMetaObjectStateRoute.call(objectStateHost, scope);
 

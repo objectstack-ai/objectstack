@@ -919,6 +919,13 @@ describe('[#16137] §3b — the composition is assembled from open packages only
 // refuse-or-degrade exactly as it did before this package existed — and if it
 // silently gained a wall from somewhere else, the acceptance above was
 // measuring the wrong thing.
+//
+// [ADR-0093 D8.1, as amended] Under every tenancy posture, a person's data
+// access requires a current membership in the organization, judged on each
+// request. That rule reads no posture, so the ablation does not reach it: the
+// ex-member's key stays refused and the ex-member session's claim stays
+// dropped on the degraded `single` composition too. What the mount moves is
+// the posture-keyed refusal, read on the organization-less key.
 // ---------------------------------------------------------------------------
 
 describe('[#16137] §4 — ablation: remove the mount and the wall comes down', () => {
@@ -939,37 +946,46 @@ describe('[#16137] §4 — ablation: remove the mount and the wall comes down', 
         expect(tenancy.degraded).toBe(true);
     });
 
-    it('the ex-member READS the other organization again — the measured leak returns', async () => {
+    it('the organization-less key is ADMITTED again — a 200 carrying an empty set, not the posture 401', async () => {
+        const c = await bootOpenOnlyComposition({ mountOrgScoping: false });
+        const res = await callGet(c, { apiKey: RAW_ORGLESS_KEY });
+        expect(res.statusCode).toBe(200);
+        expect(res.body.total).toBe(0);
+    });
+
+    it('[ADR-0093 D8.1] the membership rule reads no posture: the ex-member\'s key still reads nothing — 401', async () => {
         const c = await bootOpenOnlyComposition({ mountOrgScoping: false });
         const res = await callGet(c, { apiKey: RAW_EXMEMBER_KEY });
-        expect(res.statusCode).toBe(200);
-        expect(res.body.total).toBe(2);
-        expect(res.body.value.map((r: BusinessUnitRow) => r.id)).toEqual(['bu_a1', 'bu_a2']);
+        expect(res.statusCode).toBe(401);
+        expect(c.store().filter((r) => r.organization_id === 'org_alpha')).toHaveLength(2);
     });
 
-    it('the ex-member WRITES into it again — the row read back from the store carries `org_alpha` / `u_exmember`', async () => {
+    it('[ADR-0093 D8.1] the membership rule reads no posture: the ex-member\'s key still writes nothing — 401, store read back', async () => {
         const c = await bootOpenOnlyComposition({ mountOrgScoping: false });
         const res = await callPost(c, 'w-exmember-ablated', { apiKey: RAW_EXMEMBER_KEY });
-        expect(res.statusCode).toBe(201);
-        const landed = c.store().filter((r) => r.name === 'w-exmember-ablated');
-        expect(landed).toHaveLength(1);
-        expect(landed[0]).toMatchObject({ organization_id: 'org_alpha', created_by: 'u_exmember' });
+        expect(res.statusCode).toBe(401);
+        expect(c.store().filter((r) => r.name === 'w-exmember-ablated')).toHaveLength(0);
+        expect(c.store()).toHaveLength(SEED.length);
     });
 
-    it('the ex-member SESSION keeps its unbacked claim — no drop is decided', async () => {
+    it('[ADR-0093 D8.1] the membership rule reads no posture: the ex-member SESSION\'s unbacked claim is still dropped, and said once', async () => {
         const c = await bootOpenOnlyComposition({ mountOrgScoping: false });
         const res = await callGet(c, { cookie: COOKIE_EXMEMBER });
         expect(res.statusCode).toBe(200);
-        expect(res.body.total).toBe(2);
-        expect(res.body.value.map((r: BusinessUnitRow) => r.id)).toEqual(['bu_a1', 'bu_a2']);
-        expect(dropLines(c)).toHaveLength(0);
+        expect(res.body.total).toBe(0);
+        const lines = dropLines(c);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain('organization_membership_ended');
     });
 
-    it('and NOTHING is said about any of it — no refusal line, because no refusal was decided', async () => {
+    it('the one key refusal said is the membership rule\'s: no posture refusal is decided for the organization-less key', async () => {
         const c = await bootOpenOnlyComposition({ mountOrgScoping: false });
         await callGet(c, { apiKey: RAW_EXMEMBER_KEY });
         await callGet(c, { apiKey: RAW_ORGLESS_KEY });
-        expect(keyRefusalLines(c)).toHaveLength(0);
+        const lines = keyRefusalLines(c);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain('organization_membership_ended');
+        expect(lines[0]).toContain('principal=u_exmember');
     });
 
     it('NARROWNESS: the member control is UNCHANGED by the ablation — the mount is what moved', async () => {

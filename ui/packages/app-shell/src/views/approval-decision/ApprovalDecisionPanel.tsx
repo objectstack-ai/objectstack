@@ -11,13 +11,17 @@
  * of objectui#2763; ruling 6079807016, letter 乙), the page component type
  * `record:approval_decision`.
  *
- * One node, six parts, each drawn by a piece already shipped:
+ * One node, seven parts, each drawn by a piece already shipped:
  *
  *  0. **Where the request came from** (objectui#12491) — a request no person
  *     submitted (opened by a flow run with no user context, such as a
  *     scheduled run) is marked with the Approval Center's "Flow-initiated"
  *     copy, as the approvals inbox's request sheet marks it. See "The flow
  *     origin" below.
+ *  0b. **Why it was decided** (objectstack#32667) — on a request that was
+ *     rejected, sent back for revision or approved, the comment the deciding
+ *     action was recorded with, and who recorded it. See "The decision
+ *     comment" below.
  *  1. **What was submitted** (objectui#12483) — the declared amount and a
  *     summary of the request's record snapshot, under the target object's
  *     declared labels and through the record page's own cells, with the
@@ -97,6 +101,22 @@
  * origin, like the names, are drawn where no tally exists, so each is its own
  * part under its own gate.
  *
+ * ## The decision comment (objectstack#32667)
+ *
+ * The reader a decision reaches lands on this page, on its Details tab; the
+ * applicant of a rejected request comes here to learn what to fix. The reason
+ * lives only on the request's thread (`sys_approval_action.comment`), which
+ * the Timeline tab lists, so the panel draws the deciding action's comment
+ * itself. The request row carries no comment, so the panel reads the thread
+ * the way the Timeline tab reads it: a `find` of `sys_approval_action` scoped
+ * to the request (`{ request_id }`), through the page's data source, which the
+ * console routes to `GET /approvals/requests/:id/actions`. It reads once, only
+ * on a request whose status a decision set, and again when a decision
+ * invalidates the timeline; with no data source it reads nothing. The deciding
+ * action is the latest of the kind the status names: `reject` for `rejected`,
+ * `revise` for `returned`, `approve` for `approved`. A decision recorded
+ * without a comment, and a read that fails, draw nothing.
+ *
  * ## No authorable props
  *
  * The panel reads the record context and nothing else: the request row the
@@ -139,7 +159,13 @@
  */
 
 import * as React from 'react';
-import { notifyDataChanged, useObjectTranslation, useRecordContext } from '@object-ui/react';
+import {
+  notifyDataChanged,
+  useAdapter,
+  useDataInvalidation,
+  useObjectTranslation,
+  useRecordContext,
+} from '@object-ui/react';
 import { cn, Badge } from '@object-ui/components';
 import { Workflow } from 'lucide-react';
 import { ApprovalStepLine } from '../approval-progress/ApprovalStepLine.js';
@@ -149,7 +175,7 @@ import { DeclaredActionsBar } from '../DeclaredActionsBar.js';
 import { approverChips } from '../RecordApprovalsPanel.js';
 import { RecordSnapshotSummary } from './RecordSnapshotSummary.js';
 import { RECORD_APPROVAL_ACTION_LOCATION, SYS_APPROVAL_REQUEST_OBJECT } from '../recordApprovalActions.js';
-import type { ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
+import type { ApprovalActionLite, ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
 import type { ApprovalRequestRow } from '@objectstack/spec/contracts';
 import { useApproverDirectory } from '../../hooks/useApproverDirectory.js';
 import {
@@ -249,6 +275,82 @@ function FlowOrigin({ request }: { request: ApprovalRequestLite }) {
   );
 }
 
+/**
+ * The action kind that settles a request in each decided status: the action
+ * whose comment explains the decision (see "The decision comment" above).
+ */
+const DECIDING_ACTION: Readonly<Record<string, string>> = {
+  rejected: 'reject',
+  returned: 'revise',
+  approved: 'approve',
+};
+
+/** The read of one request's thread, newest first: the Timeline tab's scope and order. */
+function timelineQuery(requestId: string) {
+  return { $filter: { request_id: requestId }, $orderby: [{ field: 'created_at', order: 'desc' as const }] };
+}
+
+/** The first `kind` row of a thread read newest first. */
+function latestOfKind(rows: unknown, kind: string): ApprovalActionLite | null {
+  if (!Array.isArray(rows)) return null;
+  const row = rows.find((r) => (r as ApprovalActionLite | null)?.action === kind);
+  return (row as ApprovalActionLite | undefined) ?? null;
+}
+
+/**
+ * Why a decided request was decided: the deciding action's comment and who
+ * recorded it, on the request's own page; nothing on a pending request, or
+ * for a decision recorded without a comment.
+ */
+function DecisionComment({ request }: { request: ApprovalRequestLite }) {
+  const { t } = useObjectTranslation();
+  const dataSource = useAdapter();
+  const kind = DECIDING_ACTION[request.status];
+  const requestId = String(request.id);
+  const timelineChanged = useDataInvalidation(kind ? APPROVAL_ACTION_OBJECT : undefined);
+  const [answer, setAnswer] = React.useState<{ key: string; action: ApprovalActionLite | null } | null>(null);
+  const key = kind ? `${requestId}::${kind}` : null;
+
+  React.useEffect(() => {
+    if (!kind || key === null || typeof dataSource?.find !== 'function') return;
+    let cancelled = false;
+    // The executor runs synchronously, so a source that THROWS lands with a rejection.
+    new Promise<unknown>((resolve) => resolve(dataSource.find(APPROVAL_ACTION_OBJECT, timelineQuery(requestId)))).then(
+      (out) => {
+        if (!cancelled) setAnswer({ key, action: latestOfKind((out as { data?: unknown } | null)?.data, kind) });
+      },
+      () => {
+        if (!cancelled) setAnswer({ key, action: null });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [kind, key, requestId, dataSource, timelineChanged]);
+
+  const action = answer && answer.key === key ? answer.action : null;
+  const comment = typeof action?.comment === 'string' ? action.comment.trim() : '';
+  if (!action || !comment) return null;
+  const tr = (k: string, defaultValue: string) => String(t(`approvalsInbox.${k}`, { defaultValue }));
+  const verb =
+    action.action === 'reject' ? tr('actReject', 'Rejected')
+      : action.action === 'revise' ? tr('actRevise', 'Sent back for revision')
+      : tr('actApprove', 'Approved');
+  return (
+    <div
+      className="rounded-md border px-3 py-2 text-sm"
+      data-testid="approval-decision-comment"
+      data-action={action.action}
+    >
+      <div className="text-[11px] text-muted-foreground mb-0.5">
+        {verb}
+        {action.actor_name ? ` · ${action.actor_name}` : ''}
+      </div>
+      <p className="whitespace-pre-wrap break-words">{comment}</p>
+    </div>
+  );
+}
+
 /** The parts over one request row. Module-internal: no package export. */
 export function ApprovalDecisionPanel({ request, className }: ApprovalDecisionPanelProps) {
   const progress = request.decision_progress;
@@ -263,6 +365,7 @@ export function ApprovalDecisionPanel({ request, className }: ApprovalDecisionPa
   return (
     <div className={cn('space-y-3', className)} data-testid="approval-decision-panel">
       <FlowOrigin request={request} />
+      <DecisionComment request={request} />
       <RecordSnapshotSummary
         objectName={request.object_name}
         snapshot={request.payload}

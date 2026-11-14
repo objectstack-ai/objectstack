@@ -67,8 +67,10 @@
 //     a header field.
 //   - `docs/adr/PRIORITIZATION.md`, the retired review that used to sit in the
 //     registry, left when this index arrived; the one rule it still carried —
-//     status hygiene on landing an implementation — lives in `CONVENTIONS`
-//     below, where every reader of the index meets it.
+//     status hygiene after an implementation lands — lives in `CONVENTIONS`
+//     below, where every reader of the index meets it. Ruling record
+//     6797014134 moved the flip out of the implementing PR into a separate
+//     `domain:skills` PR that cites the merge commit.
 //
 // ## Self-test shape
 //
@@ -376,7 +378,7 @@ export const CONVENTIONS = `## Conventions
 
 - **One registry per repository, numbers never reassigned, files never moved** (AGENTS.md Prime Directive 13). A reversed decision is a new ADR or an amended status line, never a quiet changeset. Before changing behaviour in territory an ADR governs, grep this index for the surface.
 - **The status line is the single fact.** Every record carries, right under its title, one line that starts \`**Status**: \` followed by a keyword — ${STATUS_KEYWORDS.map((k) => `\`${k}\``).join(', ')} — and any free prose after it (dates, implementation notes, amendments). This index is generated from that line by \`scripts/adr-index.mjs\`; a record whose line is missing or names no keyword is listed as **${UNPARSED}** and reported, never guessed.
-- **Status hygiene.** A PR that lands an ADR's implementation flips that ADR's \`**Status**:\` line to \`Accepted — implemented\` with one line of evidence (key file + test), in the same PR. (The rule the retired \`PRIORITIZATION.md\` review carried; it lives here now.)
+- **Status hygiene.** A PR that lands an ADR's implementation leaves \`docs/adr/**\` untouched. After it merges, the landing seat files the status flip as its own \`domain:skills\` card, and that separate PR sets the ADR's \`**Status**:\` line to \`Accepted — implemented\` with one line of evidence (key file + test), citing the merge commit (ruling record 6797014134). (The rule the retired \`PRIORITIZATION.md\` review carried, as that ruling amended it; it lives here now.)
 - **Shared numbers are cited by stem.** Where two unrelated records carry one number, a bare \`ADR-NNNN\` is one of two; the unambiguous id is the record's filename stem prefixed \`ADR-\` (\`ADR-0057-system-data-lifecycle-and-retention\`), which \`scripts/check-adr-anchors.mjs\` resolves to that one record. Versions of one decision share a stem and add \`.vN\`; cite a version as \`ADR-0006 v4\` in prose or \`ADR-0006-project-environment-split.v4\` where a checker reads it.
 - **The ObjectUI registry (\`ui/docs/adr/\`) keeps its own sequence**, imported with the ui merge. Its numbers overlap this registry's and mean something else; this index lists them under the \`ui-\` prefix, and a citation of one is spelled \`ObjectUI ADR-NNNN\`, which the anchor checker recognises as another registry's.
 - **Decisions that draw the open/closed or commercial boundary live in \`objectstack-ai/cloud\`** and are cited from here as \`cloud ADR-NNNN\`, never as a bare number.

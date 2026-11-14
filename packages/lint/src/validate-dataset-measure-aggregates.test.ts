@@ -436,7 +436,8 @@ const flaggedStackWith = (aggregate: string, fieldType: string): Record<string, 
   });
 
 // [#24426] A total over a VIRTUAL field. A `formula` stores no value, so the
-// way to its total is to store the value as a number field and aggregate that;
+// way to its total is a field of its return type carrying the same `expression`
+// (a stored computed field, computed and stored on every write) aggregated in its place;
 // the hint used to name `count` / `count_distinct` as the way out instead,
 // which turns "total leave days" into a record count. The sentence is the
 // spec's, the one the compile leg prints too.
@@ -449,10 +450,10 @@ describe('measure-aggregate-field-type-refused — a total over a formula names 
     expect(issue.severity).toBe('error');
     expect(issue.path).toBe('datasets[0].measures[0].aggregate');
     expect(issue.hint).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
-    expect(issue.hint).toContain('store the value as a number field');
-    expect(issue.hint).toContain('answer a different question: how many records');
+    expect(issue.hint).toContain('make it a field of its return type with the same `expression`');
+    expect(issue.hint).not.toMatch(/hook/i);
     // The remedy comes first, and no count is offered as the way to the total.
-    expect(issue.hint.indexOf('number field')).toBeLessThan(issue.hint.indexOf('`count`'));
+    expect(issue.hint.indexOf('its return type')).toBeLessThan(issue.hint.indexOf('Counting records is a different question'));
     expect(issue.hint).not.toContain('accepts: count');
     expect(issue.hint).not.toContain('Either point');
   });
@@ -466,6 +467,20 @@ describe('measure-aggregate-field-type-refused — a total over a formula names 
 
   it('`os explain` holds the same sentence verbatim', () => {
     expect(explanationOf(RULE)).toContain(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+  });
+
+  it('following the fix line clears the finding: a number field carrying the same expression is accepted', () => {
+    const expression = 'daysBetween(record.start_date, record.end_date) + 1';
+    const fields = (measured: Record<string, unknown>) => ({
+      fields: { name: { type: 'text' }, start_date: { type: 'date' }, end_date: { type: 'date' }, measured },
+    });
+    for (const aggregate of ['sum', 'avg', 'min', 'max']) {
+      // Not vacuous: the same expression on a formula is refused with the remedy…
+      const [refused] = findings(stackWith(aggregate, undefined, fields({ type: 'formula', returnType: 'number', expression })));
+      expect(refused?.hint, aggregate).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+      // …and on the stored number field the remedy names, it is not.
+      expect(findings(stackWith(aggregate, undefined, fields({ type: 'number', readonly: true, expression }))), aggregate).toEqual([]);
+    }
   });
 
   it('the controls: a stored class and the count_distinct × JSON-list case keep their own hints', () => {
@@ -1478,7 +1493,8 @@ describe('[#22161] one-line fixes — the three ids', () => {
         'one query per member',
       ],
       [DIMENSION_VIRTUAL_FIELD_REFUSED]: [
-        'store it in a field of its own on the object',
+        'make it a stored field of its own on the object',
+        'carrying the same `expression`, which the engine computes and stores on every write',
         'point the dimension at that stored field',
       ],
     };

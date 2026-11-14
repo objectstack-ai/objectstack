@@ -49,7 +49,7 @@ const REPRESENTATIVE: Record<string, Record<string, unknown>> = {
   picklist: { name: 'industry', label: 'Industry', options: [{ label: 'Technology', value: 'technology' }] },
   datasource: { name: 'warehouse', driver: 'sqlite', config: {} },
   analytics_cube: { name: 'account_cube', sql: 'account', measures: {}, dimensions: {} },
-  page: { name: 'account_home', label: 'Account Home', regions: [] },
+  page: { name: 'account_home', label: 'Account Home', type: 'home', regions: [] },
   dashboard: { name: 'ops', label: 'Ops', widgets: [] },
   app: { name: 'sales', label: 'Sales' },
   action: { name: 'close_account', label: 'Close', type: 'script', target: 'close_account' },
@@ -172,10 +172,11 @@ describe('TypeScriptSerializer annotation, per metadata type', () => {
   it('no exports entry of the package re-exports the internal channel', async () => {
     // Control: the name is spelled right, so the absences below can fail.
     expect(Object.keys(await import('./typescript-serializer.js'))).toContain('serializeTypeScriptForMetadataType');
-    // Eight since `./history-snapshot` (after `./picklist-references` and
-    // `./view-container-name`, #21412): the count is the control that the loop
-    // below visits every entry, so a new entry moves it here.
-    expect(EXPORT_ENTRY_SOURCES.length).toBe(8);
+    // Nine since `./stored-item-package` (#32365; after `./history-snapshot`,
+    // `./picklist-references` and `./view-container-name`, #21412): the count
+    // is the control that the loop below visits every entry, so a new entry
+    // moves it here.
+    expect(EXPORT_ENTRY_SOURCES.length).toBe(9);
     for (const source of EXPORT_ENTRY_SOURCES) {
       const entry = (await import(source)) as Record<string, unknown>;
       expect(Object.keys(entry).length, source).toBeGreaterThan(0);

@@ -648,7 +648,8 @@ export async function migratePackagelessOverlays(
             // record of what a view container expanded to leave with it, and
             // the pair's row saved in step 2 is registered again. A draft never
             // hydrated, so its removal heals nothing.
-            if (row.state === 'active') await this.restoreArtifactRegistryView(row.type, row.name, null, row.member);
+            // [#32366] For the binding the removed row had (step 4's own).
+            if (row.state === 'active') await this.restoreArtifactRegistryView(row.type, row.name, null, bound ? row.base : null, row.member);
             movedFrom.set(itemKey, bound);
             line.moved += 1;
             outcomes.push(addedMember === undefined

@@ -78,7 +78,7 @@ describe('NativeSQLStrategy — datetime filter column normalisation (#3912)', (
       { cube: 'compliance', measures: ['total'], where: { assessed: { $gte: '2025-06-18' } } },
       withHook(),
     );
-    expect(sql).toContain('EPOCH_MS(assessed_at) >= $1');
+    expect(sql).toContain('EPOCH_MS("assessed_at") >= $1');
   });
 
   it('normalises the column on an `in` set', async () => {
@@ -90,7 +90,7 @@ describe('NativeSQLStrategy — datetime filter column normalisation (#3912)', (
       },
       withHook(),
     );
-    expect(sql).toContain('EPOCH_MS(assessed_at) IN ($1, $2)');
+    expect(sql).toContain('EPOCH_MS("assessed_at") IN ($1, $2)');
   });
 
   it('normalises the column on a timeDimension dateRange — the dashboard shape', async () => {
@@ -106,7 +106,7 @@ describe('NativeSQLStrategy — datetime filter column normalisation (#3912)', (
     // so it binds as `< 2025-07-02`, and BOTH comparisons read the normalised
     // column.
     expect(sql).toContain(
-      '(EPOCH_MS(assessed_at) >= $1 AND EPOCH_MS(assessed_at) < $2)',
+      '(EPOCH_MS("assessed_at") >= $1 AND EPOCH_MS("assessed_at") < $2)',
     );
   });
 
@@ -115,14 +115,14 @@ describe('NativeSQLStrategy — datetime filter column normalisation (#3912)', (
       { cube: 'compliance', measures: ['total'], where: { assessed: { $exists: true } } },
       withHook(),
     );
-    expect(set.sql).toContain('assessed_at IS NOT NULL');
+    expect(set.sql).toContain('"assessed_at" IS NOT NULL');
     expect(set.sql).not.toContain('EPOCH_MS');
 
     const notSet = await gen(
       { cube: 'compliance', measures: ['total'], where: { assessed: null } },
       withHook(),
     );
-    expect(notSet.sql).toContain('assessed_at IS NULL');
+    expect(notSet.sql).toContain('"assessed_at" IS NULL');
     expect(notSet.sql).not.toContain('EPOCH_MS');
   });
 
@@ -131,7 +131,7 @@ describe('NativeSQLStrategy — datetime filter column normalisation (#3912)', (
       { cube: 'compliance', measures: ['total'], where: { assessed: { $contains: '2025-06' } } },
       withHook(),
     );
-    expect(sql).toContain('assessed_at LIKE $1');
+    expect(sql).toContain('"assessed_at" LIKE $1');
     expect(sql).not.toContain('EPOCH_MS');
   });
 
@@ -140,7 +140,7 @@ describe('NativeSQLStrategy — datetime filter column normalisation (#3912)', (
       { cube: 'compliance', measures: ['total'], where: { title: { $eq: 'SOC2' } } },
       withHook(),
     );
-    expect(sql).toContain('title = $1');
+    expect(sql).toContain('"title" = $1');
     expect(sql).not.toContain('EPOCH_MS');
   });
 
@@ -152,10 +152,10 @@ describe('NativeSQLStrategy — datetime filter column normalisation (#3912)', (
       timeDimensions: [{ dimension: 'assessed', dateRange: ['2025-06-18', '2025-07-01'] }],
     };
     const { sql } = await gen(query, ctxWith({}));
-    expect(sql).toContain('assessed_at >= $1');
+    expect(sql).toContain('"assessed_at" >= $1');
     // The window itself is half-open (#3777) even without the storage hook —
     // bound semantics and storage-form normalisation are independent layers.
-    expect(sql).toContain('(assessed_at >= $2 AND assessed_at < $3)');
+    expect(sql).toContain('("assessed_at" >= $2 AND "assessed_at" < $3)');
   });
 
   it('falls back to the bare column when the hook returns nothing usable', async () => {
@@ -163,6 +163,6 @@ describe('NativeSQLStrategy — datetime filter column normalisation (#3912)', (
       { cube: 'compliance', measures: ['total'], where: { assessed: { $gte: '2025-06-18' } } },
       ctxWith({ coerceTemporalFilterColumn: () => '' as unknown as string }),
     );
-    expect(sql).toContain('assessed_at >= $1');
+    expect(sql).toContain('"assessed_at" >= $1');
   });
 });

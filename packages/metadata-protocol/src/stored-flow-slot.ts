@@ -23,6 +23,19 @@
  * read again (same binding) always replaces itself, so a re-save of the
  * override, declared or not, is what the slot holds.
  *
+ * ## A name two or more packages ship (#32613, ADR-0150 D4)
+ *
+ * A row is a declared override when it declares the override of ANY package
+ * that ships the name, each judged by its own pair, as `declinesStoredRow`
+ * judges it (#31696). Before, it was judged against the bare-name owner
+ * alone, the first holder to register: the second holder's declared override
+ * read as a plain stored row, so a package-less row read after it took the
+ * slot and dropped it, and the boot pull armed that holder's shipped body
+ * until `kernel:ready` re-armed from the protocol's view. Under two holders
+ * the slot is transport only: the pull reads the slot's body and every row
+ * carried on it ({@link shadowedStoredRowsOf}), and ranks each in its own
+ * package's slot, so which override the bare slot holds decides nothing.
+ *
  * ## The row that loses the slot is kept, stored and shadowed
  *
  * It is not deleted and not migrated: `flow` has `allowEnvironmentOverlay:
@@ -82,14 +95,15 @@ export function shadowedStoredRowsOf(item: unknown): readonly object[] {
 /**
  * Settle the bare slot of one flow name between the row it `held` and the
  * stored row now `incoming`, both bound by {@link storedRowBindingOf}, for the
- * name's shipping package `basePackageId` (the loader's set's owner, or none).
- * Returns `true` when `incoming` takes the slot, `false` when the held
+ * packages that ship the name, `shippingPackages` (the loader's set's owner
+ * and [#32613] every other package that ships it; none for a name no package
+ * ships). Returns `true` when `incoming` takes the slot, `false` when the held
  * declared override keeps it. Records the row that loses on the one that wins.
  */
 export function incomingTakesStoredFlowSlot(
     held: unknown,
     incoming: unknown,
-    basePackageId: unknown,
+    shippingPackages: string | Iterable<string> | undefined,
     installed: InstalledManifestLookup,
 ): boolean {
     const heldBinding = storedRowBindingOf(held);
@@ -102,8 +116,9 @@ export function incomingTakesStoredFlowSlot(
         carryShadowed(held, incoming);
         return true;
     }
-    const isOverride = (item: unknown, binding: string | null | undefined) =>
-        isServedOverrideRowOf({ type: 'flow', package_id: binding ?? null, metadata: item }, basePackageId, installed);
+    const shippers = typeof shippingPackages === 'string' ? [shippingPackages] : [...(shippingPackages ?? [])];
+    const isOverride = (item: unknown, binding: string | null | undefined) => shippers.some((shipper) =>
+        isServedOverrideRowOf({ type: 'flow', package_id: binding ?? null, metadata: item }, shipper, installed));
     const incomingIsOverride = isOverride(incoming, incomingBinding);
     if (!incomingIsOverride && isOverride(held, heldBinding)) {
         carryShadowed(held, held, incoming);

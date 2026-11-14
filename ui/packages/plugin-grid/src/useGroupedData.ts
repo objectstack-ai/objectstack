@@ -546,9 +546,10 @@ function readServerAggregations(
   for (const { field, type } of configs) {
     const summary = serverSummaryOf(type);
     if (!summary || typeof field !== 'string' || field === '') continue;
-    // Typed `number | null` by the spec, but a `min` / `max` column holds the
-    // aggregated field's stored value, which for a date-family field is text.
-    const value: unknown = deriveColumnSummary(row, summary, field);
+    // `unknown` by the spec's own declaration: `summary` may be `min` / `max`,
+    // whose column holds the aggregated field's stored value (text for a
+    // date-family field), not a number.
+    const value = deriveColumnSummary(row, summary, field);
     if (value === undefined) continue;
     if (value === null) {
       out.push({ field, type, value: null });

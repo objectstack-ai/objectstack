@@ -2,6 +2,7 @@
 // ADR-0090 D12 — delegated administration: scoped admin, no self-escalation.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { bindSecurityCatalogReader, createSecurityCatalogReader } from '@objectstack/core';
 import { mapDataError } from '@objectstack/types';
 import { DelegatedAdminGate, isUnreadableAddressedRowRefusal } from './delegated-admin-gate';
 import { isPermissionDeniedError } from './errors.js';
@@ -2346,4 +2347,117 @@ describe('[ADR-0090 D12] a delegate can neither capture nor evict a direct grant
       await expect(r.rename(id, to, r.as('tenant_admin')), `${id} → ${to}`).resolves.toBeUndefined();
     }
   });
+});
+
+/**
+ * [ADR-0150 D8 R1, #32538] An organization administrator's grant that names a
+ * package (`permission_set_package`) is judged on that holder alone. The write
+ * seam keeps a named holder as written and refuses a package that does not
+ * hold the name (#32164, `stored-permission-set-package-stamp.ts`), so the
+ * bare name — which two holders refuse — is never what such a grant stores.
+ * A grant that names no package is judged by its name, as the reader resolves
+ * it.
+ *
+ * A stand-in registry serves two holders of one name, because a real registry
+ * refuses a second holder until #31698 PR-2: `com.acme.crm` holds an
+ * in-boundary `shared_reader`, `com.acme.hr` one that fails condition (a).
+ *
+ * BASE (main 6bbdf301) for the one moved answer: two holders, the in-boundary
+ * holder named → refused 403 (the bare-name leg: "cannot resolve … two
+ * holders") → admitted.
+ */
+describe("[ADR-0150 D8 R1, #32538] an organization administrator's grant naming a package is judged on that holder alone", () => {
+  const CRM = 'com.acme.crm';
+  const HR = 'com.acme.hr';
+  const OTHER = 'com.acme.other';
+  const IN = { crm_account: { allowRead: true } };
+  const WILD = { '*': { allowRead: true, viewAllRecords: true } };
+  /** name → holder → objects: `shared_reader` two holders; `crm_only` and `hr_only` one each. */
+  const HOLDERS: Record<string, Record<string, object>> = {
+    shared_reader: { [CRM]: IN, [HR]: WILD },
+    crm_only: { [CRM]: IN },
+    hr_only: { [HR]: WILD },
+  };
+  const itemOf = (name: string, packageId: string) => ({ name, label: name, objects: HOLDERS[name][packageId], _packageId: packageId });
+  const holdersOf = (name: string) => Object.keys(HOLDERS[name] ?? {});
+
+  function twoHolderHarness() {
+    const o = makeOrganizationHarness();
+    const manifests = [CRM, HR, OTHER].map((id) => ({ manifest: { id, namespace: id.split('.').pop() } }));
+    const registry = {
+      getItem: (type: string, name: string) => (type === 'permission' && holdersOf(name).length > 0 ? itemOf(name, holdersOf(name)[0]) : undefined),
+      listItems: (type: string) => (type === 'permission' ? Object.keys(HOLDERS).flatMap((n) => holdersOf(n).map((p) => itemOf(n, p))) : []),
+      isPackageDisabled: () => false,
+      packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' ? holdersOf(name) : []),
+      getPackageScopedItem: (type: string, name: string, packageId: string) =>
+        type === 'permission' && holdersOf(name).includes(packageId) ? itemOf(name, packageId) : undefined,
+      getEnvironmentScopedItem: () => undefined,
+      getArtifactItem: () => undefined,
+      getPackage: (id: string) => manifests.find((m) => m.manifest.id === id),
+      getAllPackages: () => manifests,
+      bareNameHoldersAreSealed: true,
+    };
+    const metadata = { get: async () => undefined, list: async () => [] };
+    expect(bindSecurityCatalogReader(o.ql, createSecurityCatalogReader({ registry: registry as never, metadata }))).toBe(true);
+    return o;
+  }
+
+  let o: ReturnType<typeof makeOrganizationHarness>;
+  beforeEach(() => { o = twoHolderHarness(); });
+
+  const insertGrant = (principal: string, grant: Record<string, unknown>) =>
+    o.gate.assert({ object: 'sys_user_permission_set', operation: 'insert', data: grant, context: o.ctxOf(principal) });
+
+  for (const principal of ['org_admin', 'org_admin_nb']) {
+    describe(principal, () => {
+      it('two holders, the in-boundary holder named: admitted, the row keeps that holder and lands in the organization', async () => {
+        const grant: any = { user_id: 'u_member', permission_set: 'shared_reader', permission_set_package: CRM };
+        await expect(insertGrant(principal, grant)).resolves.toBeUndefined();
+        expect(grant).toMatchObject({ permission_set_package: CRM, organization_id: 'org_a' });
+      });
+
+      it('two holders, the holder outside the boundary named: refused on that holder, naming the set and the condition', async () => {
+        const err = await deniedOf(() => insertGrant(principal,
+          { user_id: 'u_member', permission_set: 'shared_reader', permission_set_package: HR }));
+        expect(err.message).toMatch(/'shared_reader'.*condition \(a\).*'viewAllRecords'/);
+        expect(err.details?.permissionSet).toBe('shared_reader');
+      });
+
+      it('two holders, no package named: refused as before, naming every holder', async () => {
+        const err = await deniedOf(() => insertGrant(principal, { user_id: 'u_member', permission_set: 'shared_reader' }));
+        expect(err.message).toMatch(/'shared_reader', which the position cannot resolve/);
+        expect(err.message).toContain(CRM);
+        expect(err.message).toContain(HR);
+      });
+
+      it('two holders, a package that holds neither named: read as no package — refused as before, naming every holder', async () => {
+        const err = await deniedOf(() => insertGrant(principal,
+          { user_id: 'u_member', permission_set: 'shared_reader', permission_set_package: OTHER }));
+        expect(err.message).toMatch(/'shared_reader', which the position cannot resolve/);
+        expect(err.message).toContain(CRM);
+        expect(err.message).toContain(HR);
+      });
+
+      it('CONTROL: one holder — admitted named or not when inside, refused named or not when outside (unchanged)', async () => {
+        for (const extra of [{}, { permission_set_package: CRM }]) {
+          await expect(insertGrant(principal, { user_id: 'u_member', permission_set: 'crm_only', ...extra }), JSON.stringify(extra))
+            .resolves.toBeUndefined();
+        }
+        for (const extra of [{}, { permission_set_package: HR }]) {
+          const err = await deniedOf(() => insertGrant(principal, { user_id: 'u_member', permission_set: 'hr_only', ...extra }));
+          expect(err.message, JSON.stringify(extra)).toMatch(/'hr_only'.*condition \(a\)/);
+        }
+      });
+
+      it('CONTROL: the removal of a stored grant is judged on the holder its row names (unchanged)', async () => {
+        o.tables.sys_user_permission_set.push(
+          { id: 'ups_crm', user_id: 'u_member', permission_set: 'shared_reader', permission_set_package: CRM, organization_id: 'org_a' },
+          { id: 'ups_hr', user_id: 'u_member', permission_set: 'shared_reader', permission_set_package: HR, organization_id: 'org_a' },
+        );
+        const remove = (id: string) => o.gate.assert({ object: 'sys_user_permission_set', operation: 'delete', data: { id }, context: o.ctxOf(principal) });
+        await expect(remove('ups_crm')).resolves.toBeUndefined();
+        expect((await deniedOf(() => remove('ups_hr'))).message).toMatch(/'shared_reader'.*condition \(a\)/);
+      });
+    });
+  }
 });

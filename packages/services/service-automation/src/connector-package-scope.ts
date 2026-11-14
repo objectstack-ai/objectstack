@@ -74,11 +74,19 @@ export function refusedConnectorNames(
  * composition with no ObjectQL, or whose registry offers none of the
  * package-scoped reads, has no registry to ask: the answer is `undefined` and
  * `connector_action` dispatches by name as before.
+ *
+ * [#32183] It judges the served holders, as the dispatch does;
+ * `options.includeDisabledPackages` asks over every holder, the question the
+ * stored-reference backfill's durable judgment asks.
  */
 export function connectorNameResolver(
     ctx: { getService<T>(name: string): T },
-): (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined {
-    return (name, callerPackageId) => {
+): (
+    name: string,
+    callerPackageId: string | null,
+    options?: { readonly includeDisabledPackages?: boolean },
+) => PackageScopedResolution | undefined {
+    return (name, callerPackageId, options) => {
         let registry: PackageScopedRegistry | undefined;
         try {
             registry = packageScopedRegistryOf(ctx.getService<{ registry?: unknown }>('objectql')?.registry);
@@ -86,7 +94,10 @@ export function connectorNameResolver(
             return undefined;
         }
         if (!registry) return undefined;
-        return resolvePackageScopedName(registry, { type: 'connector', name, callerPackageId });
+        return resolvePackageScopedName(registry, {
+            type: 'connector', name, callerPackageId,
+            ...(options?.includeDisabledPackages === true ? { includeDisabledPackages: true } : {}),
+        });
     };
 }
 
@@ -133,10 +144,12 @@ export function mappingNameResolver(
  *    the one holder in its closure): `not-found`.
  *  - Refused `outside-closure` naming exactly one holder, a disabled package:
  *    `not-found`, as the no-package read withholds that one holder's item.
- *  - Every other refusal stands as the resolver wrote it. A disabled holder
- *    beside an enabled one in the closure still counts, as it does for the
- *    no-package read today; dropping disabled holders from the holder set is
- *    #32183's change at `packageScopedHoldersOf`, which this does not touch.
+ *    [#32183] The resolver no longer writes this refusal: a disabled package
+ *    holds no name in the served holder set (`packageScopedHoldersOf`), so
+ *    such a name resolves to `not-found` before this arm is asked.
+ *  - Every other refusal stands as the resolver wrote it. [#32183] A disabled
+ *    holder beside an enabled one in the closure no longer counts (the served
+ *    holder set leaves it out), so the enabled holder's mapping is pulled.
  *
  * A registry that cannot say whether a package is disabled is read as is
  * (plugin-sharing's `listedHoldersView` precedent).

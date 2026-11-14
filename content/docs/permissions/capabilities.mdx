@@ -148,10 +148,12 @@ plain names. Three consequences worth internalising before you pick one:
   the safe direction, but nothing about the denial says the name exists nowhere.
   The authoring lint `validateCapabilityReferences` (ADR-0066 ⑨) closes part of
   this gap: it resolves every `requiredPermissions` reference against the
-  capabilities known at author time and **warns** on the unresolved ones. It is
-  a warning, not an error, because a single package's lint cannot see
-  capabilities declared by *other* installed packages. `systemPermissions` is
-  deliberately not flagged — that is the declaration side.
+  capabilities known at author time and **warns** on the unresolved ones. It
+  reads every package of the artifact being built, so a grant in a sibling
+  package of the same artifact counts, as it does at run time. It is a warning,
+  not an error, because the lint cannot see capabilities declared by packages
+  installed from *other* artifacts. `systemPermissions` is deliberately not
+  flagged — that is the declaration side.
 - **Renaming a shipped capability is a breaking change** for every permission
   set and every resource that references the old string, including ones in other
   packages you cannot see.

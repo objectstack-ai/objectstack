@@ -75,6 +75,7 @@ import {
     actionObjectOverrideTargets,
     actionServedWithoutOwnObject,
     applyObjectSchemaMask,
+    objectSchemaFieldPosture,
     isObjectSchemaMaskExempt,
     relateObjectSchemaMaskPosture,
     resolveObjectSchemaRuntimeView,
@@ -3888,7 +3889,10 @@ export const META_UNDETERMINED_CACHE_CONTROL = 'private, no-store';
  *  - `undetermined` (D6 tier 2) — the schema UNMASKED, and so served
  *    {@link META_UNDETERMINED_CACHE_CONTROL}: no shared cache may store or
  *    revalidate a body no mask touched;
- *  - `passthrough` — as given.
+ *  - `passthrough` — as given;
+ *  - `hidden` — [ruling record 6787890900] `ok: false` with `hidden`: the
+ *    caller may not read the object, so the exit answers as for a name that
+ *    names no object (a list leaves it out), ⛔ never as the D6 fault.
  *
  * The runtime dispatcher masked without the second half: an undetermined
  * posture's schema went out with no `Cache-Control` at all, where `RestServer`
@@ -3903,8 +3907,9 @@ export const META_UNDETERMINED_CACHE_CONTROL = 'private, no-store';
 export function projectMetaObjectSchema(
     posture: ObjectSchemaMaskPosture,
     document: unknown,
-): { ok: true; document: any; cacheControl?: typeof META_UNDETERMINED_CACHE_CONTROL } | { ok: false } {
+): { ok: true; document: any; cacheControl?: typeof META_UNDETERMINED_CACHE_CONTROL } | { ok: false; hidden?: true } {
     const masked = applyObjectSchemaMask(document, posture);
+    if (masked.hidden) return { ok: false, hidden: true };
     if (masked.emptied) return { ok: false };
     return posture.kind === 'undetermined'
         ? { ok: true, document: masked.document, cacheControl: META_UNDETERMINED_CACHE_CONTROL }
@@ -3981,7 +3986,11 @@ export async function projectMetaActionForCaller(
         let posture: ObjectSchemaMaskPosture | undefined;
         let evaluationError: ObjectSchemaMaskEvaluationError | undefined;
         try {
-            posture = await sources.masker(ownerName);
+            // [ruling record 6787890900] The field half only: an action is
+            // judged on its object's field projection, whether or not the
+            // object itself is served to this caller (the rule moves the
+            // schema doors, not this verdict).
+            posture = objectSchemaFieldPosture(await sources.masker(ownerName));
         } catch (error) {
             if (!(error instanceof ObjectSchemaMaskEvaluationError)) throw error;
             evaluationError = error;
@@ -4006,7 +4015,7 @@ export async function projectMetaActionForCaller(
     for (const target of targets) {
         let posture: ObjectSchemaMaskPosture | undefined;
         try {
-            posture = await sources.masker(target);
+            posture = objectSchemaFieldPosture(await sources.masker(target)); // [ruling record 6787890900] as above
         } catch (error) {
             if (!(error instanceof ObjectSchemaMaskEvaluationError)) throw error;
         }
@@ -4128,6 +4137,8 @@ async function maskMetaObjectList(
         // [#21884] The params that read another object through `objectOverride`
         // are judged against THAT object — related here, after the fetch.
         const masked = projectMetaObjectSchema(await relateObjectSchemaMaskPosture(posture, item), item);
+        // [ruling record 6787890900] An object the caller may not read is left out.
+        if (!masked.ok && masked.hidden) continue;
         if (!masked.ok) return { ok: false, object: objectName };
         cacheControl ??= masked.cacheControl;
         projected.push(masked.document);
@@ -4695,9 +4706,11 @@ export function createMetaItemAnswer(
 ): (envelope: Readonly<Record<string, any>> | null | undefined) => Promise<MetaItemAnswer> {
     const { metaType, name, policy, maskPosture } = request;
     return async (envelope) => {
-        // 1. [#18066] Absence.
+        // 1. [#18066] Absence. [ruling record 6787890900] An object the caller
+        //    may not read is absent too, before the gate, exactly as a name
+        //    with nothing behind it.
         let visible: any = envelope?.item;
-        if (visible == null) return { kind: 'refuse', refusal: { reason: 'absent' } };
+        if (visible == null || maskPosture.kind === 'hidden') return { kind: 'refuse', refusal: { reason: 'absent' } };
 
         // 2. [#20156 · #20193] THE per-caller gate.
         const verdict = await createMetaItemReadGate(sources, metaType, name, [visible], policy)(visible);
@@ -4949,8 +4962,9 @@ export function createMetaLayeredAnswer(
         const present = META_ITEM_LAYERS.filter((layer) => layered?.[layer] != null);
 
         // 1. [#20507] Absence — ADR-0045 §3: a name with no layer behind it is
-        //    the plain read's absence, answered before the gate.
-        if (present.length === 0) return { kind: 'refuse', refusal: { reason: 'absent' } };
+        //    the plain read's absence, answered before the gate. [ruling record
+        //    6787890900] So is an object the caller may not read.
+        if (present.length === 0 || maskPosture.kind === 'hidden') return { kind: 'refuse', refusal: { reason: 'absent' } };
 
         // 1b. [#7557, #24210] A disabled package's item is that same absence,
         //     for every caller: before the gate, so no author is served it.

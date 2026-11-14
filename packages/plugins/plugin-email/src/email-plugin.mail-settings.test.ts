@@ -687,6 +687,8 @@ describe('a host SMTP connect policy reaches every SMTP transport the plugin bui
   };
 
   const TIMEOUTS = { connectionTimeout: 20_000, greetingTimeout: 20_000, socketTimeout: 20_000 };
+  /** On every SMTP transport the plugin builds: it reads no file and fetches no URL for a message. */
+  const CONTENT_ACCESS_CLOSED = { disableFileAccess: true, disableUrlAccess: true };
 
   it('reaches the transport built at boot', async () => {
     const { smtpConnect, seen } = hostPolicy();
@@ -784,12 +786,14 @@ describe('a host SMTP connect policy reaches every SMTP transport the plugin bui
     expect(seen).toEqual([{ host: 'smtp.saved.test', port: 465 }, { host: 'smtp.form.test', port: 587 }]);
   });
 
-  // CONTROL: no policy — each site hands nodemailer the options it always did.
+  // CONTROL: no policy — each site hands nodemailer the options it always did,
+  // and the content-access flags, which every site sets.
   it('CONTROL: without a policy, the boot-built transport\'s options are unchanged', async () => {
     const { service } = await boot({}, { provider: 'smtp', providerOptions: { host: 'smtp.boot.test' } });
     await service.send({ to: 'user@example.test', subject: 's', text: 't' });
     expect(lastCreateOptions()).toStrictEqual({
       host: 'smtp.boot.test', port: 587, secure: false, requireTLS: true, ...TIMEOUTS,
+      ...CONTENT_ACCESS_CLOSED,
     });
   });
 
@@ -799,6 +803,7 @@ describe('a host SMTP connect policy reaches every SMTP transport the plugin bui
     expect(lastCreateOptions()).toStrictEqual({
       host: 'smtp.saved.test', port: 465, secure: true, requireTLS: false, ...TIMEOUTS,
       auth: { user: 'ops@example.test', pass: 'sekrit' },
+      ...CONTENT_ACCESS_CLOSED,
     });
   });
 
@@ -810,6 +815,7 @@ describe('a host SMTP connect policy reaches every SMTP transport the plugin bui
     });
     expect(lastCreateOptions()).toStrictEqual({
       host: 'smtp.form.test', port: 2525, secure: false, requireTLS: false, ...TIMEOUTS,
+      ...CONTENT_ACCESS_CLOSED,
     });
   });
 });

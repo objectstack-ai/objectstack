@@ -104,7 +104,7 @@ function engine(opts: { failMembers?: boolean } = {}) {
 }
 
 /** What the door answers: no context, the caller it names, or the outage. */
-type Answer = 'none' | 'outage' | { userId: string; tenantId: string };
+type Answer = 'none' | 'outage' | { userId: string; tenantId: string | undefined };
 
 interface Wiring {
     name: string;
@@ -148,11 +148,14 @@ const WIRINGS: Wiring[] = [
         answer: signedIn(),
     },
     {
-        name: "a walled tenancy service: no posture is read, so the session's claimed organization stands",
+        // [ADR-0093 D8.1, as amended] Under every tenancy posture, a person's
+        // data access requires a current membership in the organization: a
+        // claim no membership backs is dropped whether or not a posture is read.
+        name: "a walled tenancy service: no posture is read, and a claimed organization no current membership backs is dropped",
         auth: 'api',
         tenancy: { posture: 'isolated' },
         session: read({ user: { id: 'u1' }, session: { userId: 'u1', activeOrganizationId: OTHER_ORG } }),
-        answer: signedIn(OTHER_ORG),
+        answer: { userId: 'u1', tenantId: undefined },
     },
     { name: 'an API key alone: this door opens no API-key door', auth: 'api', headers: { 'x-api-key': KEY }, session: read(null), answer: 'none' },
     {
@@ -268,7 +271,8 @@ describe('[ruling 6257816853] the /auth/me door names the caller on every wiring
             }
             return;
         }
-        expect(door.context).toMatchObject({ userId: w.answer.userId, tenantId: w.answer.tenantId, principalKind: 'human', isSystem: false });
+        expect(door.context).toMatchObject({ userId: w.answer.userId, principalKind: 'human', isSystem: false });
+        expect(door.context?.tenantId).toBe(w.answer.tenantId);
         // Withheld by this door: the ADR-0069 posture, the session bearer, and
         // the localization the endpoints resolve for themselves.
         expect(door.context?.authGate).toBeUndefined();

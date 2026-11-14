@@ -68,6 +68,9 @@ import {
 // Who may START a flow by name — the one rule the trigger door, the action door
 // and this door share (the maintainer's ruling, letters B and A).
 import { flowStartRefusal } from './flow-start-admission.js';
+// [#31696] A flow endpoint's `target` resolves from the endpoint's own package.
+import { endpointPackageOf, flowServiceForCaller, flowWalkReads } from './flow-slot-view.js';
+import type { PackageScopedRegistry } from '@objectstack/objectql';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 
 // ============================================================================
@@ -376,6 +379,13 @@ export interface EndpointExecutorDeps {
      * slot (ADR-0076 D12).
      */
     automationService?: unknown;
+    /**
+     * [ADR-0150 D3, #31696] The ObjectQL registry of the request's kernel: the
+     * holder table a flow endpoint's `target` is resolved over, from the
+     * package whose `api` item the endpoint is. Absent, the target is read as
+     * a bare name (a name two packages hold is then refused, naming both).
+     */
+    registry?: Partial<PackageScopedRegistry>;
 }
 
 /** `query.id`, or a 400-class validation failure naming the missing parameter. */
@@ -513,14 +523,14 @@ async function executeFlow(
     deps: EndpointExecutorDeps,
     plan: { flow: string },
 ): Promise<EndpointExecutionAnswer> {
-    const service = deps.automationService;
+    const slot = deps.automationService;
     // Empty slot, or a slot filled by a self-declared non-handler — the same
     // amount of automation capability, and the same answer `/automation` gives:
     // 501 carrying the remedy sentence discovery reports for the slot
     // (`domains/unavailable.ts`, `serviceUnavailableMessage`). NOT a 404: the
     // endpoint IS declared and IS matched; what is missing is the implementation
     // behind it.
-    if (!isServiceServeable(service)) {
+    if (!isServiceServeable(slot)) {
         return apiErrorResponse({
             code: DispatcherErrorCode.enum.NOT_IMPLEMENTED,
             httpStatus: 501,
@@ -528,6 +538,15 @@ async function executeFlow(
         });
     }
 
+    // [ADR-0150 D3, #31696] The `target` is a reference the endpoint's own
+    // package wrote, so it resolves from that package: a flow name two
+    // packages hold (two namespaces may, ADR-0150 D9) reaches the package's
+    // own flow, else the one holder in its closure, from that holder's slot;
+    // anything else is refused naming every candidate (409, thrown, mapped by
+    // `executeEndpointTarget`'s one error path) before anything below reads
+    // or runs. An environment endpoint keeps the bare name, which the engine
+    // refuses for a shared name, naming both.
+    const service = flowServiceForCaller(slot, deps.registry, plan.flow, endpointPackageOf(deps.registry, ctx.endpoint.name));
     const automation = service as Pick<IAutomationService, 'execute'>;
     if (typeof automation.execute !== 'function') {
         // A serveable occupant that cannot execute is the same wall from the
@@ -570,7 +589,14 @@ async function executeFlow(
     // [ruling record 6377848497, letter A] The same check then asks the flow's
     // own `requiredPermissions`: an endpoint is a door that starts a flow by
     // name, so the flow's declaration binds here as at the other doors.
-    const startRefusal = await flowStartRefusal(service, plan.flow, ctx.executionContext);
+    //
+    // [ADR-0151 Non-goals; ruling record 6812617393, letter C] And between the
+    // two, the AI service account rule. An endpoint starts its flow by NAME:
+    // no action is in hand, and neither the endpoint nor the flow declares an
+    // AI opt-in, so nothing here carries one and the door says so. An AI
+    // service account is therefore refused an elevated (`runAs: 'system'`)
+    // flow at a declared endpoint, as at the trigger route.
+    const startRefusal = await flowStartRefusal(service, plan.flow, ctx.executionContext, { aiExposed: false });
     if (startRefusal) {
         return apiErrorResponse({
             message: startRefusal.message,
@@ -593,6 +619,8 @@ async function executeFlow(
         flowStartRecordKeys(automationContext as Record<string, unknown>),
         ctx.executionContext,
         (object, id) => deps.callData('get', { object, id }, ctx.dataDriver, ctx.environmentId, ctx.executionContext),
+        // [#31696] Callees read from the calling flow's package, as the run reads them.
+        flowWalkReads(service, async () => deps.registry),
     );
     const result = await automation.execute(plan.flow, automationContext);
 

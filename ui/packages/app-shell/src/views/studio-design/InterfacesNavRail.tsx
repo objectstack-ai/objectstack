@@ -30,7 +30,7 @@ import { listViewTargetOf } from './ObjectListViewInspector.js';
 import type { PackageSurface } from './packageSurfaces.js';
 import { resolveSurface, isSameSurface, type NavNode, type Surface } from './navSurface.js';
 import { t, tFormat, translateMetadataType, useMetadataLocale } from '../metadata-admin/i18n.js';
-import { inMenuOrder, navPayloadOf } from '../metadata-admin/previews/AppNavCanvas.js';
+import { inMenuOrder, isIncompleteNavEntry } from '../metadata-admin/previews/AppNavCanvas.js';
 import { navEntryLabelText } from '../metadata-admin/previews/navItemLabel.js';
 import { useNavTargetLabel } from '../../hooks/useNavTargetLabel.js';
 import { isNavEntryType } from '../metadata-admin/inspectors/nav-target.js';
@@ -336,7 +336,8 @@ export function NavTree({
         // instead, never `nav_item_N`. "No target" is the save's own rule
         // (`navPayloadOf` leaves exactly these entries out), and an authored
         // label still renders verbatim.
-        const untitled = node.label === undefined && navPayloadOf([node]).length === 0;
+        const incomplete = isIncompleteNavEntry(node);
+        const untitled = node.label === undefined && incomplete;
         // objectui#7254 — a nav item with no declared label used to render an
         // EMPTY row. It shows what it inherits (objectui#11196): its target's
         // current label, else the target's internal name, which is the
@@ -360,7 +361,13 @@ export function NavTree({
             indent={depth > 0}
             // objectui#11862 — the label is what the row says; the machine
             // name is the secondary information, on the tooltip with the type.
-            title={surface ? `${surface.type} · ${surface.name}` : rowText || undefined}
+            title={
+              surface
+                ? `${surface.type} · ${surface.name}`
+                : incomplete
+                  ? t('engine.appNav.incompleteHint', locale)
+                  : rowText || undefined
+            }
             className="disabled:opacity-40"
             icon={<Icon className="h-4 w-4 shrink-0" />}
             trailing={
@@ -380,6 +387,13 @@ export function NavTree({
                 {kind && (
                   <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
                     {kind}
+                  </span>
+                )}
+                {/* An entry with no target yet (`isIncompleteNavEntry`): the
+                    editor keeps it, marked, until it is bound or removed. */}
+                {incomplete && (
+                  <span className="shrink-0 rounded border border-amber-300 px-1 text-[10px] font-medium text-amber-700 dark:border-amber-700 dark:text-amber-400">
+                    {t('engine.appNav.incomplete', locale)}
                   </span>
                 )}
                 {surface && <RailCustomizationMark row={surface} marks={railMarks} locale={locale} />}

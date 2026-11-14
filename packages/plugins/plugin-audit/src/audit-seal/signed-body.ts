@@ -3,6 +3,7 @@
 import { createHash } from 'node:crypto';
 import { AUDIT_SEAL_CANON_VERSION, canonicalDatetime, type SealedColumnSet } from './canonical.js';
 import { canonicalJson, canonicalJsonBytes } from './jcs.js';
+import { merkleRoot } from './merkle.js';
 
 /**
  * ADR-0154 D4, D7, D8 — the signed bodies of a checkpoint and of an amendment,
@@ -17,13 +18,20 @@ import { canonicalJson, canonicalJsonBytes } from './jcs.js';
  * ⛔ A body carries no value, no salt and no seed: commitments, roots,
  * digests and handle ids only (D2). That is what lets it leave the host.
  *
- * The stored row adds what is not signed: its `id`, its `signature`, and the
+ * The stored row adds what is not signed: its `id`, its `signature`, the
  * non-null `chain_key` the `(sealed_object, chain_key, sequence)` unique index
  * needs — NULL is distinct from NULL in a SQL unique index, so the deployment
  * chain's NULL `tenant_id` could not hold two sealers to one checkpoint per
- * sequence. The body keeps ADR-0154's `tenant_id`, NULL for the deployment
- * chain; `chain_key` is derived from it ({@link chainKeyOf}) and a verifier
- * checks the two agree.
+ * sequence — and `leaf_hashes`. The body keeps ADR-0154's `tenant_id`, NULL
+ * for the deployment chain; `chain_key` is derived from it ({@link chainKeyOf})
+ * and a verifier checks the two agree.
+ *
+ * `leaf_hashes` is each sealed row's leaf hash in leaf order (the order of
+ * `row_ids`). It needs no signature of its own: the Merkle root over it is
+ * signed, so a list that rebuilds that root is the list the sealer hashed
+ * ({@link checkpointLeafHashesFromRow}). It is what lets a verifier judge each
+ * row on its own (ADR-0154 D9) — from the root alone it can tell that a
+ * chain's window changed, never which row.
  */
 
 /** A malformed body or row, named with the field. */
@@ -256,10 +264,14 @@ export function checkpointBodyFromRow(row: Readonly<Record<string, unknown>>): C
   return body;
 }
 
-/** The stored row of a signed checkpoint. */
+/**
+ * The stored row of a signed checkpoint. `leafHashes` is each listed row's
+ * leaf hash, lowercase hex, in the order of `row_ids`; it is refused unless it
+ * holds exactly one digest per listed row.
+ */
 export function checkpointRow(
   body: CheckpointSignedBody,
-  stored: { readonly id: string; readonly signature: string },
+  stored: { readonly id: string; readonly signature: string; readonly leafHashes: readonly string[] },
 ): Record<string, unknown> {
   const valid = checkpointBodyFromRow(body as unknown as Record<string, unknown>);
   return {
@@ -267,9 +279,40 @@ export function checkpointRow(
     id: stored.id,
     chain_key: chainKeyOf(valid.tenant_id),
     row_ids: canonicalJson(valid.row_ids),
+    leaf_hashes: canonicalJson(leafHashList(stored.leafHashes, valid)),
     columns: canonicalJson(valid.columns),
     signature: stored.signature,
   };
+}
+
+/** A list of lowercase hex digests holding one per row `body` lists. */
+function leafHashList(value: unknown, body: CheckpointSignedBody): string[] {
+  if (!Array.isArray(value) || value.some((hash) => typeof hash !== 'string' || !HEX_DIGEST.test(hash))) {
+    throw new SignedBodyError('leaf_hashes: an array of lowercase hex SHA-256 digests is required');
+  }
+  // One hash per listed row, and so per leaf: `checkpointBodyFromRow` holds
+  // `leaf_count` equal to the number of `row_ids`.
+  if (value.length !== body.row_ids.length || value.length !== body.leaf_count) {
+    throw new SignedBodyError(
+      `leaf_hashes: ${value.length} hash(es) for ${body.row_ids.length} row id(s) and a leaf count of ${body.leaf_count}`,
+    );
+  }
+  return [...(value as string[])];
+}
+
+/**
+ * The leaf hashes a stored checkpoint row carries, trusted: one per listed row
+ * (in the order of `row_ids`), and rebuilding `body.root` — the signed root, so
+ * a list that rebuilds it is the list the sealer hashed. Refuses a list of
+ * another length or one that rebuilds another root. `body` must be the row's
+ * own body, read with {@link checkpointBodyFromRow} and its signature checked.
+ */
+export function checkpointLeafHashesFromRow(row: Readonly<Record<string, unknown>>, body: CheckpointSignedBody): string[] {
+  const hashes = leafHashList(json(row, 'leaf_hashes'), body);
+  if (merkleRoot(hashes.map((hash) => Buffer.from(hash, 'hex'))) !== body.root) {
+    throw new SignedBodyError('leaf_hashes: do not rebuild the signed root');
+  }
+  return hashes;
 }
 
 // ── amendment ────────────────────────────────────────────────────────────────

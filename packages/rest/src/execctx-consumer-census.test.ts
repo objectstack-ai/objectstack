@@ -67,6 +67,8 @@ import {
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { RestServer } from './rest-server.js';
 import { REST_SERVER_REGISTRAR_FILES } from './rest-server-registrar-files.js';
+// Paid at collection, not inside a case's clock: the routes' reach loads it lazily.
+import '@objectstack/objectql';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
@@ -186,12 +188,20 @@ function recordingServer() {
     } as any;
 }
 
-/** A service that answers every method — the boot wires them all, none decides. */
+/**
+ * A service that answers every method — the boot wires them all, none decides.
+ * [ruling record 6787890900] Its object-level read admission admits, so the
+ * object schema doors this census drives reach the execution-context reading it
+ * measures; who the metadata plane hides an object from is pinned in
+ * `meta-object-fls.test.ts`, not here.
+ */
 function anyService() {
     return new Proxy({}, {
         get: (_t, k: string) => (k === 'then' || k === 'constructor')
             ? undefined
-            : vi.fn(async () => ({ ok: true, rows: [], data: [], total: 0 })),
+            : k === 'canReadObject'
+                ? vi.fn(async () => true)
+                : vi.fn(async () => ({ ok: true, rows: [], data: [], total: 0 })),
     });
 }
 

@@ -73,12 +73,13 @@
  *
  * When the overlay is gone our echo is dropped; a package uninstall deletes
  * each of its rows through `deleteMetaItem`, so the same projector drops
- * those. Nothing else ever removes a metadata-service entry: the service's
- * one removal, `unregister`, also deletes through its writable `datasource:`
- * loaders and announces a `deleted` event, so it is called only once the
- * stored row is gone — or, for a `permission` echo, on a slot of a package the
- * stored row is no longer bound to (its binding moved), named by that package
- * so the row, bound elsewhere, stays (ADR-0150 D4, #32162).
+ * those. [ADR-0150 D4, #31698] A `permission` echo is kept per `(package,
+ * name)`: each echo slot is judged by its OWN stored row, at its own package's
+ * address, and dropped once that row is gone or bound elsewhere (a re-bind) —
+ * never because another package's row of the name moved. The removal is the
+ * service's in-memory one (`unregisterInMemory`), announced so each cluster
+ * peer drops the same slot. ⛔ Never `unregister`: it deletes the stored row
+ * of the slot first, and an echo is only a copy of a row.
  */
 
 import { readLegacyOrganizationRows } from '@objectstack/metadata-core';
@@ -100,32 +101,21 @@ export interface SecurityCatalogEchoLogger {
 export interface SecurityCatalogEchoDeps {
   /** The engine: its `registry` holds the declared artifacts; `find` reads `sys_metadata` at boot. */
   ql: any;
-  /** The kernel `metadata` service the catalog reads (`registerInMemory`, `get`, `unregister`). */
+  /** The kernel `metadata` service the catalog reads (`registerInMemory`, `get`, `unregisterInMemory`). */
   metadata?: any;
   logger?: SecurityCatalogEchoLogger;
 }
 
 /**
- * The item the engine registry serves for `name`, unless it is our own echo
- * (a registry heal can re-register the metadata service's view there).
- */
-function registryServes(ql: any, type: SecurityCatalogEchoType, name: string): boolean {
-  try {
-    const item = ql?.registry?.getItem?.(type, name);
-    return !!item && typeof item === 'object' && !isProjectionEcho(item);
-  } catch {
-    return false;
-  }
-}
-
-/**
  * One item the metadata service holds under `name`: the item, and the package
  * whose slot it fills (`undefined` for the name's bare slot, or for the one
- * item of a type stored by name).
+ * item of a type stored by name). `only` marks the one item a read naming no
+ * package served: it is the name's only slot, whatever its stamp says.
  */
 interface ServedSlot {
   readonly item: any;
   readonly packageId: string | undefined;
+  readonly only: boolean;
 }
 
 /**
@@ -142,6 +132,11 @@ function refusedPackageHolders(error: unknown): string[] | undefined {
     .map((c) => c.packageId);
   return packages.length > 0 ? packages : undefined;
 }
+
+/** Whether `error` is a package-scoped refusal (ADR-0150 D3/D5): the read named a package that holds nothing of the name. */
+const isPackageScopedRefusal = (error: unknown): boolean =>
+  (error as { code?: unknown } | null)?.code === 'RESOURCE_CONFLICT'
+  && !!(error as { refusal?: unknown } | null)?.refusal;
 
 /**
  * [ADR-0150 D3/D4, #32162] Every item the metadata service holds under `name`.
@@ -164,57 +159,51 @@ async function servedSlotsOf(metadata: any, type: SecurityCatalogEchoType, name:
     const slots: ServedSlot[] = [];
     for (const packageId of holders) {
       const held = await metadata.get(type, name, packageId);
-      if (held !== undefined && held !== null) slots.push({ item: held, packageId });
+      if (held !== undefined && held !== null) slots.push({ item: held, packageId, only: false });
     }
     return slots;
   }
   if (item === undefined || item === null) return [];
   const stamped = item && typeof item === 'object' ? item._packageId : undefined;
-  return [{ item, packageId: typeof stamped === 'string' && stamped !== '' ? stamped : undefined }];
+  return [{ item, packageId: typeof stamped === 'string' && stamped !== '' ? stamped : undefined, only: true }];
 }
 
+/** The metadata services already told they cannot drop an echo, so each is told once. */
+const toldCannotDrop = new WeakSet<object>();
+
 /**
- * Remove one echo slot of `name` from the metadata service: the slot's
- * package named (`unregister(type, name, { packageId })`), so another
- * package's item of the name, and the stored row it holds, are never taken
- * with it; a slot with no package by name, as before.
+ * [ADR-0150 D4, #31698] Remove one echo slot of `name` from the metadata
+ * service's MEMORY (`unregisterInMemory`), naming the slot's package — or the
+ * name's package-less slot, or, for an unstamped only item of the name, none.
+ * Announced, so each cluster peer drops the same slot.
  *
- * `silent` removes the slot without announcing it to `subscribe` watchers
- * (`notify: false`): the stale-slot drop, which runs while the name's stored
- * row is live and its echo is re-registered in the same pass. Announced, a
- * package-less watcher `deleted` reached every cluster peer, and each peer's
- * foreign-write invalidation dropped every slot of the name.
+ * ⛔ Never `unregister`: that is the removal of the ITEM, and it deletes the
+ * stored row of the slot first. An echo is a copy of a row; removing the copy
+ * never removes a row, and a service without the in-memory removal keeps the
+ * slot (said once) rather than risk one.
  */
-async function unregisterEchoSlot(
+function removeEchoSlot(
   metadata: any,
   type: SecurityCatalogEchoType,
   name: string,
   slot: ServedSlot,
-  silent = false,
-): Promise<void> {
-  if (typeof metadata?.unregister !== 'function') return;
-  const options = {
-    ...(slot.packageId !== undefined ? { packageId: slot.packageId } : {}),
-    ...(silent ? { notify: false } : {}),
-  };
-  if (Object.keys(options).length === 0) await metadata.unregister(type, name);
-  else await metadata.unregister(type, name, options);
-}
-
-/** Remove our echo of `name` from the metadata service, and from the engine registry if it leaked there. */
-async function dropEcho(ql: any, metadata: any, type: SecurityCatalogEchoType, name: string, slots: readonly ServedSlot[]): Promise<void> {
-  // unregister() also asks writable loaders to delete — the stored row is
-  // already gone, so this is an in-memory removal. Only our echoes go: a
-  // declaration another package holds under the name stays.
-  for (const slot of slots) {
-    if (isProjectionEcho(slot.item)) await unregisterEchoSlot(metadata, type, name, slot);
-  }
-  try {
-    const leaked = ql?.registry?.getItem?.(type, name);
-    if (isProjectionEcho(leaked) && typeof ql?.registry?.unregisterItem === 'function') {
-      ql.registry.unregisterItem(type, name);
+  logger: SecurityCatalogEchoLogger | undefined,
+): boolean {
+  if (typeof metadata?.unregisterInMemory !== 'function') {
+    if (metadata && typeof metadata === 'object' && !toldCannotDrop.has(metadata)) {
+      toldCannotDrop.add(metadata);
+      logger?.warn(
+        `[security] the metadata service has no in-memory removal, so a security-catalog echo whose stored ${type} ` +
+          'is gone stays served until restart. Nothing stored is touched; the next boot echoes only the rows that exist.',
+        { type, name },
+      );
     }
-  } catch { /* nothing leaked, or nothing to remove it from */ }
+    return false;
+  }
+  // By the package the slot names; an unstamped slot that is the name's only
+  // one, by name (the store may hold it in a package's slot).
+  metadata.unregisterInMemory(type, name, slot.packageId !== undefined ? { packageId: slot.packageId } : slot.only ? {} : { packageId: null });
+  return true;
 }
 
 /** What one echo did. */
@@ -245,119 +234,236 @@ export const isProjectionEcho = (v: any): boolean =>
  * read, and the by-name read withholds the item of a disabled package while
  * keeping its envelope. Read off the item, a disabled package's set echoed
  * unowned, and stayed unowned after the package was re-enabled.
+ *
+ * [ADR-0150 D4, #31698] `packageId` reads at that package's address.
  */
 export async function readServedPackageBinding(
   protocol: any,
   name: string,
   type: SecurityCatalogEchoType = 'permission',
+  packageId?: string,
 ): Promise<string | undefined> {
   if (typeof protocol?.getMetaItem !== 'function') return undefined;
-  const served = await protocol.getMetaItem({ type, name });
-  const packageId = served?.packageId;
-  return typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
+  const served = await protocol.getMetaItem({ type, name, ...(packageId !== undefined ? { packageId } : {}) });
+  const binding = served?.packageId;
+  return typeof binding === 'string' && binding !== '' ? binding : undefined;
 }
 
 /**
- * Echo one landed mutation. Reads the environment-wide overlay through the
- * protocol's layered read (ADR-0131 D6: no organization is part of a metadata
- * read) and registers it, or heals/drops our echo when there is none.
+ * [ADR-0150 D4, #31698] The address a mutation names: the package its row is
+ * bound to, `null` for the package-unbound row, `undefined` when the event
+ * does not say (an emitter that predates the field). Only `permission` is
+ * stored per `(package, name)`; a `position` is read by name.
  */
-export async function echoSecurityCatalogMutation(
+function mutationAddressOf(type: SecurityCatalogEchoType, evt: { packageId?: unknown }): string | null | undefined {
+  if (type !== 'permission') return undefined;
+  const packageId = evt.packageId;
+  if (packageId === null || packageId === '') return null;
+  return typeof packageId === 'string' ? packageId : undefined;
+}
+
+/**
+ * The engine registry serves `name` at `address`, unless what it serves is our
+ * own echo (a registry heal can re-register the metadata service's view
+ * there). A package's address asks that package's item only.
+ */
+function registryServesAt(ql: any, type: SecurityCatalogEchoType, name: string, address: string | null | undefined): boolean {
+  try {
+    const registry = ql?.registry;
+    const item = typeof address === 'string' && typeof registry?.getPackageScopedItem === 'function'
+      ? registry.getPackageScopedItem(type, name, address)
+      : registry?.getItem?.(type, name);
+    return !!item && typeof item === 'object' && !isProjectionEcho(item);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Echo the stored row at one address: read its environment-wide overlay
+ * through the protocol's layered read (ADR-0131 D6: no organization is part of
+ * a metadata read) and register it. Answers the slot it registered, or
+ * `undefined` when it registered nothing. Removes nothing: an echo whose row is
+ * gone is the stale pass's ({@link dropGoneEchoSlots}).
+ */
+async function echoRowAt(
   protocol: any,
   deps: SecurityCatalogEchoDeps,
-  evt: { type?: string; name?: string; state?: string } | null | undefined,
-): Promise<SecurityCatalogEchoOutcome> {
-  const type = evt?.type;
-  const name = evt?.name;
-  if (!isEchoType(type) || !name || evt?.state === 'draft') return 'skipped';
+  type: SecurityCatalogEchoType,
+  name: string,
+  address: string | null | undefined,
+): Promise<{ slot: string | null } | undefined> {
   const { ql, metadata, logger } = deps;
-  if (!metadata || typeof metadata.registerInMemory !== 'function') return 'skipped';
-  if (typeof protocol?.getMetaItemLayered !== 'function') return 'skipped';
-
-  let overlay: any = null;
-  let envelope: unknown;
-  if (evt?.state !== 'deleted') {
-    const layered = await protocol.getMetaItemLayered({ type, name });
-    // An envelope is told by its layer keys; anything else carries no overlay
-    // this module can tell apart from an artifact, so it is not echoed.
-    if (layered && typeof layered === 'object'
-      && ('effective' in layered || 'overlay' in layered || 'code' in layered)) {
-      envelope = layered;
-      overlay = layered.overlay ?? null;
-    }
-  }
-
-  const slots = await servedSlotsOf(metadata, type, name);
-  if (!overlay?.name) {
-    // Overlay gone: drop every echo of ours. A declared artifact of the name
-    // is in the engine registry, which the catalog reads first.
-    if (!slots.some((slot) => isProjectionEcho(slot.item))) return 'skipped';
-    await dropEcho(ql, metadata, type, name, slots);
-    return 'dropped';
-  }
+  const atPackage = typeof address === 'string' ? address : undefined;
+  const layered = await protocol.getMetaItemLayered({ type, name, ...(atPackage !== undefined ? { packageId: atPackage } : {}) });
+  // An envelope is told by its layer keys; anything else carries no overlay
+  // this module can tell apart from an artifact, so it is not echoed.
+  if (!layered || typeof layered !== 'object' || !('effective' in layered || 'overlay' in layered || 'code' in layered)) return undefined;
+  const overlay = layered.overlay ?? null;
+  if (!overlay?.name) return undefined;
 
   // The engine registry already serves this name — a host kernel hydrates
   // every stored row there, and a package's artifact is there on every
   // kernel — so the catalog never reaches the metadata service for it. Skip,
   // and leave an echo of ours (registered before the artifact arrived) in
-  // place: it is not read, and dropping it would delete through the
-  // service's writable loaders while the stored row still exists. The
-  // overlay's delete drops it.
-  if (registryServes(ql, type, name)) return 'skipped';
+  // place: it is not read. The stale pass drops it once its row is gone.
+  if (registryServesAt(ql, type, name, address)) return undefined;
 
-  // The metadata service holds a declaration of this name — a stack-declared
-  // position lives only there. Never echo over it: see the module doc.
-  if (slots.some((slot) => !isProjectionEcho(slot.item))) return 'skipped';
+  const slots = await servedSlotsOf(metadata, type, name);
 
   // No declaration of the name is served. A permission set asks the lock,
   // which also reads the layered read's `code` layer and answers `unknown`
   // when it cannot tell; a stored position is tenant-authored.
   const tenantAuthored = type === 'permission'
-    ? classifyPackagedPermissionSet(name, ql, { status: 'read', envelope }).status === 'org'
+    ? classifyPackagedPermissionSet(name, ql, { status: 'read', envelope: layered }).status === 'org'
     : true;
   let ownerPackageId: string | undefined;
-  let bindingUnread = false;
   if (tenantAuthored) {
     try {
-      ownerPackageId = await readServedPackageBinding(protocol, name, type);
+      ownerPackageId = await readServedPackageBinding(protocol, name, type, atPackage);
     } catch (e) {
-      bindingUnread = true;
+      // [#31698] A binding read that failed is not a moved binding: the
+      // echo already in this address's slot keeps the package it names, so
+      // the re-echo fills that slot again. With none there, it is
+      // registered unowned, as before.
+      const kept = slots.filter((slot) => isProjectionEcho(slot.item)
+        && (atPackage === undefined ? slots.length === 1 : slot.packageId === atPackage));
+      ownerPackageId = kept.length === 1 ? kept[0]!.packageId : undefined;
       // Functional, not durability: nothing persisted is lost and nothing
-      // grants differently — the echo is registered unowned, so it still
-      // resolves and enforces the stored body. What is missing is said once,
-      // with what restores it.
-      logger?.warn(
-        `[security] the package binding of this ${type} could not be read, so its security-catalog echo ` +
-          'names no owning package: the catalog serves it as unowned, and an `isDefault: true` permission ' +
-          'set records no audience-binding suggestion (ADR-0090 D5), until the name is echoed again — ' +
-          'the next save, publish or boot re-reads the binding. Enforcement is unaffected.',
-        { type, name, error: String((e as Error)?.message ?? e) },
-      );
-    }
-  }
-  // [#32162] An echo of ours in another package's slot is stale: the stored
-  // row's binding moved (a namespace rename, a stamp, a re-bind). The write
-  // below fills the owner's slot and never replaces another package's, so the
-  // stale slot is dropped first, naming its package — the stored row, now
-  // bound to the new owner, is not that package's and stays. Left in place,
-  // two slots of the name would refuse every later read naming no package.
-  // A binding read that failed is not a moved binding: nothing is dropped
-  // then, so the owner's slot keeps serving its package's address.
-  const ownerSlot = tenantAuthored ? ownerPackageId : undefined;
-  if (!bindingUnread) {
-    for (const slot of slots) {
-      if (slot.packageId !== undefined && slot.packageId !== ownerSlot) {
-        await unregisterEchoSlot(metadata, type, name, slot, true);
+      // grants differently — the echo still resolves and enforces the stored
+      // body. What may be missing is said once, with what restores it.
+      if (ownerPackageId === undefined) {
+        logger?.warn(
+          `[security] the package binding of this ${type} could not be read, so its security-catalog echo ` +
+            'names no owning package: the catalog serves it as unowned, and an `isDefault: true` permission ' +
+            'set records no audience-binding suggestion (ADR-0090 D5), until the name is echoed again — ' +
+            'the next save, publish or boot re-reads the binding. Enforcement is unaffected.',
+          { type, name, error: String((e as Error)?.message ?? e) },
+        );
       }
     }
   }
+
+  // The metadata service holds a declaration of this name — a stack-declared
+  // position lives only there. Never echo over it: see the module doc. [#31698]
+  // An echo with an owner fills that package's slot alone, so only a
+  // declaration there is in its way.
+  const inTheWay = type === 'permission' && ownerPackageId !== undefined
+    ? slots.filter((slot) => slot.packageId === ownerPackageId)
+    : slots;
+  if (inTheWay.some((slot) => !isProjectionEcho(slot.item))) return undefined;
+
   metadata.registerInMemory(type, name, {
     ...stripDecorations(overlay),
     ...(tenantAuthored ? { _provenance: 'org' } : {}),
-    ...(tenantAuthored && ownerPackageId !== undefined ? { _packageId: ownerPackageId } : {}),
+    ...(ownerPackageId !== undefined ? { _packageId: ownerPackageId } : {}),
     [ENV_PROJECTION_MARKER]: true,
   });
-  return 'registered';
+  return { slot: ownerPackageId ?? null };
+}
+
+/**
+ * Whether the stored row an echo slot copies is still there, at the slot's own
+ * address: the layered read at that package (or naming none, for an unowned
+ * slot) serves an overlay, and — for a set — the row served is bound to that
+ * slot's package. A read refused because the package holds nothing of the name
+ * is a row that is gone. Any other failed read is thrown: the caller keeps the
+ * slot.
+ */
+async function echoRowIsServed(protocol: any, type: SecurityCatalogEchoType, name: string, slot: ServedSlot): Promise<boolean> {
+  const atPackage = type === 'permission' ? slot.packageId : undefined;
+  let layered: any;
+  try {
+    layered = await protocol.getMetaItemLayered({ type, name, ...(atPackage !== undefined ? { packageId: atPackage } : {}) });
+  } catch (error) {
+    if (atPackage !== undefined && isPackageScopedRefusal(error)) return false;
+    throw error;
+  }
+  if (!layered?.overlay?.name) return false;
+  if (type !== 'permission') return true;
+  return (await readServedPackageBinding(protocol, name, type, atPackage)) === atPackage;
+}
+
+/**
+ * [ADR-0150 D4, #31698] Drop every echo of `name` whose own stored row is gone
+ * — deleted, or bound elsewhere now (a namespace rename, a stamp, a re-bind) —
+ * each judged at its own address, never by another slot's row. `keep` are the
+ * slots this pass just registered. A slot whose row cannot be read is kept,
+ * and a declaration that is not our echo is never touched. Removal is from
+ * memory only ({@link removeEchoSlot}). Answers how many were dropped.
+ */
+async function dropGoneEchoSlots(
+  protocol: any,
+  deps: SecurityCatalogEchoDeps,
+  type: SecurityCatalogEchoType,
+  name: string,
+  keep: ReadonlySet<string | null>,
+): Promise<number> {
+  const { ql, metadata, logger } = deps;
+  let dropped = 0;
+  for (const slot of await servedSlotsOf(metadata, type, name)) {
+    if (!isProjectionEcho(slot.item) || keep.has(slot.packageId ?? null)) continue;
+    let served: boolean;
+    try {
+      served = await echoRowIsServed(protocol, type, name, slot);
+    } catch {
+      continue; // unread is not gone: the slot stays until a read answers
+    }
+    if (!served && removeEchoSlot(metadata, type, name, slot, logger)) dropped += 1;
+  }
+  if (dropped > 0) {
+    // A copy of our echo leaked into the engine registry goes with it.
+    try {
+      const leaked = ql?.registry?.getItem?.(type, name);
+      if (isProjectionEcho(leaked) && typeof ql?.registry?.unregisterItem === 'function') {
+        ql.registry.unregisterItem(type, name);
+      }
+    } catch { /* nothing leaked, or nothing to remove it from */ }
+  }
+  return dropped;
+}
+
+/**
+ * Echo one landed mutation. A save, publish or restore registers the row's
+ * overlay at the address the event names; then every echo of the name whose
+ * own row is gone is dropped (a delete, a re-bind).
+ *
+ * [ADR-0150 D4, #31698] A set is stored per `(package, name)`: the event names
+ * the package of its row (`packageId`), the overlay and its binding are read
+ * at that address, and each other echo slot is judged by its own row — a save
+ * of one package's set never moves or drops another package's echo of the
+ * name. An event naming no package reads the name with no package; refused
+ * because two packages hold it, it echoes each holder's row by its package.
+ */
+export async function echoSecurityCatalogMutation(
+  protocol: any,
+  deps: SecurityCatalogEchoDeps,
+  evt: { type?: string; name?: string; state?: string; packageId?: string | null } | null | undefined,
+): Promise<SecurityCatalogEchoOutcome> {
+  const type = evt?.type;
+  const name = evt?.name;
+  if (!isEchoType(type) || !name || evt?.state === 'draft') return 'skipped';
+  const { metadata } = deps;
+  if (!metadata || typeof metadata.registerInMemory !== 'function') return 'skipped';
+  if (typeof protocol?.getMetaItemLayered !== 'function') return 'skipped';
+
+  const address = mutationAddressOf(type, evt ?? {});
+  const registered = new Set<string | null>();
+  if (evt?.state !== 'deleted') {
+    try {
+      const echoed = await echoRowAt(protocol, deps, type, name, address);
+      if (echoed) registered.add(echoed.slot);
+    } catch (error) {
+      const holders = address === undefined && type === 'permission' ? refusedPackageHolders(error) : undefined;
+      if (!holders) throw error;
+      for (const holder of holders) {
+        const echoed = await echoRowAt(protocol, deps, type, name, holder);
+        if (echoed) registered.add(echoed.slot);
+      }
+    }
+  }
+  const dropped = await dropGoneEchoSlots(protocol, deps, type, name, registered);
+  return registered.size > 0 ? 'registered' : dropped > 0 ? 'dropped' : 'skipped';
 }
 
 /**
@@ -391,7 +497,9 @@ export async function echoStoredSecurityCatalogOverlays(
   if (typeof ql?.find !== 'function' || typeof protocol?.getMetaItemLayered !== 'function') return 0;
   let registered = 0;
   for (const type of SECURITY_CATALOG_ECHO_TYPES) {
-    const names = new Set<string>();
+    // [ADR-0150 D4, #31698] Each row by its address: a set two packages hold
+    // is echoed once per package, never read by name alone.
+    const addresses = new Map<string, string | null>();
     // The plural spelling is a legacy `type` column value the protocol still reads.
     for (const stored of [type, `${type}s`]) {
       let rows: any[];
@@ -420,12 +528,14 @@ export async function echoStoredSecurityCatalogOverlays(
       }
       for (const row of rows) {
         if (!row?.name || legacy.has(String(row.id))) continue; // env-wide overlays only
-        names.add(String(row.name));
+        const bound = typeof row.package_id === 'string' && row.package_id !== '' ? row.package_id : null;
+        addresses.set(`${String(row.name)}\u0000${bound ?? ''}`, bound);
       }
     }
-    for (const name of names) {
+    for (const [key, packageId] of addresses) {
+      const name = key.slice(0, key.indexOf('\u0000'));
       try {
-        if (await echoSecurityCatalogMutation(protocol, deps, { type, name, state: 'active' }) === 'registered') {
+        if (await echoSecurityCatalogMutation(protocol, deps, { type, name, state: 'active', packageId }) === 'registered') {
           registered += 1;
         }
       } catch (e) {

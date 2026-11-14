@@ -161,8 +161,14 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
       { type: 'object', name: 'student', state: 'active', package_id: 'app.edu' },
       { type: 'view', name: 'course_list', state: 'active', package_id: 'app.edu' },
     ]);
-    expect(promote).toHaveBeenCalledTimes(3);
-    expect((promote.mock.calls[0][0] as any)).toMatchObject({ type: 'object', name: 'course' });
+    // [#32396] This double has no `transaction()` — a runtime that cannot roll
+    // back — so the batch is judged whole (`judgeOnly`, nothing written) before
+    // any draft is promoted, then each draft is promoted once, in order.
+    const judged = promote.mock.calls.filter(([req]) => (req as any).judgeOnly === true);
+    const written = promote.mock.calls.filter(([req]) => (req as any).judgeOnly !== true);
+    expect(judged.map(([req]) => (req as any).name)).toEqual(['course', 'student', 'course_list']);
+    expect(written).toHaveLength(3);
+    expect((written[0][0] as any)).toMatchObject({ type: 'object', name: 'course' });
     // Side effects ran once per promoted item, AFTER promotion, in order.
     //
     // [#8820] Was `requestType`, the UNFOLDED spelling Phase 2 also used to

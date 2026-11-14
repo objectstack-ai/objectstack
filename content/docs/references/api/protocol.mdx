@@ -429,7 +429,7 @@ Canonical cross-paradigm action/node descriptor (ADR-0018)
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale: platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal falls back to its declared wording. Present exactly when the producer opted in at throw time; consumers render it to end users as received and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
@@ -690,7 +690,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale: platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal falls back to its declared wording. Present exactly when the producer opted in at throw time; consumers render it to end users as received and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
@@ -2580,6 +2580,7 @@ The authoring surface of a metadata write. Closed: `copilot` is an AI assistant'
 | **message** | `string` | ✅ | What is wrong, in the rule author's own words. |
 | **hint** | `string` | ✅ | How to fix it. |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | How the gate treated this finding. `error` means the write was REFUSED (these appear on the 422, never on a 2xx); `warning` / `info` are advisory — the write succeeded and the finding is FYI. |
+| **userMessage** | `string` | optional | The finding's user-facing sentence, composed by its producer in the request's locale (else the workspace default locale, else `en`) — the same field name and producer-marked meaning as `ApiErrorSchema.userMessage`. Present only when the producer authors a user sentence for this `rule`; absent, a consumer renders `message` as before. Consumers render it as received; `rule` stays the stable id and `message` / `hint` stay the developer-facing text. |
 
 
 ---
@@ -2826,6 +2827,19 @@ Answer to a device registration: the device id the client keeps
 | **seq** | `number` | ✅ | The new live row's history sequence number. |
 | **restoredFromVersion** | `number` | ✅ | Which history version was restored. |
 | **message** | `string` | optional | Rollback note, when one was recorded. |
+| **advisories** | `{ rule: string; path: string; where: string; message: string; … }[]` | optional | What the rollback did beyond restoring the row, in the same element shape and omitted-when-empty discipline as `SaveMetaItemResponseSchema.advisories`. Present ONLY when at least one entry was raised: an empty array is never emitted, so a clean answer's bytes are unchanged and a caller that ignores this key behaves exactly as before. Three rules ride it: `object-storage-sync-refused` (`warning`), the restored object's storage sync was refused; and, per stored computed field (a non-`formula` field declaring `expression`) the restore makes compute something new (added back, turned from a formula or a plain field, or its expression, stored type or scale changed), the fill of the object's existing rows the save door also runs: `stored-expression-filled` (`info`, the rows written) or `stored-expression-fill-incomplete` (`warning`, what is left and how to fill it). The restore itself SUCCEEDED either way. |
+
+### Nested Shape: `RollbackMetaItemResponse.advisories[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rule** | `string` | ✅ | Stable diagnostic rule id (`flow-multi-write-unfiltered`, `approval-expression-invalid`, …). Machine-readable and stable across releases — the key a renderer groups or suppresses by. |
+| **path** | `string` | ✅ | Config path inside the SUBMITTED body (`flows[0].nodes[1].config.multi`), so an editor can jump to the offending key. May be empty when the finding is about the item as a whole. The TOP-LEVEL collection entry follows one rule. The gate evaluates against a private per-write snapshot whose indexes no caller can resolve; a collection-resident write type is one whose collection that snapshot fills with the tenant's other stored items beside the written one, and there the entry is keyed by NAME, never by an array index — for example `objects.acme_invoice.sharingModel` (an `object` write) or `datasets.acme_invoice_metrics.dimensions[0].field` (a `dataset` write). Every other write type is the sole member of its own collection in that snapshot, so its `[0]` IS the written item and stays positional (for example `flows[0]...`). Which write types are collection-resident is derived, never listed: `@objectstack/lint`'s runtime gate computes the set (`NAME_KEYED_STACK_KEYS`) as the collections it carries as resolution context that a gated write type also lands in, so it changes with the gate, not with this text. An entry whose name cannot be spliced into a dotted path keeps its index. Nested positions inside one named item stay positional (`objects.acme_invoice.indexes[1]`): they index the author's own document. |
+| **where** | `string` | ✅ | Human-readable location — `flow "leave_approval" · node "approve"`. Prose for a person; use `path` for anything mechanical. |
+| **message** | `string` | ✅ | What is wrong, in the rule author's own words. |
+| **hint** | `string` | ✅ | How to fix it. |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | How the gate treated this finding. `error` means the write was REFUSED (these appear on the 422, never on a 2xx); `warning` / `info` are advisory — the write succeeded and the finding is FYI. |
+| **userMessage** | `string` | optional | The finding's user-facing sentence, composed by its producer in the request's locale (else the workspace default locale, else `en`) — the same field name and producer-marked meaning as `ApiErrorSchema.userMessage`. Present only when the producer authors a user sentence for this `rule`; absent, a consumer renders `message` as before. Consumers render it as received; `rule` stays the stable id and `message` / `hint` stay the developer-facing text. |
 
 
 ---
@@ -2842,6 +2856,7 @@ Answer to a device registration: the device id the client keeps
 | **message** | `string` | ✅ | What is wrong, in the rule author's own words. |
 | **hint** | `string` | ✅ | How to fix it. |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | How the gate treated this finding. `error` means the write was REFUSED (these appear on the 422, never on a 2xx); `warning` / `info` are advisory — the write succeeded and the finding is FYI. |
+| **userMessage** | `string` | optional | The finding's user-facing sentence, composed by its producer in the request's locale (else the workspace default locale, else `en`) — the same field name and producer-marked meaning as `ApiErrorSchema.userMessage`. Present only when the producer authors a user sentence for this `rule`; absent, a consumer renders `message` as before. Consumers render it as received; `rule` stays the stable id and `message` / `hint` stay the developer-facing text. |
 
 
 ---
@@ -2905,6 +2920,7 @@ Answer to a device registration: the device id the client keeps
 | **message** | `string` | ✅ | What is wrong, in the rule author's own words. |
 | **hint** | `string` | ✅ | How to fix it. |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | How the gate treated this finding. `error` means the write was REFUSED (these appear on the 422, never on a 2xx); `warning` / `info` are advisory — the write succeeded and the finding is FYI. |
+| **userMessage** | `string` | optional | The finding's user-facing sentence, composed by its producer in the request's locale (else the workspace default locale, else `en`) — the same field name and producer-marked meaning as `ApiErrorSchema.userMessage`. Present only when the producer authors a user sentence for this `rule`; absent, a consumer renders `message` as before. Consumers render it as received; `rule` stays the stable id and `message` / `hint` stay the developer-facing text. |
 
 
 ---
@@ -3217,7 +3233,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale: platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal falls back to its declared wording. Present exactly when the producer opted in at throw time; consumers render it to end users as received and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |

@@ -14,13 +14,17 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { LifecycleService, ObjectQL, assertEngineDeleteDispatch, type LifecycleEngineLike, type LifecycleObjectLike } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { pullConnectorSource, type ConnectorPullDeps, type ConnectorPullProtocol } from './connector-pull.js';
 import { REFUSED_ROW_SAMPLE } from './datasource-pull.js';
 import { ConnectorPullError } from './pull-refusal.js';
+import type { DriverQuery } from '@objectstack/spec/contracts';
+import { SysSyncRun } from './sys-sync-run.object.js';
+import { ObjectStoreSyncRunLedger, SYNC_RUN_OBJECT, closeInterruptedSyncRuns } from './sync-run-ledger.js';
+import { mappingNameResolver } from './connector-package-scope.js';
 import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
 
 type Rec = Record<string, unknown>;
@@ -72,6 +76,8 @@ const at = (ms: number) => new Date(Date.UTC(2026, 0, 1) + ms).toISOString();
 
 interface Harness {
     ql: ObjectQL;
+    /** The managed SQLite driver: the target's, and `sys_sync_run`'s when `runs` is on. */
+    main: SqlDriver;
     erp: any;
     meta: { object: Map<string, Rec>; mapping: Map<string, Rec>; datasource: Map<string, Rec> };
     deps: ConnectorPullDeps;
@@ -109,11 +115,12 @@ function protocolOver(ql: ObjectQL, meta: Harness['meta']): ConnectorPullProtoco
 /** A managed SQLite target and an external SQLite datasource `erp` holding `ERP_ORDERS`. */
 async function harness(
     rows: Array<{ no: string; at: string | null; amount?: number; org?: string }>,
-    over: { source?: Rec; target?: Rec; mapping?: Rec } = {},
+    over: { source?: Rec; target?: Rec; mapping?: Rec; runs?: boolean; logger?: Rec; objects?: Rec[] } = {},
     setup?: (ql: ObjectQL) => void,
 ): Promise<Harness> {
     const ql = new ObjectQL();
-    ql.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }), true);
+    const main = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+    ql.registerDriver(main, true);
     const erp: any = new SqlDriver({
         client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, schemaMode: 'external',
     } as any);
@@ -130,10 +137,17 @@ async function harness(
     const target = over.target ?? TARGET;
     ql.registry.registerObject(target as any);
     ql.registry.registerObject(source as any);
+    // A second target or source, for the cases that need one.
+    for (const extra of over.objects ?? []) ql.registry.registerObject(extra as any);
+    // [ADR-0153 D7] The run record, as the automation plugin registers it.
+    if (over.runs) ql.registry.registerObject(SysSyncRun as any);
     await ql.syncSchemas();
     await installDefaultOrganization(ql);
     const meta = {
-        object: new Map<string, Rec>([[String(target.name), target as Rec], [String(source.name), source as Rec]]),
+        object: new Map<string, Rec>([
+            [String(target.name), target as Rec], [String(source.name), source as Rec],
+            ...(over.objects ?? []).map((o): [string, Rec] => [String(o.name), o]),
+        ]),
         mapping: new Map<string, Rec>([[MAPPING.name, (over.mapping ?? MAPPING) as Rec]]),
         datasource: new Map<string, Rec>([['erp', ERP_DEF]]),
     };
@@ -147,9 +161,10 @@ async function harness(
             getConnectorDescriptors: () => [],
         } as never,
         providerOf: () => undefined,
-        logger: silent as never,
+        logger: (over.logger ?? silent) as never,
+        ...(over.runs ? { runs: new ObjectStoreSyncRunLedger(ql as never) } : {}),
     };
-    open = { ql, erp, meta, deps };
+    open = { ql, main, erp, meta, deps };
     return open;
 }
 
@@ -421,5 +436,432 @@ describe('[S3] through the real data door: no count beside a read, and every rea
         expect(count.mock.calls.filter((c: unknown[]) => c[0] === 'wh_order')).toEqual([]);
         // One window, one remote fetch: the floor was not asked to count it a second time.
         expect(remoteFinds).toHaveLength(1);
+    });
+});
+
+// ── ADR-0153 D7: the run record and the read position ──────────────────
+
+/** A job's context in the Default Organization (single posture): the binder's shape. */
+const JOB = { isSystem: true, tenantId: DEFAULT_ORGANIZATION_ID };
+const START = '2026-01-01T00:00:00.000Z';
+const THREE = [
+    { no: 'A-1', at: at(1000), amount: 10 },
+    { no: 'A-2', at: at(2000), amount: 20 },
+    { no: 'A-3', at: at(3000), amount: 30 },
+];
+
+/** Every `sys_sync_run` row, oldest first. */
+async function runRows(ql: ObjectQL): Promise<Rec[]> {
+    return ql.find(SYNC_RUN_OBJECT, { orderBy: [{ field: 'started_at', order: 'asc' }], context: SYSTEM as never });
+}
+
+/** Wrap the protocol's `findData` for the source object: `fail` may throw instead of reading. */
+function onSourceReads(h: Harness, fail?: (where: string) => boolean): string[] {
+    const seen: string[] = [];
+    const inner = h.deps.protocol.findData.bind(h.deps.protocol);
+    h.deps.protocol.findData = (async (req: Rec) => {
+        if (req.object === 'erp_order') {
+            const where = JSON.stringify((req.query as Rec | undefined)?.where ?? {});
+            seen.push(where);
+            if (fail?.(where)) throw new Error('remote reset the connection (10.0.0.7:5432, user erp_reader)');
+        }
+        return inner(req as never);
+    }) as never;
+    return seen;
+}
+
+/** The lower bounds a window read carries on `updated_at` (a high-water read is the whole source: it carries none). */
+function lowerBounds(where: string): string[] {
+    return [...where.matchAll(/"updated_at":\{"\$gte":"([^"]+)"\}/g)].map((m) => m[1]);
+}
+
+describe('[ADR-0153 D7] every pull leaves one sys_sync_run row, and says how it ended in one line', () => {
+    it('a completed pull: what it read, its counts, the position it committed, and the run holds that position', async () => {
+        const info: string[] = [];
+        const h = await harness(THREE, { runs: true, logger: { debug() {}, info: (m: string) => { info.push(m); }, warn() {}, error() {} } });
+        const result = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        expect(result.source === 'datasource' && result.watermark).toEqual({ field: 'updated_at', from: START, committed: at(3000) });
+
+        const rows = await runRows(h.ql);
+        expect(rows).toHaveLength(1);
+        const r = rows[0];
+        expect({
+            organization_id: r.organization_id, mapping: r.mapping, source_kind: r.source_kind, source: r.source,
+            datasource: r.datasource, read_path: r.read_path, status: r.status, watermark_field: r.watermark_field,
+            watermark_from: r.watermark_from, watermark_committed: r.watermark_committed, holds_position: Boolean(r.holds_position),
+            counts: [r.read_count, r.created_count, r.updated_count, r.refused_count].map(Number), failure_reason: r.failure_reason ?? null,
+        }).toEqual({
+            organization_id: DEFAULT_ORGANIZATION_ID, mapping: MAPPING.name, source_kind: 'datasource', source: 'erp_order',
+            datasource: 'erp', read_path: 'builtin', status: 'completed', watermark_field: 'updated_at',
+            watermark_from: START, watermark_committed: at(3000), holds_position: true,
+            counts: [3, 3, 0, 0], failure_reason: null,
+        });
+        expect(r.ended_at).toBeTruthy();
+        expect(r.committed_at).toBeTruthy();
+
+        expect(info.filter((m) => m.startsWith('[Automation] pull of mapping'))).toEqual([
+            `[Automation] pull of mapping "${MAPPING.name}" completed: read 3, created 3, updated 0, refused 0; `
+            + `read position committed at ${at(3000)} (${SYNC_RUN_OBJECT} ${String(r.id)})`,
+        ]);
+    });
+
+    it('a pull refused before the mapping is read is a failed run, with the refusal\'s reason and sentence', async () => {
+        const { datasourceSource: _drop, ...bare } = MAPPING;
+        const warn: string[] = [];
+        const h = await harness([], { mapping: bare, runs: true, logger: { debug() {}, info() {}, warn: (m: string) => { warn.push(m); }, error() {} } });
+        const err = await refusalOf(pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB }));
+        const [r] = await runRows(h.ql);
+        expect([r.status, r.failure_reason, r.failure, r.source_kind ?? null, r.watermark_committed ?? null, Boolean(r.holds_position)])
+            .toEqual(['failed', 'no_connector_source', err.message, null, null, false]);
+        expect(warn.filter((m) => m.startsWith('[Automation] pull of mapping'))).toHaveLength(1);
+    });
+});
+
+describe('[ADR-0153 D7] the run record keeps the job run that drove the pull', () => {
+    /** Each run's job run id and trigger, in the order the job runs were numbered. */
+    const origins = async (ql: ObjectQL) => (await runRows(ql))
+        .map((r) => [r.job_run_id ?? null, r.trigger ?? null])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+    it('a pull a job drove: the job run id and the trigger, as the request carries them', async () => {
+        const h = await harness(THREE, { runs: true });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB, jobRunId: 'run_job_1', trigger: 'schedule' });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB, jobRunId: 'run_job_2', trigger: 'manual' });
+
+        expect(await origins(h.ql)).toEqual([['run_job_1', 'schedule'], ['run_job_2', 'manual']]);
+    });
+
+    it('a pull refused before the mapping is read keeps them too: they are written when the run opens', async () => {
+        const { datasourceSource: _drop, ...bare } = MAPPING;
+        const h = await harness([], { mapping: bare, runs: true });
+        await refusalOf(pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB, jobRunId: 'run_job_3', trigger: 'manual' }));
+
+        const [r] = await runRows(h.ql);
+        expect([r.status, r.job_run_id, r.trigger]).toEqual(['failed', 'run_job_3', 'manual']);
+    });
+
+    it('a trigger with no job run id (a job service that keeps no run history) is kept alone', async () => {
+        const h = await harness(THREE, { runs: true });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB, trigger: 'schedule' });
+
+        expect(await origins(h.ql)).toEqual([[null, 'schedule']]);
+    });
+
+    it('CONTROL: a direct pull, with no job context, leaves both empty', async () => {
+        const h = await harness(THREE, { runs: true });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+
+        expect(await origins(h.ql)).toEqual([[null, null]]);
+    });
+});
+
+describe('[ADR-0153 D2, D7] a pull reads on from the position the last committed run stored', () => {
+    it('a second run after a committed first run reads only from the committed position on', async () => {
+        const h = await harness(THREE, { runs: true });
+        const first = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(first.source === 'datasource' && first.watermark.committed).toBe(at(3000));
+
+        await h.erp.knex.raw('update ERP_ORDERS set AMOUNT = 11, UPDATED_AT = ? where ORDER_NO = ?', [at(4000), 'A-1']);
+        await h.erp.knex.raw('insert into ERP_ORDERS values (?, ?, ?, ?)', ['A-4', at(5000), 40, DEFAULT_ORGANIZATION_ID]);
+        const reads = onSourceReads(h);
+        const second = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        if (second.source !== 'datasource') throw new Error('a datasource pull answers the datasource arm');
+        expect(second.watermark).toEqual({ field: 'updated_at', from: at(3000), committed: at(5000) });
+        // A-2 (2000) lies below the position and is not read again; A-3 shares it, so it is.
+        expect({ pulled: second.pulled, created: second.summary.created, updated: second.summary.updated })
+            .toEqual({ pulled: 3, created: 1, updated: 2 });
+        // Every window read is bounded below at the committed position or above it.
+        const windowReads = reads.filter((w) => lowerBounds(w).length > 0);
+        expect(windowReads.length).toBeGreaterThan(0);
+        expect(windowReads.flatMap(lowerBounds).every((lo) => lo >= at(3000))).toBe(true);
+        expect((await copies(h.ql)).find((c) => c.external_no === 'A-1')).toEqual({ external_no: 'A-1', amount: 11, updated_at: at(4000) });
+
+        // The newer run holds the position; the older one let it go.
+        expect((await runRows(h.ql)).map((r) => [r.watermark_from, r.watermark_committed, Boolean(r.holds_position)])).toEqual([
+            [START, at(3000), false],
+            [at(3000), at(5000), true],
+        ]);
+    });
+
+    it('a run stopped mid-window commits nothing past its last finished window, and the next run reads on from there', async () => {
+        // Pages of two rows: window [0 ms, 1000 ms) is read in two pages and
+        // committed at 300 ms; the remote fails on the second page of window
+        // [1000 ms, 2000 ms), after K-1100 and K-1200 were written.
+        process.env.OS_DATA_MAX_PAGE_SIZE = '2';
+        const h = await harness([
+            { no: 'K-0100', at: at(100) }, { no: 'K-0200', at: at(200) }, { no: 'K-0300', at: at(300) },
+            { no: 'K-1100', at: at(1100) }, { no: 'K-1200', at: at(1200) }, { no: 'K-1300', at: at(1300) },
+            { no: 'K-8000', at: at(8000) },
+        ], { runs: true });
+        let failing = true;
+        onSourceReads(h, (where) => failing && where.includes(`"$gte":"${at(1000)}"`) && where.includes('"id":{"$gt"'));
+        const stopped = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM }).then(() => undefined, (e) => e);
+        expect(stopped).toBeInstanceOf(Error);
+        expect(stopped).not.toBeInstanceOf(ConnectorPullError);
+
+        const [r] = await runRows(h.ql);
+        expect([r.status, r.failure_reason, r.watermark_committed, Boolean(r.holds_position), Number(r.read_count), Number(r.created_count)])
+            .toEqual(['failed', 'failed', at(300), true, 5, 5]);
+        // The driver's own text stays off the record.
+        expect(String(r.failure)).not.toContain('10.0.0.7');
+        expect(String(r.failure)).not.toContain('erp_reader');
+        expect((await copies(h.ql)).map((c) => c.external_no)).toEqual(['K-0100', 'K-0200', 'K-0300', 'K-1100', 'K-1200']);
+
+        failing = false;
+        const next = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        if (next.source !== 'datasource') throw new Error('a datasource pull answers the datasource arm');
+        expect(next.watermark.from).toBe(at(300));
+        // K-0100 and K-0200 lie below the position: not read again.
+        expect({ pulled: next.pulled, created: next.summary.created, updated: next.summary.updated })
+            .toEqual({ pulled: 5, created: 2, updated: 3 });
+        expect((await copies(h.ql)).map((c) => c.external_no))
+            .toEqual(['K-0100', 'K-0200', 'K-0300', 'K-1100', 'K-1200', 'K-1300', 'K-8000']);
+    });
+
+    it('a run a stopped server left running is closed failed (interrupted) at boot, and its position stands', async () => {
+        const h = await harness(THREE, { runs: true });
+        const ledger = h.deps.runs!;
+        const { id, organizationId } = await ledger.open({ mapping: MAPPING.name }, new Date());
+        // Under `single` the engine stamps the Default Organization on a run written with none.
+        expect(organizationId).toBe(DEFAULT_ORGANIZATION_ID);
+        const scope = { mapping: MAPPING.name, organizationId };
+        await ledger.describe(id, {
+            sourceKind: 'datasource', source: 'erp_order', datasource: 'erp', readPath: 'builtin', watermarkField: 'updated_at', from: START,
+            targetObject: 'order_copy',
+        });
+        await ledger.commit(id, scope, at(2000));
+        // ...and the server stops: the row still reads running.
+        const info: string[] = [];
+        const logger = { debug() {}, info: (m: string) => { info.push(m); }, warn() {}, error() {} };
+        expect(await closeInterruptedSyncRuns(h.ql as never, logger as never)).toBe(1);
+        const [r] = await runRows(h.ql);
+        expect([r.status, r.failure_reason, r.watermark_committed, Boolean(r.holds_position)]).toEqual(['failed', 'interrupted', at(2000), true]);
+        expect(r.ended_at).toBeTruthy();
+        expect(info).toHaveLength(1);
+
+        const next = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(next.source === 'datasource' && next.watermark.from).toBe(at(2000));
+        expect(next.pulled).toBe(2);
+        // The next boot finds nothing left running.
+        expect(await closeInterruptedSyncRuns(h.ql as never, logger as never)).toBe(0);
+    });
+
+    it('two runs of one mapping committing in turn: the run committed last holds the position, and the next pull starts there', async () => {
+        const h = await harness(THREE, { runs: true });
+        const ledger = h.deps.runs!;
+        const a = await ledger.open({ mapping: MAPPING.name }, new Date());
+        const b = await ledger.open({ mapping: MAPPING.name }, new Date());
+        const scope = { mapping: MAPPING.name, organizationId: a.organizationId };
+        const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
+        for (const id of [a.id, b.id]) {
+            await ledger.describe(id, { sourceKind: 'datasource', source: 'erp_order', watermarkField: 'updated_at', from: START });
+        }
+        await ledger.commit(a.id, scope, at(1000));
+        await tick();
+        await ledger.commit(b.id, scope, at(1500));
+        await tick();
+        // A finishes another window after B's: A is now the run committed last.
+        await ledger.commit(a.id, scope, at(2000));
+        const held = (await runRows(h.ql)).filter((r) => Boolean(r.holds_position)).map((r) => r.id);
+        expect(held).toEqual([a.id]);
+        expect((await ledger.lastCommitted(scope))?.position).toBe(at(2000));
+    });
+
+    it('full: true reads from watermark.start on every run, whatever position is stored', async () => {
+        const h = await harness(THREE, { runs: true, mapping: { ...MAPPING, datasourceSource: { ...MAPPING.datasourceSource, full: true } } });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        const second = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(second.source === 'datasource' && second.watermark.from).toBe(START);
+        expect(second.pulled).toBe(3);
+    });
+
+    it('a stored position from another watermark field is not a position of this read: the run starts at watermark.start', async () => {
+        const h = await harness(THREE, { runs: true });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        const [r] = await runRows(h.ql);
+        await h.ql.update(SYNC_RUN_OBJECT, { watermark_field: 'created_on' }, { where: { id: r.id }, context: SYSTEM as never });
+        const second = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(second.source === 'datasource' && second.watermark.from).toBe(START);
+        expect(second.pulled).toBe(3);
+    });
+});
+
+/**
+ * [ADR-0153 D7, contract review S1] A mapping is addressed by `(package, name)`
+ * (ADR-0150 D3), so the read position is kept per holder package, name and
+ * organization, and a stored position is used only by a run that writes the
+ * same target. The package cases resolve through the real
+ * `mappingNameResolver` over the harness engine's own registry, as a job's
+ * pull does when its job names the package that declares it.
+ */
+describe('[ADR-0153 D7] the read position belongs to one mapping (its package and name) and one target', () => {
+    const ALPHA = 'com.acme.alpha';
+    const BETA = 'com.acme.beta';
+    const CALLER = 'com.acme.caller';
+    const TARGET_B = { ...TARGET, name: 'order_copy_b', label: 'Order B (synced)' };
+    const SOURCE_B = { ...SOURCE, name: 'erp_order_b', label: 'ERP order B' };
+
+    /** Each package installs its own mapping of one name; the pull resolves by the caller's package. */
+    function packaged(h: Harness, byPackage: Record<string, Rec>, deps: Record<string, string[]> = {}): void {
+        const registry = h.ql.registry as any;
+        for (const id of new Set([...Object.keys(byPackage), ...Object.keys(deps)])) {
+            const needs = deps[id] ?? [];
+            registry.installPackage({
+                id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+                ...(needs.length > 0 ? { dependencies: Object.fromEntries(needs.map((d) => [d, '^1.0.0'])) } : {}),
+            }, 'code');
+        }
+        // A copy each: the registry stamps the item it holds.
+        for (const [id, mapping] of Object.entries(byPackage)) registry.registerItem('mapping', { ...mapping }, 'name', id);
+        h.deps.mappingByPackage = mappingNameResolver({ getService: <T>() => ({ registry }) as T });
+    }
+    const pullAs = (h: Harness, callerPackageId: string) =>
+        pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM, callerPackageId });
+    const fromOf = (r: Awaited<ReturnType<typeof pullConnectorSource>>) => (r.source === 'datasource' ? r.watermark.from : undefined);
+
+    it('two packages\' mappings of one name in one organization keep two positions, each held by its own run', async () => {
+        const h = await harness(THREE, { runs: true, objects: [SOURCE_B] });
+        packaged(h, {
+            [ALPHA]: MAPPING,
+            [BETA]: { ...MAPPING, datasourceSource: { ...MAPPING.datasourceSource, object: 'erp_order_b' } },
+        });
+        expect(fromOf(await pullAs(h, ALPHA))).toBe(START);
+        expect(fromOf(await pullAs(h, BETA))).toBe(START);
+        // Beta's run committed last; Alpha's next run still starts at Alpha's own position.
+        expect(fromOf(await pullAs(h, ALPHA))).toBe(at(3000));
+        expect(fromOf(await pullAs(h, BETA))).toBe(at(3000));
+        const held = (await runRows(h.ql)).filter((r) => Boolean(r.holds_position)).map((r) => r.mapping_package).sort();
+        expect(held).toEqual([ALPHA, BETA]);
+    });
+
+    it('a caller reading another package\'s mapping records the holder, not itself, and shares the holder\'s position', async () => {
+        const h = await harness(THREE, { runs: true });
+        packaged(h, { [BETA]: MAPPING }, { [CALLER]: [BETA] });
+        await pullAs(h, BETA);
+        const viaCaller = await pullAs(h, CALLER);
+        expect(fromOf(viaCaller)).toBe(at(3000));
+        const rows = await runRows(h.ql);
+        expect(rows.map((r) => r.mapping_package)).toEqual([BETA, BETA]);
+    });
+
+    it('two packages\' mappings of one name read one source into two targets: the second target receives the whole history', async () => {
+        const h = await harness(THREE, { runs: true, objects: [TARGET_B] });
+        packaged(h, { [ALPHA]: MAPPING, [BETA]: { ...MAPPING, targetObject: 'order_copy_b' } });
+        await pullAs(h, ALPHA);
+        const second = await pullAs(h, BETA);
+        expect(fromOf(second)).toBe(START);
+        expect(second.pulled).toBe(3);
+        const copiedB = await h.ql.find('order_copy_b', { context: SYSTEM as never });
+        expect(copiedB).toHaveLength(3);
+    });
+
+    it('a mapping whose targetObject was changed starts its new target from watermark.start', async () => {
+        const h = await harness(THREE, { runs: true, objects: [TARGET_B] });
+        const first = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(first.source === 'datasource' && first.watermark.committed).toBe(at(3000));
+        h.meta.mapping.set(MAPPING.name, { ...MAPPING, targetObject: 'order_copy_b' });
+        const second = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(fromOf(second)).toBe(START);
+        expect(second.pulled).toBe(3);
+        expect(await h.ql.find('order_copy_b', { context: SYSTEM as never })).toHaveLength(3);
+        expect((await runRows(h.ql)).map((r) => r.target_object)).toEqual(['order_copy', 'order_copy_b']);
+    });
+
+    it('a pull naming no package records the package the protocol served the mapping from, never a stored-row marker', async () => {
+        for (const [served, recorded] of [['com.acme.gamma', 'com.acme.gamma'], ['sys_metadata', null], ['__runtime__', null]] as const) {
+            const h = await harness(THREE, { runs: true });
+            const read = h.deps.protocol.getMetaItem.bind(h.deps.protocol);
+            h.deps.protocol.getMetaItem = (async (request: { type: string; name: string }) => {
+                const answer = await read(request) as Rec | undefined;
+                return request.type === 'mapping' && answer ? { ...answer, packageId: served } : answer;
+            }) as never;
+            await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+            const [r] = await runRows(h.ql);
+            expect(r.mapping_package ?? null, served).toBe(recorded);
+        }
+    });
+});
+
+describe('[ADR-0153 D7] a run record that cannot be written stops the pull (run_record_unavailable)', () => {
+    it('the run cannot be opened: refused 503 before anything is read', async () => {
+        const h = await harness(THREE, { runs: true });
+        const reads = onSourceReads(h);
+        h.deps.runs!.open = async () => { throw new Error('SQLITE_ERROR: no such table: sys_sync_run'); };
+        const err = await refusalOf(pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM }));
+        expect([err.code, err.status, err.reason]).toEqual(['SERVICE_UNAVAILABLE', 503, 'run_record_unavailable']);
+        expect(err.message).not.toContain('SQLITE_ERROR');
+        expect(reads).toEqual([]);
+        expect(await copies(h.ql)).toEqual([]);
+    });
+
+    it('the position cannot be stored at a window\'s end: refused 503, the windows before stay written and committed', async () => {
+        process.env.OS_DATA_MAX_PAGE_SIZE = '2';
+        const h = await harness([
+            { no: 'K-0100', at: at(100) }, { no: 'K-1100', at: at(1100) }, { no: 'K-8000', at: at(8000) },
+        ], { runs: true });
+        const ledger = h.deps.runs!;
+        const commit = ledger.commit.bind(ledger);
+        let commits = 0;
+        ledger.commit = async (...args) => {
+            commits++;
+            if (commits === 2) throw new Error('SQLITE_BUSY: database is locked');
+            return commit(...args);
+        };
+        const err = await refusalOf(pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM }));
+        expect([err.code, err.status, err.reason]).toEqual(['SERVICE_UNAVAILABLE', 503, 'run_record_unavailable']);
+        expect(err.message).not.toContain('SQLITE_BUSY');
+        const [r] = await runRows(h.ql);
+        expect([r.status, r.failure_reason, r.watermark_committed]).toEqual(['failed', 'run_record_unavailable', at(100)]);
+    });
+});
+
+/** `LifecycleEngineLike` over the harness's managed SQLite driver, as the sys_session sweep test builds it. */
+function sweepEngine(driver: SqlDriver, objects: LifecycleObjectLike[]): LifecycleEngineLike {
+    return {
+        registry: { getAllObjects: () => objects },
+        getDriverForObject: () => driver,
+        async find(object: string, options: any) {
+            const query: DriverQuery = { where: options?.where, limit: options?.limit };
+            return driver.find(object, query);
+        },
+        async delete(object: string, options: any) {
+            const dispatch = assertEngineDeleteDispatch(options);
+            if (dispatch.kind === 'by-id') {
+                const id = typeof dispatch.id === 'bigint' ? dispatch.id.toString() : dispatch.id;
+                return (await driver.delete(object, id)) ? 1 : 0;
+            }
+            return driver.deleteMany(object, { where: options?.where } as DriverQuery);
+        },
+    };
+}
+
+describe('[ADR-0153 D7] retention never removes the run that holds a mapping\'s read position', () => {
+    it('one sweep past the window: the superseded run goes, the position holder and a running run stay', async () => {
+        const h = await harness(THREE, { runs: true });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        await h.erp.knex.raw('insert into ERP_ORDERS values (?, ?, ?, ?)', ['A-4', at(5000), 40, DEFAULT_ORGANIZATION_ID]);
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        await h.deps.runs!.open({ mapping: MAPPING.name }, new Date());
+        expect((await runRows(h.ql)).map((r) => [r.status, Boolean(r.holds_position)])).toEqual([
+            ['completed', false], ['completed', true], ['running', false],
+        ]);
+
+        const object: LifecycleObjectLike = {
+            name: SysSyncRun.name,
+            lifecycle: (SysSyncRun as any).lifecycle,
+            fields: SysSyncRun.fields as any,
+        };
+        const silent = { info() {}, warn() {}, debug() {}, error() {} };
+        const service = new LifecycleService({
+            getEngine: () => sweepEngine(h.main, [object]),
+            logger: silent,
+            now: () => Date.now() + 31 * 86_400_000,
+            initialDelayMs: 1,
+            sweepIntervalMs: 10,
+        } as any);
+        await service.sweep();
+        expect((await runRows(h.ql)).map((r) => [r.status, r.watermark_committed ?? null, Boolean(r.holds_position)])).toEqual([
+            ['completed', at(5000), true], ['running', null, false],
+        ]);
     });
 });

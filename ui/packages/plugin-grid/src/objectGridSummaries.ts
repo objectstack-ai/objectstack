@@ -9,7 +9,7 @@
 import React from 'react';
 import type { ObjectGridSchema, DataSource, ListColumn } from '@object-ui/types';
 import { useScopedColumnSummary } from './useColumnSummary';
-import { useWholeSetSummary } from './useWholeSetSummary';
+import { useWholeSetSummary, type WholeSetSummaryFields } from './useWholeSetSummary';
 import { normalizeColumns } from './objectGridColumns';
 import type { ObjectGridExternalPaginationProps } from './objectGridProps';
 import type { useObjectGridQueryInputs } from './objectGridQueryInputs';
@@ -22,14 +22,17 @@ type Grouping = ReturnType<typeof useObjectGridGrouping>;
 
 
 export function useObjectGridSummaries({
-  schema, dataSource, objectName, objectSchema, data, hasInlineData, externalManualPagination,
-  hostFindParams, hostRowCount, lastFindParamsRef, totalMatching, refreshKey, serverPage,
+  schema, dataSource, objectName, objectSchema, objectFields, objectTypesPending, data, hasInlineData,
+  externalManualPagination, hostFindParams, hostRowCount, lastFindParamsRef, totalMatching, refreshKey, serverPage,
   fetchWindow, serverGroupedFetch, isGrouped,
 }: {
   schema: ObjectGridSchema;
   dataSource: DataSource | undefined;
   objectName: string | undefined;
   objectSchema: { fields?: Parameters<typeof useScopedColumnSummary>[2] } | null;
+  /** The grid's field catalogue (`objectSchema.fields`, else the host's) and whether it is still awaited. */
+  objectFields: WholeSetSummaryFields;
+  objectTypesPending: boolean;
   data: Parameters<typeof useScopedColumnSummary>[1];
   hasInlineData: boolean;
   externalManualPagination: boolean;
@@ -113,6 +116,11 @@ export function useObjectGridSummaries({
     dataSource,
     objectName,
     columns: summaryColumns,
+    // [ADR-0144 D6] The catalogue the grid draws its columns from, so a
+    // `record`-mode amount handed down by the host is known before the
+    // grid's own definition read lands.
+    objectFields,
+    objectFieldsPending: objectTypesPending,
     findParams: bulkFanoutParams,
     count: resolvedTotalMatching,
     reloadKey: String(refreshKey),

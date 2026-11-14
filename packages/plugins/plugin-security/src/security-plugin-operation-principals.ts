@@ -161,10 +161,10 @@ export async function resolveOperationPrincipals(
           `[Security] Access denied: on-behalf-of principal acts in organization '${liveOrganization}', which ` +
             `delegator '${String(context.onBehalfOf.userId)}' is not a member of — refusing to act (ADR-0090 D10 fail-closed)`,
           { operation, object },
-          `[ADR-0090 D10] tenancy posture '${this.tenancyPosture}' walls organizations, and a delegated operation is ` +
-            `bounded by the delegator's scope: it runs in the live principal's active organization, which the ` +
-            `delegator's own membership must back. Build the on-behalf-of context in an organization the delegator ` +
-            `is a member of. System contexts and the single posture are unaffected.`,
+          `[ADR-0090 D10] A delegated operation is bounded by the delegator's scope: it runs in the live ` +
+            `principal's active organization, which the delegator's own current membership must back, under every ` +
+            `tenancy posture (ADR-0093 D8.1). Build the on-behalf-of context in an organization the delegator is a ` +
+            `member of. System contexts are unaffected.`,
         );
       }
       delegatorContext = del.context;

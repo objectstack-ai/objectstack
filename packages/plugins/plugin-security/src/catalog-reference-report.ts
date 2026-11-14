@@ -23,6 +23,23 @@
  *    `permission_set` is empty. The v18 ceremony's verified rewrite names
  *    every grant it can before the legacy id column is dropped, and blocks on
  *    the rest; an unnamed grant confers nothing.
+ * 5. **[ADR-0150 D8] Grants withheld beside a bound grant** —
+ *    `sys_user_permission_set` rows whose `permission_set_package` names a
+ *    package that no longer serves the set, read onto a holder another grant
+ *    of the same user, set and organization is bound to. Each confers nothing
+ *    (`staleGrantBesideBoundGrant`, `@objectstack/core`, the rule the
+ *    authorization resolver applies); the fix is to remove it.
+ * 6. **[ADR-0150 D2/D8, #31698] Grants whose package no longer serves their
+ *    set, where the name's holder is outside that package's namespace** —
+ *    `sys_user_permission_set` rows whose `permission_set_package` names a
+ *    package that no longer serves the set, while the holder the name now
+ *    reads is another namespace's package, a package with no namespace, or
+ *    the environment's own set. The catalog never reads a column onto a
+ *    holder outside its package's namespace (a column of a package with no
+ *    namespace the registry knows has none, and reads as before), so each
+ *    confers nothing; the fix
+ *    is to remove it, and to grant the holder's set again, naming its
+ *    package, where that set is the one meant.
  *
  * And it lists PER POSITION, since a definition belongs to the environment and
  * to no organization:
@@ -76,7 +93,10 @@
  */
 
 import {
+  boundGrantPackages,
+  catalogEntryAddress,
   resolveCatalogReference,
+  staleGrantBesideBoundGrant,
   storedPermissionSetScope,
   type SecurityCatalogEntry,
   type SecurityCatalogReader,
@@ -131,12 +151,47 @@ export interface UnnamedGrant {
   userId: string | null;
 }
 
+/**
+ * [ADR-0150 D8] One grant whose package no longer serves its set, read onto a
+ * holder another grant of the same user, set and organization is bound to.
+ */
+export interface StaleGrantBesideBound {
+  id: string;
+  userId: string | null;
+  /** The set's name. */
+  name: string;
+  /** The package the row names, which no longer serves the set. */
+  packageId: string;
+  /** The package the set now resolves to, which the other grant is bound to. */
+  holder: string;
+}
+
+/**
+ * [ADR-0150 D2/D8, #31698] One grant whose package no longer serves its set,
+ * where the holder the name now reads is outside that package's namespace: it
+ * confers nothing.
+ */
+export interface StaleGrantOutsideNamespace {
+  id: string;
+  userId: string | null;
+  /** The set's name. */
+  name: string;
+  /** The package the row names, which no longer serves the set. */
+  packageId: string;
+  /** The holder the name now reads, outside that package's namespace: a package, or `null` for the environment's own set. */
+  holder: string | null;
+}
+
 /** Everything the report found for one organization; `null` is the organization-less bucket. */
 export interface OrganizationCatalogReferences {
   organizationId: string | null;
   positionAssignments: UnresolvedReference[];
   permissionSetGrants: UnresolvedReference[];
   unnamedGrants: UnnamedGrant[];
+  /** [ADR-0150 D8] Grants that confer nothing beside a grant bound to the holder they read. */
+  staleGrantsBesideBound: StaleGrantBesideBound[];
+  /** [ADR-0150 D2/D8, #31698] Grants that confer nothing: their package no longer serves the set, and its holder is outside that package's namespace. */
+  staleGrantsOutsideNamespace: StaleGrantOutsideNamespace[];
 }
 
 /** One position definition that names permission sets the catalog does not resolve. */
@@ -263,11 +318,15 @@ async function listPositions(catalog: SecurityCatalogReader): Promise<SecurityCa
   return entries as SecurityCatalogEntry[];
 }
 
-/** The catalog's answer per name, each name asked once. */
+/**
+ * The catalog's answer per name, each name asked once: the package of the
+ * holder it resolves to (`null` for the environment's), or `false` when it
+ * resolves nowhere.
+ */
 function catalogResolver(
   catalog: SecurityCatalogReader,
-): (type: SecurityCatalogType, name: string, packageColumn?: unknown) => Promise<boolean> {
-  const memo = new Map<string, boolean>();
+): (type: SecurityCatalogType, name: string, packageColumn?: unknown) => Promise<string | null | false> {
+  const memo = new Map<string, string | null | false>();
   return async (type, name, packageColumn) => {
     // [ADR-0150 D8 R1] A grant naming its holder is asked for that package's
     // set, as the authorization resolver asks it (`storedPermissionSetScope`).
@@ -275,15 +334,45 @@ function catalogResolver(
     const key = `${type}\u0000${name}\u0000${scope?.packageId ?? ''}`;
     const known = memo.get(key);
     if (known !== undefined) return known;
-    let resolves: boolean;
+    let holder: string | null | false;
     try {
       const entry = await catalog.resolve(type, name, scope);
-      resolves = entry !== undefined && entry.name === name;
+      holder = entry !== undefined && entry.name === name ? catalogEntryAddress(entry).packageId : false;
     } catch (e) {
       throw new ReportStop('catalog-unreadable', 'the security catalog', e);
     }
-    memo.set(key, resolves);
-    return resolves;
+    memo.set(key, holder);
+    return holder;
+  };
+}
+
+/**
+ * [ADR-0150 D2/D8, #31698] The holder a stored grant's stale package column is
+ * refused for — the name's holder, outside that package's namespace (the
+ * catalog's `not-held-by-qualifier` refusal of a column): a package, or `null`
+ * for the environment's own set. `undefined` for any other answer, and for a
+ * row with no column. Each (name, column) is asked once.
+ */
+function staleColumnHolderOutsideNamespace(
+  catalog: SecurityCatalogReader,
+): (name: string, packageColumn: unknown) => Promise<string | null | undefined> {
+  const memo = new Map<string, string | null | undefined>();
+  return async (name, packageColumn) => {
+    const scope = storedPermissionSetScope(packageColumn);
+    if (scope?.packageId === undefined) return undefined;
+    const key = `${name}\u0000${scope.packageId}`;
+    if (memo.has(key)) return memo.get(key);
+    let answer: Awaited<ReturnType<typeof resolveCatalogReference>>;
+    try {
+      answer = await resolveCatalogReference(catalog, 'permission', name, scope);
+    } catch (e) {
+      throw new ReportStop('catalog-unreadable', 'the security catalog', e);
+    }
+    const holder = answer.status === 'refused' && answer.reason === 'not-held-by-qualifier' && answer.holders?.length === 1
+      ? (answer.holders[0].kind === 'package' ? answer.holders[0].packageId : null)
+      : undefined;
+    memo.set(key, holder);
+    return holder;
   };
 }
 
@@ -318,19 +407,22 @@ export async function collectCatalogReferences(
         positionAssignments: [],
         permissionSetGrants: [],
         unnamedGrants: [],
+        staleGrantsBesideBound: [],
+        staleGrantsOutsideNamespace: [],
       };
       byOrganization.set(organizationId, found);
     }
     return found;
   };
   const resolves = catalogResolver(deps.catalog);
+  const outsideNamespaceHolder = staleColumnHolderOutsideNamespace(deps.catalog);
 
   try {
     if (readAssignments) {
       const rows = await scanAll(engine, POSITION_ASSIGNMENT_OBJECT, ['id', 'user_id', 'position', 'organization_id']);
       for (const row of rows) {
         const name = nameOf(row.position);
-        if (name === undefined || (await resolves('position', name))) continue;
+        if (name === undefined || (await resolves('position', name)) !== false) continue;
         bucket(organizationOf(row)).positionAssignments.push({
           id: String(row.id), userId: stringOrNull(row.user_id), name,
         });
@@ -341,6 +433,16 @@ export async function collectCatalogReferences(
       const rows = await scanAll(engine, GRANT_OBJECT, [
         'id', 'user_id', GRANT_SET_NAME_FIELD, PERMISSION_SET_PACKAGE_COLUMN, 'organization_id',
       ]);
+      // [ADR-0150 D8] The holders each user's grants are bound to, read as the
+      // authorization resolver reads them: every row, whatever its window.
+      const rowsByUser = new Map<string | null, Record<string, unknown>[]>();
+      for (const row of rows) {
+        const userId = stringOrNull(row.user_id);
+        const own = rowsByUser.get(userId);
+        if (own) own.push(row);
+        else rowsByUser.set(userId, [row]);
+      }
+      const boundByUser = new Map([...rowsByUser].map(([userId, own]) => [userId, boundGrantPackages(own)] as const));
       for (const row of rows) {
         const name = nameOf(row[GRANT_SET_NAME_FIELD]);
         if (name === undefined) {
@@ -349,10 +451,30 @@ export async function collectCatalogReferences(
           });
           continue;
         }
-        if (await resolves('permission', name, row[PERMISSION_SET_PACKAGE_COLUMN])) continue;
-        bucket(organizationOf(row)).permissionSetGrants.push({
-          id: String(row.id), userId: stringOrNull(row.user_id), name,
-        });
+        const holder = await resolves('permission', name, row[PERMISSION_SET_PACKAGE_COLUMN]);
+        if (holder === false) {
+          // [ADR-0150 D2/D8, #31698] A column the catalog refuses because the
+          // name's holder is outside its package's namespace is its own line:
+          // the set is held, and the fix is not to declare it again.
+          const outside = await outsideNamespaceHolder(name, row[PERMISSION_SET_PACKAGE_COLUMN]);
+          if (outside !== undefined) {
+            bucket(organizationOf(row)).staleGrantsOutsideNamespace.push({
+              id: String(row.id), userId: stringOrNull(row.user_id), name,
+              packageId: String(row[PERMISSION_SET_PACKAGE_COLUMN]).trim(), holder: outside,
+            });
+            continue;
+          }
+          bucket(organizationOf(row)).permissionSetGrants.push({
+            id: String(row.id), userId: stringOrNull(row.user_id), name,
+          });
+          continue;
+        }
+        const userId = stringOrNull(row.user_id);
+        if (holder !== null && staleGrantBesideBoundGrant(row, holder, boundByUser.get(userId) ?? new Map())) {
+          bucket(organizationOf(row)).staleGrantsBesideBound.push({
+            id: String(row.id), userId, name, packageId: String(row[PERMISSION_SET_PACKAGE_COLUMN]).trim(), holder,
+          });
+        }
       }
     }
 
@@ -491,6 +613,34 @@ function logReport(report: CatalogReferenceReport, logger?: CatalogReferenceRepo
         'it names each legacy grant from its retired id and lists the ones it cannot name. Then restart. Granting ' +
         'the set again by name before it runs makes a second grant the ceremony will report, not name.',
       { count: unnamed.count, organizations: unnamed.organizations },
+    );
+  }
+
+  const withheld = perOrganization(report, (o) => o.staleGrantsBesideBound, (items) => ({
+    grants: listed(items.map((i) => ({ id: i.id, userId: i.userId, permissionSet: i.name, packageId: i.packageId, holder: i.holder }))),
+  }));
+  if (withheld.count > 0) {
+    logError(
+      logger,
+      `[security] ${withheld.count} ${GRANT_OBJECT} grant(s) name a package that no longer serves their permission set, ` +
+        'and the set now resolves to a package another grant of the same user, set and organization is bound to ' +
+        '(ADR-0150 D8), so each confers nothing: the bound grant, with its validity window, grants the set. Nothing ' +
+        'was changed. Fix: remove each listed grant.',
+      { count: withheld.count, organizations: withheld.organizations },
+    );
+  }
+
+  const outside = perOrganization(report, (o) => o.staleGrantsOutsideNamespace, (items) => ({
+    grants: listed(items.map((i) => ({ id: i.id, userId: i.userId, permissionSet: i.name, packageId: i.packageId, holder: i.holder }))),
+  }));
+  if (outside.count > 0) {
+    logError(
+      logger,
+      `[security] ${outside.count} ${GRANT_OBJECT} grant(s) name a package that no longer serves their permission set, ` +
+        "and the set's holder now is outside that package's namespace (ADR-0150 D2/D8), so each confers nothing: a " +
+        "stored grant is never read onto another namespace's set. Nothing was changed. Fix: where the holder's set is " +
+        'the one meant, grant it again naming its package; then remove each listed grant.',
+      { count: outside.count, organizations: outside.organizations },
     );
   }
 

@@ -136,8 +136,10 @@ import {
   providerDomains,
   settleSsoProviderDelete as settleDeletedSsoProvider,
   ssoDomainClaimedRefusal,
+  ssoDomainTooLong,
   stageSsoProviderDeleteImpact,
 } from './sso-provider-lifecycle.js';
+import { ssoDomainEntryNotBare } from './sso-account-at-proven-domain.js';
 import {
   applyUserBan,
   applyUserUnban,
@@ -249,6 +251,16 @@ import {
 // [#30918] The coarse last-use stamp a verified MCP call writes on its consent.
 import { McpClientLastUseStamper, mcpClientLastUseStoreFor, issuedAtOf } from './mcp-client-last-use.js';
 import { runAfterResponse } from './run-after-response.js';
+import { markDirectoryProvisionedUsers } from './scim-identity-source.js';
+import {
+  revokeDirectoryDeactivatedApiKeys,
+  scimDeactivationKeyRevocationIncompleteMessage,
+} from './scim-deactivation-key-revocation.js';
+import {
+  directoryDeactivatedOwnerSuspensionIncompleteMessage,
+  isOwnedAccountSuspensionComplete,
+  suspendAccountsOfDirectoryDeactivatedOwner,
+} from './service-account-owner-leaves.js';
 // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
 // token: the answer `handleRequest` gives after the provider's, through
 // `answerOAuthTokenRevocation` below.
@@ -274,7 +286,18 @@ import { resolvePasswordHasher } from './auth-manager-password-hasher.js';
 import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-instance.js';
 import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
 import { createEngineSsoProviderConfigReader, emailClaimOfStoredOidcConfig, type SsoProviderConfigEngine } from './register-sso-provider.js';
-import { readSsoProviderSignInOptions, runWithSamlIdpInitiated } from './sso-sign-in-options.js';
+import { readSsoProviderSignInOptions, runWithSamlProviderScope } from './sso-sign-in-options.js';
+import {
+  judgeSignOutOfIdpCapability,
+  parkOidcEndSessionEndpoint,
+  recordOidcSignOutSession,
+  runSsoSignOut,
+  samlSingleLogoutProviderId,
+  SIGN_OUT_ENDPOINT_PATH,
+  SIGN_OUT_OF_IDP_BODY_KEY,
+  type SignOutAuthContext,
+  type SsoSignOutDeps,
+} from './sso-sign-out-of-idp.js';
 import { readStoredSamlConfig, runSsoSamlRefusalCauseScope } from './sso-saml-refusal-cause.js';
 import { readThirdPartyLoginProvider, runThirdPartyInitiatedLogin, type ThirdPartyLoginContext } from './sso-third-party-initiated-login.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
@@ -756,6 +779,21 @@ export function readInvitationPlacementIntent(
 
   if (!businessUnitId || positions.length === 0) return null;
   return { businessUnitId, positions };
+}
+
+/**
+ * [#32637] The plugin's own auth route table, as `AuthManager.handleRequest`
+ * answers through it: every route `AuthPlugin`'s mount serves, registered by
+ * the one function that fills the self-hosted mount (`auth-plugin.ts`).
+ */
+export interface AuthRouteSurface {
+  /**
+   * Answer one request under `basePath`, with what the transport knows about
+   * it. An exception is a rejection, never a fabricated answer.
+   */
+  fetch(request: Request, transport?: { remoteAddress?: string }): Promise<Response>;
+  /** Does the table itself serve `method` on `pathname` (a `HEAD` as its `GET`)? */
+  owns(method: string, pathname: string): boolean;
 }
 
 export interface AuthManagerOptions extends Partial<AuthConfig> {
@@ -2048,6 +2086,7 @@ export class AuthManager {
       assertRevokeSessionIdentifiesRecord: (...a) => this.assertRevokeSessionIdentifiesRecord(...a),
       assertSsoProviderDeletable: (...a) => this.assertSsoProviderDeletable(...a),
       assertSsoProviderDomainFree: (...a) => this.assertSsoProviderDomainFree(...a),
+      assertSsoSignOutOfIdpSupported: (...a) => this.assertSsoSignOutOfIdpSupported(...a),
       auditRefusedSignIn: (...a) => this.auditRefusedSignIn(...a),
       buildPluginList: (...a) => this.buildPluginList(...a),
       clearSignInLockout: (...a) => this.clearSignInLockout(...a),
@@ -2063,6 +2102,7 @@ export class AuthManager {
       getAudience: (...a) => this.getAudience(...a),
       getCanonicalOrigin: (...a) => this.getCanonicalOrigin(...a),
       getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
+      getDataEngine: (...a) => this.getDataEngine(...a),
       getEmailService: (...a) => this.getEmailService(...a),
       hasExistingUserFor: (...a) => this.hasExistingUserFor(...a),
       get idpLocale() { return readIdpLocale(); },
@@ -2072,7 +2112,9 @@ export class AuthManager {
       isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
       isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
+      isSsoDomainVerificationEnabled: (...a) => this.isSsoDomainVerificationEnabled(...a),
       isSsoWired: (...a) => this.isSsoWired(...a),
+      isSsoOnlyMode: (...a) => this.isSsoOnlyMode(...a),
       linkingContext: (...a) => this.linkingContext(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
       recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
@@ -2085,6 +2127,7 @@ export class AuthManager {
       sendExistingAccountSignUpNotice: (...a) => this.sendExistingAccountSignUpNotice(...a),
       settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
       settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
+      settleSsoSignOutOfIdp: (...a) => this.settleSsoSignOutOfIdp(...a),
       signUpForcedOff: (...a) => this.signUpForcedOff(...a),
       ssoDiscoveryTrustedOrigins: (...a) => this.ssoDiscoveryTrustedOrigins(...a),
       stampLastLogin: (...a) => this.stampLastLogin(...a),
@@ -2281,6 +2324,7 @@ export class AuthManager {
       emailLocaleArg: (...a) => this.emailLocaleArg(...a),
       enforceSessionControls: (...a) => this.enforceSessionControls(...a),
       getAppName: (...a) => this.getAppName(...a),
+      getAudience: (...a) => this.getAudience(...a),
       getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       getEmailService: (...a) => this.getEmailService(...a),
@@ -4044,12 +4088,20 @@ export class AuthManager {
   }
 
   /**
-   * Handle an authentication request
-   * Forwards the request directly to better-auth's universal handler
+   * Handle an authentication request: the plugin's WHOLE auth surface.
    *
-   * better-auth catches internal errors (database / adapter / ORM) and
-   * returns a 500 Response instead of throwing.  We therefore inspect the
-   * response status and log server errors so they are not silently swallowed.
+   * [#32637] A request under `basePath` is answered by the route table
+   * `AuthPlugin` bound to this manager ({@link bindRouteSurface}) — the same
+   * registration that fills the self-hosted mount, so the routes the platform
+   * mounts itself (`/config`, the `/admin/*` doors, …), their mount-layer
+   * checks, and better-auth behind them through that table's catch-all. A host
+   * that forwards its auth path here serves exactly what the self-hosted mount
+   * serves and nothing else. With no bound table (a manager constructed on its
+   * own), or for a path outside `basePath`, the request goes straight to
+   * better-auth ({@link handleVendorRequest}), as it always did.
+   *
+   * An exception on the table reaches the caller as a rejection: the host
+   * turns it into its own public error body.
    *
    * @param request - Web standard Request object
    * @param transport - What the transport knows about the request that a Fetch
@@ -4057,12 +4109,52 @@ export class AuthManager {
    *   (`IHttpRequest.remoteAddress`). Omitted, the request's client address is
    *   established from trusted forwarded headers alone, and is undetermined
    *   when `trustProxy` is not declared. Either way the vendored library is
-   *   handed that address and no other (`client-address-vendor.ts`).
+   *   handed that address and no other (`client-address-vendor.ts`), and the
+   *   table's mount-layer checks judge by that same address.
    * @returns Web standard Response object
    */
   handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+    const surface = this.routeSurface;
+    if (surface && this.betterAuthEndpointPath(request) !== undefined) return surface.fetch(request, transport);
+    return this.handleVendorRequest(request, transport);
+  }
+
+  /**
+   * [#32637] Bind the plugin's own route table: from now on
+   * {@link handleRequest} answers through it and {@link ownsRoute} counts its
+   * routes. `AuthPlugin` binds it in `init()`, right after constructing this
+   * manager, so the table is complete before the first request.
+   *
+   * @internal The plugin's wiring, not an extension point.
+   */
+  bindRouteSurface(surface: AuthRouteSurface | undefined): void {
+    this.routeSurface = surface;
+  }
+
+  /** [#32637] The table {@link bindRouteSurface} bound, if any. */
+  private routeSurface?: AuthRouteSurface;
+
+  /**
+   * better-auth's universal handler ALONE — the vendor entry.
+   *
+   * Every in-process re-dispatch into the vendor goes here, never through
+   * {@link handleRequest}: a bridge mounted on the route table that re-dispatched
+   * through `handleRequest` would be answered by that table again — the
+   * table's catch-all would call itself, and a gate-then-delegate mount on the
+   * vendor's own path (`/admin/remove-user`) would call its own route — and
+   * the mount-layer checks would run a second time on one request.
+   *
+   * better-auth catches internal errors (database / adapter / ORM) and
+   * returns a 500 Response instead of throwing.  We therefore inspect the
+   * response status and log server errors so they are not silently swallowed.
+   *
+   * @param request - Web standard Request object
+   * @param transport - As {@link handleRequest}'s.
+   * @returns Web standard Response object
+   */
+  handleVendorRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
-    const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'resolveAuthSecret'> = {
+    const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'runSsoLogout' | 'resolveAuthSecret'> = {
       config: this.config,
       betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
       getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
@@ -4070,6 +4162,7 @@ export class AuthManager {
       runSubjectErasureAtomically: (...a) => this.runSubjectErasureAtomically(...a),
       answerOAuthTokenRevocation: (...a) => this.answerOAuthTokenRevocation(...a),
       runSsoCallback: (...a) => this.runSsoCallback(...a),
+      runSsoLogout: (...a) => this.runSsoLogout(...a),
       resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
     };
     return handleRequest.call(host, request, transport);
@@ -4095,7 +4188,10 @@ export class AuthManager {
   ): Promise<Response> {
     // A SAML ACS request runs with its provider's IdP-initiated toggle in
     // scope: the vendor's one plugin-wide option answers it per provider
-    // (`sso-sign-in-options.ts`, ruling record 6718355623).
+    // (`sso-sign-in-options.ts`, ruling record 6718355623). Its single-logout
+    // switch too (ruling record 6866334319): on, the vendor records the
+    // session's NameID and SessionIndex for the sign-out
+    // (`sso-sign-out-of-idp.ts`).
     const scoped =
       callback.protocol === 'saml'
         ? async (): Promise<Response> => {
@@ -4111,7 +4207,7 @@ export class AuthManager {
               const auth: any = await this.getOrCreateAuth();
               return readStoredSamlConfig(await auth.$context, callback.providerId);
             };
-            return runWithSamlIdpInitiated(options.allowIdpInitiated, () =>
+            return runWithSamlProviderScope({ allowIdpInitiated: options.allowIdpInitiated, singleLogout: options.signOutOfIdp }, () =>
               runSsoSamlRefusalCauseScope(callback, this.config.logger, readSamlConfig, run),
             );
           }
@@ -4141,6 +4237,13 @@ export class AuthManager {
     // hold; anything else reaches the vendor callback unchanged
     // (`sso-third-party-initiated-login.ts`).
     const engine = this.config.dataEngine;
+    // An OIDC sign-in at a provider whose "sign out of the company sign-in
+    // too" switch is on records the session's provider for its sign-out
+    // (`sso-sign-out-of-idp.ts`, ruling record 6866334319).
+    const recorded = async (answer: Response): Promise<Response> => {
+      await recordOidcSignOutSession(this.ssoSignOutDeps(transport), callback.providerId, answer);
+      return answer;
+    };
     return runThirdPartyInitiatedLogin(
       callback,
       {
@@ -4151,11 +4254,150 @@ export class AuthManager {
           return (await auth.$context) as ThirdPartyLoginContext;
         },
         startUrl: new URL(`${this.getBasePath()}/sign-in/sso`, callback.request.url).href,
-        dispatch: (request) => this.handleRequest(request, transport),
+        // The vendor's own start, so never back through the route table.
+        dispatch: (request) => this.handleVendorRequest(request, transport),
         logger: this.config.logger,
       },
       callbackScope,
+    ).then(recorded);
+  }
+
+  /**
+   * What `sso-sign-out-of-idp.ts` reads: better-auth's context, the provider
+   * switch (system read), the session of a set of cookies, and the vendor
+   * entry for an in-process re-dispatch (never back through the route table).
+   */
+  private ssoSignOutDeps(transport?: { remoteAddress?: string }): SsoSignOutDeps {
+    const engine = this.config.dataEngine;
+    return {
+      context: async () => {
+        const auth: any = await this.getOrCreateAuth();
+        return (await auth.$context) as SignOutAuthContext;
+      },
+      reader: () => (engine ? (withSystemReadContext(engine) as never) : undefined),
+      getSession: async (headers) => {
+        const auth: any = await this.getOrCreateAuth();
+        const found = await auth.api.getSession({ headers, query: { disableRefresh: true } }).catch(() => null);
+        return found?.session?.id && found?.user?.id ? found : null;
+      },
+      dispatch: (request) => this.handleVendorRequest(request, transport),
+      warn: (message) => this.config.logger?.warn?.(message),
+    };
+  }
+
+  /**
+   * A sign-out, or one of the vendor's SAML single-logout endpoints, with the
+   * provider's "sign out of the company sign-in too" switch in scope (ruling
+   * record 6866334319, `sso-sign-out-of-idp.ts`):
+   *
+   * - `POST /sign-out` of a session that started at a provider whose switch is
+   *   on also ends the identity provider's session (SAML single logout, or
+   *   an OIDC RP-initiated logout URL in the answer); any other sign-out is
+   *   `run`, unchanged.
+   * - `/sso/saml2/sp/slo/:providerId`, `/sso/saml2/logout/:providerId` and
+   *   the SP metadata run with the vendor's `enableSingleLogout` answering the
+   *   provider's switch, so they are closed for a provider with it off.
+   */
+  private async runSsoLogout(
+    endpointPath: string | undefined,
+    request: Request,
+    run: () => Promise<Response>,
+    transport?: { remoteAddress?: string },
+  ): Promise<Response> {
+    if (endpointPath === SIGN_OUT_ENDPOINT_PATH) return runSsoSignOut(this.ssoSignOutDeps(transport), request, run);
+    const providerId = samlSingleLogoutProviderId(endpointPath, request);
+    if (providerId === undefined) return run();
+    const engine = this.config.dataEngine;
+    const options = await readSsoProviderSignInOptions(
+      engine ? (withSystemReadContext(engine) as never) : undefined,
+      providerId,
     );
+    return runWithSamlProviderScope({ singleLogout: options.signOutOfIdp }, run);
+  }
+
+  /**
+   * Saving "sign out of the company sign-in too" ON through `/sso/register`
+   * or `/sso/update-provider` is refused `400 VALIDATION_FAILED` on
+   * `signOutOfIdp`, before the vendor writes, when the provider cannot honour
+   * it: a SAML provider with no logout address, an OIDC provider whose
+   * discovery document names no `end_session_endpoint`
+   * (`judgeSignOutOfIdpCapability`, ruling record 6866334319). An OIDC
+   * endpoint it read is kept for the after-hook, which stores it once the
+   * vendor's write landed.
+   */
+  private async assertSsoSignOutOfIdpSupported(ctx: any): Promise<void> {
+    const path = ctx?.path;
+    if (path !== '/sso/register' && path !== '/sso/update-provider') return;
+    if (ctx?.body?.[SIGN_OUT_OF_IDP_BODY_KEY] !== true) return;
+    const providerId = typeof ctx?.body?.providerId === 'string' ? ctx.body.providerId : '';
+    if (!providerId) return;
+    const context = ctx.context as SignOutAuthContext & { isTrustedOrigin: (url: string) => boolean };
+    let stored: Record<string, unknown> | undefined;
+    if (path === '/sso/update-provider') {
+      stored = (await context.adapter
+        .findOne({ model: 'ssoProvider', where: [{ field: 'providerId', value: providerId }] })
+        .catch(() => null)) ?? undefined;
+      // No row: the vendor answers its own 404.
+      if (!stored) return;
+    }
+    const issuer =
+      (typeof ctx.body.issuer === 'string' && ctx.body.issuer)
+      || (typeof stored?.issuer === 'string' && stored.issuer)
+      || undefined;
+    const verdict = await judgeSignOutOfIdpCapability({
+      providerId,
+      issuer,
+      stored: stored ? { samlConfig: stored.samlConfig, oidcConfig: stored.oidcConfig } : undefined,
+      body: { samlConfig: ctx.body.samlConfig, oidcConfig: ctx.body.oidcConfig },
+      isTrustedOrigin: (url) => context.isTrustedOrigin(url),
+    });
+    if (!verdict.ok) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError(verdict.refusal.status, {
+        code: verdict.refusal.code,
+        message: verdict.refusal.message,
+        field: verdict.refusal.field,
+      });
+    }
+    if (verdict.endSessionEndpoint && ctx.request instanceof Request) {
+      this.pendingEndSessionEndpoints.set(ctx.request, verdict.endSessionEndpoint);
+    }
+  }
+
+  /** OIDC `end_session_endpoint`s read by a save of the switch, by request, until its after-hook stores them. */
+  private readonly pendingEndSessionEndpoints = new WeakMap<Request, string>();
+
+  /**
+   * After a `/sso/register` or `/sso/update-provider` that saved the switch
+   * ON for an OIDC provider landed: store the `end_session_endpoint` its
+   * before-hook read in the provider's `oidc_config`. A failure is logged at
+   * `error` (the switch is stored on, and its sign-out would not reach the
+   * identity provider) with the remedy: save the sign-in options again.
+   */
+  private async settleSsoSignOutOfIdp(ctx: any): Promise<void> {
+    const path = ctx?.path;
+    if (path !== '/sso/register' && path !== '/sso/update-provider') return;
+    if (ctx?.body?.[SIGN_OUT_OF_IDP_BODY_KEY] !== true) return;
+    const returned = ctx?.context?.returned;
+    // A refusal (the vendor's or a before-hook's) is an APIError here: nothing landed.
+    if (!returned || returned instanceof Error) return;
+    const request = ctx.request instanceof Request ? ctx.request : undefined;
+    const endpoint = request ? this.pendingEndSessionEndpoints.get(request) : undefined;
+    if (!endpoint) return;
+    this.pendingEndSessionEndpoints.delete(request!);
+    const providerId = typeof ctx?.body?.providerId === 'string' ? ctx.body.providerId : '';
+    try {
+      await parkOidcEndSessionEndpoint(ctx.context as SignOutAuthContext, providerId, endpoint);
+    } catch (error) {
+      const message =
+        `[sso] OIDC provider "${providerId}" was saved with "sign out of the company sign-in too" on, but its end_session_endpoint `
+        + `could not be stored, so signing out will not sign out of the identity provider until it is: save its sign-in options again. ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+      const sink = this.config.logger as { error?: (msg: string) => void } | undefined;
+      if (typeof sink?.error === 'function') sink.error(message);
+      else console.error(message);
+    }
   }
 
   /**
@@ -4308,6 +4550,31 @@ export class AuthManager {
   }
 
   /**
+   * Does this auth service ROUTE this request — is it one {@link handleRequest}
+   * answers with an answer of its own, whatever that answer is?
+   *
+   * [#32637] True for a route the bound route table serves itself, judged by
+   * method AND path (`POST /admin/sso/register` is the table's, a `GET` on that
+   * path is not), so a host that yields a `404` it is told nobody owns keeps an
+   * objectstack route's own `404` (a withdraw naming no consent) as the answer.
+   * Otherwise, whether better-auth's own router serves it
+   * ({@link ownsVendorRoute}).
+   */
+  ownsRoute(request: Request): Promise<boolean> {
+    const surface = this.routeSurface;
+    if (surface) {
+      let pathname: string | undefined;
+      try {
+        pathname = new URL(request.url).pathname;
+      } catch {
+        pathname = undefined;
+      }
+      if (pathname !== undefined && surface.owns(request.method, pathname)) return Promise.resolve(true);
+    }
+    return this.ownsVendorRoute(request);
+  }
+
+  /**
    * [#15417] Does better-auth ROUTE this request — i.e. is the path one its own
    * router owns, whatever it then answers?
    *
@@ -4327,7 +4594,7 @@ export class AuthManager {
    * request it cannot decide, so a failure to enumerate can never take the
    * #4088 surface down with it.
    */
-  ownsRoute(request: Request): Promise<boolean> {
+  ownsVendorRoute(request: Request): Promise<boolean> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
     const readRouteOwnership = () => this.routeOwnership;
     const writeRouteOwnership = (v: AuthManager['routeOwnership']) => { this.routeOwnership = v; };
@@ -4520,10 +4787,43 @@ export class AuthManager {
    * never applied it on the SCIM path either — the vendor wrote the column
    * straight through the adapter.
    *
-   * Every read and write goes through `context.database` — the adapter the
+   * Every ban read and write goes through `context.database` — the adapter the
    * vendor bound to its transaction — never through an `internalAdapter`
    * resolved outside it, so the ban commits or rolls back with the SCIM
    * mutation it belongs to.
+   *
+   * An inactive state also revokes every API key the user owns, stamped
+   * `scim_deactivated`, which no one restores from a user context
+   * (`scim-deactivation-key-revocation.ts`, the ruling of record 6787890900 on
+   * #32004, item "Directory deactivation"): the ban is the directory's to
+   * lift, and a key does not ride it, so a re-activation re-arms no key. It
+   * runs on every inactive call, a DELETE's and an already-banned user's
+   * included, after the ban write and before the mark, and is idempotent: a key
+   * that already carries a reason no one restores is not written again. A
+   * revocation that does not finish never fails the deprovision (the ban
+   * already landed); it is reported once at `error`. The `active: true` branch
+   * and an administrator's ban leave keys alone.
+   *
+   * An inactive state also suspends every AI service account the user is
+   * accountable for, with the reason that the directory deactivated its owner
+   * (`service-account-owner-leaves.ts`, the owner-left writer with its own
+   * reason; the maintainer's choice that this card covers those accounts). A
+   * re-activation lifts the user's ban only, so the accounts stay suspended
+   * until an administrator resumes them, and resume refuses while the owner is
+   * still deactivated. It runs on every inactive call after the key
+   * revocation, an account already suspended keeps its own reason, and a
+   * suspension that does not finish never fails the deprovision; it is
+   * reported once at `error`. An administrator's ban leaves the accounts alone.
+   *
+   * [ADR-0135 D4] This callback also writes the directory-managed mark
+   * (`sys_user.source = 'idp_provisioned'`, `scim-identity-source.ts`) on every
+   * call — fail-closed and first on an active state, best-effort and after the
+   * deprovision write on an inactive one (the body says why): the vendor
+   * invokes it for every SCIM create, re-link and reprovision, and it is the
+   * one host seam all of them share. `source` is not
+   * a vendor field, so the adapter would drop it; the mark is written through
+   * the data engine instead, which joins the same transaction as its ambient
+   * one. A user holding a local password keeps `env_native` (D4's rule).
    */
   private async reconcileScimUserLifecycle(
     state: SCIMIdentityState,
@@ -4544,6 +4844,28 @@ export class AuthManager {
         `[auth] SCIM identity reconciliation: better-auth user '${state.userId}' has no sys_user row`,
       );
     }
+    // [ADR-0135 D4] The directory-managed mark, on the one seam every SCIM
+    // create, re-link and reprovision passes through (`scim-identity-source.ts`
+    // says why it is this callback). The engine joins the vendor's transaction,
+    // so the mark commits with the SCIM write or not at all.
+    //
+    // Its failure posture depends on the state, and the ORDER is the contract:
+    //  - active: the mark is written FIRST and fails closed — a mark that
+    //    cannot be written fails the SCIM request, the vendor rolls the create
+    //    back, and the IdP retries; no SCIM user is created unmarked.
+    //  - inactive (a deactivation, a DELETE, a create with `active: false`):
+    //    the deprovision write goes FIRST and the mark after it is best-effort,
+    //    so a refused mark can never leave a deprovisioned account enabled. A
+    //    refusal is logged and swallowed; the boot backfill and the next active
+    //    write re-run the mark. (A failure that aborts the driver transaction
+    //    itself fails the deprovision write too — that is the database, not
+    //    the mark.)
+    const engine = this.getDataEngine();
+    if (!engine) {
+      throw new Error(
+        `[auth] SCIM identity reconciliation: no data engine to write the identity-source mark for user '${state.userId}'`,
+      );
+    }
     const writer = {
       updateUser: (id: string, data: Record<string, unknown>) =>
         db.update({ model: 'user', where: [{ field: 'id', value: id }], update: data }),
@@ -4560,18 +4882,93 @@ export class AuthManager {
         if (user.banExpires !== null && user.banExpires !== undefined) {
           await writer.updateUser(state.userId, { banExpires: null, updatedAt: new Date() });
         }
-        return;
+      } else {
+        await applyUserBan(writer, state.userId, {
+          banReason: SCIM_DEACTIVATION_BAN_REASON,
+          banExpires: null,
+        });
       }
-      await applyUserBan(writer, state.userId, {
-        banReason: SCIM_DEACTIVATION_BAN_REASON,
-        banExpires: null,
-      });
+      // The directory's deactivation revokes the user's keys; a later
+      // re-activation lifts the ban and re-arms none of them. After the ban, so
+      // a revocation that cannot land never leaves the account enabled.
+      const revocation = await revokeDirectoryDeactivatedApiKeys(engine as never, state.userId);
+      if (!revocation.complete) this.logScimKeyRevocationIncomplete(state.userId, revocation);
+      // ...and suspends the AI service accounts the user is accountable for; a
+      // re-activation resumes none of them.
+      const suspension = await suspendAccountsOfDirectoryDeactivatedOwner(engine as never, state.userId);
+      if (!isOwnedAccountSuspensionComplete(suspension)) this.logScimAccountSuspensionIncomplete(state.userId, suspension);
+      try {
+        await markDirectoryProvisionedUsers(engine as never, [state.userId]);
+      } catch (e) {
+        this.logScimMarkDegradation(state.userId, e);
+      }
       return;
     }
+    await markDirectoryProvisionedUsers(engine as never, [state.userId]);
     if (!banned) return;
     // An administrator's ban is not the IdP's to lift.
     if (user.banReason !== SCIM_DEACTIVATION_BAN_REASON) return;
     await applyUserUnban(writer, state.userId);
+  }
+
+  /**
+   * The one notice for a SCIM deprovision whose API key revocation did not
+   * finish (`scim-deactivation-key-revocation.ts`). Logged at `error`: the
+   * account is disabled, so nothing looks wrong, but a key left unrevoked works
+   * again if the directory re-activates the user.
+   */
+  private logScimKeyRevocationIncomplete(
+    userId: string,
+    outcome: Parameters<typeof scimDeactivationKeyRevocationIncompleteMessage>[1],
+  ): void {
+    const message = scimDeactivationKeyRevocationIncompleteMessage(userId, outcome);
+    const meta = { object: 'sys_api_key', revoked: outcome.apiKeys, failed: outcome.failed };
+    const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
+    if (typeof sink?.error === 'function') sink.error(message, meta);
+    else console.error(message, meta);
+  }
+
+  /**
+   * The one notice for a SCIM deprovision whose suspension of the user's AI
+   * service accounts did not finish (`service-account-owner-leaves.ts`).
+   * Logged at `error`: the user is disabled, so nothing looks wrong, but an
+   * account left unsuspended keeps running with nobody accountable for it.
+   */
+  private logScimAccountSuspensionIncomplete(
+    userId: string,
+    outcome: Parameters<typeof directoryDeactivatedOwnerSuspensionIncompleteMessage>[1],
+  ): void {
+    const message = directoryDeactivatedOwnerSuspensionIncompleteMessage(userId, outcome);
+    const meta = {
+      object: 'sys_user',
+      suspended: outcome.suspended.length,
+      failed: outcome.failed.map((f) => f.accountId),
+      ...(outcome.readError !== undefined ? { error: outcome.readError } : {}),
+    };
+    const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
+    if (typeof sink?.error === 'function') sink.error(message, meta);
+    else console.error(message, meta);
+  }
+
+  /**
+   * [ADR-0135 D4] The one notice for a directory-managed mark that could not
+   * be written on a SCIM deprovision, where the deprovision write has already
+   * landed and the mark is best-effort (`reconcileScimUserLifecycle`). Logged at
+   * `error`: the account is disabled, so nothing looks wrong, but the row keeps
+   * its previous `source` until the mark lands.
+   */
+  private logScimMarkDegradation(userId: string, error: unknown): void {
+    const message =
+      `[auth] the SCIM identity-source mark was NOT written for user '${userId}' on a deprovision — the account `
+      + 'was disabled and the SCIM request succeeds, so nothing looks wrong, but the user keeps their previous '
+      + '`source`, and a directory-provisioned user still reading `env_native` is offered the password / '
+      + 'identity-edit actions that hide for a managed identity (ADR-0135 D4). Remedy: make the sys_user update '
+      + 'land (write permission on `source`, driver connectivity); the boot backfill and the next active SCIM '
+      + 'write for this user re-run the mark.';
+    const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
+    const meta = { object: 'sys_user', field: 'source', error: error instanceof Error ? error.message : String(error) };
+    if (typeof sink?.error === 'function') sink.error(message, meta);
+    else console.error(message, meta);
   }
 
   /**
@@ -5045,6 +5442,16 @@ export class AuthManager {
   }
 
   /**
+   * Is SSO-only mode on ({@link resolveSsoOnly}, read live)? The doors that
+   * give a user a local password ask it: under it an IdP-provisioned user is
+   * given none, except a platform administrator setting their own
+   * (`sso-only-local-password.ts`).
+   */
+  public isSsoOnlyMode(): boolean {
+    return this.resolveSsoOnly();
+  }
+
+  /**
    * Is local self-registration forced off, whatever `disableSignUp` says?
    * Under SSO-only ({@link resolveSsoOnly}), and [#25083] on a cloud-managed
    * environment, whose people the hosting organisation invites in the cloud.
@@ -5452,7 +5859,9 @@ export class AuthManager {
   /**
    * Whether opt-in DNS domain-verification (ADR-0135 D6) is wired — i.e. the
    * `/sso/request-domain-verification` + `/sso/verify-domain` endpoints are
-   * mounted (and the hard "domain must be verified to log in" gate is active).
+   * mounted, a provider signs nobody in until its listed domains are verified,
+   * and a provider creates an account only for an email address at a domain it
+   * has proven (`sso-account-at-proven-domain.ts`, which asks this method).
    * Resolved with the EXACT logic `buildPluginList` uses for the `sso()`
    * `domainVerification.enabled` option, so the bridge can return a clear
    * "not enabled for this environment" instead of a bare 404 when off.
@@ -5722,7 +6131,8 @@ export class AuthManager {
     // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
     const readOrgRolesMap = () => this.orgRolesMap;
     const readOrganizationDeleteStandingJudge = () => this.organizationDeleteStandingJudge;
-    const host: Pick<ActorGuardHost, 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteStandingJudge' | 'resolveActor'> = {
+    const host: Pick<ActorGuardHost, 'getAudience' | 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteStandingJudge' | 'resolveActor'> = {
+      getAudience: (...a) => this.getAudience(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       get orgRolesMap() { return readOrgRolesMap(); },
       get organizationDeleteStandingJudge() { return readOrganizationDeleteStandingJudge(); },
@@ -5744,8 +6154,9 @@ export class AuthManager {
    *
    * [#32085] A delete the floor admits is then counted before the vendor's
    * first write (`sso-provider-lifecycle.ts` `stageSsoProviderDeleteImpact`):
-   * the users it unlinks, those it locks out, the group mappings and projected
-   * grants it leaves behind. {@link settleSsoProviderDelete} removes those and
+   * the users it unlinks and, of those,
+   * users with no other sign-in method linked; the group mappings and
+   * projected grants it leaves behind. {@link settleSsoProviderDelete} removes those and
    * names the counts in the answer. A count that cannot be read refuses the
    * delete `503 SERVICE_UNAVAILABLE`, because an unlink cannot be taken back.
    */
@@ -5793,30 +6204,54 @@ export class AuthManager {
    * already serves (`409 RESOURCE_CONFLICT`, `field: 'domain'`), before the
    * vendor writes. Sign-in routes an address to a provider by its domain, so
    * the second provider would not be reached by address
-   * (`sso-provider-lifecycle.ts` `findSsoDomainClaim`).
+   * (`sso-provider-lifecycle.ts` `findSsoDomainClaim`): the same entry, or a
+   * subdomain and its parent where the subdomain's provider does not hold it
+   * as its whole domain, each entry compared as one ASCII spelling.
    *
    * Asked only of an authenticated caller whose body carries a domain: what
    * the vendor itself answers (no session, a malformed body) falls through to
-   * it. The holding provider is named to a platform administrator, who may
-   * read every provider; any other caller (an organization administrator on
-   * `/sso/update-provider`) is told only that the domain is served, which
-   * `/sign-in/sso` already answers anyone. A provider-table read that fails
+   * it, and nothing of the domain is parsed for a caller without a session.
+   * A value longer than a provider row holds, or with an entry longer than a
+   * host name, is refused `400 VALIDATION_FAILED` on `domain` before it is
+   * parsed (`ssoDomainTooLong`); [#32960] then so is a value holding an entry
+   * that is not written as a bare host name (`ssoDomainEntryNotBare`), which
+   * would be stored and prove nothing at sign-in.
+   *
+   * The holding provider is named to a platform administrator, who may read
+   * every provider; any other caller (an organization administrator on
+   * `/sso/update-provider`) is told only that a domain its request names, or
+   * a subdomain of it, is served, which `/sign-in/sso` already answers anyone
+   * for a name they supply: never the row, nor the subdomain another
+   * provider lists. A provider-table read that fails
    * refuses `503`: a guard that could not be evaluated does not pass.
    */
   private async assertSsoProviderDomainFree(ctx: any): Promise<void> {
     const path = ctx?.path;
     if (path !== SSO_PROVIDER_REGISTER_PATH && path !== SSO_PROVIDER_UPDATE_PATH) return;
-    const domains = providerDomains(ctx?.body?.domain);
-    if (domains.length === 0) return;
+    const requested: unknown = ctx?.body?.domain;
+    if (typeof requested !== 'string' || !requested.trim()) return;
     const engine = this.getDataEngine();
     if (!engine) return;
     const actor = await this.resolveActor(ctx);
     if (!actor?.userId) return;
-    const providerId = typeof ctx?.body?.providerId === 'string' ? ctx.body.providerId : '';
     const { APIError } = await import('better-auth/api');
+    // Lengths before any parse: the value is request-controlled.
+    const tooLong = ssoDomainTooLong(requested);
+    if (tooLong) {
+      throw new APIError(tooLong.status, { code: tooLong.code, message: tooLong.message, field: tooLong.field, fields: tooLong.fields });
+    }
+    // [#32960] Then the shape: every entry a bare host name, as the rules that
+    // judge an address against the list read it (`sso-account-at-proven-domain.ts`).
+    const notBare = ssoDomainEntryNotBare(requested);
+    if (notBare) {
+      throw new APIError(notBare.status, { code: notBare.code, message: notBare.message, field: notBare.field, fields: notBare.fields });
+    }
+    const domains = providerDomains(requested);
+    if (domains.length === 0) return;
+    const providerId = typeof ctx?.body?.providerId === 'string' ? ctx.body.providerId : '';
     let claim;
     try {
-      claim = await findSsoDomainClaim(engine, domains, path === SSO_PROVIDER_UPDATE_PATH ? providerId : undefined);
+      claim = await findSsoDomainClaim(engine, requested, path === SSO_PROVIDER_UPDATE_PATH ? providerId : undefined);
     } catch {
       throw new APIError('SERVICE_UNAVAILABLE', {
         code: 'SERVICE_UNAVAILABLE',

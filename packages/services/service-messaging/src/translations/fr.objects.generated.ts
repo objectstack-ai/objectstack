@@ -28,15 +28,15 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Événement de notification",
-        help: "Clé étrangère → sys_notification (l’événement L2 que cette ligne matérialise)"
+        help: "La notification que ce message délivre. Marquer le message comme lu l’enregistre pour cette notification."
       },
       delivery_id: {
         label: "Livraison",
-        help: "Clé étrangère → sys_notification_delivery (ligne de la boîte d’envoi) ; null jusqu’à P1"
+        help: "L’enregistrement de livraison de ce message. Non renseigné pour les messages dans l’application."
       },
       actor_id: {
-        label: "Auteur de l’action",
-        help: "Utilisateur à l’origine de l’événement (auteur de la mention, de l’attribution) — même sémantique que sys_notification.actor_id. Permet à un client de masquer ses propres accusés par une simple comparaison locale. Null sur une ligne de résumé par construction : un groupe regroupé n’a pas d’auteur unique."
+        label: "Déclenché par",
+        help: "La personne dont l’action a généré cette notification, par exemple celle qui a mentionné ou assigné le destinataire. Vide lorsque le message regroupe plusieurs notifications."
       },
       topic: {
         label: "Sujet"
@@ -86,11 +86,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Événement de notification",
-        help: "Clé étrangère → sys_notification (événement L2)"
+        help: "La notification dont cet accusé enregistre l’état."
       },
       delivery_id: {
         label: "Livraison",
-        help: "Clé étrangère → sys_notification_delivery (ligne de la boîte d’envoi) ; null jusqu’à P1"
+        help: "L’enregistrement de livraison auquel appartient cet accusé. Non renseigné actuellement."
       },
       user_id: {
         label: "Utilisateur destinataire"
@@ -131,7 +131,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Événement de notification",
-        help: "Clé étrangère → sys_notification (événement L2)"
+        help: "La notification que cette livraison envoie."
       },
       recipient_id: {
         label: "Destinataire",

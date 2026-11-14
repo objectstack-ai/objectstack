@@ -30,11 +30,11 @@ import ordersStack from './src/packages/orders/index.js';
  * flattened half would have.
  *
  * ⚠️ A composition that RECONCILES something keeps the flattened half instead,
- * because there it is not a copy: `objectConflict: 'merge'` / `'override'` fold
- * two packages' same-named objects into one, and a standalone action binds onto
- * an object a sibling package owns. Neither is refused and both stay readable —
- * the emitter drops the flattened collections only when the bodies reproduce
- * them item for item.
+ * because there it is not a copy: a standalone action binds onto an object a
+ * sibling package owns. It is not refused and stays readable — the emitter
+ * drops the flattened collections only when the bodies reproduce them item for
+ * item. Two packages declaring one object name are refused under every
+ * `objectConflict` strategy, since each package keeps its own body.
  *
  * `packages[]` is what the metadata service's artifact door reads and what
  * `ObjectQL.registerApp` registers, package by package, in

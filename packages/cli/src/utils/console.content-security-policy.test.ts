@@ -576,6 +576,7 @@ describe('the host\'s cloudflareWebAnalytics option', () => {
    */
   const DOCUMENT_WITHOUT_OPTION = [
     '<!doctype html><html><head>',
+    '    <meta name="robots" content="noindex, nofollow">',
     '    <script nonce="NONCE">window.__OBJECTUI_CAPABILITIES_DISABLED__=(window.__OBJECTUI_CAPABILITIES_DISABLED__||[]).concat(\'react-pages\');</script>',
     '    <base href="/_console/"><meta charset="UTF-8"><title></title>',
     '<script nonce="NONCE">window.early = 1;</script>',

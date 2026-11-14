@@ -142,7 +142,9 @@ describe('#32073 — two packages hold one function name: each packaged flow run
             install(Q);
             holds(order[0]);
             holds(order[1]);
-            expect(ql.resolveFunctionEntry(FN)?.packageId, 'the bare map keeps the last registration').toBe(`app:${order[1]}`);
+            // [#31700, epic seat ruling R2-C] The bare read of a name two packages
+            // hold picks neither (it answered the last registration before).
+            expect(() => ql.resolveFunctionEntry(FN), 'the bare read is refused, naming both').toThrow(PackageScopedNameRefusedError);
             ship(A, scripted('a_flow'));
             ship(Q, scripted('q_flow'));
 

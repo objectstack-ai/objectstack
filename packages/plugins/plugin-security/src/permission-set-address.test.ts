@@ -33,6 +33,10 @@ const ORG = 'org_1';
 const ALPHA = 'com.alpha.sales';
 const BETA = 'org.beta.crm';
 const GONE = 'com.gone.pkg';
+/** A package of ALPHA's namespace that holds no set. */
+const ALPHA_OLD = 'com.alpha.old';
+/** The namespaces the stand-in's packages declare; any other id declares none. */
+const NAMESPACES: Record<string, string> = { [ALPHA]: 'alpha', [ALPHA_OLD]: 'alpha', [BETA]: 'beta' };
 
 type Item = Record<string, unknown>;
 type Holders = Record<string, Array<{ packageId: string; item: Item }>>;
@@ -66,7 +70,7 @@ function scopedRegistry(holders: Holders, positions: Item[] = []) {
       type === 'permission' ? holders[name]?.find((h) => h.packageId === packageId)?.item : undefined,
     getEnvironmentScopedItem: (type: string, name: string) => (type === 'position' ? position(name) : undefined),
     getArtifactItem: () => undefined,
-    getPackage: (id: string) => ({ manifest: { id } }),
+    getPackage: (id: string) => ({ manifest: { id, ...(NAMESPACES[id] ? { namespace: NAMESPACES[id] } : {}) } }),
     getAllPackages: () => [],
   };
 }
@@ -246,15 +250,38 @@ describe('[ADR-0150 D3, D4] the explainer reads what enforcement reads', () => {
 });
 
 describe('[ADR-0150 D8] a stale address — its package no longer serves the set', () => {
-  it('one holder of the name: the evaluator falls back to it (D3) and says the stale address once', async () => {
+  it('one holder of the name, of the address package\'s namespace: the evaluator falls back to it (D3) and says the stale address once', async () => {
     const ql = engine(tablesFor([]));
     const { plugin, warn } = await bootPlugin(ql);
+    const sets = await plugin.resolvePermissionSetsForContext({
+      userId: 'u1', tenantId: ORG, positions: [], permissions: ['solo_rep'],
+      permissionSetAddresses: [{ packageId: ALPHA_OLD, name: 'solo_rep' }],
+    });
+    expect(readsOf(sets, 'solo_rep')).toEqual(['solo_deal']);
+    expect(warn.mock.calls.some(([msg]) => String(msg).includes(ALPHA_OLD) && String(msg).includes('solo_rep'))).toBe(true);
+  });
+
+  it('⛔ [#31698] one holder of the name, outside the address package\'s namespace: nothing is read, and the refusal is said', async () => {
+    for (const packageId of [BETA]) {
+      const ql = engine(tablesFor([]));
+      const { plugin, warn } = await bootPlugin(ql);
+      const sets = await plugin.resolvePermissionSetsForContext({
+        userId: 'u1', tenantId: ORG, positions: [], permissions: ['solo_rep'],
+        permissionSetAddresses: [{ packageId, name: 'solo_rep' }],
+      });
+      expect(readsOf(sets, 'solo_rep'), packageId).toEqual([]);
+      expect(warn.mock.calls.some(([msg]) => String(msg).includes('grants nothing') && String(msg).includes(packageId)), packageId).toBe(true);
+    }
+  });
+
+  it('CONTROL [#31698]: an address of a package the registry does not know has no namespace to bound it, and falls back to the one holder (D3)', async () => {
+    const ql = engine(tablesFor([]));
+    const { plugin } = await bootPlugin(ql);
     const sets = await plugin.resolvePermissionSetsForContext({
       userId: 'u1', tenantId: ORG, positions: [], permissions: ['solo_rep'],
       permissionSetAddresses: [{ packageId: GONE, name: 'solo_rep' }],
     });
     expect(readsOf(sets, 'solo_rep')).toEqual(['solo_deal']);
-    expect(warn.mock.calls.some(([msg]) => String(msg).includes(GONE) && String(msg).includes('solo_rep'))).toBe(true);
   });
 
   it('⛔ two holders of the name: the stale address is refused, and nothing is picked', async () => {

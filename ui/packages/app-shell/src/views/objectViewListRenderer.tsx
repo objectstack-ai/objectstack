@@ -324,8 +324,9 @@ export function useObjectViewListRenderer({
                     <Suspense key={identityKey} fallback={<div className="p-4 text-sm text-muted-foreground">{t('chart.loading')}</div>}>
                         <ObjectChart
                             dataSource={ds}
-                            // ADR-0150 D5 — the view's own served package, never the
-                            // object's or the app's: a view with none queries bare.
+                            // The view's own served package, never the object's or the
+                            // app's, sent as the reader's package (`callerPackage`,
+                            // ADR-0150 D3): a view with none queries bare.
                             packageId={servedPackageId(viewDef)}
                             schema={{
                                 type: 'object-chart',

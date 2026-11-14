@@ -212,8 +212,11 @@ export function deriveHookApi(api: unknown, runAs: HookRunAs, ref: HookRunAsRef)
  * list and email (#24639) onto the api `withRunAs('user')` derived.
  *
  * A symbol, and ⛔ deliberately NOT re-exported from the package entry, so the
- * method is no NAMEABLE member of `ScopedContext`'s published face: only the
- * hook wrapper reaches it, through {@link seedHookUserGrants}. A public named
+ * method is no NAMEABLE member of `ScopedContext`'s published face: it is
+ * reached only through {@link seedHookUserGrants}, which the entry does export,
+ * by the hook wrapper and by the runtime's script-body doors (`body-runner.ts`
+ * `hookDoorCaller`, which reads one record's existence in the hook's calling
+ * user's scope). A public named
  * method would widen the published surface, and it would also be a derivation
  * the runtime's stored-metadata seams (`deriveThroughSeam`) do not know, so a
  * seam-served host api calling it would get back an unserved context.
@@ -227,7 +230,7 @@ export const SEED_USER_GRANTS: unique symbol = Symbol('objectstack.objectql.hook
  * the refusing {@link UnscopedHookApi} does not, and needs nothing seeded.
  */
 interface UserGrantsSeedableApi {
-  [SEED_USER_GRANTS](): Promise<IScopedContext>;
+  [SEED_USER_GRANTS](opts?: { membershipUnread?: true }): Promise<IScopedContext>;
 }
 
 /**
@@ -241,6 +244,20 @@ export async function seedHookUserGrants(api: unknown): Promise<unknown> {
   const seedable = api as Partial<UserGrantsSeedableApi> | undefined;
   if (!seedable || typeof seedable[SEED_USER_GRANTS] !== 'function') return api;
   return seedable[SEED_USER_GRANTS]();
+}
+
+/**
+ * [ADR-0093 D8.1, as amended] The api a `runAs: 'user'` derivation produced,
+ * after {@link seedHookUserGrants} could not read the user's grants: nothing
+ * is resolved, and a context that carries no membership set takes an empty
+ * one, so the organization wall judges the hook as it judges a person who
+ * holds no current membership. Narrower, never wider. An api that cannot seed
+ * is returned as is.
+ */
+export async function seedHookUnreadMembership(api: unknown): Promise<unknown> {
+  const seedable = api as Partial<UserGrantsSeedableApi> | undefined;
+  if (!seedable || typeof seedable[SEED_USER_GRANTS] !== 'function') return api;
+  return seedable[SEED_USER_GRANTS]({ membershipUnread: true });
 }
 
 /**

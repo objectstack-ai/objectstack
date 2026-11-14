@@ -1,5 +1,619 @@
 # @objectstack/plugin-approvals
 
+## 18.4.0
+
+### Patch Changes
+
+- 13c0c5b: fix(plugin-approvals)!: an approval node refuses to open when a team or position approver's directory read fails, or a queue approver's expansion rejects, and the ownership-queue reads page to completion
+  
+  Clause-②: yes (narrowing) — an approval node no longer opens when a `team` or `position` approver (static, or an `expression` approver with `resolveAs` `team` / `position`) cannot be expanded because a directory read or the cross-organization read filter failed, or when a `queue` approver's expansion rejects. Under every `onEmptyApprovers` policy, the `fallbackApprovers` slate included, it now fails the node with a retryable `APPROVER_DIRECTORY_UNREADABLE:` error naming the read, where it used to open on the rest of the slate, on the fallback slate or on the administrators, or auto-approve. The registered ownership-queue service does not reject yet: a failed member read inside it still answers nobody until #29604 part 2 (#30251), so a `queue` approver refuses here only when `expandMembers` itself rejects. Every other input answers as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the approval node config, the approver types and the ownership-queue contract keep their shapes. What moves is the answer a node gives while a directory table cannot be read, and nothing at rest records that answer, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the approval node (`@objectstack/plugin-approvals`): a failed directory read behind a `team` or `position` approver, or a `queue` approver whose expansion rejects, refuses the node instead of opening it on a slate that is missing people (ADR-0142 D6 as amended, ruling record 6599731698 on #29604).
+  
+  - **Before.** A `team` or `position` approver whose `sys_team_member`, `sys_user_position` or `sys_member` read failed kept its `type:value` literal slot, which nobody can act on, and logged the failure. A `queue` approver whose expansion threw answered "expanded to nobody" and added no slot. Either way the node went on as if those people did not exist: beside other approvers it opened on them alone, and on an otherwise empty slate the node's `onEmptyApprovers` policy acted, opening on the `fallbackApprovers` or the organization's administrators, or auto-approving.
+  - **Now.** The node does not open and writes no request, approver or action row. It fails with an `ApproverDirectoryUnreadableError` whose message starts `APPROVER_DIRECTORY_UNREADABLE:`, names the approver, the organization and the read that failed (a failure of the cross-organization read filter is named as that filter's read, on a static approver and on an `expression` one alike), and is retryable: the flow node's failure is a runtime one, so the run can be resumed once the directory can be read. A `fallbackApprovers` slate whose own `team` or `position` read fails refuses the same way. `department` / `business_unit`, `org_membership_level` and `manager` approvers are not named by the ruling and answer exactly as before.
+  - **Unchanged.** A decision on a request opened before the approver snapshot existed still re-reads its slate on the old path, which keeps the literal slot on a failed read, because the decision has already been recorded when that read happens.
+  - **Not yet.** The ownership-queue service shipped in `@objectstack/plugin-sharing` answers a failed `sys_queue` / `sys_queue_member`, team or position read with nobody (logged once) rather than rejecting, so a `queue` approver backed by it still adds no slot on such a failure. Its refusal arrives with #29604 part 2, once the contract can carry it (#30251).
+  
+  `@objectstack/plugin-sharing`: the ownership-queue service reads its `sys_queue` and `sys_queue_member` rows by id, page after page, to the end, where it read one page of 10,000 rows and answered on it. A queue's 10,001st member, an organization's 10,001st queue and the queues naming a recipient past that bound are now found. A read that fails partway answers as a failed read did before (that read contributes nobody, logged once, with the read's reason and without the walk's own "refuses instead" clause), never with the pages it had read.
+- fe835b4: fix(plugin-sharing)!: the ownership-queue service refuses a failed member read when the caller asks, and the approver slate and the sharing-recipient grant recompute ask
+  
+  Clause-②: yes (narrowing) — `expandMembers` and `isMember` of the registered ownership-queue service, called with `onFailedRead: 'refuse'`, now reject when a read behind the queue fails, where they answered nobody. The approver slate asks for that answer, so an approval node whose `queue` approver cannot be read refuses to open under every `onEmptyApprovers` policy, where it opened on the rest of the slate, on the fallback slate or on the administrators, or auto-approved. The sharing-rule recompute asks for it too, so a whole-rule pass (`evaluateRule`, the REST evaluate endpoint, the boot backfill), the recipient-axis revoke and the per-user pass on a `queue`-recipient rule reject on such a failure, where they completed by revoking the grants of the members who could not be read. Every call without the option, and every read that succeeds, answers as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the ownership-queue contract's `onFailedRead` option already exists, and the approval node config and the sharing rule keep their shapes. What moves is the answer two consumers get while a membership table cannot be read, and nothing at rest records that answer, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the ownership-queue service's `'refuse'` answer and at its two recompute consumers (`@objectstack/plugin-sharing`, `@objectstack/plugin-approvals`): an empty expansion is a fact, a failed read is a fault (ADR-0142 D2 as amended), and the approver slate (D6) and the sharing-recipient grant recompute (D7) now get the fault instead of "nobody".
+  
+  - **The service.** `OwnershipQueueService.expandMembers(name, org, { onFailedRead: 'refuse' })` and `isMember(user, name, org, { onFailedRead: 'refuse' })` reject when the queue's `sys_queue` row, its `sys_queue_member` rows, or a member table one of its specifications reads (`sys_team_member`, `sys_user_position`, `sys_member`, `sys_business_unit_member`, `sys_business_unit`) cannot be read, or a paged read cannot vouch for completion. The rejection's message starts `[queue] queue '<name>' in organization '<org>' does not answer its members, because a read behind it failed:` and names that read; the read's own error rides along as `cause`. It never answers `[]`, a partial set or `false` instead. `isMember` still answers `true` when a read that succeeded reaches the user, and answers `false` only when every read behind it succeeded. An empty queue is still `[]`, and a name that resolves nowhere is still `[]` / `false`.
+  - **Unchanged: the default.** Without the option (`onFailedRead: 'nobody'`), a failed read still contributes nobody, logged once. The sitting-record access path (`queuesOf`), the claim admission and the assignment pool take that answer, so they deny on a failed read exactly as before. A failed read of the activation ledger (`sys_metadata_activation`) is not a failed read in this sense under either answer: it still reads "switched on" for that call, logged, the posture the sharing-rule service takes for its own position recipients.
+  - **The approver slate (D6).** A `queue` approver asks with `onFailedRead: 'refuse'` beside the addressing purpose. When the registered service rejects, the node fails with the retryable `APPROVER_DIRECTORY_UNREADABLE:` error that a failed team or position read already raises, naming the queue's failed read, and writes no request, approver or action row. Before, the registered service answered nobody, so the queue added no slot and the node's `onEmptyApprovers` policy acted on a slate missing those people.
+  - **The sharing-recipient grant recompute (D7).** A `queue`-recipient rule's expansion and its per-user membership check ask with `onFailedRead: 'refuse'`. A failed member read now rejects before any grant is diffed, so the rule's existing grants stay as they were until a pass can read the queue, and each recompute's caller logs it: the record pass and the object pass per rule (`record reconcile failed for rule`, `object reconcile failed for rule`), the queue-membership and business-unit write recomputes (`queue-membership revocation failed`, `queue-membership re-grant failed`, `business-unit revocation failed`, `business-unit re-grant failed`), the membership-row recompute (`recipient membership re-evaluation failed`) and the boot backfill (`boot rule backfill failed for rule`). A direct call to `evaluateRule`, `revokeRuleGrantsForRetiredRecipients` or `reconcileRuleForUser`, the REST evaluate endpoint included, rejects with the service's failure. Before, the failed read answered nobody and the pass revoked the grant of every member behind it. This is the answer a `team` or `position` recipient has given since its own reads began to refuse.
+  - **Supersedes the approval node's "Not yet".** The approval node's own entry in this release ("an approval node refuses to open when a team or position approver's directory read fails…") says, in its `Clause-②:` line and its **Not yet** bullet, that the registered ownership-queue service answers a failed member read with nobody rather than rejecting, so a `queue` approver backed by it refuses only when `expandMembers` itself rejects. That was true when it was written and is not after this change: the service now rejects on that failure when asked, and the slate asks, so a `queue` approver backed by it refuses on a failed `sys_queue`, `sys_queue_member`, team, position or business-unit read, as a `team` or `position` approver does. Read this bullet in place of those two sentences.
+- a52761f: fix(console): an action another package places on `sys_user` at `record_header` / `record_more` draws again on the user's record page, in the drawer and on the full page (#29951)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The header reads `placedActions: true`.** `page:header`'s `placedActions` (#30018) is now drawn by the console's header renderer (`PageHeaderActions` in `@object-ui/components`): `true` draws every action of the page's object whose `locations` include `record_header` or `record_more`, in declaration order, read from the object's metadata at render time, so an action an installed package adds to the object is drawn without editing the page. Omitted or `false`, an authored `actions` list is still the whole set (#11592). A `true` beside an authored list, which the spec refuses, draws none of the object's actions and is reported once in the console.
+  - **One placed-header reader.** `placedHeaderActions` (`@object-ui/types`) is the rule both headers read: the synthesized default record page's header in `RecordDetailView` and a `placedActions: true` header. The `page:header` registration publishes the `placedActions` input.
+  - **The platform record pages opt in.** `sys_user_detail` and `sys_organization_detail` (`@objectstack/platform-objects`) and `sys_approval_request_detail` (`@objectstack/plugin-approvals`) set `placedActions: true` in place of the id lists #27219 froze, which dropped every header action another package places on those objects. The tab strips are unchanged, and every action the lists named is placed at `record_header` / `record_more`, so each still draws.
+  - `@objectstack/spec`: the `placedActions` describe no longer opens with `[PLANNED — not yet rendered]`, and the `page` liveness record names the reader.
+- a0c68ae: feat(approvals,messaging): approval requests, reminders and outcomes also go by e-mail, linking to the request page; messaging gains a code-declared notification template tier
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/plugin-approvals`: `approval.requested`, `approval.reminder`, `approval.approved` and `approval.rejected` request the `inbox` and `email` channels** in one emit. Before, every approval notice named no channel, so messaging delivered it to the in-app inbox alone and nobody who does not watch the Console bell heard of it. Every other `approval.*` topic stays inbox-only, and delivery preferences filter the e-mail as they filter any channel. The inbox is unchanged. On a deployment with no mail transport the e-mail is whatever the `email` channel answers there.
+  - **The approval e-mail** is the notice's own title as its subject and its body (in the recipient's language, as the inbox renders it) followed by one line that opens the request, in `en`, `zh-CN`, `ja-JP` and `es-ES`. The link is a new payload member, `approvalUrl`: the request page (`/system/approvals?request=ID`) under the deployment's public origin. `actionUrl` stays relative, as the Console routes on it. It opens the request for a signed-in reader and decides nothing; no ADR-0043 action link or token is in any payload.
+  - **`publicBaseUrl` now resolves when the option is unset**: `OS_AUTH_URL` (legacy `BETTER_AUTH_URL`), then `OS_BASE_URL`, never a guessed `localhost`. With none of them set, or a value that is not an absolute `http(s)` URL, links stay relative and the plugin warns once at start, naming the variable to set. The same origin also prefixes ADR-0043's `actionLinkUrl`, as its option always documented. To give approval e-mails a working link, set `OS_BASE_URL` (or `OS_AUTH_URL`) to the deployment's address.
+  - **`@objectstack/service-messaging`: `MessagingService.registerBuiltinTemplates(templates)`** (and the `BuiltinNotificationTemplate` type) declares `(topic, channel, locale)` notification templates in code. The channels' template store reads them at every rung of its locale ladder after the recipient organization's own `sys_notification_template` row: the rung's row, else the rung's built-in, else the next rung, else the generic title and body. Nothing is written to the database (ADR-0131 §1.4), so an organization that authors a row overrides the built-in with nothing to migrate. A malformed template, or a `(topic, channel, locale)` already declared, is refused with a `TypeError`, and nothing from that call is kept.
+- 7c164cf: i18n(plugin-approvals): the approval objects, notifications, record page and e-mail link line ship in Traditional Chinese, Arabic, French and Brazilian Portuguese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The approval objects (`sys_approval_request`, `sys_approval_action`, `sys_approval_delegation`), the approval notifications' sentences, the approval request record page (its label and its Details / Timeline tabs) and the line that opens an approval from its e-mail now carry `zh-Hant`, `ar`, `fr` and `pt-BR` beside the existing `en`, `zh-CN`, `ja-JP` and `es-ES`, so an approver or submitter in one of those languages reads the approval screens, notices and e-mails in their own language instead of English. Each new locale is registered under its platform-table tag with its source-hash companion, its page entry and its messages, and the package's extract command lists the tags, so the existing `check:i18n` bundle check covers them. The e-mail templates' shape, the template selection and `EMAIL_TEMPLATE_FLOOR_LOCALE` are unchanged; only the link line is added per locale. First half of package 9 of #30512; `ru`, `de` and `ko` follow in the second half.
+- ae82d05: i18n(plugin-approvals): the approval objects, notifications, record page and e-mail link line ship in Russian, German and Korean
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The approval objects (`sys_approval_request`, `sys_approval_action`, `sys_approval_delegation`), the approval notifications' sentences, the approval request record page (its label and its Details / Timeline tabs) and the line that opens an approval from its e-mail now carry `ru`, `de` and `ko` as well, so the package ships all eleven platform languages. Each new locale is registered under its platform-table tag with its source-hash companion, its page entry and its messages, and the package's extract command lists the tags, so the existing `check:i18n` bundle check covers them. The e-mail templates' shape, the template selection and `EMAIL_TEMPLATE_FLOOR_LOCALE` are unchanged; only the link line is added per locale. Second half of package 9 of #30512.
+- 9038187: fix(audit): name the impersonating administrator on identity writes and on an approval decided while impersonating
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two writes an administrator makes while impersonating a user still read as the user's own in the audit ledger. Both now carry the same attribution-only `impersonatedBy` a record write from that session already carries, recorded as `sys_audit_log.metadata.impersonated_by`. `user_id`, `actor` and every permission stay the impersonated user's.
+  
+  - **Identity-table writes (`@objectstack/plugin-auth`).** A write better-auth makes on the user's behalf (renaming the profile, changing an email, a membership change, an admin route such as set-user-manager) runs as the system and is credited to the user through `attributedUserId`. On an impersonation session it now also names the administrator, read from the session row's `impersonatedBy`, never from the request body. `authSystemWriteContext()` builds it, and the adapter's `withSystemContext` writes now use that same builder. `resolveAttributedActor()` (new) answers the user and the administrator together; `runAttributedToUser()` also accepts the admitted actor object, whose new optional `impersonatedBy` the platform-admin gate fills from the session.
+  - **The approval decider's segment (`@objectstack/spec`, `@objectstack/plugin-approvals`, `@objectstack/service-automation`).** `ResumeSignal.impersonatedBy` (new, optional) names the administrator when the decider decided from an impersonation session. It is honoured only beside `resumedBy`, on a signal carrying `RESUME_AUTHORITY_SERVICE`, so an HTTP body cannot set it. The approvals decision door fills it from the decision request's context, and a stranded decision's journal keeps it for the replay. The nodes after the decision now carry exactly the decision's administrator, and none when the decider acted in their own name. Before this, a trigger user deciding their own run kept the stamp of the write that started it, and a decider deciding while impersonated carried none.
+  
+  No schema column and no migration.
+- 2735ca4: feat(service-automation, plugin-approvals, plugin-email, trigger-schedule): automation stored references gain a package column, and a scheduled flow's dispatch key names its flow's package (ADR-0150 D8 R7–R11, R20)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Five stored references that name a flow, a connector instance or an email template by its bare name now carry, beside the name, the package that holds it: `sys_approval_request.process_package` on open requests (R7: `pending` and `returned`), `sys_automation_run.flow_package` on paused runs (R8), `sys_flow_credential.flow_package` (R9), `sys_connector_connection.connector_package` (R11) and `sys_email_template.package_id` on legacy template rows (R20). Each is nullable, read-only to users, and filled in by the platform.
+  
+  At every boot, once the registry has sealed its holders, each table's rows that name no package are walked and asked the one ADR-0150 D3 rule with no caller package: the item's one holder in this environment. An environment override of a package's flow is that package's flow overlaid, so its runs and requests bind to that package. A name only the email service's built-in templates hold binds to `com.objectstack.service.email`. A name two or more packages hold is left null and logged as a warning naming every candidate; it is never bound to the first. A name only the environment or the platform holds, or that nothing holds, is left null and reported. A row that already names a package is never read again, so a second boot writes nothing.
+  
+  The once-per-window dispatch key in `sys_flow_dispatch` (R10) now names the flow's package: `schedule:PACKAGE:FLOW:WINDOW` and `time-relative:PACKAGE:FLOW:SCOPE:RECORD`. A flow the environment holds, or nothing holds, keeps the old shape. At boot, keys claimed inside the ledger's 30-day retention gain a copy under the new key with the same claim time and outcome, and the old rows stay until the retention reaper removes them. The ledger holds every claim, settle and read until that copy has run, for at most two minutes, so a trigger's first claim after the upgrade sees the window as claimed. A claim also inserts the window's old key first, and the scoped key second: whoever inserts the old key wins the window, so during a rolling upgrade a node of an older release, which claims only the old key, and a node of this release share one arbiter in either order, and the old key settles beside the new one. A replay check and a missed-run check also read a claim under the old key as the window's claim. So no window fires twice across the change. The one case that claims no old key is a flow two packages hold: its old key would be one row for both, so each package claims only its own key. That case is unreachable while a second package's same-named flow is refused at registration.
+  
+  Nothing else reads the new columns yet, writers do not stamp them, and no other unique key changes. If a boot pass fails, it logs a warning, leaves its rows as they are and is tried again at the next boot.
+- b96b875: feat(objectql)!: two packages of two namespaces may each ship a flow of the same name; each namespace's `/automation` address, and each package's own flow action and flow endpoint, run that package's flow (ADR-0150 child B)
+  
+  Clause-②: yes (narrowing) — two refusals where a flow was served before. (1) The bare `GET /meta/flow/NAME` and `MetadataManager.get('flow', NAME)` with no package, for a name two packages hold, are refused `409 RESOURCE_CONFLICT` naming both, where they served the first registered package's flow (a name two packages could hold before only as a clash the cold boot sealed with a warning). (2) A by-name read of a flow made as a package (the registry's package-scoped read, `PACKAGE_SCOPED_READ_TYPES`, which `flow` joins) follows ADR-0150 D3: a name only the environment holds is refused (D3 (a): a package never reaches an environment item), and so is a name one package outside the caller's dependency closure holds (D3 step 3), where both were served. First-party callers in either position: 0, the full dogfood battery green with it. Widened beside them: the engine's package door (`SchemaRegistry.installPackage`), its item seam (`SchemaRegistry.registerItem`), the cold boot's holder seal and the cloud `install-local` door (`POST /api/v1/marketplace/install-local`, `422` → `200`, pinned in `marketplace-install-local-bare-name-conflict.test.ts`) accept, for a flow, a second package holder they refused before: one that declares a namespace other than the holder's. For a name two packages hold, `/automation/:ns/:name`, which answered `409`, now serves that namespace's package's flow at every by-name door, the run doors under `…/runs/:runId` included (the run read, the screen read, and the run-lifecycle writes resume, cancel and restore-suspension); the bare run doors (`/automation/:name/runs/:runId…`, the same five), which answered `409`, act on the run's own slot; and MCP `resume_run`, which answered `403` for such a run, continues it through the flow action of the run's own package.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered flow-by-name-read-shared-or-unreachable-refused -->
+  
+  **BREAKING** for two callers. A caller of the bare `GET /meta/flow/NAME` (or `MetadataManager.get('flow', NAME)` with no package) for a name two packages hold now answers `409 RESOURCE_CONFLICT` naming both instead of one of them: read each by its package (`?package=ID`, `/meta/flow/NS/NAME`). A package's by-name read of a flow only the environment holds, or one a package outside its declared dependencies holds, is now refused naming the holders: declare a dependency on the package that ships the flow (ADR-0141), or ship the flow in the reading package. Nothing in the workspace is in either position.
+  
+  The bare-name one-holder rule (`bare-name-one-holder.ts`) has narrowed for `flow` from one package holder per deployment to one per namespace (ADR-0150 D2, D9; `NAMESPACE_SCOPED_BARE_NAME_TYPES` in `@objectstack/core`, `PACKAGE_SLOTTED_STORE_TYPES` in `@objectstack/metadata` and `PACKAGE_SCOPED_READ_TYPES` in `@objectstack/objectql` take `flow` in the one change). The automation engine already holds each package's flow of a name in its own slot (D4); its bare entries (`execute`, `getFlow`, `toggleFlow`) refuse a name two packages hold, `409` naming both, as before. What reads a flow by its package:
+  
+  - **`/automation/:ns/:name`.** For a name two packages hold, an address whose namespace names one of them reads (`GET`), runs (`POST …/trigger`, and the legacy `POST /automation/trigger/:ns/:name`), switches (`POST …/toggle`, writing that package's own activation row), lists the runs of (`GET …/runs`) and acts on a run of (`GET …/runs/:runId`, `GET …/runs/:runId/screen`, and the run-lifecycle writes `POST …/runs/:runId/resume`, `…/cancel`, `…/restore-suspension`) that package's flow, from its slot, where every one answered `409`. A run of the other package's flow is answered under it as a run nobody holds, and its verb is never called. The definition writes (`PUT`, `DELETE`, `POST …/clone`) keep their `409` naming both: an address names a flow to read and run, never one to write. An engine with no slot entries keeps the `409` (fail closed). The bare name, and a namespace that holds neither, keep the `409` naming both.
+  - **The run doors, by run id.** A run of a name two packages hold carries its slot key (`PACKAGE/NAME`), and a run id names exactly one run. So the bare run doors (`GET /automation/:name/runs/:runId`, `GET …/screen`, `POST …/resume`, `…/cancel`, `…/restore-suspension`) act on THAT run's slot, exactly as under its namespace's address; the Console's screen runner resumes there. A run filed under the bare name while the engine holds only one of the two packages' flows is that package's run, served at the bare door too (the one holder whose slot the engine files under the run's key). A run of another flow, a run whose key no holder's slot, or two holders' slots, are filed under, and a run id nobody holds keep the `409` naming both, as do the bare run list and an engine with no slot entries. A run paused or finished while one package held the name is re-keyed with its slot when a second package installs the name (the engine's paused runs, its run log, and a run still in flight), so it reads as that package's run at every door. **R8 (ADR-0150 D8): the boot's stored-reference backfill now binds every `sys_automation_run` row that names no package, terminal history included, to its flow's one package holder** (it bound paused rows only), so a history row written before `flow_package` existed reads as that package's run once a second package installs the name; a row of an environment-authored flow, or of a name two packages already hold, stays null, and the ambiguous names are reported as before. A name one package holds reads exactly as before. Under an address, another package's run is answered as the door answers a run nobody holds, and its verb is never called, including while the engine holds only one of the two packages' flows. MCP `resume_run` reads the run's flow name off its key and admits a flow action targeting that name whose `target` reaches the run's package from the action's own (as `run_action` resolves it); a run whose key carries no package, of a name two packages hold, is that one holder's run, else refused `409` naming every holder.
+  - **An approval request's flow.** **R7 (ADR-0150 D8): a request now records its run's package when it opens (`sys_approval_request.process_package`, which the boot binds on open requests already)**, and every read of its flow reads that package's slot, else the slot its run (`flow_run_id`) is filed under: the send-back's revise-edge check, the request read's `flow_route` and `flow_steps`, the resubmit-window check, the batch above a recalled item, and the step's queue package. So once a second namespace installs the name, send-back and the request read answer as before, for requests opened before and after the install. A request whose package and run name no one slot (a request decided before this release, whose run has left history) keeps the `409` naming every holder at send-back, and its read (`GET /approvals/requests/:id`), which carried `flow_route` and `flow_steps` while one package held the name, now carries neither once a second holds it: the refusal, never another holder's flow. A name one package holds reads exactly as before.
+  - **A flow action and a flow endpoint.** Their `target` is a reference their own package wrote, so it resolves from that package (D3): an action's package (its own stamp; an action embedded in an object's `actions[]` without one takes its object's; a standalone `action` item never inherits its object's package), an endpoint's (the package holding its `api` item). For a name two packages hold, the package's own flow runs, else the one holder in its dependency closure, from that holder's slot, where the action and the endpoint answered `409`; a package that reaches neither holder is refused `409` naming both before anything is read or run. An action or an endpoint of no package, and one whose registry cannot be read, keep the bare name and its `409` (fail closed). A name one package holds runs exactly as before, whoever calls it: a packaged action whose `target` one package outside its closure holds is not narrowed here. MCP `list_actions` reads a flow action's inputs the same way, so the package's own flow action still lists its `params`.
+  - **A start's record-read admission** (the action, endpoint and trigger doors) walks the flows the run reaches, and reads each `subflow` / `map` callee as the engine's run reads it: from the CALLING flow's package (its own flow, else the one holder in its closure), never bare. So a package's flow whose subflow's name another namespace also ships starts, and the records its inputs name are judged against the objects that package's own subflow reads; a callee name the calling package reaches neither holder of is refused `409` naming both, before anything runs.
+  - **The activation ledger** (epic Q4): a flow the deployment switched off while one package held its name stays off once a second namespace's package installs a flow of that name, and the newcomer's flow arms. Pinned at the engine (a row naming no package is bound to the first holder) and on a booted stack (the bare toggle door, then `install-local`).
+  
+  So a package no longer has to rename a flow because a package of another namespace already ships one of that name, and each package's actions and endpoints keep running their own.
+  
+  Unchanged, and still refused with the same `422` envelope and sentence: a second package of the SAME namespace (a co-owner) holding the name (at `install-local`, a co-owner depends on the holder, so the ADR-0146 D2 override write gate refuses it first, `403 NOT_OVERRIDABLE`, as before); a package that declares no namespace, beside any other holder of the name; a built-in name. A package-less save of a name two packages hold (`PUT /meta/flow/NAME`) is refused by the managed seal, `403 NOT_OVERRIDABLE` (ADR-0131 D6), before anything is stored, as for any packaged flow; its sentence names one holder's customization pair as the place to declare an override, and either holder's pair would do.
+  
+  Not changed, and declared: Studio's flow panels address a flow by its bare name (`/automation/:name/…`), so on a name two packages hold their read, run, switch and run-list doors answer the `409` naming both until they address it by namespace; the run doors by run id, where the Console resumes a paused screen run, act on the run's own slot (above). Every other covered type still on one package holder per deployment (webhook, connector, and the rest) keeps it.
+- 7231dc7: feat(objectql, plugin-approvals): a declared assignment rule and an approval step read the queue they name from the package that declares them
+  
+  Clause-②: yes (widening); narrowing per ADR-0150 D3 declared below
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type of either package root changes: a queue name a package-declared assignment rule or approval step writes is now resolved from that package, through the ownership-queue service's existing optional callerPackageId. Nothing an author writes changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  A declared assignment rule (`assignmentRules`) now passes the package that ships it as `callerPackageId` when it resolves its queue and reads the queue's members. An approval step passes the package of the flow body the engine runs (the automation engine's `armedFlowPackage`) when it expands a `queue` approver, on the node's slate, its fallback slate and the tally of a request opened before the slate snapshot existed. The queue service resolves the name from that package (ADR-0150 D3): the package's own queue, else the one holder in its declared dependencies, else a refusal naming every candidate. An organization's own assignment rule, a declared rule no package ships and a flow authored in the deployment read environment-wide, exactly as before. So does a step in an environment-authored override of a packaged flow (a declared `.custom` override, ADR-0146 D9): a reference written in an overlay is the environment's (ADR-0150 D3), never read from the package it customizes.
+  
+  When a `queue` approver's name is refused this way, the approval node still refuses with `APPROVER_DIRECTORY_UNREADABLE`, but the message now says the name was refused (ADR-0150 D3), with the refusal and its remedy, instead of asking for the flow to run again once the directory can be read. Its `retryable` is `false`.
+  
+  Widening, per ADR-0150 D3. A rule or step in package P that names queue `q` used to be refused because two packages declared the name, and is now served:
+  
+  - P's dependency D and an unrelated package U both declare `q`: it reaches D's `q`;
+  - P declares `q` itself and an unrelated package U does too: it reaches P's own `q`.
+  
+  Measured first-party: 0 (no first-party package declares a queue, an assignment rule or a `queue` approver).
+  
+  Narrowing, per ADR-0150 D3. A rule or step in package P whose queue name P cannot reach used to be served environment-wide and is now refused:
+  
+  - the only holder is a package outside P's dependencies (`outside-closure`, naming it);
+  - P's dependency D holds the name but is disabled, and an unrelated U holds it too (`outside-closure`, naming U; a disabled package holds no queue for this read);
+  - the only holder is an item authored in the environment (`outside-closure`, naming the environment).
+  
+  An assignment rule then writes the row ownerless and in no queue, and warns; an approval node refuses to open, naming every candidate and the remedy below. An organization's `sys_queue` row under a name no package declares is unchanged. To resolve it, declare a dependency on the package whose queue you mean, enable it, or ship the queue in P. Measured first-party: 0 (no first-party package declares a queue, an assignment rule or a `queue` approver).
+- 4f6fb53: fix(security): read every administrator identity and every grant gate by the permission set's package, not its name alone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When another package ships a permission set under one of the platform's names (`admin_full_access`, `organization_admin`, `organization_admin_no_bypass`), a grant of that package's set is now granted like any other set and confers no administration. Platform standing, the tenant-administrator rung, the approvals override, the access explainer's posture, the break-glass guard's administrator count, the Default Organization's owner binding, the role-change answer and the upgrade report's recipients all read the platform's own set: the holder whose package declares the kernel namespace `sys`. The deployment-config administrator is given the platform's `admin_full_access` even beside another package's set of that name.
+  
+  The delegated-admin gate compares `(package, name)`. A scope's allowlist names a holder: each name resolves from the package of the set that carries the scope, so a delegate allowed to grant one package's `sales_rep` cannot grant another package's `sales_rep`, by a direct grant or through a position. A grant is judged at the holder its package column names, and at the holder the write seam will stamp from the name.
+  
+  The security plugin's evaluator, when no security catalog is bound, no longer picks the first of two sets that share a name: such a name grants nothing and is logged, naming every holder.
+  
+  A deployment where every set name has one holder sees no change.
+- 0763bf6: fix(objectql, metadata-protocol)!: by-name doors judge a name's holders over the served set, so a disabled package's item is not a holder (ADR-0150 D3, #32183)
+  
+  Clause-②: no (narrowing) — for a name that only disabled packages hold, `SchemaRegistry.resolveItem`, `MetadataFacade.get` / `getEntry` and `SchemaRegistry.getApp` (`@objectstack/objectql`) answer `undefined` where they answered the disabled package's body, and `MetadataFacade.exists` answers false where it answered true. Every by-name door already withheld that body. The other moved answers are listed below, each before → after. Most widen or name fewer packages: a name one enabled and one disabled package hold is served by the enabled holder where it was refused naming both. Three narrow a served answer. A package caller whose closure holds the name only through a disabled package, while an enabled package outside the closure holds it, is refused `outside-closure` where it was served the disabled package's body. The pair address (`?package=<base>.custom`) of a disabled base answers 404 where, with an enabled holder registered first, it served the disabled base's body under that holder's envelope. A disabled package's address at a member only its customization pair stores answers 404 where it served the pair's row. The rest move between a refusal and not-found.
+  Metadata-protocol: none
+  Skills-docs: none — `content/docs/deployment/marketplace-handbook.mdx` already says a disabled module is hidden, and no skill or doc teaches the by-name answer for a name a disabled package holds.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape beyond optional parameters (the flow and connector resolvers' `options`, `MetadataManager.getPublished`'s `packageId`) and one optional query member. The moved answers are reads of registered items under a reversible package state, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** answer narrowing at exported in-process APIs of `@objectstack/objectql`, for a name only disabled packages hold, and for a package caller that reaches a name only through a disabled package; and at the `/meta` exact read (`@objectstack/metadata-protocol`), for the pair address of a disabled base and for a disabled package's address at a member only its pair stores.
+  
+  - **Before → after.** `SchemaRegistry.resolveItem(type, name)`, `MetadataFacade.get` / `getEntry` and `SchemaRegistry.getApp(name)`: the disabled package's body → `undefined`. `MetadataFacade.exists`: true → false. First-party callers: 0. `MetadataFacade` is never constructed in-tree, `getApp` has no caller, and the one door that reads `resolveItem` (the protocol's by-name read) already withheld the body.
+  - **Before → after, the resolver primitives**, same name: `SchemaRegistry.packageScopedHoldersOf(type, name)`: `[DISABLED]` → `[]`. `resolvePackageScopedName`, `readPackageScopedItem` and `resolveActionByPackage`, a caller with no package or outside the holder's closure: resolved to the disabled holder → not-found. First-party callers whose answer moves: 0 (no first-party app disables a package at boot).
+  - **Before → after, served → refused.** A package caller whose declared closure holds the name only through a disabled package, while an enabled package outside the closure holds it: the disabled package's body → refused `outside-closure`, naming the enabled holder. At `resolvePackageScopedName`, `SchemaRegistry.resolveItem(type, name, callerPackageId)` and `resolveActionByPackage`. First-party callers: 0.
+  - **Before → after, served → not-found, at a door.** `GET /meta/:type/:name?package=<base>.custom`, on both transports, the pair of a disabled base, when an enabled package that holds the name registered first: 200 with the disabled base's body under the enabled holder's envelope (`_packageId`) → 404, the disabled base's withheld item. Measured on `main` with the email-template namespace change merged. First-party callers: 0.
+  - **Before → after, served → not-found, at a door.** `GET /meta/:type/:name?package=DISABLED&member=`, `?package=DISABLED.custom&member=` and the disabled package's namespace path, at a member only the disabled package's customization pair stores, with one holder of the name or two, in either registration order: 200 with the pair's row → 404, the disabled package's withheld item. The same with one holder, disabled, at a member only a package-less stored row carries: 200 with that row → 404. An address that reads only a disabled package never serves its customization. Measured on `main` 216674301. First-party callers: 0.
+  - **Added, `@objectstack/metadata`.** `MetadataManager.getPublished(type, name, packageId?)`: an optional `packageId`, read as `get` reads it. Without it, every answer is unchanged.
+  - **Unchanged.** A caller inside the disabled package still reads its own item. Re-enabling the package serves it again. A consumer that needs a disabled package's body names the package (`SchemaRegistry.getPackageScopedItem(type, name, packageId)`), or reads the holders with `includeDisabledPackages: true`.
+  
+  **Every moved answer, before → after.** First-party count 0 for each: showcase (22 packages, 205 package-scoped names), crm (18, 35) and multi-package (16, 27) hold no name that two packages share, and disable none at boot.
+  
+  Widening:
+  
+  - Bare `GET /meta/:type/:name` for every type of `PACKAGE_SCOPED_READ_TYPES`, on both transports, and the doors that read it (MCP `agent_prompt`, the dataset query door with a bare `datasetName`, the import door's `mappingName`, the connector pull). Two holders, one disabled: 409 naming both → 200 with the enabled holder's item.
+  - Bare `GET /meta/:type/:name/layers` (and `?layers=true`), on both transports, the same name: 409 naming both → 200 with the enabled holder's layers, read at its address (its code layer, its stored overlay row, its lock), whichever holder registered first or last. A stored row bound to the disabled holder is read by none of them, and rows bound to each holder no longer make the layered read refuse. The metadata service's copy of a type it keys by name alone is the body registered last, and when that copy is the disabled holder's it is never the code layer.
+  - Bare `GET /meta/:type/:name/published`, on both transports, the same name: 409 naming both → the enabled holder's stored row if it has one. Otherwise → the metadata service's copy, read at the enabled holder's package. A type the service stores per `(package, name)` (`agent`, `skill`, `api`, `action`) answers that package's copy and is never refused naming the disabled holder. A copy stamped with the disabled holder is replaced by the enabled holder's code layer. Otherwise → 404, as `/published` answers an item the metadata service does not hold (a package registered only through the `manifest` service).
+  - Two co-owners of a shareable namespace, one disabled, `GET /meta/:type/:ns/:name` and the bare read: 409 `ambiguous-in-namespace` → 200 with the enabled co-owner's item.
+  - `resolveActionByPackage`, and the REST route rung for a caller's package (`resolveRouteActionDeclaration`), a caller with no package or one whose closure holds both: refused → the enabled holder's declaration and its handler.
+  - The caller arm (`?callerPackage=P`) of `GET /meta/dataset/:name` and of the dataset query doors, single and batch, on both transports: two holders in P's declared closure, one disabled: 409 naming both → 200 with the enabled holder's dataset.
+  - The connector pull of a job's mapping for a package caller (the package that declares the job): two holders in its closure, one disabled: 409 `mapping_name_refused` naming both → the enabled holder's mapping is pulled.
+  - An App's pair (`?package=<App>.custom`), two modules of the App holding the name, one disabled, where the layer below reaches neither module's item (a package outside the App holds the name and registered first): 409 `ambiguous-in-closure` naming both → 200 with the enabled module's item.
+  - A package-less row of a name an enabled and a disabled package hold (the environment's item, or a package-less stored row), at the enabled holder's exact address (`?package=`, its namespace): 409 `ambiguous-in-closure` naming both → served as that holder's customization, as with one holder. Re-enabled, it is refused naming both again. At the enabled holder's pair (`?package=<enabled>.custom`) beside the same row: 409 naming both → 200 with the row when the enabled holder registered first; → 404 when the disabled one did (the 409 → 404 line below). The same for `action`, whose package-less rows are judged since the narrowed types joined that judgment (`judgesPackageLessRows`): the environment's item at the enabled holder's exact address, and a package-less stored row in the layered read at that address (`?layers=true&package=`), reported as its overlay, where both were refused naming both.
+  - The flow credential channel's write (the flow save door's credential store), for a flow name an enabled and a disabled package hold: a save that sets, clears or removes a stored credential, refused 409 naming both → written, each row stamped (`flow_package`) with the enabled holder's package, the one the served flow is.
+  - The list scoped to the enabled holder (`GET /meta/:type?package=`), and the execution list at its address (`getMetaItemsForExecution`, which an email send resolved to that holder reads), a package-less stored row of a name an enabled and a disabled package hold: the holder's own item → the row, as that holder's customization (the package-less row line above, read in the list). Re-enabled, the holder's own item again. The environment's item in the registry is not in either list, disabled or not.
+  - A member row an App's pair stores with no `overrides`, of a bundle name two modules of the App hold, one disabled: at the enabled module's exact address, refused 409 naming both → served as its member; in its scoped list and its execution list (a send resolved to that module), left out → listed. Re-enabled, as before.
+  - The same member row, both modules disabled: in each module's scoped list and execution list, left out → listed; a send made from either module at that member, no template → that member. Carried to #32670.
+  - The bare read of a name two or more packages hold, every one disabled, at a member only another row carries (a package-less row, a dependent's added locale, or the App pair's row the metadata service answers by name): 409 naming them → 200 with that row, the answer `main` already gives with one holder. Beside the 409 → 404 line for the bare read below; carried to #32354.
+  
+  Same status, the disabled package no longer named:
+  
+  - `?package=NONHOLDER`, `GET /meta/:type/:ns/:name` of a namespace that holds nothing, and `_env`, two holders: 409 naming both → 409 naming the enabled holder.
+  - An action caller outside both closures: refused naming both → refused naming the enabled holder.
+  
+  Served or not-found → refused:
+  
+  - An action caller whose closure holds the name only through the disabled holder, the enabled one outside it: the disabled holder's declaration → refused `outside-closure`, naming the enabled holder (the served → refused line above).
+  - The dataset caller arm (`?callerPackage=P`), P's closure reaching the name only through a disabled package while an enabled package outside it holds it: 404 (the disabled package's withheld item) → 409 `outside-closure`, naming the enabled holder.
+  
+  Served → not-found:
+  
+  - The pair address of a disabled base, an enabled holder registered first (the line above): the disabled base's body → 404.
+  - `?package=DISABLED&member=`, `?package=DISABLED.custom&member=` and the namespace path, at a member only the disabled package's pair stores, or, with one holder, only a package-less stored row carries (the line above): that row → 404.
+  
+  409 → 404:
+  
+  - An App's pair whose every base is disabled: 409 `ambiguous-in-closure` naming them → 404.
+  - `?package=DISABLED` and `?package=DISABLED.custom`, beside a package-less row (the environment's item, or a package-less stored row) of a name an enabled and the disabled package hold: 409 `ambiguous-in-closure` naming both → 404, the disabled package's withheld item. For `action`, `?package=DISABLED` beside the environment's item, the same.
+  - `?package=<enabled>.custom` beside the same row, the disabled holder registered first: 409 naming both → 404. The pair address's envelope falls back to the first holder that ships the name (#32501 location 1, the same on `main`); with the enabled holder first it is the widening above.
+  - A name only disabled packages hold, on `?package=NONHOLDER` and its qualified path, whatever row a layer of the read reached (a row of a holder's customization pair at a member only it stores included): 409 naming the disabled package → 404. Only a row stored under the address's own package is served.
+  - A name two or more disabled packages hold, and nothing else, on the bare read: 409 naming them → 404. At a member only another row carries, it serves that row (the widening line above).
+  - A shareable namespace whose co-owners both hold the name and are both disabled, `GET /meta/:type/:ns/:name`: 409 `ambiguous-in-namespace` → 404.
+  
+  Refused → not-found:
+  
+  - A stored permission-set column naming the disabled holder: refused naming both (it was read as a stale column) → not-found. It conferred nothing before and confers nothing now, and it is never re-targeted to the enabled holder.
+  - An action caller outside the closure of a name only a disabled package holds: refused naming it → not-found.
+  
+  Degraded → 409:
+  
+  - The REST action rung for a caller's package (`resolveRouteActionDeclaration` with `callerPackageId`): a package-scoped refusal the protocol's execution read throws → the declaration's `refusal`, answered as the declared `409 RESOURCE_CONFLICT`, where it was swallowed as `degraded`. No door reaches this rung today: it runs only for a caller that names its package, and neither the bare `/actions` door nor the activation door passes one.
+  
+  **Not moved.** `?package=DISABLED`, the disabled package's namespace, the pair of a disabled base read where no enabled holder's envelope is reached, and the caller arm (`?callerPackage=P`) when P's own holding is disabled keep their 404 (beside a package-less row, the 409 → 404 line above; at a member only the pair stores, the 200 → 404 line above). The email template send (`createRegistryEmailTemplateLoader`, `@objectstack/plugin-email`) reads every holder, so a disabled package still counts there and a refusal still names it, until #32670: the door asks the list for the same address, or throws the same refusal, as on `main`, a send made from the disabled holder included; what an address lists moves only as the scoped-list and execution-list lines above declare. `_env` of a name only disabled packages hold keeps `main`'s 409 naming them: with no served holder, its admission judges every holder. The exact qualifier admits them over every holder, and the item face answers the address itself as the disabled package's withheld item, whichever envelope a layer reached; a refusal's candidates and the bases a pair is read at are the served holders. A name only disabled packages hold keeps the missing name's 404 on the bare `/meta/:type/:name/layers` and `/published`, and the layered view at any other address answers 404 as the plain read does: the item face (`@objectstack/metadata-protocol`) answers it as that package's withheld item, the shape a disabled holder's read had. Every holder's own read, the served lists (but the list scoped to an enabled holder and its execution list, for the two lines above), and a name only disabled packages hold on the bare read (404) answer as before. Durable judgments read every holder, so a binding never moves with a reversible disable: a name only a disabled package holds still binds to it, and a name an enabled and a disabled package both hold stays ambiguous and is left null. They are the stored-reference backfills (R1/R3 permission sets, R4 activation ledger, R5/R6/R13 sharing declarations, R20 email templates, R7 open approval requests, R8 paused runs, R9 flow credentials, R10 dispatch keys, R11 connector connections), the CLI stored-reference report (`os migrate stored-references`, its pair-member and package-less-row sections included), and the picklist verdict that the load audit, the install door and a field's options share. R7–R11 read through `AutomationEngine.durableFlowHolder` and the connector resolver asked with `includeDisabledPackages`, and so does the dispatch key a trigger claims (`AutomationEngine.flowDispatchHolder`), as the re-key does: a flow only a disabled package holds keeps that package's scope, and a name an enabled and a disabled package hold keeps the collision guard; the connector execute door, and the flow execute door for a name one slot holds, keep judging the served holders. The install gate (`bareNamePackageHolders`) and the security catalog's item seam are separate reads and are not touched. A permission-set grant is the fixed exception to the served set: the security catalog's resolution (`resolvePermissionScoped`, for a reference with no package column, a stale column, or a position's package) and `holdsPlatformPermissionSet` (`@objectstack/core`) read every holder, so a disable never makes a grant confer more. Two holders with one disabled stay refused naming both, and `holdsPlatformPermissionSet` is false; a name only a disabled package holds counts that package, so a caller outside it is refused naming it, and no grant resolves to its set: each as on `main`. Only a column naming the disabled holder moves (the refused → not-found line above). The picklist arrival judge (`SchemaRegistry.judgePicklistArrival`: an install, an upgrade, a hot reload or a late item whose lists would leave an installed reference with no one list) reads every holder before and after the arrival, as the picklist verdict does, so the install audit and a field's options agree for a disabled holder: an arrival is refused exactly as with the holder enabled. The doors that run one package's flow of a name two packages hold read every holder too, so a disable moves none of their answers: a flow action's and a flow endpoint's target (`flowServiceForCaller`, `endpointPackageOf`), the start admission's read walk (`flowWalkReads`), `flowHolderForCaller`, the `/automation` bare-name refusal and addressed paths of such a name (`bareNameRefusal`, `admitAutomationAddress`), and the engine's slot table (`heldByMany`), its shared-name refusal and the shared branch of its flow-key resolution. A runtime disable keeps the disabled package's engine slot armed, so a served read there would move these doors both ways; their served judgment is carried to #32670. The engine's `flowHolder` and `flowHolderPackage` (the credential channel line above), and the activation ledger's `stillHolds`, keep the served read. The metadata service's removal by name (`storeRemovalKeys`) counts the store's own slots and reads no package state, so it does not move either. The bare action read's check for a disabled package's customization (`servedFromDisabledHolder`, `@objectstack/metadata-protocol`) asks which disabled holder's slot answered, so it reads every holder and answers as on `main`.
+  
+  **Also in this change, not breaking.** `@objectstack/metadata-protocol`: `packageLessRowOwners(registry, type, name, options?)` takes an optional `options` carrying `includeDisabledPackages`, which the CLI report passes; without it the answer is the served holders. `SchemaRegistry.packageScopedHoldersOf(type, name, callerPackageId?, options?)` takes `options.includeDisabledPackages` (the option name `listItems` already carries) to read every holder, and `resolvePackageScopedName`'s query takes `includeDisabledPackages`, forwarded to it. `@objectstack/service-automation`: `AutomationEngine.durableFlowHolder(name)` asks `flowHolder`'s question over every holder, and the `FlowNameResolver` and `ConnectorNameResolver` types take an optional third `options` argument carrying it.
+- 23e94a0: Clause-②: no
+  Metadata-protocol: none
+  
+  An approver's agent can now decide a pending approval request over MCP. The four approver decisions on `sys_approval_request` (approve, reject, reassign, send back) declare `ai: { exposed: true, description, requiresConfirmation: true }`, so `list_actions` lists them and `run_action` runs them once the call carries `confirm: true`. Each forwards to its approvals route as the caller, so the approval service admits the same people the console's buttons admit: a current approver of the request, and, for approve, reject and reassign, the administrator who may override it. Anyone else, the submitter included, is refused and the request stays pending. The submitter's levers, request-info and comments stay unexposed.
+- 8004529: fix(approvals): a non-admin approver can open an approval request again — the request definitions are served to the callers the approvals door admits, declared by the object's owner as `schemaReadDelegate`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — `schemaReadDelegate` is a plugin-owned delegate key like `fileAccessDelegate`, which no published skill teaches; it names a kernel service, and only plugin code can provide one
+  
+  Since the metadata API began answering an object the caller may not read as absent (ADR-0106 as amended by ruling record 6787890900), a non-admin approver got `404` on `GET /api/v1/meta/object/sys_approval_request` and `…/sys_approval_action`. Both objects are closed on the data side on purpose, and their rows reach a member who may not read them only through `/api/v1/approvals/*`, so the console request page lost its definition: every inbox row, `?request=` link and record panel showed "Object Not Found" with no decision actions. The maintainer's decision (6840464379) keeps that rule and makes these two definitions visible to the callers the approvals door admits, declared by the owning plugin.
+  
+  - **`@objectstack/spec`: `ObjectSchema.schemaReadDelegate`.** An optional service name, beside `fileAccessDelegate`. The named kernel service implements `authorizeSchemaRead(objectName, context)` and is asked only after the object read check refused the caller; a `true` verdict serves the object's definition, and only the definition, exactly as to a reader of the object: in the object list and by name, projected by the caller's own field-level security. The data door's answer about the rows does not move. A declared service that is missing or does not implement the method leaves the object absent; one that throws is a 5xx fault, never a false absence.
+  - **`@objectstack/metadata-core`:** `resolveObjectSchemaMaskPosture` takes an optional `schemaReadDelegates` source and asks the object's declared delegate after `canReadObject` refused, never on an undetermined field posture (that would serve the schema unmasked). `objectSchemaReadDelegateSource` builds the source from a transport's engine and service lookups; `ObjectSchemaReadDelegate` is the method's shape. An outlet that hands no source applies no exception.
+  - **`@objectstack/rest`, `@objectstack/runtime` and `@objectstack/mcp`:** every object-schema masker hands the posture resolution a source over the request's environment, so every schema-serving outlet (item, layered, published, diff, object state, app bundle, list, the HTTP MCP object tools, and the stdio MCP object tools and resources) gives one answer. `RestServer` takes a by-name service lookup as a new last constructor argument, which `RestApiPlugin` wires; `createStdioDataBridge` and `callerObjectView` take an optional `schemaReadDelegates` source, which `MCPServerPlugin` wires.
+  - **`@objectstack/plugin-approvals`:** `sys_approval_request` and `sys_approval_action` declare `schemaReadDelegate: 'approvals'`, and `ApprovalService.authorizeSchemaRead` admits the callers its door serves at least one request to in their organization, by the rule its request read applies: a current approver, the submitter, a past actor or commenter, or the override holder. A member party to no request in their organization keeps the `404`, and every other object keeps its answer. The verdict is asked once per request.
+- 9df85e1: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A submitter's agent can now recall and resubmit its own approval request over MCP. `approval_recall` and `approval_resubmit` on `sys_approval_request` declare `ai: { exposed: true, description, requiresConfirmation: true }`, the same shape the four approver decisions got, so `list_actions` lists them and `run_action` runs them once the call carries `confirm: true`. Each forwards to its approvals route as the caller, so the approval service admits the same people the console's buttons admit: the submitter, and, for recalling a pending request, the administrator who may override it. Anyone else is refused (recall in the `approval_recall_not_submitter` sentence) and the request does not move. Remind, request-info and comments stay unexposed.
+- cae2179: fix(plugin-approvals)!: an approval decision or comment attaches only files its caller uploaded
+  
+  Clause-②: no (narrowing) — an approve, reject or comment that carries `attachments` accepts an id only when it names a file of the request's organization that the caller uploaded; every other value is refused before anything is written, with one `VALIDATION_FAILED` answer. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and nothing at rest is rewritten: what moves is the approvals service's verdict on the attachments of one decision or comment, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** fail-closed narrowing at the approvals service's decision and comment doors (`ApprovalService.decide` / `decideNode` and `ApprovalService.comment`, reached through the REST approvals routes and every caller of the service).
+  
+  - **The rule.** Every id in `attachments` must name a file of the request's organization that the caller uploaded. Anything else is refused with `VALIDATION_FAILED` (`400` on the REST door) before anything is written, and every refusal is the same answer: a file someone else uploaded, an id that names no file, a file the caller uploaded in another organization, and a value that is not a list of ids.
+  - **Unchanged.** A decision or comment with no attachments, and the caller's own uploads (the Console's decision dialog uploads the file first, so it is unaffected). A system caller is not judged, and a composition with no file store (no `sys_file` object) is untouched.
+  - **Who moves.** A client that attached a file it did not upload itself (for example, one already on the record) now gets `400 VALIDATION_FAILED`: upload the file as the deciding user, then attach that upload.
+- e1146e8: fix(plugin-approvals)!: under a walled tenancy posture, an approval request that carries no organization is acted on only by a platform administrator or the system
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: the approval request, its actions and the IApprovalService contract keep their shapes. What moves is who the approval doors admit on a stored request with no organization under the group or isolated posture, and nothing at rest records that answer, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for an organization administrator under the `group` or `isolated` posture, on an approval request whose stored row carries no organization (ADR-0131 D1: NULL is not a state and names no owner).
+  
+  - **The rule.** Under a walled posture, only a platform administrator or a system context is admitted to act on an approval request that has no organization. Such a request is still not decided at the door: the action row a decision writes would carry no organization, which ADR-0131 D9 refuses, so the decision is answered with that refusal and nothing is written. An organization administrator is answered on approve, reject, recall, reassign, revise (send back), resubmit, remind, request info and comment exactly as for an id that names no request: `404 REQUEST_NOT_FOUND`, and the request is unchanged. The same rule holds where the organization asked is the caller's own: under a walled posture, a tenant administrator whose session carries no active organization is no override holder for the request lists, the request visibility the data door reads, or the pending-approver record read.
+  - **Unchanged.** Under the `single` posture nothing changes: a tenant administrator still acts on such a request. A request that carries an organization is acted on, as before, by an administrator of that organization or a platform administrator; an administrator of another organization is answered as for no request. A pending approver and the submitter are judged by each door's own rule, as before.
+  
+  **Who moves, and the fix.** Only a deployment running `group` or `isolated` that still holds approval requests with no organization, stored before ADR-0131 D9: under a walled posture a new write is stamped with an organization or refused. Under a walled posture no door decides such a request (ADR-0131 D9 refuses its action write); to give those rows their owner, so that their organization's administrators and approvers act on them again, run the existing, voluntary organization-ownership ceremony: `os migrate organization-ownership` first, which writes a read-only plan and changes no row, review the plan, then `os migrate organization-ownership --apply --plan-file PLAN_FILE --backup-taken`. Nothing runs on upgrade.
+- bdbaf80: fix: Setup's form help speaks to an administrator, and the queue pages, the mail status banner and the test-email toast read in Chinese on a zh-CN console
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Field help (English source and zh-CN):** the permission set and position assignment forms, the out-of-office (approval delegation) rule, and the business unit, organization and user forms no longer describe the implementation. Gone: "fail-closed", "half-open [from, until)", "agent grants", "graph semantics", "expanded by graph queries", "Null = root of tenant", "HRIS", "When true / When false" (zh-CN 「为 true 时」 now reads 「开启后」) and an HTTP status code. The help now says when an assignment starts and ends, what turning a switch on does, and what to fill in. Text only: no field name, key, option value or behaviour changes.
+  - **`@objectstack/plugin-sharing`:** `sys_queue` and `sys_queue_member` join the plugin's translation bundle, with zh-CN text, so the 队列 and 队列成员 pages, their columns, help and the 新建 button read in Chinese. ja-JP and es-ES carry English fills for now.
+  - **`@objectstack/plugin-email`:** the live-status statement at the top of Setup → Email and the "Send test email" answer (sent, failed, logged only) are written in the caller's display language, en and zh-CN today; another language gets English.
+  - **`@objectstack/service-settings`:** a settings action handler (`SettingsActionHandler`) receives an optional `locale`, the caller's display language read from the request the same way the live-status statement's is (`Accept-Language`, else `?locale`); `runAction` takes it as a fifth `display` argument. Existing handlers compile and behave unchanged.
+- Updated dependencies [7d0b47c]
+- Updated dependencies [f6a429b]
+- Updated dependencies [8aa2e91]
+- Updated dependencies [c17719d]
+- Updated dependencies [b90a6f7]
+- Updated dependencies [486b0a9]
+- Updated dependencies [9ed2ee1]
+- Updated dependencies [769adff]
+- Updated dependencies [e8dc483]
+- Updated dependencies [bcdb1db]
+- Updated dependencies [9ebca94]
+- Updated dependencies [140d8ce]
+- Updated dependencies [699ebd8]
+- Updated dependencies [4c2cd29]
+- Updated dependencies [4be8a2e]
+- Updated dependencies [471add3]
+- Updated dependencies [b5eb61d]
+- Updated dependencies [771b2db]
+- Updated dependencies [97e4249]
+- Updated dependencies [9037b13]
+- Updated dependencies [e3b56b2]
+- Updated dependencies [a52761f]
+- Updated dependencies [e8afd1e]
+- Updated dependencies [bd65cb6]
+- Updated dependencies [f19fbb8]
+- Updated dependencies [217ba78]
+- Updated dependencies [cde492d]
+- Updated dependencies [eee4149]
+- Updated dependencies [0f3ee58]
+- Updated dependencies [f3a52d3]
+- Updated dependencies [d59a1eb]
+- Updated dependencies [af3451b]
+- Updated dependencies [3a27208]
+- Updated dependencies [29cbfcc]
+- Updated dependencies [0c666c3]
+- Updated dependencies [38717d3]
+- Updated dependencies [ac890f5]
+- Updated dependencies [aa57c76]
+- Updated dependencies [fc869c2]
+- Updated dependencies [fef212b]
+- Updated dependencies [dc51811]
+- Updated dependencies [b77c160]
+- Updated dependencies [09720e2]
+- Updated dependencies [8fed00f]
+- Updated dependencies [25fea77]
+- Updated dependencies [86ae2ca]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [3da9a4c]
+- Updated dependencies [4be9734]
+- Updated dependencies [bb86ff9]
+- Updated dependencies [977be38]
+- Updated dependencies [2046d21]
+- Updated dependencies [243eba1]
+- Updated dependencies [740edc5]
+- Updated dependencies [778aedf]
+- Updated dependencies [71318af]
+- Updated dependencies [fd749a4]
+- Updated dependencies [d9d42d4]
+- Updated dependencies [6a70821]
+- Updated dependencies [9d939c5]
+- Updated dependencies [d4a8439]
+- Updated dependencies [69c7cd6]
+- Updated dependencies [25e1c1a]
+- Updated dependencies [6a8f415]
+- Updated dependencies [67d5d53]
+- Updated dependencies [47226e6]
+- Updated dependencies [c7d1367]
+- Updated dependencies [f5aaa0b]
+- Updated dependencies [0005fec]
+- Updated dependencies [2d6402c]
+- Updated dependencies [77c203a]
+- Updated dependencies [8293c74]
+- Updated dependencies [60fe44f]
+- Updated dependencies [29702d5]
+- Updated dependencies [a839020]
+- Updated dependencies [a7b8876]
+- Updated dependencies [f7afab8]
+- Updated dependencies [4dde0ae]
+- Updated dependencies [e8e924f]
+- Updated dependencies [590724f]
+- Updated dependencies [35cd64c]
+- Updated dependencies [38d416f]
+- Updated dependencies [d2e2f6f]
+- Updated dependencies [d5f3bc5]
+- Updated dependencies [e3948ae]
+- Updated dependencies [b55d6ab]
+- Updated dependencies [1c5cee6]
+- Updated dependencies [aad1603]
+- Updated dependencies [0e4747a]
+- Updated dependencies [eb68b98]
+- Updated dependencies [1ebe0c5]
+- Updated dependencies [2f05a46]
+- Updated dependencies [b126c13]
+- Updated dependencies [a11ef71]
+- Updated dependencies [deac7f4]
+- Updated dependencies [2ae3e30]
+- Updated dependencies [7145bf3]
+- Updated dependencies [55d9dd4]
+- Updated dependencies [af8aab1]
+- Updated dependencies [a59d00a]
+- Updated dependencies [4bf9a2d]
+- Updated dependencies [0c9aa82]
+- Updated dependencies [49c8568]
+- Updated dependencies [4564d6f]
+- Updated dependencies [f2ea193]
+- Updated dependencies [badf24d]
+- Updated dependencies [5268f50]
+- Updated dependencies [a30c4f4]
+- Updated dependencies [0cba0ce]
+- Updated dependencies [c893b3d]
+- Updated dependencies [677d542]
+- Updated dependencies [9bdeed2]
+- Updated dependencies [3479c33]
+- Updated dependencies [000a4c0]
+- Updated dependencies [7569fb5]
+- Updated dependencies [f4d9c09]
+- Updated dependencies [c77dd17]
+- Updated dependencies [ebe0a98]
+- Updated dependencies [9038187]
+- Updated dependencies [f108e6d]
+- Updated dependencies [8847e09]
+- Updated dependencies [40eaae7]
+- Updated dependencies [45916c9]
+- Updated dependencies [b2ce250]
+- Updated dependencies [5cb7d7e]
+- Updated dependencies [78eb352]
+- Updated dependencies [2ce2646]
+- Updated dependencies [468e0c1]
+- Updated dependencies [6106b73]
+- Updated dependencies [0f920b9]
+- Updated dependencies [6bd00d2]
+- Updated dependencies [b5696b4]
+- Updated dependencies [33bc8ae]
+- Updated dependencies [293a85b]
+- Updated dependencies [ed4b832]
+- Updated dependencies [8c9260f]
+- Updated dependencies [b70d9aa]
+- Updated dependencies [f5e23e2]
+- Updated dependencies [a1afbb9]
+- Updated dependencies [150f740]
+- Updated dependencies [42eb126]
+- Updated dependencies [8cf1fd0]
+- Updated dependencies [98583cd]
+- Updated dependencies [cadd6aa]
+- Updated dependencies [a5cb4f1]
+- Updated dependencies [d36d4ad]
+- Updated dependencies [3c1eb63]
+- Updated dependencies [d57be87]
+- Updated dependencies [2b752f1]
+- Updated dependencies [c0068ed]
+- Updated dependencies [7fe019f]
+- Updated dependencies [e735425]
+- Updated dependencies [1f37085]
+- Updated dependencies [71d094c]
+- Updated dependencies [8b16445]
+- Updated dependencies [f4b4c8a]
+- Updated dependencies [db50231]
+- Updated dependencies [0e1311d]
+- Updated dependencies [8c75f83]
+- Updated dependencies [3aa0b42]
+- Updated dependencies [82e6da1]
+- Updated dependencies [acfc86c]
+- Updated dependencies [18ed2db]
+- Updated dependencies [39aa3f6]
+- Updated dependencies [b6e6545]
+- Updated dependencies [90457e7]
+- Updated dependencies [76e4c2c]
+- Updated dependencies [47bc621]
+- Updated dependencies [efbe1a0]
+- Updated dependencies [2d1a76b]
+- Updated dependencies [3b7219e]
+- Updated dependencies [3fed8ce]
+- Updated dependencies [907fdca]
+- Updated dependencies [f25414e]
+- Updated dependencies [75d7fb1]
+- Updated dependencies [41106b5]
+- Updated dependencies [8aaa69f]
+- Updated dependencies [59630d9]
+- Updated dependencies [fe88ecd]
+- Updated dependencies [5e85952]
+- Updated dependencies [ef4af73]
+- Updated dependencies [7e697ff]
+- Updated dependencies [96b9350]
+- Updated dependencies [d9a232f]
+- Updated dependencies [3487ccc]
+- Updated dependencies [2b3e3eb]
+- Updated dependencies [5b7269f]
+- Updated dependencies [2735ca4]
+- Updated dependencies [6dd196d]
+- Updated dependencies [d834a36]
+- Updated dependencies [0cd594b]
+- Updated dependencies [8beac67]
+- Updated dependencies [b96b875]
+- Updated dependencies [c62e72a]
+- Updated dependencies [450bfb6]
+- Updated dependencies [5defbfe]
+- Updated dependencies [f56354c]
+- Updated dependencies [e55347d]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [5f84ef0]
+- Updated dependencies [36a8700]
+- Updated dependencies [fdfcc7a]
+- Updated dependencies [5a8dbc7]
+- Updated dependencies [fb94249]
+- Updated dependencies [98ba756]
+- Updated dependencies [e627eaa]
+- Updated dependencies [c8223fb]
+- Updated dependencies [3224545]
+- Updated dependencies [8fca8f7]
+- Updated dependencies [26d30d7]
+- Updated dependencies [3684d18]
+- Updated dependencies [d9f626b]
+- Updated dependencies [1a66fcf]
+- Updated dependencies [6180c87]
+- Updated dependencies [bc41e01]
+- Updated dependencies [f00fb1b]
+- Updated dependencies [c655af8]
+- Updated dependencies [93ff5dd]
+- Updated dependencies [c7dd505]
+- Updated dependencies [016ec88]
+- Updated dependencies [01559b8]
+- Updated dependencies [8075338]
+- Updated dependencies [93f0d43]
+- Updated dependencies [c7dc143]
+- Updated dependencies [aad7d2f]
+- Updated dependencies [4f6fb53]
+- Updated dependencies [7d4fcb6]
+- Updated dependencies [4c928f5]
+- Updated dependencies [171cf6d]
+- Updated dependencies [f75466c]
+- Updated dependencies [ff04ad8]
+- Updated dependencies [36b216b]
+- Updated dependencies [84aabea]
+- Updated dependencies [b96d492]
+- Updated dependencies [ed95466]
+- Updated dependencies [91d88ec]
+- Updated dependencies [f714b0a]
+- Updated dependencies [ba8e993]
+- Updated dependencies [9bff554]
+- Updated dependencies [1368536]
+- Updated dependencies [02498c9]
+- Updated dependencies [7aab601]
+- Updated dependencies [2830f31]
+- Updated dependencies [c419609]
+- Updated dependencies [e34723f]
+- Updated dependencies [9052363]
+- Updated dependencies [88282a7]
+- Updated dependencies [d074c28]
+- Updated dependencies [e267b96]
+- Updated dependencies [1e474e3]
+- Updated dependencies [7575116]
+- Updated dependencies [0763bf6]
+- Updated dependencies [2b11a71]
+- Updated dependencies [de6d893]
+- Updated dependencies [c147fc2]
+- Updated dependencies [5192297]
+- Updated dependencies [326453e]
+- Updated dependencies [6d6f86b]
+- Updated dependencies [f1d1f6c]
+- Updated dependencies [a03cf66]
+- Updated dependencies [90106d6]
+- Updated dependencies [0115280]
+- Updated dependencies [26f4e6d]
+- Updated dependencies [6ff08b0]
+- Updated dependencies [f09517e]
+- Updated dependencies [2ae811e]
+- Updated dependencies [1216abf]
+- Updated dependencies [cac0f1a]
+- Updated dependencies [3c18783]
+- Updated dependencies [e336a33]
+- Updated dependencies [3452dec]
+- Updated dependencies [e47da23]
+- Updated dependencies [f0f729e]
+- Updated dependencies [1af8253]
+- Updated dependencies [be0c0a2]
+- Updated dependencies [5694bf5]
+- Updated dependencies [c54d60c]
+- Updated dependencies [101adaf]
+- Updated dependencies [6219588]
+- Updated dependencies [6cec006]
+- Updated dependencies [245afc1]
+- Updated dependencies [070e879]
+- Updated dependencies [a888c5c]
+- Updated dependencies [9ae8291]
+- Updated dependencies [4f1de9f]
+- Updated dependencies [8c77203]
+- Updated dependencies [386891e]
+- Updated dependencies [9891065]
+- Updated dependencies [870ce55]
+- Updated dependencies [c54a23d]
+- Updated dependencies [28a1527]
+- Updated dependencies [9af0766]
+- Updated dependencies [fd63747]
+- Updated dependencies [1ff2c7f]
+- Updated dependencies [0b23b2a]
+- Updated dependencies [fc45328]
+- Updated dependencies [04c35f0]
+- Updated dependencies [a596c03]
+- Updated dependencies [ccaee99]
+- Updated dependencies [d4b14a8]
+- Updated dependencies [8004529]
+- Updated dependencies [152b53c]
+- Updated dependencies [3a83b53]
+- Updated dependencies [e003ebb]
+- Updated dependencies [6739719]
+- Updated dependencies [5d4f2aa]
+- Updated dependencies [9dbcc1f]
+- Updated dependencies [19f9053]
+- Updated dependencies [133f75a]
+- Updated dependencies [f4cd4ec]
+- Updated dependencies [b3d2f4b]
+- Updated dependencies [d0fbe11]
+- Updated dependencies [eca7cd2]
+- Updated dependencies [cf4b9bf]
+- Updated dependencies [767f110]
+- Updated dependencies [14754c7]
+- Updated dependencies [766a5df]
+- Updated dependencies [e1dac19]
+- Updated dependencies [e542831]
+- Updated dependencies [3299873]
+- Updated dependencies [7d13a33]
+- Updated dependencies [7b2bb66]
+- Updated dependencies [44a030b]
+- Updated dependencies [a794e32]
+- Updated dependencies [21510bb]
+- Updated dependencies [0fd363d]
+- Updated dependencies [f127b04]
+- Updated dependencies [5210acf]
+- Updated dependencies [d6b88f1]
+- Updated dependencies [4123865]
+- Updated dependencies [bdbaf80]
+- Updated dependencies [6ffe37e]
+- Updated dependencies [1f3e6fd]
+- Updated dependencies [63a470a]
+  - @objectstack/spec@18.4.0
+  - @objectstack/platform-objects@18.4.0
+  - @objectstack/core@18.4.0
+  - @objectstack/metadata-core@18.4.0
+  - @objectstack/formula@18.4.0
+  - @objectstack/types@18.4.0
+
 ## 18.3.0
 
 ### Minor Changes

@@ -172,3 +172,65 @@ describe('Setup → Permission set assignment', () => {
     expect(screen.queryByText('New Nora')).toBeNull();
   });
 });
+
+describe('Setup → Permission set assignment: a name more than one package holds (objectstack#32537)', () => {
+  const heldTwice = [
+    { name: 'territory', label: 'Territory', _packageId: 'com.acme.crm' },
+    { name: 'territory', label: 'Territory', _packageId: 'com.acme.sales' },
+  ];
+  beforeEach(() => {
+    permissionSets.push(...heldTwice);
+    data.sys_user_permission_set.push(
+      { id: 'g_crm', permission_set: 'territory', permission_set_package: 'com.acme.crm', user_id: 'u_direct' },
+      { id: 'g_sales', permission_set: 'territory', permission_set_package: 'com.acme.sales', user_id: 'u_held' },
+    );
+  });
+  afterEach(() => {
+    permissionSets.splice(permissionSets.length - heldTwice.length, heldTwice.length);
+  });
+
+  it('lists one entry per holder, said beside it, and the pick names the package in the URL', async () => {
+    renderPage();
+    const list = await screen.findByRole('list', { name: 'Permission sets' });
+    const entries = within(list).getAllByRole('button', { name: /Territory/ });
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toHaveTextContent('Package com.acme.crm');
+    expect(entries[1]).toHaveTextContent('Package com.acme.sales');
+    // CONTROL: a name with one holder is one entry, with no holder said.
+    expect(within(list).getByRole('button', { name: /Sales user/ })).not.toHaveTextContent('Package');
+
+    fireEvent.click(entries[1]);
+    expect(screen.getByTestId('location')).toHaveTextContent('?set=territory&package=com.acme.sales');
+    // The holder's own grants, by the resolver's reading of each grant row.
+    expect(await screen.findByText('Held Henry')).toBeInTheDocument();
+    expect(screen.queryByText('Direct Dana')).toBeNull();
+  });
+
+  it("assigns the picked holder's set by its package", async () => {
+    renderPage('?set=territory&package=com.acme.crm');
+    await screen.findByText('Direct Dana');
+    expect(screen.queryByText('Held Henry')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Add user' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'pick' }));
+    await waitFor(() =>
+      expect(adapter.create).toHaveBeenCalledWith('sys_user_permission_set', {
+        user_id: 'u_new',
+        permission_set: 'territory',
+        permission_set_package: 'com.acme.crm',
+      }),
+    );
+  });
+
+  it('a link naming the name and no holder picks nothing, and reads no grant', async () => {
+    renderPage('?set=territory');
+    expect(await screen.findByTestId('setup-permission-set-assignment-pick-holder')).toBeInTheDocument();
+    expect(screen.queryByTestId('setup-permission-set-assignment-not-found')).toBeNull();
+    expect(adapter.find).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: picking a set one package holds names no package in the URL', async () => {
+    renderPage('?package=com.acme.crm');
+    fireEvent.click(await screen.findByRole('button', { name: /Sales user/ }));
+    expect(screen.getByTestId('location').textContent).toBe('?set=sales_user');
+  });
+});

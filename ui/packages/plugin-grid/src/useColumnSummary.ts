@@ -655,7 +655,7 @@ export function useScopedColumnSummary(
         if (config.type !== 'min' && config.type !== 'max') continue;
         // The whole set's extreme when the server answered one; otherwise the
         // rows', labelled as the page's under the `whole` scope.
-        const whole: unknown = scope === 'whole' && wholeRow
+        const whole = scope === 'whole' && wholeRow
           ? deriveColumnSummary(wholeRow, col.summary as ColumnSummarySetting, col.field)
           : undefined;
         const fromWhole = temporalInstant(whole) !== undefined;

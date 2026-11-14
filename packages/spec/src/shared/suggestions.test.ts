@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   levenshteinDistance,
   findClosestMatches,
   formatSuggestion,
+  strictUnknownKeyError,
 } from './suggestions.zod';
+import { PROTOCOL_UPGRADE_GUIDE_URL, RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from './protocol-upgrade-guide';
 import { suggestFieldType } from './field-type-suggestion';
 
 describe('levenshteinDistance', () => {
@@ -231,5 +234,47 @@ describe('formatSuggestion', () => {
   it('should format multiple suggestions', () => {
     const result = formatSuggestion(['text', 'textarea']);
     expect(result).toBe("Did you mean one of: 'text', 'textarea'?");
+  });
+});
+
+/**
+ * The upgrade-guide pointer is per SURFACE: on by default (a protocol metadata
+ * surface, where an aged-out retired key arrives as a plain unknown key), off
+ * only where the caller declares the surface never carried a retirement kit
+ * (an MCP tool's arguments). The refusal must still name the right key either
+ * way.
+ */
+describe('strictUnknownKeyError — retiredKeyUpgradeGuide', () => {
+  const refusalOf = (options: Partial<Parameters<typeof strictUnknownKeyError>[0]>, input: Record<string, unknown>) => {
+    const schema = z
+      .object({ where: z.string().optional() }, {
+        error: strictUnknownKeyError({
+          surface: 'this probe call',
+          knownKeys: ['where'],
+          aliases: { filter: 'where' },
+          history: 'H.',
+          ...options,
+        }),
+      })
+      .strict();
+    const r = schema.safeParse(input);
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0].code).toBe('unrecognized_keys');
+    return r.error!.issues[0].message;
+  };
+
+  it('a surface with no retirement history names the right key and no upgrade guide', () => {
+    const m = refusalOf({ retiredKeyUpgradeGuide: false }, { filter: 'x' });
+    expect(m).toContain('`filter` → `where`');
+    expect(m).not.toContain(PROTOCOL_UPGRADE_GUIDE_URL);
+    expect(m).toBe('Unrecognized key(s) on this probe call: `filter`. Did you mean `filter` → `where`? H.');
+  });
+
+  it('CONTROL: by default the refusal still points at the upgrade guide', () => {
+    const m = refusalOf({}, { filter: 'x' });
+    expect(m).toContain(RETIRED_KEY_UPGRADE_GUIDE_SENTENCE);
+    expect(m).toBe(
+      `Unrecognized key(s) on this probe call: \`filter\`. Did you mean \`filter\` → \`where\`? ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} H.`,
+    );
   });
 });

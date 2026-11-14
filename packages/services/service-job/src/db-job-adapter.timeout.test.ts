@@ -211,9 +211,10 @@ describe('DbJobAdapter — a timed-out run is recorded as one (#7734)', () => {
     await adapter.schedule('rp', CRON, handler, { timeoutMs: TIMEOUT_MS });
     await adapter.replay('rp');
 
-    // One synthetic `replay` row + one wrapped row, and they must agree.
-    expect(runRows().map((r) => r.trigger).sort()).toEqual(['replay', 'schedule']);
-    expect(runRows().map((r) => r.status)).toEqual(['timeout', 'timeout']);
+    // One run, one row: tagged `replay`, settled `timeout` at the instant the
+    // guard fired.
+    expect(runRows().map((r) => r.trigger)).toEqual(['replay']);
+    expect(runRows().map((r) => r.status)).toEqual(['timeout']);
   });
 });
 

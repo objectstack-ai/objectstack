@@ -12,6 +12,15 @@ import { isMcpServerEnabled } from '@objectstack/types';
 import { MCP_OAUTH_SCOPES, deriveAiFaceName } from '@objectstack/spec/ai';
 import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
+// [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
+import { isAiReadExposed } from '@objectstack/spec/data';
+import {
+    BUILTIN_MEMBERSHIP_ROLES,
+    MEMBERSHIP_REACH,
+    mapMembershipRole,
+    type BuiltinMembershipRole,
+    type MembershipReachEntry,
+} from '@objectstack/spec/identity';
 import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
 import {
     FEDERATION_READ_CAPABILITY,
@@ -34,10 +43,15 @@ import { readDispatchedBody } from '../deferred-request-body.js';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
+import { RUNTIME_OWNED_FIELD_TYPES, isVirtualSearchField } from '@objectstack/spec/data';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
 // engine result identically.
 import { classifyResumeResult } from './automation.js';
+// [ADR-0150 D3/D4, #31696] A flow action's `target` read from the action's own
+// package; a run's flow read off the slot key it carries.
+import { flowHolderForCaller, flowServiceForCaller, runFlowOf, runSlotPackage } from '../flow-slot-view.js';
+import { automationAddressRegistryOf, bareNameRefusal } from './automation-address.js';
 // [ADR-0106 D1/D5] The `/meta` door's object-schema masker and projection —
 // imported, never restated, so `describe_object` and `list_objects` answer a
 // caller the same field set the `/meta` object read answers that caller.
@@ -47,6 +61,67 @@ import { actionRunFieldVisibilityRefusal, actionRunMasker, projectActionForCalle
 
 /** Typed as the registered vocabulary, so a misspelling fails to compile. */
 const FIELD_VISIBILITY_UNRESOLVED: ErrorCode = 'FIELD_VISIBILITY_UNRESOLVED';
+
+/**
+ * The code `run_action` answers when an organization endpoint refuses the
+ * caller's membership role: the forward relays the endpoint's 403, served as
+ * the standard code for that status (ADR-0112).
+ */
+const MEMBERSHIP_REACH_REFUSAL_CODE: ErrorCode = 'PERMISSION_DENIED';
+
+/** An identity-route target on better-auth's organization plugin, captured relative to the auth base path. */
+const ORGANIZATION_ENDPOINT_TARGET = /^\/api\/v1\/auth(\/organization\/[^?#]+)/;
+
+/**
+ * [ruling record 6812625052, letter E: list and mark, do not hide] Why
+ * `run_action` would be refused for a listed `api` action whose target is an
+ * organization endpoint the caller's membership role does not reach, or
+ * `undefined` when it would not, or when this listing cannot tell.
+ *
+ * The reach is read from the action's declared `target` against the spec's
+ * reach table ({@link MEMBERSHIP_REACH}, pinned equal to the vendor doors in
+ * plugin-auth), never from a local list: the grades that reach the endpoint
+ * are those of every row naming it (`/organization/update-member-role` is two
+ * rows, so its reach is their union). A target no row names is no grade's to
+ * judge (`/organization/create` is judged on the deployment's tenancy posture,
+ * an SSO provider or OAuth application on record ownership), so it is never
+ * marked.
+ *
+ * The caller's grades are its `positions` in the organization this listing
+ * reads, by the names {@link mapMembershipRole} projects them to: the reading
+ * the action's `requiresMembershipReach` sugar is lowered to. Only a principal
+ * whose envelope carries its own positions is judged: the system context, a
+ * delegated agent (its envelope carries the agent ceiling, not the delegating
+ * person's grades) and an envelope with no `positions` are left unmarked.
+ *
+ * This is a mark and nothing else. The run doors do not read it: the endpoint
+ * stays the authority, and a call naming another organization is judged there.
+ */
+function membershipReachRefusal(action: any, objectName: string | undefined, ec: any): { code: string; message: string } | undefined {
+    if (action?.type !== 'api' || typeof action?.target !== 'string') return undefined;
+    const endpoint = ORGANIZATION_ENDPOINT_TARGET.exec(action.target)?.[1]?.replace(/\/+$/, '');
+    if (!endpoint) return undefined;
+    const reaching = new Set<BuiltinMembershipRole>();
+    for (const row of Object.values(MEMBERSHIP_REACH) as MembershipReachEntry[]) {
+        if (row.endpoint === endpoint) for (const grade of row.grades) reaching.add(grade);
+    }
+    if (reaching.size === 0) return undefined;
+    if (!ec || ec.isSystem === true || ec.onBehalfOf || !Array.isArray(ec.positions)) return undefined;
+    const grades = BUILTIN_MEMBERSHIP_ROLES.filter((grade) => reaching.has(grade));
+    if (grades.some((grade) => ec.positions.includes(mapMembershipRole(grade)))) return undefined;
+
+    const names = grades.map((grade) => grade.replace(/_/g, ' '));
+    const roles = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}` : names[0];
+    const on = objectName ? ` on '${objectName}'` : '';
+    const where = ec.tenantId ? 'in this organization' : 'in any organization you belong to';
+    return {
+        code: MEMBERSHIP_REACH_REFUSAL_CODE,
+        message:
+            `Action '${String(action?.name ?? '')}'${on} needs an organization ${roles}: its endpoint ` +
+            `(${endpoint}) refuses every other membership role, and your role ${where} is none of those. ` +
+            `Ask a person who holds one of those roles to run it.`,
+    };
+}
 
 /**
  * [ADR-0106 D6 tier 3] The refusal an MCP object-schema read answers when the
@@ -271,10 +346,14 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
     }
 
     // [#30892] The file pair is taught where the bridge would carry it.
-    const fileTools = (await resolveMcpRecordFileService(deps, context)) !== undefined;
+    const recordFiles = await resolveMcpRecordFileService(deps, context);
+    const fileTools = recordFiles !== undefined;
+    // [#32686] …and the upload link for a record not yet created, where the
+    // storage plugin serves it.
+    const newRecordUploadLinks = typeof recordFiles?.createUploadLinkForNewRecordAs === 'function';
     // [ADR-0149 D2] …and the dataset pair, with the D3 selection rule.
     const datasetTools = (await resolveMcpDatasetToolsService(deps, context)) !== undefined;
-    const markdown: string = mcp.renderSkill({ mcpUrl, fileTools, datasetTools });
+    const markdown: string = mcp.renderSkill({ mcpUrl, fileTools, newRecordUploadLinks, datasetTools });
     // Raw text must NOT ride the `response` channel — `sendResult` JSON-
     // encodes those bodies unconditionally. The `result` stream channel is
     // the one raw pipe through every adapter (string events are written
@@ -582,6 +661,147 @@ async function warnIfSkillListIncomplete(
 }
 
 /**
+ * [#32435] `describe_object`'s answer: what an agent needs to WRITE a record,
+ * read off the object as THIS caller is served it — so a field, an option or a
+ * rule the caller's view withholds (ADR-0106 D1: the served view drops a rule
+ * that names a denied field anywhere, its message included) is not described.
+ *
+ * Per field: `required`, `readonly` and `system` (an auto-injected column such
+ * as `created_at` is `readonly` and `system`; [#32530] `readonly` is also true
+ * where a write never sets the value, {@link writeNeverSetsField}), the allowed
+ * `options` as value + label for a field that declares them (a picklist-bound
+ * field carries its list's resolved options on the served object,
+ * `declaresOptions`), and the `defaultValue` an INSERT applies. Per active validation rule: its name, kind,
+ * message, severity, the write events it runs on, and the fields it names —
+ * ⛔ never its condition, pattern or transition table: the rule's message is
+ * what a refused write answers with, and its expression is server policy.
+ *
+ * `declared` is the object `def` was projected from (the caller's mask
+ * applied to it gives `def`): `readonly` is judged on it,
+ * {@link writeNeverSetsField}. Nothing else is read from it.
+ *
+ * The twin is `describeServedObject` in `packages/mcp/src/mcp-server-runtime.ts`,
+ * which the stdio bridge and the `objectstack://objects/{name}` resource serve
+ * (this package does not depend on `@objectstack/mcp`): the transports answer
+ * one shape, and the `describe_object` description (`mcp-http-tools.ts`)
+ * states it.
+ */
+function describeServedObject(def: any, declared: any): Record<string, unknown> {
+    return {
+        name: def.name,
+        label: def.label ?? def.name,
+        fields: Object.entries(def.fields ?? {}).map(([k, f]: [string, any]) => ({
+            name: k,
+            type: f?.type,
+            label: f?.label ?? k,
+            required: f?.required ?? false,
+            // [#32530] Judged on the DECLARED field, never the served one: the
+            // caller's mask deletes a readable field's `expression` when it
+            // names a field they cannot read, and the engine still computes the
+            // field. Only the boolean is read there; the served definition,
+            // without that expression, is what the answer is built from.
+            readonly: writeNeverSetsField(declared?.fields?.[k]),
+            system: f?.system === true,
+            ...(declaresOptions(f) ? { options: describedOptions(f.options) } : {}),
+            ...(f?.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {}),
+        })),
+        validations: describedRules(def.validations),
+        enableFeatures: def.enable ?? {},
+    };
+}
+
+/**
+ * [#32530] `readonly` as {@link describeServedObject} serves it: a caller's
+ * write can never set this field's value. True for the declared flag, and for
+ * a value the engine owns whatever the payload says:
+ *
+ * - a runtime-owned type (`RUNTIME_OWNED_FIELD_TYPES`, today `autonumber`):
+ *   the write path strips a caller's value even with no `readonly` flag, and a
+ *   hand-authored literal carries none (the field builder injects it);
+ * - a `formula`, virtual — computed on read, no column (`isVirtualSearchField`,
+ *   the spec's one statement of that set): the write path strips it;
+ * - a stored field declaring an `expression`: the engine computes it from the
+ *   row the write stores, so a client-sent value never stands (the spec's
+ *   `expression` contract).
+ *
+ * ⛔ Not the caller's field edit permission: a field the caller may read but
+ * not edit is served the schema's answer, and the write naming it is refused
+ * at the field-level write gate. The served object carries the read projection
+ * only ({@link servedToCaller}), and the `describe_object` description says so.
+ *
+ * Asked of the DECLARED field ({@link describeServedObject}'s `declared`),
+ * because the caller's mask deletes an `expression` that names a field the
+ * caller cannot read, while the engine still computes the column from it.
+ *
+ * The twin is `writeNeverSetsField` in `packages/mcp/src/mcp-server-runtime.ts`,
+ * which the stdio bridge and the `objectstack://objects/{name}` resource ask of
+ * the declared field too: the stdio caller view hands the declaration it masked
+ * beside the served object (`readObjectWithDeclaration`), so every transport
+ * answers this verdict alike.
+ */
+function writeNeverSetsField(f: any): boolean {
+    if (!f || typeof f !== 'object') return false;
+    if (f.readonly === true) return true;
+    if (typeof f.type === 'string' && RUNTIME_OWNED_FIELD_TYPES.has(f.type)) return true;
+    if (isVirtualSearchField(f)) return true;
+    // Truthy, the engine's own test for a stored expression it plans.
+    return Boolean(f.expression);
+}
+
+/** A field's options as value + label: the stored value a write sends, and what a person reads. */
+function describedOptions(options: unknown[]): Array<{ value: unknown; label: unknown }> {
+    return options
+        .filter((o): o is { value: unknown; label?: unknown } => !!o && typeof o === 'object' && 'value' in o)
+        .map((o) => ({ value: o.value, label: o.label ?? o.value }));
+}
+
+/**
+ * How deep a `conditional` rule's `then` / `otherwise` is described: the depth
+ * the engine's own rule-message index walks (`MAX_VALIDATION_DEPTH`,
+ * `@objectstack/objectql`'s `engine-validation-messages.ts`).
+ */
+const MAX_DESCRIBED_RULE_DEPTH = 10;
+
+/** The object's ACTIVE validation rules, described without their expressions ({@link describeServedObject}). */
+function describedRules(rules: unknown): Array<Record<string, unknown>> {
+    if (!Array.isArray(rules)) return [];
+    const out: Array<Record<string, unknown>> = [];
+    for (const rule of rules) {
+        const described = describedRule(rule, 0);
+        if (described) out.push(described);
+    }
+    return out;
+}
+
+function describedRule(raw: unknown, depth: number): Record<string, unknown> | undefined {
+    if (!raw || typeof raw !== 'object' || depth >= MAX_DESCRIBED_RULE_DEPTH) return undefined;
+    const rule = raw as Record<string, unknown>;
+    // An inactive rule never runs on a write, so it is not part of what a write needs.
+    if (rule.active === false) return undefined;
+    const fields: string[] = [];
+    if (typeof rule.field === 'string') fields.push(rule.field);
+    if (Array.isArray(rule.fields)) {
+        for (const name of rule.fields) if (typeof name === 'string' && !fields.includes(name)) fields.push(name);
+    }
+    const described: Record<string, unknown> = {
+        name: rule.name,
+        type: rule.type,
+        message: rule.message,
+        // The spec's defaults (`ValidationRuleSchema`), stated so a reader need not know them.
+        severity: rule.severity ?? 'error',
+        events: Array.isArray(rule.events) ? rule.events : ['insert', 'update'],
+        fields,
+    };
+    if (rule.type === 'conditional') {
+        const then = describedRule(rule.then, depth + 1);
+        const otherwise = describedRule(rule.otherwise, depth + 1);
+        if (then) described.then = then;
+        if (otherwise) described.otherwise = otherwise;
+    }
+    return described;
+}
+
+/**
  * Build a principal-bound {@link McpDataBridge}: every method runs AS the
  * request's ExecutionContext through {@link callData} (RLS/permissions) and
  * the per-env metadata reads (the protocol's merged listing, or the metadata
@@ -651,6 +871,9 @@ export function buildMcpBridge(
      * judges against: from the listing {@link readMergedObjects} reads, or the
      * metadata service's by-name read on a host with none.
      */
+    /** {@link readMergedObjects}, read once per bridge for the `aiReadExposed` asks. */
+    let mergedForAiRead: Promise<any[] | undefined> | undefined;
+
     const readServedObject = async (name: string): Promise<any> => {
         const merged = await readMergedObjects();
         return merged !== undefined
@@ -697,8 +920,11 @@ export function buildMcpBridge(
      * either. An unrestricted caller is handed the definition it was handed
      * before (the projection returns it by reference). A posture that cannot
      * be evaluated, or a projection that leaves no field, is refused with the
-     * door's code ({@link fieldVisibilityRefusal}). The masker is resolved
-     * once per bridge, i.e. once per MCP request, and asked per object.
+     * door's code ({@link fieldVisibilityRefusal}). [ruling record
+     * 6787890900] An object the caller may not read is `undefined`: it does
+     * not exist for them in `describe_object` or `list_objects`, exactly as a
+     * name the listing omits. The masker is resolved once per bridge, i.e.
+     * once per MCP request, and asked per object.
      *
      * Only the definitions these tools SERVE go through it. The reads that
      * judge a call (the action collection, the exposure gates) keep the
@@ -708,6 +934,9 @@ export function buildMcpBridge(
     const servedToCaller = async (def: any): Promise<any> => {
         const name = String(def?.name ?? '');
         const masked = await maskObjectSchema(await (masker ??= resolveObjectMasker(deps, context, 'object')), name, def);
+        // [ruling record 6787890900] An object the caller may not read does not
+        // exist for them: `undefined`, the answer for a name the listing omits.
+        if (!masked.ok && masked.hidden) return undefined;
         if (!masked.ok) throw fieldVisibilityRefusal(name);
         return masked.document;
     };
@@ -764,6 +993,8 @@ export function buildMcpBridge(
         // object list does.
         for (const listed of objs) {
             const o = await servedToCaller(listed);
+            // [ruling record 6787890900] An object the caller may not read is left out.
+            if (o === undefined) continue;
             out.push({
                 name: o.name,
                 label: o.label ?? o.name,
@@ -820,21 +1051,34 @@ export function buildMcpBridge(
         // can describe, and a name the listing omits (a disabled package's
         // object among them) is "not found" here too.
         // [ADR-0106 D1/D5] …as this caller is served it ({@link readObjectForCaller}).
+        /**
+         * [#32442, ruling A] The read opt-in of a system object, judged by
+         * `isAiReadExposed` over its WHOLE served definition (the read that
+         * judges a call, not the masked one this caller is served): the
+         * stored-metadata family is refused before the key is read, and only
+         * `enable.aiReadable: true` opens. The read tools then read the object
+         * through {@link callData} as the caller, under every gate they always
+         * ran (permissions, RLS, the object's own read middleware, field
+         * masking), so this admits the object and nothing else.
+         */
+        aiReadExposed: async (name: string): Promise<boolean> => {
+            // `list_objects` asks once per listed `sys_*` object: one merged
+            // read serves every ask this bridge (one request) makes.
+            mergedForAiRead ??= readMergedObjects();
+            const merged = await mergedForAiRead;
+            const def = merged !== undefined
+                ? merged.find((o: any) => o?.name === name)
+                : await ((await getMeta()) as any)?.getObject?.(name);
+            return isAiReadExposed(def);
+        },
         describeObject: async (name: string) => {
-            const def: any = await readObjectForCaller(name);
+            // {@link readObjectForCaller}'s two steps, kept apart so the
+            // declaration it masks is in hand ([#32530] `readonly`).
+            const declared: any = await readServedObject(name);
+            const def: any = declared ? await servedToCaller(declared) : declared;
             if (!def) return null;
-            const fields = def.fields ?? {};
-            return {
-                name: def.name,
-                label: def.label ?? def.name,
-                fields: Object.entries(fields).map(([k, f]: [string, any]) => ({
-                    name: k,
-                    type: f?.type,
-                    label: f?.label ?? k,
-                    required: f?.required ?? false,
-                })),
-                enableFeatures: def.enable ?? {},
-            };
+            // [#32435] …each field and rule carrying what a write needs.
+            return describeServedObject(def, declared);
         },
         // [#28715] The fields `validate_expression` judges a `label()` call
         // against, from the object `describeObject` reads: the served object,
@@ -847,6 +1091,15 @@ export function buildMcpBridge(
             return Object.entries(def.fields ?? {})
                 .filter(([, f]) => declaresOptions(f))
                 .map(([k]) => k);
+        },
+        // [#32872] The object `describeObject` reads, whole: what
+        // `validate_expression` hands the publish gate's own passes at a
+        // validation rule or a formula field. Rendered to nobody; the tool
+        // answers the gate's findings only.
+        // [ADR-0106 D1] …the same caller's object, so no field it cannot read is judged.
+        servedObjectDefinitionOf: async (name: string): Promise<Record<string, unknown> | null> => {
+            const def: any = await readObjectForCaller(name);
+            return def ?? null;
         },
         query: async (object: string, o: any) => {
             const query: any = {};
@@ -917,7 +1170,9 @@ export function buildMcpBridge(
         // and the open distribution is MCP-only (BYO-AI): without this read the
         // type is authorable, lint-validated and consumed by nothing here. The
         // MCP runtime projects each skill's `instructions` onto the `prompts`
-        // primitive; the tool-binding half stays cloud-runtime-only.
+        // primitive. The tool-binding half binds nothing here, but it is read:
+        // `registerSkillPrompts` offers a skill only when this request's
+        // server lists every tool the skill binds.
         //
         // Resolved through THIS request's per-environment services — the same
         // seam `listObjects` / `describeObject` use — so a multi-tenant host
@@ -1009,12 +1264,16 @@ export function buildMcpBridge(
                 // omits the optional `getFlow` — or a flow the registry does
                 // not hold — simply summarizes as before, since the fallback
                 // is "no `params` key", exactly today's answer.
+                // [ADR-0150 D3, #31696] Read from the action's own package, as
+                // `run_action` runs it: on a flow name two namespaces hold, the
+                // bare read refuses, while the action runs its package's own.
                 let flow: any;
                 if (action?.type === 'flow' && typeof action?.target === 'string' && typeof automation?.getFlow === 'function') {
                     try {
-                        flow = await automation.getFlow(action.target);
+                        flow = await flowServiceForCaller(automation, listingEngine?.registry, action.target, packageId)
+                            .getFlow(action.target);
                     } catch {
-                        flow = undefined; // a registry that cannot answer is not a listing failure
+                        flow = undefined; // a registry that cannot answer, or a refused name, is not a listing failure
                     }
                 }
                 // [#28178] An api action whose target cannot read the caller's
@@ -1025,7 +1284,24 @@ export function buildMcpBridge(
                 // [#28943] …and one the target's per-object gate refuses for
                 // that credential (a `sys_api_key` write under an API key),
                 // marked with that gate's own code and sentence.
-                const refusal = actionExec.apiForwardCredentialRefusal(context, action);
+                // [ADR-0151 D3 rule 3] …and one declaring `ai.requiresConfirmation:
+                // true` for an AI service account, which never confirms for
+                // itself: `run_action` refuses it whatever the call sends, with
+                // the gate's own code and sentence. That gate runs in the
+                // admission sequence, ahead of the forward, so where both
+                // apply it is the refusal the mark carries. Asked only for an
+                // account: a person and a delegated agent confirm and run.
+                const confirmation = actionExec.isAiServiceAccountCaller(ec)
+                    ? actionExec.actionConfirmationRefusal(deps, action, undefined, objectName, ec)
+                    : undefined;
+                // [ruling record 6812625052, letter E] …and an organization
+                // endpoint the caller's membership role does not reach: the
+                // forward reaches it and it refuses 403. Asked last, because
+                // `run_action` meets it last: after the admission sequence and
+                // the forward's credential table. Listed, never hidden: the
+                // run doors do not read the mark ({@link membershipReachRefusal}).
+                const refusal = confirmation ?? actionExec.apiForwardCredentialRefusal(context, action)
+                    ?? membershipReachRefusal(action, actionExec.isObjectLessActionKey(objectName) ? undefined : objectName, ec);
                 // [ADR-0106 D1] Summarised against the object as this caller is
                 // served it, and not listed where `/meta` withholds it.
                 const served = await servedActionObject(action, objectName, obj, objectsByName);
@@ -1272,6 +1548,16 @@ export interface McpRecordFileService {
         target: { field: string } | { attachments: true },
         context: unknown,
     ): Promise<{ path: string; expiresAt: string }>;
+    /**
+     * [#32686] A link for a file field of a record not yet created, with the
+     * file id(s) the upload is stored under. Optional: a storage plugin that
+     * predates it serves links for existing records only.
+     */
+    createUploadLinkForNewRecordAs?(
+        object: string,
+        target: { field: string; count?: number },
+        context: unknown,
+    ): Promise<{ path: string; expiresAt: string; fileIds: string[] }>;
 }
 
 /**
@@ -1356,6 +1642,8 @@ function recordFileMembers(
             });
         }
     };
+    const newRecordLinkAs =
+        typeof service.createUploadLinkForNewRecordAs === 'function' ? service.createUploadLinkForNewRecordAs.bind(service) : undefined;
     return {
         listRecordFiles: async (object: string, recordId: string) => {
             await readRecordFirst(object, recordId);
@@ -1380,6 +1668,21 @@ function recordFileMembers(
             const grant = await service.createUploadLinkAs(object, recordId, target, ec);
             return { url: absoluteUrl(grant.path, await publicOrigin(deps, context)), expiresAt: grant.expiresAt };
         },
+        // [#32686] No record to read first: the storage service asks the
+        // object's create verdict and the field's writability for the caller.
+        ...(newRecordLinkAs
+            ? {
+                // [#32747] `count`: how many files the user will upload, each id answered now.
+                createUploadLinkForNewRecord: async (object: string, target: { field: string; count?: number }) => {
+                    const grant = await newRecordLinkAs(object, target, ec);
+                    return {
+                        url: absoluteUrl(grant.path, await publicOrigin(deps, context)),
+                        expiresAt: grant.expiresAt,
+                        fileIds: [...grant.fileIds],
+                    };
+                },
+            }
+            : {}),
     };
 }
 
@@ -1566,7 +1869,9 @@ function notResumableRunMessage(runId: string): string {
  *     was not started by a flow action, and the call is refused 403.
  *     The confirmation gate applies here too because the flow's writes happen
  *     after the screen, so on resume. A run started with `confirm: true` still
- *     needs `confirm: true` to resume.
+ *     needs `confirm: true` to resume. An AI service account never confirms
+ *     an action for itself (ADR-0151 D3 rule 3), so its resume of a gated
+ *     action is refused whatever it sends.
  *  4. **The subject record, read again as the caller.** This is #16370's rule,
  *     with the same two shared functions: `loadActionSubjectRecord` and
  *     `refuseDeniedSubjectLoad`. A record the caller could read when the run
@@ -1638,18 +1943,35 @@ export async function resumeActionRun(
     }
 
     // ── 3. the flow action that admits it, through run_action's gates ────────
-    const flowName: unknown = run.flowName;
+    // [ADR-0150 D4, #31696] A run of a flow name two packages hold carries its
+    // slot key, `PACKAGE/NAME`: the run's flow is that NAME, of that package.
+    // A candidate targets the name, and its target reaches the run's package
+    // from the action's own (`run_action`'s resolution of it): the action that
+    // could have started this run. A run whose key carries no package, of a
+    // name two packages hold, is the one holder's whose slot is filed under
+    // the key (`runSlotPackage`), else refused naming every holder.
+    const runFlow = runFlowOf(run.flowName);
+    const flowName: unknown = runFlow?.name ?? run.flowName;
     const runObject = typeof trigger?.object === 'string' && trigger.object !== '' ? trigger.object : undefined;
     const meta: any = await getMeta();
     const objectsListing = await readObjects?.();
     const declarations = await actionExec.collectActionDeclarations(deps, meta, objectsListing, await readActions?.());
-    const candidates = declarations.filter(({ action, objectName }) =>
+    const activationEngine: any = await deps.getObjectQL(context, envId).catch(() => undefined);
+    let runPackage = runFlow?.packageId;
+    const runName = runPackage === undefined && typeof flowName === 'string' ? flowName.replace(/^\u0000/, '') : '';
+    const shared = runName ? bareNameRefusal(automationAddressRegistryOf(activationEngine), 'flow', runName) : undefined;
+    if (shared) {
+        runPackage = runSlotPackage(automation, runName, run.flowName, shared.candidates.flatMap((c) => (c.kind === 'package' ? [c.packageId] : [])));
+        if (runPackage === undefined) throw resumeDoorError(deps, shared.message, 409, { candidates: shared.candidates });
+    }
+    const candidates = declarations.filter(({ action, objectName, packageId }) =>
         action?.type === 'flow'
         && !actionExec.isDeclarativeUpdateAction(action)
         && typeof action?.target === 'string'
         && action.target === flowName
+        && (runPackage === undefined
+            || flowHolderForCaller(activationEngine?.registry, action.target, packageId) === runPackage)
         && (runObject === undefined ? actionExec.isObjectLessActionKey(objectName) : objectName === runObject));
-    const activationEngine: any = await deps.getObjectQL(context, envId).catch(() => undefined);
     let admitted: { action: any; objectName: string } | undefined;
     let firstRefusal: Error | undefined;
     // [ADR-0106 D1] A candidate this caller is not shown does not exist for
@@ -1787,7 +2109,9 @@ function resumeAdmissionRefusal(
     if (permission) return resumeDoorError(deps, permission, 403);
     const disabled = actionExec.disabledActionRefusal(deps, activationEngine, action);
     if (disabled) return resumeDoorError(deps, disabled.message, disabled.status, { code: disabled.code });
-    const confirmation = actionExec.actionConfirmationRefusal(deps, action, request, objectName);
+    // [ADR-0151 D3 rule 3] The caller's envelope rides along: an AI service
+    // account never confirms for itself, so it is refused whatever it sends.
+    const confirmation = actionExec.actionConfirmationRefusal(deps, action, request, objectName, ec);
     if (confirmation) {
         return resumeDoorError(deps, confirmation.message, confirmation.status, {
             code: confirmation.code,

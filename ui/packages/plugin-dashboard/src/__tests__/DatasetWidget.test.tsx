@@ -1233,13 +1233,14 @@ describe('DatasetWidget table drill — measure drill scopes (#30615)', () => {
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
- * objectstack#32077 (ADR-0150 D5) — a dataset query names the package of the
- * dashboard it belongs to, as served (`_packageId`), so a dataset name two
- * packages hold reaches each dashboard's own dataset. A dashboard authored in
- * the environment sends no package, and the server's refusal for a name two
- * packages hold is shown as it came, naming both, never retried bare.
+ * ADR-0150 D3 — a dataset query names the package of the dashboard it belongs
+ * to, as served (`_packageId`), as the READER's package (`callerPackage`): the
+ * server reads the dashboard's own dataset, else the unique holder in its
+ * dependency closure plus `sys`, else refuses `409` naming the candidates. A
+ * dashboard authored in the environment sends no package, and a refusal is
+ * shown as it came, never retried bare.
  * ──────────────────────────────────────────────────────────────────────────── */
-describe('DatasetWidget — the dashboard\'s package on its dataset query (objectstack#32077)', () => {
+describe('DatasetWidget — the dashboard\'s package as the reader\'s package on its dataset query (ADR-0150 D3)', () => {
   const salesDashboard = (packageId?: string) => ({
     type: 'dashboard',
     name: 'sales_overview',
@@ -1247,11 +1248,11 @@ describe('DatasetWidget — the dashboard\'s package on its dataset query (objec
     widgets: [{ id: 'revenue_tile', type: 'metric', title: 'Revenue', dataset: 'sales', values: ['revenue'] }],
   }) as any;
 
-  /** Two packages each ship a `sales` dataset; the adapter answers per qualifier, as the server's exact read does. */
+  /** Two packages each ship a `sales` dataset; the adapter answers per caller, as the server's D3 read does. */
   const twoHolderSource = () => ({
-    queryDataset: vi.fn(async (_dataset: string, _selection: unknown, options?: { packageId?: string }) => {
-      if (options?.packageId === 'com.acme.alpha') return { rows: [{ revenue: 111 }] };
-      if (options?.packageId === 'com.acme.beta') return { rows: [{ revenue: 222 }] };
+    queryDataset: vi.fn(async (_dataset: string, _selection: unknown, options?: { callerPackage?: string }) => {
+      if (options?.callerPackage === 'com.acme.alpha') return { rows: [{ revenue: 111 }] };
+      if (options?.callerPackage === 'com.acme.beta') return { rows: [{ revenue: 222 }] };
       throw new Error(
         'Dataset query failed: 409 Conflict — dataset "sales" is held by 2 packages in this environment and the caller '
         + 'names no package: package "com.acme.alpha", package "com.acme.beta". Nothing picks one of them: address it by its package.',
@@ -1259,7 +1260,7 @@ describe('DatasetWidget — the dashboard\'s package on its dataset query (objec
     }),
   });
 
-  it('two packages hold one dataset name: each dashboard queries its own, under its own package', async () => {
+  it('two packages hold one dataset name: each dashboard queries its own, as its own reader', async () => {
     const src = twoHolderSource();
     const { unmount } = render(<DashboardRenderer schema={salesDashboard('com.acme.alpha')} dataSource={src} />);
     expect(await screen.findByText('111')).toBeInTheDocument();
@@ -1267,15 +1268,35 @@ describe('DatasetWidget — the dashboard\'s package on its dataset query (objec
     render(<DashboardRenderer schema={salesDashboard('com.acme.beta')} dataSource={src} />);
     expect(await screen.findByText('222')).toBeInTheDocument();
     expect(src.queryDataset.mock.calls.map((c) => [c[0], c[2]])).toEqual([
-      ['sales', { packageId: 'com.acme.alpha' }],
-      ['sales', { packageId: 'com.acme.beta' }],
+      ['sales', { callerPackage: 'com.acme.alpha' }],
+      ['sales', { callerPackage: 'com.acme.beta' }],
     ]);
+  });
+
+  it('a dashboard in P whose dataset only P\'s dependency holds renders that dataset: the server resolves it for P', async () => {
+    // The server's D3 read for reader `com.acme.app`: its own `sales` is
+    // absent, its dependency `com.acme.lib` is the unique holder. The bare
+    // read would answer another holder, which must never reach this tile.
+    const src = {
+      queryDataset: vi.fn(async (_dataset: string, _selection: unknown, options?: { callerPackage?: string; packageId?: string }) => {
+        if (options?.callerPackage === 'com.acme.app' && options.packageId === undefined) return { rows: [{ revenue: 314 }] };
+        if (options?.packageId !== undefined) {
+          throw new Error(`Dataset query failed: 409 Conflict — dataset "sales" is not held by package "${options.packageId}".`);
+        }
+        return { rows: [{ revenue: 999 }] };
+      }),
+    };
+    render(<DashboardRenderer schema={salesDashboard('com.acme.app')} dataSource={src} />);
+    expect(await screen.findByText('314')).toBeInTheDocument();
+    expect(screen.queryByText('999')).not.toBeInTheDocument();
+    expect(src.queryDataset.mock.calls.map((c) => c[2])).toEqual([{ callerPackage: 'com.acme.app' }]);
   });
 
   it.each([
     ['no _packageId', undefined],
     ['the package-less sentinel', 'sys_metadata'],
-  ])('a dashboard authored in the environment (%s) sends no package', async (_label, packageId) => {
+    ['the runtime compatibility package', '__runtime__'],
+  ])('CONTROL: a dashboard authored in the environment (%s) sends no caller and no package', async (_label, packageId) => {
     const src = makeSource(async () => ({ rows: [{ revenue: 5 }] }));
     render(<DashboardRenderer schema={salesDashboard(packageId)} dataSource={src} />);
     expect(await screen.findByText('5')).toBeInTheDocument();
@@ -1283,25 +1304,34 @@ describe('DatasetWidget — the dashboard\'s package on its dataset query (objec
     expect(src.queryDataset.mock.calls[0]).toHaveLength(2);
   });
 
-  it('a dashboard in P whose dataset only P\'s dependency holds sends ?package=P and shows the 409, never retried bare (interim, ruling A)', async () => {
-    // `?package=` is the exact qualifier (ADR-0150 D5), not the D3 closure
-    // read: the server refuses a package that does not hold the name, naming
-    // the holder. Follow-ups #32310 / #32311 restore the dependency case.
+  it('a 409 for the dashboard\'s reader is shown on the widget, naming the candidates, and never retried bare', async () => {
     const src = {
-      queryDataset: vi.fn(async (_dataset: string, _selection: unknown, options?: { packageId?: string }) => {
-        if (options?.packageId === undefined) return { rows: [{ revenue: 999 }] };
+      queryDataset: vi.fn(async (_dataset: string, _selection: unknown, options?: { callerPackage?: string }) => {
+        if (options?.callerPackage === undefined) return { rows: [{ revenue: 999 }] };
         throw new Error(
-          `Dataset query failed: 409 Conflict — dataset "sales" is not held by package "${options.packageId}", which the `
-          + 'address names exactly (ADR-0150 D5): it is held by package "com.acme.lib". Address it by its holder.',
+          'Dataset query failed: 409 Conflict — dataset "sales" is held by 2 packages in the closure of '
+          + `package "${options.callerPackage}": package "com.acme.lib1", package "com.acme.lib2".`,
         );
       }),
     };
     render(<DashboardRenderer schema={salesDashboard('com.acme.app')} dataSource={src} />);
-    const alert = await screen.findByText(/is not held by package "com\.acme\.app"/);
-    expect(alert.textContent).toContain('com.acme.lib');
+    const alert = await screen.findByText(/held by 2 packages in the closure of package "com\.acme\.app"/);
+    expect(alert.textContent).toContain('com.acme.lib1');
+    expect(alert.textContent).toContain('com.acme.lib2');
     expect(screen.queryByText('999')).not.toBeInTheDocument();
     expect(src.queryDataset).toHaveBeenCalledTimes(1);
-    expect(src.queryDataset.mock.calls[0][2]).toEqual({ packageId: 'com.acme.app' });
+    expect(src.queryDataset.mock.calls[0][2]).toEqual({ callerPackage: 'com.acme.app' });
+  });
+
+  it('the package is part of the query signature: the same widget under another package queries again', async () => {
+    const src = twoHolderSource();
+    const widget = { type: 'metric', dataset: 'sales', values: ['revenue'] };
+    const { rerender } = render(<DatasetWidget widget={widget} dataSource={src} packageId="com.acme.alpha" />);
+    expect(await screen.findByText('111')).toBeInTheDocument();
+    rerender(<DatasetWidget widget={widget} dataSource={src} packageId="com.acme.beta" />);
+    expect(await screen.findByText('222')).toBeInTheDocument();
+    expect(screen.queryByText('111')).not.toBeInTheDocument();
+    expect(src.queryDataset.mock.calls.map((c) => c[2])).toEqual([{ callerPackage: 'com.acme.alpha' }, { callerPackage: 'com.acme.beta' }]);
   });
 
   it('a widget with no package, where two packages hold the name, shows the conflict naming both, queried once', async () => {

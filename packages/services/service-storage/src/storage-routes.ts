@@ -15,6 +15,12 @@ import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 // The commit door's attach arm relays the attach verb's declared refusals as
 // the print door relays its service's: the producer's code and status.
 import { declaredRefusalMessage, demotedDeclaredCode, resolveThrownHttpError } from '@objectstack/types';
+// [#32712] The upload-link `PUT` relays a refusal for a person: the producer's
+// own code prefix off its text, the `/api/v1/data` door's rule, and a text the
+// producer marked for the user kept verbatim.
+import { declaredUserMessage, withoutDeclaredCodePrefix } from '@objectstack/types';
+// [#32712] The request's language, read as every other door reads it.
+import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 // [#15999] The BRAND predicate, never `instanceof` — this error crosses package
 // boundaries and a monorepo resolves the same module through more than one path
 // (`src` under vitest aliases, `dist` under the published `exports`), so two
@@ -59,14 +65,22 @@ import { buildKey } from './storage-key.js';
 export { buildKey };
 // [#30892] The upload-link doors: the service verbs they call, the one
 // refusal an unusable link gets, and the page a link opens.
-import type { UploadLinkDoor, UploadLinkView } from './record-file-access.js';
+import type { UploadLinkDoor, UploadLinkUpload, UploadLinkView } from './record-file-access.js';
 import {
+  UPLOAD_LINK_FORM_COUNT_FIELD,
+  UPLOAD_LINK_FILE_COUNT_CODE,
+  UPLOAD_LINK_FILE_COUNT_STATUS,
+  UPLOAD_LINK_FORM_FILE_PREFIX,
+  UPLOAD_LINK_FORM_HEADER,
+  UPLOAD_LINK_FORM_HEADER_VALUE,
   UPLOAD_LINK_SEGMENT,
   UPLOAD_LINK_UNUSABLE_CODE,
   UPLOAD_LINK_UNUSABLE_MESSAGE,
   UPLOAD_LINK_UNUSABLE_STATUS,
+  uploadLinkFileCountMessage,
 } from './upload-link-wire.js';
 import { sendUnusableUploadLinkPage, sendUploadLinkPage } from './upload-link-page.js';
+import { uploadLinkCopy, uploadLinkRefusalText, type UploadLinkCopy } from './upload-link-copy.js';
 // [#22283] The `storage` settings namespace's Limits group — read and resolved
 // in ONE module, called per request by the doors below.
 // [#23306] The size refusal itself lives there too, beside the limit it
@@ -126,6 +140,19 @@ const ORGANIZATION_CHANGED_MESSAGE =
  */
 const INCOMPLETE_UPLOAD_STATUS = 409;
 const INCOMPLETE_UPLOAD_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
+
+/**
+ * [#33027] The chunk door's answer to a chunk sent to an upload that has
+ * already completed: the file is committed and the backend multipart is gone,
+ * so the chunk would be stored for no file. `409` / `RESOURCE_CONFLICT`, as
+ * for an incomplete upload above: the request conflicts with where the upload
+ * stands. The remedy is a new upload, so the message names it.
+ */
+const COMPLETED_SESSION_STATUS = 409;
+const COMPLETED_SESSION_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
+const COMPLETED_SESSION_CHUNK_MESSAGE =
+  'This chunked upload has already completed and its file is committed, so it takes no more chunks. ' +
+  'To send another file, start a new chunked upload.';
 
 /**
  * [#22470] The answer both upload-starting doors (presigned, chunked) give a
@@ -508,6 +535,14 @@ export function registerStorageRoutes(
  */
 export type StorageGatedSessionReader = (req: IHttpRequest) => Promise<unknown>;
 
+/**
+ * [#32712] The workspace's default locale for a signed-in caller of the
+ * upload-link doors (the `localization` settings), or `undefined` for none.
+ * Asked only when the request names no language of its own; bound by
+ * `composeStorageRoutes`, absent on a mount that composes no settings read.
+ */
+export type UploadLinkWorkspaceLocale = (caller: StorageUploadSession) => Promise<string | undefined>;
+
 /** What the commit door's `attachTo` names: the upload, and the record it is attached to. */
 export interface StorageUploadAttachment {
   fileId: string;
@@ -581,6 +616,7 @@ export function registerStorageFamily(
   readGatedSessionUser: StorageGatedSessionReader | undefined,
   attachUpload: StorageUploadAttacher | undefined = undefined,
   getUploadLinkDoor?: () => UploadLinkDoor | undefined,
+  uploadLinkWorkspaceLocale?: UploadLinkWorkspaceLocale,
 ): void {
   const basePath = opts.basePath ?? '/api/v1/storage';
   const downloadTtl = opts.downloadTtl ?? DEFAULT_DOWNLOAD_TTL;
@@ -1055,6 +1091,21 @@ export function registerStorageFamily(
     }
   };
 
+  /**
+   * The chunked-completion door's `200` body. One builder for the completion
+   * that assembles the file and for a retry of it after it succeeded
+   * (#33027), so both answer the same file the same way. The key is the one
+   * the file row was committed with: the backend may assemble under another
+   * key than the session started with.
+   */
+  const completedUploadBody = (session: UploadSessionRecord, file: Pick<FileRecord, 'key'> | null) => ({
+    fileId: session.file_id,
+    key: file?.key ?? session.key,
+    size: session.total_size,
+    mimeType: session.mime_type ?? 'application/octet-stream',
+    url: `${basePath}/files/${session.file_id}/url`,
+  });
+
   // ---------------------------------------------------------------------------
   // POST /storage/upload/presigned
   // ---------------------------------------------------------------------------
@@ -1403,6 +1454,16 @@ export function registerStorageFamily(
         return;
       }
 
+      // [#33027] A completed upload takes no more bytes. Its backend multipart
+      // is already assembled and gone, so a chunk stored now belongs to no
+      // file, and recording it would rewrite the parts of a finished upload.
+      // Asked after the resume token, so only the uploader learns the status,
+      // and before a byte is read or stored.
+      if (live.status === 'completed') {
+        sendError(res, COMPLETED_SESSION_STATUS, COMPLETED_SESSION_CODE, COMPLETED_SESSION_CHUNK_MESSAGE);
+        return;
+      }
+
       // [#27412] The index must name a chunk this upload declared: a whole
       // number in [0, total_chunks). Judged here — after the resume token
       // (a caller who cannot prove it owns the session learns nothing of its
@@ -1586,6 +1647,20 @@ export function registerStorageFamily(
         return;
       }
 
+      // [#33027] A completion sent again after one that succeeded (a client
+      // retrying after it lost the `200`, as `resumeUpload` does) answers the
+      // same `200` for the same file. It writes nothing and does not reach the
+      // backend: the multipart was assembled and discarded by the first
+      // completion, so the backend answered "session not found", the catch
+      // below stamped `failed` over `completed`, and the uploader was told a
+      // committed, downloadable file had failed. The request is still judged
+      // above against the parts the upload holds, so a retry naming a chunk
+      // the upload never held is refused as before.
+      if (live.status === 'completed') {
+        sendOk(res, completedUploadBody(session, file));
+        return;
+      }
+
       await store.updateSession(uploadId, { status: 'completing' }, writeContext);
 
       const partsForBackend = verdict.parts.map(p => ({
@@ -1617,13 +1692,7 @@ export function registerStorageFamily(
         throw completionErr;
       }
 
-      sendOk(res, {
-        fileId: session.file_id,
-        key: finalKey,
-        size: session.total_size,
-        mimeType: session.mime_type ?? 'application/octet-stream',
-        url: `${basePath}/files/${session.file_id}/url`,
-      });
+      sendOk(res, completedUploadBody(session, { key: finalKey }));
     } catch (err: any) {
       sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
@@ -1779,12 +1848,29 @@ export function registerStorageFamily(
   // the bytes, and answer.
   // ---------------------------------------------------------------------------
 
+  // [#32712] The language a link request is answered in: the request's own
+  // (`Accept-Language`), else the workspace default for the signed-in user
+  // (`localization` settings, read through the one resolver), else English.
+  // The doors read no query parameter, so `?locale` is not a source here.
+  const uploadLinkCopyFor = async (req: IHttpRequest, caller: StorageUploadSession | null): Promise<UploadLinkCopy> => {
+    const asked = preferredLocaleFromHeader(headerValue(req.headers?.['accept-language']));
+    if (asked !== undefined || caller === null || !uploadLinkWorkspaceLocale) return uploadLinkCopy(asked);
+    let workspace: string | undefined;
+    try {
+      workspace = await uploadLinkWorkspaceLocale(caller);
+    } catch {
+      // A default that cannot be read is no default: the page is English.
+      workspace = undefined;
+    }
+    return uploadLinkCopy(workspace);
+  };
+
   // The signed-in user a link request carries, or `null` once the 401 is sent.
   // No resolver wired (a kernel without an auth service) fails CLOSED here,
   // unlike the bare-kernel upload doors: a link is minted for a user, so a
   // request whose user cannot be read can never be that user. A resolver that
   // throws fails closed too.
-  const uploadLinkCaller = async (req: IHttpRequest, res: IHttpResponse): Promise<string | null> => {
+  const uploadLinkCaller = async (req: IHttpRequest, res: IHttpResponse): Promise<StorageUploadSession | null> => {
     let session: StorageUploadSession | null | undefined = null;
     if (opts.resolveSession) {
       try {
@@ -1793,60 +1879,117 @@ export function registerStorageFamily(
         session = null;
       }
     }
-    if (session?.userId) return String(session.userId);
+    if (session?.userId) return { userId: String(session.userId), organizationId: session.organizationId };
+    const copy = await uploadLinkCopyFor(req, null);
     sendError(
       res,
       401,
       'AUTH_REQUIRED',
       'Sign in as the person this upload link was made for, then open the link again.',
+      { userMessage: copy.signInRequired },
     );
     return null;
   };
 
   mountFamilyRoute('get', `${basePath}/${UPLOAD_LINK_SEGMENT}/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
+    let copy = uploadLinkCopy(undefined);
     try {
       const caller = await uploadLinkCaller(req, res);
       if (caller === null) return;
+      copy = await uploadLinkCopyFor(req, caller);
       const door = getUploadLinkDoor?.();
       if (!door) {
-        sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS);
+        sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS, copy);
         return;
       }
       let view: UploadLinkView;
       try {
-        view = await door.inspectUploadLink(String(req.params.token ?? ''), caller);
+        // [#32712] Ruling B′: the page names the record and the field for the
+        // link's own user, read as that user now, in the page's language. A
+        // record they can no longer read answers the one unusable-link page.
+        view = await door.inspectUploadLink(String(req.params.token ?? ''), caller.userId as string, {
+          names: { lang: copy.lang },
+        });
       } catch (err) {
         if (isUnusableUploadLink(err)) {
-          sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS);
+          sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS, copy);
           return;
         }
         throw err;
       }
-      sendUploadLinkPage(res, view);
+      sendUploadLinkPage(res, view, copy);
     } catch (err: any) {
-      if (relayUploadLinkRefusal(res, err)) return;
+      if (relayUploadLinkRefusal(res, err, copy)) return;
       sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
   mountFamilyRoute('put', `${basePath}/${UPLOAD_LINK_SEGMENT}/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
+    let copy = uploadLinkCopy(undefined);
     try {
       const caller = await uploadLinkCaller(req, res);
       if (caller === null) return;
+      copy = await uploadLinkCopyFor(req, caller);
       const door = getUploadLinkDoor?.();
       if (!door) {
-        sendError(res, UPLOAD_LINK_UNUSABLE_STATUS, UPLOAD_LINK_UNUSABLE_CODE, UPLOAD_LINK_UNUSABLE_MESSAGE);
+        sendError(res, UPLOAD_LINK_UNUSABLE_STATUS, UPLOAD_LINK_UNUSABLE_CODE, UPLOAD_LINK_UNUSABLE_MESSAGE, {
+          userMessage: copy.unusable,
+        });
         return;
       }
-      // The declared length first, so an oversized body is refused before it
-      // is read; the service judges the bytes read again, before the link is
-      // spent, so an oversized upload never uses it up.
+      // The declared length first: this door refuses a body that declares more
+      // than it takes before this door reads it. The service judges the bytes
+      // read again, before the link is spent, so an oversized upload never uses
+      // it up. [#32747] A body is the page's several-file form only when it
+      // says so (`multipart/form-data` carrying the form header) AND the link
+      // takes several files; that form may declare up to as many files as the
+      // link takes, each within the limit, plus the form's framing. Any other
+      // body, on any link, is the file itself, whatever its content type,
+      // under the one-file limit, with the checks and order it had before
+      // links took several.
+      const token = String(req.params.token ?? '');
       const { maxUploadBytes } = currentLimits();
       const declaredBody = declaredContentLength(req);
-      if (
-        declaredBody !== undefined &&
-        !requireWithinUploadLimit(declaredBody, maxUploadBytes, (n) => `The upload body is ${n} bytes`, res)
-      ) {
+      const linkFiles = isUploadLinkForm(req.headers?.['content-type'], req.headers?.[UPLOAD_LINK_FORM_HEADER])
+        ? await severalFilesOf(door, token, caller.userId as string)
+        : undefined;
+      const formLimit =
+        linkFiles !== undefined && maxUploadBytes !== undefined
+          ? maxUploadBytes * linkFiles.max + UPLOAD_LINK_FORM_OVERHEAD_BYTES
+          : undefined;
+      const tooLarge =
+        declaredBody === undefined
+          ? null
+          : formLimit !== undefined
+            ? declaredBody > formLimit
+              ? `The upload body is ${declaredBody} bytes, over the ${formLimit} bytes this link's upload can carry ` +
+                `(${linkFiles!.max} files, each within the "Max upload size (MB)" storage setting).`
+              : null
+            : uploadSizeRefusal(declaredBody, maxUploadBytes, (n) => `The upload body is ${n} bytes`);
+      if (tooLarge !== null) {
+        sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, tooLarge, { userMessage: copy.tooLarge });
+        return;
+      }
+      if (linkFiles !== undefined) {
+        const form = await uploadLinkFormBody(req, formLimit);
+        if (form.refused) {
+          sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, form.refused, { userMessage: copy.tooLarge });
+          return;
+        }
+        const uploads = await uploadLinkFormFiles(form.body, linkFiles);
+        if (!Array.isArray(uploads)) {
+          sendError(res, uploads.status, uploads.code, uploads.message, { userMessage: copy.refused(uploads.message) });
+          return;
+        }
+        const outcome = await door.consumeUploadLinkFiles(token, uploads, caller.userId as string);
+        const fileIds = outcome.files.map((file) => file.fileId);
+        sendOk(res, {
+          fileId: fileIds[0],
+          fileIds,
+          files: outcome.files,
+          ...(outcome.field !== undefined ? { field: outcome.field } : {}),
+          ...(outcome.attachmentId !== undefined ? { attachmentId: outcome.attachmentId } : {}),
+        });
         return;
       }
       let data: Buffer;
@@ -1855,26 +1998,29 @@ export function registerStorageFamily(
       } else if (Buffer.isBuffer(req.body)) {
         data = req.body;
       } else {
-        sendError(res, 400, 'INVALID_REQUEST', 'Binary body required: the file bytes, as the request body');
+        const message = 'Binary body required: the file bytes, as the request body';
+        sendError(res, 400, 'INVALID_REQUEST', message, { userMessage: copy.refused(message) });
         return;
       }
       const outcome = await door.consumeUploadLink(
-        String(req.params.token ?? ''),
+        token,
         {
           filename: uploadLinkFilename(req.headers?.['x-file-name']),
           mimeType: uploadLinkMimeType(req.headers?.['content-type']),
           data,
         },
-        caller,
+        caller.userId as string,
       );
       sendOk(res, {
         fileId: outcome.fileId,
+        // [#32747] Every answer names its ids as a list, one here.
+        fileIds: [outcome.fileId],
         size: outcome.size,
         ...(outcome.field !== undefined ? { field: outcome.field } : {}),
         ...(outcome.attachmentId !== undefined ? { attachmentId: outcome.attachmentId } : {}),
       });
     } catch (err: any) {
-      if (relayUploadLinkRefusal(res, err)) return;
+      if (relayUploadLinkRefusal(res, err, copy)) return;
       sendServerFault(res, 500, 'INTERNAL', 'Upload failed', err);
     }
   });
@@ -2295,6 +2441,12 @@ function isMissingLocalFile(err: unknown): boolean {
  */
 export const DEFAULT_DOWNLOAD_TTL = 300;
 
+/** [#32712] A request header's one value: the first, when a transport hands a list. */
+function headerValue(raw: string | string[] | undefined): string | undefined {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  return typeof first === 'string' ? first : undefined;
+}
+
 /** [#30892] Is `err` the one refusal an unusable upload link gets? */
 function isUnusableUploadLink(err: unknown): boolean {
   const e = err as { code?: unknown; status?: unknown } | null;
@@ -2308,19 +2460,233 @@ function isUnusableUploadLink(err: unknown): boolean {
  * outages (the authorization store's, and a `503` `SERVICE_UNAVAILABLE`),
  * so a fault's own text never reaches the link's holder — every other throw
  * is the route's `500`.
+ *
+ * [#32734] The declared status is `resolveThrownHttpError`'s
+ * `declaredStatus`, which reads three limbs in order: `status`; then
+ * `statusCode`, the spelling a lifecycle hook's refusal declares (the record
+ * lock's `409 RECORD_LOCKED`, which reading `status` alone answered `500`);
+ * then the validation shape (`code: 'VALIDATION_FAILED'` or a
+ * `ValidationError`), which declares `400`. A throw carrying no string `code`
+ * is not relayed, whatever it declares.
+ *
+ * [#32783] The code is the resolver's closed `code` (ADR-0112, the #9106
+ * ruling: `error.code` is a closed vocabulary at every door), as
+ * {@link relayAttachFailure} answers it: a registered spelling verbatim, and
+ * an unregistered one as the code its status derives, with the producer's
+ * spelling beside it as `declaredCode` ({@link demotedDeclaredCode}).
+ *
+ * [#32712] The page shows the refusal as `userMessage`, composed in the
+ * request's language (`copy`): the producer's own user-facing text when it
+ * marked one, else the page's sentence for the code (`upload-link-copy.ts`),
+ * which names no record, object or field. `message` keeps the producer's
+ * text, its own code prefix stripped the way the `/api/v1/data` door strips
+ * it (`withoutDeclaredCodePrefix`).
  */
-function relayUploadLinkRefusal(res: IHttpResponse, err: unknown): boolean {
+function relayUploadLinkRefusal(res: IHttpResponse, err: unknown, copy: UploadLinkCopy): boolean {
   if (isAuthzStoreUnavailableError(err)) {
-    sendError(res, err.status, err.code, err.message);
+    sendError(res, err.status, err.code, err.message, {
+      userMessage: uploadLinkRefusalText(copy, err.status, err.code, err.message),
+    });
     return true;
   }
-  const e = err as { code?: unknown; status?: unknown; message?: unknown } | null;
-  if (!e || typeof e.code !== 'string' || typeof e.status !== 'number') return false;
-  const relayable =
-    (e.status >= 400 && e.status < 500) || (e.status === 503 && e.code === 'SERVICE_UNAVAILABLE');
+  const e = err as { code?: unknown; message?: unknown } | null;
+  if (!e || typeof e.code !== 'string') return false;
+  const thrown = resolveThrownHttpError(err);
+  const status = thrown.declaredStatus;
+  if (status === undefined) return false;
+  // The outage arm names its code as spelled: a 503 whose spelling is not
+  // `SERVICE_UNAVAILABLE` stays a fault, though its status derives that code.
+  const relayable = (status >= 400 && status < 500) || (status === 503 && thrown.declaredCode === 'SERVICE_UNAVAILABLE');
   if (!relayable) return false;
-  sendError(res, e.status, e.code as ErrorCode, typeof e.message === 'string' ? e.message : 'Upload refused');
+  // [#32712] The producer's own code prefix (`RECORD_LOCKED: …`) is off the
+  // text, as the `/api/v1/data` door strips it: `code` carries the token.
+  const stripped = typeof e.message === 'string' ? withoutDeclaredCodePrefix(e.message, err) : '';
+  const message = stripped.length > 0 ? stripped : 'Upload refused';
+  // [#32712] What the page shows: a text the producer marked for the user,
+  // verbatim; else the page's own sentence for the code, in its language.
+  const userMessage = declaredUserMessage(err) ?? uploadLinkRefusalText(copy, status, thrown.code, message);
+  // [#32783] The closed code, and an unregistered spelling beside it.
+  const declaredCode = demotedDeclaredCode(thrown);
+  sendError(res, status, thrown.code, message, {
+    userMessage,
+    ...(declaredCode !== undefined ? { declaredCode } : {}),
+  });
   return true;
+}
+
+/**
+ * [#32747] Room for a several-file submit's form framing (boundaries, part
+ * headers, the `count` field) beyond its files' own bytes, in the declared
+ * body cap.
+ */
+const UPLOAD_LINK_FORM_OVERHEAD_BYTES = 64 * 1024;
+
+/**
+ * [#32747] How many files a link that takes several takes, read before a
+ * multipart body is judged (a read that writes nothing), or `undefined` for a
+ * link that takes one file. A link that cannot be read is `undefined` too: it
+ * takes the one-file path, whose spend answers the refusal it answered before
+ * links took several, in the order it did.
+ */
+async function severalFilesOf(
+  door: UploadLinkDoor,
+  token: string,
+  callerUserId: string,
+): Promise<{ min: number; max: number } | undefined> {
+  let files: { min: number; max: number };
+  try {
+    files = (await door.inspectUploadLink(token, callerUserId)).files;
+  } catch {
+    return undefined;
+  }
+  return files.max > 1 ? files : undefined;
+}
+
+/**
+ * [#32747] Is the submit the page's several-file form: `multipart/form-data`
+ * carrying {@link UPLOAD_LINK_FORM_HEADER}? A multipart body without it is a
+ * file, as it was before links took several.
+ */
+function isUploadLinkForm(contentType: string | string[] | undefined, marker: string | string[] | undefined): boolean {
+  const type = Array.isArray(contentType) ? contentType[0] : contentType;
+  const mark = Array.isArray(marker) ? marker[0] : marker;
+  return (
+    typeof type === 'string' &&
+    type.split(';')[0].trim().toLowerCase() === 'multipart/form-data' &&
+    typeof mark === 'string' &&
+    mark.trim().toLowerCase() === UPLOAD_LINK_FORM_HEADER_VALUE
+  );
+}
+
+/**
+ * Whether a read of `req.body` was refused by the transport's request-body
+ * limit (`PAYLOAD_TOO_LARGE`), a limit that bounds what the HTTP door reads, not
+ * what this door accepts.
+ */
+function isTransportBodyTooLarge(err: unknown): boolean {
+  return !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'PAYLOAD_TOO_LARGE';
+}
+
+/**
+ * The several-file form, bounded by this door's own form limit rather than the
+ * transport's request-body limit. The form the transport parsed when it fits
+ * within that limit; when the transport refused it for size, the form's bytes
+ * read through `rawBody()` (a declared length over this door's limit was
+ * already refused unread), judged against this door's limit, and parsed here.
+ * `refused` names why the bytes read are over this door's limit.
+ */
+async function uploadLinkFormBody(
+  req: IHttpRequest,
+  formLimit: number | undefined,
+): Promise<{ body: unknown; refused?: undefined } | { body?: undefined; refused: string }> {
+  try {
+    return { body: req.body };
+  } catch (err) {
+    if (!isTransportBodyTooLarge(err) || !req.rawBody) throw err;
+  }
+  const bytes = await req.rawBody();
+  if (formLimit !== undefined && bytes.byteLength > formLimit) {
+    return {
+      refused:
+        `The upload body is ${bytes.byteLength} bytes, over the ${formLimit} bytes this link's upload can carry ` +
+        '(its files, each within the "Max upload size (MB)" storage setting).',
+    };
+  }
+  const contentType = req.headers?.['content-type'];
+  let parsed: FormData;
+  try {
+    parsed = await new Response(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), {
+      headers: { 'content-type': String(Array.isArray(contentType) ? contentType[0] : contentType) },
+    }).formData();
+  } catch {
+    // Not a readable form: the form checks below refuse it as one that names no files.
+    return { body: {} };
+  }
+  // A name sent twice is kept as a list, which the form checks refuse.
+  const body: Record<string, unknown> = {};
+  for (const [key, value] of parsed.entries()) {
+    const held = body[key];
+    body[key] = held === undefined ? value : Array.isArray(held) ? [...held, value] : [held, value];
+  }
+  return { body };
+}
+
+/** [#32747] A form value that is a file: what a form parser hands for a file part. */
+interface FormFilePart {
+  name?: unknown;
+  type?: unknown;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+function isFormFilePart(value: unknown): value is FormFilePart {
+  return !!value && typeof value === 'object' && typeof (value as FormFilePart).arrayBuffer === 'function';
+}
+
+/** [#32747] Why a several-file form is refused before any of its parts is read. */
+interface UploadLinkFormRefusal {
+  status: number;
+  code: StandardErrorCode | RegisteredErrorCode;
+  message: string;
+}
+
+/**
+ * [#32747] The files of a several-file submit, in the order sent, or the
+ * reason the form is not one: `count` must name how many files it carries
+ * (a whole number, at most what the link takes), and parts `file0` …
+ * `fileN-1` must each be a file, with no other file part beside them, so a
+ * part a parser dropped (or one sent twice under one name, of which a parser
+ * keeps only the last) is refused rather than stored as fewer files than were
+ * picked. Every one of those refusals comes before any part's bytes are read
+ * here. A `count` over what the link takes gets the link's file-count
+ * refusal; the service judges the exact count again before the spend.
+ */
+async function uploadLinkFormFiles(
+  body: unknown,
+  linkFiles: { min: number; max: number },
+): Promise<UploadLinkUpload[] | UploadLinkFormRefusal> {
+  const malformed = (message: string): UploadLinkFormRefusal => ({ status: 400, code: 'INVALID_REQUEST', message });
+  const form = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  const rawCount = form[UPLOAD_LINK_FORM_COUNT_FIELD];
+  const countText = Array.isArray(rawCount) ? undefined : typeof rawCount === 'string' ? rawCount.trim() : undefined;
+  const count = countText !== undefined && /^[0-9]{1,3}$/.test(countText) ? Number(countText) : NaN;
+  if (!Number.isInteger(count) || count < 1) {
+    return malformed(
+      `A several-file upload is a form naming how many files it carries (${UPLOAD_LINK_FORM_COUNT_FIELD}) ` +
+        `and each file as ${UPLOAD_LINK_FORM_FILE_PREFIX}0, ${UPLOAD_LINK_FORM_FILE_PREFIX}1, …`,
+    );
+  }
+  if (count > linkFiles.max) {
+    return {
+      status: UPLOAD_LINK_FILE_COUNT_STATUS,
+      code: UPLOAD_LINK_FILE_COUNT_CODE,
+      message: uploadLinkFileCountMessage(linkFiles, count),
+    };
+  }
+  const partName = new RegExp(`^${UPLOAD_LINK_FORM_FILE_PREFIX}(0|[1-9][0-9]*)$`);
+  const fileParts = Object.entries(form).filter(([key, value]) => isFormFilePart(value) || partName.test(key));
+  if (fileParts.length !== count) {
+    return malformed(`The form names ${count} file(s) in ${UPLOAD_LINK_FORM_COUNT_FIELD} but carries ${fileParts.length}.`);
+  }
+  const parts: FormFilePart[] = [];
+  for (let i = 0; i < count; i++) {
+    const part = form[`${UPLOAD_LINK_FORM_FILE_PREFIX}${i}`];
+    if (!isFormFilePart(part)) {
+      return malformed(
+        `The form carries no file ${UPLOAD_LINK_FORM_FILE_PREFIX}${i}: the files are ` +
+          `${UPLOAD_LINK_FORM_FILE_PREFIX}0 … ${UPLOAD_LINK_FORM_FILE_PREFIX}${count - 1}.`,
+      );
+    }
+    parts.push(part);
+  }
+  const uploads: UploadLinkUpload[] = [];
+  for (const part of parts) {
+    uploads.push({
+      filename: uploadLinkFilename(typeof part.name === 'string' ? part.name : undefined),
+      mimeType: uploadLinkMimeType(typeof part.type === 'string' ? part.type : undefined),
+      data: Buffer.from(await part.arrayBuffer()),
+    });
+  }
+  return uploads;
 }
 
 /** The longest file name an upload link stores, in characters. */

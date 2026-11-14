@@ -147,6 +147,7 @@ import { renderOperationMessage, type ValidationMessageTranslator } from '@objec
 import { AUDIT_EXCLUDED_OBJECTS } from './audit-writers.js';
 import {
   computeParentRecordFilter,
+  doorServedParentObjectsOrNone,
   type ParentObjectReadAdmissionSource,
   type ParentRecordGate,
   type ParentRecordGateEngine,
@@ -1201,7 +1202,12 @@ export function installCommentAccessHooks(
  * objects are every registered object but `sys_comment` itself: a comment can
  * hang off any record (the console writes `thread_id` from every record
  * detail page), so every object the audit writer excludes is a named parent of
- * this gate ({@link commentThreadGate}).
+ * this gate ({@link commentThreadGate}). Of those, only the ones the data door
+ * serves: a comment is served when its reader can open its record through the
+ * data door, so a comment on a record of an object whose `enable` block
+ * refuses `get` is served to no reader, administrators included — on the leaf
+ * and on the thread probe below alike (`parent-record-read-gate.ts`, "A
+ * parent the data door does not serve").
  *
  * That module decides up front, by name, what keeps the bounded probe (over the
  * pair): ADR-0139 D5's two remaining classes — a parent an object-scoped read
@@ -1439,7 +1445,7 @@ async function computeThreadVisibilityFilter(
  * sentinel when none is visible. A throw is the caller's to fail closed on.
  */
 async function probeUnstampedThreads(
-  engine: CommentAccessEngine,
+  engine: ParentRecordGateEngine,
   ctx: CommentReadMiddlewareCtx,
   logger: CommentAccessLogger,
   onlyUnstamped: boolean,
@@ -1482,11 +1488,15 @@ async function probeUnstampedThreads(
    * dropped here, which is what makes them invisible. */
   const threads = new Map<string, CommentThreadTarget>();
   const byObject = new Map<string, Set<string>>();
+  // Only the parents the data door serves: a comment is served when its reader
+  // can open its record through that door (`parent-record-read-gate.ts`, "A
+  // parent the data door does not serve"); with no registry view, none.
+  const served = doorServedParentObjectsOrNone(engine, logger, 'comment read visibility');
   for (const row of candidates) {
     const threadId = row.thread_id;
     if (typeof threadId !== 'string' || threads.has(threadId)) continue;
     const target = parseCommentThreadId(threadId);
-    if (!target) continue;
+    if (!target || !served.has(target.object)) continue;
     threads.set(threadId, target);
     let ids = byObject.get(target.object);
     if (!ids) byObject.set(target.object, (ids = new Set()));

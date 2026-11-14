@@ -48,18 +48,35 @@ function silentLogger(): any {
 
 interface Row { [key: string]: unknown; id: string }
 
-/** A data engine holding the users, and recording every row the stack writes. */
-function dataEngine(users: Row[]) {
+/**
+ * A data engine holding the users and their memberships, and recording every
+ * row the stack writes. `find` answers the membership read an organization-wide
+ * audience makes (equality on plain fields, then offset / limit, projected to
+ * the fields asked); every other `find` answers nothing, as before.
+ */
+function dataEngine(users: Row[], members: Row[] = []) {
     const written: Array<{ object: string; row: Record<string, unknown> }> = [];
     let seq = 0;
-    const tables: Record<string, Row[]> = { sys_user: users };
+    const tables: Record<string, Row[]> = { sys_user: users, sys_member: members };
     const engine = {
         async insert(object: string, row: Record<string, unknown>) {
             const stored = { ...row, id: row.id != null ? String(row.id) : `row_${++seq}` };
             written.push({ object, row: stored });
             return stored;
         },
-        async find() { return []; },
+        async find(object: string, query?: { where?: Record<string, unknown>; fields?: string[]; offset?: number; limit?: number }) {
+            if (object !== 'sys_member') return [];
+            // Equality on plain fields only, as `findOne` below: a combinator or operator is refused.
+            const hits = members.filter((r) => Object.entries(query?.where ?? {}).every(([k, v]) => {
+                if (k.startsWith('$') || (typeof v === 'object' && v !== null)) {
+                    throw new Error(`this double matches equality on plain fields only: ${JSON.stringify(query?.where)}`);
+                }
+                return r[k] === v;
+            }));
+            const offset = query?.offset ?? 0;
+            const page = hits.slice(offset, query?.limit === undefined ? undefined : offset + query.limit);
+            return page.map((r) => (query?.fields ? Object.fromEntries(query.fields.map((f) => [f, r[f]])) : { ...r }));
+        },
         async findOne(object: string, query?: EngineFindOneQueryInput) {
             assertEngineFindOnePredicate(object, query);
             const where = (query as { where?: Record<string, unknown> } | undefined)?.where ?? {};
@@ -78,9 +95,16 @@ function dataEngine(users: Row[]) {
 
 const EXEC = { id: 'usr_exec', email: 'exec@company.example' };
 
+/** Two members of the run's organization (`org_1`, see {@link runOnce}) and one of another. */
+const MEMBERS: Row[] = [
+    { id: 'm1', organization_id: 'org_1', user_id: 'usr_exec', role: 'admin' },
+    { id: 'm2', organization_id: 'org_1', user_id: 'usr_no_role', role: null },
+    { id: 'm3', organization_id: 'org_2', user_id: 'usr_elsewhere', role: 'member' },
+];
+
 /** The stack: messaging with the inbox and email channels, and the notify node over them. */
 function boot(opts: { withData?: boolean } = {}) {
-    const { engine: data, written } = dataEngine([EXEC]);
+    const { engine: data, written } = dataEngine([EXEC], MEMBERS);
     const getData = () => (opts.withData === false ? undefined : (data as any));
     const mailed: unknown[] = [];
     const messaging = new MessagingService({ logger: silentLogger(), getData });
@@ -229,5 +253,28 @@ describe('#25758 — a computed address on a node that does not name email', () 
         expect(run.success).toBe(false);
         expect(step?.error?.message).toContain('no user holds it');
         expect(step?.error?.message).toContain("`recipients: { emailField: 'FIELD' }`");
+    });
+});
+
+describe('[#32445] an org: recipient is an audience selector, never a written-out address', () => {
+    it('org:members reaches every member of the run\'s organization, and no one outside it', async () => {
+        const stack = boot();
+        const { run } = await runOnce(stack, { recipients: 'org:members' });
+        expect(run.success).toBe(true);
+        expect(rowsOf(stack, INBOX_OBJECT).map((r) => r.user_id)).toEqual(['usr_exec', 'usr_no_role']);
+    });
+
+    it.each([
+        ['names no channel (inbox, the default)', undefined],
+        ['names inbox and email', ['inbox', 'email']],
+    ])('an org: value shaped like an address, on a node that %s, is not refused or mailed as an address', async (_label, channels) => {
+        const stack = boot();
+        const { step } = await runOnce(stack, { recipients: ['org:exec@company.example'], ...(channels ? { channels } : {}) });
+        // The address screen would refuse it naming `channels` and a user id,
+        // or mail it as written; the resolver reads it as an unrecognized
+        // organization audience instead, which reaches nobody.
+        expect(step?.error?.message ?? '').not.toContain('`org:exec@company.example`');
+        expect(stack.mailed).toHaveLength(0);
+        expect(rowsOf(stack, INBOX_OBJECT)).toHaveLength(0);
     });
 });

@@ -1209,11 +1209,12 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "سبب الإلغاء",
-        help: "سبب إبطال المفتاح، حين يحدد من يستطيع استعادته. إعادة تعيين كلمة المرور من قِبل المسؤول: لا يستطيع استعادة المفتاح إلا مسؤول المنصة. انتهاء العضوية في المؤسسة: غادر المالك المؤسسة، ولا يستطيع أحد استعادة المفتاح؛ وينشئ عضوٌ مفتاحًا جديدًا. معلّق من قِبل مسؤول: أبطل مسؤول المنصة مفتاحًا لا يملكه، ولا يستطيع استعادته إلا مسؤول المنصة. يُمسح عند استعادة المفتاح. فارغ للمفتاح الذي أبطله مالكه من قائمة مفاتيح API.",
+        help: "سبب إبطال المفتاح، حين يحدد من يستطيع استعادته. إعادة تعيين كلمة المرور من قِبل المسؤول: لا يستطيع استعادة المفتاح إلا مسؤول المنصة. انتهاء العضوية في المؤسسة: غادر المالك المؤسسة، ولا يستطيع أحد استعادة المفتاح؛ وينشئ عضوٌ مفتاحًا جديدًا. معلّق من قِبل مسؤول: أبطل مسؤول المنصة مفتاحًا لا يملكه، ولا يستطيع استعادته إلا مسؤول المنصة. أُلغي تفعيله من قِبل الدليل: ألغى دليل المؤسسة (SCIM) تفعيل المالك أو حذفه، ولا يستطيع أحد استعادة المفتاح، حتى بعد إعادة تفعيل المالك؛ وينشئ المالك مفتاحًا جديدًا. يُمسح عند استعادة المفتاح. فارغ للمفتاح الذي أبطله مالكه من قائمة مفاتيح API.",
         options: {
           admin_password_reset: "إعادة تعيين كلمة المرور من قِبل المسؤول",
           organization_membership_ended: "انتهاء العضوية في المؤسسة",
-          administrator_suspended: "معلّق من قِبل مسؤول"
+          administrator_suspended: "معلّق من قِبل مسؤول",
+          scim_deactivated: "أُلغي تفعيله من قِبل الدليل"
         }
       },
       key: {
@@ -2110,6 +2111,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "قراءة المطالبات من رمز المعرّف فقط",
         help: "لـ OIDC فقط. تُقرأ عناوين البريد الإلكتروني والاسم والمجموعات من رمز المعرّف الذي تحقق منه موفر الهوية، ولا تُستدعى نقطة نهاية userinfo الخاصة به. فعّله لـ Microsoft Entra ID، إذ لا تتضمن استجابة userinfo لديه مجموعات ولا preferred_username. معطّل افتراضيًا: الموفر الذي لديه نقطة نهاية userinfo يقرأ مطالباته من تلك الاستجابة. غيّره عبر «تعديل خيارات تسجيل الدخول»."
       },
+      sign_out_of_idp: {
+        label: "Sign Out of the Company Sign-In Too",
+        help: "When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "سجّله",
         help: "المستخدم الذي سجّل هذا المزوّد"
@@ -2220,6 +2225,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
             helpText: "اختياري. تنسيق NameID المطلوب في SAML. القيمة الافتراضية هي التنسيق المُهيَّأ لدى مزوّد الهوية.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options."
+          },
           mapEmail: {
             label: "التعيين: سمة البريد الإلكتروني",
             helpText: "اختياري. سمة التأكيد المعيَّنة لبريد المستخدم الإلكتروني. القيمة الافتراضية \"email\"، ثم NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -2304,6 +2313,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           keepCurrentCert: {
             label: "الاستمرار في الوثوق بالشهادة الحالية",
             helpText: "أثناء انتقال مزوّد الهوية، تُقبل التأكيدات الموقّعة بأيٍّ من الشهادتين. عدّل مرة أخرى دون هذا الخيار لإزالة الشهادة القديمة."
+          },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one."
           }
         },
         resultDialog: {
@@ -3079,6 +3092,34 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "حسب الموضوع"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "إرسال رسالة داخل التطبيق",
+        description: "أرسل رسالة إلى جميع أعضاء مؤسستك أو إلى الأعضاء الذين تختارهم. تظهر في إشعارات كل مستلم.",
+        successMessage: "تم إرسال الرسالة. عدد المستلمين: {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "جميع أعضاء هذه المؤسسة",
+            helpText: "الإرسال إلى كل عضو في مؤسستك الحالية. اتركه متوقفًا لاختيار المستلمين أدناه."
+          },
+          recipients: {
+            label: "المستلمون",
+            helpText: "أعضاء مؤسستك الذين تُرسل إليهم الرسالة، عندما لا تكون للجميع."
+          },
+          title: {
+            label: "العنوان",
+            helpText: "السطر الذي يراه كل مستلم في إشعاراته."
+          },
+          body: {
+            label: "نص الرسالة"
+          },
+          link: {
+            label: "الرابط",
+            helpText: "اختياري. صفحة في هذا التطبيق (تبدأ بـ /) أو عنوان ويب تفتحه الرسالة."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3765,9 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "الإصدار"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "نوع العملية",

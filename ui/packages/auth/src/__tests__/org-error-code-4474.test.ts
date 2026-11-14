@@ -122,3 +122,78 @@ describe('#4474 — organization rejections carry the machine code', () => {
     expect(message).toBe('Failed to accept invitation');
   });
 });
+
+describe('objectstack#32648 — a refused organization delete carries its dependents', () => {
+  /** plugin-auth's 409 body for an organization that still owns records. */
+  const restricted = (extra: Record<string, unknown> = {}) => ({
+    code: 'DELETE_RESTRICTED',
+    message:
+      'This organization still owns records in sys_environment (2), crm_account (3). ' +
+      'Delete or move those records first, then delete the organization.',
+    dependents: [
+      { object: 'sys_environment', count: 2 },
+      { object: 'crm_account', count: 3 },
+    ],
+    ...extra,
+  });
+
+  async function rejectionOf(promise: Promise<unknown>) {
+    try {
+      await promise;
+    } catch (err) {
+      return err as Error & { code?: string; dependents?: unknown; userMessage?: unknown };
+    }
+    throw new Error('expected the call to reject, but it resolved');
+  }
+
+  it('deleteOrganization keeps `dependents` beside the code, and the message is unchanged', async () => {
+    const client = clientWith(rejectingFetch('/organization/delete', 409, restricted()));
+    const err = await rejectionOf(client.deleteOrganization('org-1'));
+    expect(err.code).toBe('DELETE_RESTRICTED');
+    expect(err.dependents).toEqual([
+      { object: 'sys_environment', count: 2 },
+      { object: 'crm_account', count: 3 },
+    ]);
+    expect(err.message).toBe(restricted().message);
+    expect(err).not.toHaveProperty('userMessage');
+  });
+
+  it('an entry with no object is dropped, and a withheld or malformed count is left out', async () => {
+    const client = clientWith(
+      rejectingFetch(
+        '/organization/delete',
+        409,
+        restricted({
+          dependents: [
+            { object: 'crm_note' },
+            { object: 'crm_task', count: -1 },
+            { object: 'crm_lead', count: '4' },
+            { count: 5 },
+            null,
+            { object: '', count: 1 },
+          ],
+        }),
+      ),
+    );
+    const err = await rejectionOf(client.deleteOrganization('org-1'));
+    expect(err.dependents).toEqual([{ object: 'crm_note' }, { object: 'crm_task' }, { object: 'crm_lead' }]);
+  });
+
+  it('a body without a usable list carries no `dependents` key at all', async () => {
+    for (const dependents of [undefined, 'sys_environment', [], [{ count: 2 }]]) {
+      const client = clientWith(rejectingFetch('/organization/delete', 409, restricted({ dependents })));
+      const err = await rejectionOf(client.deleteOrganization('org-1'));
+      expect(err.code).toBe('DELETE_RESTRICTED');
+      expect(err).not.toHaveProperty('dependents');
+    }
+  });
+
+  it('a producer-marked `userMessage` is carried; a blank one is not', async () => {
+    const marked = clientWith(
+      rejectingFetch('/organization/delete', 409, restricted({ userMessage: '该组织仍有数据，无法删除。' })),
+    );
+    expect((await rejectionOf(marked.deleteOrganization('org-1'))).userMessage).toBe('该组织仍有数据，无法删除。');
+    const blank = clientWith(rejectingFetch('/organization/delete', 409, restricted({ userMessage: '  ' })));
+    expect(await rejectionOf(blank.deleteOrganization('org-1'))).not.toHaveProperty('userMessage');
+  });
+});

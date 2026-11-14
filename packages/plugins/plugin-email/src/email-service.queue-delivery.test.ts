@@ -338,10 +338,7 @@ describe('EmailService — queue delivery on', () => {
     expect(rows.get(res.id)!.attachments_json).toBeUndefined();
   });
 
-  it('keeps a message inline when `content` is outside the string | Buffer contract', async () => {
-    // A Uint8Array/stream is off-contract for EmailAttachment but nodemailer
-    // accepts it, so inline delivery must keep working exactly as before —
-    // what it must NOT do is queue a row that cannot rebuild it.
+  it('refuses a message whose attachment content is not a string or a Buffer: no queued row, no job, no send', async () => {
     const transport = { send: vi.fn(async () => ({ messageId: '<odd@x>' })) };
     const queue = makeQueue();
     const { p, rows } = makePersistence();
@@ -350,17 +347,41 @@ describe('EmailService — queue delivery on', () => {
       transport, defaultFrom: 'no@reply.com', persistence: p, logger, queueDelivery: wiring(queue),
     });
 
-    const res = await svc.send({
+    await expect(svc.send({
       ...MSG,
       attachments: [{ filename: 'odd.bin', content: new Uint8Array([1, 2, 3]) as unknown as Buffer }],
-    });
+    })).rejects.toThrow(/^VALIDATION_FAILED: `attachments\[0\]\.content` must be a string or a Buffer, not a typed array$/);
 
-    expect(res.status).toBe('sent');
+    expect(transport.send).not.toHaveBeenCalled();
     expect(queue.published).toHaveLength(0);
-    expect(rows.get(res.id)!.attachments_json).toBeUndefined();
-    expect(logger.info.mock.calls.map((c) => String(c[0])).join('\n'))
-      .toMatch(/neither a string nor a Buffer/);
-    expect(logger.error).not.toHaveBeenCalled();
+    expect([...rows.values()].map((r) => r.status)).toEqual(['failed']);
+  });
+
+  it('CONTROL — a Buffer attachment with a cid is queued, and the row rebuilds it whole for delivery', async () => {
+    const transport = { send: vi.fn(async (_m: NormalizedEmailMessage) => ({ messageId: '<cid@x>' })) };
+    const queue = makeQueue();
+    const { p, rows } = makePersistence();
+    const svc = new EmailService({
+      transport, defaultFrom: 'no@reply.com', persistence: p, queueDelivery: wiring(queue),
+    });
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff]);
+
+    const res = await svc.send({
+      ...MSG,
+      html: '<img src="cid:logo@inline">',
+      attachments: [{ filename: 'logo.png', content: png, contentType: 'image/png', cid: 'logo@inline' }],
+    });
+    expect(res.status).toBe('queued');
+    expect(transport.send).not.toHaveBeenCalled();
+
+    const out = await svc.deliverPersistedRow({ ...rows.get(res.id)! }, { maxAttempts: 1 });
+
+    expect(out.status).toBe('sent');
+    const [delivered] = transport.send.mock.calls[0]!;
+    expect(delivered.attachments).toHaveLength(1);
+    expect(delivered.attachments![0]).toMatchObject({ filename: 'logo.png', contentType: 'image/png', cid: 'logo@inline' });
+    expect(Buffer.isBuffer(delivered.attachments![0]!.content)).toBe(true);
+    expect((delivered.attachments![0]!.content as Buffer).equals(png)).toBe(true);
   });
 
   it('persists headers and attachments in INLINE mode too, so a stranded row is whole', async () => {

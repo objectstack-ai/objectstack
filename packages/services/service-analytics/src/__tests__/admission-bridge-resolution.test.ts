@@ -52,7 +52,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { LiteKernel, ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import { DatasetSchema } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { AnalyticsServicePlugin } from '../plugin.js';
+import { AnalyticsServicePlugin, type AnalyticsServicePluginOptions } from '../plugin.js';
 import type { AnalyticsService } from '../analytics-service.js';
 
 /** The reported probe's shape: one object, one count measure, no dimensions. */
@@ -126,10 +126,10 @@ function fakePluginContext(opts: {
   };
 }
 
-async function bootAnalytics(security?: () => unknown) {
+async function bootAnalytics(security?: () => unknown, options: AnalyticsServicePluginOptions = {}) {
   const { engine, reads } = fakeEngine();
   const { ctx, registered, error } = fakePluginContext({ data: engine, security });
-  await new AnalyticsServicePlugin({ queryCapabilities: nativeSql }).init(ctx as never);
+  await new AnalyticsServicePlugin({ queryCapabilities: nativeSql, ...options }).init(ctx as never);
   return { service: registered.analytics as AnalyticsService, reads, error };
 }
 
@@ -241,6 +241,115 @@ describe('analytics admission bridge — resolving the "security" service', () =
       status: 403,
     });
     expect(refused.reads).toEqual([]);
+  });
+});
+
+// ── The host's narrowing, composed over the provider this plugin wires ───────
+
+/**
+ * `narrowObjectReadAdmission` is the PUBLIC composition point a host uses to
+ * scope the object-level read per actor without naming the service's private
+ * provider. Its promise is one direction only: it can refuse a read the
+ * plugin's own provider admits, and it can never admit one that provider
+ * refuses. Each refusal keeps the gate's existing envelope — 403 for a denial,
+ * 503 for a provider that threw — and is reached before any read.
+ */
+describe('analytics admission — a host narrowing (narrowObjectReadAdmission)', () => {
+  const securityAdmits = () => ({ ...rowScopeOpen, canReadObject: () => true });
+
+  it('without the option, the service holds the plugin\'s provider unchanged', async () => {
+    // No narrowing ⇒ no wrapper: the provider the gate asks IS the host's own
+    // function, the same reference, so the gate's behaviour cannot have moved.
+    const admitObjectRead = () => true;
+    const { service } = await bootAnalytics(undefined, { admitObjectRead });
+    expect((service as unknown as { readAdmissionProvider?: unknown }).readAdmissionProvider).toBe(admitObjectRead);
+  });
+
+  it('REFUSES 403 a read the security bridge admits when the narrowing answers false', async () => {
+    const narrowObjectReadAdmission = vi.fn(() => false);
+    const { service, reads } = await bootAnalytics(securityAdmits, { narrowObjectReadAdmission });
+
+    await expect(runProbe(service)).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      status: 403,
+    });
+    expect(narrowObjectReadAdmission).toHaveBeenCalledWith('employer_member', CALLER);
+    expect(reads).toEqual([]);
+  });
+
+  it('serves the read when both the security bridge and the narrowing admit', async () => {
+    const narrowObjectReadAdmission = vi.fn(async () => true);
+    const { service, reads } = await bootAnalytics(securityAdmits, { narrowObjectReadAdmission });
+
+    expect((await runProbe(service)).rows).toEqual([{ cnt: 24 }]);
+    expect(narrowObjectReadAdmission).toHaveBeenCalledWith('employer_member', CALLER);
+    expect(reads).toHaveLength(1);
+  });
+
+  it('narrows a host-supplied admitObjectRead the same way', async () => {
+    const { service, reads } = await bootAnalytics(undefined, {
+      admitObjectRead: () => true,
+      narrowObjectReadAdmission: (object) => object !== 'employer_member',
+    });
+
+    await expect(runProbe(service)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(reads).toEqual([]);
+  });
+
+  it('cannot WIDEN: a read the security bridge denies stays 403, and the narrowing is never asked', async () => {
+    const narrowObjectReadAdmission = vi.fn(() => true);
+    const { service, reads } = await bootAnalytics(
+      () => ({ canReadObject: () => false }),
+      { narrowObjectReadAdmission },
+    );
+
+    await expect(runProbe(service)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(narrowObjectReadAdmission).not.toHaveBeenCalled();
+    expect(reads).toEqual([]);
+  });
+
+  it('cannot WIDEN: a security bridge that could not answer stays 503, and the narrowing is never asked', async () => {
+    const narrowObjectReadAdmission = vi.fn(() => true);
+    const { service, reads } = await bootAnalytics(
+      () => { throw new Error('security service is initialising'); },
+      { narrowObjectReadAdmission },
+    );
+
+    await expect(runProbe(service)).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
+      object: 'employer_member',
+    });
+    expect(narrowObjectReadAdmission).not.toHaveBeenCalled();
+    expect(reads).toEqual([]);
+  });
+
+  it('REFUSES 503, fail-closed, when the narrowing THROWS', async () => {
+    const { service, reads, error } = await bootAnalytics(securityAdmits, {
+      narrowObjectReadAdmission: () => { throw new Error('actor scope store unreachable'); },
+    });
+
+    await expect(runProbe(service)).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
+      object: 'employer_member',
+    });
+    expect(reads).toEqual([]);
+    expect(error.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(
+      /read-admission resolution failed for object "employer_member" .* \(fail-closed\)/,
+    );
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['a truthy non-boolean', 'yes'],
+  ])('REFUSES 403 when the narrowing answers %s rather than true', async (_label, answer) => {
+    const { service, reads } = await bootAnalytics(securityAdmits, {
+      narrowObjectReadAdmission: () => answer as never,
+    });
+
+    await expect(runProbe(service)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(reads).toEqual([]);
   });
 });
 

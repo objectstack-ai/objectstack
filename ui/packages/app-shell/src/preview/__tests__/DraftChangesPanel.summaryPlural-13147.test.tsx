@@ -21,14 +21,19 @@
 import '@testing-library/jest-dom/vitest';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 
-import { DraftChangesPanel } from '../DraftChangesPanel';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
+
+import { COUNTED_DRAFT_TYPES, DraftChangesPanel } from '../DraftChangesPanel';
+// Warmed at module scope: the sheet's security lint loads it with a dynamic
+// import, and that first transform must not be paid inside a `findBy` window.
+import '@objectstack/lint';
 
 type Row = { type: string; name: string };
 
-function stubFetch(rows: Row[]) {
+function stubFetch(rows: Row[], draftBody: Record<string, unknown> = { name: 'x' }) {
   const drafts = rows.map((r) => ({ ...r, packageId: 'com.x', label: r.name }));
   vi.stubGlobal(
     'fetch',
@@ -36,7 +41,7 @@ function stubFetch(rows: Row[]) {
       const url = String(input);
       const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
       if (url.includes('/_drafts')) return ok({ drafts });
-      if (url.includes('state=draft')) return ok({ name: 'x' });
+      if (url.includes('state=draft')) return ok(draftBody);
       // Every published-list read: nothing is published, so every row is New.
       if (/\/meta\/\w+(\?|$)/.test(url)) return ok([]);
       return { ok: false, status: 404, json: async () => ({}) };
@@ -49,8 +54,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function summaryFor(rows: Row[], lang: 'en' | 'zh' = 'en') {
-  stubFetch(rows);
+async function summaryFor(rows: Row[], lang: 'en' | 'zh' = 'en', draftBody?: Record<string, unknown>) {
+  stubFetch(rows, draftBody);
   const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <I18nProvider instance={i18n} persistLanguage={false}>
@@ -110,5 +115,47 @@ describe('Pending changes summary — each type agrees with its count (objectui#
       { type: 'st_unknown_kind', name: 'u_b' },
     ]);
     expect(summary).toHaveTextContent(/^2 items · 2 st_unknown_kind$/);
+  });
+});
+
+describe('Pending changes — every type a runtime author can draft reads through the packs', () => {
+  it('the count table names every type the spec registry lets a runtime author create', () => {
+    const draftable = DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowRuntimeCreate).map((e) => e.type);
+    expect(draftable.length).toBeGreaterThan(0);
+    expect(draftable.filter((type) => !COUNTED_DRAFT_TYPES.includes(type))).toEqual([]);
+  });
+
+  it('zh: a field mapping and a seed read their zh names, in the summary and in the group headings', async () => {
+    const summary = await summaryFor(
+      [
+        { type: 'mapping', name: 'm_a' },
+        { type: 'seed', name: 's_a' },
+      ],
+      'zh',
+    );
+    await waitFor(() => expect(summary).toHaveTextContent(/^2 项 · 字段映射 1 · 种子数据 1$/));
+    const headings = screen.getAllByRole('heading', { level: 4 }).map((h) => h.textContent);
+    expect(headings).toEqual(['字段映射 1', '种子数据 1']);
+  });
+
+  it('en: the same drafts read "2 items · 1 field mapping · 1 seed data set"', async () => {
+    const summary = await summaryFor([
+      { type: 'mapping', name: 'm_a' },
+      { type: 'seed', name: 's_a' },
+    ]);
+    expect(summary).toHaveTextContent(/^2 items · 1 field mapping · 1 seed data set$/);
+  });
+});
+
+describe('Pending changes — a pre-publish security finding reads in the console language', () => {
+  /** An object draft that never authored its sharing baseline: `security-owd-unset`. */
+  const OWD_LESS = { name: 'crmext_visit', label: 'Visit', fields: { name: { type: 'text', label: 'Name' } } };
+
+  it('zh: the row reads the zh verdict of its rule, and the rule\'s own text stays on its tooltip', async () => {
+    await summaryFor([{ type: 'object', name: 'crmext_visit' }], 'zh', OWD_LESS);
+    const block = await screen.findByTestId('draft-security-problems', undefined, { timeout: 8000 });
+    await waitFor(() => expect(block.textContent).toContain('未声明记录共享模型（sharingModel）'));
+    const row = within(block).getByRole('listitem');
+    expect(row.getAttribute('title')).toMatch(/declares no sharingModel/);
   });
 });

@@ -505,12 +505,14 @@ const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string; face?: LoweringFac
   },
 ];
 
-const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | 'crypto.uuid' | 'log' }> = [
+const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | 'crypto.uuid' | 'log' | 'email.send' | 'activity.append' }> = [
   // Match `ctx.api.object(...)` directly OR a local alias like
   // `const api = ctx.api;` then `api.object(...)`. We accept any
   // identifier (or chain) ending in `.object(...)` followed by a known
-  // read/write method — over-inclusive but safe (false-positive caps
-  // get rejected at the runtime by the sandbox if not actually granted).
+  // read/write method — over-inclusive, and for these tokens harmless: an
+  // over-inferred grant is one the body never exercises, and the sandbox
+  // checks a grant only at a call. One token is the exception, see the door
+  // patterns at the end of this list.
   { rx: /\.object\s*\([^)]+\)\s*\.\s*(?:find|findOne|count|aggregate|get|list)\b/, cap: 'api.read' },
   { rx: /\.object\s*\([^)]+\)\s*\.\s*(?:insert|update|upsert|delete|patch|remove|create)\b/, cap: 'api.write' },
   { rx: /ctx\.crypto\.randomUUID\b/, cap: 'crypto.uuid' },
@@ -535,6 +537,20 @@ const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | '
   // arrives as a sandbox refusal at run time, far from its cause. Over-inferring
   // grants a token the body may not use, which the sandbox simply never checks.
   { rx: /\.\s*title\s*\(\s*[^)\s]/, cap: 'api.read' },
+  // The two platform doors: a call to the door is what its token grants.
+  //
+  // ⛔ An over-inferred `email.send` is NOT harmless on a hook. A hook body may
+  // not be granted it (ruling 6843314411 on #32004: a message cannot be taken
+  // back if the write that runs the hook rolls back), and the hook's parse
+  // refuses a body that carries it, so the build fails on a handler whose
+  // source merely spells `ctx.email.send` without calling it: a string, or a
+  // branch that never runs (a comment does not count; the lowered source
+  // carries none). That failure is the rule working: the remedy is
+  // to take the spelling out of the hook handler, and mail on a record change
+  // goes through an action, a job or a flow. An action or a job body is
+  // granted the token as before.
+  { rx: /ctx\.email\.send\b/, cap: 'email.send' },
+  { rx: /ctx\.activity\.append\b/, cap: 'activity.append' },
 ];
 
 export interface ExtractedBody {
@@ -546,7 +562,7 @@ export interface ExtractedBody {
    * is retired (see this file's header). An author whose needs differ from what
    * inference derives writes `body.capabilities` on the hook instead.
    */
-  capabilities: Array<'api.read' | 'api.write' | 'crypto.uuid' | 'log'>;
+  capabilities: Array<'api.read' | 'api.write' | 'crypto.uuid' | 'log' | 'email.send' | 'activity.append'>;
   /** True when source is a single expression (arrow with implicit return). */
   isExpression: boolean;
 }
@@ -740,10 +756,10 @@ interface ParameterRebind {
   /** Names bound to the WHOLE context: an identifier parameter, an object-rest element. */
   contextRoots: readonly string[];
   /** Names bound to ONE capability-bearing member: `({ log: l })` binds `l` to `ctx.log`. */
-  memberLocals: Readonly<Record<'log' | 'crypto' | 'title', readonly string[]>>;
+  memberLocals: Readonly<Record<'log' | 'crypto' | 'title' | 'email' | 'activity', readonly string[]>>;
 }
 
-const NO_REBIND: ParameterRebind = { prologue: '', contextRoots: [], memberLocals: { log: [], crypto: [], title: [] } };
+const NO_REBIND: ParameterRebind = { prologue: '', contextRoots: [], memberLocals: { log: [], crypto: [], title: [], email: [], activity: [] } };
 
 /**
  * The context members {@link CAPABILITY_PATTERNS} infers a token from. A
@@ -752,7 +768,7 @@ const NO_REBIND: ParameterRebind = { prologue: '', contextRoots: [], memberLocal
  * computed key under one of them could not be followed, and a body the build
  * under-grants is refused by the sandbox at run time.
  */
-const CAPABILITY_BEARING_MEMBERS: ReadonlySet<string> = new Set(['api', 'log', 'crypto', 'title']);
+const CAPABILITY_BEARING_MEMBERS: ReadonlySet<string> = new Set(['api', 'log', 'crypto', 'title', 'email', 'activity']);
 
 /**
  * A hook-face refusal that names the PARAMETER, in the family's wording: what
@@ -863,7 +879,7 @@ function planHookParameterRebind(
   }
 
   const contextRoots: string[] = [];
-  const memberLocals: Record<'log' | 'crypto' | 'title', string[]> = { log: [], crypto: [], title: [] };
+  const memberLocals: Record<'log' | 'crypto' | 'title' | 'email' | 'activity', string[]> = { log: [], crypto: [], title: [], email: [], activity: [] };
   if (ts.isIdentifier(name)) {
     contextRoots.push(name.text);
   } else if (ts.isObjectBindingPattern(name)) {
@@ -890,7 +906,7 @@ function planHookParameterRebind(
             `(\`{ ${key ?? 'log'} }\`), or read it as \`ctx.${key ?? 'log'}\``,
         );
       }
-      if (key !== 'api') memberLocals[key as 'log' | 'crypto' | 'title'].push(el.name.text);
+      if (key !== 'api') memberLocals[key as 'log' | 'crypto' | 'title' | 'email' | 'activity'].push(el.name.text);
     }
   }
 
@@ -963,12 +979,20 @@ function reboundCapabilities(source: string, rebind: ParameterRebind): Array<Ext
   for (const r of rebind.contextRoots) {
     if (new RegExp(String.raw`${root(r)}\.log\.(?:info|warn|error|debug)\b`).test(source)) out.push('log');
     if (new RegExp(String.raw`${root(r)}\.crypto\.randomUUID\b`).test(source)) out.push('crypto.uuid');
+    if (new RegExp(String.raw`${root(r)}\.email\.send\b`).test(source)) out.push('email.send');
+    if (new RegExp(String.raw`${root(r)}\.activity\.append\b`).test(source)) out.push('activity.append');
   }
   for (const l of rebind.memberLocals.log) {
     if (new RegExp(String.raw`${root(l)}\.(?:info|warn|error|debug)\b`).test(source)) out.push('log');
   }
   for (const l of rebind.memberLocals.crypto) {
     if (new RegExp(String.raw`${root(l)}\.randomUUID\b`).test(source)) out.push('crypto.uuid');
+  }
+  for (const l of rebind.memberLocals.email) {
+    if (new RegExp(String.raw`${root(l)}\.send\b`).test(source)) out.push('email.send');
+  }
+  for (const l of rebind.memberLocals.activity) {
+    if (new RegExp(String.raw`${root(l)}\.append\b`).test(source)) out.push('activity.append');
   }
   for (const l of rebind.memberLocals.title) {
     if (new RegExp(String.raw`${root(l)}\s*\(\s*[^)\s]`).test(source)) out.push('api.read');

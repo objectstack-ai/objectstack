@@ -392,17 +392,44 @@ describe('[ADR-0150 D8 R1] permission_set_package — only a system writer write
       expect(await storedPackage(engine, created.id)).toBe(QA_PKG);
     });
 
-    it(`${who} inserting a grant that carries the column stores the seam's answer, not the payload's`, async () => {
+    // [#32164, F3] BASE (main e40f2df2): the forged package was replaced by the
+    // seam's answer and the grant stored as QA_PKG's. A package that does not
+    // hold the set is now refused, never re-stamped (epic red line 1).
+    it(`${who} inserting a grant that carries a package not holding its set is refused 409, and nothing is stored`, async () => {
       const { engine } = await sealed();
-      const created: any = await engine.insert(GRANT, TABLES[GRANT]({ permission_set_package: FORGED }), { context: { ...caller } } as never);
+      const err: any = await engine
+        .insert(GRANT, TABLES[GRANT]({ permission_set_package: FORGED }), { context: { ...caller } } as never)
+        .catch((e: unknown) => e);
+      expect(err?.code, String(err?.message ?? err)).toBe('RESOURCE_CONFLICT');
+      expect(err?.refusal).toMatchObject({ reason: 'not-held-by-qualifier', callerPackageId: FORGED, candidates: [{ kind: 'package', packageId: QA_PKG }] });
+      expect(await engine.find(GRANT, { where: {}, context: { isSystem: true } } as never)).toEqual([]);
+    });
+
+    it(`${who} inserting a grant that names the holder stores it`, async () => {
+      const { engine } = await sealed();
+      const created: any = await engine.insert(GRANT, TABLES[GRANT]({ permission_set_package: QA_PKG }), { context: { ...caller } } as never);
       expect(await storedPackage(engine, created.id)).toBe(QA_PKG);
     });
   }
 
-  it('a system update writing the column alone — the backfill\'s and the reviewed bind\'s write — lands as written', async () => {
+  // [#32164, F3] BASE (main e40f2df2): a system update writing a package that
+  // does not hold the set landed as written. The backfill and the reviewed
+  // bind only ever write a holder (the bind re-asks the rule and requires the
+  // package among its candidates), so their write still lands; a non-holder is
+  // refused, the column unchanged.
+  it('a system update writing the column alone — the backfill\'s and the reviewed bind\'s write — lands when it names a holder; a non-holder is refused', async () => {
     const { engine } = await sealed();
     const created: any = await engine.insert(GRANT, TABLES[GRANT](), SYS);
-    await engine.update(GRANT, { permission_set_package: BOUND }, { where: { id: created.id }, context: { isSystem: true } } as never);
-    expect(await storedPackage(engine, created.id)).toBe(BOUND);
+    // A grant written before the seal, package-less, as the backfill finds it.
+    await (engine as any).getDriver(GRANT).knex(GRANT).where({ id: created.id }).update({ permission_set_package: null });
+    await engine.update(GRANT, { permission_set_package: QA_PKG }, { where: { id: created.id }, context: { isSystem: true } } as never);
+    expect(await storedPackage(engine, created.id)).toBe(QA_PKG);
+
+    const err: any = await engine
+      .update(GRANT, { permission_set_package: BOUND }, { where: { id: created.id }, context: { isSystem: true } } as never)
+      .catch((e: unknown) => e);
+    expect(err?.code, String(err?.message ?? err)).toBe('RESOURCE_CONFLICT');
+    expect(err?.refusal).toMatchObject({ reason: 'not-held-by-qualifier', callerPackageId: BOUND });
+    expect(await storedPackage(engine, created.id)).toBe(QA_PKG);
   });
 });

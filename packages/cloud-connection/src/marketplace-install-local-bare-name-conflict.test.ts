@@ -32,10 +32,17 @@
  * ## What these cases pin
  *
  *   - a fresh cloud-fetched install and a cloud-fetched upgrade, each declaring
- *     a flow name another package holds: `422 PLUGIN_REGISTER_FAILED` in the
- *     declared envelope, both holders and the rename named, the registry and
- *     the ledger exactly as before the call, the holder's flow still the
- *     holder's;
+ *     a connector name another package holds: `422 PLUGIN_REGISTER_FAILED` in
+ *     the declared envelope, both holders and the rename named, the registry
+ *     and the ledger exactly as before the call, the holder's items still the
+ *     holder's. [#31696] These cases declared a flow name until the flow's
+ *     one-holder rule narrowed to the namespace (ADR-0150 D9); the connector
+ *     keeps one package holder per name, so it carries the refusal now;
+ *   - [#31696] the answer that moved, FROM → TO (Clause-② yes (narrowing)): a
+ *     cloud-fetched install declaring a flow name another namespace's package
+ *     holds was refused `422` naming both; it now installs, `200` and
+ *     hot-loaded, each package's flow held in its own `(package, name)` slot
+ *     and a by-name read that names no package refused naming both;
  *   - CONTROL, an environment-held security catalog name: the same `422` it
  *     answered before (#25366; its full matrix lives in
  *     `marketplace-install-local-catalog-name-collision.test.ts`);
@@ -73,12 +80,14 @@ type Handler = (c: any) => Promise<any>;
 const ROUTE = '/api/v1/marketplace/install-local';
 const CLOUD_URL = 'http://cloud.test';
 
-/** The package already holding the flow name, installed first. */
+/** The package already holding the connector and flow names, installed first. */
 const HOLDER_ID = 'com.acme.dispatch';
 /** The package the cloud-fetched install asks for. */
 const INCOMING_ID = 'com.acme.routing';
-/** The flow name both declare. */
-const HELD_FLOW = 'assign_technician';
+/** The connector name both declare: one package holder per name (#30803). */
+const HELD_CONN = 'technician_api';
+/** [#31696] The flow name both declare: scoped to the namespace, so each package holds its own. */
+const SHARED_FLOW = 'assign_technician';
 /** CONTROL: a flow name nobody holds. */
 const FREE_FLOW = 'reassign_technician';
 
@@ -89,6 +98,14 @@ const flow = (name: string, tag: string): Bag => ({
     status: 'active',
     nodes: [{ id: 'start', type: 'start', label: 'Start' }],
     edges: [],
+});
+
+const connector = (name: string, tag: string): Bag => ({
+    name,
+    label: `${tag} connector`,
+    type: 'api',
+    description: `${tag} connector body`,
+    enabled: false,
 });
 
 /** A package version whose namespace is its id's last segment, so the refusal's rename is `NAMESPACE_NAME`. */
@@ -202,7 +219,9 @@ async function bootPlugin() {
     const installFromCloud = (versionId: string) => install({ packageId: 'pkg_acme_routing', versionId });
     /** The holder, through the same door's inline branch. */
     const installHolder = async () => {
-        const res = await install({ manifest: packageVersion(HOLDER_ID, '1.0.0', [HELD_FLOW]) });
+        const res = await install({
+            manifest: packageVersion(HOLDER_ID, '1.0.0', [SHARED_FLOW], { connectors: [connector(HELD_CONN, 'dispatch')] }),
+        });
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
     };
     return { ql, install, installFromCloud, installHolder };
@@ -214,9 +233,10 @@ const ledger = () => {
     return { holder: source.read(HOLDER_ID).entry, incoming: source.read(INCOMING_ID).entry };
 };
 
-/** The holder's flow is still the holder's: the registry serves its item under the bare name. */
+/** The holder's items are still the holder's: the registry serves its connector and its flow under the bare name. */
 function expectHolderFlowKept(ql: ObjectQL) {
-    expect(ql.registry.getItem<Bag>('flow', HELD_FLOW)?.label).toBe('dispatch flow');
+    expect(ql.registry.getItem<Bag>('connector', HELD_CONN)?.label).toBe('dispatch connector');
+    expect(ql.registry.getItem<Bag>('flow', SHARED_FLOW)?.label).toBe('dispatch flow');
 }
 
 function expectBareNameRefusal(res: any) {
@@ -229,15 +249,16 @@ function expectBareNameRefusal(res: any) {
     // The registry's own sentence: both holders, the name, and the rename.
     expect(res.payload.error.message).toContain(`package "${INCOMING_ID}"`);
     expect(res.payload.error.message).toContain(`package "${HOLDER_ID}"`);
-    expect(res.payload.error.message).toContain(`"${HELD_FLOW}"`);
-    expect(res.payload.error.message).toContain(`"routing_${HELD_FLOW}"`);
+    expect(res.payload.error.message).toContain(`"${HELD_CONN}"`);
+    expect(res.payload.error.message).toContain(`"routing_${HELD_CONN}"`);
 }
 
 describe('install-local cloud branch refuses a package declaring a bare name another package holds, before any write', () => {
     const versions = {
         'v1-free': packageVersion(INCOMING_ID, '1.0.0', [FREE_FLOW]),
-        'v1-held': packageVersion(INCOMING_ID, '1.0.0', [HELD_FLOW]),
-        'v2-held': packageVersion(INCOMING_ID, '2.0.0', [FREE_FLOW, HELD_FLOW]),
+        'v1-held': packageVersion(INCOMING_ID, '1.0.0', [FREE_FLOW], { connectors: [connector(HELD_CONN, 'routing')] }),
+        'v2-held': packageVersion(INCOMING_ID, '2.0.0', [FREE_FLOW], { connectors: [connector(HELD_CONN, 'routing')] }),
+        'v1-shared-flow': packageVersion(INCOMING_ID, '1.0.0', [SHARED_FLOW]),
     };
 
     it('a fresh install is refused: 422 naming both holders and the rename, nothing registered or ledgered', async () => {
@@ -307,6 +328,29 @@ describe('install-local cloud branch refuses a package declaring a bare name ano
         expect(ledger().incoming?.version).toBe('1.0.0');
         expect(ql.registry.getItem<Bag>('flow', FREE_FLOW)?.label).toBe('routing flow');
         expectHolderFlowKept(ql);
+    });
+
+    it('[#31696] a flow name another namespace\'s package holds installs: 200, hot-loaded, each holder\'s flow in its own slot, a bare read refused naming both', async () => {
+        serveVersions(versions);
+        const { ql, installFromCloud, installHolder } = await bootPlugin();
+        await installHolder();
+
+        const res = await installFromCloud('v1-shared-flow');
+
+        // FROM `422 PLUGIN_REGISTER_FAILED` naming both holders, TO installed.
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.hotLoaded).toBe(true);
+        expect(res.payload.data.hotLoadError).toBeUndefined();
+        expect(ql.registry.getPackage(INCOMING_ID)?.manifest?.version).toBe('1.0.0');
+        expect(ledger().incoming?.version).toBe('1.0.0');
+        expect(ql.registry.resolveItem<Bag>('flow', SHARED_FLOW, HOLDER_ID)?.label).toBe('dispatch flow');
+        expect(ql.registry.resolveItem<Bag>('flow', SHARED_FLOW, INCOMING_ID)?.label).toBe('routing flow');
+        // A caller naming no package is never served one of the two by registration order.
+        let refusal: unknown;
+        try { ql.registry.resolveItem('flow', SHARED_FLOW); } catch (e) { refusal = e; }
+        expect(String((refusal as Error | undefined)?.message)).toContain(HOLDER_ID);
+        expect(String((refusal as Error | undefined)?.message)).toContain(INCOMING_ID);
+        expect(ql.registry.getItem<Bag>('connector', HELD_CONN)?.label).toBe('dispatch connector');
     });
 });
 

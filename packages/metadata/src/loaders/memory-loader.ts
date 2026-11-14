@@ -14,6 +14,12 @@
  * saved. `loadSlots` / `loadManySlots` answer every slot; `load`, `loadMany`
  * and `loadManyKeyed` still answer one item per name, the one saved last, as
  * they did. Every other type is held by name, as before.
+ *
+ * [#31699 R3-B, epic ruling 6796068023] A bundled type (`email_template`)
+ * answers `loadMany` / `loadManyKeyed` one entry per `(package, name, member)`,
+ * as `DatabaseLoader` does. [#32517] Each member of a slot is saved under its
+ * own key (`memberKeyOf`), so a second locale of one package's template no
+ * longer overwrites the first: every key is one member.
  */
 
 import type {
@@ -27,8 +33,13 @@ import type {
 import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions } from './loader-interface.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  isBundledStoreType,
+  lastWrittenKeyOf,
+  latestMembersFirst,
   lastWrittenOf,
+  latestMemberOf,
   recordStoreWrite,
+  slotOfKey,
   slotPackageOf,
   storedNameOf,
   storeKeysNamed,
@@ -49,7 +60,8 @@ export class MemoryLoader implements MetadataLoader {
   };
 
   // Storage: Type -> Key -> Data. The key is the name, or for a type stored
-  // per `(package, name)` the registry's store key (a package's slot).
+  // per `(package, name)` the registry's store key (a package's slot; a
+  // bundled type's member under its slot, [#32517]).
   private storage = new Map<string, Map<string, any>>();
 
   /** [#32246] For a type stored per `(package, name)`: the slot of the name saved last. */
@@ -102,23 +114,74 @@ export class MemoryLoader implements MetadataLoader {
     return Array.from(typeStore, ([name, data]) => ({ name, data: data as T }));
   }
 
-  /** [#32246] Every slot of `name`, each with the package it is held for. */
+  /**
+   * [#32246] Every slot of `name`, each with the package it is held for.
+   * [#32517] A bundled type's slot hands its member saved last first, as
+   * {@link loadManySlots} does, so a reader that keeps a slot's first item
+   * answers what the slot answers.
+   */
   async loadSlots<T = any>(type: string, name: string): Promise<MetadataKeyedItem<T>[]> {
     const typeStore = this.storage.get(type);
-    return storeKeysNamed(typeStore, type, name).map((key) => keyedSlot<T>(key, typeStore!.get(key)));
+    if (!typeStore) return [];
+    return latestMembersFirst(typeStore, storeKeysNamed(typeStore, type, name)).map((key) => keyedSlot<T>(key, typeStore.get(key)));
   }
 
-  /** [#32246] Every slot of every name, each with its name and the package it is held for. */
+  /**
+   * [#32246] Every slot of every name, each with its name and the package it
+   * is held for. [#32517] A bundled type's slot hands its member saved last
+   * first (what the slot held before its members had keys of their own),
+   * then its other members, slots in the order they were first saved.
+   */
   async loadManySlots<T = any>(type: string): Promise<MetadataKeyedItem<T>[]> {
     const typeStore = this.storage.get(type);
     if (!typeStore) return [];
-    return Array.from(typeStore, ([key, data]) => keyedSlot<T>(key, data));
+    if (!isBundledStoreType(type)) return Array.from(typeStore, ([key, data]) => keyedSlot<T>(key, data));
+    const keys: string[] = [];
+    for (const slot of new Set(Array.from(typeStore.keys(), slotOfKey))) {
+      const latest = latestMemberOf(typeStore, slot);
+      keys.push(latest, ...Array.from(typeStore.keys()).filter((key) => key !== latest && slotOfKey(key) === slot));
+    }
+    return keys.map((key) => keyedSlot<T>(key, typeStore.get(key)));
   }
 
-  /** One entry per name, in the order names were first saved: its slot saved last. */
+  /**
+   * [#32517] One entry per `(package, name)` — each package's slot of the
+   * name, and the name's package-less slot — in the order they were first
+   * saved: the slot of the package saved last (an action bound to several
+   * objects by one package is one entry, the binding saved last, as this read
+   * answered it before and as `DatabaseLoader`'s unscoped read answers it;
+   * {@link loadManySlots} serves every binding), each with the package it is
+   * held for. Keyed by name alone, this
+   * answered one package's item and folded every other package's away. A
+   * package-less slot under a name one package holds is that holder's (D4),
+   * so a one-holder name answers its one item saved last, as before.
+   * [#31699 R3-B] A bundled type: every key (each slot's every member), each
+   * under its name.
+   */
   private latestByName<T>(type: string, typeStore: Map<string, any>): MetadataKeyedItem<T>[] {
-    const names = [...new Set(Array.from(typeStore.keys(), storedNameOf))];
-    return names.map((name) => ({ name, data: lastWrittenOf(typeStore, type, name) as T }));
+    if (isBundledStoreType(type)) return Array.from(typeStore, ([key, data]) => ({ name: storedNameOf(key), data: data as T }));
+    // [ADR-0150 D4] A package-less slot under a name exactly one package
+    // holds is that holder's customization, whatever object an action binds:
+    // it folds into the holder's entry, which answers the one saved last.
+    const holdersOf = new Map<string, Set<string>>();
+    for (const key of typeStore.keys()) {
+      const packageId = slotPackageOf(key);
+      if (packageId === undefined) continue;
+      const name = storedNameOf(key);
+      holdersOf.set(name, (holdersOf.get(name) ?? new Set()).add(packageId));
+    }
+    const held = new Map<string, string[]>();
+    for (const key of typeStore.keys()) {
+      const name = storedNameOf(key);
+      const holders = holdersOf.get(name);
+      const holder = slotPackageOf(key) ?? (holders?.size === 1 ? [...holders][0] : undefined);
+      const holding = JSON.stringify([holder ?? null, name]);
+      held.set(holding, [...(held.get(holding) ?? []), key]);
+    }
+    return [...held.values()].map((keys) => {
+      const latest = lastWrittenKeyOf(typeStore, keys);
+      return keyedSlot<T>(latest, typeStore.get(latest));
+    });
   }
 
   async exists(type: string, name: string): Promise<boolean> {
@@ -174,19 +237,25 @@ export class MemoryLoader implements MetadataLoader {
    * [ADR-0150 D3/D4, #32246] For a type stored per `(package, name)`: with
    * `options.packageId`, every slot of the name held for that package (an
    * object-bound action's included, as `DatabaseLoader`'s one row of the
-   * package holds it) — ⛔ never another package's item; with none, by the
+   * package holds it; a bundled type's every member, [#32517]) — ⛔ never
+   * another package's item; with none, by the
    * registry's removal rule (`storeRemovalKeys`): every slot of the name
    * while at most one package holds it, refused
-   * (`PackageScopedNameRefusedError`) when two or more do.
+   * (`PackageScopedNameRefusedError`) when two or more do. [#32560] With
+   * `options.packagelessOnly`, the name's package-less slots only: the
+   * manager judged the removal over every store, so a door that holds a
+   * package's item alone keeps it.
    */
   async delete(type: string, name: string, options?: MetadataLoaderDeleteOptions): Promise<void> {
     const typeStore = this.storage.get(type);
     if (typeStore) {
       if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
         const packageId = options?.packageId;
-        const keys = packageId === undefined
-          ? storeRemovalKeys(typeStore, type, name).keys
-          : storeKeysNamed(typeStore, type, name).filter((key) => slotPackageOf(key) === packageId);
+        const keys = packageId !== undefined
+          ? storeKeysNamed(typeStore, type, name).filter((key) => slotPackageOf(key) === packageId)
+          : options?.packagelessOnly === true
+            ? storeKeysNamed(typeStore, type, name).filter((key) => slotPackageOf(key) === undefined)
+            : storeRemovalKeys(typeStore, type, name).keys;
         for (const key of keys) typeStore.delete(key);
       } else {
         typeStore.delete(name);

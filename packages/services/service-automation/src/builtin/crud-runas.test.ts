@@ -493,7 +493,7 @@ describe("runAs:'user' resolves the triggering user's grants at run setup (#3356
     }
   });
 
-  it('resolves nothing when the trigger already carried permissions, a peer list AND an email (a subflow child, a resumed leg)', async () => {
+  it('resolves nothing when the trigger already carried permissions, a peer list, a membership set AND an email (a subflow child, a resumed leg)', async () => {
     const engine = new AutomationEngine(makeLogger());
     const { data, calls } = fakeData();
     registerCrudNodes(engine, ctxWith(data));
@@ -502,17 +502,18 @@ describe("runAs:'user' resolves the triggering user's grants at run setup (#3356
     let called = 0;
     engine.setUserGrantsResolver(() => {
       called++;
-      return { positions: ['SHOULD_NOT_APPLY'], permissions: ['SHOULD_NOT_APPLY'], org_user_ids: ['SHOULD_NOT_APPLY'], email: 'SHOULD_NOT_APPLY' };
+      return { positions: ['SHOULD_NOT_APPLY'], permissions: ['SHOULD_NOT_APPLY'], org_user_ids: ['SHOULD_NOT_APPLY'], accessible_org_ids: ['SHOULD_NOT_APPLY'], email: 'SHOULD_NOT_APPLY' };
     });
 
     await engine.execute('usr', {
-      userId: 'u1', positions: ['member'], permissions: ['member_default'], tenantId: 't1', org_user_ids: ['u1', 'u3'], email: 'u1@example.test',
+      userId: 'u1', positions: ['member'], permissions: ['member_default'], tenantId: 't1', org_user_ids: ['u1', 'u3'], accessible_org_ids: ['t1'], email: 'u1@example.test',
     } as SeededRunContext);
     expect(called).toBe(0);
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) {
       expect(c.ctx.permissions).toEqual(['member_default']);
       expect(c.ctx.org_user_ids).toEqual(['u1', 'u3']);
+      expect(c.ctx.accessible_org_ids).toEqual(['t1']);
       expect(c.ctx.email).toBe('u1@example.test');
     }
   });

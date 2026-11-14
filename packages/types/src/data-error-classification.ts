@@ -26,13 +26,14 @@ import {
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
 } from './error-leak.js';
-import { isUniqueViolationError, uniqueViolationColumn } from './unique-violation.js';
+import { isUniqueViolationError, uniqueViolationField } from './unique-violation.js';
 import { matchMissingColumnOfRelation } from './relation-sub-object.js';
 import {
     resolveThrownHttpError,
     demotedDeclaredCode,
     declaredUserMessage,
     declaredRefusalMessage,
+    packageScopedRefusalCandidates,
     UNDECLARED_HOOK_REFUSAL_CODE,
 } from './thrown-http-error.js';
 import { isScriptFaultMessage, sandboxBusinessMessage } from './sandbox-business-message.js';
@@ -1071,9 +1072,12 @@ function structuredCodeAnswer(
     // `gsku` while `developerMessage` read `Global SKU`. A field with no label
     // in hand answers the unnamed sentence: the API key is the programs' half
     // and stays on `field`, which still names the column whenever the engine
-    // resolved one through `uniqueViolationColumn` (`field` and `fieldLabel`
+    // resolved one through `uniqueViolationField` (`field` and `fieldLabel`
     // are read off the envelope, not re-derived — the envelope is the
-    // contract, and this module holds no schema to look a label up in).
+    // contract, and this module holds no schema to look a label up in). That
+    // includes an organization-scoped unique field, whose index is the
+    // composite `(organization_id, FIELD)`: the organization part is implied,
+    // so the envelope names FIELD and this sentence reads its label.
     // `developerMessage` is the engine's own sentence (`message`): it names the object and the column
     // and carries no value. The envelope's own `developerMessage` is
     // deliberately NOT relayed — it addresses the in-process caller of
@@ -1643,12 +1647,21 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // question {@link thrownCodeFields} asks, so which bodies carry a
         // `code` at all is unchanged here; only the VALUE can move, and only
         // for a spelling the ADR-0112 union does not contain.
+        //
+        // [#32250, ADR-0150 D5] A package-scoped refusal (a write hook's
+        // `409 RESOURCE_CONFLICT` naming no one item, e.g. a permission-set
+        // grant naming a set two packages ship) names its holders as
+        // `details.candidates`, the member the `/actions` and `/meta` doors
+        // answer; appended last, so every key this body carried keeps its
+        // position. Every other declared refusal answers as it did.
+        const candidates = packageScopedRefusalCandidates(error);
         return {
             status: declaredStatus,
             body: {
                 error: msg,
                 ...thrownCodeFields(error, declaredStatus),
                 ...(object ? { object } : {}),
+                ...(candidates ? { details: { candidates } } : {}),
             },
         };
     }
@@ -1693,12 +1706,12 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // text, and the only values the body carries are the object name the ROUTE
     // supplied and — since #7821 — the conflicting FIELD on `field`, and that
     // second one is safe for the same reason the first is: it does not come from the
-    // driver's prose, it comes from `uniqueViolationColumn`, which hands back
+    // driver's prose, it comes from `uniqueViolationField`, which hands back
     // only a bare `[A-Za-z_][A-Za-z0-9_$]*` identifier it could determine is a
     // COLUMN. The withholding this branch exists to enforce is unchanged:
     // MySQL's text embeds the offending USER DATA (`Duplicate entry
     // 'acme@example.com' …`) and Postgres' embeds the index name, and neither
-    // can reach the wire — `uniqueViolationColumn` refuses index names outright
+    // can reach the wire — `uniqueViolationField` refuses index names outright
     // and the table qualifier is stripped (`sys_user.email` → `email`). Pinned,
     // per dialect, in `rest-unique-violation-dialects.test.ts`. The full text
     // still reaches the operator: `handleRouteError` / `logWithheldServerFault`
@@ -1727,22 +1740,25 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     //
     // **Passing the error OBJECT, not `error.message`, is the point.**
     // `sanitizeRowError` only ever holds a string, so it reads the message
-    // channel alone. This site has the whole error, and `uniqueViolationColumn`
+    // channel alone. This site has the whole error, and `uniqueViolationField`
     // additionally reads `detail` and one step of `cause` — which is where the
     // column actually is for the Postgres driver we ship: node-postgres keeps
     // its `DETAIL: Key (email)=(…)` line on `error.detail` and off the message.
     // Measured on `origin/main`: that shape resolves `email` from the object and
     // `undefined` from `err.message`.
     //
-    // **When it cannot tell, it says nothing.** `uniqueViolationColumn` returns
+    // **When it cannot tell, it says nothing.** `uniqueViolationField` returns
     // `undefined` for an index name (MySQL's `for key 'idx_email_unique'`,
-    // SQLite's `index 'x'`), for a composite key, and for any dialect it does
-    // not parse — and then this branch emits NO `field` key at all. That
+    // SQLite's `index 'x'`), for a composite of more than one authored column,
+    // and for any dialect it does not parse — and then this branch emits NO
+    // `field` key at all. An organization-scoped unique field's composite
+    // (`organization_id` + the field) is not such a composite: the organization
+    // part is the implied scope, so it names the field. That
     // degradation is the contract, not a fallback: a wrong field name is worse
     // than none, because it sends the user to correct an input that was never
     // the problem.
     if (isUniqueViolationError(error)) {
-        const field = uniqueViolationColumn(error);
+        const field = uniqueViolationField(error);
         return {
             status: 409,
             body: {

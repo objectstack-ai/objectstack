@@ -19,7 +19,9 @@ const page = (extra: Record<string, unknown> = {}) => ({
   type: 'record',
   object: 'sys_organization',
   isDefault: true,
-  regions: [],
+  // A record page places a component: a package body parses its pages, and
+  // one that places none is refused there.
+  regions: [{ name: 'main', components: [{ type: 'record:details' }] }],
   ...extra,
 });
 

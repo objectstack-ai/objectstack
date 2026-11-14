@@ -53,6 +53,25 @@
  *     estimate, not a count — the two describe different numbers of rows,
  *     and the footer stays on the page, labelled as the page's.
  *
+ * ## ⛔ Never a raw money aggregate over a `record`-mode amount
+ *
+ * [ADR-0144 D6] The whole set is never inside one currency, so a `sum` /
+ * `avg` / `min` / `max` over a `record`-mode amount (its `currencyField` a
+ * sibling code field or a parent path) would add amounts in different
+ * currencies, and the engine refuses such an aggregate with the query NOT
+ * run. The footer draws no figure for that column (`useScopedColumnSummary`
+ * skips it), so the question leaves it out: `wholeSetSummaryNodes` drops the
+ * node by the same predicate the group headers use
+ * (`requiredCurrencyGrouping`). Asked anyway, the refusal would cost every
+ * other column in the query its whole-set figure. A per-currency total is a
+ * query grouped by the code, which this read does not ask.
+ *
+ * The leave-out needs the object's field catalogue. While the grid still
+ * awaits it (`objectFieldsPending`), a column summary that aggregates the
+ * amounts themselves is not asked: its currency mode is unknown, and a guess
+ * that it is not `record` is the refused request. The answer comes once the
+ * catalogue lands.
+ *
  * ## Asked only for a footer, once per question
  *
  * A grid whose columns declare no summary that maps to an aggregate (none at
@@ -80,6 +99,10 @@ import {
   type ListViewGroupHeaderRow,
 } from '@objectstack/spec/ui';
 import { useDataInvalidation } from '@object-ui/react';
+import { isMoneyAggregate, requiredCurrencyGrouping } from './recordCurrencyAggregates';
+
+/** The object's field catalogue; only a field's `currencyConfig` is read here. */
+export type WholeSetSummaryFields = Parameters<typeof requiredCurrencyGrouping>[2];
 
 /** Find-param keys that shape the WINDOW or the row's SHAPE — never which rows match. */
 const WINDOW_KEYS: ReadonlySet<string> = new Set(['$top', '$skip', '$orderby', '$select', '$expand', '$count']);
@@ -93,8 +116,15 @@ const WINDOW_KEYS: ReadonlySet<string> = new Set(['$top', '$skip', '$orderby', '
  * figure has nothing to ask, so `null` here is what keeps the read off
  * (objectui#12081 item 3, rework round 1): the `count` node alone is not a
  * question anybody asked.
+ *
+ * [ADR-0144 D6] A money aggregate over a `record`-mode amount in
+ * `objectFields` is no node either (see the module note): the footer draws
+ * nothing for it, and the engine refuses the query that carries it.
  */
-export function wholeSetSummaryNodes(columns: readonly ListColumn[] | undefined): AggregationNode[] | null {
+export function wholeSetSummaryNodes(
+  columns: readonly ListColumn[] | undefined,
+  objectFields?: WholeSetSummaryFields,
+): AggregationNode[] | null {
   const nodes = new Map<string, AggregationNode>([[LIST_VIEW_GROUP_COUNT_ALIAS, { function: 'count', alias: LIST_VIEW_GROUP_COUNT_ALIAS }]]);
   let declared = false;
   for (const column of columns ?? []) {
@@ -110,8 +140,9 @@ export function wholeSetSummaryNodes(columns: readonly ListColumn[] | undefined)
     if (!mapping || mapping.kind === 'none' || mapping.kind === 'unmapped') continue;
     const field = typeof summary === 'string' ? column.field : (summary.field ?? column.field);
     if (typeof field !== 'string' || field === '') continue;
-    declared = true;
     const fn = mapping.kind === 'derived' ? mapping.from : mapping.function;
+    if (requiredCurrencyGrouping(field, fn, objectFields) !== undefined) continue;
+    declared = true;
     const aggregated = mapping.fieldless ? undefined : field;
     const alias = columnSummaryAlias(fn, aggregated);
     if (!nodes.has(alias)) nodes.set(alias, { function: fn, ...(aggregated !== undefined ? { field: aggregated } : {}), alias });
@@ -127,8 +158,9 @@ export function wholeSetSummaryNodes(columns: readonly ListColumn[] | undefined)
 export function compileWholeSetSummaryQuery(
   columns: readonly ListColumn[] | undefined,
   findParams: Readonly<Record<string, unknown>>,
+  objectFields?: WholeSetSummaryFields,
 ): EngineAggregateOptions | null {
-  const aggregations = wholeSetSummaryNodes(columns);
+  const aggregations = wholeSetSummaryNodes(columns, objectFields);
   if (aggregations === null) return null;
 
   for (const key of Object.keys(findParams)) {
@@ -179,6 +211,17 @@ export interface WholeSetSummaryInput {
    */
   columns: ListColumn[] | undefined;
   /**
+   * The object's field catalogue, read for each summarised field's currency
+   * mode: a money aggregate over a `record`-mode amount is left out of the
+   * question (ADR-0144 D6, see the module note).
+   */
+  objectFields: WholeSetSummaryFields;
+  /**
+   * The grid still awaits `objectFields` (`objectTypesPending`): a money
+   * aggregate is not asked until the catalogue says its currency mode.
+   */
+  objectFieldsPending: boolean;
+  /**
    * The find params behind the rows on screen — the host's `findParams`, or
    * the query this grid's own loader sent. `null` when none is known: the
    * figures cannot be asked, and the footer stays on the page.
@@ -193,7 +236,8 @@ export interface WholeSetSummaryInput {
 /**
  * - `off` — not asked: the rows are the whole set, or no column declares a
  *   summary that maps to an aggregate.
- * - `pending` — asked, no answer to THIS question in hand yet.
+ * - `pending` — asked, no answer to THIS question in hand yet; or not yet
+ *   askable, a money aggregate awaiting the field catalogue.
  * - `answered` — the whole set's header row, its `count` agreeing with the grid's.
  * - `unavailable` — no door, a refusal, an unaskable query, or an answer whose
  *   count is not the grid's.
@@ -216,13 +260,18 @@ const NOTHING_HELD: Held = { question: '', answer: PENDING };
 
 /** Ask the server for the whole matched set's footer figures. */
 export function useWholeSetSummary(input: WholeSetSummaryInput): WholeSetSummary {
-  const { enabled, dataSource, objectName, columns, findParams, count, reloadKey } = input;
+  const { enabled, dataSource, objectName, columns, objectFields, objectFieldsPending, findParams, count, reloadKey } = input;
 
   // The gate (rework round 1): a grid whose columns declare no summary that
   // maps to an aggregate draws no footer, so it asks nothing and listens to
   // nothing — the read is `off`, exactly as for rows that are the whole set.
-  const active = enabled && wholeSetSummaryNodes(columns) !== null;
-  const query = active && findParams ? compileWholeSetSummaryQuery(columns, findParams) : null;
+  const nodes = enabled ? wholeSetSummaryNodes(columns, objectFields) : null;
+  const active = nodes !== null;
+  // [ADR-0144 D6] A money aggregate waits for the catalogue that says whether
+  // its amount is `record`-mode; it is never asked on a guess. A read that
+  // never lands keeps it unasked, and the footer on the page.
+  const awaitingFields = active && objectFieldsPending && nodes.some((node) => isMoneyAggregate(node.function));
+  const query = active && !awaitingFields && findParams ? compileWholeSetSummaryQuery(columns, findParams, objectFields) : null;
   const canAsk = active
     && !!objectName
     && query !== null
@@ -261,6 +310,7 @@ export function useWholeSetSummary(input: WholeSetSummaryInput): WholeSetSummary
   }, [canAsk, dataSource, objectName, question, reloadKey, invalidationNonce]);
 
   if (!active) return OFF;
+  if (awaitingFields) return PENDING;
   if (!canAsk) return UNAVAILABLE;
   // Read in the render the question changes, never one render late.
   const answer = held.question === question ? held.answer : PENDING;

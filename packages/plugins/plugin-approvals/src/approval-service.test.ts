@@ -5474,6 +5474,177 @@ describe('ApprovalService — authorizeFileRead delegate (ADR-0104 D3 wave 2)', 
   });
 });
 
+// ── Schema-read delegate (ADR-0106, decision 6840464379) ─────────────
+//
+// The metadata API answers an object the caller may not read as absent, and
+// both request objects are closed on the data side on purpose, so without a
+// delegate a non-admin approver could not be served the definitions the
+// request page renders from. Both objects declare `schemaReadDelegate:
+// 'approvals'`, and the service answers by its own request visibility rule,
+// asked without a named request: does the caller see at least one?
+describe('ApprovalService — authorizeSchemaRead delegate (ADR-0106, decision 6840464379)', () => {
+  const OBJECTS = ['sys_approval_request', 'sys_approval_action'];
+  const as = (userId: string) => ({ userId, tenantId: 't1', positions: [], permissions: [] }) as any;
+  const seed = async () => {
+    const engine = makeFakeEngine();
+    let n = 0;
+    const svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(1757000000000 + (n++) * 1000) } });
+    await svc.openNodeRequest(openInput(['u9']), CTX);
+    return svc;
+  };
+
+  it('admits the pending approver and the submitter, for both objects', async () => {
+    const svc = await seed();
+    for (const object of OBJECTS) {
+      expect(await svc.authorizeSchemaRead(object, as('u9')), `approver ${object}`).toBe(true);
+      expect(await svc.authorizeSchemaRead(object, CTX), `submitter ${object}`).toBe(true);
+    }
+  });
+
+  it('refuses a member party to no request', async () => {
+    const svc = await seed();
+    for (const object of OBJECTS) expect(await svc.authorizeSchemaRead(object, as('u5')), object).toBe(false);
+  });
+
+  it('answers by the request read door\'s own rule — never a second copy of it', async () => {
+    const svc = await seed();
+    // The door and the delegate read ONE rule, `participantProbes`.
+    const probes = vi.spyOn(svc as any, 'participantProbes');
+    await (svc as any).visibleRequestIds(as('u9'), 't1');
+    expect(probes).toHaveBeenCalledTimes(1);
+    probes.mockReturnValueOnce([]);
+    expect(await svc.authorizeSchemaRead('sys_approval_request', as('u9'))).toBe(false);
+    expect(probes).toHaveBeenCalledTimes(2);
+    expect(probes.mock.calls[1][1]).toBe('t1');
+    // The override holder's unrestricted view (the door's `null`) needs no probe.
+    const override = vi.spyOn(svc as any, 'isOverrideActor').mockReturnValueOnce(true);
+    expect(await svc.authorizeSchemaRead('sys_approval_request', as('u5'))).toBe(true);
+    expect(override).toHaveBeenCalledWith(expect.anything(), 't1');
+    expect(probes).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts only requests the door serves in the caller\'s organization', async () => {
+    const svc = await seed(); // t1: submitter u1, pending approver u9
+    // u9 also decides a request in t2.
+    const inT2 = { userId: 'u3', tenantId: 't2', positions: [], permissions: [] } as any;
+    const req = (await svc.openNodeRequest(openInput(['u9'], { recordId: 'opp_t2', record: { id: 'opp_t2' } }), inT2)) as { id: string };
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    const u9In = (tenantId: string) => ({ userId: 'u9', tenantId, positions: [], permissions: [] }) as any;
+    expect(await svc.authorizeSchemaRead('sys_approval_request', u9In('t1')), 'pending approver in t1').toBe(true);
+    expect(await svc.authorizeSchemaRead('sys_approval_request', u9In('t2')), 'past actor in t2').toBe(true);
+    // In t3 u9 is party to nothing: the t2 decision the already-acted probe
+    // collects is not a request the door serves there.
+    expect(await svc.authorizeSchemaRead('sys_approval_request', u9In('t3')), 'party to nothing in t3').toBe(false);
+  });
+
+  it('asks the door once per request context, for both objects', async () => {
+    const svc = await seed();
+    const asked = vi.spyOn(svc as any, 'servesAnyRequest');
+    const ctx = as('u9');
+    for (const object of OBJECTS) expect(await svc.authorizeSchemaRead(object, ctx), object).toBe(true);
+    expect(asked).toHaveBeenCalledTimes(1);
+    expect(await svc.authorizeSchemaRead('sys_approval_request', as('u9'))).toBe(true);
+    expect(asked).toHaveBeenCalledTimes(2);
+  });
+
+  // [#33046] Every hidden-object list read by a member asks this, so it is an
+  // existence question asked as one: each approval-table read fetches at most
+  // one row — never the door's 10000-row id windows gathered into one `$in`.
+  describe('bounded probe', () => {
+    const APPROVAL_TABLES = new Set(['sys_approval_approver', 'sys_approval_request', 'sys_approval_action']);
+    const member = (userId: string, tenantId: string, positions: string[] = []) =>
+      ({ userId, tenantId, positions, permissions: [] }) as any;
+    /** A request in `org` and one decision on it, written straight to the tables. */
+    const seedHistory = (engine: any, org: string, action: Record<string, unknown>) => {
+      const id = `req_${org}_${Math.random().toString(36).slice(2, 8)}`;
+      engine._tables.sys_approval_request ??= [];
+      engine._tables.sys_approval_action ??= [];
+      engine._tables.sys_approval_request.push({ id, organization_id: org, submitter_id: 'u_other', status: 'approved' });
+      engine._tables.sys_approval_action.push({ id: `aact_${id}`, request_id: id, organization_id: org, action: 'approve', ...action });
+      return id;
+    };
+    const ask = async (engine: any, ctx: any) => {
+      const svc = new ApprovalService({ engine });
+      const from = engine._finds.length;
+      const verdict = await svc.authorizeSchemaRead('sys_approval_request', ctx);
+      const reads = engine._finds.slice(from).filter((f: any) => APPROVAL_TABLES.has(f.object));
+      return { verdict, reads };
+    };
+    const expectBounded = (reads: Array<{ object: string; options: any }>, label: string) => {
+      expect(reads.length, `${label}: the probe read something`).toBeGreaterThan(0);
+      for (const { object, options } of reads) {
+        expect(options.limit, `${label}: ${object} read is bounded`).toBeLessThanOrEqual(1);
+        expect(JSON.stringify(options.where), `${label}: ${object} read gathers no id window`).not.toMatch(/"id":\{"\$in"/);
+      }
+    };
+
+    it('admits the pending approver and the submitter with bounded reads', async () => {
+      const engine = makeFakeEngine();
+      await new ApprovalService({ engine: engine as any }).openNodeRequest(openInput(['u9']), CTX);
+      for (const [label, ctx] of [['pending approver', member('u9', 't1')], ['submitter', CTX]] as const) {
+        const { verdict, reads } = await ask(engine, ctx);
+        expect(verdict, label).toBe(true);
+        expectBounded(reads, label);
+      }
+    });
+
+    it('admits a past actor by actor_id and a slot holder by acted_as, with bounded reads, and only in their organization', async () => {
+      const engine = makeFakeEngine();
+      // A long history in t1 that is nobody's business but u_old's…
+      for (let i = 0; i < 50; i++) seedHistory(engine, 't1', { actor_id: 'u_old' });
+      // …one decision u7 took in person, one taken under `position:mgr`.
+      seedHistory(engine, 't1', { actor_id: 'u7' });
+      seedHistory(engine, 't1', { actor_id: 'u_holder', acted_as: 'position:mgr' });
+      // And one in t2, which must not count in t1.
+      seedHistory(engine, 't2', { actor_id: 'u8' });
+
+      const cases: Array<[string, any, boolean]> = [
+        ['past actor (actor_id)', member('u7', 't1'), true],
+        ['slot holder (acted_as)', member('u6', 't1', ['mgr']), true],
+        ['non-participant', member('u5', 't1'), false],
+        ['non-participant holding another position', member('u5', 't1', ['clerk']), false],
+        ['past actor in another organization only', member('u8', 't1'), false],
+        ['past actor in their own organization', member('u8', 't2'), true],
+      ];
+      for (const [label, ctx, expected] of cases) {
+        const { verdict, reads } = await ask(engine, ctx);
+        expect(verdict, label).toBe(expected);
+        expectBounded(reads, label);
+      }
+    });
+
+    it('a decision whose request is gone serves nothing', async () => {
+      const engine = makeFakeEngine();
+      const id = seedHistory(engine, 't1', { actor_id: 'u7' });
+      engine._tables.sys_approval_request = engine._tables.sys_approval_request.filter((r: any) => r.id !== id);
+      const { verdict, reads } = await ask(engine, member('u7', 't1'));
+      expect(verdict).toBe(false);
+      expectBounded(reads, 'orphaned decision');
+    });
+
+    it('sys_approval_action indexes the columns the probe filters on', async () => {
+      const { SysApprovalAction } = await import('./sys-approval-action.object.js');
+      const indexed = ((SysApprovalAction as any).indexes ?? []).map((i: any) => i.fields.join(','));
+      expect(indexed).toContain('actor_id,organization_id');
+      expect(indexed).toContain('acted_as,organization_id');
+    });
+  });
+
+  it('speaks only for its own two objects, whoever asks', async () => {
+    const svc = await seed();
+    for (const object of ['sys_approval_approver', 'opportunity', 'sys_user', '']) {
+      expect(await svc.authorizeSchemaRead(object, as('u9')), object).toBe(false);
+    }
+  });
+
+  it('both request objects declare the delegate, and no other approvals object does', async () => {
+    const { SysApprovalRequest } = await import('./sys-approval-request.object.js');
+    const { SysApprovalAction } = await import('./sys-approval-action.object.js');
+    expect((SysApprovalRequest as any).schemaReadDelegate).toBe('approvals');
+    expect((SysApprovalAction as any).schemaReadDelegate).toBe('approvals');
+  });
+});
+
 // ── Participant visibility (#3590) ───────────────────────────────────
 //
 // getRequest/listRequests deliberately query with SYSTEM_CTX (the

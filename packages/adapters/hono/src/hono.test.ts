@@ -1172,3 +1172,53 @@ describe('createHonoApp', () => {
     });
   });
 });
+
+/**
+ * [#32250, ADR-0150 D5] The dispatcher's `/data` twin on this host: a write
+ * hook's package-scoped refusal escapes `dispatch()` and is answered by the
+ * catch-all through `declaredEnvelopeForThrow`, which composes `details` from
+ * `resolveThrownHttpError`. It answers `409 RESOURCE_CONFLICT` naming the
+ * candidates, as the REST `/data` door does. The throw is the class's shape
+ * (`code`, `status`, `refusal`): core is not a dependency of this package, and
+ * the resolver recognises the class by that shape.
+ */
+describe('[#32250] the dispatch() catch-all names a package-scoped refusal\'s candidates', () => {
+  const CANDIDATES = [
+    { kind: 'package', packageId: 'com.acme.crm' },
+    { kind: 'package', packageId: 'com.acme.sales' },
+  ];
+  const MESSAGE = 'The permission set "sales_rep" is held by 2 packages in this environment.';
+  const REFUSAL = {
+    status: 'refused', reason: 'ambiguous-in-environment', type: 'permission', name: 'sales_rep',
+    callerPackageId: null, candidates: CANDIDATES, message: MESSAGE,
+  };
+  const post = async (app: ReturnType<typeof createHonoApp>) => {
+    const res = await app.request('http://localhost/api/v1/data/sys_user_permission_set', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ permission_set: 'sales_rep' }),
+    });
+    return { status: res.status, body: await res.json() as any };
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('409 RESOURCE_CONFLICT with error.details.candidates', async () => {
+    mockDispatcher.dispatch.mockRejectedValueOnce(
+      Object.assign(new Error(MESSAGE), { code: 'RESOURCE_CONFLICT', status: 409, httpStatus: 409, refusal: REFUSAL }),
+    );
+    const answer = await post(createHonoApp({ kernel: mockKernel, prefix: '/api/v1', cors: false }));
+    expect(answer.status).toBe(409);
+    expect(answer.body).toEqual({
+      success: false,
+      error: { code: 'RESOURCE_CONFLICT', message: MESSAGE, details: { candidates: CANDIDATES } },
+    });
+  });
+
+  it('CONTROL: a RESOURCE_CONFLICT thrown with no refusal answers as before, with no details', async () => {
+    mockDispatcher.dispatch.mockRejectedValueOnce(Object.assign(new Error('in conflict'), { code: 'RESOURCE_CONFLICT', status: 409 }));
+    const answer = await post(createHonoApp({ kernel: mockKernel, prefix: '/api/v1', cors: false }));
+    expect(answer.status).toBe(409);
+    expect(answer.body).toEqual({ success: false, error: { code: 'RESOURCE_CONFLICT', message: 'in conflict' } });
+  });
+});

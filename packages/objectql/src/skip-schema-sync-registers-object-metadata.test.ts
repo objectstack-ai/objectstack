@@ -91,7 +91,7 @@ async function install(
   for (const obj of objects) engine.registerObject(obj);
   (plugin as any).ql = engine;
   (plugin as any).skipSchemaSync = skipSchemaSync;
-  await (plugin as any).installRegisteredSchemas({ logger: rec.logger });
+  await (plugin as any).installRegisteredSchemas({ logger: rec.logger, trigger: async () => {} });
   return rec;
 }
 

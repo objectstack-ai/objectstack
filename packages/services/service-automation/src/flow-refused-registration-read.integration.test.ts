@@ -273,3 +273,104 @@ describe('a stored flow with no start node: refused at the bind, never at the bo
         expect(await automation.getFlow('draft_no_start')).toBeNull();
     });
 });
+
+/**
+ * Ruling 6810500711 (letter D): an after-save flow whose inline outbound call
+ * is retried, now that registration refuses it. At every door a flow becomes
+ * active through:
+ *
+ *  - Boot: a row stored before the refusal is refused at the bind and reads as
+ *    refused beside its stored body; it does not vanish, and the kernel runs.
+ *  - Save: the metadata save door's lint rule (`flow-after-save-inline-retry`)
+ *    refuses a live save with 422 and stores nothing; a draft keeps the
+ *    finding. The same node with `durable: true` saves and is armed.
+ *  - `POST /automation` and the clone door call `registerFlow`, whose refusal
+ *    the route answers as a 4xx (`registerAndSaveFlow`); the engine's own
+ *    refusal is pinned in `flow-registration-checks.test.ts`.
+ */
+describe('an after-save flow with a retried inline callout: refused at the bind and at the save door', () => {
+    let kernel: ObjectKernel;
+
+    afterEach(async () => {
+        if (kernel?.getState() === 'running') await kernel.shutdown();
+    });
+
+    const afterSaveSync = (name: string, status: string, httpConfig: Record<string, unknown> = {}) => ({
+        name,
+        label: name,
+        type: 'autolaunched',
+        status,
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start', config: { objectName: 'sys_metadata', triggerType: 'record-after-update' } },
+            {
+                id: 'guarded_push', type: 'try_catch', label: 'Push with retry',
+                config: {
+                    retry: { maxRetries: 3, backoffMs: 1000, backoffMultiplier: 2 },
+                    try: { nodes: [{ id: 'push', type: 'http', label: 'Push', config: { url: 'https://api.example.com/v1/tasks', method: 'POST', ...httpConfig } }], edges: [] },
+                    catch: { nodes: [{ id: 'flag', type: 'assignment', label: 'Flag', config: { failed: true } }], edges: [] },
+                },
+            },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'guarded_push' },
+            { id: 'e2', source: 'guarded_push', target: 'end' },
+        ],
+    });
+
+    async function boot() {
+        kernel = new ObjectKernel({ logger: { level: 'fatal' }, gracefulShutdown: false } as never);
+        await kernel.use(new ObjectQLPlugin());
+        await kernel.use(new AutomationServicePlugin({ suspendedRunStore: 'memory' }));
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+        await kernel.use(storedFlowsPlugin(driver, [
+            afterSaveSync('stored_sync', 'active') as never,
+            stampFlow('valid', { count: 2 }),
+        ]));
+        await kernel.bootstrap();
+        return {
+            protocol: kernel.getService<MetadataReadDoors>('protocol'),
+            automation: kernel.getService<AutomationEngine>('automation'),
+        };
+    }
+
+    it('the boot completes, the stored row is not armed, and the read serves it beside the refusal', async () => {
+        const { protocol, automation } = await boot();
+        expect(kernel.getState()).toBe('running');
+        expect(await automation.getFlow('stored_sync')).toBeNull();
+        expect(await automation.getFlow('valid'), 'control: the other stored flow is armed').not.toBeNull();
+
+        const read = await protocol.getMetaItem({ type: 'flow', name: 'stored_sync' });
+        expect((read.item as { status?: string }).status).toBe('active');
+        expect(read.registration?.state).toBe('refused');
+        const reason = read.registration?.state === 'refused' ? read.registration.reason.message : '';
+        expect(reason).toMatch(/^Flow 'stored_sync' rejected: 1 inline outbound call\(s\) retried on the save path/);
+        expect(reason).toContain("node 'push' (`http`)");
+        expect(reason).toContain('Set `durable: true` on the node');
+    });
+
+    it('the metadata save door refuses a live save with 422 and the rule, and keeps a draft with the finding', async () => {
+        const { protocol, automation } = await boot();
+        const refusal = await protocol
+            .saveMetaItem({ type: 'flow', name: 'new_sync', item: afterSaveSync('new_sync', 'active') })
+            .then(() => null, (e: unknown) => e as { code?: string; status?: number; issues?: Array<{ rule?: string }> });
+        expect({ code: refusal?.code, status: refusal?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect((refusal?.issues ?? []).map((i) => i.rule)).toContain('flow-after-save-inline-retry');
+        expect(await automation.getFlow('new_sync')).toBeNull();
+
+        await protocol.saveMetaItem({ type: 'flow', name: 'new_sync', item: afterSaveSync('new_sync', 'active'), mode: 'draft' });
+        const read = await protocol.getMetaItem({ type: 'flow', name: 'new_sync', state: 'draft' });
+        const diagnostics = (read.item as { _diagnostics?: { valid: boolean; errors?: Array<{ code?: string }> } })._diagnostics;
+        expect(diagnostics?.valid).toBe(false);
+        expect((diagnostics?.errors ?? []).map((e) => e.code)).toContain('flow-after-save-inline-retry');
+    });
+
+    it('control: the same flow with `durable: true` saves and is armed', async () => {
+        const { protocol, automation } = await boot();
+        await protocol.saveMetaItem({ type: 'flow', name: 'durable_sync', item: afterSaveSync('durable_sync', 'active', { durable: true }) });
+        await vi.waitFor(async () => {
+            expect(await automation.getFlow('durable_sync'), 'the mutation sync registered the durable row').not.toBeNull();
+        });
+        expect((await protocol.getMetaItem({ type: 'flow', name: 'durable_sync' })).registration).toEqual({ state: 'registered' });
+    });
+});

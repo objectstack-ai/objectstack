@@ -177,12 +177,25 @@ describe('[18.x step 7b] the organization key part across the 18.0 → HEAD upgr
       expectNoDestructiveIndexDrift(await managedDrift(stack!));
     });
 
-    it('the 11 declared organization composites survive the HEAD boot byte for byte', () => {
+    it('[#32164] the grant key that gained its package column: its 18.0 narrower is offered for retirement as ONE safe replace, the guard standing', async () => {
+      // `sys_user_permission_set`'s `(user_id, permission_set, organization_id)`
+      // became `(user_id, permission_set, permission_set_package,
+      // organization_id)`; the boot's schema-sync migration built the
+      // package-less guard, so on this certified store the differ's widening arm
+      // offers the 18.0 COALESCE index's retirement — never an orphan drop.
+      const grant = (await managedDrift(stack!)).filter((d) => d.table === 'sys_user_permission_set');
+      expect(grant.map((d) => [d.op.type, d.category])).toEqual([['replace_unique_index', 'safe']]);
+      expect((grant[0]!.op as { dropIndexNames?: string[] }).dropIndexNames).toEqual(['uniq_sys_user_permission_set_ac248331']);
+    });
+
+    it('the 11 organization composites 18.0 declared survive the HEAD boot byte for byte', () => {
       // The other two are runtime-managed: the metadata protocol's own
       // migrations rebuild them on every boot over the plain organization key —
       // `sys_setting`'s identity index, and `sys_notification_preference`'s
       // one-global-default-per-key index, NULL-safe on its `user_id` (an empty
-      // User is the admin-global default, ADR-0118 D1).
+      // User is the admin-global default, ADR-0118 D1). One of the 11,
+      // `sys_user_permission_set`'s, is no longer declared (#32164): the boot
+      // keeps it too, and the leg above is its retirement.
       const declared = COALESCE_INDEXES_18_0.filter((i) => !RUNTIME_MANAGED_INDEX.test(i.name));
       expect(declared).toHaveLength(11);
       const after = new Map(organizationUniqueIndexes(restored).map((i) => [i.name, i.sql]));

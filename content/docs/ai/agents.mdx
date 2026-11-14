@@ -111,6 +111,15 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
   key — the account's own included — can neither register an account nor mint
   one's key. An account is never counted as one of the administrators that
   keep an organization manageable, and never receives administrator mail.
+  A flow that runs as the system (`runAs: 'system'`) writes past the
+  account's grants, so an account starts one only through an action whose
+  author opted it into AI (`ai: { exposed: true }`), run over
+  `POST /api/v1/actions/...` or the MCP `run_action` tool. The flow's trigger
+  route and a declared `type: 'flow'` endpoint refuse it **403**
+  `PERMISSION_DENIED`, and the refusal names the declaration to add (see
+  [Run a flow via API](/docs/automation/flows#run-a-flow-via-api)). A flow
+  that runs as the user, the default, it starts at every door under its own
+  grants.
   Its lifecycle has doors of its own, each taking a signed-in session only
   (`POST /api/v1/auth/service-account/<door>`):
   - **`suspend`** (its owner or an administrator) stops every key on its
@@ -123,6 +132,10 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
   - **`set-owner`** (an administrator) names another member as the
     accountable owner. When the owner leaves the organization, the account is
     suspended, and it is not resumed until an administrator names a new owner.
+    When the organization's directory (SCIM) deactivates or deletes the owner,
+    the account is suspended too, a re-activation of the owner does not resume
+    it, and `resume` refuses until the owner is re-activated or a new owner is
+    named.
   - **`retire`** (an administrator) ends its membership and revokes every key
     for good; the account's record stays, so what it wrote still names it.
 
@@ -239,8 +252,23 @@ itself (a different LLM-facing description, fewer exposed parameters).
 
 | Half | Keys | Where it runs |
 |---|---|---|
-| **Judgment** | `instructions` | **Everywhere.** On the open framework `@objectstack/mcp` serves it as an MCP **prompt** — any connected client can `prompts/list` it by name and `prompts/get` the text ([Connect an MCP client](/docs/ai/connect-mcp#prompts-your-skills-served-to-the-client)). On **ObjectOS** it is injected into the active agent's system prompt. |
-| **Wiring** | `tools`, `surface`, `triggerConditions` | **ObjectOS only.** Composing an agent's tool set and deciding when a skill activates are properties of an in-product agent loop. Over MCP the model lives in the client and drives one flat tool list, and your AI-exposed Actions already reach it as `action_<name>` via `list_actions` / `run_action`. |
+| **Judgment** | `instructions` | **Both editions.** On the open framework `@objectstack/mcp` serves it as an MCP **prompt** — a connected client can `prompts/list` it by name and `prompts/get` the text ([Connect an MCP client](/docs/ai/connect-mcp#prompts-your-skills-served-to-the-client)), on a server that serves the tools the skill binds (below). On **ObjectOS** it is injected into the active agent's system prompt. |
+| **Wiring** | `tools`, `surface`, `triggerConditions` | **Bound on ObjectOS only.** Composing an agent's tool set and deciding when a skill activates are properties of an in-product agent loop. Over MCP the model lives in the client and drives one flat tool list, and your AI-exposed Actions already reach it through `list_actions` / `run_action`. `surface` and `triggerConditions` are inert there; `tools` is read, and decides whether the skill is offered. |
+
+**Over MCP, `tools` decides whether the skill is offered.** The prompt surface
+`registerSkillPrompts` (`@objectstack/mcp`) installs lists and gets a skill only
+when the server it is installed on lists every tool the skill binds, read from
+that server's own tool list when the prompt request is answered. A plain name is
+served by a tool of that name, a trailing wildcard (`describe_*`) by any listed
+tool it matches, and an `action_<name>` entry (or `action_*`) also by
+`run_action`. A skill that binds no tool is offered as before, and `prompts/get`
+answers a withheld skill as it answers an unknown prompt name. This holds on the
+HTTP endpoint and on any host that drives its own MCP server and calls
+`registerSkillPrompts`, stdio included; the plugin's own long-lived stdio
+server, which projects skills through `MCPServerRuntime.bridgePrompts` instead,
+applies no such filter. So bind a skill only to tools its intended connections
+serve: one that names a tool no MCP tool family serves is offered on no such
+connection unless a host registers that tool.
 
 Both halves are still **validated everywhere** — a skill naming a tool that
 does not exist is an authoring error in either distribution. So a skill written

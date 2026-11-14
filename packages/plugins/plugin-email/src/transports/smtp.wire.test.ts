@@ -11,12 +11,18 @@
 //   * an AUTH rejection (535) reaches the caller instead of being swallowed.
 
 import net from 'node:net';
+import http from 'node:http';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { describe, it, expect, afterEach } from 'vitest';
+import type { NormalizedEmailMessage } from '@objectstack/spec/contracts';
 import { SmtpTransport, SMTP_CONNECT_POLICY_NO_SOCKET, type SmtpConnectPolicy } from './smtp.js';
 // The fake server + wire decoders live in a testkit since #5177, so the
 // sys_email round-trip suite proves itself against the SAME wire, not a second
 // hand-written copy of it.
-import { startFakeSmtp, decodeEncodedWords, decodeBodies, type FakeSmtp } from './fake-smtp.testkit.js';
+import { startFakeSmtp, decodeEncodedWords, decodeBodies, wireAttachments, type FakeSmtp } from './fake-smtp.testkit.js';
 
 let server: FakeSmtp | undefined;
 afterEach(async () => {
@@ -221,5 +227,145 @@ describe('SmtpTransport — a host connect policy over a real SMTP conversation'
     expect(otherAsked).toBe(0);
     expect(seen).toHaveLength(1);
     expect(server.messages).toHaveLength(1);
+  }, 20_000);
+});
+
+describe('SmtpTransport — a message\'s content reaches the wire only as a string or as bytes', () => {
+  // `SmtpTransport.send()` is driven directly, past the type: `normalizeMessage`
+  // refuses these shapes first, so this pins the transport on its own.
+  // The fixtures are a temp file this test writes and a loopback listener it
+  // owns; no system path, no other host.
+  const MARK = `canary-${randomBytes(6).toString('hex')}`;
+  const FILE_BYTES = `file-${MARK}`;
+  const URL_BYTES = `url-${MARK}`;
+
+  let dir: string | undefined;
+  let listener: http.Server | undefined;
+  let requests = 0;
+
+  afterEach(async () => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+    if (listener) await new Promise<void>((resolve) => listener!.close(() => resolve()));
+    listener = undefined;
+    requests = 0;
+  });
+
+  async function fixtures(): Promise<{ file: string; url: string }> {
+    dir = mkdtempSync(join(tmpdir(), 'os-smtp-content-'));
+    const file = join(dir, 'canary.txt');
+    writeFileSync(file, FILE_BYTES);
+    listener = http.createServer((_req, res) => { requests += 1; res.end(URL_BYTES); });
+    await new Promise<void>((resolve) => listener!.listen(0, '127.0.0.1', () => resolve()));
+    const { port } = listener.address() as net.AddressInfo;
+    return { file, url: `http://127.0.0.1:${port}/canary` };
+  }
+
+  /** True when `payload` carries either canary, raw or base64-encoded. */
+  function carriesCanary(payload: string): boolean {
+    return [FILE_BYTES, URL_BYTES].some(
+      (text) => payload.includes(text) || payload.includes(Buffer.from(text).toString('base64')),
+    );
+  }
+
+  function messageWith(content: unknown): NormalizedEmailMessage {
+    return {
+      to: ['rcpt@example.test'],
+      from: 'no-reply@example.test',
+      subject: 'content',
+      text: 'see attachment',
+      attachments: [{ filename: 'canary.txt', content: content as string }],
+    };
+  }
+
+  /**
+   * A nodemailer plugin transport supplied through `transportOptions`: it
+   * renders the message and records the bytes, and opens no connection.
+   */
+  function pluginTransport(rendered: string[]) {
+    return {
+      name: 'record',
+      version: '1',
+      send(mail: any, callback: (err: Error | null, info?: unknown) => void) {
+        let done = false;
+        const finish = (err: Error | null, info?: unknown) => { if (!done) { done = true; callback(err, info); } };
+        const chunks: Buffer[] = [];
+        const stream = mail.message.createReadStream();
+        stream.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+        stream.on('error', (err: Error) => { rendered.push(Buffer.concat(chunks).toString('utf8')); finish(err); });
+        stream.on('end', () => {
+          rendered.push(Buffer.concat(chunks).toString('utf8'));
+          finish(null, { messageId: '<record@example.test>', response: 'recorded' });
+        });
+      },
+    };
+  }
+
+  for (const shape of ['path', 'href'] as const) {
+    for (const leg of ['the SMTP transport', 'the SMTP transport with transportOptions turning the flags off'] as const) {
+      it(`content \`{ ${shape} }\` over ${leg}: the send rejects, and the transport reads no file and fetches no URL`, async () => {
+        const { file, url } = await fixtures();
+        server = await startFakeSmtp();
+        const transport = new SmtpTransport({
+          host: '127.0.0.1',
+          port: server.port,
+          secure: false,
+          timeout: 5_000,
+          ...(leg === 'the SMTP transport' ? {} : {
+            transportOptions: { disableFileAccess: false, disableUrlAccess: false },
+          }),
+        });
+
+        await expect(transport.send(messageWith(shape === 'path' ? { path: file } : { href: url }))).rejects.toThrow();
+        await transport.close();
+
+        expect(server.messages.some(carriesCanary)).toBe(false);
+        expect(requests).toBe(0);
+      }, 20_000);
+    }
+
+    it(`content \`{ ${shape} }\` over a transportOptions plugin transport: the send rejects, and the transport reads no file and fetches no URL`, async () => {
+      const { file, url } = await fixtures();
+      const rendered: string[] = [];
+      const transport = new SmtpTransport({
+        host: 'smtp.example.test',
+        transportOptions: { ...pluginTransport(rendered), disableFileAccess: false, disableUrlAccess: false },
+      });
+
+      await expect(transport.send(messageWith(shape === 'path' ? { path: file } : { href: url }))).rejects.toThrow();
+      await transport.close();
+
+      expect(rendered.some(carriesCanary)).toBe(false);
+      expect(requests).toBe(0);
+    });
+  }
+
+  it('CONTROL — the plugin transport leg can see attachment bytes: a string attachment renders', async () => {
+    const rendered: string[] = [];
+    const transport = new SmtpTransport({ host: 'smtp.example.test', transportOptions: pluginTransport(rendered) });
+
+    await transport.send(messageWith(FILE_BYTES));
+
+    expect(rendered).toHaveLength(1);
+    expect(carriesCanary(rendered[0]!)).toBe(true);
+  });
+
+  it('CONTROL — a Buffer attachment with a cid still arrives inline, bytes intact', async () => {
+    server = await startFakeSmtp();
+    const transport = new SmtpTransport({ host: '127.0.0.1', port: server.port, secure: false, timeout: 5_000 });
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff]);
+
+    await transport.send({
+      to: ['rcpt@example.test'],
+      from: 'no-reply@example.test',
+      subject: 'inline',
+      html: '<img src="cid:logo@inline">',
+      attachments: [{ filename: 'logo.png', content: bytes, contentType: 'image/png', cid: 'logo@inline' }],
+    });
+    await transport.close();
+
+    expect(server.messages).toHaveLength(1);
+    expect(server.messages[0]).toMatch(/Content-ID: <logo@inline>/i);
+    expect(wireAttachments(server.messages[0]!).get('logo.png')?.equals(bytes)).toBe(true);
   }, 20_000);
 });

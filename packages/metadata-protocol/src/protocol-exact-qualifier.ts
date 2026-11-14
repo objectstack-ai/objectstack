@@ -23,7 +23,10 @@
  *
  * What X holds (the census of ui carry-in 1, comment 6727995849 on #31691):
  *  - X's own item: a registry holder of the name (its composite, or a bare-slot
- *    row bound to it);
+ *    row bound to it). A bundle ADDITION is X's own item too: a dependent's
+ *    member its base does not ship holds no name for a bare read (R2), but X
+ *    named is X's holding, as the resolver keeps a caller's own addition
+ *    (#31699, the first bundled type the exact qualifier reads);
  *  - an item of a package X is a customization pair of (ADR-0146): the base's
  *    item, which X's declared override customizes. Studio reads a base-held
  *    item's override and draft at the pair (`?package=PAIR`), before and after
@@ -45,16 +48,19 @@ import {
     isNamespaceScopedBareNameType,
     isPackageScopedType,
     PackageScopedNameRefusedError,
+    isPlatformRequestedBareName,
     packageScopedRefusalMessage,
     resolvePackageScopedHolders,
     type PackageScopedHolder,
     type PackageScopedRefusalReason,
     type PackageScopedResolvableType,
+    type PackageScopedType,
 } from '@objectstack/core';
 import { ENVIRONMENT_ADDRESS_SEGMENT, readNamespacePositionSegment } from '@objectstack/spec/kernel';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import type { ProtocolHost } from './protocol-host.js';
+import type { ServedOverrideRow } from './served-override.js';
 
 /**
  * The registry reads the exact qualifier judges a qualified read with: who
@@ -67,11 +73,28 @@ interface ExactQualifierRegistry {
      * [#32310] `callerPackageId` counts the caller's own holding for the caller
      * arm's step 1 ({@link resolveCallerPackageAddress}), as objectql's
      * resolver reads it; the exact qualifier passes none.
+     *
+     * [#32183] The SERVED holders: a disabled package holds no name.
+     * `options.includeDisabledPackages` reads every holder, the read the
+     * exact qualifier's admission takes ({@link admitExactQualifier}).
      */
-    packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): string[];
+    packageScopedHoldersOf(
+        type: string, name: string, callerPackageId?: string | null,
+        options?: { includeDisabledPackages?: boolean },
+    ): string[];
     getEnvironmentScopedItem(type: string, name: string, member?: string): unknown;
     getPackageScopedItem(type: string, name: string, packageId: string, member?: string): unknown;
     getPackage?(id: string): unknown;
+    /**
+     * [#32561] The package the registry binds a stored row of `(type, name)`
+     * to (objectql's `overlayRowBinding`, the one owner rule every registry
+     * reader asks, counted over the served holders as this read counts them):
+     * a package id, `null` for the environment's own item, or `undefined` for
+     * no package. The exact read adopts it for an undeclared pair row
+     * ({@link pairRowOnAddress}); a registry without it keeps the exact read's
+     * own count.
+     */
+    overlayRowBinding?(type: string, name: string, item: unknown): string | null | undefined;
 }
 
 /**
@@ -148,8 +171,9 @@ export type UnjudgeableReadAddress =
  *    ruling (b)), unless the registry judges that read itself. `action` is
  *    such a type: `SchemaRegistry` counts an object-less action's holders
  *    for the bare read (`refuseAmbiguousObjectLessAction`, asked by
- *    `readMetaItem`, #31697), and an action bound to an object reads through
- *    `getItem`, as on `main`.
+ *    `readMetaItem`, #31697), and `readMetaItem` counts the registry's
+ *    package holders of the name on any object key besides
+ *    (`refuseActionHeldByPackages`, #32244).
  */
 function unjudgeableCause(
     host: Pick<ProtocolHost, 'engine'>,
@@ -262,12 +286,30 @@ export async function admitExactQualifier(
     const registry = exactQualifierRegistry(host);
     if (!registry) throw unjudgeableRefusal(request, { kind: 'package', packageId }, 'no-resolver');
 
-    const holders = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
-    if (holders.includes(packageId)) return { packageId, registryHolders: [packageId] };
+    // X named is X's holding even when it is a bundle addition (R2 drops one
+    // only for OTHER readers): the qualifier asks as the caller it names.
+    // [#32183, ruling (c)] Admission asks every holder, a disabled package's
+    // included: X named is X's holding, or a base X is a pair of, whether or
+    // not that package is disabled. So `?package=DISABLED` and its pair are
+    // admitted and the item face answers the disabled item's 404, never a
+    // refusal naming the enabled holder; the qualifier never serves the
+    // disabled body (the face withholds it).
+    const every = registry.packageScopedHoldersOf(request.type, request.name, packageId, { includeDisabledPackages: true }) ?? [];
+    if (every.includes(packageId)) return { packageId, registryHolders: [packageId] };
 
+    // [#32183] The candidates a refusal names, and the bases a pair is read
+    // at, are the served holders: a disabled package holds no name, so it is
+    // never named beside an enabled one. A pair whose every base is disabled
+    // is still admitted at those bases, and the item face withholds it
+    // ({@link disabledExactAddressHolder}).
+    const holders = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
     const installed = installedManifestsOfEngine(host.engine);
-    const pairedBases = holders.filter((holder) => pairsOf(holder, installed).includes(packageId));
-    if (pairedBases.length > 0) return { packageId, registryHolders: pairedBases };
+    const servedBases = holders.filter((holder) => pairsOf(holder, installed).includes(packageId));
+    if (servedBases.length > 0) return { packageId, registryHolders: servedBases };
+    // Every base disabled: the address reads one of them, which the face
+    // withholds, so no refusal names a disabled base.
+    const pairedBases = every.filter((holder) => pairsOf(holder, installed).includes(packageId));
+    if (pairedBases.length > 0) return { packageId, registryHolders: pairedBases.slice(0, 1) };
 
     for (const state of ['active', 'draft'] as const) {
         const served = await host.findServedOverlayRow({
@@ -289,6 +331,39 @@ export async function admitExactQualifier(
 }
 
 /**
+ * [#32183, ruling (c)] The disabled package an exact address reads, when every
+ * package it reads is disabled: the package `packageId` names when it is
+ * disabled ([#32354] whether it holds the name in the registry or only as a
+ * stored row), else the bases it is a pair of when none of them is enabled (the
+ * bases {@link admitExactQualifier} admits it at). `undefined` when the
+ * address reads an enabled package, reads no holder, or the type is not
+ * package-scoped. The item face answers such an address as that package's
+ * withheld item, whichever package's envelope a layer of the read reached:
+ * the disabled body is never served, and no enabled holder is named.
+ * Optional-called: a registry without `isPackageDisabled` withholds nothing more.
+ */
+export function disabledExactAddressHolder(
+    host: Pick<ProtocolHost, 'engine'>,
+    request: { type: string; name: string; packageId: string },
+): string | undefined {
+    if (!isPackageScopedType(request.type)) return undefined;
+    const registry = registryOf(host) as (Partial<ExactQualifierRegistry> & { isPackageDisabled?(id: string): boolean }) | undefined;
+    if (typeof registry?.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
+    const disabled = (id: string) => registry.isPackageDisabled!(id) === true;
+    // [#32354] A disabled package named is its own withheld item whether it
+    // holds the name in the registry or only as a stored row, which the
+    // registry need not know (one bare slot per name): the read reached its
+    // row, and served its body under the envelope of the package that ships
+    // the name.
+    if (disabled(request.packageId)) return request.packageId;
+    const every = registry.packageScopedHoldersOf(request.type, request.name, request.packageId, { includeDisabledPackages: true }) ?? [];
+    if (every.includes(request.packageId)) return undefined;
+    const installed = installedManifestsOfEngine(host.engine);
+    const bases = every.filter((holder) => pairsOf(holder, installed).includes(request.packageId));
+    return bases.length > 0 && bases.every(disabled) ? bases[0] : undefined;
+}
+
+/**
  * The item an admitted exact read serves, when a layer below answered another
  * package's item: the registry's own item of the holder the address admitted.
  * Another package's item is never served for the address; two bases the
@@ -306,6 +381,20 @@ export async function admitExactQualifier(
  * only. The App's own address keeps #28390 ruling A for a row that declares
  * nothing or declares the App.
  *
+ * The owner check is one function, {@link pairRowOnAddress}, which the list
+ * scoped to a package asks too ({@link pairMemberWithheldAt}); a row whose sole
+ * owner is not one of the address's bases is that owner's, not this
+ * address's (#32277 delta review S2).
+ *
+ * A package-less row (the environment's item, or a `sys_metadata` row bound to
+ * no package) of a name two or more packages hold is no holder's own, for a
+ * type whose by-name readers consult `(package, name)` or whose one-holder
+ * rule has narrowed to the namespace ({@link packageLessRowOwners}, epic
+ * ruling on #31699, #32407): refused naming every holder. That is an overlay
+ * type's row; a sealed type's is declined before it reaches here
+ * ({@link declinesPackageLessRowAt}, {@link declinedCopyReplaced}, epic ruling
+ * 6817768147 on #32568).
+ *
  * @returns the item to serve (unchanged when it is the address's).
  */
 export function exactQualifierItem(
@@ -319,23 +408,37 @@ export function exactQualifierItem(
     const registry = exactQualifierRegistry(host);
     if (!registry) return item;
     const served = (item as { _packageId?: unknown })._packageId;
-    if (typeof served !== 'string' || served === address.packageId || address.registryHolders.includes(served)) return item;
-    // [#32076] A pair of the package the address names, or of a base it admitted, serves on that base's address
-    // when the row is that base's: one owner among the name's holders (epic ruling on #31699 F2).
-    const installed = installedManifestsOfEngine(host.engine);
-    const bases = [address.packageId, ...address.registryHolders];
-    if (bases.some((base) => isPairOf(served, base, installed))) {
-        const declared = declaredOverrideBase(item);
-        // The App's own pair on the App's address, unless the row declares another base (#28390 ruling A).
-        if (isAppPairOf(served, address.packageId, installed) && (declared === undefined || declared === address.packageId)) return item;
-        const owners = pairMemberOwners(served, registry.packageScopedHoldersOf(request.type, request.name) ?? [], installed, item);
+    // A row hydrated into the registry carries `''` or the provenance sentinel
+    // `sys_metadata` where a stored row carries no package: both are no package.
+    if (typeof served !== 'string' || served === '' || served === 'sys_metadata') {
+        // [epic ruling 6761802819 on #31699] A package-less row of a name two
+        // or more packages hold is no package's own (D4: it is the
+        // customization of one holder and cannot say which), so no holder's
+        // exact address serves it. The `_env` address never reaches here.
+        const owners = packageLessRowOwners(registry, request.type, request.name);
         if (owners.length > 1) {
             throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
                 owners.map((owner) => ({ kind: 'package' as const, packageId: owner })));
         }
-        // One owner: kept only when it is the address's package or a base it admitted. No owner: kept
-        // unless the row declares a base the address does not name.
-        if (owners.length === 1 ? bases.includes(owners[0]) : (declared === undefined || bases.includes(declared))) return item;
+        return item;
+    }
+    // [#32501] An item of one of TWO admitted bases (two modules of one App
+    // sharing its pair) is no more the address's than the other's: it falls
+    // through to the refusal naming both below, never the first registered.
+    if (served === address.packageId || (address.registryHolders.length === 1 && address.registryHolders[0] === served)) return item;
+    // [#32076] A pair of the package the address names, or of a base it admitted, serves on that base's address
+    // when the row is that base's (epic ruling on #31699 F2; {@link pairRowOnAddress}, the one owner check).
+    const installed = installedManifestsOfEngine(host.engine);
+    const bases = [address.packageId, ...address.registryHolders];
+    if (bases.some((base) => isPairOf(served, base, installed))) {
+        const verdict = pairRowOnAddress(served, item, address.packageId, bases,
+            registry.packageScopedHoldersOf(request.type, request.name) ?? [], installed,
+            registryRowBinding(registry, request.type, request.name, item));
+        if (verdict === 'serve') return item;
+        if (verdict !== 'not-member') {
+            throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
+                verdict.refuse.map((owner) => ({ kind: 'package' as const, packageId: owner })));
+        }
         // Another holder's row: not this address's item, so the admitted holder's is served below.
     } else if (typeof registry.getPackage === 'function' && registry.getPackage(served) === undefined) {
         // A provenance sentinel or a package this registry does not hold is not another package's item.
@@ -347,6 +450,71 @@ export function exactQualifierItem(
     }
     const [holder] = address.registryHolders;
     return holder === undefined ? undefined : registry.getPackageScopedItem(request.type, request.name, holder, member);
+}
+
+/**
+ * [ADR-0126 Regime C, ADR-0150 D4; epic ruling 6817768147 on #32568] Is a
+ * package-less row of `(type, name)` met at a holder's exact address declined
+ * there: a type ADR-0150 addresses by `(package, name)` whose stored row of
+ * the name the reads decline ({@link ProtocolHost.declinesStoredRow}: a sealed
+ * managed item, unless the row is the shipping package's declared override)?
+ * ⛔ Not a flow: its reads keep their own Regime C rule (#20946, #21002), which
+ * reports a declined row as a shadowed `overlay` layer.
+ *
+ * Such a row customizes nothing: it is no holder's customization, so D4 has
+ * no ambiguity to report for it, and the address serves its holder's own
+ * item, as with no row stored. Declined on every read at the address, in
+ * every hydration state: the active read and its registry or service copy,
+ * the strict draft read, `previewDrafts`, the layered read and its `draft`
+ * layer. Only the five overlay types' package-less rows are a holder's
+ * customization, judged by {@link packageLessRowOwners} (D4).
+ */
+export function declinesPackageLessRowAt(
+    host: Pick<ProtocolHost, 'declinesStoredRow'>,
+    type: string,
+    name: string,
+    row?: ServedOverrideRow,
+): boolean {
+    return isPackageScopedType(type) && type !== 'flow' && host.declinesStoredRow(type, name, row);
+}
+
+/** Is `row` a stored row bound to no package (its `package_id` column empty)? */
+export function isPackageLessRow(row: unknown): boolean {
+    const bound = (row as { package_id?: unknown } | null | undefined)?.package_id;
+    return bound === undefined || bound === null || bound === '';
+}
+
+/**
+ * [Epic ruling 6817768147 on #32568] The item an exact address serves in
+ * place of a package-less registry or service copy of a row it declines
+ * ({@link declinesPackageLessRowAt}): the copy a hydration put in the
+ * registry's bare slot (stamped `''` or `sys_metadata`, tenant-marked) is the
+ * declined row, so the admitted holder's own shipped item is served, as
+ * before the hydration. Read from the artifact set (`lookupArtifactItem`),
+ * never the registry's package-scoped read, which answers the bare slot over
+ * a lone holder's composite (the ADR-0005 overlay). Two bases the package is
+ * a pair of, both holding the name, are refused naming both. `item` is
+ * returned unchanged when it is not such a copy.
+ */
+export function declinedCopyReplaced(
+    host: Pick<ProtocolHost, 'isStoredEntryOfDeclinedName' | 'lookupArtifactItem'>,
+    request: { type: string; name: string },
+    address: ExactQualifierAddress,
+    item: unknown,
+    wantedMember: string | undefined,
+): unknown {
+    if (item === undefined || item === null || typeof item !== 'object') return item;
+    const served = (item as { _packageId?: unknown })._packageId;
+    // Package-less only: `''` and the provenance sentinel `sys_metadata` are no package, as in {@link exactQualifierItem}.
+    if (typeof served === 'string' && served !== '' && served !== 'sys_metadata') return item;
+    // A flow's copy is its own read's ({@link ProtocolHost.isStoredFlowEntryOfShippedName}).
+    if (!isPackageScopedType(request.type) || request.type === 'flow' || !host.isStoredEntryOfDeclinedName(request.type, item)) return item;
+    if (address.registryHolders.length > 1) {
+        throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
+            address.registryHolders.map((holder) => ({ kind: 'package' as const, packageId: holder })));
+    }
+    const [holder] = address.registryHolders;
+    return holder === undefined ? undefined : host.lookupArtifactItem(request.type, request.name, holder, wantedMember);
 }
 
 /**
@@ -435,7 +603,69 @@ export function resolveCallerPackageAddress(
 }
 
 
-/** The base a pair's row declares it customizes (`overrides.package`, ADR-0146 D2), or `undefined`. */
+/**
+ * [ADR-0150 D4, epic ruling 6761802819 on #31699, #32407] Is a package-less
+ * row of `type` judged by {@link packageLessRowOwners}: a type ADR-0150
+ * addresses by `(package, name)` whose by-name readers consult `(package,
+ * name)` (the registry's `readsByPackage`), or whose one-holder rule has
+ * narrowed to the namespace (`NAMESPACE_SCOPED_BARE_NAME_TYPES`, core). A
+ * narrowed type lets two namespaces hold one name whether or not its readers
+ * are wired, so the refusal is in place from the change that narrows it
+ * (`action` since #31697, read through `getItem`), never one reader card later.
+ */
+export function judgesPackageLessRows(registry: { readsByPackage?(type: string): boolean }, type: string): type is PackageScopedType {
+    if (!isPackageScopedType(type)) return false;
+    return registry.readsByPackage?.(type) === true || isNamespaceScopedBareNameType(type);
+}
+
+/**
+ * [ADR-0150 D4, epic ruling 6761802819 on #31699] The packages a package-less
+ * row of `(type, name)` could be the customization of: every package holding
+ * the name, for a type {@link judgesPackageLessRows} judges. Two or more
+ * mean the row cannot say whose it is: each holder's exact read refuses it
+ * naming every one, the list scoped to a holder leaves it out (so a send made
+ * from a holder reads that holder's own), and `os migrate stored-references`
+ * lists it, until it is saved under one package. With one holder it is that
+ * holder's customization, as before. A name the platform requests by
+ * spelling (the `auth.*` mails) resolves environment-wide, so its
+ * package-less row stays the environment's: an empty answer. ⛔ Never a pick
+ * between two.
+ */
+export function packageLessRowOwners(
+    registry: {
+        readsByPackage?(type: string): boolean;
+        packageScopedHoldersOf(
+            type: string, name: string, callerPackageId?: string | null,
+            options?: { includeDisabledPackages?: boolean },
+        ): readonly string[] | undefined;
+    },
+    type: string,
+    name: string,
+    options?: { includeDisabledPackages?: boolean },
+): string[] {
+    if (!judgesPackageLessRows(registry, type)) return [];
+    if (isPlatformRequestedBareName(type, name)) return [];
+    // [#32183] The served holders: a read judges them, so a package-less row
+    // of a name an enabled and a disabled package hold is the enabled one's.
+    // A durable report (`os migrate stored-references`) asks every holder
+    // (`includeDisabledPackages`), so its listing never moves with a
+    // reversible disable.
+    return [...((options === undefined
+        ? registry.packageScopedHoldersOf(type, name)
+        : registry.packageScopedHoldersOf(type, name, null, options)) ?? [])];
+}
+
+/**
+ * Whether a list scoped to a package leaves out the package-less stand-in
+ * row `name` ({@link packageLessRowOwners}: two or more holders could own it).
+ */
+export function packageLessRowWithheld(host: Pick<ProtocolHost, 'engine'>, type: string, name: unknown): boolean {
+    if (typeof name !== 'string' || name === '') return false;
+    const registry = exactQualifierRegistry(host);
+    return registry !== undefined && packageLessRowOwners(registry, type, name).length > 1;
+}
+
+/** The base a member row's body declares it customizes (`overrides.package`, ADR-0146 D2), or `undefined`. */
 function declaredOverrideBase(item: unknown): string | undefined {
     const declaration = (item as { overrides?: unknown } | null | undefined)?.overrides;
     if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return undefined;
@@ -445,7 +675,8 @@ function declaredOverrideBase(item: unknown): string | undefined {
 
 /**
  * [#28390 ruling A] Whether `pairId` is the pair of the App `base` itself (not
- * the pair `base` shares as a member of an App): a row there is the App's own.
+ * the pair `base` shares as a member of an App): a member row there is the
+ * App's own added member on the App's own address.
  */
 function isAppPairOf(pairId: string, base: string, installed: InstalledManifestLookup): boolean {
     if (appOf(base, installed) !== base) return false;
@@ -454,15 +685,19 @@ function isAppPairOf(pairId: string, base: string, installed: InstalledManifestL
 }
 
 /**
- * [ADR-0150 D3, epic ruling on #31699 F2] The holders of a name that a row
- * stored in the customization package `pairId` could belong to: every holder
- * `pairId` is a pair of (ADR-0146 D3: the App's pair is shared by every package
- * of the App), narrowed to the one the row declares it customizes
- * (`overrides.package`) when it declares one. Two or more mean the row cannot
- * say whose it is, and each such holder's exact read refuses it naming every
- * one. ⛔ Never a pick between two.
+ * [ADR-0150 D3/D4, epic ruling on #31699 F2] The holders of a bundle's name
+ * that a member row stored in the customization package `pairId` could be the
+ * added member of: every holder `pairId` is a pair of (ADR-0146 D3: the App's
+ * pair is shared by every package of the App), narrowed to the one the row's
+ * body declares it customizes (`overrides.package`) when it declares one.
+ *
+ * Two or more answers mean the row cannot say whose member it is: each such
+ * holder's exact read refuses it naming every one, the list scoped to a holder
+ * leaves it out, and `os migrate stored-references` lists it, until the row
+ * declares the base it customizes. One answer is that holder's member (#28390
+ * ruling A). ⛔ Never a pick between two.
  */
-function pairMemberOwners(
+export function pairMemberOwners(
     pairId: string,
     holders: readonly string[],
     installed: InstalledManifestLookup,
@@ -473,6 +708,110 @@ function pairMemberOwners(
     return declared === undefined ? owners : owners.filter((holder) => holder === declared);
 }
 
+/**
+ * [#33131 item 5] Whether `packageId` holds the name `name` for the exact
+ * read: the registry's served holders ({@link ExactQualifierRegistry.packageScopedHoldersOf},
+ * every composite slot, then the package a bare-slot entry binds to), so a
+ * package that holds a bundle's name only through its own stored row counts
+ * as the exact read counts it. The list scoped to the package asks it beside
+ * "a code package ships the name", so the package's list and its exact read
+ * agree on its pair's added member. Only for a type whose readers consult
+ * `(package, name)`; every other type keeps the list as it was.
+ */
+export function holdsNameForExactRead(
+    host: Pick<ProtocolHost, 'engine'>,
+    type: string,
+    name: string,
+    packageId: string,
+): boolean {
+    const registry = exactQualifierRegistry(host);
+    if (!registry || (registry as { readsByPackage?(type: string): boolean }).readsByPackage?.(type) !== true) return false;
+    return (registry.packageScopedHoldersOf(type, name) ?? []).includes(packageId);
+}
+
+/**
+ * [Epic ruling on #31699 F2] Whether the list scoped to `base` leaves out the
+ * member row `item` its pair `pairId` stores: the row could be the added
+ * member of two or more holders of the name ({@link pairMemberOwners}) and
+ * `base` is not the App whose own pair it is, or the row declares another
+ * base. Only for a type whose readers consult `(package, name)`; every other
+ * type keeps the list as it was.
+ */
+export function pairMemberWithheldAt(
+    host: Pick<ProtocolHost, 'engine'>,
+    type: string,
+    name: string,
+    base: string,
+    pairId: string,
+    item: unknown,
+): boolean {
+    const registry = exactQualifierRegistry(host);
+    if (!registry || (registry as { readsByPackage?(type: string): boolean }).readsByPackage?.(type) !== true) return false;
+    return pairRowOnAddress(pairId, item, base, [base], registry.packageScopedHoldersOf(type, name) ?? [],
+        installedManifestsOfEngine(host.engine), registryRowBinding(registry, type, name, item)) !== 'serve';
+}
+
+/**
+ * [#32561] The registry's binding of the stored row `item`, read lazily
+ * ({@link ExactQualifierRegistry.overlayRowBinding}), or `undefined` when the
+ * registry does not answer it (the exact read then keeps its own count).
+ */
+function registryRowBinding(
+    registry: ExactQualifierRegistry,
+    type: string,
+    name: string,
+    item: unknown,
+): (() => string | null | undefined) | undefined {
+    const read = registry.overlayRowBinding;
+    return typeof read === 'function' ? () => read.call(registry, type, name, item) : undefined;
+}
+
+/**
+ * [#31699 F2, contract review F-B, delta review S2] The one owner check for a
+ * customization pair's member row `item` (stored under `pairId`) met on the
+ * exact address of `addressPackageId`, whose admitted bases are `bases` (the
+ * address's package and the holders it admitted), given every package
+ * `holders` holding the name. Self-contained, so a generic pair line (#32277)
+ * can hoist it to the top of {@link exactQualifierItem}; the scoped list asks
+ * the same question ({@link pairMemberWithheldAt}).
+ *
+ * - A row that declares the base it customizes (`overrides.package`) is that
+ *   base's member only, the App's own address included: read first (F-B).
+ * - Else the App's own pair keeps its added member on the App's address
+ *   (#28390 ruling A).
+ * - Else two or more holders could own it: refuse, naming every one (F2).
+ * - Else a sole owner that is not one of the address's bases owns it: not
+ *   this address's member (S2).
+ * - [#32561] Else a sole owner the registry does not bind the row to
+ *   (`registryBinding`, the registry's one owner rule: `pairRowBinding`
+ *   counts a bundle addition that ships the row's member as an owner, and
+ *   binds a row whose count would read another shared pair's undeclared row
+ *   to no package) is no owner of it: not this address's member, so the
+ *   address answers its own shipped item (epic ruling, red line 2). The
+ *   exact read adopts the registry's count rather than counting again. Both
+ *   count the served holders (a disabled package holds no name, ADR-0150
+ *   D3): with one of two holders disabled, the row stays the enabled one's
+ *   member (#32183, epic ruling R4-A).
+ * - Else (the sole owner is a base, or no holder pairs it) it is served.
+ */
+export function pairRowOnAddress(
+    pairId: string,
+    item: unknown,
+    addressPackageId: string,
+    bases: readonly string[],
+    holders: readonly string[],
+    installed: InstalledManifestLookup,
+    registryBinding?: () => string | null | undefined,
+): 'serve' | 'not-member' | { refuse: string[] } {
+    const declared = declaredOverrideBase(item);
+    if (declared !== undefined) return bases.includes(declared) ? 'serve' : 'not-member';
+    if (isAppPairOf(pairId, addressPackageId, installed)) return 'serve';
+    const owners = pairMemberOwners(pairId, holders, installed, item);
+    if (owners.length > 1) return { refuse: owners };
+    if (owners.length === 1 && !bases.includes(owners[0]!)) return 'not-member';
+    if (owners.length === 1 && registryBinding !== undefined && registryBinding() !== owners[0]) return 'not-member';
+    return 'serve';
+}
 
 /**
  * [ADR-0150 D5, child G1] The literal segments a by-name metadata read serves
@@ -500,7 +839,10 @@ export type MetaItemAddress =
 /** The registry's namespace catalogue, as the qualified path reads it. */
 interface NamespaceCatalogue {
     getNamespaceOwners(namespace: string): string[];
-    packageScopedHoldersOf?(type: string, name: string): string[];
+    packageScopedHoldersOf?(
+        type: string, name: string, callerPackageId?: string | null,
+        options?: { includeDisabledPackages?: boolean },
+    ): string[];
 }
 
 /**
@@ -538,7 +880,15 @@ export function resolveMetaItemAddress(
     const holders = typeof registry.packageScopedHoldersOf === 'function'
         ? new Set(registry.packageScopedHoldersOf(request.type, request.name) ?? [])
         : new Set<string>();
+    // [#32183] The served holders judge the namespace; a disabled package
+    // holds no name, so a co-owner it shares the namespace with answers alone.
     const holding = owners.filter((owner) => holders.has(owner));
+    // …and when no served owner holds the name, an owner that holds it while
+    // disabled is still the address (its read answers the withheld 404, never
+    // a refusal naming another package).
+    const every = holding.length === 0 && typeof registry.packageScopedHoldersOf === 'function'
+        ? new Set(registry.packageScopedHoldersOf(request.type, request.name, null, { includeDisabledPackages: true }) ?? [])
+        : new Set<string>();
     // A shareable namespace (`base`, `system`, `sys`) can have several owners
     // holding one name: the address names no one item, so it is refused naming
     // each, never picked (ADR-0150 D2) — as the bare read of the name is.
@@ -553,7 +903,7 @@ export function resolveMetaItemAddress(
         };
         throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
     }
-    const packageId = holding[0] ?? owners[0];
+    const packageId = holding[0] ?? owners.find((owner) => every.has(owner)) ?? owners[0];
     return { kind: 'namespace', namespace: reading.namespace, packageId };
 }
 
@@ -588,7 +938,14 @@ export function admitEnvironmentQualifier(
         refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
         return;
     }
-    const holders = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
+    // [#32183, epic ruling R4-B2] The served holders, or every holder when no
+    // package serves the name: a name only disabled packages hold is refused
+    // naming them, as before, never read as a caller with no package (that
+    // read can reach a disabled holder's customization pair row).
+    const served = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
+    const holders = served.length > 0
+        ? served
+        : registry.packageScopedHoldersOf(request.type, request.name, null, { includeDisabledPackages: true }) ?? [];
     if (holders.length === 0) {
         refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
         return;

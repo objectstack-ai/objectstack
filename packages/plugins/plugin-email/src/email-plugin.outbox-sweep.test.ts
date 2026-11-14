@@ -433,7 +433,8 @@ describe('normal delivery is unchanged', () => {
   });
 
   it('an app-inserted row is still drained by the afterInsert hook, exactly once', async () => {
-    const h = await boot();
+    // The drain sends a row the service did not write from the configured sender.
+    const h = await boot({ plugin: { defaultFrom: { address: 'no-reply@example.test' } } });
     await h.ready();
 
     await h.engine.insert('sys_email', {
@@ -446,6 +447,26 @@ describe('normal delivery is unchanged', () => {
     expect(h.transport.send).toHaveBeenCalledTimes(1);
     expect(h.sysEmail()[0]).toMatchObject({ id: 'row-app', status: 'sent', message_id: '<sent@x>' });
     expect(h.ctx.logger.error).not.toHaveBeenCalled();
+  });
+});
+
+describe('an app-inserted row is sent from the configured sender', () => {
+  it('whatever sender its columns and headers name', async () => {
+    const h = await boot({ plugin: { defaultFrom: { name: 'Acme', address: 'no-reply@example.test' } } });
+    await h.ready();
+
+    await h.engine.insert('sys_email', {
+      id: 'row-named', from_address: 'ceo@example.test', to_addresses: 'c@d.test',
+      subject: 'App', body_text: 'x', status: 'queued', attempt_count: 0,
+      headers_json: JSON.stringify({ Sender: 'ceo@example.test', 'X-Campaign': 'q4' }),
+      created_at: new Date(NOW).toISOString(),
+    });
+    await flush();
+
+    expect(h.transport.send).toHaveBeenCalledTimes(1);
+    const sent = (h.transport.send as any).mock.calls[0][0];
+    expect(sent.from).toBe('Acme <no-reply@example.test>');
+    expect(sent.headers ?? {}).toEqual({ 'X-Campaign': 'q4' });
   });
 });
 
@@ -475,7 +496,7 @@ describe('a datasource that re-keys a sys_email insert', () => {
         return { messageId: '<sent@x>' };
       }),
     };
-    const h = await boot({ engine: { reKeyInsert: 'db-pk-7' }, transport });
+    const h = await boot({ engine: { reKeyInsert: 'db-pk-7' }, transport, plugin: { defaultFrom: { address: 'no-reply@example.test' } } });
     await h.ready();
 
     await expect(
@@ -701,7 +722,7 @@ describe('[ADR-0131 D7, Q2 A] identity mail is written to sys_identity_email', (
   });
 
   it('the outbox drain hook delivers a queued row inserted into the sibling', async () => {
-    const h = await boot();
+    const h = await boot({ plugin: { defaultFrom: { address: 'no-reply@example.test' } } });
     await h.ready();
 
     await h.engine.insert(IDENTITY, { ...eighteenZeroIdentityRow('id-drained', ago(0)) });
