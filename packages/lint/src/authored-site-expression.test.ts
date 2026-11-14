@@ -94,8 +94,6 @@ function walkPushes(code: string): string[] {
 const SITE_MEMBER_CALLS: Record<AuthoredExpressionSite, Record<string, string>> = {
   validation: {
     get: 'a Map read (the object index, the field definitions)',
-    indexOf: 'a string offset, reading the slot key',
-    isArray: '`Array.isArray`',
     push: "appends a finding to the walk's list",
   },
   formula: {
@@ -130,14 +128,17 @@ const CYCLE = {
   },
 };
 
-/** Where each site's calls are read: the rule loop and the `check` helper it calls; the field-formula pass and what follows the fields loop. */
+/** Where each site's calls are read: the rule pass (`judgeValidationRule`) and the `check` helper it calls; the field-formula pass and what follows the fields loop. */
 const SITE_REGIONS: Record<AuthoredExpressionSite, Array<[string, string]>> = {
   validation: [
     ['  const check = (', '  const fieldRuleRootVerdict = ('],
-    ['    for (const rule of recordsOf(validations)) {', '    // Field-level formulas'],
+    // [#33154] The rule pass, hoisted out of the object walk so the extension
+    // walk judges an extension's rules by the same body; the object walk's
+    // loop now calls it and nothing else.
+    ['  const judgeValidationRule = (', '  // ── Object validation-rule'],
   ],
   formula: [
-    ['  const judgeFieldFormula = (', '  // ── Object validation-rule'],
+    ['  const judgeFieldFormula = (', '  const judgeValidationRule = ('],
     [
       '      judgeFieldFormula(fname, f, { objectName, optionFields: optionFieldNames, fieldDefs });\n    }',
       "    // [#26646] A field group's section predicate",

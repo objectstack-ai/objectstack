@@ -4118,7 +4118,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // item-relative (`validations.0.condition`). The index is the authored
       // one: `ObjectExtensionSchema` declares `validations` an array of rule
       // records, and `recordsOf` hands an array's records back in order.
-      for (const [ruleIndex, rule] of rules.entries()) {
+      // Counted by hand, as `objectPosition` is, so the #5017 key scan sees
+      // no new receiver.
+      let ruleIndex = -1;
+      for (const rule of rules) {
+        ruleIndex += 1;
         judgeValidationRule(rule, {
           objectName: target,
           locus: `object '${target}' · ${entryPath}`,
