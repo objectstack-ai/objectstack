@@ -327,6 +327,68 @@ would move a handler's own `ctx.api` writes *outside* the transaction the write
 ran in, which is a worse guarantee than the one documented here.
 </Callout>
 
+## Recipe — refuse overlapping time ranges
+
+Leave, overtime, room and shift bookings share one rule: two live records of the
+same owner may not cover the same time. There is no declarative key for it, and
+a validation rule cannot see the other records, so write it as a `before*` hook
+on **both** insert and update. This is the vetted form; rename the object and
+fields:
+
+```ts
+import { defineHook } from '@objectstack/spec/data';
+
+export default defineHook({
+  name: 'leave_request_no_overlap',
+  object: 'leave_request',
+  events: ['beforeInsert', 'beforeUpdate'],
+  refusals: { OVERLAP: { message: 'This overlaps another request of yours.', status: 409 } },
+  body: {
+    language: 'js',
+    capabilities: ['api.read'],
+    source: `
+      const r = Object.assign({}, ctx.previous, ctx.input); // update: stored row under the patch
+      const off = ['rejected', 'cancelled'];
+      if (!r.owner_id || !r.start_at || !r.end_at || off.includes(r.status)) return;
+      const where = {
+        owner_id: r.owner_id,
+        status: { $nin: off },        // fail closed: a new status counts until listed here
+        start_at: { $lt: r.end_at },  // half-open: one ending 18:00 and
+        end_at: { $gt: r.start_at },  // one starting 18:00 do not overlap
+      };
+      if (ctx.previous) where.id = { $ne: ctx.previous.id }; // not the record itself
+      if (await ctx.api.object('leave_request').count({ where }) > 0)
+        throw Object.assign(new Error(), { code: 'OVERLAP' });
+    `,
+  },
+});
+```
+
+Each line is there for a reason:
+
+- **Merge the stored row under the patch.** On update `ctx.input` carries only
+  the fields this write changes, so a patch that moves `start_at` alone must be
+  judged with the stored `end_at`, `owner_id` and `status`.
+- **Exclude the record itself** with `id: { $ne: … }`, or every update of a
+  booking collides with its own stored row.
+- **Name the ignored statuses with `$nin` (or `$ne`), never the live ones with
+  `$in`.** A status added later then counts as live until someone decides
+  otherwise, and a row with no status counts too. A record saved in an ignored
+  status is not checked; reviving it into an overlap is refused.
+- **Half-open ranges.** `start < other.end && end > other.start`: a booking
+  ending at 18:00 and one starting at 18:00 do not overlap.
+- **A declared refusal.** The body throws the code alone; the saver gets the
+  catalogue's fixed sentence (translated through the key
+  `hooks.leave_request_no_overlap.refusals.OVERLAP.message`) and the caller a
+  `409` whose `declaredCode` is `OVERLAP`.
+
+Known limits — the hook does not cover these, so do not assume it does:
+
+- It reads, then the write happens: two saves at the same moment can both pass.
+- A recycle-bin restore runs no insert hook.
+- An import run with automations off skips hooks.
+- Rows of one bulk insert do not see each other.
+
 ## Hook Context
 
 `handler` receives a `HookContext` with these fields:
