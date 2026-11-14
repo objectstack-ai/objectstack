@@ -351,8 +351,16 @@ What verification decides, with it on:
   letters) is refused. Any other new account is refused with
   `error=EMAIL_DOMAIN_NOT_ALLOWED`, and nothing is created. No audience
   posture, invitation, first-user carve-out or `allowJit` setting relaxes this.
-- **Accounts that already exist are not re-checked.** A person who already has
-  an account signs in as before.
+- **A sign-in reaches an existing account only with an address at a domain the
+  provider has proven.** The same rule decides when an SSO sign-in links to an
+  account that already exists (an implicit link), and when a later sign-in into
+  an account the provider is already linked to asserts a different email
+  address: the asserted address must be at one of the provider's listed,
+  verified domains, matched the same way. Otherwise the sign-in is refused with
+  `error=EMAIL_DOMAIN_NOT_ALLOWED`, no link is written, no session is issued
+  and the stored address is unchanged. A sign-in that asserts the account's own
+  address is not re-checked, so a person who already has an account signs in
+  as before; an explicit link from account settings is unchanged.
 
 So if your people first sign in with addresses at a subdomain or at another
 domain, list each such domain on the provider as a bare host name and verify it.
