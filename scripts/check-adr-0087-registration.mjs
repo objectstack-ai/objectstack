@@ -503,7 +503,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'IX (#26220): predicate 4 reads an `any` index signature; the entry may be `src/index.tsx`': 52,
   'WP (#26220): a deleted published package is retired whole, `<package>#*`': 59,
   'DX (#26324): an export named `default` is reached through an import, never through the word': 19,
-  'SP (#30598): a LITERAL subpath key of the `exports` map, `<package>/<subpath>#...`': 61,
+  'SP (#30598): a LITERAL subpath key of the `exports` map, `<package>/<subpath>#...`': 73,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -4984,17 +4984,22 @@ function subpathSourceEntry(rev, cwd, pkgName, manifest, dir, subpath, kit) {
           '      refused by name, never resolved',
       };
     }
+    // `"exports": null` is no map, exactly as an absent field is: Node and
+    // TypeScript both read it as absent, and every file is importable by path.
+    const noExportsMap = manifest.exports == null;
     return {
       keyAbsent: true,
+      noExportsMap,
       refusal: `the \`exports\` map of \`${pkgName}\` has no \`${subpath}\` key at ${short}` +
-        (manifest.exports === undefined ? ' (it declares no `exports` map at all)' : ''),
+        (noExportsMap ? ` (it declares no \`exports\` map at all${manifest.exports === null ? ': `"exports": null` reads as absent' : ''})` : ''),
     };
   }
   if (entry === null) {
     return {
       refusal: `the \`${subpath}\` key of \`${pkgName}\` names no TypeScript declaration entry at ${short}\n` +
-        `      (${JSON.stringify(manifest.exports[subpath]).slice(0, 100)}): a key that ships no \`.d.ts\` exports no name a\n` +
-        '      TypeScript consumer imports, so nothing on it is a runtime export to retire. Refused by name',
+        `      (${JSON.stringify(manifest.exports[subpath]).slice(0, 100)}): none of its conditions names a \`.d.ts\`,\n` +
+        '      `.d.mts` or `.d.cts` file -- a stylesheet, a JSON file or a TS SOURCE file is not one -- so this gate has\n' +
+        '      no declaration entry to map to a source and nothing on it to read. Refused by name',
     };
   }
   const declaredEntry = entry.replace(/^\.\//, '');
@@ -5110,10 +5115,11 @@ function verifySubpathRetired(op, at, { head, cwd, packagesAt }) {
   let manifest;
   try { manifest = JSON.parse(showOrNull(head, info.file, cwd) ?? ''); } catch { return { refusal: `${info.file} does not parse at HEAD` }; }
   const map = manifest.exports;
-  if (map === undefined) {
+  // `"exports": null` reads as absent to Node and TypeScript alike (#30598 review).
+  if (map == null) {
     return {
-      refusal: `\`${op.pkg}\` declares no \`exports\` map at HEAD, so every file in it is importable by path and the\n` +
-        `      absence of a \`${op.subpath}\` key proves nothing left the published surface`,
+      refusal: `\`${op.pkg}\` declares no \`exports\` map at HEAD${map === null ? ' (`"exports": null` reads as absent)' : ''}, so every file in it is\n` +
+        `      importable by path and the absence of a \`${op.subpath}\` key proves nothing left the published surface`,
     };
   }
   const present = [];
@@ -5413,6 +5419,8 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
         `${tag(op)} cannot be read at HEAD:\n      ${now.refusal}.` +
         (deleted ? `\n      A published package DELETED at HEAD is retired whole, on one operand: \`${op.pkg}#*\`\n` +
           '      (ADR-0087 D9, amended 2026-10-27), with one FROM line naming the package.'
+          : now.keyAbsent && now.noExportsMap ? `\n      With no \`exports\` map at HEAD every file of \`${op.pkg}\` is importable by path, so neither this\n` +
+            `      operand nor \`${op.specifier}#*\` can prove the retirement.`
           : now.keyAbsent ? `\n      A subpath key that LEFT the \`exports\` map at HEAD is retired whole, on one operand:\n` +
             `      \`${op.specifier}#*\` (ADR-0087 D9, amended 2026-11-14), with one FROM line naming \`${op.specifier}\`.` : ''),
       );
@@ -5458,7 +5466,7 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
     if (after.state === 'not-exported') {
       problems.push(
         `${tag(op)}: the type \`${op.exportName}\` itself is no longer exported at HEAD. A retired TYPE is\n` +
-        `      named as an export (\`${op.pkg}#${op.exportName}\`), not through one of its members.`,
+        `      named as an export (\`${op.specifier}#${op.exportName}\`), not through one of its members.`,
       );
       continue;
     }
@@ -8898,6 +8906,20 @@ function selfTest() {
     red('SP-R11 `#*` on a package with NO `exports` map at HEAD: every file is importable, absence proves nothing', sp([`${TPL}#*`], WHOLE_LINE, {
       head: { ...SP_GONE, [rexPath('package.json')]: REX_MANIFEST({ exports: undefined }) },
     }), [TPL_P1, /declares no `exports` map at HEAD/]);
+    red('SP-R16 `#*` on a package whose HEAD `exports` is NULL: read as absent, as Node and TypeScript read it', sp([`${TPL}#*`], WHOLE_LINE, {
+      head: { ...SP_GONE, [rexPath('package.json')]: REX_MANIFEST({ exports: null }) },
+    }), [TPL_P1, /declares no `exports` map at HEAD \(`"exports": null` reads as absent\)/]);
+    const r17 = sp([`${TPL}#renderTemplate`], RENDER_LINE, { head: { ...SP_GONE, [rexPath('package.json')]: REX_MANIFEST({ exports: null }) } });
+    red('SP-R17 an EXPORT operand on a package with no `exports` map at HEAD is NOT pointed at the whole-key spelling', r17,
+      [/cannot be read at HEAD/, /neither this\n\s+operand nor `@objectstack\/plugin-email\/templates#\*` can prove the retirement/]);
+    assert(!/LEFT the `exports` map at HEAD is retired whole/.test(messages(r17)),
+      `SP-R17b: no whole-key hint where the whole-key form is refused too. Got:\n${messages(r17)}`);
+    red('SP-R18 a key whose `types` condition names a TS SOURCE file is refused as no declaration entry', sp([`${REX_PKG}/raw#X`], '- FROM `X` TO nothing.', {
+      base: { [rexPath('package.json')]: SP_MANIFEST({ ...SP_EXPORTS, './raw': { types: './src/raw.ts', import: './dist/raw.mjs' } }), [rexPath('src/raw.ts')]: 'export const X = 1;\n' },
+    }), [/the `\.\/raw` key of `@objectstack\/plugin-email` names no TypeScript declaration entry/, /a TS SOURCE file is not one/]);
+    red('SP-R19 a member operand whose TYPE left the subpath entry is pointed at the SUBPATH export spelling', sp([`${TPL}#TemplateOptions.legacy`],
+      '- FROM `TemplateOptions.legacy` TO nothing.', { head: { [rexPath('src/templates.ts')]: 'export const KEEP_TEMPLATES = 1;\n' } }),
+    [/named as an export \(`@objectstack\/plugin-email\/templates#TemplateOptions`\)/]);
     red('SP-R12 `#*` while a metadata surface OUTSIDE the package imports the subpath at the merge base', sp([`${TPL}#*`], WHOLE_LINE, {
       head: SP_GONE, base: { 'packages/spec/src/ui/tpl.zod.ts': `import { renderTemplate } from '${TPL}';\nexport const T = renderTemplate;\n` },
     }), [TPL_P2, /packages\/spec\/src\/ui\/tpl\.zod\.ts \(a Zod schema\) IMPORTS `@objectstack\/plugin-email\/templates` IN CODE/]);
