@@ -573,7 +573,10 @@ describe('[#32990] the resync judges artifact-shipped by each holder\'s owner ke
       name: 'row-store', version: '0.0.0', supports: {},
       async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async syncSchema() {},
       async find(object: string, ast: AnyRecord) {
-        return object === 'sys_metadata' ? rows.filter((r) => matches(r, ast?.where)).map((r) => ({ ...r })) : [];
+        if (object !== 'sys_metadata') return [];
+        const hits = rows.filter((r) => matches(r, ast?.where));
+        const page = typeof ast?.limit === 'number' ? hits.slice(0, ast.limit) : hits;
+        return page.map((r) => ({ ...r }));
       },
       async findOne(object: string, ast: AnyRecord) {
         return object === 'sys_metadata' ? rows.find((r) => matches(r, ast?.where)) ?? null : null;
