@@ -90,6 +90,7 @@
     "data/HookContext",
     "data/HookEvent",
     "data/HookRefusal",
+    "data/HookRefusalReason",
     "data/ImportFieldMapping",
     "data/Index",
     "data/InlineGridColumn",

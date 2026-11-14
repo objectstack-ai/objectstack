@@ -5,8 +5,12 @@ import {
   HOOK_REFUSAL_MESSAGE_HOLE_REFUSED,
   hookRefusalCodesThrownIn,
   hookRefusalsWithoutSandboxedBody,
+  HOOK_REFUSAL_REASON_PATTERN,
+  hookRefusalReasonsThrownIn,
   undeclaredHookRefusalAtRun,
   undeclaredHookRefusalCodeAtSave,
+  undeclaredHookRefusalReasonAtRun,
+  undeclaredHookRefusalReasonAtSave,
 } from './hook-refusal-codes';
 import { hookRefusalMessageKey } from '../system/i18n-resolver';
 import { TranslationDataSchema } from '../system/translation.zod';
@@ -48,18 +52,23 @@ describe('Hook.refusals — the declared catalogue', () => {
   });
 
   it.each([
-    ['an in-process `handler`', { handler: 'creditGuard' }, 'no `body`'],
+    ['neither a body nor a handler', {}, 'no `body` and no `handler`'],
     ['an expression body', { body: { language: 'expression', source: 'record.amount > 0' } }, 'a `expression` body'],
+    [
+      'an expression body beside a handler (the body wins at bind)',
+      { body: { language: 'expression', source: 'record.amount > 0' }, handler: 'creditGuard' },
+      'a `expression` body',
+    ],
   ])('refuses a catalogue on a hook with %s — nothing would answer it', (_label, rest, has) => {
     const r = HookSchema.safeParse({ ...base, ...rest, refusals: { CREDIT_LIMIT: { message: 'x' } } });
     expect(r.success).toBe(false);
     const issue = r.error!.issues.find((i) => i.path.join('.') === 'refusals')!;
-    expect(issue.message).toBe(hookRefusalsWithoutSandboxedBody(has === 'no `body`' ? undefined : 'expression'));
+    expect(issue.message).toBe(hookRefusalsWithoutSandboxedBody(has.startsWith('no') ? undefined : 'expression'));
     expect(issue.message).toContain(has);
   });
 
   it.each(['Over the limit of {{limit}}.', 'Hi {{ user.name }}, no.', 'Line one.\nOver {{limit}}.'])(
-    'refuses a `{{ }}` hole in %j — nothing fills it, and a params slot stays additive',
+    'refuses a `{{ }}` hole in %j when the entry declares no `params` — nothing fills it',
     (message) => {
       const r = HookSchema.safeParse({ ...base, body: body('return;'), refusals: { CREDIT_LIMIT: { message } } });
       expect(r.success).toBe(false);
@@ -223,5 +232,216 @@ describe('HookContext.session.locale — the locale a refusal is picked in', () 
     const ctx = { object: 'order', event: 'beforeInsert', input: {}, ql: {} };
     expect(HookContextSchema.safeParse({ ...ctx, session: { userId: 'u1', locale: 'zh-CN' } }).success).toBe(true);
     expect(HookContextSchema.safeParse({ ...ctx, session: { userId: 'u1' } }).success).toBe(true);
+  });
+});
+
+// #33214 (ruling 6879477573: 问一 A, 问二 S1, 问三 是) — the catalogue is answered
+// on a handler-authored hook too, a code holds further sentences under declared
+// reasons, and a sentence may name declared params.
+
+describe('Hook.refusals on a handler-authored hook (#33214)', () => {
+  const refusals = { CREDIT_LIMIT: { message: 'Over the credit limit.' } };
+
+  it('accepts a catalogue on a hook whose `handler` is an inline function', () => {
+    const handler = async (ctx: any) => {
+      if (ctx.input.amount > 10) throw Object.assign(new Error('x'), { code: 'CREDIT_LIMIT' });
+    };
+    const r = HookSchema.safeParse({ ...base, handler, refusals });
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.refusals?.CREDIT_LIMIT.message).toBe('Over the credit limit.');
+  });
+
+  it('accepts a catalogue on a hook whose `handler` is a string reference — its codes are judged when it runs', () => {
+    expect(HookSchema.safeParse({ ...base, handler: 'creditGuard', refusals }).success).toBe(true);
+  });
+
+  it('refuses a literal code the catalogue does not declare, read off the inline handler, at `handler`', () => {
+    const handler = async () => {
+      throw Object.assign(new Error('x'), { code: 'CREDIT_LIMT' });
+    };
+    const r = HookSchema.safeParse({ ...base, handler, refusals });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'handler')!;
+    expect(issue.message).toBe(undeclaredHookRefusalCodeAtSave('CREDIT_LIMT', ['CREDIT_LIMIT'], 'handler'));
+    expect(issue.message.startsWith('`handler` throws code')).toBe(true);
+  });
+
+  it('reads the body, not the handler, when both are present — the body wins at bind', () => {
+    const handler = async () => {
+      throw Object.assign(new Error('x'), { code: 'NOT_RUN' });
+    };
+    const r = HookSchema.safeParse({
+      ...base,
+      handler,
+      body: body("throw Object.assign(new Error('x'), { code: 'CREDIT_LIMIT' });"),
+      refusals,
+    });
+    expect(r.success).toBe(true);
+  });
+});
+
+describe('HookRefusal.reasons — further sentences under one code (#33214, S1)', () => {
+  const refusals = {
+    VALIDATION_FAILED: {
+      message: 'This plan cannot be submitted.',
+      reasons: { plan_locked: { message: 'The plan is locked.' }, second_primary: { message: 'A primary plant exists.' } },
+    },
+  };
+
+  it('accepts declared snake_case reasons with a message each', () => {
+    const r = HookSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'VALIDATION_FAILED', reason: 'plan_locked', message: 'x' };"),
+      refusals,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it.each(['PlanLocked', 'PLAN_LOCKED', 'plan-locked', '1st'])('refuses the reason key %j — a reason is snake_case', (key) => {
+    const r = HookRefusalSchema.safeParse({ message: 'x', reasons: { [key]: { message: 'y' } } });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.some((i) => i.path[0] === 'reasons')).toBe(true);
+  });
+
+  it('refuses an empty reason message and a reason carrying its own status', () => {
+    expect(HookRefusalSchema.safeParse({ message: 'x', reasons: { a: { message: ' ' } } }).success).toBe(false);
+    const r = HookRefusalSchema.safeParse({ message: 'x', reasons: { a: { message: 'y', status: 409 } } });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('`status`');
+  });
+
+  it('refuses at `body.source` a literal reason the code does not declare', () => {
+    const r = HookSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'VALIDATION_FAILED', reason: 'plan_lockd', message: 'x' };"),
+      refusals,
+    });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'body.source')!;
+    expect(issue.message).toBe(
+      undeclaredHookRefusalReasonAtSave('VALIDATION_FAILED', 'plan_lockd', ['plan_locked', 'second_primary'], 'body.source'),
+    );
+  });
+
+  it('refuses at `handler` a literal reason under a code with no `reasons`', () => {
+    const handler = async () => {
+      const e: any = new Error('x');
+      e.code = 'CREDIT_LIMIT';
+      e.reason = 'over_by_far';
+      throw e;
+    };
+    const r = HookSchema.safeParse({ ...base, handler, refusals: { CREDIT_LIMIT: { message: 'Over.' } } });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'handler')!;
+    expect(issue.message).toContain("reason 'over_by_far'");
+    expect(issue.message).toContain('declared: none');
+  });
+});
+
+describe('hookRefusalReasonsThrownIn — the save-time reading of reasons', () => {
+  it.each([
+    ["throw { code: 'A_B', reason: 'x_y' };", [{ code: 'A_B', reason: 'x_y' }]],
+    ["throw Object.assign(new Error('m'), { reason: \"r\", code: \"C\" });", [{ code: 'C', reason: 'r' }]],
+    ["const e = new Error('m'); e.code = 'C'; e.reason = 'r'; throw e;", [{ code: 'C', reason: 'r' }]],
+  ])('reads %j', (source, pairs) => {
+    expect(hookRefusalReasonsThrownIn(source)).toEqual(pairs);
+  });
+
+  it.each([
+    // no literal code beside it
+    "throw { code: c, reason: 'r' };",
+    // a reason outside any throw
+    "const row = { reason: 'r' }; throw { code: 'C' };",
+    // inside a string or a comment
+    "// throw { code: 'C', reason: 'r' }\nreturn;",
+    "throw new Error(\"reason: 'r'\");",
+  ])('reads nothing in %j', (source) => {
+    expect(hookRefusalReasonsThrownIn(source)).toEqual([]);
+  });
+
+  it('does not read a kept reason literal spelling `throw` as a throw statement', () => {
+    expect(hookRefusalCodesThrownIn("const k = 'throw'; const r = { code: 'NOPE' };")).toEqual([]);
+  });
+
+  it.each(['a', 'plan_locked', 'x1_y2'])('the reason pattern accepts %s', (r) => expect(HOOK_REFUSAL_REASON_PATTERN.test(r)).toBe(true));
+  it.each(['A', 'Plan', '_a', 'a_', 'a__b', 'a-b'])('the reason pattern refuses %s', (r) => expect(HOOK_REFUSAL_REASON_PATTERN.test(r)).toBe(false));
+
+  it('the run-time fault names the hook, the code, the reason and the declared reasons', () => {
+    const text = undeclaredHookRefusalReasonAtRun('plan_gate', 'VALIDATION_FAILED', 'nope', ['plan_locked']);
+    expect(text).toContain("hook 'plan_gate' threw code 'VALIDATION_FAILED' with reason 'nope'");
+    expect(text).toContain("declared: 'plan_locked'");
+  });
+});
+
+describe('HookRefusal.params — declared names a sentence may fill (#33214)', () => {
+  it('accepts a hole over a declared param, in the message and in a reason', () => {
+    const r = HookRefusalSchema.safeParse({
+      message: 'The plan is {{ state }}.',
+      params: ['state', 'owner'],
+      reasons: { locked: { message: 'Locked by {{ owner }} while {{ state }}.' } },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('accepts a hole with a formatter over a declared param', () => {
+    expect(HookRefusalSchema.safeParse({ message: 'Over by {{ amount | number }}.', params: ['amount'] }).success).toBe(true);
+  });
+
+  it('refuses a hole over a name the entry does not declare, naming the declared roots', () => {
+    const r = HookRefusalSchema.safeParse({ message: 'The plan is {{ stat }}.', params: ['state'] });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'message')!;
+    expect(issue.message).toContain('`{{ stat }}`');
+    expect(issue.message).toContain('`state`');
+  });
+
+  it('refuses an undeclared hole in a reason at `reasons.REASON.message`', () => {
+    const r = HookRefusalSchema.safeParse({ message: 'x', params: ['a'], reasons: { r: { message: 'Hi {{ b }}.' } } });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.some((i) => i.path.join('.') === 'reasons.r.message')).toBe(true);
+  });
+
+  it('refuses every hole in a reason when the entry declares no params', () => {
+    const r = HookRefusalSchema.safeParse({ message: 'x', reasons: { r: { message: 'Hi {{ b }}.' } } });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.find((i) => i.path.join('.') === 'reasons.r.message')!.message).toBe(HOOK_REFUSAL_MESSAGE_HOLE_REFUSED);
+  });
+
+  it('prescribes the hole for a single-brace token over a declared param', () => {
+    const r = HookRefusalSchema.safeParse({ message: 'The plan is {state}.', params: ['state'] });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.message).toContain('{{ state }}');
+  });
+
+  it.each([['1a'], ['a-b'], ['$x']])('refuses the param name %j', (name) => {
+    expect(HookRefusalSchema.safeParse({ message: 'x', params: [name] }).success).toBe(false);
+  });
+
+  it('refuses a param declared twice', () => {
+    const r = HookRefusalSchema.safeParse({ message: 'x', params: ['a', 'a'] });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.path.join('.')).toBe('params.1');
+  });
+});
+
+describe('the translation address of a reason — `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`', () => {
+  it('is the key the runtime asks the i18n service for', () => {
+    expect(hookRefusalMessageKey('plan_gate', 'VALIDATION_FAILED', 'plan_locked')).toBe(
+      'hooks.plan_gate.refusals.VALIDATION_FAILED.reasons.plan_locked.message',
+    );
+    expect(hookRefusalMessageKey('plan_gate', 'VALIDATION_FAILED')).toBe('hooks.plan_gate.refusals.VALIDATION_FAILED.message');
+  });
+
+  it('is a path a translation bundle can write, holes kept', () => {
+    const r = TranslationDataSchema.safeParse({
+      hooks: { plan_gate: { refusals: { VALIDATION_FAILED: { reasons: { plan_locked: { message: '计划已{{ state }}。' } } } } } },
+    }) as { success: true; data: any };
+    expect(r.success).toBe(true);
+    expect(r.data.hooks.plan_gate.refusals.VALIDATION_FAILED.reasons.plan_locked.message).toBe('计划已{{ state }}。');
+  });
+
+  it('refuses a key a reason translation does not hold', () => {
+    const r = TranslationDataSchema.safeParse({ hooks: { h: { refusals: { C: { reasons: { r: { title: 'x' } } } } } } });
+    expect(r.success).toBe(false);
   });
 });
