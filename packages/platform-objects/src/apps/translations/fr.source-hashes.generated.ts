@@ -242,4 +242,5 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_sso_provider.fields.sign_out_of_idp.help": "ab8ff5fce3001c81",
   "objects.sys_sso_provider.fields.sign_out_of_idp.label": "212587b8191bb91b",
   "objects.sys_two_factor.fields.secret.label": "03cb32e33fa5cc45",
+  "objects.sys_user.fields.source.options.idp_pending": "3751093c5b65b072",
 };

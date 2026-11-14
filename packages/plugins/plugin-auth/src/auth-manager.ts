@@ -6374,11 +6374,12 @@ export class AuthManager {
     // [#25224 cut 4] The body moved to `auth-manager-database-hooks.ts` (see `DatabaseHooksHost`).
     const readConfig = () => this.config;
     const readIdpLocale = () => this.idpLocale;
-    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'enforceConcurrentCap' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'judgeSessionSwitch' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
+    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'enforceConcurrentCap' | 'isAdminPluginMounted' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'judgeSessionSwitch' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
       audienceLogError: (...a) => this.audienceLogError(...a),
       get config() { return readConfig(); },
       get idpLocale() { return readIdpLocale(); },
       isCreatedInThisRequest: (...a) => this.isCreatedInThisRequest(...a),
+      isAdminPluginMounted: () => this.isAdminPluginMounted(),
       enforceConcurrentCap: (...a) => this.enforceConcurrentCap(...a),
       judgeSessionScoping: (...a) => this.judgeSessionScoping(...a),
       judgeSessionSwitch: (...a) => this.judgeSessionSwitch(...a),
@@ -7509,6 +7510,19 @@ export class AuthManager {
    */
   public isScimWired(): boolean {
     return resolveScimEnabled(this.config.plugins);
+  }
+
+  /**
+   * Is better-auth's admin plugin mounted on the built instance? Asked of the
+   * instance itself (its `banUser` endpoint, the seam `admin/create-user` and
+   * `admin/ban-user` have always tested), never of the configuration, so a
+   * plugin that failed to mount reads as absent. Where it is absent the
+   * platform enforces a ban itself (`user-session-admission.ts`) and writes
+   * one through the data engine (`user-ban-write.ts`).
+   */
+  public async isAdminPluginMounted(): Promise<boolean> {
+    const api = (await this.getApi()) as { banUser?: unknown } | undefined;
+    return typeof api?.banUser === 'function';
   }
 
   /**

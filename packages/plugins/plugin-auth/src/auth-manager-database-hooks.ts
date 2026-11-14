@@ -62,7 +62,10 @@ import { holdPrincipalSessionExpiry } from './principal-session-mint.js';
 import { canonicalClientAddress } from './client-address-canonical.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
-import { refuseAgentAccountCredential, refuseAgentAccountSession } from './service-account-identity.js';
+import { readSessionUserRow, refuseAgentAccountCredential } from './service-account-identity.js';
+import { refuseInactiveUserSession, SESSION_ADMISSION_ROW_FIELDS } from './user-session-admission.js';
+import { PLATFORM_IDP_PROVIDER_ID } from './implicit-account-linking.js';
+import { PENDING_SSO_SOURCE } from './pending-sso-marker.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -77,6 +80,7 @@ export interface DatabaseHooksHost {
   readonly idpLocale: AuthManager['idpLocale'];
   audienceLogError: AuthManager['audienceLogError'];
   getDataEngine: AuthManager['getDataEngine'];
+  isAdminPluginMounted: AuthManager['isAdminPluginMounted'];
   isCreatedInThisRequest: AuthManager['isCreatedInThisRequest'];
   enforceConcurrentCap: AuthManager['enforceConcurrentCap'];
   judgeSessionScoping: AuthManager['judgeSessionScoping'];
@@ -92,7 +96,7 @@ export interface DatabaseHooksHost {
 
 /** The body of `AuthManager#composeDatabaseHooks`; the method's docblock there is its contract. */
 export function composeDatabaseHooks(
-  this: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'enforceConcurrentCap' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'judgeSessionSwitch' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'>,
+  this: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'enforceConcurrentCap' | 'isAdminPluginMounted' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'judgeSessionSwitch' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'>,
   host?: BetterAuthOptions['databaseHooks'],
 ): BetterAuthOptions['databaseHooks'] {
   // A landed link ends a standing unlink record (implicit-account-linking.ts,
@@ -359,7 +363,16 @@ export function composeDatabaseHooks(
   // impersonation or minted session gets a session for one, whatever runs
   // after it. See service-account-identity.ts.
   const sessionBefore = async (session: any, ctx: any) => {
-    await refuseAgentAccountSession(this.config.dataEngine, session);
+    // [#33181] The same one read of the row carries the columns the next
+    // refusal judges: a pending person holds no session but the platform
+    // sign-in's, and a ban holds on a kernel without the vendor admin plugin
+    // (whose own hook enforces it where it is mounted). See
+    // user-session-admission.ts.
+    const userRow = await readSessionUserRow(this.config.dataEngine, session, SESSION_ADMISSION_ROW_FIELDS);
+    await refuseInactiveUserSession(this.config.dataEngine, session, {
+      row: userRow,
+      enforceBan: async () => !(await this.isAdminPluginMounted()),
+    });
     const captured = await captureSessionAddress(session);
     const result = sessionActiveOrgBefore ? await sessionActiveOrgBefore(captured, ctx) : undefined;
     if (result === false) return false;
@@ -589,6 +602,16 @@ export async function stampIdentitySource(this: Pick<DatabaseHooksHost, 'getData
         await engine.update('sys_user', { id: userId, source: 'env_native' }, { context: SYSTEM_CTX } as any);
       }
       return;
+    }
+
+    // [#33181] A pending person (`idp_pending`) becomes a person only through
+    // the platform identity provider: any other federated link leaves the
+    // marker, so the session admission keeps refusing the row.
+    if (providerId !== PLATFORM_IDP_PROVIDER_ID) {
+      const current = await engine.findOne('sys_user', {
+        where: { id: userId }, fields: ['id', 'source'], context: SYSTEM_CTX,
+      });
+      if (current && current.source === PENDING_SSO_SOURCE) return;
     }
 
     // Federated link → managed, unless a local credential already exists.

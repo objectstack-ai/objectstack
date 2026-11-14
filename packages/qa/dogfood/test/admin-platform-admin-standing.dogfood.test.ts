@@ -255,6 +255,14 @@ const ADMITTED = [
   'POST /api/v1/auth/admin/authorized-clients/withdraw',
   'POST /api/v1/auth/admin/unlock-user',
   'POST /api/v1/auth/admin/import-users',
+  // #33181 — add pending, SSO-only people: ObjectStack raw mounts whose FIRST
+  // statement is the ADR-0068 gate. This stack is not cloud-managed, so the
+  // admin passes the gate and lands on `409 RESOURCE_CONFLICT` (the doors
+  // answer only on a managed environment), like the SSO bridges' capability
+  // error above; the add's effect is pinned in plugin-auth's
+  // `pending-sso-users.test.ts`.
+  'POST /api/v1/auth/admin/add-sso-user',
+  'POST /api/v1/auth/admin/import-sso-users',
   'POST /api/v1/auth/admin/oauth2/toggle-disabled',
   'POST /api/v1/auth/admin/impersonate-user',
   'POST /api/v1/auth/admin/sso/register',
@@ -747,6 +755,11 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
         body: { format: 'json', rows: [{ email: 'standing.sweep.imported@example.com', name: 'Sweep Imported' }] },
       },
       'POST /api/v1/auth/admin/unlock-user': { body: { userId: targetUserId } },
+      // #33181. A valid add body, so a managed boot would reach the handler too.
+      'POST /api/v1/auth/admin/add-sso-user': { body: { email: 'standing.sweep.pending@example.com', name: 'Sweep Pending' } },
+      'POST /api/v1/auth/admin/import-sso-users': {
+        body: { rows: [{ email: 'standing.sweep.pending.import@example.com', name: 'Sweep Pending Import' }] },
+      },
       // #16678. The CLEAR, not a set: it is idempotent, so the sweep leaves
       // `manager_id` as it found it, and it still reaches a 2xx rather than a
       // semantic error — measured 200 `{"success":true,...,"managerId":null}`.

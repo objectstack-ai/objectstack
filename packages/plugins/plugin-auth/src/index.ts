@@ -91,6 +91,13 @@ export * from './platform-admin-gate.js';
 // twin of one of these doors (the cloud's per-environment `set-initial-password`,
 // objectstack-ai/cloud#3169) answers with the same status, code and message.
 export * from './cloud-managed.js';
+// [#33181] Pending, SSO-only people on a managed environment: the add and
+// import doors, the `idp_pending` marker and its refusals, and the host seam a
+// hosting layer implements to hear about added, deactivated and reactivated
+// people.
+export * from './pending-sso-marker.js';
+export * from './environment-user-host.js';
+export * from './pending-sso-users.js';
 export * from './last-local-credential.js';
 export * from './placeholder-email.js';
 export * from './admin-import-users.js';

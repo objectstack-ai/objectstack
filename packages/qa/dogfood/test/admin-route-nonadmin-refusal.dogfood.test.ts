@@ -272,6 +272,21 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: { userId: targetUserId, managerId: null },
       note: 'the gate runs ahead of any body read, so the member 403 holds even on an empty body; the admin gets 200 from the idempotent clear',
     },
+    // ── #33181 — add pending, SSO-only people (cloud-managed environments) ──
+    // ObjectStack raw mounts whose FIRST statement is the ADR-0068 gate. This
+    // stack is not cloud-managed, so the admin passes the gate and lands on
+    // `409 RESOURCE_CONFLICT` (the doors answer only on a managed
+    // environment): a semantic answer, not a gate verdict.
+    'POST /api/v1/auth/admin/add-sso-user': {
+      bucket: 'objectstack-gate',
+      body: { email: 'refusal.probe.pending@example.com', name: 'Pending Probe' },
+      note: 'the gate runs first; off a managed environment the admin gets 409 RESOURCE_CONFLICT and no one is added',
+    },
+    'POST /api/v1/auth/admin/import-sso-users': {
+      bucket: 'objectstack-gate',
+      body: { rows: [{ email: 'refusal.probe.pending.import@example.com', name: 'Pending Import Probe' }] },
+      note: 'the gate runs first; off a managed environment the admin gets 409 RESOURCE_CONFLICT and no one is imported',
+    },
     // ── ADR-0095 D3 — the platform-admin roster (a read; no body is read) ───
     'POST /api/v1/auth/admin/list-platform-admins': {
       bucket: 'objectstack-gate',

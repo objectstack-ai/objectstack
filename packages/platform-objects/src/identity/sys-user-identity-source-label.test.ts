@@ -33,8 +33,14 @@ function bundleOptionLabel(bundle: Record<string, unknown>, value: string): unkn
 describe('sys_user.source identity-source labels', () => {
   it('keeps the field a select over the same stored values and default', () => {
     expect(sourceField.type).toBe('select');
-    expect(sourceField.options.map((o) => o.value)).toEqual(['idp_provisioned', 'env_native']);
+    // [#33181] `idp_pending`: a person added on a managed environment who has
+    // not signed in through the hosting organisation's identity provider yet.
+    expect(sourceField.options.map((o) => o.value)).toEqual(['idp_provisioned', 'env_native', 'idp_pending']);
     expect(sourceField.defaultValue).toBe('env_native');
+  });
+
+  it('labels idp_pending "Pending SSO Sign-In"', () => {
+    expect(sourceField.options.find((o) => o.value === 'idp_pending')?.label).toBe('Pending SSO Sign-In');
   });
 
   it('labels env_native "Local Account"', () => {

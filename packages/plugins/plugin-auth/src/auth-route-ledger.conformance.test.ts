@@ -267,7 +267,14 @@ describe('auth route ledger hygiene', () => {
       // catch-all), and the `live.has(route)` loop below holds them to the same
       // proof — better-auth's own withdraw is `/oauth2/delete-consent`, a
       // different path.
+      // [#33181] Both pending-person doors, on this pin's own terms:
+      // `auth-plugin.ts` mounts each itself (a `rawApp.post` on the
+      // `${basePath}/admin/add-sso-user` and `${basePath}/admin/import-sso-users`
+      // templates), and the `live.has(route)` loop below holds them to the same
+      // proof — better-auth serves neither.
+      'POST /api/v1/auth/admin/add-sso-user',
       'POST /api/v1/auth/admin/authorized-clients/withdraw',
+      'POST /api/v1/auth/admin/import-sso-users',
       'POST /api/v1/auth/admin/import-users',
       // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
       // `rawApp.post` on the `${basePath}/admin/list-platform-admins`

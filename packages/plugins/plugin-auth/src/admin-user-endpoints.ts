@@ -240,6 +240,7 @@ import { readJsonRequestBody } from './request-json-body.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
 import { identitySourceUnreadable, judgeSsoOnlyLocalPassword, readUserSource, ssoOnlyPasswordRefusal } from './sso-only-local-password.js';
 import { temporaryPasswordLength } from './temporary-password-length.js';
+import { isPendingSsoSource, pendingSsoPasswordRefusal } from './pending-sso-marker.js';
 import { isCloudManaged } from '@objectstack/core';
 import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
 import type { FieldErrorCode } from '@objectstack/spec/api';
@@ -474,8 +475,8 @@ async function stampMustChangePassword(
  * organization and `membershipCreated: false` — the account is created, the
  * membership is not.
  */
-async function bindUserToSoleOrganization(
-  deps: AdminUserEndpointDeps,
+export async function bindUserToSoleOrganization(
+  deps: Pick<AdminUserEndpointDeps, 'getDataEngine' | 'getMembershipPolicy' | 'getTenancy' | 'logger'>,
   userId: string,
 ): Promise<{ organizationId: string | null; membershipCreated: boolean }> {
   const engine = deps.getDataEngine();
@@ -521,11 +522,17 @@ async function bindUserToSoleOrganization(
  * mirror row for the same write, in the snapshot column the ledger's read
  * side narrows.
  */
-type AdminAuditDecisions =
+export type AdminAuditDecisions =
   | {
       event: 'user.admin_created';
       placeholderEmail: boolean;
       passwordGenerated: boolean;
+      membershipCreated: boolean;
+      organizationId?: string;
+    }
+  | {
+      /** A pending, SSO-only person was added (`pending-sso-users.ts`); no password exists. */
+      event: 'user.admin_added_pending';
       membershipCreated: boolean;
       organizationId?: string;
     }
@@ -597,8 +604,8 @@ type AdminAuditDecisions =
  * the pins in `admin-user-endpoints.test.ts` fail on any key outside the
  * decision set and on any value this call wrote into the user.
  */
-async function writeAdminAudit(
-  deps: AdminUserEndpointDeps,
+export async function writeAdminAudit(
+  deps: Pick<AdminUserEndpointDeps, 'getDataEngine' | 'logger'>,
   entry: {
     action: 'create' | 'update';
     actor: AdminActor;
@@ -943,7 +950,7 @@ interface CreatedAccount {
 }
 
 /** [#25338] Thrown out of the unit of work so it rolls back; carries the refusal the caller answers. */
-class CreationRefused extends Error {
+export class CreationRefused extends Error {
   constructor(readonly result: EndpointResult) {
     super(result.body.error?.message ?? 'user creation refused');
     this.name = 'CreationRefused';
@@ -970,8 +977,8 @@ class CreationRefused extends Error {
  * A membership already there is respected and reported as
  * `membershipCreated: false`, exactly as the reconciler reports it.
  */
-async function joinCurrentOrganization(
-  deps: AdminUserEndpointDeps,
+export async function joinCurrentOrganization(
+  deps: Pick<AdminUserEndpointDeps, 'getDataEngine'>,
   addMember: AddMemberCapableApi['addMember'],
   userId: string,
   organizationId: string,
@@ -1013,7 +1020,9 @@ async function joinCurrentOrganization(
  * default-organization bind, unchanged. A host that wires no way to read the
  * caller's current organization does not join either.
  */
-function multiOrgCreationJoinsCurrentOrganization(deps: AdminUserEndpointDeps): boolean {
+export function multiOrgCreationJoinsCurrentOrganization(
+  deps: Pick<AdminUserEndpointDeps, 'getTenancy' | 'getCallerActiveOrganizationId'>,
+): boolean {
   return deps.getTenancy?.()?.isolationActive === true && typeof deps.getCallerActiveOrganizationId === 'function';
 }
 
@@ -1091,6 +1100,17 @@ export async function runAdminSetUserPassword(
   try {
     if (!(await authCtx.internalAdapter.findUserById(userId))) {
       return { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'User not found' } } };
+    }
+
+    // A pending person (`sys_user.source = 'idp_pending'`, added through
+    // `admin/add-sso-user`) signs in only through the hosting organisation's
+    // identity provider and holds no local password until then, in every mode
+    // and for every caller (`pending-sso-users.ts`). A source that cannot be
+    // read is judged by the arms below exactly as before: none of them existed
+    // for a pending row, and no row carried the marker before it did.
+    const pendingSource = await readUserSource(deps.getDataEngine(), userId);
+    if (pendingSource.ok && isPendingSsoSource(pendingSource.value)) {
+      return pendingSsoPasswordRefusal('setUserPassword');
     }
 
     // [#25083] On a cloud-managed environment a password is set here only on

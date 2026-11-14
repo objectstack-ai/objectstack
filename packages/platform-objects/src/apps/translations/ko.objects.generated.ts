@@ -120,7 +120,8 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         help: "이 ID가 만들어진 방식입니다. idp_provisioned(페더레이션 SSO JIT) 또는 env_native(로컬 가입 / 앱 최종 사용자)입니다. 시스템이 관리하므로 편집하지 마세요.",
         options: {
           idp_provisioned: "IdP에서 프로비저닝됨",
-          env_native: "로컬 계정"
+          env_native: "로컬 계정",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {

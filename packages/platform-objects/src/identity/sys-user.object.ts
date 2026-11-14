@@ -1397,8 +1397,13 @@ export const SysUser = ObjectSchema.create({
       options: [
         { label: 'IdP-Provisioned', value: 'idp_provisioned' },
         { label: 'Local Account', value: 'env_native' },
+        // [#33181] A person added on a managed environment who has not signed
+        // in yet: no password, no session, until their first sign-in through
+        // the hosting organisation's identity provider moves the row to
+        // `idp_provisioned` (`plugin-auth` `pending-sso-marker.ts`).
+        { label: 'Pending SSO Sign-In', value: 'idp_pending' },
       ],
-      description: 'How this identity was created — idp_provisioned (federated SSO JIT or SCIM directory provisioning) or env_native (local signup, a local password, or an app end-user). System-managed; do not edit.',
+      description: 'How this identity was created — idp_provisioned (federated SSO JIT or SCIM directory provisioning), env_native (local signup, a local password, or an app end-user), or idp_pending (added on a managed environment and waiting for the first sign-in through the hosting organisation identity provider). System-managed; do not edit.',
     }),
 
     id: Field.text({

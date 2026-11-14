@@ -217,4 +217,5 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_user._actions.register_service_account.params.name.label": "5274417ff1ccaf01",
   "objects.sys_user.fields.name.label": "5274417ff1ccaf01",
   "objects.sys_user.fields.principal_kind.options.human": "ed18d3469e10aef2",
+  "objects.sys_user.fields.source.options.idp_pending": "3751093c5b65b072",
 };

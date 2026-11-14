@@ -160,7 +160,8 @@ import {
   type DemoStaffRefusal,
 } from './demo-staff.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
-import { identitySourceUnreadable, judgeSsoOnlyLocalPassword, ssoOnlyPasswordRefusal } from './sso-only-local-password.js';
+import { identitySourceUnreadable, judgeSsoOnlyLocalPassword, readUserSource, ssoOnlyPasswordRefusal } from './sso-only-local-password.js';
+import { isPendingSsoSource, pendingSsoPasswordRefusal } from './pending-sso-marker.js';
 import { registerCopyInvitationLinkAction } from './invitation-link-action.js';
 import {
   ALLOWED_IP_RANGES_ENV,
@@ -182,6 +183,8 @@ import {
   runAdminUnbanUser,
   type AdminBanEndpointDeps,
 } from './admin-ban-endpoints.js';
+import { engineUserBanWriter, type UserBanEngine } from './user-ban-write.js';
+import type { EnvironmentUserHostAccessor } from './environment-user-host.js';
 
 
 /**
@@ -375,6 +378,19 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * @default false
    */
   hostSignInHandoff?: boolean;
+
+  /**
+   * [#33181] The environment-user host (`environment-user-host.ts`): told
+   * after a person is added through `admin/add-sso-user` or
+   * `admin/import-sso-users`, and asked before a person is deactivated
+   * through `admin/ban-user` or reactivated through `admin/unban-user`. Read
+   * per call, so a host wired after boot is still found. A typed
+   * `EnvironmentUserHostRefusal` refuses the operation (a refused add is
+   * taken back out); any other failure refuses a deactivation (`503`) and is
+   * reported on an add or a reactivation as `host: { notified: false,
+   * reason }`, which it never undoes.
+   */
+  environmentUserHost?: EnvironmentUserHostAccessor;
 
   /**
    * Whether this plugin registers the platform's default record page for
@@ -4038,7 +4054,23 @@ export class AuthPlugin implements Plugin {
             }
           }
         }
-        const { status, body } = await runSetInitialPassword(authApi as any, c.req.raw);
+        // A pending person (`idp_pending`, `pending-sso-marker.ts`) signs in
+        // only through the hosting organisation's identity provider and is
+        // given no local password, in every mode and with no exception — a
+        // platform administrator's standing included. Such a row is refused a
+        // session too (`user-session-admission.ts`); this arm holds the door on
+        // its own, whatever session reaches it. Judged once the body holds a password and
+        // before anything is written; a source that cannot be read is judged
+        // by the arms above as before.
+        const { status, body } = await runSetInitialPassword(authApi as any, c.req.raw, {
+          beforeWrite: async () => {
+            const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
+            const callerId = session?.user?.id;
+            if (!callerId) return undefined;
+            const source = await readUserSource(this.authManager!.getDataEngine(), String(callerId));
+            return source.ok && isPendingSsoSource(source.value) ? pendingSsoPasswordRefusal('setInitialPassword') : undefined;
+          },
+        });
         return c.json(body, status);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
@@ -4798,35 +4830,32 @@ export class AuthPlugin implements Plugin {
       // break-glass last-local-credential guard used to fire on
       // `/admin/ban-user` from `auth-manager.ts`. `runAdminBanUser` re-runs it
       // from the shared module.
+      // [#33181] Without the vendor admin plugin (a Free or Team hosted
+      // environment, where it mounts only with SCIM) the ban columns are not
+      // fields of better-auth's user model, so the write goes through the data
+      // engine, and the session refusal in `user-session-admission.ts`
+      // enforces the ban with the vendor's own answer. With the plugin
+      // mounted, nothing changes: the `internalAdapter` writes and the
+      // vendor's hook enforces.
       const adminBanDeps = (): AdminBanEndpointDeps => ({
         getAuthContext: () => this.authManager!.getAuthContext(),
+        getBanWriter: async () => {
+          if (await this.authManager!.isAdminPluginMounted()) return undefined;
+          const engine = this.authManager!.getDataEngine() as UserBanEngine | undefined;
+          if (!engine || typeof engine.update !== 'function') {
+            throw new Error('The data engine is not available, so the ban could not be written');
+          }
+          return engineUserBanWriter(engine);
+        },
+        ...(this.options.environmentUserHost ? { host: this.options.environmentUserHost } : {}),
+        getDataEngine: () => this.authManager!.getDataEngine(),
+        logger: ctx.logger,
       });
-
-      /**
-       * Refuse when the admin plugin is off, exactly as create-user does.
-       *
-       * Without this the shadowing mounts would answer 200 on a deployment
-       * that has no admin plugin — writing `banned: true` while the vendor's
-       * session hook that ENFORCES a ban is not loaded. That is a
-       * declared-but-not-enforced ban: the console reports success and the
-       * banned user signs straight back in. `banUser` on the api surface is
-       * the same seam create-user tests for.
-       */
-      const adminPluginMissing = async (c: any): Promise<Response | undefined> => {
-        const authApi: any = await this.authManager!.getApi();
-        if (typeof authApi.banUser === 'function') return undefined;
-        return c.json(
-          { success: false, error: { code: 'NOT_IMPLEMENTED', message: 'The better-auth admin plugin is not enabled (auth.plugins.admin)' } },
-          501,
-        );
-      };
 
       rawApp.post(`${basePath}/admin/ban-user`, async (c: any) => {
         try {
           const actor = await gateAdmin(c);
           if (actor instanceof Response) return actor;
-          const unavailable = await adminPluginMissing(c);
-          if (unavailable) return unavailable;
           // Attributed to the admin for the same reason create-user is: the
           // write is driven server-side and never passes through
           // `AuthManager.handleRequest`, so the request-scoped actor seam is
@@ -4846,8 +4875,6 @@ export class AuthPlugin implements Plugin {
         try {
           const actor = await gateAdmin(c);
           if (actor instanceof Response) return actor;
-          const unavailable = await adminPluginMissing(c);
-          if (unavailable) return unavailable;
           const { status, body } = await runAttributedToUser(actor, () =>
             runAdminUnbanUser(adminBanDeps(), actor, c.req.raw),
           );
@@ -5074,6 +5101,69 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/import-users failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
+        }
+      });
+
+      // ── [#33181] Add / import a pending, SSO-only person (managed only) ──
+      //
+      // On a cloud-managed environment the people who sign in come through
+      // the hosting organisation's identity provider, so `create-user` /
+      // `import-users` answer 409 there. These two doors are the managed
+      // way to add someone: the row reads `idp_pending` (no password, no
+      // session) until the person's first platform sign-in binds to it.
+      // Off managed they answer 409, the mirror image. Logic, the marker
+      // and the host seam: `pending-sso-users.ts`. Gate and attribution are
+      // create-user's.
+      const pendingSsoUserDeps = (c: any): import('./pending-sso-users.js').PendingSsoUserDeps => ({
+        isCloudManaged: () => isCloudManaged(),
+        getDataEngine: () => this.authManager!.getDataEngine() as any,
+        createGrant: createGrantFor(c),
+        getAddMember: async () => {
+          const authApi: any = await this.authManager!.getApi();
+          return typeof authApi.addMember === 'function' ? authApi.addMember.bind(authApi) : undefined;
+        },
+        getTenancy: () => this.tenancy ?? undefined,
+        getMembershipPolicy: () => this.authManager!.getMembershipPolicy(),
+        getCallerActiveOrganizationId: async () => {
+          const authApi: any = await this.authManager!.getApi();
+          const session = (await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers))) as
+            | { session?: { activeOrganizationId?: string | null } }
+            | null;
+          return session?.session?.activeOrganizationId ?? null;
+        },
+        ...(this.options.environmentUserHost ? { host: this.options.environmentUserHost } : {}),
+        logger: ctx.logger,
+      });
+
+      rawApp.post(`${basePath}/admin/add-sso-user`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const { runAddSsoUser } = await import('./pending-sso-users.js');
+          const { status, body } = await runAttributedToUser(actor, () =>
+            runAddSsoUser(pendingSsoUserDeps(c), actor, c.req.raw),
+          );
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/add-sso-user failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
+        }
+      });
+
+      rawApp.post(`${basePath}/admin/import-sso-users`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const { runImportSsoUsers } = await import('./pending-sso-users.js');
+          const { status, body } = await runAttributedToUser(actor, () =>
+            runImportSsoUsers(pendingSsoUserDeps(c), actor, c.req.raw),
+          );
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/import-sso-users failed', err);
           return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });

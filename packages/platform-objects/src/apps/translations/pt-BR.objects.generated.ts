@@ -120,7 +120,8 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         help: "Como esta identidade foi criada — idp_provisioned (SSO federado JIT) ou env_native (cadastro local / usuário final do app). Gerenciado pelo sistema; não edite.",
         options: {
           idp_provisioned: "Provisionado pelo IdP",
-          env_native: "Conta local"
+          env_native: "Conta local",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {

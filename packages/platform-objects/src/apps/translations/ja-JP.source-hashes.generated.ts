@@ -140,4 +140,5 @@ export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_sso_provider.fields.id.label": "00b0385c9c152888",
   "objects.sys_sso_provider.fields.sign_out_of_idp.help": "ab8ff5fce3001c81",
   "objects.sys_sso_provider.fields.sign_out_of_idp.label": "212587b8191bb91b",
+  "objects.sys_user.fields.source.options.idp_pending": "3751093c5b65b072",
 };

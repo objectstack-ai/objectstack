@@ -120,7 +120,8 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         help: "該身分的建立方式——idp_provisioned（聯合 SSO 即時開通）或 env_native（本地註冊 / 應用程式終端使用者）。系統維護，請勿編輯。",
         options: {
           idp_provisioned: "IdP 開通",
-          env_native: "本地帳號"
+          env_native: "本地帳號",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {
