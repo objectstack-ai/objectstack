@@ -11,14 +11,23 @@ import { describe, expect, it } from 'vitest';
 // verdict reads that file too.
 import { maskComments, maskCommentsAndLiterals } from '../../../scripts/js-comment-mask.mjs';
 
+import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
+
 import {
+  AUTHORED_CONDITION_ID,
+  AUTHORED_FLOW_NAME,
   AUTHORED_FORMULA_FIELD_NAME,
   AUTHORED_RULE_NAME,
   authoredExpressionHopTargets,
+  authoredFlowProbe,
   judgeAuthoredSiteExpression,
   type AuthoredExpressionSite,
+  type AuthoredFlowTrigger,
 } from './authored-site-expression.js';
-import { validateStackExpressions } from './validate-expressions.js';
+import { runStackExpressionPasses, validateStackExpressions } from './validate-expressions.js';
+
+/** The two object-body sites; a flow condition has its own block below (#33147). */
+type ObjectSite = Exclude<AuthoredExpressionSite, 'flow_condition'>;
 
 /**
  * [#32872] `judgeAuthoredSiteExpression` is the publish gate's verdict on one
@@ -91,7 +100,7 @@ function walkPushes(code: string): string[] {
 }
 
 /** The method names called on a receiver at each site, each plumbing: none of them judges an expression. */
-const SITE_MEMBER_CALLS: Record<AuthoredExpressionSite, Record<string, string>> = {
+const SITE_MEMBER_CALLS: Record<ObjectSite, Record<string, string>> = {
   validation: {
     get: 'a Map read (the object index, the field definitions)',
     push: "appends a finding to the walk's list",
@@ -114,7 +123,7 @@ const WALK_PUSHES: Record<string, string> = {
 };
 
 /** The passes the walk pushes whole from INSIDE a site's regions: classified with that site's calls, in `SITE_CALLS`. */
-const WALK_PUSHES_IN_REGION: Record<string, AuthoredExpressionSite> = {
+const WALK_PUSHES_IN_REGION: Record<string, ObjectSite> = {
   formulaCycleIssues: 'formula',
 };
 
@@ -129,7 +138,7 @@ const CYCLE = {
 };
 
 /** Where each site's calls are read: the rule pass (`judgeValidationRule`) and the `check` helper it calls; the field-formula pass and what follows the fields loop. */
-const SITE_REGIONS: Record<AuthoredExpressionSite, Array<[string, string]>> = {
+const SITE_REGIONS: Record<ObjectSite, Array<[string, string]>> = {
   validation: [
     ['  const check = (', '  const fieldRuleRootVerdict = ('],
     // [#33154] The rule pass, hoisted out of the object walk so the extension
@@ -185,7 +194,7 @@ const BODY_HOP: Fixture = { objects: [REQ, BAL], expression: "record.meta.name =
 const ANCHOR: Fixture = { objects: [EXT], expression: "record.owner_id == 'u1'", severity: 'warning', names: 'owner_id' };
 const asValue = (f: Fixture): Fixture => ({ ...f, expression: `${f.expression} ? 1 : 0` });
 
-const SITE_CALLS: Record<AuthoredExpressionSite, Record<string, Classified>> = {
+const SITE_CALLS: Record<ObjectSite, Record<string, Classified>> = {
   validation: {
     validateExpression: VALIDATOR,
     withAttachedBlocks: { kind: 'plumbing', why: 'the field list handed to the shared validator' },
@@ -217,24 +226,24 @@ const SITE_CALLS: Record<AuthoredExpressionSite, Record<string, Classified>> = {
     // finding on a cycle member's own `expression`; the probe is named
     // `__validate_expression__`, which no authored formula can read, so the
     // probe is never on a cycle and nothing is located on it, at the gate or
-    // through the entry. The cycle verdict on the formula being authored
-    // needs that field's own name, which `validate_expression` is not handed:
-    // the tool cannot give it (a follow-up, not this pin's to hide).
+    // through the entry. [#33147] The cycle verdict on the formula being
+    // authored needs that field's own name: given as `field`, the entry
+    // judges it under that name (the `field` block below pins it).
     formulaCycleIssues: {
       kind: 'pass-silent-here',
-      why: "locates each finding on a cycle member's own `expression`; the probe is on no cycle",
+      why: "locates each finding on a cycle member's own `expression`; the default probe is on no cycle (with `field`, see below)",
       fixture: { objects: [CYCLE], expression: 'record.f_x + record.days' },
     },
     storedExpressionInputIssues: {
       kind: 'pass-silent-here',
-      why: 'judges a STORED field\'s `expression` (any type but `formula`); the tool\'s formula site is a `formula` field',
+      why: 'judges a STORED field\'s `expression` (any type but `formula`); the default probe is a `formula` field (with `field` naming a stored one, see below)',
       fixture: { objects: [REQ, BAL], expression: 'record.balance.remaining > 1 ? now() : now()' },
     },
   },
 };
 
 /** The full gate's findings on the same rule or field, named as the entry names it. */
-function gateOn(site: AuthoredExpressionSite, objects: Array<Record<string, unknown>>, expression: string) {
+function gateOn(site: ObjectSite, objects: Array<Record<string, unknown>>, expression: string) {
   const [subject, ...others] = objects as [Record<string, any>, ...Array<Record<string, unknown>>];
   const judged = site === 'validation'
     ? { ...subject, validations: [{ name: AUTHORED_RULE_NAME, type: 'script', condition: expression, message: 'm' }] }
@@ -250,7 +259,7 @@ function gateOn(site: AuthoredExpressionSite, objects: Array<Record<string, unkn
     .map((i) => [i.severity ?? 'error', i.message]);
 }
 
-function entryOn(site: AuthoredExpressionSite, objects: Array<Record<string, unknown>>, expression: string) {
+function entryOn(site: ObjectSite, objects: Array<Record<string, unknown>>, expression: string) {
   return judgeAuthoredSiteExpression({ site, objectName: 'obj', expression, objects })
     .map((i) => [i.severity ?? 'error', i.message]);
 }
@@ -408,5 +417,374 @@ describe('authoredExpressionHopTargets (#32872)', () => {
     expect(authoredExpressionHopTargets(REQ, 'record.balance != null && record.days > 1')).toEqual([]);
     expect(authoredExpressionHopTargets(REQ, 'record.days >')).toEqual([]);
     expect(authoredExpressionHopTargets(REQ, 'record.title.size() > 1')).toEqual([]);
+  });
+});
+
+// ── [#33147] A flow condition ────────────────────────────────────────────
+//
+// The entry judges a flow condition as the runtime publish gate judges a flow
+// write (`runtimeWriteType: 'flow'`): a one-flow probe whose start node
+// carries the caller's trigger, with the condition on its one edge. The same
+// two halves as above: every call the gate makes at a flow condition (the
+// start node's trigger gate, a `decision` branch, an edge, and the helpers
+// they hand the source to) is classified, and each pass refuses through the
+// entry as the gate does on a hand-written flow.
+
+/** Where a flow condition's calls are read: the three slots, and the two helpers they hand the source to. */
+const FLOW_REGIONS: Array<[string, string]> = [
+  ['  const check = (', '  const fieldRuleRootVerdict = ('],
+  ['  const checkDeclaredPredicate = (', '  const checkDeclaredValue = ('],
+  ['        const nodeCondWhere = ', '        // Descriptor-declared expression slots'],
+  ["          if (found.entry.role !== 'predicate') continue;", '        // [#19939] The `{…}` template dialect'],
+  ['      for (const edge of recordsOf(graph.edges)) {', "        // [#26858] A top-level edge's findings"],
+];
+
+const FLOW_MEMBER_CALLS: Record<string, string> = {
+  get: 'a Map read (the object index, the field definitions)',
+  push: "appends a finding to the walk's list",
+  set: "records the judged slot's key for the node's key-path stamp",
+};
+
+/** A flow probe's slot, as the hand-written flows below place the condition. */
+type FlowSlot = 'start' | 'decision' | 'edge';
+
+type FlowFixture = {
+  objects: Array<Record<string, unknown>>;
+  expression: string;
+  severity: 'error' | 'warning';
+  names: string;
+};
+
+type FlowClassified =
+  | { kind: 'pass'; fixture: FlowFixture }
+  /**
+   * A pass the gate runs at a flow condition that the runtime publish gate's
+   * probe has nothing for. `buildDoor` is a fixture `os validate` does refuse
+   * or warn on, so the silence is the door's (or the missing input's), not a
+   * dead pass.
+   */
+  | { kind: 'pass-silent-here'; why: string; fixture: Omit<FlowFixture, 'severity' | 'names'>; buildDoor?: HandFlowOverrides }
+  | { kind: 'validator'; why: string }
+  | { kind: 'plumbing'; why: string };
+
+type HandFlowOverrides = { variables?: Array<Record<string, unknown>> };
+
+const FLOW_OBJ = { ...REQ, name: 'obj' };
+const FLOW_EXT = { ...EXT };
+
+const FLOW_CALLS: Record<string, FlowClassified> = {
+  // The shared validator and the two envelope checks the tool runs itself
+  // (it parses the slot with `EvaluatedExpressionInputSchema` before it asks
+  // the gate, and a string is the only shape it is handed).
+  validateExpression: VALIDATOR,
+  checkStructuralCondition: {
+    kind: 'validator',
+    why: "the slot's envelope: the tool parses the same schema first and never asks the gate about a refused one",
+  },
+  predicateSlotRefusal: {
+    kind: 'validator',
+    why: "a declared predicate slot's shape: the tool is handed a string, which that check admits",
+  },
+  check: { kind: 'plumbing', why: 'the helper whose calls are the first region' },
+  checkDeclaredPredicate: { kind: 'plumbing', why: "a `decision` branch's helper, the second region" },
+  withAttachedBlocks: { kind: 'plumbing', why: 'the field list handed to the shared validator' },
+  isBareReferenceToAny: { kind: 'plumbing', why: "filters the shared validator's findings on a field-rule slot" },
+  checkFlowNullGuards: {
+    kind: 'pass',
+    fixture: { objects: [FLOW_OBJ], expression: 'record.days > 3', severity: 'error', names: 'record.days' },
+  },
+  warnUnprovisionedAnchors: {
+    kind: 'pass',
+    fixture: { objects: [FLOW_EXT], expression: "record.owner_id == 'u1'", severity: 'warning', names: 'owner_id' },
+  },
+  refuseUnboundRoots: {
+    kind: 'pass-silent-here',
+    why: "the runtime publish gate's root scope is never provable (its snapshot shows no entrance), so it judges no root; `os validate` does, over the flow's variables, node ids and entrances, which the tool is not handed",
+    fixture: { objects: [FLOW_OBJ], expression: 'foo.bar == 1' },
+    buildDoor: {},
+  },
+  warnShadowedFieldReads: {
+    kind: 'pass-silent-here',
+    why: "needs the flow's declared variables, which the tool is not handed; the probe declares none",
+    fixture: { objects: [FLOW_OBJ], expression: "title == 'x'" },
+    buildDoor: { variables: [{ name: 'title', type: 'text' }] },
+  },
+  refuseStoredMetadataBodyHop: {
+    kind: 'pass-silent-here',
+    why: 'runs only where a relationship hop is hydrated (a rule condition, a formula); nothing hydrates one at a flow condition',
+    fixture: { objects: [FLOW_OBJ, BAL], expression: "record.meta.name == 'x'" },
+  },
+  refuseUndeclaredHopField: {
+    kind: 'pass-silent-here',
+    why: 'runs only where a relationship hop is hydrated (a rule condition, a formula); nothing hydrates one at a flow condition',
+    fixture: { objects: [FLOW_OBJ, BAL], expression: 'record.balance.nope > 1' },
+  },
+};
+
+/** The start node of a hand-written flow on `obj`, with the trigger `kind` names. */
+function handStart(kind: AuthoredFlowTrigger, config: Record<string, unknown> = {}): Record<string, unknown> {
+  const trigger: Record<AuthoredFlowTrigger, Record<string, unknown>> = {
+    record_change: { triggerType: 'record-after-create' },
+    time_relative: { timeRelative: { object: 'obj', dateField: 'due', withinDays: 7 } },
+    schedule: { schedule: '*/5 * * * *' },
+    api: { triggerType: 'api' },
+    none: {},
+  };
+  return { id: 'begin', type: 'start', config: { objectName: 'obj', ...trigger[kind], ...config } };
+}
+
+/** The `where` the hand-written flow's judged slot carries, as each gate sentence spells it. */
+const HAND_WHERE: Record<FlowSlot, string> = {
+  start: "flow 'escalate' · node 'begin' (start) condition",
+  decision: "flow 'escalate' · node 'triage' (decision) decision branch expression at config.conditions[0].expression",
+  edge: "flow 'escalate' · edge 'e2' (triage→alert) condition",
+};
+const PROBE_WHERE = `flow '${AUTHORED_FLOW_NAME}' · edge '${AUTHORED_CONDITION_ID}' (start→end) condition`;
+
+/**
+ * A realistic flow the condition sits in at `slot`: a start node, a
+ * `decision`, two ends, three edges, and `startCondition` on the start node
+ * when the slot is downstream of it.
+ */
+function handFlow(
+  slot: FlowSlot,
+  expression: string,
+  { kind = 'record_change', startCondition, variables }: { kind?: AuthoredFlowTrigger; startCondition?: string } & HandFlowOverrides = {},
+): Record<string, unknown> {
+  const startCond = slot === 'start' ? expression : startCondition;
+  return {
+    name: 'escalate',
+    label: 'Escalate',
+    type: kind === 'api' ? 'api' : 'autolaunched',
+    ...(variables ? { variables } : {}),
+    nodes: [
+      handStart(kind, startCond !== undefined ? { condition: startCond } : {}),
+      {
+        id: 'triage',
+        type: 'decision',
+        config: { conditions: [{ label: 'Hot', expression: slot === 'decision' ? expression : 'true' }] },
+      },
+      { id: 'alert', type: 'end' },
+      { id: 'calm', type: 'end' },
+    ],
+    edges: [
+      { id: 'e1', source: 'begin', target: 'triage' },
+      { id: 'e2', source: 'triage', target: 'alert', ...(slot === 'edge' ? { condition: expression } : {}) },
+      { id: 'e3', source: 'triage', target: 'calm', isDefault: true },
+    ],
+  };
+}
+
+/**
+ * The gate's findings on the judged slot of the hand-written flow, the shared
+ * validator's left out (the tool answers those itself), with the slot's
+ * locator spelled as the probe's so the two read alike.
+ */
+function flowGateOn(
+  objects: Array<Record<string, unknown>>,
+  expression: string,
+  { slot = 'edge', door = 'runtime', ...rest }: { slot?: FlowSlot; door?: 'runtime' | 'build'; kind?: AuthoredFlowTrigger; startCondition?: string } & HandFlowOverrides = {},
+) {
+  const where = HAND_WHERE[slot];
+  const issues = runStackExpressionPasses(
+    { objects, flows: [handFlow(slot, expression, rest)] },
+    door === 'runtime' ? { runtimeWriteType: 'flow', sharedValidatorRunByCaller: true } : { sharedValidatorRunByCaller: true },
+  );
+  return issues
+    .filter((i) => i.where === where)
+    .map((i) => [i.severity ?? 'error', i.message.split(where).join(PROBE_WHERE)]);
+}
+
+function flowEntryOn(
+  objects: Array<Record<string, unknown>>,
+  expression: string,
+  opts: { triggerKind?: AuthoredFlowTrigger; startCondition?: string } = {},
+) {
+  return judgeAuthoredSiteExpression({ site: 'flow_condition', objectName: 'obj', expression, objects, ...opts })
+    .map((i) => [i.severity ?? 'error', i.message]);
+}
+
+describe('judgeAuthoredSiteExpression at a flow condition — every gate pass is listed (#33147)', () => {
+  it('every call the gate makes at a flow condition is classified', () => {
+    const calls = bareCalls(FLOW_REGIONS.map(([start, end]) => region(start, end)).join('\n'));
+    expect(calls.length, 'the scan read nothing — the regions are vacuous').toBeGreaterThan(5);
+    expect(calls).toEqual(Object.keys(FLOW_CALLS).sort());
+  });
+
+  it('every member call the gate makes at a flow condition is classified', () => {
+    const calls = memberCalls(FLOW_REGIONS.map(([start, end]) => region(start, end)).join('\n'));
+    expect(calls).toEqual(Object.keys(FLOW_MEMBER_CALLS).sort());
+  });
+
+  for (const [name, classified] of Object.entries(FLOW_CALLS)) {
+    if (classified.kind === 'pass') {
+      const { objects, expression, severity, names } = classified.fixture;
+      for (const slot of ['start', 'decision', 'edge'] as const) {
+        it(`${name} refuses through the entry as the gate does at a flow's ${slot} condition`, () => {
+          const gate = flowGateOn(objects, expression, { slot });
+          expect(gate.length, 'the fixture trips the gate').toBeGreaterThan(0);
+          const entry = flowEntryOn(objects, expression);
+          expect(entry).toEqual(gate);
+          expect(entry.map(([level]) => level)).toEqual(gate.map(() => severity));
+          expect(entry.some(([, message]) => message!.includes(names))).toBe(true);
+        });
+      }
+    }
+    if (classified.kind === 'pass-silent-here') {
+      const { objects, expression } = classified.fixture;
+      it(`${name} has nothing to say through the entry, as at the runtime publish gate`, () => {
+        expect(flowGateOn(objects, expression)).toEqual([]);
+        expect(flowEntryOn(objects, expression)).toEqual([]);
+        if (classified.buildDoor) {
+          // Non-vacuous: `os validate` speaks on the same condition, given what it reads.
+          expect(flowGateOn(objects, expression, { door: 'build', ...classified.buildDoor }).length).toBeGreaterThan(0);
+        }
+      });
+    }
+  }
+
+  it("a bare name's null guard is `os validate`'s, not the runtime publish gate's, and not the entry's", () => {
+    expect(flowGateOn([FLOW_OBJ], 'days > 3', { door: 'build' }).length).toBeGreaterThan(0);
+    expect(flowGateOn([FLOW_OBJ], 'days > 3')).toEqual([]);
+    expect(flowEntryOn([FLOW_OBJ], 'days > 3')).toEqual([]);
+  });
+
+  it('CONTROL — a clean condition answers nothing', () => {
+    for (const expression of ["record.title == 'x'", 'record.days != null && record.days > 3']) {
+      expect(flowGateOn([FLOW_OBJ], expression)).toEqual([]);
+      expect(flowEntryOn([FLOW_OBJ], expression)).toEqual([]);
+    }
+  });
+
+  it('a start probe and an edge probe answer alike when no start condition is given', () => {
+    for (const expression of ['record.days > 3', "record.title == 'x'", 'days > 3']) {
+      expect(flowGateOn([FLOW_OBJ], expression, { slot: 'start' })).toEqual(flowGateOn([FLOW_OBJ], expression, { slot: 'edge' }));
+    }
+  });
+
+  it('presumes what the start condition proves, as the gate does downstream of it', () => {
+    // Guarded at the start, the edge condition passes; unguarded, it is refused.
+    const guarded = { startCondition: 'record.days != null' };
+    expect(flowGateOn([FLOW_OBJ], 'record.days > 3', guarded)).toEqual([]);
+    expect(flowEntryOn([FLOW_OBJ], 'record.days > 3', guarded)).toEqual([]);
+    expect(flowGateOn([FLOW_OBJ], 'record.days > 3', { slot: 'decision', ...guarded })).toEqual([]);
+    // A BARE start guard proves nothing at the runtime publish gate (its bound
+    // set is not provable), so the edge is still refused there and here.
+    const bare = { startCondition: 'days != null' };
+    const refused = flowGateOn([FLOW_OBJ], 'record.days > 3', bare);
+    expect(refused.length).toBeGreaterThan(0);
+    expect(flowEntryOn([FLOW_OBJ], 'record.days > 3', bare)).toEqual(refused);
+    // The start condition's own findings are not the judged condition's.
+    expect(flowEntryOn([FLOW_OBJ], "record.title == 'x'", { startCondition: 'record.days > 3' })).toEqual([]);
+  });
+
+  it("the probe's trigger reads back as each kind, and each kind answers as the gate does", () => {
+    for (const kind of ['record_change', 'time_relative', 'schedule', 'api', 'none'] as const) {
+      const probe = authoredFlowProbe({ objectName: 'obj', expression: 'true', triggerKind: kind });
+      expect(resolveFlowTriggerKind(probe) ?? 'none', kind).toBe(kind);
+      expect(resolveFlowTriggerKind(handFlow('edge', 'true', { kind })) ?? 'none', kind).toBe(kind);
+      for (const expression of ['record.days > 3', "record.owner_id == 'u1'"]) {
+        const objects = expression.includes('owner_id') ? [{ ...FLOW_EXT }] : [FLOW_OBJ];
+        expect(flowEntryOn(objects, expression, { triggerKind: kind }), `${kind}: ${expression}`)
+          .toEqual(flowGateOn(objects, expression, { kind }));
+      }
+    }
+    // The null guard is a record-triggered flow's alone: another kind is not refused.
+    expect(flowEntryOn([FLOW_OBJ], 'record.days > 3', { triggerKind: 'schedule' })).toEqual([]);
+  });
+
+  it('judges a served definition (injected columns declared) as the authored body', () => {
+    const served = applyInjectedSystemColumns(FLOW_OBJ);
+    expect(flowEntryOn([served], "record.created_at > timestamp('2020-01-01T00:00:00Z')")).toEqual([]);
+    expect(flowEntryOn([served], 'record.days > 3')).toEqual(flowEntryOn([FLOW_OBJ], 'record.days > 3'));
+    expect(flowEntryOn([applyInjectedSystemColumns(FLOW_EXT)], "record.owner_id == 'u1'"))
+      .toEqual(flowEntryOn([FLOW_EXT], "record.owner_id == 'u1'"));
+  });
+
+  it("judges the caller's condition only, never the object's own rules or fields", () => {
+    const withOwn = {
+      ...FLOW_OBJ,
+      validations: [{ name: 'own', type: 'script', condition: 'record.days > 3', message: 'm' }],
+      fields: { ...FLOW_OBJ.fields, own_formula: { type: 'formula', label: 'Own', expression: 'record.balance.nope' } },
+    };
+    expect(flowEntryOn([withOwn, BAL], "record.title == 'x'")).toEqual([]);
+  });
+
+  it('answers nothing when the object is not among the definitions', () => {
+    expect(judgeAuthoredSiteExpression({ site: 'flow_condition', objectName: 'nope', expression: 'record.days > 3', objects: [FLOW_OBJ] }))
+      .toEqual([]);
+  });
+});
+
+// ── [#33147] The field being authored, at the formula site ───────────────
+//
+// Named as `field`, a field the definition declares keeps its definition with
+// the expression in place: a stored field (any type but `formula`) is judged
+// as stored, and a formula is judged on the object's formula graph under its
+// own name. Any other name is a new `formula` field of that name.
+
+/** An object with a stored computed field (`stamp`) and a formula pair; `days` required. */
+const STORED = {
+  name: 'obj',
+  fields: {
+    ...REQ.fields,
+    stamp: { type: 'number', label: 'Stamp', expression: 'record.days' },
+    f_x: { type: 'formula', label: 'X', expression: 'record.f_y + 1' },
+    f_y: { type: 'formula', label: 'Y', expression: 'record.title.size()' },
+  },
+};
+
+/** The gate's findings on field `name` of `obj`, its expression replaced (the shared validator's left out). */
+function fieldGateOn(objects: Array<Record<string, any>>, name: string, expression: string) {
+  const [subject, ...others] = objects as [Record<string, any>, ...Array<Record<string, unknown>>];
+  const fields = Array.isArray(subject.fields)
+    ? subject.fields.map((f: Record<string, unknown>) => (f.name === name ? { ...f, expression } : f))
+    : { ...subject.fields, [name]: { ...subject.fields[name], expression } };
+  const where = `object 'obj' · field '${name}' expression`;
+  return runStackExpressionPasses({ objects: [{ ...subject, fields }, ...others] }, { runtimeWriteType: 'object', sharedValidatorRunByCaller: true })
+    .filter((i) => i.where === where)
+    .map((i) => [i.severity ?? 'error', i.message]);
+}
+
+function fieldEntryOn(objects: Array<Record<string, unknown>>, expression: string, field?: string) {
+  return judgeAuthoredSiteExpression({ site: 'formula', objectName: 'obj', expression, objects, ...(field ? { field } : {}) })
+    .map((i) => [i.severity ?? 'error', i.message]);
+}
+
+describe('judgeAuthoredSiteExpression with the field being authored (#33147)', () => {
+  it("a declared stored field gets the gate's stored-expression warnings", () => {
+    for (const expression of ['record.balance.remaining + 1', 'record.days + (now() > now() ? 1 : 0)']) {
+      const gate = fieldGateOn([STORED, BAL], 'stamp', expression);
+      expect(gate.length, expression).toBeGreaterThan(0);
+      expect(gate.every(([level]) => level === 'warning')).toBe(true);
+      expect(fieldEntryOn([STORED, BAL], expression, 'stamp')).toEqual(gate);
+      // Without the field, the probe is a formula: nothing stored to warn on.
+      expect(fieldEntryOn([STORED, BAL], expression)).toEqual([]);
+    }
+  });
+
+  it('a declared formula is judged on the formula graph under its own name: the cycle it would close is refused', () => {
+    const gate = fieldGateOn([STORED], 'f_y', 'record.f_x + 1');
+    expect(gate.length).toBeGreaterThan(0);
+    expect(gate.every(([level]) => level === 'error')).toBe(true);
+    expect(fieldEntryOn([STORED], 'record.f_x + 1', 'f_y')).toEqual(gate);
+    // The same expression on a field no formula reads closes no cycle.
+    expect(fieldEntryOn([STORED], 'record.f_x + 1', 'f_new')).toEqual([]);
+    expect(fieldEntryOn([STORED], 'record.f_x + 1')).toEqual([]);
+  });
+
+  it('reads an array-form field list the same way', () => {
+    const asArray = { ...STORED, fields: Object.entries(STORED.fields).map(([name, def]) => ({ name, ...def })) };
+    expect(fieldEntryOn([asArray, BAL], 'record.balance.remaining + 1', 'stamp'))
+      .toEqual(fieldEntryOn([STORED, BAL], 'record.balance.remaining + 1', 'stamp'));
+    expect(fieldEntryOn([asArray], 'record.f_x + 1', 'f_y')).toEqual(fieldEntryOn([STORED], 'record.f_x + 1', 'f_y'));
+  });
+
+  it('a name the definition does not declare is judged as a new formula field, like no name at all', () => {
+    // So a field the caller is not served (masked, or absent) reads as one the
+    // object does not declare: the answer says nothing about whether it exists.
+    for (const expression of ['record.balance.remaining + 1', 'record.f_x + 1', "record.owner_id == 'u1' ? 1 : 0"]) {
+      expect(fieldEntryOn([STORED, BAL], expression, 'not_declared')).toEqual(fieldEntryOn([STORED, BAL], expression));
+    }
   });
 });

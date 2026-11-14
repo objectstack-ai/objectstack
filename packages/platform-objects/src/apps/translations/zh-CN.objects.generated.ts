@@ -2111,6 +2111,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "仅从 ID 令牌读取声明",
         help: "仅适用于 OIDC。从身份提供方已验证的 ID 令牌读取邮箱、姓名和组，不调用其 userinfo 端点。Microsoft Entra ID 需开启此项：它的 userinfo 响应不含组，也不含 preferred_username。默认关闭：配置了 userinfo 端点的提供方从该响应读取声明。请通过“编辑登录选项”修改。"
       },
+      sign_out_of_idp: {
+        label: "Sign Out of the Company Sign-In Too",
+        help: "When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "注册人",
         help: "注册该提供方的用户"
@@ -2221,6 +2225,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             helpText: "可选。请求的 SAML NameID 格式。默认为 IdP 配置的格式。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options."
+          },
           mapEmail: {
             label: "映射：邮箱属性",
             helpText: "可选。映射为用户邮箱的断言属性。默认为“email”，其次为 NameID。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -2305,6 +2313,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           keepCurrentCert: {
             label: "继续信任当前证书",
             helpText: "在 IdP 切换期间，接受由任一证书签名的断言。之后不勾选此项再编辑一次，即可移除旧证书。"
+          },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one."
           }
         },
         resultDialog: {

@@ -103,6 +103,7 @@ import {
   slotPackageOf,
   slotOfKey,
   slotStoreOf,
+  newSlotView,
   storedItemPackageId as indexedItemPackageId,
   storedNameOf,
   storeKeysNamed,
@@ -1550,7 +1551,9 @@ export class MetadataManager implements IMetadataService {
     loaderStore: ReadonlyMap<string, unknown>,
   ): Map<string, unknown> {
     const registryStore = this.registry.get(type);
-    const view = new Map<string, unknown>();
+    // [#32714] Declared a view where it is made (`newSlotView`), so
+    // `latestMemberOf` never infers it from a missing write order.
+    const view = newSlotView<unknown>();
     // [#32517] Each slot's member written last first: a slot no key of which
     // came from the registry answers its first member (`latestMemberOf`).
     if (registryStore) {

@@ -143,6 +143,8 @@ beforeAll(async () => {
     getDataEngine: () => engine,
     unlockUser: acts.unlockUser,
     isSsoDomainVerificationEnabled: () => true,
+    // SSO-only mode off: the set-initial-password route asks it (`sso-only-local-password.ts`).
+    isSsoOnlyMode: () => false,
     isPhoneNumberEnabled: () => false,
     isEmailServiceAvailable: () => false,
     isPhoneOtpDeliverable: () => false,

@@ -28,7 +28,9 @@ import { describe, it, expect, vi } from 'vitest';
 // Paid at collection, not inside a clocked case: the dispatcher's reach dynamic-imports it (check:test-source-alias).
 import '@objectstack/metadata';
 
-import { SysUser } from '@objectstack/platform-objects/identity';
+import {
+    SysInvitation, SysMember, SysOauthApplication, SysOrganization, SysSsoProvider, SysTeam, SysTeamMember, SysUser,
+} from '@objectstack/platform-objects/identity';
 import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec/identity';
 
 import { HttpDispatcher } from './http-dispatcher.js';
@@ -205,6 +207,192 @@ describe('[#30771] the listing and the run doors read one declaration', () => {
                 const action = (SysUser as any).actions.find((a: any) => a.name === name);
                 expect(actionPermissionError(deps, action, (ctx as any).executionContext, OBJECT), `${who}: ${name}`).toBeNull();
             }
+        }
+    });
+});
+
+// [ruling record 6812625052, letter E: list and mark, do not hide] An identity
+// action whose target is an organization endpoint the caller's membership role
+// does not reach stays listed, marked `unavailable` with the code `run_action`
+// answers for it; nothing is hidden and neither run door reads the mark.
+//
+// Driven over the REAL identity declarations through the production
+// `McpActionBridge`, with the forward target faked as the organization
+// endpoints answer a refused role (measured on a booted showcase: 403
+// `PERMISSION_DENIED` and the endpoint's own sentence).
+describe('[ruling E] list_actions marks an organization action the caller\'s membership role does not reach', () => {
+    const IDENTITY: Record<string, any> = {
+        sys_user: SysUser, sys_member: SysMember, sys_invitation: SysInvitation, sys_organization: SysOrganization,
+        sys_team: SysTeam, sys_team_member: SysTeamMember, sys_sso_provider: SysSsoProvider,
+        sys_oauth_application: SysOauthApplication,
+    };
+    /** Set A: owner and admin reach these endpoints. */
+    const SET_A = [
+        'sys_member.remove_member', 'sys_invitation.cancel_invitation', 'sys_organization.rename_organization',
+        'sys_organization.update_organization', 'sys_team.create_team', 'sys_team.update_team', 'sys_team.remove_team',
+        'sys_team.add_team_member', 'sys_team_member.add_team_member', 'sys_team_member.remove_team_member',
+    ];
+    /** Set B: `/organization/invite-member`, which delegated_admin reaches too. */
+    const SET_B = [
+        'sys_user.invite_user', 'sys_member.invite_user', 'sys_invitation.invite_user', 'sys_organization.invite_user',
+        'sys_invitation.resend_invitation',
+    ];
+    /** Sets C and D: judged on record ownership and on the tenancy posture, which no reach row names. */
+    const SET_CD = [
+        'sys_sso_provider.delete_sso_provider', 'sys_oauth_application.delete_oauth_application',
+        'sys_organization.create_organization',
+    ];
+    const REFUSED_SENTENCE = 'You are not allowed to do this in this organization';
+
+    function bootIdentity(refuseForward: boolean) {
+        const request = vi.fn(async () => (refuseForward
+            ? new Response(JSON.stringify({ success: false, error: { code: 'PERMISSION_DENIED', message: REFUSED_SENTENCE } }), {
+                status: 403, headers: [['content-type', 'application/json']],
+            })
+            : new Response(JSON.stringify({ success: true, data: { ok: true } }), {
+                status: 200, headers: [['content-type', 'application/json']],
+            })));
+        const server = { getRawApp: () => ({ request }) };
+        const row = { id: 'rec_1', organization_id: 'org_1', organizationId: 'org_1', team_id: 'team_1', user_id: 'u_target', email: 'invitee@example.test', role: 'member' };
+        const ql: any = {
+            executeAction: vi.fn(async () => ({ ran: 'script' })),
+            listRegisteredActions: () => [],
+            getSchema: (name: string) => IDENTITY[name],
+            registry: { getObject: (name: string) => IDENTITY[name], getItem: () => undefined },
+            find: vi.fn(async () => [row]),
+            insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
+            isActionEnabled: () => true,
+        };
+        const metadata: any = {
+            load: vi.fn(async () => null),
+            loadDiagnosed: vi.fn(async () => ({ data: null, degraded: false, errors: [] })),
+            loadMany: vi.fn(async () => []),
+            listObjects: vi.fn(async () => Object.values(IDENTITY)),
+            getObject: vi.fn(async (name?: string) => (name ? IDENTITY[name] : undefined)),
+        };
+        const resolve = (n: string) =>
+            n === 'objectql' || n === 'data' ? ql
+            : n === 'metadata' ? metadata
+            : n === 'http.server' || n === 'http-server' ? server
+            : null;
+        const kernel: any = { getService: resolve, getServiceAsync: async (n: string) => resolve(n), context: { getService: resolve } };
+        return { dispatcher: new HttpDispatcher(kernel) as any, request };
+    }
+
+    /** A signed-in human holding `positions` in org_1, over a session cookie. */
+    const PERSON = (userId: string, positions: string[], extra: Record<string, unknown> = {}): HttpProtocolContext => ({
+        request: {
+            headers: {
+                host: 'app.example.test', 'x-forwarded-proto': 'https',
+                cookie: 'better-auth.session_token=abc', 'content-type': 'application/json',
+            },
+        },
+        environmentId: 'platform',
+        executionContext: {
+            userId, tenantId: 'org_1', positions, permissions: [], systemPermissions: [], principalKind: 'human', ...extra,
+        },
+    } as unknown as HttpProtocolContext);
+    const MEMBER_P = () => PERSON('u_member', ['org_member', 'everyone']);
+    const OWNER_P = () => PERSON('u_owner', ['org_owner', 'everyone']);
+    const ADMIN_P = () => PERSON('u_admin', ['org_admin', 'everyone']);
+    const DELEGATED_ADMIN_P = () => PERSON('u_delegate', ['delegated_admin', 'org_member', 'everyone']);
+
+    const keyOf = (a: any) => `${a.objectName}.${a.name}`;
+    async function listed(ctx: HttpProtocolContext): Promise<Record<string, any>> {
+        const { dispatcher } = bootIdentity(false);
+        const rows: any[] = await dispatcher.buildMcpBridge(ctx).listActions();
+        return Object.fromEntries(rows.map((a) => [keyOf(a), a]));
+    }
+    const declarationOf = (key: string): any => {
+        const [object, name] = key.split('.');
+        const found = (IDENTITY[object!]?.actions ?? []).find((a: any) => a?.name === name);
+        if (!found) throw new Error(`${object} no longer declares '${name}' — the fixture moved`);
+        return found;
+    };
+    /** The declared params a call needs, so a refusal is the endpoint's and not the param contract's. */
+    const paramsFor = (key: string): Record<string, unknown> => {
+        const out: Record<string, unknown> = {};
+        for (const p of (declarationOf(key).params ?? []) as any[]) {
+            if (!p?.required) continue;
+            const name = String(p.name ?? p.field);
+            out[name] = name === 'email' ? 'invitee@example.test' : name === 'role' ? 'member' : 'x';
+        }
+        return out;
+    };
+
+    it('premise: every pinned action is exposed to AI, `api`-typed, and declares no capability gate', () => {
+        for (const key of [...SET_A, ...SET_B, ...SET_CD]) {
+            const action = declarationOf(key);
+            expect(action.ai?.exposed, key).toBe(true);
+            expect(action.type, key).toBe('api');
+            expect(action.requiredPermissions ?? [], key).toEqual([]);
+        }
+    });
+
+    it('a plain member is listed every set-A and set-B action, each marked with the code run_action answers', async () => {
+        const rows = await listed(MEMBER_P());
+        for (const key of [...SET_A, ...SET_B]) {
+            expect(rows[key], `${key} is listed`).toBeDefined();
+            expect(rows[key].unavailable, key).toMatchObject({ code: 'PERMISSION_DENIED' });
+            expect(rows[key].unavailable.reason, key).toContain(`Action '${rows[key].name}' on '${rows[key].objectName}' needs an organization `);
+        }
+        for (const key of SET_A) expect(rows[key].unavailable.reason, key).toContain('needs an organization owner or admin:');
+        for (const key of SET_B) {
+            expect(rows[key].unavailable.reason, key).toContain('needs an organization owner, admin or delegated admin:');
+            expect(rows[key].unavailable.reason, key).toContain('(/organization/invite-member)');
+        }
+    });
+
+    it('owner and admin get no mark; delegated_admin gets none on the invite actions and keeps it on set A', async () => {
+        for (const [who, ctx] of [['owner', OWNER_P()], ['admin', ADMIN_P()]] as const) {
+            const rows = await listed(ctx);
+            for (const key of [...SET_A, ...SET_B]) {
+                expect(rows[key], `${who}: ${key}`).toBeDefined();
+                expect(rows[key].unavailable, `${who}: ${key}`).toBeUndefined();
+            }
+        }
+        const delegated = await listed(DELEGATED_ADMIN_P());
+        for (const key of SET_B) expect(delegated[key]?.unavailable, `delegated_admin: ${key}`).toBeUndefined();
+        for (const key of SET_A) expect(delegated[key]?.unavailable, `delegated_admin: ${key}`).toMatchObject({ code: 'PERMISSION_DENIED' });
+    });
+
+    it('CONTROL: the set-C and set-D actions are listed unmarked, for the member too', async () => {
+        for (const ctx of [MEMBER_P(), ADMIN_P()]) {
+            const rows = await listed(ctx);
+            for (const key of SET_CD) {
+                expect(rows[key], key).toBeDefined();
+                expect(rows[key].unavailable, key).toBeUndefined();
+            }
+        }
+    });
+
+    it('CONTROL: a delegated agent and the system context are left unmarked: their envelope carries no grade of their own', async () => {
+        const agent = PERSON('u_member', [], { principalKind: 'agent', onBehalfOf: { userId: 'u_member', principalKind: 'human' } });
+        const system = PERSON('u_member', [], { isSystem: true });
+        for (const ctx of [agent, system]) {
+            const rows = await listed(ctx);
+            for (const key of [...SET_A, ...SET_B]) expect(rows[key]?.unavailable, key).toBeUndefined();
+        }
+    });
+
+    // Green before the mark existed too: the mark changes no run.
+    it('CONTROL: run_action is unchanged: the member\'s call is forwarded and refused by the endpoint (the marked code); the admin\'s is forwarded and served', async () => {
+        for (const key of [...SET_A, ...SET_B]) {
+            const [objectName, name] = key.split('.');
+            const member = bootIdentity(true);
+            const thrown = await refusalOf(member.dispatcher.buildMcpBridge(MEMBER_P()).runAction(name!, {
+                objectName, recordId: 'rec_1', params: paramsFor(key), confirm: true,
+            }));
+            // The endpoint answered, so the door forwarded: no gate of its own refused the member.
+            expect(member.request, `${key}: ${String(thrown?.message)}`).toHaveBeenCalledTimes(1);
+            expect(thrown, key).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+            expect(String(thrown?.message), key).toBe(REFUSED_SENTENCE);
+
+            const admin = bootIdentity(false);
+            await expect(admin.dispatcher.buildMcpBridge(ADMIN_P()).runAction(name!, {
+                objectName, recordId: 'rec_1', params: paramsFor(key), confirm: true,
+            }), key).resolves.toMatchObject({ ok: true });
+            expect(admin.request, key).toHaveBeenCalledTimes(1);
         }
     });
 });

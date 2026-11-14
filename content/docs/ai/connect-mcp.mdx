@@ -384,6 +384,15 @@ can reach is the **default exposure policy (v1)**:
   list the approvals waiting on you with `pending_approvers` contains
   `{current_user_id}` — answered for a slot that names you by email, position
   or team too, not only by user id.
+  `sys_user` declares it too, so an agent can fill a person field (an owner, an
+  approver, an employee): it finds a colleague with `query_records` on
+  `sys_user`, by `email` for exactly one person or by `name` (`$contains`), and
+  gets their id. It reads exactly what your console's person picker shows you:
+  your own row and your organization's members, never another organization's
+  users, with the `Admin` field group (sign-in trail, lockout, ban reason,
+  sign-in phone) withheld, on results and on filters. Names repeat, so where
+  several people share one, the agent tells them apart by email. No write tool
+  opens it.
 - **Actions require the author's opt-in**: `ai: { exposed: true }` plus an
   `ai.description` of at least 40 characters, and the action must be callable
   without a UI. In the open framework that means three types — `script`

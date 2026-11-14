@@ -2111,6 +2111,10 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         label: "Читать утверждения только из ID-токена",
         help: "Только OIDC. Адрес электронной почты, имя и группы читаются из проверенного ID-токена поставщика удостоверений, его конечная точка userinfo не вызывается. Включите для Microsoft Entra ID: его ответ userinfo не содержит ни групп, ни preferred_username. По умолчанию выключено: поставщик с конечной точкой userinfo читает утверждения из её ответа. Изменяется через «Изменить параметры входа»."
       },
+      sign_out_of_idp: {
+        label: "Sign Out of the Company Sign-In Too",
+        help: "When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "Кем зарегистрирован",
         help: "Пользователь, зарегистрировавший этого поставщика"
@@ -2221,6 +2225,10 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Необязательно. Запрашиваемый формат SAML NameID. По умолчанию — формат, настроенный в IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options."
+          },
           mapEmail: {
             label: "Сопоставление: атрибут эл. почты",
             helpText: "Необязательно. Атрибут утверждения SAML, сопоставляемый с эл. почтой пользователя. По умолчанию — «email», затем NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -2305,6 +2313,10 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           keepCurrentCert: {
             label: "Продолжать доверять текущему сертификату",
             helpText: "Пока IdP переключается, принимать утверждения, подписанные любым из двух сертификатов. Чтобы убрать старый, измените ещё раз без этого параметра."
+          },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one."
           }
         },
         resultDialog: {

@@ -2111,6 +2111,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "ID 토큰에서만 클레임 읽기",
         help: "OIDC 전용. ID 공급자의 검증된 ID 토큰에서 이메일, 이름, 그룹을 읽고 userinfo 엔드포인트는 호출하지 않습니다. Microsoft Entra ID에서는 켜야 합니다. 해당 userinfo 응답에는 그룹도 preferred_username도 없습니다. 기본값은 꺼짐이며, userinfo 엔드포인트가 있는 공급자는 그 응답에서 클레임을 읽습니다. '로그인 옵션 편집'에서 변경하세요."
       },
+      sign_out_of_idp: {
+        label: "Sign Out of the Company Sign-In Too",
+        help: "When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "등록한 사람",
         help: "이 공급자를 등록한 사용자"
@@ -2221,6 +2225,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             helpText: "선택 사항입니다. 요청할 SAML NameID 형식입니다. 기본값은 IdP에 구성된 형식입니다.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options."
+          },
           mapEmail: {
             label: "매핑: 이메일 속성",
             helpText: "선택 사항입니다. 사용자 이메일에 매핑되는 어설션 속성입니다. 기본값은 \"email\"이며, 없으면 NameID입니다. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -2305,6 +2313,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           keepCurrentCert: {
             label: "현재 인증서도 계속 신뢰",
             helpText: "IdP가 전환하는 동안 두 인증서 중 하나로 서명된 어설션을 모두 허용합니다. 이전 인증서를 제거하려면 이 옵션 없이 다시 편집하세요."
+          },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one."
           }
         },
         resultDialog: {
