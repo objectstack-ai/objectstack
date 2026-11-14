@@ -70,6 +70,50 @@ const PUBLIC_FORM_DOOR = '/api/v1/forms';
 const PUBLIC_FORM_PAGE = '/f';
 
 /**
+ * Whether `reqPath` (relative to {@link CONSOLE_PATH}) is the public form page:
+ * the one Console page meant to be shared, embedded and found. It is framable
+ * by other sites and the only Console page search engines may index.
+ */
+function isPublicFormPage(reqPath: string): boolean {
+  return reqPath.startsWith(`${PUBLIC_FORM_PAGE}/`);
+}
+
+/**
+ * What the Console tells search engines on every answer it serves except the
+ * public form page: do not index this page and do not follow its links. The
+ * Console is an app (sign-in screens, record pages), not content; a search
+ * result that lands on its login page is a duplicate of every other
+ * deployment's. Sent as the `X-Robots-Tag` header and, in the HTML, as a
+ * `<meta name="robots">` tag, so a crawler that reads either one gets it.
+ */
+const CONSOLE_ROBOTS_DIRECTIVE = 'noindex, nofollow';
+
+/** The `<meta name="robots">` tag the Console document carries. */
+const CONSOLE_ROBOTS_META = `<meta name="robots" content="${CONSOLE_ROBOTS_DIRECTIVE}">`;
+
+/**
+ * The `/robots.txt` a Console-serving runtime answers when nothing else serves
+ * that path (see {@link createConsoleStaticPlugin}). It keeps crawlers out of
+ * the API and the Console, and lets them reach the public form surface: the
+ * authored `/forms/<slug>` link, the page it redirects to, the bundle that page
+ * runs, and the anonymous form door it reads to render the form. A crawler
+ * picks the longest matching rule, so each `Allow` wins over the shorter
+ * `Disallow` it sits under.
+ */
+export const DEFAULT_ROBOTS_TXT = [
+  '# Served by the ObjectStack runtime because the app defines no robots.txt.',
+  '# The API and the Console are app surfaces, not content; public forms stay crawlable.',
+  'User-agent: *',
+  'Allow: /forms/',
+  `Allow: ${CONSOLE_PATH}${PUBLIC_FORM_PAGE}/`,
+  `Allow: ${CONSOLE_PATH}/assets/`,
+  `Allow: ${PUBLIC_FORM_DOOR}/`,
+  `Disallow: ${CONSOLE_PATH}/`,
+  'Disallow: /api/',
+  '',
+].join('\n');
+
+/**
  * The anonymous door that serves the Console's branding. The shell's inline
  * early-branding script fetches `GET /api/v1/runtime/config` and sets
  * `document.title` from its `branding.productName`. The shell's server-written
@@ -1054,6 +1098,14 @@ function stampScriptNonce(html: string, nonce: string): string {
  * not-found answer as before. Mounted
  * only with the Console, because without it there is no page to send anyone to.
  *
+ * It tells search engines to stay out of the app: every answer under
+ * `/_console/` carries `X-Robots-Tag: noindex, nofollow` and every Console
+ * document a `<meta name="robots">` tag saying the same, except the public form
+ * page (`/_console/f/<slug>`), which is meant to be shared and found. The API's
+ * own answers carry the header from the HTTP server (`@objectstack/plugin-hono-server`).
+ * `GET /robots.txt` answers {@link DEFAULT_ROBOTS_TXT}, but only when nothing
+ * else serves that path, so an app that ships its own robots.txt keeps it.
+ *
  * `cloudflareWebAnalytics: { token }` adds Cloudflare Web Analytics to the
  * document this plugin serves, and to no other: the beacon tag, stamped with
  * the document's nonce, and the origin it reports to in `connect-src`. It is an
@@ -1151,7 +1203,7 @@ export function createConsoleStaticPlugin(
         );
       };
 
-      const readIndexHtml = (reactPages: boolean, nonce: string): string => {
+      const readIndexHtml = (reactPages: boolean, nonce: string, indexable: boolean): string => {
         const raw = fs.readFileSync(indexPath, 'utf-8');
         // Inject <base href="${CONSOLE_PATH}/"> so:
         //   1. Relative asset URLs ('./assets/...') resolve to the
@@ -1172,6 +1224,11 @@ export function createConsoleStaticPlugin(
           const beaconTag = cloudflareWebAnalyticsBeaconScript(cloudflareWebAnalyticsToken);
           html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${beaconTag}`);
         }
+        // Every document but the public form page asks not to be indexed. A
+        // build that already ships a robots tag keeps its own.
+        if (!indexable && !/<meta\s[^>]*name=["']?robots["']?/i.test(html)) {
+          html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${CONSOLE_ROBOTS_META}`);
+        }
         // Stamped while the document holds only the build's markup and the
         // server's own tags: nothing read at request time is written yet, so
         // no runtime value can ever carry the nonce.
@@ -1186,7 +1243,7 @@ export function createConsoleStaticPlugin(
           unrecognized: reportUnrecognizedReactPages,
           legacyName: reportLegacyReactPagesName,
         });
-        const html = readIndexHtml(reactPages, nonce);
+        const html = readIndexHtml(reactPages, nonce, isPublicFormPage(reqPath));
         const shell = await readShellConfig(app, c, reportShellConfigReadFailure);
         const policy = consoleContentSecurityPolicy({
           nonce,
@@ -1197,7 +1254,7 @@ export function createConsoleStaticPlugin(
           mapStyleOrigin,
           storageUploadOrigin: await readStorageUploadOrigin(ctx, reportStorageUploadOriginFailure),
           extraConnectSources,
-          embeddable: reqPath.startsWith(`${PUBLIC_FORM_PAGE}/`),
+          embeddable: isPublicFormPage(reqPath),
         });
         // The title, description and Open Graph tags, written here because a
         // link-preview crawler runs no script: the early-branding script sets
@@ -1216,6 +1273,24 @@ export function createConsoleStaticPlugin(
       if (options?.rootRedirect !== false) {
         app.get('/', (c: any) => c.redirect(`${CONSOLE_PATH}/`));
       }
+
+      // Every Console answer but the public form page carries the noindex
+      // header. Mounted ahead of the Console's own routes so it wraps them.
+      mountConsoleNoindex(app);
+
+      // A default `/robots.txt`, answered only when nothing else serves the
+      // path: it asks the rest of the chain first, so an app's own robots.txt
+      // (a route, a static mount, a fallback) wins whichever registered first.
+      app.get('/robots.txt', async (c: any, next: () => Promise<void>) => {
+        await next();
+        if (c.res?.status !== 404) return;
+        // Clear the not-found answer first: assigning over it would carry its
+        // headers (its content-length among them) onto this one.
+        c.res = undefined;
+        c.res = new Response(DEFAULT_ROBOTS_TXT, {
+          headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=3600' },
+        });
+      });
 
       // Redirect bare path to trailing-slash (SPA convention)
       app.get(CONSOLE_PATH, (c: any) => c.redirect(`${CONSOLE_PATH}/`));
@@ -1317,6 +1392,22 @@ export function createConsoleStaticPlugin(
  * `--no-ui` and `--no-console` mount none of this: the operator chose to serve
  * no Console, and those routes stay the router's 404.
  */
+/**
+ * Mount the lane that adds `X-Robots-Tag` ({@link CONSOLE_ROBOTS_DIRECTIVE}) to
+ * every answer under {@link CONSOLE_PATH} except the public form page. It runs
+ * after the route, so it covers documents, assets, the SPA fallback and the
+ * `503` a refused Console answers; an answer that set its own keeps it.
+ */
+function mountConsoleNoindex(app: any): void {
+  app.use(`${CONSOLE_PATH}/*`, async (c: any, next: () => Promise<void>) => {
+    await next();
+    const reqPath = String(c.req.path).substring(CONSOLE_PATH.length) || '/';
+    if (isPublicFormPage(reqPath)) return;
+    if (c.res?.headers?.has?.('x-robots-tag')) return;
+    c.header('X-Robots-Tag', CONSOLE_ROBOTS_DIRECTIVE);
+  });
+}
+
 function createConsoleUnavailablePlugin(name: string, what: string, answer: string) {
   return {
     name,
@@ -1333,6 +1424,7 @@ function createConsoleUnavailablePlugin(name: string, what: string, answer: stri
       const app = httpServer.getRawApp();
       app.get('/', (c: any) => c.redirect(`${CONSOLE_PATH}/`));
       app.get(CONSOLE_PATH, (c: any) => c.redirect(`${CONSOLE_PATH}/`));
+      mountConsoleNoindex(app);
       app.get(`${CONSOLE_PATH}/*`, (c: any) => c.text(answer, 503, { 'cache-control': 'no-store' }));
     },
   };

@@ -49,6 +49,7 @@ import {
     RequestBodyTooLarge,
 } from './body-limit';
 import { compressResponse } from './response-compression';
+import { installApiNoindex } from './api-noindex';
 // The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
 // is the closed union (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`) a registered
 // code must be a member of, and `HttpStatusErrorCodeMap` IS the set of statuses
@@ -754,6 +755,11 @@ export class HonoHttpServer implements IHttpServer {
         // Inside the compression seam, ahead of every other middleware and
         // route, so every reader of a request body reads through the limit.
         installRequestBodyLimit(this.app, () => this.maxRequestBodyBytes);
+        // Every `/api/` answer tells search engines not to index it
+        // (`./api-noindex.ts`). Installed here, before any route exists, so
+        // raw-app mounts, the dispatcher and the not-found sink all pass
+        // through it.
+        installApiNoindex(this.app);
     }
 
     /**
