@@ -62,6 +62,8 @@ import { PROMOTION_REGISTRY_QUESTION, type RegistryQuestion } from './registry-q
 import { isBatchObjectType, judgeBatchObjectRegistrations, registerAdmittedBatchRows, type BatchObjectRow } from './batch-object-registration.js';
 import { engineCanRollBack } from '@objectstack/core';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
+import type { HistoryVersionOwner } from './sys-metadata-repository.js';
+import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './protocol-history-slots.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
 
 /**
@@ -192,13 +194,15 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
 
 export class ProtocolHistoryAndPublishFacet {
     /** The body of `ObjectStackProtocolImplementation#historyMetaItem`; the method's docblock there is its contract. */
-    static async historyMetaItem(host: Pick<ProtocolHost, 'getOverlayRepo' | 'historyMetaItem' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'resolveRowlessExpandedView' | 'storedHashDigest'>, request: {
+    static async historyMetaItem(host: Pick<ProtocolHost, 'engine' | 'findServedOverlayRow' | 'getOverlayRepo' | 'historyMetaItem' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'packagelessAddress' | 'resolveRowlessExpandedView' | 'shippedArtifactsOf' | 'storedHashDigest'>, request: {
             type: string;
             name: string;
             sinceSeq?: number;
             limit?: number;
             /** [#22877] The bundle member whose lineage to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
             member?: string;
+            /** [ADR-0150 D3/D4, #32905] The package whose versions to read — {@link historySlotOf}; omitted, the name's. */
+            packageId?: string;
         }): Promise<{ events: import('@objectstack/metadata-core').MetadataEvent[] }> {
         // [#9157] #4432 / #7894 — CANONICAL TYPE KEY. See {@link canonicalMetaType}
         // and the twin comment on {@link auditMetaItem}; #9180 step ① routes all
@@ -240,6 +244,10 @@ export class ProtocolHistoryAndPublishFacet {
         const member = resolveBundleMemberSelector(request.type, request.member);
         // Canonical by construction from the fold above — NOT a second fold.
         const singularType = request.type;
+        // [#32905] `?package=` addresses a holder of a type stored per
+        // `(package, name)` only; on any other type it is refused, before the
+        // early answer below, never accepted and dropped.
+        refusePackageSelectorOutsideSlottedTypes(singularType, request.packageId);
         if (!host.isOverlayAllowed(singularType)
             && !host.isRuntimeCreateAllowed(singularType)) {
             return { events: [] };
@@ -257,6 +265,15 @@ export class ProtocolHistoryAndPublishFacet {
         if (expandedFrom !== undefined) {
             return host.historyMetaItem({ ...request, name: expandedFrom.container.name });
         }
+        // [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`,
+        // the name's log interleaves every holder's versions: a name two
+        // holders' rows hold is refused naming both when no package is named,
+        // and `?package=` reads that holder's versions alone. A name one slot
+        // holds, named bare, reads its whole log as before.
+        const slot = await historySlotOf(host, {
+            type: singularType, name: request.name, ...memberOption(member),
+            ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
+        });
         // [ADR-0131 D6] The environment's change log; a legacy
         // organization-scoped history row is not read.
         const repo = host.getOverlayRepo();
@@ -267,7 +284,10 @@ export class ProtocolHistoryAndPublishFacet {
         } as Parameters<typeof repo.history>[0];
 
         const events: import('@objectstack/metadata-core').MetadataEvent[] = [];
-        const opts: { sinceSeq?: number; limit?: number; member?: string } = { ...memberOption(member) };
+        const opts: { sinceSeq?: number; limit?: number; member?: string; versionsOf?: HistoryVersionOwner } = {
+            ...memberOption(member),
+            ...(slot?.addressed ? { versionsOf: slot.owner } : {}),
+        };
         if (request.sinceSeq !== undefined) opts.sinceSeq = request.sinceSeq;
         if (request.limit !== undefined) opts.limit = request.limit;
         // [#21207] Each event's hash and parent hash are served in keyed form —

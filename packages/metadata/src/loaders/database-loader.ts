@@ -272,9 +272,9 @@ function addressedPackage(address?: MetadataHistoryAddress): string | null | und
  * snapshot of the environment's (package-less) row of a by-package type: the
  * explicit `sys_metadata` sentinel. NULL in that column means "not
  * attributed" (a row written before the column, or one `SysMetadataRepository`
- * wrote), never the environment.
+ * wrote before it recorded the column too, #32905), never the environment.
  */
-const ENVIRONMENT_HISTORY_MARK = 'sys_metadata';
+export const ENVIRONMENT_HISTORY_MARK = 'sys_metadata';
 
 /**
  * [#32351] The `package_id` a by-package type's snapshot of `slot`'s row is
@@ -293,9 +293,10 @@ function historySnapshotPackage(slot: { packageId?: string } | undefined): strin
  * environment (the column holds {@link ENVIRONMENT_HISTORY_MARK}), or
  * `undefined` when it is attributed to none. An addressed read never answers
  * an unattributed version, and a rollback lands one only on a name a single
- * row slot holds.
+ * row slot holds. [#32905] `SysMetadataRepository` (the `/meta` history and
+ * rollback doors) attributes the rows it reads by this same rule.
  */
-function historyRowAttribution(row: Record<string, unknown>): string | null | undefined {
+export function historyRowAttribution(row: Record<string, unknown>): string | null | undefined {
   if (row.package_id === ENVIRONMENT_HISTORY_MARK) return null;
   return storedRowPackageId(row);
 }

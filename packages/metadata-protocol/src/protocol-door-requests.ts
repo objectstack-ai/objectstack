@@ -101,6 +101,19 @@ type RollbackMetaItemRequest = {
      * a version of ANOTHER member answers 404 `VERSION_NOT_FOUND`.
      */
     member?: string;
+    /**
+     * [ADR-0150 D3/D4, #32905] The package whose row this rollback restores,
+     * as the `/layers` read names its package (`?package=` on the REST door).
+     * Read for a type stored per `(package, name)` only (refused `400` on
+     * any other type): its own row, its `.custom` pair's declared override,
+     * or the package-less row its read falls back to; the version must be
+     * that holder's — one attributed to no package, or to the environment,
+     * only while it is the name's sole slot. Absent, a name two row slots
+     * hold, or one the bare plain read refuses, is refused `409` naming every
+     * holder, before anything is written; a name one holder holds restores
+     * any of its versions, as before.
+     */
+    packageId?: string;
 };
 
 /** The request of {@link ObjectStackProtocolImplementation.deleteMetaItem}. */

@@ -79,6 +79,7 @@ import type {
 } from '../kernel/package-registry.zod';
 
 import { lazySchema } from '../shared/lazy-schema';
+import { canonicalMetaUrlType } from '../meta-spelling/metadata-url-spelling';
 export const AutomationTriggerRequestSchema = lazySchema(() => z.object({
   trigger: z.string(),
   payload: z.record(z.string(), z.unknown())
@@ -2290,6 +2291,45 @@ export const AuditMetaItemResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * [ADR-0150 D3/D4, #32905] The `?package=` selector of the history and
+ * rollback doors, shared by their request schemas.
+ */
+const HISTORY_PACKAGE_SELECTOR_DESCRIPTION =
+  'Optional package ID (`?package=` on the REST door, the `/layers` spelling) — '
+  + 'for a type stored per (package, name), the holder whose versions to address: '
+  + 'the slot of the row a read naming the package serves (its own row, its `.custom` '
+  + 'pair\'s declared override, or the package-less row that read falls back to), '
+  + 'else the package\'s own empty slot when it ships the name; a package that neither '
+  + 'holds nor ships the name is refused 409 `not-held-by-qualifier` (ADR-0150 D3/D4). '
+  + 'Versions attributed to no package, or to the environment, are that slot\'s only '
+  + 'while it is the name\'s sole slot. Absent, a name two holders hold (in stored rows '
+  + 'or in code) is refused 409 naming every holder. Refused with 400 `VALIDATION_ERROR` '
+  + 'on a type not stored per (package, name).';
+
+/**
+ * [ADR-0150 D3/D4, #32905] The metadata types stored per `(package, name)`:
+ * one row per package for a name, so a name can have several holders. These
+ * are the types whose history and rollback doors take `?package=` (see
+ * {@link HistoryMetaItemRequestSchema}`.packageId`); on every other type the
+ * doors refuse it `400`. The one list: `@objectstack/metadata`'s
+ * `PACKAGE_SLOTTED_STORE_TYPES` is built from it, and a client names a
+ * package on those doors only for a type it holds
+ * ({@link isPackageSlottedMetaType}).
+ */
+export const PACKAGE_SLOTTED_METADATA_TYPES: readonly string[] = Object.freeze([
+  'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset',
+  'webhook', 'tool',
+]);
+
+/**
+ * Whether `type`, in any `/meta/:type` spelling (`flows` folds to `flow`), is
+ * stored per `(package, name)` ({@link PACKAGE_SLOTTED_METADATA_TYPES}).
+ */
+export function isPackageSlottedMetaType(type: string): boolean {
+  return PACKAGE_SLOTTED_METADATA_TYPES.includes(canonicalMetaUrlType(type));
+}
+
+/**
  * History Metadata Item Request
  *
  * Request shape for `GET /api/v1/meta/:type/:name/history` (the
@@ -2327,6 +2367,7 @@ export const HistoryMetaItemRequestSchema = lazySchema(() => z.object({
     + 'verb accepts.)',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  packageId: z.string().optional().describe(HISTORY_PACKAGE_SELECTOR_DESCRIPTION),
 }));
 
 /**
@@ -2576,6 +2617,30 @@ export const FindReferencesToMetaResponseSchema = lazySchema(() => z.object({
     path: z.string().describe('Where inside the referring item the reference sits (dot path).'),
     kind: z.string().describe('What kind of reference this is (e.g. which key carries it).'),
   })).describe('Every found reference to the addressed item.'),
+}));
+
+/**
+ * Rollback Metadata Item Request
+ *
+ * Request shape for `POST /api/v1/meta/:type/:name/rollback` (the
+ * `rollbackMetaItem` protocol method): `toVersion` from the body (or its
+ * `version` alias) or the query, all three read through this declaration,
+ * `member` and `package` from the query, `message` from the body.
+ * Mirrors the implementation's parameter type in
+ * `@objectstack/metadata-protocol` (`RollbackMetaItemRequest`) member for
+ * member, less the actor the door fills from the session — a
+ * declared-surface catch-up (#32905), as `HistoryMetaItemRequestSchema` is.
+ */
+export const RollbackMetaItemRequestSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name'),
+  name: z.string().describe('Item name'),
+  toVersion: z.number().int().min(1).describe(
+    'The history version whose body is restored as the new live row: a whole number of at least 1, '
+    + 'as the history lists it. The rollback door reads this declaration and refuses anything else `400`.',
+  ),
+  message: z.string().optional().describe('Rollback note, recorded on the new history row.'),
+  member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  packageId: z.string().optional().describe(HISTORY_PACKAGE_SELECTOR_DESCRIPTION),
 }));
 
 /**
@@ -4435,6 +4500,9 @@ export type GetMetaDiagnosticsResponseParsed = z.infer<typeof GetMetaDiagnostics
 export type FindReferencesToMetaResponse = z.input<typeof FindReferencesToMetaResponseSchema>;
 /** Post-parse shape of {@link FindReferencesToMetaResponse} — defaults applied, transforms run (ADR-0122). */
 export type FindReferencesToMetaResponseParsed = z.infer<typeof FindReferencesToMetaResponseSchema>;
+export type RollbackMetaItemRequest = z.input<typeof RollbackMetaItemRequestSchema>;
+/** Post-parse shape of {@link RollbackMetaItemRequest} — defaults applied, transforms run (ADR-0122). */
+export type RollbackMetaItemRequestParsed = z.infer<typeof RollbackMetaItemRequestSchema>;
 export type RollbackMetaItemResponse = z.input<typeof RollbackMetaItemResponseSchema>;
 /** Post-parse shape of {@link RollbackMetaItemResponse} — defaults applied, transforms run (ADR-0122). */
 export type RollbackMetaItemResponseParsed = z.infer<typeof RollbackMetaItemResponseSchema>;
