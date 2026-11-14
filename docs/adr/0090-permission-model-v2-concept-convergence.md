@@ -262,6 +262,12 @@ Replaces both the `member_default` builtin-set fallback and ADR-0056 D7's defaul
   only what that same package's own resources require of it, so conferring it on the
   authenticated audience widens nothing the package did not itself define. See the revision
   note below.
+- **Removing a row one owns is not a delete bit.** A member withdrawing a row they own is
+  served by an own-row delete door, authorized because the row's owner column names the
+  caller — not by `allowDelete` on a set bound to `everyone`. The storage service's
+  `DELETE /api/v1/attachments/:id`, over `sys_attachment.uploaded_by`, is one such door: a
+  member removes an attachment they uploaded and no other (#33010, ruled 2026-11-14). The
+  attachment member grant still carries read and create only.
 
 > **Revision (2026-09-12, #17189) — the offending bit is a `systemPermissions` entry naming a
 > PLATFORM permission, not `systemPermissions` at all.** [ruled]
