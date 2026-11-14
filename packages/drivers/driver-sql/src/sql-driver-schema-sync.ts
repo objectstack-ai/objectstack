@@ -86,7 +86,8 @@
  * [#25521 cut 17] The movable members of the class's data-lifecycle rotation
  * sub-banner joined them the same way: `ensureRotation`, which inventories a
  * rotation-managed table's shards, adopts a legacy base table, column-syncs
- * the retained shards, drops the expired ones and rebuilds the read view, with
+ * the retained shards, drops the expired ones (on the Rotator's call only) and
+ * rebuilds the read view, with
  * `rotationShardKey` and `rotationColumnList`, which it calls;
  * `warnBuiltinColumnCollisions`, the warning the create, alter and shard paths
  * share when a declared field collides with a builtin column; and
@@ -2106,7 +2107,7 @@ export function rotationShardKey(nowMs: number, unit: 'day' | 'week' | 'month'):
 }
 
 /** The body of `SqlDriver#ensureRotation`; the method's docblock there is its contract. */
-export async function ensureRotation(this: Pick<SchemaSyncHost, 'aliasShardBookkeeping' | 'ensureShardTable' | 'knex' | 'logger' | 'rotationColumnList' | 'rotationShardKey' | 'rotationStateByTable'>, tableName: string, obj: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] }, policy: { shards: number; unit: 'day' | 'week' | 'month' }, nowMs: number = Date.now()): Promise<{ object: string; current: string; shards: string[]; dropped: string[] }> {
+export async function ensureRotation(this: Pick<SchemaSyncHost, 'aliasShardBookkeeping' | 'ensureShardTable' | 'knex' | 'logger' | 'rotationColumnList' | 'rotationShardKey' | 'rotationStateByTable'>, tableName: string, obj: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] }, policy: { shards: number; unit: 'day' | 'week' | 'month' }, nowMs: number = Date.now(), dropExpired: boolean = false): Promise<{ object: string; current: string; shards: string[]; dropped: string[] }> {
   const current = `${tableName}__r${this.rotationShardKey(nowMs, policy.unit)}`;
 
   // Physical inventory: the base name (table before adoption, view after)
@@ -2144,8 +2145,19 @@ export async function ensureRotation(this: Pick<SchemaSyncHost, 'aliasShardBookk
   const oldestRetainedKey = this.rotationShardKey(nowMs - (Math.max(1, policy.shards) - 1) * unitMs, policy.unit);
   const parsed = [...shardNames].sort((a, b) => b.localeCompare(a));
   const keyOf = (n: string) => n.slice(tableName.length + 3);
-  const retained = parsed.filter((n) => keyOf(n) >= oldestRetainedKey);
-  const dropped = parsed.filter((n) => keyOf(n) < oldestRetainedKey);
+  const expired = parsed.filter((n) => keyOf(n) < oldestRetainedKey);
+  // Expiry is the Rotator's alone: the lifecycle sweep's `rotateShards` passes
+  // `dropExpired`. Schema sync (`initObjects`) never DROPs a shard: it runs
+  // on every boot BEFORE that boot is judged — the organization-ownership
+  // guard refuses only after the engine's sync — and on every one-shot CLI
+  // boot, which arms no sweep. A shard a restore brought back, past the window
+  // only because the dump is old, then went with the boot that refused to
+  // serve it. Left to the sweep, an expired shard stays in the read view, its
+  // columns synced with the rest, until the first sweep of a served boot drops
+  // it — at most one sweep interval past its window, the same tolerance the
+  // sweep's own schedule has.
+  const retained = dropExpired ? parsed.filter((n) => keyOf(n) >= oldestRetainedKey) : parsed;
+  const dropped = dropExpired ? expired : [];
 
   // Column-sync every retained shard (creates the current one; adds any
   // newly declared columns to older shards so the UNION stays uniform).
@@ -2171,6 +2183,11 @@ export async function ensureRotation(this: Pick<SchemaSyncHost, 'aliasShardBookk
   if (dropped.length > 0) {
     (this.logger as { info?: (msg: string) => void }).info?.(
       `[sql-driver] rotated ${tableName}: ${retained.length} shard(s) live, dropped ${dropped.join(', ')}`,
+    );
+  } else if (!dropExpired && expired.length > 0) {
+    (this.logger as { info?: (msg: string) => void }).info?.(
+      `[sql-driver] ${tableName}: ${expired.join(', ')} past the rotation window, kept for the lifecycle sweep ` +
+        'to drop once this boot is served',
     );
   }
   return { object: tableName, current, shards: retained, dropped };

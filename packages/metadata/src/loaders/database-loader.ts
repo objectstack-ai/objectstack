@@ -25,7 +25,8 @@ import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/s
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { historySnapshotBody } from '../utils/history-snapshot-body.js';
 import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/contracts';
-import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions } from './loader-interface.js';
+import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions, MetadataStampOnlyRow } from './loader-interface.js';
+import { parsedStoredBody, stampOnlyPackageOf } from '../stamp-only-row.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
   isBundledStoreType,
@@ -1284,8 +1285,9 @@ export class DatabaseLoader implements MetadataLoader {
    * package's rows of the name written before their object was named. ⛔ Never from
    * `item`'s stamp as it stands now, never a row the read did not hand out,
    * [#32488] never another writer's row (`source` other than `'database'`, as
-   * the operator migration reads it), and never into a slot another row of the
-   * name holds. `MetadataManager.register`
+   * the operator migration reads it), [#32985] never a row whose body names
+   * its package by the `_packageId` stamp alone, and never into a slot
+   * another row of the name holds. `MetadataManager.register`
    * calls it in place of the write-through it skips (`skipSourceLoader`).
    */
   async bindReadRowPackage(type: string, name: string, item: object): Promise<void> {
@@ -1297,6 +1299,11 @@ export class DatabaseLoader implements MetadataLoader {
     // [#32488 item 3, R8-A] The loader's own rows only, as `migrateDatabaseLoaderRowPackages`
     // binds them: another writer's row whose body carries a copied stamp is bound to nothing.
     if (row.source !== 'database') return;
+    // [#32985] Nor a row whose body names its package by the `_packageId` stamp alone: it may be an
+    // environment row a 17.0.0–18.3.0 boot stamped with the host (`stampOnlyPackageOf`), and the
+    // column would make it the host's for every reader of `package_id`. A row of a package's item
+    // whose code still ships is bound by that item's own save (`save`'s column-only binding).
+    if (stampOnlyPackageOf(parsedStoredBody(row.metadata)) !== undefined) return;
     // [#32540] An action's member is its bound object: one package's rows of one
     // name on two objects are two slots' rows. Read as the store's unique key
     // holds it once named (`namedRowColumnOf`): a row whose object the column
@@ -1317,6 +1324,23 @@ export class DatabaseLoader implements MetadataLoader {
     const naming = owned && typeof target === 'string' && row.bundle_member !== target ? { bundle_member: target } : {};
     await this._update(this.tableName, read.id, { package_id: read.packageId, ...naming });
     this.invalidate(type, name);
+  }
+
+  /**
+   * [#32985] The rows of `(type, name)` whose `package_id` column is empty and
+   * whose stored body names `packageId` by the `_packageId` stamp alone
+   * (`stampOnlyPackageOf`), whichever writer's (`source`): a 17.0.0–18.3.0
+   * boot saved its host stamp into another writer's package-less row as well.
+   * Read-only, uncached; a read failure is thrown, so a removal that asks
+   * removes nothing it could not check.
+   */
+  async stampOnlyRows(type: string, name: string, packageId: string): Promise<MetadataStampOnlyRow[]> {
+    await this.ensureSchema();
+    const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
+    return rows
+      .filter((row) => !isPackageCaller(typeof row.package_id === 'string' ? row.package_id : undefined)
+        && stampOnlyPackageOf(parsedStoredBody(row.metadata)) === packageId)
+      .map((row) => ({ id: String(row.id), source: typeof row.source === 'string' ? row.source : null }));
   }
 
   /**

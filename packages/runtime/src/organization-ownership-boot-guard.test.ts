@@ -151,7 +151,7 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling â‘
     expect(err.tables).toEqual(['sys_api_key', 'sys_job', 'sys_metadata']);
     expect(err.message).toMatch(/carries no organization-ownership marker: 17\.x or an 18\.0 pre-release \(18\.0\.0-next\.\*\) created it/);
     expect(err.message).toContain('sys_api_key, sys_job, sys_metadata still carry a physical organization_id column its object no longer declares.');
-    expect(err.message).toMatch(/os migrate organization-ownership --apply --plan-file PLAN --backup-taken/);
+    expect(err.message).toMatch(/os migrate organization-ownership --apply --plan-file PLAN --backup-taken --out REPORT/);
     // An 18.0 pre-release database takes the same ceremony: the text names no release line to stay on,
     // and never says every 18.0 database (18.0.0 itself writes the birth marker).
     expect(err.message).not.toMatch(/17\.x release|keep this one|does not upgrade|every 18\.0/);
@@ -162,7 +162,7 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling â‘
     const dev = await refusalOf(() => assertOrganizationOwnershipMigrated(engine({ stats: FOUND }), undefined, { dev: true }));
     expect(dev.message).toContain(
       "Run 'os migrate organization-ownership --dev --out PLAN' to write and review its plan, take a backup, then run " +
-        "'os migrate organization-ownership --dev --apply --plan-file PLAN --backup-taken'",
+        "'os migrate organization-ownership --dev --apply --plan-file PLAN --backup-taken --out REPORT'",
     );
     const served = await refusalOf(() => assertOrganizationOwnershipMigrated(engine({ stats: FOUND })));
     expect(served.message).not.toContain('--dev');
@@ -175,12 +175,12 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling â‘
     const absent = await refusalOf(() => assertOrganizationOwnershipMigrated(engine({ stats: FOUND }), undefined, opts));
     expect(absent.message).toContain(
       `Run '${exported} --out PLAN' to write and review its plan, take a backup, then run ` +
-        `'${exported} --apply --plan-file PLAN --backup-taken', and start again.`,
+        `'${exported} --apply --plan-file PLAN --backup-taken --out REPORT', and start again.`,
     );
     expect(absent.message).toContain('Both commands export the auth secret this server read from /srv/os/home/auth-secret');
     for (const state of ['outdated', 'unreadable', 'unverified'] as const) {
       const message = organizationOwnershipRefusalMessage(['sys_job'], state, opts);
-      expect(message, state).toContain(`'${exported} --apply --plan-file PLAN --backup-taken'`);
+      expect(message, state).toContain(`'${exported} --apply --plan-file PLAN --backup-taken --out REPORT'`);
       expect(message, state).toContain('read from /srv/os/home/auth-secret');
     }
     // A path a shell would split or expand is one double-quoted word.
@@ -201,11 +201,11 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling â‘
     const absent = await refusalOf(() => assertOrganizationOwnershipMigrated(engine({ stats: FOUND }), undefined, opts));
     expect(absent.message).toContain(
       `Run '${named} --out PLAN' to write and review its plan, take a backup, then run ` +
-        `'${named} --apply --plan-file PLAN --backup-taken', and start again.`,
+        `'${named} --apply --plan-file PLAN --backup-taken --out REPORT', and start again.`,
     );
     for (const state of ['outdated', 'unreadable', 'unverified'] as const) {
       expect(organizationOwnershipRefusalMessage(['sys_job'], state, opts), state)
-        .toContain(`'${named} --apply --plan-file PLAN --backup-taken'`);
+        .toContain(`'${named} --apply --plan-file PLAN --backup-taken --out REPORT'`);
     }
     // A path a shell would split or expand is one double-quoted word.
     expect(organizationOwnershipRefusalMessage([], 'absent', { databaseUrl: 'file:/data/o p/$x.db' }))
@@ -247,11 +247,11 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling â‘
     const absent = await refusalOf(() => assertOrganizationOwnershipMigrated(engine({ stats: FOUND }), undefined, opts));
     expect(absent.message).toContain(
       `Run '${named} --out PLAN' to write and review its plan, take a backup, then run ` +
-        `'${named} --apply --plan-file PLAN --backup-taken', and start again.`,
+        `'${named} --apply --plan-file PLAN --backup-taken --out REPORT', and start again.`,
     );
     for (const state of ['outdated', 'unreadable', 'unverified'] as const) {
       expect(organizationOwnershipRefusalMessage(['sys_job'], state, opts), state)
-        .toContain(`'${named} --apply --plan-file PLAN --backup-taken'`);
+        .toContain(`'${named} --apply --plan-file PLAN --backup-taken --out REPORT'`);
     }
     // A development boot (`os dev -d â€¦ --database-driver â€¦`) keeps `--dev` after the command name.
     expect(organizationOwnershipRefusalMessage([], 'absent', { dev: true, databaseUrl: 'file:A.db', databaseDriver: 'sqlite' }))
@@ -269,7 +269,7 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling â‘
       `OS_DATABASE_DRIVER=turso OS_DATABASE_AUTH_TOKEN="\${OS_DATABASE_AUTH_TOKEN:?${AUTH_TOKEN_UNSET}}" ` +
       'os migrate organization-ownership --dev --database-url libsql://os-dev.turso.io';
     expect(message).toContain(`'${named} --out PLAN'`);
-    expect(message).toContain(`'${named} --apply --plan-file PLAN --backup-taken'`);
+    expect(message).toContain(`'${named} --apply --plan-file PLAN --backup-taken --out REPORT'`);
     expect(message).toContain('The database auth token this server was started with (--database-auth-token) is not printed');
     // The token alone, with no driver and a database the ceremony finds by default.
     expect(organizationOwnershipRefusalMessage([], 'absent', { databaseAuthTokenFromFlag: true }))
@@ -358,7 +358,7 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling â‘
     expect(err.message).toContain(
       `certified by an organization-ownership ceremony of shape generation 0, and this release requires generation ${ORGANIZATION_OWNERSHIP_SHAPE_GENERATION}`,
     );
-    expect(err.message).toMatch(/os migrate organization-ownership --apply --plan-file PLAN --backup-taken/);
+    expect(err.message).toMatch(/os migrate organization-ownership --apply --plan-file PLAN --backup-taken --out REPORT/);
   });
 
   it('a marker that is not verified (an unfinished ceremony, or one whose post-check found discrepancies) is refused', async () => {
@@ -392,7 +392,7 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling â‘
     expect(err.message).toMatch(/^The organization-ownership ceremony has not finished on this database: its marker \(sys_migration 'adr-0131-organization-ownership'\) is not verified/);
     expect(err.message).toContain(
       "Resolve what the apply report names, then run 'os migrate organization-ownership --out PLAN' again, review it, run " +
-        "'os migrate organization-ownership --apply --plan-file PLAN --backup-taken', and start again.",
+        "'os migrate organization-ownership --apply --plan-file PLAN --backup-taken --out REPORT', and start again.",
     );
     // A verified_at with blocking left is not verified either (`isDataMigrationFlagVerified`).
     db.exec('DELETE FROM sys_migration');

@@ -2167,6 +2167,18 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
             label: "發現文件 URL",
             helpText: "可選。OIDC 發現文件 URL（https）。留空則推導為 `<issuer>/.well-known/openid-configuration`。在此填寫的端點會被此提供者信任。"
           },
+          authorizationEndpoint: {
+            label: "Authorization URL",
+            helpText: "Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust."
+          },
+          tokenEndpoint: {
+            label: "Token URL",
+            helpText: "Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token"
+          },
+          jwksEndpoint: {
+            label: "JWKS URL",
+            helpText: "Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs"
+          },
           userInfoEndpoint: {
             label: "Userinfo 端點 URL",
             helpText: "可選。OIDC userinfo 端點 URL（https），取代發現文件中列出的端點。在此填寫的端點會被此提供者信任：當註冊因發現文件列出的 userinfo 主機不受伺服器信任而被拒絕時，請在此填寫。"
