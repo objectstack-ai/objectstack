@@ -137,6 +137,10 @@ const MOUNTS = {
 
   'packages/plugins/plugin-hono-server/src/adapter.ts:use *': { yields: true },
   'packages/plugins/plugin-hono-server/src/hono-plugin.ts:use *': { yields: true },
+  // The `X-Robots-Tag` lanes: each awaits `next()` and only adds a header to
+  // the answer the route already produced, so neither owns its namespace.
+  'packages/plugins/plugin-hono-server/src/api-noindex.ts:use *': { yields: true },
+  "packages/cli/src/utils/console.ts:use `${CONSOLE_PATH}/*`": { yields: true },
 
   // ── Exempt: SUPPOSED to own the namespace ───────────────────────────────
 

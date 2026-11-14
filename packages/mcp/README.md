@@ -227,12 +227,22 @@ Two prompt families are bridged — there is no per-item prompt registration cal
    and its `agentName` argument names agents that boot holds; the open
    framework registers none, so there it is not listed.
 2. **One prompt per authored skill** that carries `instructions` (#3905). Write
-   a `*.skill.ts`, and its instructions become a prompt any connected MCP client
+   a `*.skill.ts`, and its instructions become a prompt a connected MCP client
    can list and fetch.
 
 The skill **list** is a snapshot taken when the bridge runs; each prompt's
 **body** is re-read from metadata at `prompts/get` time, so an edited skill
 serves fresh text without a restart.
+
+`bridgePrompts` lists every such skill on the long-lived server. The HTTP door,
+and any server a host installs `registerSkillPrompts` on, offers a skill on
+`prompts/list` and `prompts/get` only when that server lists every tool the
+skill binds (`SkillSchema.tools`), read from the server's own tool registry when
+the prompt request is answered: a plain name by a tool of that name, a trailing
+wildcard by any listed tool it matches, and an `action_<name>` entry (or
+`action_*`) also by `run_action`. A skill that binds no tool is offered as
+before, and `prompts/get` answers a withheld skill as it answers an unknown
+prompt name.
 
 ## Extending the server from a host
 

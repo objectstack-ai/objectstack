@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 311 |
-| Object name statically decidable | 216 |
+| Write call sites | 314 |
+| Object name statically decidable | 219 |
 | Object name chosen at run time | 95 |
-| Against a tenancy-enabled object | 209 |
+| Against a tenancy-enabled object | 212 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 240 |
+| Threading a tenant context | 243 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 59 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 174 |
+| Threading a decidably elevated context | 177 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 125 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-13 at `fc310c98b`.
+Measured on 2026-11-14 at `aad3132fa`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1150 |
-| engine-shaped types recognised | 136 |
+| tracked non-test sources scanned | 1160 |
+| engine-shaped types recognised | 138 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 293 |
+| same-named calls subtracted as non-engine | 298 |
 
 ## Every site
 
@@ -237,6 +237,7 @@ Measured on 2026-11-13 at `fc310c98b`.
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `delete` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `update` | `objectName` | undecidable | context, elevation undecidable | 1 |
+| `packages/services/service-automation/src/connector-connections.ts` | `delete` | `sys_connector_connection` | enabled | elevated | 1 |
 | `packages/services/service-automation/src/connector-connections.ts` | `delete` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/connector-connections.ts` | `insert` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/connector-connections.ts` | `update` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
@@ -299,7 +300,7 @@ Measured on 2026-11-13 at `fc310c98b`.
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_setting_audit` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service.ts` | `insert` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-settings/src/settings-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-storage/src/attachment-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 3 |
+| `packages/services/service-storage/src/attachment-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 4 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `update` | `object` | undecidable | options unreadable | 1 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `insert` | `sys_file` | enabled | context, elevation undecidable | 1 |
@@ -308,7 +309,7 @@ Measured on 2026-11-13 at `fc310c98b`.
 | `packages/services/service-storage/src/file-attachment-service.ts` | `delete` | `sys_attachment` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-storage/src/file-attachment-service.ts` | `insert` | `sys_attachment` | enabled | context, elevation undecidable | 2 |
 | `packages/services/service-storage/src/file-reference-lifecycle.ts` | `insert` | `sys_file` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-storage/src/file-reference-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 2 |
+| `packages/services/service-storage/src/file-reference-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 3 |
 | `packages/services/service-storage/src/metadata-store.ts` | `delete` | `sys_file` | enabled | options unreadable | 1 |
 | `packages/services/service-storage/src/metadata-store.ts` | `insert` | `sys_file` | enabled | options unreadable | 1 |
 | `packages/services/service-storage/src/metadata-store.ts` | `update` | `sys_file` | enabled | options unreadable | 2 |

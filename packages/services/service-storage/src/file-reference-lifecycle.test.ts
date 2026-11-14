@@ -337,6 +337,58 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
     });
   });
 
+  // ── [#33125] The reclaim stamp of an upload made before its record ─
+  describe('the reclaim stamp of an upload made before its record', () => {
+    const STAMP = '2026-01-01T00:00:00.000Z';
+
+    it('is cleared before the driver writes the record that names the file', async () => {
+      const engine = fakeEngine({ files: [file({ deleted_at: STAMP })] });
+      install(engine);
+
+      // The before phase alone: the stamp is gone even if the claim after the
+      // write never runs.
+      await engine.trigger('beforeInsert', { object: 'product', event: 'beforeInsert', input: { data: { image: 'file_a' } }, dispatch: recordDispatch() });
+
+      expect(engine.tables.sys_file[0]).toMatchObject({ status: 'committed', deleted_at: null });
+      expect(engine.tables.sys_file[0].ref_id).toBeUndefined();
+    });
+
+    it('is cleared by the claim itself', async () => {
+      const engine = fakeEngine({ files: [file({ deleted_at: STAMP })] });
+      install(engine);
+
+      // The after phase alone: a claim that was not preceded by the before hook.
+      await engine.trigger('afterInsert', { object: 'product', event: 'afterInsert', result: { id: 'p1', image: 'file_a' } });
+
+      expect(engine.tables.sys_file[0]).toMatchObject({ status: 'committed', deleted_at: null, ref_id: 'p1' });
+    });
+
+    it('is cleared on every file of a multiple:true field, through a full write', async () => {
+      const engine = fakeEngine({
+        files: [file({ deleted_at: STAMP }), file({ id: 'file_b', key: 'user/file_b.png', deleted_at: STAMP })],
+      });
+      install(engine);
+
+      await driveInsert(engine, 'product', { gallery: ['file_a', 'file_b'] }, 'p1');
+
+      expect(engine.tables.sys_file.map((f) => [f.id, f.ref_id, f.deleted_at])).toEqual([
+        ['file_a', 'p1', null],
+        ['file_b', 'p1', null],
+      ]);
+    });
+
+    it('a file with no stamp is claimed with no extra write', async () => {
+      const engine = fakeEngine({ files: [file()] });
+      install(engine);
+
+      await driveInsert(engine, 'product', { image: 'file_a' }, 'p1');
+
+      const writes = engine.calls.filter((c) => c.op === 'update' && c.object === 'sys_file');
+      expect(writes).toHaveLength(1);
+      expect(writes[0].arg).not.toHaveProperty('deleted_at');
+    });
+  });
+
   // ── Dormancy: the pre-v17 world must cost nothing ────────────────
   describe('dormancy (dual-mode)', () => {
     it('ignores a legacy inline blob value — no sys_file access at all', async () => {

@@ -7,6 +7,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isEmptyForRequired } from '@objectstack/core';
 import { validationFailure } from '@objectstack/types';
 import { callerContext } from './attachment-access-hooks.js';
+import { isReclaimStampedUpload } from './attachment-lifecycle.js';
 import { buildKey } from './storage-key.js';
 import {
   findReferenceableFile,
@@ -848,6 +849,12 @@ async function applyCopyOnClaim(
   }
   assertNoFileFieldRefused(refused);
 
+  // [#33125] Unclaimed files this write names that carry the reclaim stamp of
+  // an upload made before its record. Cleared once every field has passed,
+  // before the driver writes, so a file a record names never stays a sweep
+  // candidate even if the claim after the write fails. A write refused after
+  // this point leaves the file unstamped: kept, never lost.
+  const stamped: string[] = [];
   for (const { field, value, rows } of named) {
     const replacements = new Map<string, string>();
     for (const [token, row] of rows) {
@@ -858,7 +865,10 @@ async function applyCopyOnClaim(
       assertFileConstraints(fieldDefOf(engine, object, field), field, row);
 
       // Unclaimed: the after-hook will claim it for this slot. Nothing to copy.
-      if (row.ref_id == null) continue;
+      if (row.ref_id == null) {
+        if (isReclaimStampedUpload(row)) stamped.push(token);
+        continue;
+      }
       // Already ours (an update rewriting the same value) — no-op.
       // `recordId` is null on insert, where a brand-new record can never be
       // the current owner — so there, every already-owned id is a copy.
@@ -893,6 +903,9 @@ async function applyCopyOnClaim(
     data[field] = Array.isArray(value)
       ? value.map((v) => (typeof v === 'string' && replacements.has(v) ? replacements.get(v)! : v))
       : (replacements.get(value as string) ?? value);
+  }
+  for (const id of new Set(stamped)) {
+    await engine.update('sys_file', { id, deleted_at: null }, { context: { ...SYSTEM_CTX } });
   }
 }
 
@@ -946,6 +959,9 @@ async function claimFile(
     patch.status = 'committed';
     patch.deleted_at = null;
   }
+  // [#33125] A file uploaded before its record, taken by the record it was
+  // uploaded for: the reclaim stamp goes with the claim.
+  if (isReclaimStampedUpload(row)) patch.deleted_at = null;
   // [#26046] The claiming record's rule replaces the one the file kept from
   // the record that let it go.
   if (row.released_ref_object != null || row.released_ref_id != null) {
