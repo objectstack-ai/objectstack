@@ -835,7 +835,7 @@ describe('[#31698] two packages\' slots of a set in the metadata service: the D3
         registry: {
           ...silentRegistry(),
           packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' && name === 'ops_reader' ? [A] : []),
-          getPackageScopedItem: (type: string, name: string, pkg: string) => (pkg === A ? { name, label: 'registry', _packageId: A } : undefined),
+          getPackageScopedItem: (_type: string, name: string, pkg: string) => (pkg === A ? { name, label: 'registry', _packageId: A } : undefined),
           listItems: () => [{ name: 'ops_reader', _packageId: A }],
         },
         metadata: metadata({ permission: [rowB, rowA] }),
