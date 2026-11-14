@@ -45,7 +45,7 @@ import { authIdentityObjects } from './manifest.js';
 import { REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED } from '@objectstack/spec/system';
 import { assertPasswordResetEndsSessions } from './password-reset-ends-sessions.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
-import { SSO_ONLY_REFUSAL_MESSAGES } from './sso-only-local-password.js';
+import { SSO_ONLY_REFUSAL_MESSAGES, SSO_ONLY_RESET_UNREADABLE_MESSAGE } from './sso-only-local-password.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 import { sqliteEnginePool } from './__tests__/sqlite-engine-pool.testkit';
 // better-auth's first module load is paid here, at module load, not inside the
@@ -721,6 +721,35 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the r
     return { status: res.status, code: body?.code };
   }
 
+  /** Status, code and message of a reset door's fail-closed answer, in the vendor's flat body. */
+  async function expectFailClosed(res: Response): Promise<void> {
+    const text = await res.clone().text();
+    const body = JSON.parse(text) as { code?: unknown; message?: unknown };
+    expect({ status: res.status, code: body.code, message: body.message }, text).toEqual({
+      status: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      message: SSO_ONLY_RESET_UNREADABLE_MESSAGE,
+    });
+  }
+
+  /** Make every read of the reset records throw while `run` is in flight. */
+  async function withVerificationReadsDown<T>(engine: ObjectQL, run: () => Promise<T>): Promise<T> {
+    const down = (object: unknown) => object === 'sys_verification';
+    const target = engine as unknown as Record<'find' | 'findOne', (object: string, ...rest: unknown[]) => Promise<unknown>>;
+    const spies = (['find', 'findOne'] as const).map((method) => {
+      const real = target[method].bind(engine);
+      return vi.spyOn(target, method).mockImplementation(async (object: string, ...rest: unknown[]) => {
+        if (down(object)) throw new Error('verification store down');
+        return real(object, ...rest);
+      });
+    });
+    try {
+      return await run();
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  }
+
   /** Who the reset doors judge a platform administrator: pinned per case, not inferred from staging. */
   const platformAdmin = (standing: boolean) =>
     vi
@@ -817,6 +846,20 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the r
       expect(on).toEqual(off);
     }, 60_000);
 
+    it('a reset record that cannot be read fails closed with 503 and writes no credential', async () => {
+      const a = await signedInAccount();
+      await provisionedByIdp(a);
+      platformAdmin(false);
+      const token = await requestResetToken(a);
+      ssoOnly();
+
+      const reset = await withVerificationReadsDown(a.engine, () =>
+        post(a.manager, '/reset-password', { token, newPassword: SECOND }),
+      );
+      await expectFailClosed(reset);
+      expect(await credentialOf(a.engine)).toBeUndefined();
+    }, 60_000);
+
     it('CONTROL: SSO-only off, the idp_provisioned user resets as before', async () => {
       const a = await signedInAccount();
       await provisionedByIdp(a);
@@ -896,6 +939,20 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the r
       const reset = await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: SECOND });
       expect(reset.status, await reset.clone().text()).toBe(200);
       expect(await credentialOf(a.engine)).toBeDefined();
+    }, 60_000);
+
+    it('a reset record that cannot be read fails closed with 503 and writes no credential', async () => {
+      const { a, requestCode } = await phoneAccount();
+      await provisionedByIdp(a);
+      platformAdmin(false);
+      const otp = await requestCode();
+      ssoOnly();
+
+      const reset = await withVerificationReadsDown(a.engine, () =>
+        post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: SECOND }),
+      );
+      await expectFailClosed(reset);
+      expect(await credentialOf(a.engine)).toBeUndefined();
     }, 60_000);
 
     it('CONTROL: SSO-only off, the idp_provisioned user resets with the code as before', async () => {

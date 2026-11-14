@@ -105,13 +105,17 @@ describe('resolveResetDoorUserId', () => {
     },
   });
 
+  const user = (userId: string) => ({ ok: true, userId });
+  const nobody = { ok: true, userId: undefined };
+  const unreadable = { ok: false };
+
   it('names the user of a live emailed token, and nobody for an expired or unknown one', async () => {
     const live = ctxFor('/reset-password', { token: 't1' }, { 'reset-password:t1': { value: 'u1', expiresAt: future() } });
-    expect(await resolveResetDoorUserId(live, 3)).toBe('u1');
+    expect(await resolveResetDoorUserId(live, 3)).toEqual(user('u1'));
     const expired = ctxFor('/reset-password', { token: 't1' }, { 'reset-password:t1': { value: 'u1', expiresAt: past() } });
-    expect(await resolveResetDoorUserId(expired, 3)).toBeUndefined();
+    expect(await resolveResetDoorUserId(expired, 3)).toEqual(nobody);
     const unknown = ctxFor('/reset-password', { token: 't2' }, { 'reset-password:t1': { value: 'u1', expiresAt: future() } });
-    expect(await resolveResetDoorUserId(unknown, 3)).toBeUndefined();
+    expect(await resolveResetDoorUserId(unknown, 3)).toEqual(nobody);
   });
 
   it('names the user of a matching texted code inside its budget, and nobody otherwise', async () => {
@@ -119,20 +123,43 @@ describe('resolveResetDoorUserId', () => {
     const users = { '+15550100': 'u2' };
     const at = (value: string, expiresAt = future()) =>
       ctxFor('/phone-number/reset-password', { phoneNumber: '+15550100', otp: '123456' }, { [id]: { value, expiresAt } }, users);
-    expect(await resolveResetDoorUserId(at('123456:0'), 3)).toBe('u2');
-    expect(await resolveResetDoorUserId(at('123456:2'), 3)).toBe('u2');
-    expect(await resolveResetDoorUserId(at('654321:0'), 3)).toBeUndefined();
-    expect(await resolveResetDoorUserId(at('123456:3'), 3)).toBeUndefined();
-    expect(await resolveResetDoorUserId(at('123456:0', past()), 3)).toBeUndefined();
+    expect(await resolveResetDoorUserId(at('123456:0'), 3)).toEqual(user('u2'));
+    expect(await resolveResetDoorUserId(at('123456:2'), 3)).toEqual(user('u2'));
+    expect(await resolveResetDoorUserId(at('654321:0'), 3)).toEqual(nobody);
+    expect(await resolveResetDoorUserId(at('123456:3'), 3)).toEqual(nobody);
+    expect(await resolveResetDoorUserId(at('123456:0', past()), 3)).toEqual(nobody);
   });
 
-  it('names nobody on any other path, or when a read throws', async () => {
-    expect(await resolveResetDoorUserId(ctxFor('/change-password', { token: 't1' }, {}), 3)).toBeUndefined();
-    const throwing: ResetDoorContext = {
-      path: '/reset-password',
+  it('names nobody on any other path, and reads nothing there', async () => {
+    let reads = 0;
+    const counting: ResetDoorContext = {
+      path: '/change-password',
       body: { token: 't1' },
-      context: { internalAdapter: { findVerificationValue: async () => { throw new Error('down'); } } },
+      context: { internalAdapter: { findVerificationValue: async () => { reads += 1; return null; } } },
     };
-    expect(await resolveResetDoorUserId(throwing, 3)).toBeUndefined();
+    expect(await resolveResetDoorUserId(counting, 3)).toEqual(nobody);
+    expect(reads).toBe(0);
+  });
+
+  it('answers unreadable when a reset record cannot be read: no read surface, or a read that throws', async () => {
+    const down = async () => { throw new Error('down'); };
+    const cases: ResetDoorContext[] = [
+      { path: '/reset-password', body: { token: 't1' }, context: {} },
+      { path: '/reset-password', body: { token: 't1' }, context: { internalAdapter: { findVerificationValue: down } } },
+      {
+        path: '/phone-number/reset-password',
+        body: { phoneNumber: '+15550100', otp: '123456' },
+        context: { internalAdapter: { findVerificationValue: down } },
+      },
+      {
+        path: '/phone-number/reset-password',
+        body: { phoneNumber: '+15550100', otp: '123456' },
+        context: {
+          internalAdapter: { findVerificationValue: async () => ({ value: '123456:0', expiresAt: future() }) },
+          adapter: { findOne: down },
+        },
+      },
+    ];
+    for (const ctx of cases) expect(await resolveResetDoorUserId(ctx, 3)).toEqual(unreadable);
   });
 });

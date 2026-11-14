@@ -359,7 +359,13 @@ nothing; the user signs in through the identity provider.
   another IdP-provisioned user, another administrator included, is refused.
 - **The resets judge only a credential they would accept.** A reset token or a
   texted code that does not match answers exactly as it does with SSO-only mode
-  off.
+  off. If the reset record or the user's identity source cannot be read, the
+  reset answers `503 SERVICE_UNAVAILABLE` and sets nothing.
+- **The two resets answer in the auth library's flat body**,
+  `{ "code": "RESOURCE_CONFLICT", "message": "…" }`, the shape their other
+  refusals (an invalid token, an invalid code) take. The two set doors answer
+  the platform's `{ "success": false, "error": { "code", "message" } }`
+  envelope.
 - **Unchanged:** environment-native users at every door, SSO-only mode off, and
   a local password a user already holds — it still signs in, and
   `POST /api/v1/auth/change-password` still changes it. On a cloud-managed

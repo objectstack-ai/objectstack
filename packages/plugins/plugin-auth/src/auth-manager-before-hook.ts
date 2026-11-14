@@ -71,7 +71,7 @@ import {
 } from './last-local-credential.js';
 import { refuseRequestNamingDifferentAccounts } from './one-account-per-request.js';
 import {
-  identitySourceUnreadable,
+  SSO_ONLY_RESET_UNREADABLE_MESSAGE,
   judgeSsoOnlyLocalPassword,
   PHONE_RESET_PASSWORD_PATH,
   RESET_PASSWORD_PATH,
@@ -200,34 +200,38 @@ export async function globalBeforeHook(
   // shares (`sso-only-local-password.ts`); a platform administrator
   // resetting their own keeps break-glass. Judged only for a credential
   // the door itself would accept, read without spending it, so any other
-  // request is answered exactly as before. Ahead of the complexity check,
+  // request is answered exactly as before; a reset record that cannot be
+  // read fails closed (503). Ahead of the complexity check,
   // so the refusal names the real reason.
   if (
     (ctx?.path === RESET_PASSWORD_PATH || ctx?.path === PHONE_RESET_PASSWORD_PATH) &&
     this.isSsoOnlyMode()
   ) {
-    const userId = await resolveResetDoorUserId(ctx, this.config.phoneOtp?.allowedAttempts ?? 3);
-    if (userId) {
-      const verdict = await judgeSsoOnlyLocalPassword({
+    const subject = await resolveResetDoorUserId(ctx, this.config.phoneOtp?.allowedAttempts ?? 3);
+    // A reset record that cannot be read fails closed, as a source that
+    // cannot be read does.
+    let verdict: 'allow' | 'refuse' | 'unreadable' = subject.ok ? 'allow' : 'unreadable';
+    if (subject.ok && subject.userId) {
+      const userId = subject.userId;
+      verdict = await judgeSsoOnlyLocalPassword({
         ssoOnly: true,
         engine: this.getDataEngine(),
         userId,
         selfPlatformAdmin: () => this.isPlatformAdminUserId(userId),
       });
-      if (verdict !== 'allow') {
-        const { APIError } = await import('better-auth/api');
-        if (verdict === 'refuse') {
-          throw new APIError('CONFLICT', {
-            message: SSO_ONLY_REFUSAL_MESSAGES.resetPassword,
-            code: SSO_ONLY_REFUSAL_CODE,
-          });
-        }
-        const unreadable = identitySourceUnreadable('this SSO-only environment may reset your password here');
-        throw new APIError('SERVICE_UNAVAILABLE', {
-          message: unreadable.body.error.message,
-          code: 'SERVICE_UNAVAILABLE',
+    }
+    if (verdict !== 'allow') {
+      const { APIError } = await import('better-auth/api');
+      if (verdict === 'refuse') {
+        throw new APIError('CONFLICT', {
+          message: SSO_ONLY_REFUSAL_MESSAGES.resetPassword,
+          code: SSO_ONLY_REFUSAL_CODE,
         });
       }
+      throw new APIError('SERVICE_UNAVAILABLE', {
+        message: SSO_ONLY_RESET_UNREADABLE_MESSAGE,
+        code: 'SERVICE_UNAVAILABLE',
+      });
     }
   }
 

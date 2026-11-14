@@ -37,15 +37,37 @@
  * - the break-glass lock-out guards (`last-admin-guard.ts`,
  *   `last-local-credential.ts`) are separate and unchanged.
  *
- * ## The two predicates are the cloud-managed doors' own
+ * ## The predicates are the cloud-managed doors' own
  *
  * Who is IdP-provisioned is the `sys_user.source` read {@link readUserSource}
  * (the one the cloud-managed administrator door asks, moved here so both rules
- * read one), and who is a platform administrator is the session's
- * `isPlatformAdminUser` or the manager's `isPlatformAdminUserId` — the
- * predicates the cloud-managed narrowing and the platform-admin gate ask. A
- * source that cannot be read fails closed (`503`), as the cloud-managed door
- * does: an outage is never read as a local account.
+ * read one). A source that cannot be read fails closed (`503`), as the
+ * cloud-managed door does: an outage is never read as a local account. The
+ * reset doors fail closed the same way when the reset record they would judge
+ * cannot be read.
+ *
+ * Who is a platform administrator is asked through one of two predicates,
+ * each the one its door already had:
+ * - `isPlatformAdminUser(session.user)` (`platform-admin-gate.ts`), the
+ *   session's standing, at `POST /set-initial-password`, as its cloud-managed
+ *   arm asks it;
+ * - `AuthManager#isPlatformAdminUserId(userId)`, the manager's id-shaped
+ *   standing (ADR-0135 D5, `hasPlatformAdminStanding`), at the two reset
+ *   doors, which have no session to ask;
+ * - at `POST /admin/set-user-password` no predicate is asked here: the route's
+ *   `gateAdmin` admits platform administrators only, so the exception is the
+ *   caller naming themselves (`actor.id === userId`).
+ *
+ * ## Why the doors are where the rule bites
+ *
+ * ADR-0135 D5.2 (second bullet) records D4's stamp: gaining a local credential
+ * stamps the row back to `env_native` (`stampIdentitySource`, on the credential
+ * account's creation). So a managed user given a local password at any of these
+ * doors would stop being managed, and this rule, which reads `source` as
+ * stored, would no longer reach them. Refusing before the write is the only
+ * point the rule can hold. The break-glass exception goes through that stamp
+ * too: once a platform administrator holds their own local password, their row
+ * reads `env_native`.
  *
  * ## The refusal
  *
@@ -115,6 +137,15 @@ export function identitySourceUnreadable(what: string): {
     },
   };
 }
+
+/**
+ * The message a reset door answers (`503 SERVICE_UNAVAILABLE`) under SSO-only
+ * mode when the reset record, or the identity source of the user it names,
+ * cannot be read.
+ */
+export const SSO_ONLY_RESET_UNREADABLE_MESSAGE =
+  'This environment is in SSO-only mode, and the reset record or your identity source could not be read, so whether '
+  + 'this reset may set a local password cannot be judged. Try again later. No password was set.';
 
 /** The read surface {@link readUserSource} needs. */
 export interface UserSourceReader {
@@ -207,52 +238,68 @@ function isLive(row: { expiresAt?: unknown } | null | undefined): boolean {
 }
 
 /**
- * The user a reset door would give a password to, or `undefined`.
+ * What a reset door's presented credential names, read without spending it.
+ *
+ * - `{ ok: true, userId }`: the credential is one the door itself would
+ *   accept, and `userId` is the user it would give a password to;
+ * - `{ ok: true, userId: undefined }`: the credential is one the door would
+ *   refuse (or the path is not a reset door), so the door answers it exactly
+ *   as before;
+ * - `{ ok: false }`: the reset record (or the user it names) cannot be read,
+ *   so whether the credential names an IdP-provisioned user cannot be judged.
+ */
+export type ResetDoorSubject = { ok: true; userId: string | undefined } | { ok: false };
+
+/**
+ * The user a reset door would give a password to.
  *
  * Resolved only from a credential the door itself would accept, read WITHOUT
  * spending it: a live reset token (`reset-password:TOKEN`, the identifier
  * better-auth's handler reads), or a texted code that matches the live stored
  * one and is still inside its attempt budget (better-auth's own non-consuming
  * predicate for that door, `matchesUsableStoredPhoneNumberOTP`, 1.7.12). Any
- * other request resolves `undefined` and the door answers it exactly as before,
- * so the SSO-only refusal tells nobody anything their credential did not
- * already prove. A read that throws resolves `undefined` too: the vendor's
- * handler then makes its own read and answers.
+ * other request names nobody and the door answers it exactly as before, so the
+ * SSO-only refusal tells nobody anything their credential did not already
+ * prove. A record that cannot be read (no read surface, or a read that throws)
+ * answers `{ ok: false }`, and the door fails closed on it, as it does on a
+ * source that cannot be read: an outage never hands the request to the
+ * vendor's handler unjudged.
  */
 export async function resolveResetDoorUserId(
   ctx: ResetDoorContext,
   phoneOtpAllowedAttempts: number,
-): Promise<string | undefined> {
+): Promise<ResetDoorSubject> {
+  const none: ResetDoorSubject = { ok: true, userId: undefined };
+  if (ctx.path !== RESET_PASSWORD_PATH && ctx.path !== PHONE_RESET_PASSWORD_PATH) return none;
   const internal = ctx.context?.internalAdapter;
-  if (!internal) return undefined;
+  if (!internal) return { ok: false };
   try {
     if (ctx.path === RESET_PASSWORD_PATH) {
       const fromBody = ctx.body?.token;
       const fromQuery = ctx.query?.token;
       const token = typeof fromBody === 'string' && fromBody ? fromBody : typeof fromQuery === 'string' ? fromQuery : '';
-      if (!token) return undefined;
+      if (!token) return none;
       const row = await internal.findVerificationValue(`reset-password:${token}`);
-      if (!isLive(row) || typeof row?.value !== 'string' || !row.value) return undefined;
-      return row.value;
+      if (!isLive(row) || typeof row?.value !== 'string' || !row.value) return none;
+      return { ok: true, userId: row.value };
     }
-    if (ctx.path === PHONE_RESET_PASSWORD_PATH) {
-      const phoneNumber = ctx.body?.phoneNumber;
-      const otp = ctx.body?.otp;
-      if (typeof phoneNumber !== 'string' || !phoneNumber || typeof otp !== 'string' || !otp) return undefined;
-      const row = await internal.findVerificationValue(`${phoneNumber}-request-password-reset`);
-      if (!isLive(row) || typeof row?.value !== 'string') return undefined;
-      const [stored, rawAttempts] = row.value.split(':');
-      const attempts = Number(rawAttempts ?? 0);
-      if ((Number.isSafeInteger(attempts) && attempts > 0 ? attempts : 0) >= phoneOtpAllowedAttempts) return undefined;
-      if (stored !== otp) return undefined;
-      const user = (await ctx.context?.adapter?.findOne({
-        model: 'user',
-        where: [{ field: 'phoneNumber', value: phoneNumber }],
-      })) as { id?: unknown } | null | undefined;
-      return typeof user?.id === 'string' && user.id ? user.id : undefined;
-    }
+    const phoneNumber = ctx.body?.phoneNumber;
+    const otp = ctx.body?.otp;
+    if (typeof phoneNumber !== 'string' || !phoneNumber || typeof otp !== 'string' || !otp) return none;
+    const row = await internal.findVerificationValue(`${phoneNumber}-request-password-reset`);
+    if (!isLive(row) || typeof row?.value !== 'string') return none;
+    const [stored, rawAttempts] = row.value.split(':');
+    const attempts = Number(rawAttempts ?? 0);
+    if ((Number.isSafeInteger(attempts) && attempts > 0 ? attempts : 0) >= phoneOtpAllowedAttempts) return none;
+    if (stored !== otp) return none;
+    const adapter = ctx.context?.adapter;
+    if (!adapter) return { ok: false };
+    const user = (await adapter.findOne({
+      model: 'user',
+      where: [{ field: 'phoneNumber', value: phoneNumber }],
+    })) as { id?: unknown } | null | undefined;
+    return { ok: true, userId: typeof user?.id === 'string' && user.id ? user.id : undefined };
   } catch {
-    return undefined;
+    return { ok: false };
   }
-  return undefined;
 }
