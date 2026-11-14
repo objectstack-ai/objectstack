@@ -34,6 +34,17 @@
 //   omd_obligation --contract--> omd_contract   (opted in,      ownership: user)
 //   omd_task       --contract--> omd_contract   (NOT opted in,  ownership: user)
 //   omd_note       --contract--> omd_contract   (opted in,      ownership: none)
+//
+// [ADR-0055 §3 as amended for #33250 — ruling A+] The second opt-in of the
+// same block, `writeRequiresMasterRead: true`: with it the master question the
+// gate asks for an insert, an update and a delete of a detail is READ on the
+// master instead of EDIT, and the detail's own grants, row-level policies and
+// FLS decide the rest. Its pins are the `[#33250]` blocks at the end, over the
+// same rig plus:
+//
+//   omd_milestone  --contract--> omd_contract    (writeRequiresMasterRead)
+//   omd_step       --milestone-> omd_milestone   (writeRequiresMasterRead; a chain of two opted-in hops)
+//   omd_line       --milestone-> omd_milestone   (NOT opted in; edit on the milestone, then read on its contract)
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
@@ -68,6 +79,14 @@ const EDITOR = 'usr_editor';
 const BLIND = 'usr_blind';
 /** A delegator holding the owner's grants and bound by no floor, for the on-behalf-of pin. */
 const DELEGATOR = 'usr_delegator';
+/** [#33250] A delegator holding only the blind set: it cannot read any contract. */
+const BLIND_DELEGATOR = 'usr_blind_delegator';
+/** [#33250] Reads the contract object but not the contracts REP owns (no View All on a private master). */
+const HIDDEN = 'usr_hidden';
+/** [#33250] Reads the contract; holds READ alone on the milestone: no create, edit or delete grant of its own. */
+const LOOKER = 'usr_looker';
+/** [#33250] Reads the contract; CRUD on the milestone, narrowed by an update policy to the rows it owns. */
+const NARROW = 'usr_narrow';
 const ORG = 'org_omd';
 
 const CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
@@ -75,13 +94,29 @@ const CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete:
 const MASTER_READ = { allowRead: true, viewAllRecords: true };
 /** Modify All Data on the contract, which the sharing verdict answers `allow` for. */
 const MASTER_EDIT = { allowRead: true, allowCreate: true, allowEdit: true, viewAllRecords: true, modifyAllRecords: true };
-const DETAILS = { [OBLIGATION]: CRUD, [TASK]: CRUD, [NOTE]: CRUD };
+const MILESTONE = 'omd_milestone';
+const STEP = 'omd_step';
+const LINE = 'omd_line';
+const DETAILS = { [OBLIGATION]: CRUD, [TASK]: CRUD, [NOTE]: CRUD, [MILESTONE]: CRUD, [STEP]: CRUD, [LINE]: CRUD };
 
 const REQUESTER_SET = PermissionSetSchema.parse({ name: 'omd_requester', objects: { [CONTRACT]: MASTER_READ, ...DETAILS } });
 const EDITOR_SET = PermissionSetSchema.parse({ name: 'omd_editor', objects: { [CONTRACT]: MASTER_EDIT, ...DETAILS } });
 /** CRUD on the details and NO grant on the contract: the master is not readable. */
 const BLIND_SET = PermissionSetSchema.parse({ name: 'omd_blind', objects: { ...DETAILS } });
-const SETS = [MEMBER_DEFAULT, REQUESTER_SET, EDITOR_SET, BLIND_SET];
+/** [#33250] READ on the contract object without View All: a private contract REP owns is hidden from the holder. */
+const HIDDEN_SET = PermissionSetSchema.parse({ name: 'omd_hidden', objects: { [CONTRACT]: { allowRead: true }, ...DETAILS } });
+/** [#33250] Reads every contract; the milestone may be READ only. */
+const LOOKER_SET = PermissionSetSchema.parse({
+  name: 'omd_looker',
+  objects: { [CONTRACT]: MASTER_READ, [MILESTONE]: { allowRead: true } },
+});
+/** [#33250] Reads every contract; CRUD on the milestone, but its own update policy admits only the rows the holder owns. */
+const NARROW_SET = PermissionSetSchema.parse({
+  name: 'omd_narrow',
+  objects: { [CONTRACT]: MASTER_READ, [MILESTONE]: CRUD },
+  rowLevelSecurity: [{ name: 'omd_milestone_own_rows', object: MILESTONE, operation: 'update', using: 'owner_id == current_user.id' }],
+});
+const SETS = [MEMBER_DEFAULT, REQUESTER_SET, EDITOR_SET, BLIND_SET, HIDDEN_SET, LOOKER_SET, NARROW_SET];
 
 /** The execution context `resolveAuthzContext` hands the middleware for an organization member holding the sets. */
 const memberOf = (userId: string, ...sets: string[]) => ({
@@ -95,6 +130,9 @@ const OWNER_CALLER = memberOf(OWNER, REQUESTER_SET.name);
 const STRANGER_CALLER = memberOf(STRANGER, REQUESTER_SET.name);
 const EDITOR_CALLER = memberOf(EDITOR, EDITOR_SET.name);
 const BLIND_CALLER = memberOf(BLIND, BLIND_SET.name);
+const HIDDEN_CALLER = memberOf(HIDDEN, HIDDEN_SET.name);
+const LOOKER_CALLER = memberOf(LOOKER, LOOKER_SET.name);
+const NARROW_CALLER = memberOf(NARROW, NARROW_SET.name);
 const onBehalfOf = (caller: object, delegator: string) => ({ ...caller, onBehalfOf: { userId: delegator } });
 
 type Answer = { kind: 'admitted' } | { kind: 'refused'; code?: string; status?: number; message: string };
@@ -131,6 +169,23 @@ const detail = (name: string, label: string, extra: Record<string, unknown> = {}
 });
 
 const OPT_IN = { sharing: { controlledByParent: { ownerMayEdit: true } } };
+/** [#33250] The second opt-in: read on the master is the master question for every write of the detail. */
+const MASTER_READ_OPT_IN = { sharing: { controlledByParent: { writeRequiresMasterRead: true } } };
+
+/** [#33250] A detail of the milestone: same shape as {@link detail}, its master the milestone. */
+const milestoneDetail = (name: string, label: string, extra: Record<string, unknown> = {}) => ({
+  name,
+  label,
+  sharingModel: 'controlled_by_parent',
+  tenancy: { enabled: false },
+  fields: {
+    id: { name: 'id', type: 'text', primaryKey: true },
+    name: { name: 'name', type: 'text' },
+    milestone: { name: 'milestone', type: 'master_detail', reference: MILESTONE, required: true },
+    created_by: { name: 'created_by', type: 'text' },
+  },
+  ...extra,
+});
 
 beforeAll(async () => {
   engine = new ObjectQL();
@@ -172,11 +227,16 @@ beforeAll(async () => {
       // The opt-in on a detail whose rows carry NO owner (`ownership: 'none'`
       // injects no `owner_id`): the opt-in names nobody and is reported.
       detail(NOTE, 'Note', { ...OPT_IN, ownership: 'none' }),
+      // [#33250] Read on the master suffices for every write of these.
+      detail(MILESTONE, 'Milestone', MASTER_READ_OPT_IN),
+      milestoneDetail(STEP, 'Step', MASTER_READ_OPT_IN),
+      // [#33250] Not opted in, under an opted-in master: edit on the milestone, then read on its contract.
+      milestoneDetail(LINE, 'Line'),
     ],
   } as never);
   await engine.syncSchemas();
 
-  await engine.insert('sys_user', [REP, OWNER, STRANGER, EDITOR, BLIND, DELEGATOR].map((id) => ({
+  await engine.insert('sys_user', [REP, OWNER, STRANGER, EDITOR, BLIND, DELEGATOR, BLIND_DELEGATOR, HIDDEN, LOOKER, NARROW].map((id) => ({
     id, name: id, email: `${id}@omd.test`,
   })), SYS);
   await engine.insert('sys_organization', [{ id: ORG, name: 'OMD', slug: 'omd' }], SYS);
@@ -192,6 +252,11 @@ beforeAll(async () => {
   await engine.insert('sys_member', [{ id: 'mem_delegator', user_id: DELEGATOR, organization_id: ORG, role: 'admin' }], SYS);
   await (engine as any).getDriver('sys_user_permission_set').create('sys_user_permission_set', {
     id: 'ups_delegator', user_id: DELEGATOR, permission_set: REQUESTER_SET.name, organization_id: ORG,
+  });
+  // [#33250] The same shape for a delegator who reads no contract at all.
+  await engine.insert('sys_member', [{ id: 'mem_blind_delegator', user_id: BLIND_DELEGATOR, organization_id: ORG, role: 'admin' }], SYS);
+  await (engine as any).getDriver('sys_user_permission_set').create('sys_user_permission_set', {
+    id: 'ups_blind_delegator', user_id: BLIND_DELEGATOR, permission_set: BLIND_SET.name, organization_id: ORG,
   });
 
   let securityService: unknown;
@@ -404,5 +469,249 @@ describe('[#25760] ISecurityService.checkControlledByParentWrite answers as the 
   it('deny for the owner of a detail that has not opted in', async () => {
     const pair = await seed(TASK, { owner: OWNER });
     expect(await security.checkControlledByParentWrite(TASK, pair.row, { ...OWNER_CALLER })).toMatchObject({ outcome: 'deny' });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#33250 — ruling A+] `sharing.controlledByParent.writeRequiresMasterRead: true`
+//
+// The maintainer's ruling 「读主记录即可增改删」: with the opt-in, whoever reads
+// the master inserts, updates and deletes the detail under the detail's own
+// grants; the default is unchanged. So the gate swaps ONE question — the master
+// is asked READ instead of EDIT — on every shape it judges (a by-id write, an
+// insert single or batch, a predicate write, a re-point, each hop of a chain),
+// and the detail's own object grant, its own row-level policies and its FLS
+// decide what they decided before.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A fresh contract, a milestone under it and one row of `object` (a milestone detail) under the milestone. */
+async function seedUnderMilestone(object: string, opts: { owner?: string | null; createdBy?: string } = {}) {
+  const top = await seed(MILESTONE, { owner: REP });
+  const n = ++seq;
+  const row: Record<string, unknown> = { id: `${object}_${n}`, name: 'as seeded', milestone: top.row, created_by: opts.createdBy ?? REP };
+  if (opts.owner !== undefined) row.owner_id = opts.owner;
+  await engine.insert(object, [row], SYS);
+  return { contract: top.contract, milestone: top.row, row: row.id as string };
+}
+
+/** The master gate's refusal for an opted-in detail: the caller's object and verb, and READ as the question. */
+function expectMasterReadRefusal(answer: Answer, verb: string, object: string): void {
+  expect(answer).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+  expect((answer as { message: string }).message).toContain(
+    `[Security] Access denied: ${verb} on '${object}' requires read access to its master record`,
+  );
+}
+
+const readerOf = (caller: object) => ({ ...caller });
+
+describe('[#33250] the opt-in: whoever reads the master inserts, updates and deletes the detail under its own grants', () => {
+  it('an INSERT under a contract the caller only reads is admitted, and the row lands', async () => {
+    const pair = await seed(MILESTONE, { owner: REP });
+    const before = await rowsUnder(MILESTONE, pair.contract);
+    expect(await insertUnder(MILESTONE, pair, readerOf(STRANGER_CALLER))).toEqual({ kind: 'admitted' });
+    expect(await rowsUnder(MILESTONE, pair.contract)).toBe(before + 1);
+  });
+
+  it('a BATCH insert naming two contracts the caller only reads is admitted whole', async () => {
+    const a = await seed(MILESTONE, { owner: REP });
+    const b = await seed(MILESTONE, { owner: REP });
+    const answer = await landed(engine.insert(MILESTONE, [
+      { name: 'batch a', contract: a.contract },
+      { name: 'batch b', contract: b.contract },
+    ], { context: { ...STRANGER_CALLER } } as never));
+    expect(answer).toEqual({ kind: 'admitted' });
+    expect(await rowsUnder(MILESTONE, a.contract)).toBe(2);
+    expect(await rowsUnder(MILESTONE, b.contract)).toBe(2);
+  });
+
+  it('a by-id UPDATE of a row the caller neither owns nor created is admitted, and the row changed', async () => {
+    const pair = await seed(MILESTONE, { owner: REP });
+    expect(await updateById(MILESTONE, pair, STRANGER_CALLER)).toEqual({ kind: 'admitted' });
+    expect((await stored(MILESTONE, pair.row))?.name).toBe('edited by id');
+  });
+
+  it('a by-id DELETE of a row the caller neither owns nor created is admitted, and the row is gone', async () => {
+    const pair = await seed(MILESTONE, { owner: REP });
+    expect(await deleteById(MILESTONE, pair, STRANGER_CALLER)).toEqual({ kind: 'admitted' });
+    expect(await stored(MILESTONE, pair.row)).toBeNull();
+  });
+
+  it('a PREDICATE update (multi: true) is admitted, and the row changed', async () => {
+    const pair = await seed(MILESTONE, { owner: REP });
+    expect(await updateByPredicate(MILESTONE, pair, STRANGER_CALLER)).toEqual({ kind: 'admitted' });
+    expect((await stored(MILESTONE, pair.row))?.name).toBe('edited by predicate');
+  });
+
+  it('a PREDICATE delete (multi: true) is admitted, and the row is gone', async () => {
+    const pair = await seed(MILESTONE, { owner: REP });
+    const answer = await landed(engine.delete(MILESTONE, { where: { id: { $in: [pair.row] } }, multi: true, context: { ...STRANGER_CALLER } } as never));
+    expect(answer).toEqual({ kind: 'admitted' });
+    expect(await stored(MILESTONE, pair.row)).toBeNull();
+  });
+
+  it('a body that RE-POINTS the row under another contract the caller reads is admitted', async () => {
+    const pair = await seed(MILESTONE, { owner: REP });
+    const other = await seed(MILESTONE, { owner: REP });
+    expect(await updateById(MILESTONE, pair, STRANGER_CALLER, { name: 'moved', contract: other.contract })).toEqual({ kind: 'admitted' });
+    expect(await stored(MILESTONE, pair.row)).toMatchObject({ name: 'moved', contract: other.contract });
+  });
+
+  it('CONTROL — a master editor is admitted as before', async () => {
+    const pair = await seed(MILESTONE, { owner: REP });
+    expect(await updateById(MILESTONE, pair, EDITOR_CALLER)).toEqual({ kind: 'admitted' });
+  });
+});
+
+describe('[#33250] without read on the master, every write of an opted-in detail is refused', () => {
+  it('no read grant on the contract: insert, update and delete are refused, and nothing is written', async () => {
+    const pair = await seed(MILESTONE, { owner: BLIND });
+    const before = await rowsUnder(MILESTONE, pair.contract);
+    expectMasterReadRefusal(await insertUnder(MILESTONE, pair, BLIND_CALLER), 'insert', MILESTONE);
+    expectMasterReadRefusal(await updateById(MILESTONE, pair, BLIND_CALLER), 'update', MILESTONE);
+    expectMasterReadRefusal(await deleteById(MILESTONE, pair, BLIND_CALLER), 'delete', MILESTONE);
+    expect(await rowsUnder(MILESTONE, pair.contract)).toBe(before);
+    expect((await stored(MILESTONE, pair.row))?.name).toBe('as seeded');
+  });
+
+  it('a read grant on the contract object, but the contract row is hidden: insert, update and delete are refused', async () => {
+    const pair = await seed(MILESTONE, { owner: HIDDEN, createdBy: HIDDEN });
+    const before = await rowsUnder(MILESTONE, pair.contract);
+    expectMasterReadRefusal(await insertUnder(MILESTONE, pair, HIDDEN_CALLER), 'insert', MILESTONE);
+    expectMasterReadRefusal(await updateById(MILESTONE, pair, HIDDEN_CALLER), 'update', MILESTONE);
+    expectMasterReadRefusal(await deleteById(MILESTONE, pair, HIDDEN_CALLER), 'delete', MILESTONE);
+    expect(await rowsUnder(MILESTONE, pair.contract)).toBe(before);
+    expect((await stored(MILESTONE, pair.row))?.name).toBe('as seeded');
+  });
+
+  it('a body that re-points the row under a contract the caller cannot read is refused, and the row stays', async () => {
+    const pair = await seed(MILESTONE, { owner: HIDDEN, createdBy: HIDDEN });
+    // A contract the hidden caller does read: its own.
+    await engine.update(CONTRACT, { owner_id: HIDDEN, created_by: HIDDEN }, { where: { id: pair.contract }, context: { isSystem: true } } as never);
+    const other = await seed(MILESTONE, { owner: REP });
+    expect(await updateById(MILESTONE, pair, HIDDEN_CALLER, { name: 'edited' })).toEqual({ kind: 'admitted' });
+    expectMasterReadRefusal(
+      await updateById(MILESTONE, pair, HIDDEN_CALLER, { name: 'moved', contract: other.contract }),
+      'update',
+      MILESTONE,
+    );
+    expect(await stored(MILESTONE, pair.row)).toMatchObject({ name: 'edited', contract: pair.contract });
+  });
+});
+
+describe('[#33250] the detail\'s own grants still decide', () => {
+  it('reading the contract and holding READ alone on the milestone: insert, update and delete are refused by the object gate', async () => {
+    const pair = await seed(MILESTONE, { owner: LOOKER });
+    const before = await rowsUnder(MILESTONE, pair.contract);
+    for (const answer of [
+      await insertUnder(MILESTONE, pair, LOOKER_CALLER),
+      await updateById(MILESTONE, pair, LOOKER_CALLER),
+      await deleteById(MILESTONE, pair, LOOKER_CALLER),
+    ]) {
+      expect(answer).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+      expect((answer as { message: string }).message).not.toContain('its master record');
+    }
+    expect(await rowsUnder(MILESTONE, pair.contract)).toBe(before);
+    expect((await stored(MILESTONE, pair.row))?.name).toBe('as seeded');
+  });
+
+  it('the milestone\'s own owner-keyed update policy decides as authored: its own row is admitted, another\'s is not', async () => {
+    const own = await seed(MILESTONE, { owner: NARROW });
+    const theirs = await seed(MILESTONE, { owner: REP });
+    expect(await updateById(MILESTONE, own, NARROW_CALLER)).toEqual({ kind: 'admitted' });
+    expect((await stored(MILESTONE, own.row))?.name).toBe('edited by id');
+    expect(await updateById(MILESTONE, theirs, NARROW_CALLER)).toMatchObject({ kind: 'refused' });
+    expect((await stored(MILESTONE, theirs.row))?.name).toBe('as seeded');
+  });
+});
+
+describe('[#33250] chains: each hop asks what the object written at that hop declares', () => {
+  it('a step (opted in) under a milestone (opted in): the caller who reads the contract writes the step', async () => {
+    const chain = await seedUnderMilestone(STEP, { owner: REP });
+    expect(await updateById(STEP, { contract: chain.contract, row: chain.row }, STRANGER_CALLER)).toEqual({ kind: 'admitted' });
+    expect(await landed(engine.insert(STEP, { name: 'inserted', milestone: chain.milestone }, { context: { ...STRANGER_CALLER } } as never)))
+      .toEqual({ kind: 'admitted' });
+  });
+
+  it('…and the caller who cannot read the contract cannot: the milestone it would write under is not readable', async () => {
+    const chain = await seedUnderMilestone(STEP, { owner: BLIND });
+    expectMasterReadRefusal(await updateById(STEP, { contract: chain.contract, row: chain.row }, BLIND_CALLER), 'update', STEP);
+    expect((await stored(STEP, chain.row))?.name).toBe('as seeded');
+  });
+
+  it('a line (NOT opted in) under a milestone (opted in): edit on the milestone, then read on its contract, admits the reader', async () => {
+    const chain = await seedUnderMilestone(LINE, { owner: REP });
+    expect(await updateById(LINE, { contract: chain.contract, row: chain.row }, STRANGER_CALLER)).toEqual({ kind: 'admitted' });
+    expect((await stored(LINE, chain.row))?.name).toBe('edited by id');
+  });
+
+  it('…and refuses the caller who cannot read the contract, on the milestone\'s hop', async () => {
+    const chain = await seedUnderMilestone(LINE, { owner: BLIND });
+    const answer = await updateById(LINE, { contract: chain.contract, row: chain.row }, BLIND_CALLER);
+    expect(answer).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+    expect((await stored(LINE, chain.row))?.name).toBe('as seeded');
+  });
+});
+
+describe('[#33250] on behalf of another user: each principal is asked the same read question', () => {
+  it('both read the contract: the delegated insert is admitted', async () => {
+    const pair = await seed(MILESTONE, { owner: REP });
+    const before = await rowsUnder(MILESTONE, pair.contract);
+    expect(await insertUnder(MILESTONE, pair, onBehalfOf(STRANGER_CALLER, DELEGATOR))).toEqual({ kind: 'admitted' });
+    expect(await rowsUnder(MILESTONE, pair.contract)).toBe(before + 1);
+  });
+
+  it('the delegator cannot read the contract: the delegated insert is refused, and no row lands', async () => {
+    const pair = await seed(MILESTONE, { owner: REP });
+    const before = await rowsUnder(MILESTONE, pair.contract);
+    expectMasterReadRefusal(await insertUnder(MILESTONE, pair, onBehalfOf(STRANGER_CALLER, BLIND_DELEGATOR)), 'insert', MILESTONE);
+    expect(await rowsUnder(MILESTONE, pair.contract)).toBe(before);
+  });
+
+  it('the agent cannot read the contract: the delegated insert is refused, and no row lands', async () => {
+    const pair = await seed(MILESTONE, { owner: REP });
+    const before = await rowsUnder(MILESTONE, pair.contract);
+    expectMasterReadRefusal(await insertUnder(MILESTONE, pair, onBehalfOf(BLIND_CALLER, DELEGATOR)), 'insert', MILESTONE);
+    expect(await rowsUnder(MILESTONE, pair.contract)).toBe(before);
+  });
+
+  it('a delegated by-id update (both read the contract; the agent created the row, so its own floor passes) is admitted', async () => {
+    const pair = await seed(MILESTONE, { owner: REP, createdBy: STRANGER });
+    expect(await updateById(MILESTONE, pair, onBehalfOf(STRANGER_CALLER, DELEGATOR))).toEqual({ kind: 'admitted' });
+    expect((await stored(MILESTONE, pair.row))?.name).toBe('edited by id');
+  });
+});
+
+describe('[#33250] the default is unchanged: a detail that has NOT opted in asks edit on the master for every write', () => {
+  it('the master reader is refused insert, update and delete on the task, each by the master gate', async () => {
+    const pair = await seed(TASK, { owner: STRANGER });
+    expectMasterGateRefusal(await insertUnder(TASK, pair, STRANGER_CALLER), 'insert', TASK);
+    expectMasterGateRefusal(await updateById(TASK, pair, STRANGER_CALLER), 'update', TASK);
+    expectMasterGateRefusal(await deleteById(TASK, pair, STRANGER_CALLER), 'delete', TASK);
+    expect((await stored(TASK, pair.row))?.name).toBe('as seeded');
+  });
+});
+
+describe('[#33250] ISecurityService.checkControlledByParentWrite answers the opt-in as the write path does', () => {
+  it('allow for a master reader who neither owns nor created the row', async () => {
+    const pair = await seed(MILESTONE, { owner: REP });
+    expect(await security.checkControlledByParentWrite(MILESTONE, pair.row, { ...STRANGER_CALLER })).toEqual({ outcome: 'allow' });
+  });
+
+  it('deny on object_permission when the contract may not be read at all', async () => {
+    const pair = await seed(MILESTONE, { owner: BLIND });
+    expect(await security.checkControlledByParentWrite(MILESTONE, pair.row, { ...BLIND_CALLER }))
+      .toEqual({ outcome: 'deny', leg: 'object_permission' });
+  });
+
+  it('deny on row_level_security when the contract row is hidden from the caller', async () => {
+    const pair = await seed(MILESTONE, { owner: HIDDEN });
+    expect(await security.checkControlledByParentWrite(MILESTONE, pair.row, { ...HIDDEN_CALLER }))
+      .toEqual({ outcome: 'deny', leg: 'row_level_security' });
+  });
+
+  it('on behalf of a delegator who cannot read the contract: deny', async () => {
+    const pair = await seed(MILESTONE, { owner: REP });
+    expect(await security.checkControlledByParentWrite(MILESTONE, pair.row, onBehalfOf(STRANGER_CALLER, BLIND_DELEGATOR)))
+      .toMatchObject({ outcome: 'deny' });
   });
 });
