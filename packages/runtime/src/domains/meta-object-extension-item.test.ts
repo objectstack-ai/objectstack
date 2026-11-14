@@ -192,7 +192,10 @@ describe('[#28574] a writable pair saves and publishes an extension of the base\
 
     it('the whole parsed body is registered: an extension\'s `validations` reach the object', async () => {
         const rig = await boot();
-        const rule = { name: 'region_required', type: 'script', condition: 'region__c == null', message: 'Region is required', events: ['insert'] };
+        // [#33154] `record.`-scoped, as a rule declared on the account must be:
+        // the door now judges an extension's rules by the object's own rule
+        // pass, which refuses the bare `region__c` this fixture used to carry.
+        const rule = { name: 'region_required', type: 'script', condition: 'record.region__c == null', message: 'Region is required', events: ['insert'] };
         await rig.saveAndPublish(PAIR, regionBody({ validations: [rule] }));
 
         const names = ((rig.engine.registry.getObject(TARGET) as any)?.validations ?? []).map((v: any) => v?.name);
