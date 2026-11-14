@@ -242,6 +242,16 @@ An environment that has adopted SSO still needs a user-management surface, and t
   context, `isSystem` included, because the paths that actually lock an organization out are the
   system ones.
 
+> **Note (2026-11-14, objectstack, #33203; ruling 10 of objectstack-ai/cloud#4465) — on a
+> cloud-managed environment the break-glass bullet above does not apply.** A hosted environment
+> (`OS_CLOUD_MANAGED=1`) keeps no local password for anyone and has no local break-glass
+> administrator: `admin/set-user-password` refuses every target, an `env_native` row included, and
+> `set-initial-password` refuses every signed-in caller, a platform administrator included
+> (`packages/plugins/plugin-auth/src/cloud-managed.ts`). Everyone signs in through the hosting
+> cloud's identity provider, and recovery is the cloud's, not a local credential's. Self-hosted
+> deployments are unchanged: the split by population above, break-glass included, holds there.
+> Cloud ADR-0024's own text is not amended here.
+
 ### D6 — SSO per production environment, configured in the environment
 
 A production environment federates login to the customer's own identity provider, and that
