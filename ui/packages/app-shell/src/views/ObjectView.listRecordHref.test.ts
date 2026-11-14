@@ -34,6 +34,9 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { listRecordDetailUrl, listRecordActionsValue, type ListRecordRoutes } from './ObjectView';
 
 describe('listRecordDetailUrl — one record-route shape for the list surface (#4490)', () => {
