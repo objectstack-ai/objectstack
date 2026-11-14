@@ -3831,6 +3831,15 @@ function withoutField(schema: ServiceObject, name: string): ServiceObject {
 }
 
 /**
+ * [#33050] One item slot (or one claimed name) of a package body, as
+ * {@link SchemaRegistry.replacingPackageBody} records it: the type and the key,
+ * joined by a character no type name carries.
+ */
+function packageBodySlot(type: string, key: string): string {
+  return `${type}\u0000${key}`;
+}
+
+/**
  * [#28697] The undo record of one registration run under
  * {@link SchemaRegistry.restoringOnRefusal}: for each registry entry the run
  * writes, the way to put back what the entry held just before the run's FIRST
@@ -4528,6 +4537,26 @@ export class SchemaRegistry {
         const now = this.metadata.get(type);
         if (had) now?.set(key, value);
         else now?.delete(key);
+      };
+    });
+  }
+
+  /**
+   * [#33050] Record the ORDER of one item type's slots before the run's first
+   * removal from it ({@link replacingPackageBody}). A removed slot put back by
+   * {@link noteItem} alone would come back last, and the store's order is read:
+   * it is the order {@link listItems} answers and the first composite match a
+   * caller naming no package is served. Put back after every later write of
+   * the run is undone, so the slots come back where they stood.
+   */
+  private noteItemOrder(type: string): void {
+    this.restorePoint?.note(`itemOrder\u0000${type}`, () => {
+      const saved = [...(this.metadata.get(type) ?? [])];
+      return () => {
+        const now = this.metadata.get(type);
+        if (!now) return;
+        now.clear();
+        for (const [key, value] of saved) now.set(key, value);
       };
     });
   }
@@ -8764,6 +8793,11 @@ export class SchemaRegistry {
 
     this.noteItem(type, storageKey);
     collection.set(storageKey, item);
+    // [#33050] A slot the package's own body registration writes is one its
+    // new version ships ({@link replacingPackageBody}).
+    if (packageId !== undefined && this.openPackageBody?.packageId === packageId) {
+      this.openPackageBody.written.add(packageBodySlot(type, storageKey));
+    }
     if (type === 'picklist') this.invalidateAll();
     // [#24400] A bound action is attached to its target on read
     // ({@link attachBoundActions}); drop that object's cached fold.
@@ -8970,6 +9004,130 @@ export class SchemaRegistry {
     // [#28877] …and every object whose actions a flow of this package withheld.
     if (droppedExtensions || removed.some((r) => r.startsWith('picklist/') || r.startsWith('action/') || r.startsWith('flow/'))) this.invalidateAll();
     return { removed, orphanedOverlays };
+  }
+
+  // ==========================================
+  // [#33050] A re-registered body replaces what its package shipped
+  // ==========================================
+
+  /**
+   * Package id → the item slots its last body registration wrote
+   * ({@link replacingPackageBody}), as {@link packageBodySlot} spells them.
+   * Forgotten by {@link uninstallPackage}.
+   */
+  private readonly packageBodyItems = new Map<string, ReadonlySet<string>>();
+
+  /** The body registration {@link replacingPackageBody} has open, while it runs. */
+  private openPackageBody: { readonly packageId: string; readonly written: Set<string> } | undefined;
+
+  /**
+   * [#33050] Run `register` — the registration of one package body (the
+   * engine's `registerApp`) — and then withdraw what the package's PREVIOUS
+   * body registration shipped and this one does not: the item slots it wrote
+   * that this run did not write again, and the bare-name and security catalog
+   * claims its manifest no longer declares. An upgrade or a re-install is then
+   * what the next boot would register from the new body, at once: before this
+   * a tool or flow the new version dropped stayed registered, kept its bare
+   * name (another package declaring it was refused as a second holder) and was
+   * gone only after a restart.
+   *
+   * The body is the unit, as it is for the navigation contributions
+   * (`setPackageNavContributions`) and the default record page claims
+   * (`recordDefaultRecordPageClaims`), which a re-registration already
+   * replaces. ⛔ What is withdrawn is exactly what the previous BODY
+   * registration wrote under the package's id, never everything under its
+   * prefix: an item registered under the id outside a body (a stack residual
+   * owned by the id, a plugin's own `registerItem` under it) and an
+   * environment overlay in the bare slot (ADR-0005) are not the body's and are
+   * left as they are. A first registration withdraws nothing.
+   *
+   * Withdrawn inside the open {@link restoringOnRefusal} run, each slot and
+   * claim recorded before it is removed, so a refusal later in the run (a later
+   * member of the artifact, the run-end record-currency door) puts them back
+   * with the rest of the installed version. `register` throwing withdraws
+   * nothing. Objects and object extensions are not items and are not touched
+   * here.
+   */
+  replacingPackageBody<T>(packageId: string | undefined, manifest: ObjectStackManifest, register: () => T): T {
+    if (!packageId) return register();
+    const open = this.openPackageBody;
+    const body = { packageId, written: new Set<string>() };
+    this.openPackageBody = body;
+    let result: T;
+    try {
+      result = register();
+    } finally {
+      this.openPackageBody = open;
+    }
+    const previous = this.packageBodyItems.get(packageId);
+    if (previous !== undefined) {
+      this.withdrawPackageBodyItemsNotShipped(packageId, previous, body.written);
+      this.withdrawPackageClaimsNotDeclared(packageId, manifest);
+    }
+    this.restorePoint?.note(`packageBody\u0000${packageId}`, () => {
+      const had = this.packageBodyItems.has(packageId);
+      const saved = this.packageBodyItems.get(packageId);
+      return () => {
+        if (had && saved !== undefined) this.packageBodyItems.set(packageId, saved);
+        else this.packageBodyItems.delete(packageId);
+      };
+    });
+    this.packageBodyItems.set(packageId, body.written);
+    // A body of the same package registered inside another one's run (none
+    // does today) ships its slots as part of that one.
+    if (open?.packageId === packageId) for (const slot of body.written) open.written.add(slot);
+    return result;
+  }
+
+  /** The slots `previous` names that `written` does not, withdrawn (see {@link replacingPackageBody}). */
+  private withdrawPackageBodyItemsNotShipped(packageId: string, previous: ReadonlySet<string>, written: ReadonlySet<string>): void {
+    const removed: string[] = [];
+    for (const slot of previous) {
+      if (written.has(slot)) continue;
+      const separator = slot.indexOf('\u0000');
+      const type = slot.slice(0, separator);
+      const key = slot.slice(separator + 1);
+      const collection = this.metadata.get(type);
+      if (!collection?.has(key)) continue;
+      this.noteItemOrder(type);
+      this.noteItem(type, key);
+      collection.delete(key);
+      removed.push(`${type}/${key}`);
+    }
+    if (removed.length === 0) return;
+    this.log(
+      `[Registry] Withdrew ${removed.length} item(s) package ${packageId}'s new body no longer ships: ${removed.join(', ')}`,
+    );
+    // The read caches {@link unregisterItemsByPackage} drops for the same types.
+    if (removed.some((r) => r.startsWith('picklist/') || r.startsWith('action/') || r.startsWith('flow/'))) this.invalidateAll();
+  }
+
+  /**
+   * The bare-name and security catalog claims `packageId` holds that
+   * `manifest` no longer declares, released (see {@link replacingPackageBody}).
+   * ⛔ Never a `function` claim: those are the hook binder's
+   * ({@link claimBareNameFunctions}), recorded and released by its own bind.
+   */
+  private withdrawPackageClaimsNotDeclared(packageId: string, manifest: ObjectStackManifest): void {
+    const bare = new Set(declaredBareNames(manifest).map(({ type, name }) => packageBodySlot(type, name)));
+    for (const [type, byName] of this.bareNameClaims) {
+      if (!isBareNameRegistryType(type)) continue;
+      for (const [name, claimants] of byName) {
+        if (!claimants.has(packageId) || bare.has(packageBodySlot(type, name))) continue;
+        this.noteBareNameClaim(type, name);
+        claimants.delete(packageId);
+        if (claimants.size === 0) byName.delete(name);
+      }
+    }
+    const catalog = new Set(declaredSecurityCatalogNames(manifest).map(({ type, name }) => packageBodySlot(type, name)));
+    for (const [type, byName] of this.securityCatalogClaims) {
+      for (const [name, claimants] of byName) {
+        if (!claimants.has(packageId) || catalog.has(packageBodySlot(type, name))) continue;
+        this.noteSecurityCatalogClaim(type, name);
+        claimants.delete(packageId);
+        if (claimants.size === 0) byName.delete(name);
+      }
+    }
   }
 
   /**
@@ -10559,6 +10717,9 @@ export class SchemaRegistry {
     this.forgetDefaultRecordPageClaims(id);
     // …and its bare names of the covered types.
     this.forgetBareNameClaims(id);
+    // [#33050] …and the record of what its body shipped: a later install of
+    // the id is a first registration, with nothing of its own to withdraw.
+    this.packageBodyItems.delete(id);
     // [#31720] …and the namespace names a stack's residual holds under this
     // id: the residual's items are registered under their owner id, so
     // `unregisterItemsByPackage(id)` above has just withdrawn them (the

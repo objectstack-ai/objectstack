@@ -180,8 +180,15 @@ export class RegistrationFacet {
       // reload) this run is part of that one and the question waits for its
       // end. ⛔ Never asked per body there: a later member or the residual can
       // still complete the pair.
+      //
+      // [#33050] A re-registration of an installed id REPLACES what the body
+      // ships: once the body has registered, the items its previous body
+      // registered and this one does not — and the bare-name and security
+      // catalog claims it no longer declares — are withdrawn inside the same
+      // run, so a refusal puts them back. See {@link SchemaRegistry.replacingPackageBody}.
       this._registry.admitPicklistArrival([manifest], () =>
-          this._registry.restoringOnRefusal(() => this.registerPackageBody(manifest, id, namespace, version, source, scope)));
+          this._registry.restoringOnRefusal(() => this._registry.replacingPackageBody(id, manifest,
+              () => this.registerPackageBody(manifest, id, namespace, version, source, scope))));
 
       // [#28697] Written only once nothing above threw, so a refused body
       // leaves none of them. Nothing above reads any of them.

@@ -58,6 +58,12 @@
  *
  * A register failure that is NOT a registry refusal keeps #22695's lenient
  * answer; `marketplace-install-local-hot-loaded.test.ts` pins that.
+ *
+ * [#33050] The other side of the same rule: a re-install or upgrade through
+ * this door withdraws the tool and flow its new version no longer ships, so
+ * another package may declare the name at once (measured before the fix: the
+ * dropped tool kept serving and the other package was refused `422`); a
+ * re-install that still ships the name keeps holding it.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -405,5 +411,77 @@ describe('install-local cloud branch refuses a package whose namespace another p
         expect(ledger()).toEqual(before);
         expect(ledger().incoming?.version).toBe('1.0.0');
         expectHolderFlowKept(ql);
+    });
+});
+
+describe('[#33050] a re-install or upgrade withdraws what the new version no longer ships, so its bare name is free at once', () => {
+    /** Two packages with no namespace: each meets every holder, so one tool name has one holder (ADR-0150 D2). */
+    const TOOL_PKG = 'com.qa.tool-1';
+    const OTHER_PKG = 'com.qa.tool-2';
+    const SHARED_TOOL = 'qa_shared_tool';
+    const DROPPED_FLOW = 'qa_sync';
+    const tool = (name: string, tag: string): Bag => ({
+        name,
+        label: `${tag} tool`,
+        description: `${tag} tool body`,
+        parameters: {},
+    });
+    const bare = (id: string, version: string, extra: Bag = {}): Bag => ({
+        id,
+        name: id.split('.').pop()!.replace('-', '_'),
+        type: 'app',
+        version,
+        ...extra,
+    });
+
+    it('a re-install of the same version without the tool and the flow withdraws both; another package then installs the tool name: 200', async () => {
+        const { ql, install } = await bootPlugin();
+        const first = await install({ manifest: bare(TOOL_PKG, '1.0.0', { tools: [tool(SHARED_TOOL, 'one')], flows: [flow(DROPPED_FLOW, 'one')] }) });
+        expect(first.status, JSON.stringify(first.payload)).toBe(200);
+        expect(ql.registry.getItem<Bag>('tool', SHARED_TOOL)?._packageId).toBe(TOOL_PKG);
+        expect(ql.registry.resolveItem<Bag>('flow', DROPPED_FLOW, TOOL_PKG)?.label).toBe('one flow');
+
+        const again = await install({ manifest: bare(TOOL_PKG, '1.0.0', { tools: [], flows: [] }) });
+
+        expect(again.status, JSON.stringify(again.payload)).toBe(200);
+        expect(again.payload.data.hotLoaded).toBe(true);
+        expect(ql.registry.getPackage(TOOL_PKG)?.manifest?.version).toBe('1.0.0');
+        expect(ql.registry.getItem('tool', SHARED_TOOL)).toBeUndefined();
+        expect(ql.registry.resolveItem('flow', DROPPED_FLOW, TOOL_PKG)).toBeUndefined();
+        expect(ql.registry.getItem('flow', DROPPED_FLOW)).toBeUndefined();
+
+        // The name is free at once. Before the fix: 422 PLUGIN_REGISTER_FAILED, "already held by package com.qa.tool-1".
+        const other = await install({ manifest: bare(OTHER_PKG, '1.0.0', { tools: [tool(SHARED_TOOL, 'two')] }) });
+        expect(other.status, JSON.stringify(other.payload)).toBe(200);
+        expect(ql.registry.getItem<Bag>('tool', SHARED_TOOL)?._packageId).toBe(OTHER_PKG);
+        expect(ql.registry.getItem<Bag>('tool', SHARED_TOOL)?.label).toBe('two tool');
+    });
+
+    it('an upgrade to 1.0.1 that drops one tool withdraws it and keeps serving the tool it still ships', async () => {
+        const { ql, install } = await bootPlugin();
+        const first = await install({ manifest: bare(TOOL_PKG, '1.0.0', { tools: [tool(SHARED_TOOL, 'one'), tool('qa_kept_tool', 'one')] }) });
+        expect(first.status, JSON.stringify(first.payload)).toBe(200);
+
+        const upgrade = await install({ manifest: bare(TOOL_PKG, '1.0.1', { tools: [tool('qa_kept_tool', 'one v1.0.1')] }) });
+
+        expect(upgrade.status, JSON.stringify(upgrade.payload)).toBe(200);
+        expect(ql.registry.getPackage(TOOL_PKG)?.manifest?.version).toBe('1.0.1');
+        expect(ql.registry.getItem('tool', SHARED_TOOL)).toBeUndefined();
+        expect(ql.registry.getItem<Bag>('tool', 'qa_kept_tool')?.label).toBe('one v1.0.1 tool');
+        expect(ql.registry.listItems<Bag>('tool', TOOL_PKG).map((t) => t.name)).toEqual(['qa_kept_tool']);
+    });
+
+    it('CONTROL — a re-install that still ships the tool keeps holding its name: the other package is refused 422', async () => {
+        const { ql, install } = await bootPlugin();
+        expect((await install({ manifest: bare(TOOL_PKG, '1.0.0', { tools: [tool(SHARED_TOOL, 'one')] }) })).status).toBe(200);
+        expect((await install({ manifest: bare(TOOL_PKG, '1.0.1', { tools: [tool(SHARED_TOOL, 'one v1.0.1')] }) })).status).toBe(200);
+
+        const other = await install({ manifest: bare(OTHER_PKG, '1.0.0', { tools: [tool(SHARED_TOOL, 'two')] }) });
+
+        expect(other.status, JSON.stringify(other.payload)).toBe(422);
+        expect(other.payload.error.code).toBe('PLUGIN_REGISTER_FAILED');
+        expect(other.payload.error.message).toContain(TOOL_PKG);
+        expect(ql.registry.getItem<Bag>('tool', SHARED_TOOL)?.label).toBe('one v1.0.1 tool');
+        expect(ql.registry.getPackage(OTHER_PKG)).toBeUndefined();
     });
 });
