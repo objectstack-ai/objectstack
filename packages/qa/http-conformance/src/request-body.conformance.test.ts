@@ -31,6 +31,11 @@
  *  4. The refusal is the answer even when the handler catches it and writes
  *     its own.
  *  5. `rawBody()` still reads the bytes of a refused body.
+ *  5b. `rawBody({ maxBytes })` holds the body to the door's own bound whether
+ *     or not it declares a length: a declared length over it and a body with
+ *     no declared length past it are both refused (413 `PAYLOAD_TOO_LARGE`), a
+ *     refusal the door lets escape is answered 413 `PAYLOAD_TOO_LARGE`, and
+ *     exactly the bound is read whole (CONTROLS).
  *  6. CONTROLS: an empty body is `{}`, and a valid JSON body is the document.
  *  7. THE FALLBACK (`setFallbackHandler`), the door every declared `apis:`
  *     endpoint enters through: a fallback that reads a refused body is
@@ -327,5 +332,105 @@ describe('IHttpRequest.body parity: both adapters answer each body with the same
         const reference = await (await boot(node!.make, opened))(path, body);
         const standard = await (await boot(hono!.make, opened))(path, body);
         expect(reference, `the reference answered ${reference.text}; the standard transport ${standard.text}`).toEqual(standard);
+    });
+});
+
+describe.each(ADAPTERS)('IHttpRequest.rawBody({ maxBytes }) holds a body to the door\'s own bound on the $label adapter', ({ make }) => {
+    const BOUND = 4096;
+    const opened: BodyReadingServer[] = [];
+    afterEach(async () => {
+        await Promise.all(opened.splice(0).map((server) => server.close?.()));
+    });
+
+    async function start() {
+        const server = make();
+        opened.push(server);
+        server.put('/door', async (req, res) => {
+            try {
+                const bytes = await req.rawBody!({ maxBytes: BOUND });
+                res.json({ success: true, data: { size: bytes.byteLength } });
+            } catch (err) {
+                const e = err as { status?: unknown; code?: unknown };
+                res.status(413).json({ success: false, error: { code: e.code, status: e.status } });
+            }
+        });
+        server.put('/escape', async (req, res) => {
+            const bytes = await req.rawBody!({ maxBytes: BOUND });
+            res.json({ success: true, data: { size: bytes.byteLength } });
+        });
+        await server.listen(0);
+        const port = server.getPort();
+        return async (path: string, size: number, declare: boolean): Promise<Answer> => {
+            const bytes = new Uint8Array(size).fill(0x65);
+            const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+                method: 'PUT',
+                headers: { 'content-type': 'application/octet-stream' },
+                body: declare
+                    ? bytes
+                    : new ReadableStream({
+                        start(controller) {
+                            controller.enqueue(bytes);
+                            controller.close();
+                        },
+                    }),
+                duplex: 'half',
+            } as RequestInit);
+            return { status: res.status, text: await res.text(), allow: res.headers.get('allow') };
+        };
+    }
+
+    it.each([['declared', true], ['not declared', false]])('a body past the bound, length %s, is refused 413 PAYLOAD_TOO_LARGE', async (_label, declare) => {
+        const send = await start();
+        const answer = await send('/door', BOUND * 4, declare);
+        expect(answer.status, answer.text).toBe(413);
+        expect(JSON.parse(answer.text)).toEqual({ success: false, error: { code: 'PAYLOAD_TOO_LARGE', status: 413 } });
+    });
+
+    it('a refusal the door lets escape is answered 413 PAYLOAD_TOO_LARGE', async () => {
+        const send = await start();
+        const answer = await send('/escape', BOUND * 4, false);
+        expect(answer.status, answer.text).toBe(413);
+        expect(JSON.parse(answer.text)).toEqual({ success: false, error: { code: 'PAYLOAD_TOO_LARGE', message: expect.any(String) } });
+    });
+
+    it.each([['declared', true], ['not declared', false]])('CONTROL: exactly the bound, length %s, is read whole', async (_label, declare) => {
+        const send = await start();
+        const answer = await send('/door', BOUND, declare);
+        expect(answer.status, answer.text).toBe(200);
+        expect(JSON.parse(answer.text)).toEqual({ success: true, data: { size: BOUND } });
+    });
+});
+
+describe('IHttpRequest.rawBody({ maxBytes }) parity: both adapters answer an escaped refusal with the same status and bytes', () => {
+    const opened: BodyReadingServer[] = [];
+    afterEach(async () => {
+        await Promise.all(opened.splice(0).map((server) => server.close?.()));
+    });
+
+    it('a body with no declared length past the bound, refusal escaped', async () => {
+        const answers: Answer[] = [];
+        for (const { make } of ADAPTERS) {
+            const server = make();
+            opened.push(server);
+            server.put('/escape', async (req, res) => {
+                const bytes = await req.rawBody!({ maxBytes: 64 });
+                res.json({ success: true, data: { size: bytes.byteLength } });
+            });
+            await server.listen(0);
+            const res = await fetch(`http://127.0.0.1:${server.getPort()}/escape`, {
+                method: 'PUT',
+                headers: { 'content-type': 'application/octet-stream' },
+                body: new ReadableStream({
+                    start(controller) {
+                        controller.enqueue(new Uint8Array(1024));
+                        controller.close();
+                    },
+                }),
+                duplex: 'half',
+            } as RequestInit);
+            answers.push({ status: res.status, text: await res.text(), allow: res.headers.get('allow') });
+        }
+        expect(answers[0]!.status).toBe(413);
+        expect(answers[0]).toEqual(answers[1]);
     });
 });

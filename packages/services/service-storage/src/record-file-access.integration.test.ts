@@ -2047,4 +2047,127 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect(String(single._sent)).not.toContain('multiple');
     });
   });
+  describe('the upload-link door holds a body with no declared length to its own bound, and judges the link before it reads', () => {
+    /**
+     * A transport's `rawBody` as `IHttpRequest.rawBody` contracts it: it records
+     * the bound each read states and refuses past it (413 `PAYLOAD_TOO_LARGE`).
+     * No `content-length` is sent, so only the stated bound can hold the body.
+     */
+    const boundedRawBody = (bytes: Buffer) => {
+      const asked: Array<number | undefined> = [];
+      const rawBody = vi.fn(async (options?: { maxBytes?: number }) => {
+        asked.push(options?.maxBytes);
+        if (options?.maxBytes !== undefined && bytes.byteLength > options.maxBytes) {
+          throw Object.assign(new Error('refused past the bound'), { status: 413, code: 'PAYLOAD_TOO_LARGE' });
+        }
+        return bytes;
+      });
+      return { asked, rawBody };
+    };
+    const putLink = (token: string, rawBody: (options?: { maxBytes?: number }) => Promise<Buffer>, user: string | null = OWNER.userId) =>
+      call('PUT', `${BASE}/upload-links/:token`, {
+        params: { token },
+        headers: { 'content-type': 'application/pdf', 'x-file-name': encodeURIComponent('bound.pdf'), ...sessionOf(user) },
+        rawBody,
+      });
+    const newClaim = async (name: string) =>
+      String((await engine.insert('claim', { name, owner: OWNER.userId, organization_id: ORG }, { context: SYS } as never)).id);
+
+    it('a one-file link reads its body bounded by max_upload_mb and refuses past it, with the link unspent', async () => {
+      const grant = await files.createUploadLinkAs('claim', await newClaim('bound-one'), { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 1, authored: true } } as never);
+      try {
+        const over = boundedRawBody(Buffer.alloc(MIB + 1));
+        const refused = await putLink(token, over.rawBody);
+        expect(refused._status, JSON.stringify(refused._json)).toBe(413);
+        expect(refused._json.error.code).toBe('PAYLOAD_TOO_LARGE');
+        expect(refused._json.error.message).toBe(uploadSizeRefusal(MIB + 1, MIB, () => `The upload body is more than ${MIB} bytes`));
+        expect(over.asked).toEqual([MIB]);
+        // CONTROL — the link was not spent: a body within the bound lands through it.
+        const within = boundedRawBody(Buffer.from('%PDF-1.4 bound'));
+        const landed = await putLink(token, within.rawBody);
+        expect(landed._status, JSON.stringify(landed._json)).toBe(200);
+        expect(within.asked).toEqual([MIB]);
+      } finally {
+        storage.setLimitsSnapshot({} as never);
+      }
+    });
+
+    it('a link the caller cannot use is refused before a byte of the body is read: spent, or another user\'s', async () => {
+      const grant = await files.createUploadLinkAs('claim', await newClaim('bound-judged'), { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const foreign = boundedRawBody(Buffer.from('%PDF-1.4 foreign'));
+      const notTheirs = await putLink(token, foreign.rawBody, OUTSIDER.userId);
+      expect(notTheirs._status).toBe(404);
+      expect(notTheirs._json.error.message).toBe(UPLOAD_LINK_UNUSABLE_MESSAGE);
+      expect(foreign.rawBody).not.toHaveBeenCalled();
+      // CONTROL — the link's own user is read and lands; then the link is spent.
+      expect((await putLink(token, boundedRawBody(Buffer.from('%PDF-1.4 own')).rawBody))._status).toBe(200);
+      const spent = boundedRawBody(Buffer.from('%PDF-1.4 again'));
+      const again = await putLink(token, spent.rawBody);
+      expect(again._status).toBe(404);
+      expect(again._json.error.message).toBe(UPLOAD_LINK_UNUSABLE_MESSAGE);
+      expect(spent.rawBody).not.toHaveBeenCalled();
+    });
+
+    it('the several-file form, taken over past the transport limit, is read bounded by the door\'s form limit and refused past it', async () => {
+      const grant = await files.createUploadLinkAs('claim', await newClaim('bound-form'), { field: 'scans' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const formLimit = MIB * UPLOAD_LINK_MAX_FILES + 64 * 1024;
+      const handler = routes.get(`PUT:${BASE}/upload-links/:token`)!;
+      /** The form as a transport hands it when its request-body limit refused `req.body`. */
+      const takeOver = async (rawBody: (options?: { maxBytes?: number }) => Promise<Buffer>, contentType = 'multipart/form-data; boundary=----os') => {
+        const res: any = {
+          _status: 200, _json: null,
+          json(data: any) { res._json = data; return res; },
+          send() { return res; },
+          status(code: number) { res._status = code; return res; },
+          header() { return res; },
+        };
+        const req: Record<string, unknown> = {
+          params: { token },
+          query: {},
+          headers: { 'content-type': contentType, 'x-upload-link-form': 'several', ...sessionOf(OWNER.userId) },
+          method: 'PUT',
+          path: `${BASE}/upload-links/:token`,
+          rawBody,
+        };
+        Object.defineProperty(req, 'body', {
+          get() {
+            throw Object.assign(new Error('over the request-body limit'), { status: 413, code: 'PAYLOAD_TOO_LARGE' });
+          },
+        });
+        await handler(req as never, res);
+        return res;
+      };
+      storage.setLimitsSnapshot({ maxUploadMb: { value: 1, authored: true } } as never);
+      try {
+        const over = boundedRawBody(Buffer.alloc(formLimit + 1));
+        const refused = await takeOver(over.rawBody);
+        expect(refused._status, JSON.stringify(refused._json)).toBe(413);
+        expect(refused._json.error.code).toBe('PAYLOAD_TOO_LARGE');
+        expect(over.asked).toEqual([formLimit]);
+        // CONTROL — a form within the bound is read and parsed by the door.
+        const form = new FormData();
+        form.append('count', '1');
+        form.append('file0', new File([new Uint8Array(Buffer.from('%PDF-1.4 form'))], 'form.pdf', { type: 'application/pdf' }));
+        const encoded = new Response(form);
+        const bytes = Buffer.from(await encoded.arrayBuffer());
+        const within = boundedRawBody(bytes);
+        const res = await takeOver(within.rawBody, encoded.headers.get('content-type')!);
+        expect(res._status, JSON.stringify(res._json)).toBe(200);
+        expect(within.asked).toEqual([formLimit]);
+      } finally {
+        storage.setLimitsSnapshot({} as never);
+      }
+    });
+
+    it('CONTROL · with no max_upload_mb the door states no bound and reads the whole body, as before', async () => {
+      const grant = await files.createUploadLinkAs('claim', await newClaim('bound-none'), { field: 'policy' }, OWNER as never);
+      const read = boundedRawBody(Buffer.from('%PDF-1.4 unbounded'));
+      expect((await putLink(tokenOf(grant.path), read.rawBody))._status).toBe(200);
+      expect(read.asked).toEqual([undefined]);
+    });
+  });
 });

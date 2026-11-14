@@ -243,3 +243,136 @@ describe('a body refused past the limit releases its source, and a byte door rea
         },
     );
 });
+
+describe('a byte door\'s own bound holds a body whether or not it declares a length', () => {
+    const LIMIT = 1024;
+    const BOUND = LIMIT * 4;
+    const CHUNK = 256;
+
+    /** A body of `total` bytes (endless when undefined) that records what was pulled from it and whether it was cancelled. */
+    function countedBody(total?: number) {
+        const state = { pulled: 0, cancelled: false };
+        const stream = new ReadableStream<Uint8Array>({
+            pull(controller) {
+                if (total !== undefined && state.pulled >= total) {
+                    controller.close();
+                    return;
+                }
+                const size = total === undefined ? CHUNK : Math.min(CHUNK, total - state.pulled);
+                state.pulled += size;
+                controller.enqueue(new Uint8Array(size).fill(0x64));
+            },
+            cancel() {
+                state.cancelled = true;
+            },
+        }, { highWaterMark: 0 });
+        return { stream, state };
+    }
+
+    /** Routes that read through `rawBody({ maxBytes: BOUND })`: one answers its own refusal, one lets it escape. */
+    function serverWithDoors() {
+        const server = new HonoHttpServer(0);
+        server.setMaxRequestBodyBytes(LIMIT);
+        server.put('/api/v1/door/:id', async (req, res) => {
+            try {
+                const bytes = await req.rawBody!({ maxBytes: BOUND });
+                res.json({ success: true, data: { size: bytes.byteLength } });
+            } catch (err) {
+                const e = err as { status?: unknown; code?: unknown };
+                res.status(413).json({ success: false, error: { code: e.code, message: `door refused at ${e.status}` } });
+            }
+        });
+        server.put('/api/v1/escape/:id', async (req, res) => {
+            const bytes = await req.rawBody!({ maxBytes: BOUND });
+            res.json({ success: true, data: { size: bytes.byteLength } });
+        });
+        // A form door: refused `req.body` for size, it takes the read over under its own bound.
+        server.put('/api/v1/form/:id', async (req, res) => {
+            try {
+                res.json({ success: true, data: { parsed: Object.keys(req.body ?? {}).length } });
+            } catch (err) {
+                if ((err as { code?: unknown }).code !== 'PAYLOAD_TOO_LARGE') throw err;
+                const bytes = await req.rawBody!({ maxBytes: BOUND });
+                res.json({ success: true, data: { size: bytes.byteLength } });
+            }
+        });
+        return server;
+    }
+
+    function send(path: string, body: ReadableStream<Uint8Array> | Uint8Array, headers: Record<string, string> = {}) {
+        return serverWithDoors().getRawApp().request(`http://localhost${path}`, {
+            method: 'PUT',
+            headers: { 'content-type': 'application/octet-stream', ...headers },
+            body,
+            duplex: 'half',
+        } as RequestInit);
+    }
+
+    it.each([['application/octet-stream'], ['application/json']])(
+        'a %s body with no declared length is refused past the bound, read no further, its source cancelled',
+        async (contentType) => {
+            const { stream, state } = countedBody();
+            const res = await send('/api/v1/door/f_1', stream, { 'content-type': contentType });
+            expect(res.status).toBe(413);
+            expect(((await res.json()) as any).error).toEqual({ code: 'PAYLOAD_TOO_LARGE', message: 'door refused at 413' });
+            expect(state.cancelled).toBe(true);
+            expect(state.pulled).toBeLessThanOrEqual(BOUND + 2 * CHUNK);
+        },
+    );
+
+    it('a form refused req.body for size and taken over is held to the door\'s bound, its source cancelled', async () => {
+        const { stream, state } = countedBody();
+        const res = await send('/api/v1/form/f_1', stream, { 'content-type': 'multipart/form-data; boundary=x' });
+        expect(res.status).toBe(413);
+        expect(((await res.json()) as any).error.message).toContain(`(${BOUND} bytes)`);
+        expect(state.cancelled).toBe(true);
+        expect(state.pulled).toBeLessThanOrEqual(BOUND + 2 * CHUNK);
+    });
+
+    it('a declared length over the bound is refused without reading the body', async () => {
+        const { stream, state } = countedBody(BOUND + 1);
+        const res = await send('/api/v1/door/f_1', stream, { 'content-length': String(BOUND + 1) });
+        expect(res.status).toBe(413);
+        expect(((await res.json()) as any).error.code).toBe('PAYLOAD_TOO_LARGE');
+        expect(state.pulled).toBe(0);
+    });
+
+    it('a refusal the door lets escape is answered 413 PAYLOAD_TOO_LARGE, naming the door\'s bound', async () => {
+        const { stream } = countedBody();
+        const res = await send('/api/v1/escape/f_1', stream);
+        expect(res.status).toBe(413);
+        const body = (await res.json()) as any;
+        expect(body.success).toBe(false);
+        expect(body.error.code).toBe('PAYLOAD_TOO_LARGE');
+        expect(body.error.message).toContain(`(${BOUND} bytes)`);
+    });
+
+    it.each([['declared', true], ['not declared', false]])(
+        'CONTROL: exactly the bound is read whole, length %s',
+        async (_label, declare) => {
+            const { stream } = countedBody(BOUND);
+            const res = await send('/api/v1/door/f_1', stream, declare ? { 'content-length': String(BOUND) } : {});
+            expect(res.status, await res.clone().text()).toBe(200);
+            expect(((await res.json()) as any).data.size).toBe(BOUND);
+        },
+    );
+
+    it('CONTROL: a JSON body within the transport limit, read through req.body first, is judged against the bound once read', async () => {
+        const server = new HonoHttpServer(0);
+        server.setMaxRequestBodyBytes(LIMIT);
+        server.put('/api/v1/both/:id', async (req, res) => {
+            void req.body;
+            try {
+                await req.rawBody!({ maxBytes: 8 });
+                res.json({ success: true });
+            } catch (err) {
+                res.status(413).json({ success: false, error: { code: (err as { code?: unknown }).code } });
+            }
+        });
+        const res = await server.getRawApp().request('http://localhost/api/v1/both/f_1', {
+            method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"a":"0123456789"}',
+        });
+        expect(res.status).toBe(413);
+        expect(((await res.json()) as any).error.code).toBe('PAYLOAD_TOO_LARGE');
+    });
+});
