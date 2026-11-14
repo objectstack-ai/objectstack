@@ -813,6 +813,16 @@ describe('an unmapped SAML sign-in reads the standard claims before the NameID',
     expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
   });
 
+  it('with domain verification on: the same two entries still end on one account', async () => {
+    const rp = await entraRp({ domainVerified: true }, { config: { plugins: { sso: true, ssoDomainVerification: true } } });
+    admitted(await signInThroughIdp(rp, UPN, undefined, undefined, spInitiated));
+    const second = await idpInitiated(rp, UPN, undefined, idpInitiatedPersistent);
+    // The provider is trusted here, and the account it made is not
+    // email-verified, so the local-verification rule refuses the link.
+    expect(landing(second)).toEqual({ base: CONSOLE_LOGIN, error: 'account_not_linked' });
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+  });
+
   it('IdP-initiated first, with a persistent NameID: the account is made for the address, never for the opaque id', async () => {
     const rp = await entraRp();
     admitted(await idpInitiated(rp, UPN, undefined, idpInitiatedPersistent));

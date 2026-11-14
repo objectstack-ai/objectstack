@@ -13,7 +13,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { EMAIL_DOMAIN_NOT_ALLOWED } from './audience-posture.js';
 import {
   SSO_ACCOUNT_DOMAIN_REFUSAL_DESCRIPTION,
+  SSO_ACCOUNT_NOT_AN_ADDRESS_DESCRIPTION,
   refuseSsoAccountOutsideProvenDomain,
+  refuseSsoAccountWithoutAddress,
+  ssoValueIsAddress,
   ssoAddressAtProvenDomain,
   ssoAddressDomain,
   ssoDomainEntryHosts,
@@ -321,5 +324,36 @@ describe('[#32960] a requested domain entry that is not a bare host name is refu
       expect(ssoDomainEntryNotBare(domain), domain).toBeUndefined();
     }
     expect(ssoDomainEntryNotBare(undefined)).toBeUndefined();
+  });
+});
+
+describe('verification on or off, an SSO provider creates an account only for an email address', () => {
+  const NOT_AN_ADDRESS = { error: 'INVALID_EMAIL', errorDescription: SSO_ACCOUNT_NOT_AN_ADDRESS_DESCRIPTION };
+
+  it('refuses INVALID_EMAIL for a value that is not an address, SAML and OIDC alike, naming no value', () => {
+    for (const email of ['pov4hy2mt2-opaque-id', '', '@acme.com', 'mia chen@acme.com', 'mia@', 'mia@acme.com:443', 'mia@acme.com.', undefined, 42]) {
+      for (const method of ['sso-saml', 'sso-oidc']) {
+        const info = vi.fn();
+        expect(refuseSsoAccountWithoutAddress(creation(email, method), { info }), `${method} ${String(email)}`).toEqual(NOT_AN_ADDRESS);
+        expect(JSON.stringify(info.mock.calls)).not.toContain('pov4hy2mt2');
+      }
+    }
+    expect(SSO_ACCOUNT_NOT_AN_ADDRESS_DESCRIPTION).not.toMatch(/#\d/);
+  });
+
+  it('admits an address, at any domain', () => {
+    for (const email of ['mia.chen@acme.com', 'Mia@ACME.com', 'bob@other.example', 'bob@xn--bcher-kva.de', 'a@b']) {
+      expect(ssoValueIsAddress(email), email).toBe(true);
+      expect(refuseSsoAccountWithoutAddress(creation(email, 'sso-saml'))).toBeUndefined();
+    }
+  });
+
+  it('CONTROL: judges only a creation from an SSO provider', () => {
+    const opaque = 'pov4hy2mt2-opaque-id';
+    expect(refuseSsoAccountWithoutAddress({ user: { email: opaque }, source: { action: 'sign-in', method: 'sso-saml', sso: { providerId: PROVIDER } } })).toBeUndefined();
+    expect(refuseSsoAccountWithoutAddress({ user: { email: opaque }, source: { action: 'link-account', method: 'sso-saml', sso: { providerId: PROVIDER } } })).toBeUndefined();
+    expect(refuseSsoAccountWithoutAddress({ user: { email: opaque }, source: { action: 'create-user', method: 'oauth', oauth: { providerId: 'github' } } })).toBeUndefined();
+    expect(refuseSsoAccountWithoutAddress({ user: { email: opaque }, source: { action: 'create-user', method: 'scim' } })).toBeUndefined();
+    expect(refuseSsoAccountWithoutAddress(undefined)).toBeUndefined();
   });
 });
