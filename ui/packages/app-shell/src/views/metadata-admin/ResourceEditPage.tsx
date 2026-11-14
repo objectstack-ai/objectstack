@@ -3053,7 +3053,10 @@ function MetadataResourceEditPageImpl({
             }
           >
             {error && (
-              <div className="text-sm text-destructive border border-destructive/30 rounded p-3 bg-destructive/5">
+              // objectstack#33346 (row 147) — wraps anywhere: a refusal can be one
+              // unbroken token (a Zod enum list `"text"|"textarea"|…`), which ran
+              // past the viewport at 1440 px; the whole text stays on screen.
+              <div data-testid="resource-edit-error" className="text-sm text-destructive border border-destructive/30 rounded p-3 bg-destructive/5 min-w-0 [overflow-wrap:anywhere]">
                 <RefusalMessage text={error} />
               </div>
             )}
