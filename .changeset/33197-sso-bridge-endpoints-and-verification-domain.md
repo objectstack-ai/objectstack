@@ -1,0 +1,12 @@
+---
+'@objectstack/plugin-auth': patch
+---
+
+fix(plugin-auth): the Register SSO Provider bridge takes every endpoint `/sso/register` takes, so an identity provider whose token endpoint is on another host (Google) registers; the domain-verification answer carries the provider's registered domain
+
+Clause-②: yes (widening) — `POST /api/v1/auth/admin/sso/register` now accepts `tokenEndpoint`, `jwksEndpoint` and `authorizationEndpoint` beside `discoveryEndpoint` and `userInfoEndpoint`, and the `request-domain-verification` answer gains `dnsRecords`. Nothing that was served before is refused now; a form that names none of the new fields sends the body it sent before.
+Metadata-protocol: none
+
+**Registering an identity provider whose endpoints sit on other hosts.** `/sso/register` trusts an endpoint the discovery document names only when it is on the issuer's host or the registration names it. Google's discovery document names its token endpoint on `oauth2.googleapis.com`, its key set on `www.googleapis.com` and its userinfo endpoint on `openidconnect.googleapis.com`, so a Google registration is refused until each is named. The Register SSO Provider bridge (`POST /api/v1/auth/admin/sso/register`) took only `discoveryEndpoint` and `userInfoEndpoint` and dropped the rest, so on a host where only the bridge is reachable such a provider could never be registered, although the refusal told the admin to name `tokenEndpoint`. The bridge now takes `authorizationEndpoint`, `tokenEndpoint`, `jwksEndpoint`, `userInfoEndpoint` and `discoveryEndpoint`, each as a field of the same name, and sends each to `oidcConfig`. The refusal now says which bridge field names the endpoint it refused.
+
+**Where the domain-verification record goes.** `POST /api/v1/auth/admin/sso/request-domain-verification` answered `domain: ""` and a bare record label when the request body named no `domain`, and placed the record under whatever domain the body named. Verification looks for the record only under the provider's registered domain, so the answer now reads that domain back from the provider and places the record there: `domain` is the provider's registered domain and `dnsRecordName` the full name under it. A `domain` in the request body is no longer read. A provider listing several domains (`acme.com, acme.org`) is verified only when the record is published under each of them, so `dnsRecords` lists one `{ domain, type, name, value }` per listed domain and `dnsRecordName` names all of them, comma-separated.
