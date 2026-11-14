@@ -550,12 +550,12 @@ describe('[#32990] the resync judges artifact-shipped by each holder\'s owner ke
     body: { language: 'js', source: `return '${label}';` },
     ...extra,
   });
-  const packageOf = (id: string, objectName: string, actionObject: string | undefined = objectName) => {
+  const packageOf = (id: string, objectName: string, opts: { objectLess?: true } = {}) => {
     const ns = id.split('.').pop()!;
     return {
       id, name: ns, namespace: ns, version: '1.0.0', type: 'app',
       objects: [{ name: objectName, label: objectName, fields: { name: { name: 'name', label: 'Name', type: 'text' } } }],
-      actions: [script(ns, actionObject)],
+      actions: [script(ns, opts.objectLess ? undefined : objectName)],
     };
   };
   const storedRow = (id: string, body: AnyRecord, packageId: string | null = null) => ({
@@ -596,7 +596,7 @@ describe('[#32990] the resync judges artifact-shipped by each holder\'s owner ke
   });
 
   /** Boot with `packages` registered in that order during the cold boot and `rows` stored; the `kernel:ready` resync binds. */
-  async function boot(packages: AnyRecord[], rows: AnyRecord[]): Promise<ObjectQL> {
+  async function boot(packages: AnyRecord[], rows: AnyRecord[], disabled: string[] = []): Promise<ObjectQL> {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
     kernels.push(kernel);
     await kernel.use({
@@ -617,6 +617,7 @@ describe('[#32990] the resync judges artifact-shipped by each holder\'s owner ke
           await manifest.register(structuredClone(p));
           for (const a of p.actions) ql.registerAction(a.objectName ?? 'global', a.name, async () => `ran ${a.label}`, `app:${p.id}`);
         }
+        for (const id of disabled) ql.registry.disablePackage(id);
       },
     } as never);
     await kernel.bootstrap();
@@ -637,6 +638,18 @@ describe('[#32990] the resync judges artifact-shipped by each holder\'s owner ke
     }
   });
 
+  it('one holder and the environment\'s own action on another object: the environment\'s body runs there, the holder\'s on its own', async () => {
+    const ql = await boot([packageOf(A, ON_A)], [storedRow('env-approve', script('env', ON_ENV))]);
+    expect(await run(ql, ON_ENV)).toBe('ran env');
+    expect(await run(ql, ON_A)).toBe('ran alpha');
+  });
+
+  it('CONTROL — a DISABLED holder registered after another still owns its object: the environment\'s row there binds nothing', async () => {
+    const D = 'com.acme.delta';
+    const ql = await boot([packageOf(A, ON_A), packageOf(D, ON_ENV)], [storedRow('env-approve', script('env', ON_ENV))], [D]);
+    expect(await run(ql, ON_ENV)).toBe('ran delta');
+  });
+
   it('CONTROL — a package-less row on an object a holder\'s action owns is that holder\'s customization: the holder\'s body keeps running, in either registration order', async () => {
     for (const [order, packages] of ORDERS) {
       const ql = await boot([...packages], [storedRow('env-on-b', script('env', ON_B))]);
@@ -646,7 +659,7 @@ describe('[#32990] the resync judges artifact-shipped by each holder\'s owner ke
   });
 
   it('CONTROL — an object-less action a package ships owns every object: a row on another object binds nothing', async () => {
-    const ql = await boot([packageOf(A, ON_A, undefined)], [storedRow('env-approve', script('env', ON_ENV))]);
+    const ql = await boot([packageOf(A, ON_A, { objectLess: true })], [storedRow('env-approve', script('env', ON_ENV))]);
     expect(await run(ql, ON_ENV)).toBe(`Action 'approve' on object '${ON_ENV}' not found`);
     expect(await run(ql, 'global')).toBe('ran alpha');
   });

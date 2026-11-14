@@ -52,6 +52,7 @@ import {
   GLOBAL_ACTION_OBJECT_KEY,
   runActionGovernanceInventory,
   standaloneActionOwnerKey,
+  standaloneActionOwnsRoute,
 } from './action-governance.js';
 // [ADR-0126 §8] The packaged-action activation ledger's durable store. The
 // engine holds the projection; this plugin is what attaches the store and
@@ -3974,21 +3975,32 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
-   * True when an action of this name is shipped by an installed CODE
-   * package — either as a standalone `action` artifact, or embedded in a
-   * packaged object's `actions[]` array (the common `defineStack` shape).
-   * Those handlers are registered by AppPlugin under `app:<appId>` with its
-   * own runner, and `engine.registerAction` REPLACES by `<object>:<name>`
-   * key — so re-registering here would clobber the packaged handler with a
-   * metadata copy. Artifact-wins, same rule as {@link isArtifactShippedHook}.
+   * True when a CODE package ships this action at its owner key — either as
+   * a standalone `action` artifact that owns the action's object, or embedded
+   * in a packaged object's `actions[]` array (the common `defineStack`
+   * shape). Those handlers are registered by AppPlugin under `app:<appId>`
+   * with its own runner, and an authored row there is that holder's
+   * customization (ADR-0150 D4), so binding its copy would run it in place
+   * of the packaged handler. Artifact-wins, same rule as
+   * {@link isArtifactShippedHook}.
+   *
+   * [#32990] Judged against every holder's artifact of the name
+   * ({@link artifactActionsNamed}), each by the object it owns
+   * ({@link standaloneActionOwnsRoute}: an object-less artifact owns every
+   * object), never by the bare name alone. Two packages may hold one action
+   * name on different objects (ADR-0150 D4 keys the action by
+   * `(package, objectName, name)`), and the environment's own action on an
+   * object none of them binds is its own item, whose declaration the route
+   * serves (#32751): the bare-name test found a holder's artifact and left
+   * it with no handler.
    */
   private isArtifactShippedAction(action: any): boolean {
     const name = action?.name;
     if (typeof name !== 'string' || name.length === 0) return false;
     const registry: any = this.ql?.registry;
     if (!registry || typeof registry.getArtifactItem !== 'function') return false;
-    if (registry.getArtifactItem('action', name) !== undefined) return true;
     const objectKey = standaloneActionOwnerKey(action);
+    if (this.artifactActionsNamed(name).some((artifact) => standaloneActionOwnsRoute(artifact, objectKey))) return true;
     if (objectKey !== GLOBAL_ACTION_OBJECT_KEY) {
       const artifactObject: any = registry.getArtifactItem('object', objectKey);
       if (Array.isArray(artifactObject?.actions)
@@ -3997,6 +4009,30 @@ export class ObjectQLPlugin implements Plugin {
       }
     }
     return false;
+  }
+
+  /**
+   * [#32990] Every code package's artifact of action `name`: the registry's
+   * first match by bare name (`getArtifactItem`, what one holder always
+   * answered), and each holder's own (`packageScopedHoldersOf`, disabled
+   * packages included: a reversible disable never moves a binding), read
+   * prefer-local. Deduplicated; a holder whose own read answers another
+   * package's artifact adds nothing that is not a genuine artifact.
+   */
+  private artifactActionsNamed(name: string): any[] {
+    const registry: any = this.ql?.registry;
+    if (!registry || typeof registry.getArtifactItem !== 'function') return [];
+    const found = new Set<any>();
+    const first = registry.getArtifactItem('action', name);
+    if (first !== undefined && first !== null) found.add(first);
+    const holders: string[] = typeof registry.packageScopedHoldersOf === 'function'
+      ? registry.packageScopedHoldersOf('action', name, null, { includeDisabledPackages: true })
+      : [];
+    for (const packageId of holders) {
+      const own = registry.getArtifactItem('action', name, packageId);
+      if (own !== undefined && own !== null) found.add(own);
+    }
+    return [...found];
   }
 
   /**
@@ -4120,13 +4156,16 @@ export class ObjectQLPlugin implements Plugin {
     const registry: any = this.ql?.registry;
     if (!registry || typeof registry.getArtifactItem !== 'function') return false;
     const installed = installedManifestsOf(registry);
-    const artifact: any = registry.getArtifactItem('action', action.name);
-    if (artifact === undefined || artifact === null) {
+    // [#32990] The artifact at the row's own object, among every holder's:
+    // the first match by bare name may be another holder's, on another object.
+    const artifacts = this.artifactActionsNamed(action.name);
+    if (artifacts.length === 0) {
       return isServedOverrideRowOf(row as any, action?.overrides?.package, installed);
     }
+    const objectKey = standaloneActionOwnerKey(action);
+    const artifact: any = artifacts.find((a) => standaloneActionOwnerKey(a) === objectKey);
     const base = artifact?._packageId;
     if (typeof base !== 'string' || base === '') return false;
-    if (standaloneActionOwnerKey(artifact) !== standaloneActionOwnerKey(action)) return false;
     return isServedOverrideRowOf(row as any, base, installed);
   }
 
