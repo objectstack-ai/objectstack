@@ -6064,6 +6064,15 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
             }
             return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
         }
+        // [#32989, #32996] The bare read cannot see the object: where the name
+        // has a package-less item or a disabled package beside a package
+        // holder, its answer depends on who else holds the name. The route's
+        // answer is who holds the name on the route.
+        const census = await routeHolderCensus({
+            ql, objectName, actionName, obj, ownsRoute,
+            readAt: (packageId) => byName.call(protocol, { type: 'action', name: actionName, packageId }),
+        });
+        if (census !== undefined) return census;
         const item: any = (envelope as { item?: unknown } | null | undefined)?.item;
         const declared = item !== null && typeof item === 'object' && item.name === actionName && ownsRoute(item);
         return { action: declared ? item : undefined, obj };
@@ -6196,70 +6205,229 @@ async function routeOwnerOfRefusedRead(
 }
 
 /**
- * [#32751] The declaration of a route no holder of a refused name owns
- * ({@link routeOwnerOfRefusedRead}): the environment's own item, bound to the
- * routed object first and object-less after (the order the router reaches a
- * handler in). Never read at a holder's exact address, and never served as a
- * holder's: the answer carries no package, so the dispatch is unqualified, as
- * the bare call's always was.
+ * [#32751, #32996] Who holds `actionName` on the route of `objectName`, read
+ * from the registry's listing of every holder (`includeDisabledPackages`) and
+ * the environment's own store: each item that owns the route — bound to the
+ * routed object, or object-less, the two rungs the router reaches a handler
+ * on, bound first — filed under its holder:
  *
- * The environment's own item is a package-less registry item whose row the
- * environment's store holds bound to no package ({@link environmentStoredActionNames},
- * the test {@link packagelessOriginOf} applies): the row's source, never a
- * byte of the definition. A package-less item with no such row is the
- * platform's (host code or a plugin) and is not served here. The protocol's
- * reads cannot answer this: beside two package holders its bare read refuses
- * the name, and its merged listing folds the package-less item into the
- * holders' slots as their stand-in.
+ *  - `served` — an enabled package's item;
+ *  - `disabled` — a disabled package's item. The protocol's reads withhold
+ *    it, so they cannot tell that a disabled package still binds the route;
+ *    this listing can;
+ *  - `environment` — a package-less item whose row the environment's store
+ *    holds bound to no package ({@link environmentStoredActionNames}, the test
+ *    {@link packagelessOriginOf} applies): the row's source, never a byte of
+ *    the definition;
+ *  - `platform` — any other package-less item (host code or a plugin).
  *
- * Only when no package holds the name on this route's key, a DISABLED one
- * included (ruling 6824698376, letter A: a disabled package is still a
- * holder). The protocol's reads withhold a disabled package's item, so they
- * cannot tell; the registry's listing of every holder can
- * (`includeDisabledPackages`). A route a disabled package's action binds
- * stays no declaration, never handed to the environment's item, and so does
- * a route on a host whose registry cannot list every holder or whose engine
- * has no store to read (no `find`, or no `sys_metadata` object). Any other
- * store read that throws is the plane failing to answer (ADR-0110 D3):
- * `degraded`, never "no row".
+ * The registry keeps ONE package-less item per name: a platform item and the
+ * environment's own replace each other there, the later registration staying
+ * (the registry's rule, not this reader's). So a rung never holds both, and
+ * the environment's item bound to the routed object and its object-less one
+ * are never both listed: "bound before object-less" among the environment's
+ * own items is not observable today.
+ *
+ * `undefined` when the host cannot answer: a registry with no listing of
+ * every holder, or an engine with no store to read (no `find`). Every
+ * package-less item is `platform` when the engine registers no metadata store
+ * at all ({@link listingNotServed}). Any other store read that throws is the
+ * plane failing to answer (ADR-0110 D3): `degraded`, never "no row". The store
+ * is read only when a package-less item owns the route.
  */
-async function environmentOwnerOfUnheldRoute(
-    args: { ql: any; objectName: string; actionName: string; obj: any },
-): Promise<RouteActionDeclaration> {
-    const { ql, objectName, actionName, obj } = args;
-    const none: RouteActionDeclaration = { action: undefined, obj };
+interface RouteHolders { served: any[]; disabled: any[]; environment: any[]; platform: any[] }
+type RouteHolderReading =
+    | { degraded: true; reason: string }
+    | {
+        degraded?: undefined;
+        /** Every holder's item of the name, on any key. */
+        named: any[];
+        /** Is this item's package disabled? */
+        isDisabled: (item: any) => boolean;
+        /** The holders that own the route, both rungs. */
+        owners: RouteHolders;
+        /** The rung the router reaches first: bound to the routed object, else object-less. */
+        rung: RouteHolders;
+    };
+
+/** [ADR-0150 D4] Is a registry item a package's (`_packageId`), not package-less? */
+function packagedItem(item: any): boolean {
+    return typeof item?._packageId === 'string' && item._packageId !== '';
+}
+
+async function readRouteHolders(
+    args: { ql: any; objectName: string; actionName: string },
+    /**
+     * Asked of the listing BEFORE the store is read: `false` answers
+     * `undefined` with no store read, so a caller that can only answer some
+     * compositions never pays the store's scans (or its outage) on the others.
+     */
+    admit: (named: readonly any[], isDisabled: (item: any) => boolean) => boolean = () => true,
+): Promise<RouteHolderReading | undefined> {
+    const { ql, objectName, actionName } = args;
     const registry: any = ql?.registry;
-    if (typeof registry?.listItems !== 'function') return none;
+    if (typeof registry?.listItems !== 'function') return undefined;
     let named: any[];
     try {
         named = (registry.listItems('action', undefined, { includeDisabledPackages: true }) ?? [])
             .filter((item: any) => item?.name === actionName);
     } catch {
-        return none;
+        return undefined;
     }
-    const ownsRoute = (item: any): boolean => {
-        const owner = standaloneActionOwnerKey(item);
-        return owner === objectName || isObjectLessActionKey(owner);
-    };
-    const packaged = (item: any): boolean => typeof item?._packageId === 'string' && item._packageId !== '';
-    if (named.some((item) => packaged(item) && ownsRoute(item))) return none;
-    const packageless = named.filter((item) => !packaged(item) && ownsRoute(item));
-    if (packageless.length === 0) return none;
+    const isDisabled = (item: any): boolean => packagedItem(item)
+        && typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(item._packageId) === true;
+    if (!admit(named, isDisabled)) return undefined;
     const store = environmentStoredActionNames(ql);
-    if (store === undefined) return none;
-    let stored: ReadonlySet<string>;
+    if (store === undefined) return undefined;
+    const isBound = (item: any): boolean =>
+        !isObjectLessActionKey(objectName) && standaloneActionOwnerKey(item) === objectName;
+    const isObjectLess = (item: any): boolean => isObjectLessActionKey(standaloneActionOwnerKey(item));
+    const ownerItems = named.filter((item) => isBound(item) || isObjectLess(item));
+    let stored: ReadonlySet<string> = new Set<string>();
+    if (ownerItems.some((item) => !packagedItem(item))) {
+        try {
+            stored = (await store()).actions;
+        } catch (err: any) {
+            // An engine that registers no metadata store has no environment
+            // row: nothing here is the environment's.
+            if (!listingNotServed(err)) return { degraded: true, reason: err?.message ?? String(err) };
+        }
+    }
+    const file = (items: any[]): RouteHolders => {
+        const holders: RouteHolders = { served: [], disabled: [], environment: [], platform: [] };
+        for (const item of items) {
+            if (packagedItem(item)) (isDisabled(item) ? holders.disabled : holders.served).push(item);
+            else if (stored.has(`${standaloneActionOwnerKey(item)}:${actionName}`)) holders.environment.push(item);
+            else holders.platform.push(item);
+        }
+        return holders;
+    };
+    const bound = ownerItems.filter(isBound);
+    return {
+        named,
+        isDisabled,
+        owners: file(ownerItems),
+        rung: file(bound.length > 0 ? bound : ownerItems.filter(isObjectLess)),
+    };
+}
+
+/**
+ * [#32751] The declaration of a route no holder of a refused name owns
+ * ({@link routeOwnerOfRefusedRead}): the environment's own item on the route's
+ * first rung ({@link readRouteHolders}). Never read at a holder's exact
+ * address, and never served as a holder's: the answer carries no package, so
+ * the dispatch is unqualified, as the bare call's always was. A package-less
+ * item with no row in the environment's store is the platform's and is not
+ * served here. The protocol's reads cannot answer this: beside two package
+ * holders its bare read refuses the name, and its merged listing folds the
+ * package-less item into the holders' slots as their stand-in.
+ *
+ * Only when no package's action owns the route, a DISABLED package's
+ * included. This is main's own answer, kept: with only the environment's item
+ * and a disabled package's action on the route — bound to the routed object
+ * or object-less — the route answers no declaration, never the environment's
+ * item ({@link routeHolderCensus} gives that answer whatever other holders the
+ * name has). So does a route on a host whose registry cannot list every
+ * holder or whose engine has no store to read.
+ */
+async function environmentOwnerOfUnheldRoute(
+    args: { ql: any; objectName: string; actionName: string; obj: any },
+): Promise<RouteActionDeclaration> {
+    const { obj } = args;
+    const none: RouteActionDeclaration = { action: undefined, obj };
+    const reading = await readRouteHolders(args);
+    if (reading === undefined) return none;
+    if (reading.degraded) return { action: undefined, obj, degraded: true, reason: reading.reason };
+    if (reading.owners.served.length > 0 || reading.owners.disabled.length > 0) return none;
+    return reading.rung.environment.length === 1 ? { action: reading.rung.environment[0], obj } : none;
+}
+
+/**
+ * [#32989, #32996] The bare route's declaration when the name has a package
+ * holder beside a package-less item or a disabled package: the compositions
+ * where the protocol's bare by-name read, which cannot see the routed object,
+ * answers by who ELSE holds the name. Beside one package it answers the
+ * environment's item wherever that item is bound, so a served holder's own
+ * route read the environment's item on another object and answered no
+ * declaration; beside a disabled package its answer moves with registration
+ * order; and it stamps the package-less item with a holder's package. The
+ * route decides from who holds the name ON THE ROUTE ({@link readRouteHolders}),
+ * in this order:
+ *
+ *  1. no served package's action owns the route and a disabled package's
+ *     does: no declaration, whatever other holders the name has (main's own
+ *     answer beside the environment's item, {@link environmentOwnerOfUnheldRoute});
+ *  2. the environment's own item on the route's first rung: that item, with
+ *     no package (ADR-0150 D3: the environment's own declaration answers
+ *     first on one owner key);
+ *  3. exactly one served package on the route's first rung, and no platform
+ *     item there: that package's own declaration, read at its exact address
+ *     (`packageId`, the protocol's execution face, which the disabled-package
+ *     face governs as the bare read's does) and served with no package, so the
+ *     dispatch is unqualified, as the bare call's always was. A disabled
+ *     co-holder, and the environment's or the platform's item on another
+ *     object, do not change it. A refusal of that address leaves the bare
+ *     read's answer; any other throw is an outage (ADR-0110 D3).
+ *
+ * `undefined`, so the bare read answers as before, for every other
+ * composition: no package holder; nothing package-less and nothing disabled;
+ * a platform item on the first rung; two served packages there; and a host
+ * {@link readRouteHolders} cannot read.
+ */
+async function routeHolderCensus(
+    args: {
+        ql: any; objectName: string; actionName: string; obj: any;
+        ownsRoute: (action: any) => boolean;
+        readAt: (packageId: string) => Promise<unknown>;
+    },
+): Promise<RouteActionDeclaration | undefined> {
+    const { obj, actionName, ownsRoute, readAt } = args;
+    // [review 6879733874 M1] The composition is judged on the listing alone,
+    // before the store is read: a name with no package holder, or with
+    // nothing package-less and nothing disabled beside its packages — the
+    // one-holder case among them — never reads the store, so it never pays
+    // its scans nor answers `degraded` when the store is down.
+    const reading = await readRouteHolders(args, (named, isDisabled) =>
+        named.some(packagedItem) && (named.some((item) => !packagedItem(item)) || named.some(isDisabled)));
+    if (reading === undefined) return undefined;
+    if (reading.degraded) return { action: undefined, obj, degraded: true, reason: reading.reason };
+    const { owners, rung } = reading;
+    if (owners.served.length === 0 && owners.disabled.length > 0) return { action: undefined, obj };
+    if (rung.environment.length === 1) return { action: rung.environment[0], obj };
+    if (rung.served.length !== 1 || rung.platform.length > 0) return undefined;
+    let envelope: unknown;
     try {
-        stored = (await store()).actions;
+        envelope = await readAt(rung.served[0]._packageId);
     } catch (err: any) {
-        // An engine that registers no metadata store has no environment row:
-        // nothing here is the environment's ({@link listingNotServed}).
-        if (listingNotServed(err)) return none;
+        if (refusalOf(err) !== undefined) return undefined;
         return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
     }
-    const own = packageless.filter((item) => stored.has(`${standaloneActionOwnerKey(item)}:${actionName}`));
-    const bound = own.filter((item) => !isObjectLessActionKey(standaloneActionOwnerKey(item)));
-    const rung = bound.length > 0 ? bound : own;
-    return rung.length === 1 ? { action: rung[0], obj } : none;
+    const item: any = (envelope as { item?: unknown } | null | undefined)?.item;
+    return item !== null && typeof item === 'object' && item.name === actionName && ownsRoute(item)
+        ? { action: item, obj }
+        : undefined;
+}
+
+/**
+ * [#32988] The environment's own item at its exact address
+ * `/actions/_env/:object/:action` when the merged listing does not list it:
+ * beside a package holder of the name that listing folds the package-less
+ * item into a stand-in for the holder, so the address found nothing and
+ * answered `404`. Read from who holds the name on the route
+ * ({@link readRouteHolders}): the environment's own item on the route's first
+ * rung, bound to the routed object first and object-less after, whatever the
+ * other holders. Never a package's item and never the platform's (no row in
+ * the environment's store), and never served as a holder's: no package.
+ * `undefined` when the environment holds none there or the host cannot tell,
+ * so the address's `404` stands.
+ */
+async function environmentItemAtOwnAddress(
+    args: { ql: any; objectName: string; actionName: string; obj: any },
+): Promise<RouteActionDeclaration | undefined> {
+    const reading = await readRouteHolders(args);
+    if (reading === undefined) return undefined;
+    if (reading.degraded) return { action: undefined, obj: args.obj, degraded: true, reason: reading.reason };
+    return reading.rung.environment.length === 1 ? { action: reading.rung.environment[0], obj: args.obj } : undefined;
 }
 
 /**
@@ -6338,7 +6506,15 @@ export async function resolveAddressedRouteActionDeclaration(deps: ActionExecuti
         };
     } catch (err: any) {
         if (err instanceof PackageScopedNameRefusedError) return { action: undefined, obj, refusal: err.refusal };
-        if (err?.status === 404) throw err;
+        if (err?.status === 404) {
+            // [#32988] The environment's own item answers its own address
+            // whatever other holders the name has.
+            const own = 'environment' in qualifier
+                ? await environmentItemAtOwnAddress({ ql, objectName, actionName, obj })
+                : undefined;
+            if (own !== undefined) return own;
+            throw err;
+        }
         return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
     }
 }
