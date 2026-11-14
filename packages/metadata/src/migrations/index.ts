@@ -20,6 +20,16 @@ export {
     type DatabaseLoaderRowLeftReason,
     type DatabaseLoaderRowPackagesResult,
 } from './bind-database-loader-row-packages.js';
+// [#32985] Read-only: the rows that name their package by the `_packageId`
+// stamp alone, with the history evidence of how the stamp got there.
+export {
+    detectStampOnlyRows,
+    type StampOnlyRowReadStore,
+    type StampOnlyRowVerdict,
+    type StampOnlyRowFinding,
+    type StampOnlyRowsReport,
+    type StampOnlyRowsOptions,
+} from './detect-stamp-only-rows.js';
 // Ruling 6677709817 step (b), first half: the read-only count of the history
 // snapshots the drained-key scrub would rewrite (its rewrite mode waits on the
 // maintainer's confirmation of that count).

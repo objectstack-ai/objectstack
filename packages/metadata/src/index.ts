@@ -8,7 +8,7 @@
  */
 
 // Main Manager
-export { MetadataManager, type WatchCallback, type MetadataManagerOptions, type MetadataRegisterOptions, type MetadataUnregisterOptions } from './metadata-manager.js';
+export { MetadataManager, type WatchCallback, type MetadataManagerOptions, type MetadataRegisterOptions, type MetadataUnregisterOptions, type MetadataUnregisterPackageOptions, type MetadataUnregisterPackageResult } from './metadata-manager.js';
 
 // Plugin
 export {
@@ -19,7 +19,7 @@ export {
 } from './plugin.js';
 
 // Loaders
-export { type MetadataLoader, type MetadataKeyedItem, type MetadataLoaderDeleteOptions } from './loaders/loader-interface.js';
+export { type MetadataLoader, type MetadataKeyedItem, type MetadataLoaderDeleteOptions, type MetadataStampOnlyRow } from './loaders/loader-interface.js';
 export { MemoryLoader } from './loaders/memory-loader.js';
 export { RemoteLoader } from './loaders/remote-loader.js';
 export { DatabaseLoader, type DatabaseLoaderOptions, type MetadataHistoryAddress } from './loaders/database-loader.js';
