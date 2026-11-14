@@ -533,6 +533,94 @@ describe('invite_only refuses an unknown OIDC user unless the provider allows JI
   });
 });
 
+// ── Sign out of the company sign-in too: OIDC RP-initiated logout ───────────
+//
+// Ruling record 6866334319 (`sso-sign-out-of-idp.ts`). The provider's
+// `end_session_endpoint` is the one saving the switch on read from discovery
+// and kept in the stored OIDC config; here it is written into the row as that
+// save leaves it.
+
+describe('sign out of the company sign-in too: OIDC logout redirect', () => {
+  const END_SESSION = `${IDP}/oauth2/logout`;
+  const AFTER_SIGN_OUT = `${BASE}/signed-out`;
+
+  const parkEndSession = (rp: Rp) => {
+    const row = rp.engine.tables.get('sys_sso_provider')![0];
+    row.oidc_config = JSON.stringify({ ...JSON.parse(row.oidc_config), endSessionEndpoint: END_SESSION });
+  };
+
+  const sessionOf = async (rp: Rp, cookie: string): Promise<{ user?: { email?: string } } | null> => {
+    const res = await rp.manager.handleRequest(new Request(`${AUTH}/get-session`, { headers: { cookie } }));
+    const body = (await res.json().catch(() => null)) as { user?: { email?: string } } | null;
+    return body?.user ? body : null;
+  };
+
+  const signOut = (rp: Rp, cookie: string, body: Record<string, unknown> = {}): Promise<Response> =>
+    rp.manager.handleRequest(
+      new Request(`${AUTH}/sign-out`, {
+        method: 'POST',
+        headers: { cookie, origin: BASE, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  const recordedSessions = (rp: Rp): unknown[] =>
+    (rp.engine.tables.get('sys_verification') ?? []).filter((v: any) => String(v.identifier).startsWith('oidc-session-by-id:'));
+
+  it('CONTROL, switch off: sign-out ends the platform session only, with no logout URL, and no session is recorded', async () => {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(rp);
+    parkEndSession(rp);
+    const signedIn = cookiesOf(await signInThroughIdp(rp, await idToken()));
+    expect((await sessionOf(rp, signedIn))?.user?.email).toBe(EMAIL);
+    expect(recordedSessions(rp)).toHaveLength(0);
+
+    const out = await signOut(rp, signedIn, { callbackURL: AFTER_SIGN_OUT });
+    expect(out.status).toBe(200);
+    const body = (await out.json()) as { success?: boolean; url?: string };
+    expect(body.success).toBe(true);
+    expect(body.url).toBeUndefined();
+    expect(out.headers.get('location')).toBeNull();
+    expect(await sessionOf(rp, signedIn)).toBeNull();
+  });
+
+  it('on: sign-out answers the provider logout URL carrying the ID token as its hint, and the session ends', async () => {
+    const rp = await makeRp({ provider: { allowJit: true, signOutOfIdp: true } });
+    await seedAdmin(rp);
+    parkEndSession(rp);
+    const token = await idToken();
+    const signedIn = cookiesOf(await signInThroughIdp(rp, token));
+    expect((await sessionOf(rp, signedIn))?.user?.email).toBe(EMAIL);
+    expect(recordedSessions(rp)).toHaveLength(1);
+
+    const out = await signOut(rp, signedIn, { callbackURL: AFTER_SIGN_OUT, state: 'opaque-state' });
+    expect(out.status).toBe(200);
+    const body = (await out.json()) as { success?: boolean; url?: string; redirect?: boolean };
+    expect(body).toMatchObject({ success: true, redirect: true });
+    const url = new URL(body.url!);
+    expect(`${url.origin}${url.pathname}`).toBe(END_SESSION);
+    expect(url.searchParams.get('id_token_hint')).toBe(token);
+    expect(url.searchParams.get('client_id')).toBe(CLIENT_ID);
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe(AFTER_SIGN_OUT);
+    expect(url.searchParams.get('state')).toBe('opaque-state');
+    expect(out.headers.get('location')).toBe(body.url);
+    expect(await sessionOf(rp, signedIn)).toBeNull();
+    expect(recordedSessions(rp)).toHaveLength(0);
+  });
+
+  it('on: an untrusted callbackURL is not handed to the identity provider as the place to return to', async () => {
+    const rp = await makeRp({ provider: { allowJit: true, signOutOfIdp: true } });
+    await seedAdmin(rp);
+    parkEndSession(rp);
+    const signedIn = cookiesOf(await signInThroughIdp(rp, await idToken()));
+    const out = await signOut(rp, signedIn, { callbackURL: 'https://elsewhere.example/landing', disableRedirect: true });
+    const body = (await out.json()) as { url?: string; redirect?: boolean };
+    expect(body.redirect).toBe(false);
+    expect(out.headers.get('location')).toBeNull();
+    expect(new URL(body.url!).searchParams.get('post_logout_redirect_uri')).toBeNull();
+  });
+});
+
 // ── 4. IdP group → permission set at sign-in ────────────────────────────────
 //
 // Ruling A on the Enterprise SSO knobs (record 6718355623), item 3: an SSO

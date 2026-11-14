@@ -264,3 +264,46 @@ describe('the item header\'s draft line after the copilot\'s undo, the object op
     expect(screen.queryByText(t('engine.studio.unpublishedDraft', 'en'))).toBeNull();
   });
 });
+
+describe('a draft an agent stages outside the tab reaches the open item when the tab is visible again (objectstack#32592)', () => {
+  function switchTab(hidden: boolean): void {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => (hidden ? 'hidden' : 'visible'),
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }
+  afterEach(() => {
+    switchTab(false);
+  });
+
+  it('the badge, the header line and the pillar\'s own draft read all move on the one return, with no pulse sent by anyone', async () => {
+    await openTask();
+    const before = objectDraftReads();
+
+    // The user is in the MCP client; the agent stages drafts of the open object.
+    switchTab(true);
+    server.objectDraft = { ...OBJECT, description: 'mcp draft' };
+    server.drafts = COPILOT_DRAFTS;
+
+    switchTab(false);
+
+    await waitFor(() => expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('2'), SLOW);
+    await waitFor(() => expect(headerStatus()).toHaveTextContent(draftLine(2)));
+    // The Data pillar re-read its open object on the same pulse — where its
+    // draft marks are read from (objectstack#32610).
+    await waitFor(() => expect(objectDraftReads()).toBeGreaterThan(before));
+  });
+
+  it('CONTROL: a return that finds the ledger unchanged re-reads no item', async () => {
+    await openTask();
+    const before = objectDraftReads();
+    switchTab(true);
+    switchTab(false);
+    // Give the return read time to answer.
+    await new Promise((r) => setTimeout(r, 100));
+    expect(objectDraftReads()).toBe(before);
+    expect(headerStatus()).toBeNull();
+  });
+});

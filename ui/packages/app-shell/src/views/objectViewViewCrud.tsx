@@ -353,15 +353,18 @@ export function useObjectViewViewCrud({
             return;
         }
         try {
-            // Clear `isDefault` on all other saved views, then set this one.
+            // Clear `isDefault` on every other saved view, then set this one,
+            // ONE WRITE AT A TIME, in the list's order (the clears first, the
+            // set last). The first refusal stops the run, so a clear the server
+            // refuses never leaves the new default applied beside the old one:
+            // the click ends with exactly one default, or with this view not
+            // made the default and the refusal said below. Fired together, a
+            // refused clear of a shipped default still let the set land, and the
+            // object had two defaults.
             if (typeof (dataSource as any)?.updateView !== 'function') return;
-            await Promise.all(
-                dispatchViewPatches(
-                    dataSource,
-                    objectName,
-                    setDefaultViewPatches(savedViews, vid),
-                ),
-            );
+            for (const step of setDefaultViewPatches(savedViews, vid)) {
+                await Promise.all(dispatchViewPatches(dataSource, objectName, [step]));
+            }
             setRefreshKey(k => k + 1);
         } catch (err) {
             console.error('[ViewTabBar] Failed to set default view:', err);

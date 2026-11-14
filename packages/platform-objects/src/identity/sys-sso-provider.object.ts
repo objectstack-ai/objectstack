@@ -183,6 +183,7 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'entryPoint', label: 'IdP SSO URL', type: 'text', required: true, helpText: 'The IdP’s SAML single sign-on (redirect) endpoint that receives the SAMLRequest.' },
         { name: 'cert', label: 'IdP Signing Certificate', type: 'textarea', required: true, helpText: 'The IdP’s X.509 signing certificate (PEM body). Used to verify assertion signatures.' },
         { name: 'identifierFormat', label: 'NameID Format', type: 'text', required: false, placeholder: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress', helpText: 'Optional. Requested SAML NameID format. Defaults to the IdP’s configured format.' },
+        { name: 'logoutUrl', label: 'IdP Logout URL', type: 'text', required: false, helpText: 'Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options.' },
         // Who a sign-in resolves to: the assertion attributes the user's email
         // and name are read from, stored as the provider's `mapping.email` /
         // `firstName` / `lastName` / `name` (plugin-auth `register-sso-provider.ts`,
@@ -344,6 +345,10 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'allowIdpInitiated', field: 'allow_idp_initiated', defaultFromRow: true, required: false },
         { name: 'allowJit', field: 'allow_jit', defaultFromRow: true, required: false },
         { name: 'skipUserInfo', field: 'skip_user_info', defaultFromRow: true, required: false },
+        // Ruling record 6866334319: saving it on is refused for a provider
+        // that cannot honour it (a SAML provider with no IdP Logout URL, an
+        // OIDC provider publishing no end_session_endpoint).
+        { name: 'signOutOfIdp', field: 'sign_out_of_idp', defaultFromRow: true, required: false },
       ],
     },
     // [#32085] Edit a registered provider instead of deleting and
@@ -378,6 +383,7 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'entryPoint', label: 'IdP SSO URL', type: 'text', required: false, helpText: 'The IdP’s single sign-on endpoint. Leave blank to keep the stored one. Changes only while no user is linked to the provider.' },
         { name: 'cert', label: 'New IdP Signing Certificate', type: 'textarea', required: false, helpText: 'The IdP’s new X.509 signing certificate (PEM). Leave blank to keep the stored certificate.' },
         { name: 'keepCurrentCert', label: 'Keep trusting the current certificate', type: 'boolean', required: false, helpText: 'While the IdP switches over, accept assertions signed by either certificate. Edit again without this to drop the old one.' },
+        { name: 'logoutUrl', label: 'IdP Logout URL', type: 'text', required: false, helpText: 'The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one.' },
       ],
       resultDialog: {
         title: 'SAML settings saved',
@@ -545,7 +551,7 @@ export const SysSsoProvider = ObjectSchema.create({
       name: 'all',
       label: 'All',
       data: { provider: 'object', object: 'sys_sso_provider' },
-      columns: ['provider_id', 'issuer', 'domain', 'domain_verified', 'allow_idp_initiated', 'allow_jit', 'created_at'],
+      columns: ['provider_id', 'issuer', 'domain', 'domain_verified', 'allow_idp_initiated', 'allow_jit', 'sign_out_of_idp', 'created_at'],
       sort: [{ field: 'provider_id', order: 'asc' }],
       pagination: { pageSize: 50 },
       // Per-object empty state — the shared identity-object copy ("created
@@ -661,6 +667,22 @@ export const SysSsoProvider = ObjectSchema.create({
       trackHistory: true,
       description:
         'OIDC only. Read the email, name and groups from the identity provider’s verified ID token and do not call its userinfo endpoint. Turn it on for Microsoft Entra ID, whose userinfo answer carries no groups and no preferred_username. Off by default: a provider with a userinfo endpoint reads its claims from that answer. Change it with “Edit Sign-In Options”.',
+      group: 'Identity',
+    }),
+
+    // "Sign out of the company sign-in too" (ruling record 6866334319),
+    // written as the @better-auth/sso provider additional field
+    // `signOutOfIdp` (plugin-auth `sso-sign-out-of-idp.ts`). Off by default;
+    // `trackHistory` like the sign-in options: a change is audited. On, a
+    // sign-out of a session that started at this provider also ends the
+    // identity provider's session (SAML single logout, OIDC RP-initiated
+    // logout), and the IdP's signed logout messages are accepted.
+    sign_out_of_idp: Field.boolean({
+      label: 'Sign Out of the Company Sign-In Too',
+      defaultValue: false,
+      trackHistory: true,
+      description:
+        'When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”.',
       group: 'Identity',
     }),
 
