@@ -832,6 +832,23 @@ describe('an unmapped SAML sign-in reads the standard claims before the NameID',
     expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
   });
 
+  it('portal first: an IdP-initiated sign-in with no account yet lands on the app origin signed in, the account keyed on the opaque NameID at the claim address; the sign-in page entry after it is refused', async () => {
+    const rp = await entraRp();
+    const first = await idpInitiated(rp, UPN, undefined, idpInitiatedPersistent);
+    expect(first.status).toBe(302);
+    expect(first.headers.get('location')).toBe(BASE);
+    expect(cookiesOf(first)).toMatch(/session_token=[^;]/);
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+    const keys = () => (rp.engine.tables.get('sys_account') ?? []).filter((a: any) => a.provider_id === PROVIDER_ID).map((a: any) => a.account_id);
+    expect(keys()).toEqual([OPAQUE]);
+
+    const second = await signInThroughIdp(rp, UPN, undefined, undefined, spInitiated);
+    expect(landing(second)).toEqual({ base: FAILED, error: 'account_not_linked' });
+    expect(cookiesOf(second)).not.toMatch(/session_token=[^;]/);
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+    expect(keys()).toEqual([OPAQUE]);
+  });
+
   it('the claim is read before an "email" attribute the same assertion carries', async () => {
     const rp = await entraRp();
     admitted(await idpInitiated(rp, UPN, undefined, { ...idpInitiatedPersistent, attributes: { ...ENTRA_CLAIMS, email: 'other@acme.com' } }));

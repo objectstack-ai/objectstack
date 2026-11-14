@@ -507,8 +507,12 @@ name is `givenName` + `surname`, else `displayName`, else the NameID. So an Entr
 ID provider with nothing mapped keys its users on the address in the
 `emailaddress` claim, whether the person enters from your sign-in page (an
 email-format NameID) or from the IdP's app portal (Entra's default persistent
-NameID, an opaque id): both entries reach the same account. A member you map is
-always read as mapped. Two limits:
+NameID, an opaque id), so the two entries resolve to one address and never make a
+second account. Each entry is still its own sign-in identity: whichever entry
+comes second finds the account the first one made and is refused with
+`error=account_not_linked`, creating nothing, until that account is linked to it.
+When the assertion carries both an `email` attribute and the `emailaddress`
+claim, the claim is read. A member you map is always read as mapped. Two limits:
 
 - The claims are recognised by the attribute names in the assertion as posted.
   An encrypted assertion's names cannot be read before it is decrypted, so a
