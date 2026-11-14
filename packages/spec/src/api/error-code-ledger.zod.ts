@@ -661,7 +661,6 @@ export const ERROR_CODE_LEDGER = {
     'LAST_LOCAL_CREDENTIAL',      // refusing to remove the user's only local credential
     'NO_IDENTITY',                // import row has neither email nor phone
     'NO_PENDING_VERIFICATION',    // pass-through from better-auth
-    'NOT_FOUND',                  // 404 from GET /sign-in/direct (`direct-sign-in.ts`) when the door is mounted and the direct sign-in setting reads off at request time (OS_AUTH_DIRECT_SIGN_IN_ENABLED turned off after boot): answered like an unmounted route
     // [#24254] The organization hooks' two refusals no standard member names
     // (`beforeCreateOrganization`, `beforeUpdateOrganization`), registered AHEAD
     // of their producer: today both are a bare `FORBIDDEN`, and #24243 stamps these.

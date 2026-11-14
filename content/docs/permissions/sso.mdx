@@ -615,7 +615,7 @@ OS_AUTH_DIRECT_SIGN_IN_ENABLED=true
 # Optional: which provider to use. Unset, the one configured provider is used.
 # OS_AUTH_DIRECT_SIGN_IN_PROVIDER=okta
 # Optional: hidden (default) or off.
-# OS_AUTH_LOCAL_SIGN_IN=hidden
+# OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden
 ```
 
 ```ts
@@ -628,16 +628,18 @@ new AuthPlugin({
 |---|---|---|
 | `OS_AUTH_DIRECT_SIGN_IN_ENABLED` | `true` / `false` | Turns it on or off, whatever the option says. |
 | `OS_AUTH_DIRECT_SIGN_IN_PROVIDER` | a `providerId` | An [`oidcProviders`](#enterprise-sso-oidc) entry or a registered SSO provider. Unset, the only one configured is used; with none or several configured, the sign-in page is shown as before. |
-| `OS_AUTH_LOCAL_SIGN_IN` | `hidden` (default) / `off` | `hidden` keeps the password form at `/login?local=1`. `off` means the Console never draws a local way in. Any other value refuses to boot. |
+| `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH` | `hidden` (default) / `off` | `hidden` keeps the password form at `/login?local=1`. `off` means the sign-in form offers no local way in. Any other value refuses to boot. |
 
-With `off`, the Console sign-in page draws no local way in, in any state: no
-email or phone form, no sign-up and no "use password" link, also on an OAuth
-client's hand-off and when no provider can be started. It changes the page
-only: `POST /api/v1/auth/sign-in/email` still accepts a password.
+With `off`, the sign-in form offers no local way in, in any of its states: no
+email or phone form, no sign-up link and no "use password" link, also on an
+OAuth client's hand-off and when no provider can be started. It changes the
+form only: `POST /api/v1/auth/sign-in/email` still accepts a password, and the
+`/register` and `/forgot-password` pages are not changed by it.
 
 **What a visit does.** The Console sign-in page reads `features.directSignIn`
 from `GET /api/v1/auth/config`. That is `true` only while a provider can be
-started. A signed-out visitor is then sent to
+started, and only when this server mounted the door: a setting turned on
+after start-up takes a restart. A signed-out visitor is then sent to
 `GET /api/v1/auth/sign-in/direct?callbackURL=<this page>`, which starts the
 provider's own sign-in and redirects to it. After the sign-in, the visitor
 comes back to the same sign-in URL, which then continues as after any sign-in:
@@ -650,8 +652,8 @@ any of these behind percent-encoding is dropped, and the sign-in returns to
 the Console home page. The query takes `callbackURL` only, once. Anything else
 is refused **400 `VALIDATION_ERROR`**.
 
-**No loops.** The page shows itself, with the reason and a **Continue with
-single sign-on** button, instead of starting again when:
+**No loops.** The page shows itself, with a **Continue with single sign-on**
+button (and the reason, where there is one), instead of starting again when:
 
 - the provider sends back an error;
 - the visitor comes back without a session (for example, a browser that
@@ -659,7 +661,14 @@ single sign-on** button, instead of starting again when:
 - the door could not start a sign-in. It redirects to
   `/login?error=direct_sign_in_unavailable` and writes one `warn` line naming
   why (`no_provider`, `several_providers`, `provider_not_found` or
-  `start_refused`).
+  `start_refused`);
+- the identity provider's sign-in rate limit refused the start (too many
+  starts from one address in a few seconds). It redirects to
+  `/login?error=direct_sign_in_rate_limited`, the page asks the visitor to
+  wait a few seconds and try again, and the `warn` line names `rate_limited`;
+- the person just signed out in that tab. The identity provider's session
+  usually outlives the platform's, so starting again would sign them straight
+  back in.
 
 An OAuth client's authorization hand-off (`client_id` or `redirect_uri` on the
 sign-in URL) keeps today's sign-in page. API keys, bearer tokens, `/api/*` and

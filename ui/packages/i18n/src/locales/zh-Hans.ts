@@ -2799,6 +2799,7 @@ const zh = {
         ssoTechnicalDetails: "技术详情",
         directSignInIncomplete: "登录没有完成：你从单点登录返回时仍未登录。请确认浏览器允许本站点的 Cookie，然后重试。",
         directSignInUnavailable: "无法为本系统发起单点登录。请联系管理员检查本系统使用的登录服务。",
+        directSignInRateLimited: "刚刚从此网络发起的登录过多。请等待几秒后再试。",
         twoFactorInvalidCode: '验证码无效，请检查身份验证器应用后重试。',
         twoFactorInvalidBackupCode: '该备用码无效或已被使用。',
         twoFactorTooManyAttempts: '错误次数过多，请重新使用密码登录。',

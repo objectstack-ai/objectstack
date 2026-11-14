@@ -105,7 +105,11 @@ export interface AuthRouteLedgerEntry {
    * exactly the fact the row is there to record.
    */
   client?: string;
-  /** Optional better-auth plugin this route needs (absent = always mounted). */
+  /**
+   * What this route needs to be mounted (absent = always mounted): a
+   * better-auth plugin, or a setting of this plugin that mounts an
+   * ObjectStack route (`directSignIn`, `scim`).
+   */
   requires?: string;
   /**
    * Name of the `@objectstack/spec/api` export declaring this route's response

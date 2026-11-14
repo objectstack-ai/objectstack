@@ -127,7 +127,7 @@ import type { CounterStore } from './rate-limit-storage.js';
 import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
-import { resolveDirectSignIn, type DirectSignInOptions } from './direct-sign-in.js';
+import type { DirectSignInOptions } from './direct-sign-in.js';
 import {
   devSeedAdminEmail,
   devSeedAdminPassword,
@@ -386,7 +386,7 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * (default: the sign-in page stays at `/login?local=1`) or `off` (the page
    * does not offer it); the server's password sign-in is unchanged either way.
    * Absent ⇒ off. Self-host sets `OS_AUTH_DIRECT_SIGN_IN_ENABLED`,
-   * `OS_AUTH_DIRECT_SIGN_IN_PROVIDER` and `OS_AUTH_LOCAL_SIGN_IN`, which win
+   * `OS_AUTH_DIRECT_SIGN_IN_PROVIDER` and `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH`, which win
    * over this option field by field.
    */
   directSignIn?: DirectSignInOptions;
@@ -651,6 +651,14 @@ export class AuthPlugin implements Plugin {
 
   private options: AuthPluginOptions;
   private authManager: AuthManager | null = null;
+  /**
+   * Whether a route registration mounted direct sign-in's start door. The
+   * door is mounted from the manager's setting and `/auth/config` advertises
+   * `directSignIn: true` only while this is set, so the flag never names a door
+   * that is not on the route table (a setting turned on after registration
+   * takes a restart, and is advertised `false` until then).
+   */
+  private directSignInDoorMounted = false;
   /** ADR-0093 D4 — the tenancy service registered in init(); reused at kernel:ready. */
   private tenancy: TenancyService | null = null;
   /** [ADR-0131 D3] Whether `start()` created the Default Organization (a fresh install). */
@@ -3962,7 +3970,8 @@ export class AuthPlugin implements Plugin {
         // Refine "direct sign-in on" to "able to start" (one provider resolves),
         // so the sign-in page navigates only to a door that starts a sign-in.
         if (config.features?.directSignIn) {
-          config.features.directSignIn = await this.authManager!.isDirectSignInUsable();
+          config.features.directSignIn =
+            this.directSignInDoorMounted && (await this.authManager!.isDirectSignInUsable());
         }
         return c.json({ success: true, data: config });
       } catch (error) {
@@ -3975,11 +3984,13 @@ export class AuthPlugin implements Plugin {
     // Direct sign-in's start door (`direct-sign-in.ts`): mounted only while the
     // setting is on, so with it off this path is better-auth's 404 as before.
     // Registered before the wildcard so it takes precedence; the IP allow-list
-    // above applies to it like every sign-in door. The setting is resolved from
-    // this plugin's own option and the environment, the same inputs the
-    // manager resolves it from.
-    const env = ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>;
-    if (resolveDirectSignIn(this.options.directSignIn, env).enabled) {
+    // above applies to it like every sign-in door. The setting is the manager's
+    // (`directSignInSetting()`), the one `/auth/config` serves, so an option an
+    // `auth:configure` handler contributed mounts the door it advertises; a
+    // manager without the method (a partial double) mounts nothing.
+    const manager = this.authManager as Partial<AuthManager> | null;
+    if (typeof manager?.directSignInSetting === 'function' && manager.directSignInSetting().enabled) {
+      this.directSignInDoorMounted = true;
       rawApp.get(`${basePath}/sign-in/direct`, (c: any) =>
         this.authManager!.startDirectSignIn(c.req.raw, transportOf(c)),
       );

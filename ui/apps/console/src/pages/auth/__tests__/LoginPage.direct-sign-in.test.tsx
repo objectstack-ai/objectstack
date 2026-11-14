@@ -21,8 +21,8 @@
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import { AuthProvider } from '@object-ui/auth';
+import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from '@object-ui/auth';
 import type { AuthClient } from '@object-ui/auth';
 import { LoginPage } from '../LoginPage';
 import { decideDirectSignIn, directSignInStartUrl } from '../directSignIn';
@@ -76,6 +76,17 @@ describe('decideDirectSignIn', () => {
     expect(decide(ON.features, '?error=access_denied')).toBe('hold');
     expect(decide(ON.features, '?error=direct_sign_in_unavailable')).toBe('hold');
     expect(decide(ON.features, '?redirect=%2Fapps&direct=returned')).toBe('incomplete');
+  });
+
+  it('holds after an explicit sign-out in this tab, and only then (ruling 6879236460)', () => {
+    expect(decideDirectSignIn({ features: ON.features, search: '', signedOut: true })).toBe('signedOut');
+    expect(decideDirectSignIn({ features: ON.features, search: '', signedOut: false })).toBe('start');
+    // An error or a return keeps its own reason on the card.
+    expect(decideDirectSignIn({ features: ON.features, search: '?error=x', signedOut: true })).toBe('hold');
+    expect(decideDirectSignIn({ features: ON.features, search: '?direct=returned', signedOut: true })).toBe('incomplete');
+    // Today's page stays today's page.
+    expect(decideDirectSignIn({ features: ON.features, search: '?local=1', signedOut: true })).toBe('local');
+    expect(decideDirectSignIn({ features: {}, search: '', signedOut: true })).toBe('off');
   });
 
   it('keeps an OAuth client hand-off on today\'s page', () => {
@@ -174,5 +185,76 @@ describe('LoginPage — direct sign-in', () => {
     );
     await screen.findByLabelText('Email');
     expect(window.location.replace).not.toHaveBeenCalled();
+  });
+
+  it('names a start the sign-in rate limit refused, on the retry card, without starting again', async () => {
+    renderLogin('?error=direct_sign_in_rate_limited', ON);
+    const alert = await screen.findByTestId('sso-callback-refusal');
+    expect(alert.textContent).toContain(
+      'Too many sign-ins were started from this network just now. Wait a few seconds, then try again.',
+    );
+    expect(screen.getByTestId('direct-sign-in-retry-button')).toBeTruthy();
+    expect(window.location.replace).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Ruling 6879236460 (objectstack#33183): after an explicit sign-out in this
+ * tab the page holds with a sign-in button; only a fresh signed-out visit
+ * starts on its own. Driven through the real `AuthProvider`: the visitor is
+ * signed in, signs out from a page, and lands on the sign-in page in the same
+ * tab.
+ */
+describe('LoginPage — direct sign-in after an explicit sign-out', () => {
+  function SignOutPage() {
+    const { signOut } = useAuth();
+    const navigate = useNavigate();
+    return (
+      <button
+        type="button"
+        onClick={async () => {
+          await signOut();
+          navigate('/login');
+        }}
+      >
+        Sign out
+      </button>
+    );
+  }
+
+  function renderSignedIn() {
+    let serverUser: { id: string; name: string; email: string } | null = {
+      id: 'user_a',
+      name: 'Ada',
+      email: 'ada@example.com',
+    };
+    window.history.replaceState({}, '', '/login');
+    const client = {
+      getSession: vi.fn(async () => (serverUser ? { user: serverUser, session: { token: 'tok_a' } } : null)),
+      getConfig: vi.fn().mockResolvedValue(ON),
+      signOut: vi.fn(async () => {
+        serverUser = null;
+      }),
+    } as unknown as AuthClient;
+    return render(
+      <AuthProvider authUrl="/api/v1/auth" client={client}>
+        <MemoryRouter initialEntries={['/home']}>
+          <Routes>
+            <Route path="/home" element={<SignOutPage />} />
+            <Route path="/login" element={<LoginPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>,
+    );
+  }
+
+  it('holds the page with a sign-in button instead of going back to the identity provider', async () => {
+    renderSignedIn();
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+    const retry = await screen.findByTestId('direct-sign-in-retry-button');
+    expect(screen.queryByLabelText('Email')).toBeNull();
+    expect(window.location.replace).not.toHaveBeenCalled();
+    fireEvent.click(retry);
+    expect(window.location.replace).toHaveBeenCalledWith(doorFor('/login?direct=returned'));
   });
 });

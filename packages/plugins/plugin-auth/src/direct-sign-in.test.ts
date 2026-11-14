@@ -26,8 +26,12 @@ import { Hono } from 'hono';
 import type { PluginContext } from '@objectstack/core';
 import { AuthPlugin } from './auth-plugin';
 import { AuthManager } from './auth-manager';
+import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@objectstack/rest';
+import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import {
   DIRECT_SIGN_IN_ENV,
+  DIRECT_SIGN_IN_QUERY_PARAMS,
+  DIRECT_SIGN_IN_RATE_LIMITED,
   DIRECT_SIGN_IN_UNAVAILABLE,
   chooseDirectSignInProvider,
   keptReturnPath,
@@ -70,6 +74,8 @@ const FOREIGN_RETURN_PATHS = [
   '/%09/evil.example',
   '/%0a/evil.example',
   '/%E0%A4%A',
+  '/..//evil.example',
+  '/%2e%2e//evil.example',
   '',
   `/${'a'.repeat(2048)}`,
 ];
@@ -106,7 +112,7 @@ describe('resolveDirectSignIn: the setting in force', () => {
   });
 
   it('refuses an off-vocabulary local sign-in path loudly, from the option or the environment', () => {
-    expect(() => resolveDirectSignIn({ localSignIn: 'of' as never }, {})).toThrow(/OS_AUTH_LOCAL_SIGN_IN/);
+    expect(() => resolveDirectSignIn({ localSignIn: 'of' as never }, {})).toThrow(/OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH/);
     expect(() => resolveDirectSignIn(undefined, { [DIRECT_SIGN_IN_ENV.localSignIn]: 'none' })).toThrow(/hidden/);
   });
 });
@@ -241,6 +247,22 @@ describe('runDirectSignIn: the start door', () => {
     }
   });
 
+  it('answers the two refusals with the shared sentences every route uses', async () => {
+    const unknown = await (await runDirectSignIn(door('?returnTo=%2F'), fakeHost().host)).json();
+    expect(unknown.error.message).toBe(unknownQueryParamRefusalMessage({ returnTo: ['/'] }, DIRECT_SIGN_IN_QUERY_PARAMS));
+    const repeated = await (await runDirectSignIn(door('?callbackURL=%2F&callbackURL=%2Fx'), fakeHost().host)).json();
+    expect(repeated.error.message).toBe(repeatedQueryParamMessage('callbackURL', 2));
+  });
+
+  it('tells a start the vendor\'s rate limit refused apart: wait and retry, not a configuration problem', async () => {
+    const { host } = fakeHost({ dispatch: async () => new Response('{"message":"Too many requests"}', { status: 429 }) });
+    const res = await runDirectSignIn(door('?callbackURL=%2F_console%2F'), host);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(`${ORIGIN}/_console/login?error=${DIRECT_SIGN_IN_RATE_LIMITED}`);
+    expect(host.logger!.warn).toHaveBeenCalledTimes(1);
+    expect((host.logger!.warn as any).mock.calls[0][1]).toMatchObject({ reason: 'rate_limited' });
+  });
+
   it('lands on the sign-in page with an error, never a retry, when no provider resolves or the start is refused', async () => {
     const cases: Array<Partial<DirectSignInHost>> = [
       { chooseProvider: async () => ({ miss: 'several_providers' }) },
@@ -262,6 +284,7 @@ describe('runDirectSignIn: the start door', () => {
     const { host, dispatched } = fakeHost({ setting: () => ({ enabled: false }) });
     const res = await runDirectSignIn(door('?callbackURL=%2F'), host);
     expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe('RESOURCE_NOT_FOUND');
     expect(dispatched).toHaveLength(0);
   });
 });
@@ -402,6 +425,76 @@ describe('CONTROL: with the setting off, the door and /auth/config are what they
   it('the environment turns it off over the option', async () => {
     process.env[DIRECT_SIGN_IN_ENV.enabled] = 'false';
     const { app } = mount({ provider: PLATFORM_IDP });
+    expect((await config(app)).features.directSignIn).toBe(false);
+    expect((await app.request(`${ORIGIN}/api/v1/auth/sign-in/direct`)).status).toBe(404);
+  });
+});
+
+describe('one source: the door is mounted exactly when /auth/config advertises it', () => {
+  /** `AuthPlugin.init()` with an `auth:configure` handler that contributes the setting. */
+  async function composeThroughConfigure(contribute: Record<string, unknown> | undefined) {
+    const engine = createMemoryEngine();
+    const ctx = {
+      registerService: vi.fn(),
+      getService: vi.fn((name: string) => {
+        if (name === 'data') return engine;
+        if (name === 'manifest') return { register: vi.fn() };
+        return undefined;
+      }),
+      getServices: vi.fn(() => new Map()),
+      hook: vi.fn(),
+      // What a package's `auth:configure` handler does: mutate the draft.
+      trigger: vi.fn(async (name: string, draft: Record<string, unknown>) => {
+        if (name === 'auth:configure' && contribute) Object.assign(draft, contribute);
+      }),
+      logger: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() },
+      getKernel: vi.fn(),
+    } as unknown as PluginContext;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const plugin = new AuthPlugin({
+      secret: SECRET,
+      baseUrl: ORIGIN,
+      registerRoutes: false,
+      oidcProviders: [
+        {
+          providerId: PLATFORM_IDP,
+          clientId: `${PLATFORM_IDP}-client`,
+          clientSecret: `${PLATFORM_IDP}-secret`,
+          authorizationUrl: `${IDP}/${PLATFORM_IDP}/authorize`,
+          tokenUrl: `${IDP}/${PLATFORM_IDP}/token`,
+          userInfoUrl: `${IDP}/${PLATFORM_IDP}/userinfo`,
+          pkce: false,
+        },
+      ],
+    } as never);
+    await plugin.init(ctx);
+    warnSpy.mockRestore();
+    const app = new Hono();
+    (plugin as any).registerAuthRoutes({ getRawApp: () => app, getPort: () => 0 }, ctx);
+    return { app };
+  }
+
+  it('a setting an auth:configure handler contributes mounts the door it advertises', async () => {
+    const { app } = await composeThroughConfigure({ directSignIn: { provider: PLATFORM_IDP, localSignIn: 'off' } });
+    const data = await config(app);
+    expect(data.features.directSignIn).toBe(true);
+    expect(data.features.localSignIn).toBe('off');
+    const res = await app.request(`${ORIGIN}/api/v1/auth/sign-in/direct?callbackURL=%2F_console%2F`);
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get('location')!);
+    expect(`${location.origin}${location.pathname}`).toBe(`${IDP}/${PLATFORM_IDP}/authorize`);
+  });
+
+  it('CONTROL: with no contribution there is no door and nothing is advertised', async () => {
+    const { app } = await composeThroughConfigure(undefined);
+    expect((await config(app)).features.directSignIn).toBe(false);
+    expect((await app.request(`${ORIGIN}/api/v1/auth/sign-in/direct`)).status).toBe(404);
+  });
+
+  it('a setting turned on after the routes were registered is not advertised until the door exists', async () => {
+    const { app } = mount();
+    process.env[DIRECT_SIGN_IN_ENV.enabled] = 'true';
+    process.env[DIRECT_SIGN_IN_ENV.provider] = PLATFORM_IDP;
     expect((await config(app)).features.directSignIn).toBe(false);
     expect((await app.request(`${ORIGIN}/api/v1/auth/sign-in/direct`)).status).toBe(404);
   });

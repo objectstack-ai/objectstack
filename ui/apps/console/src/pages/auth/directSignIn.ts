@@ -32,7 +32,10 @@ import type { AuthPublicConfig } from '@object-ui/auth';
  *    bounce forever;
  *  - an OAuth client's hand-off (`client_id` / `redirect_uri`) is on the URL:
  *    it keeps today's page, so MCP and OAuth clients are unaffected;
- *  - `?local=1` while the local sign-in path is `hidden`.
+ *  - `?local=1` while the local sign-in path is `hidden`;
+ *  - the person signed out in this tab just now: the identity provider's
+ *    session usually outlives ours, so starting again would sign them straight
+ *    back in. The page offers the sign-in instead, and starts it when asked.
  */
 
 /** The query mark on the return address. */
@@ -41,6 +44,9 @@ export const DIRECT_SIGN_IN_RETURN_VALUE = 'returned';
 
 /** The door's `error` code when it could not start a sign-in. */
 export const DIRECT_SIGN_IN_UNAVAILABLE = 'direct_sign_in_unavailable';
+
+/** The door's `error` code when the sign-in rate limit refused the start. */
+export const DIRECT_SIGN_IN_RATE_LIMITED = 'direct_sign_in_rate_limited';
 
 /** What the page does for a signed-out visitor. */
 export type DirectSignInDecision =
@@ -55,11 +61,15 @@ export type DirectSignInDecision =
   /** On, but the URL carries `error`: the page says so and offers a retry. */
   | 'hold'
   /** On, and the last start came back without a session. */
-  | 'incomplete';
+  | 'incomplete'
+  /** On, and the person signed out in this tab: the page offers the sign-in. */
+  | 'signedOut';
 
 export function decideDirectSignIn(input: {
   features: AuthPublicConfig['features'] | undefined;
   search: string;
+  /** `useAuth().sessionEndedBySignOut`: an explicit sign-out ended the session. */
+  signedOut?: boolean;
 }): DirectSignInDecision {
   const { features } = input;
   if (features?.directSignIn !== true) return 'off';
@@ -68,6 +78,7 @@ export function decideDirectSignIn(input: {
   if (params.has('client_id') || params.has('redirect_uri')) return 'handoff';
   if (params.has('error')) return 'hold';
   if (params.get(DIRECT_SIGN_IN_RETURN_PARAM) === DIRECT_SIGN_IN_RETURN_VALUE) return 'incomplete';
+  if (input.signedOut === true) return 'signedOut';
   return 'start';
 }
 

@@ -130,6 +130,7 @@ export function LoginPage() {
     activeOrganization,
     switchOrganization,
     getAuthConfig,
+    sessionEndedBySignOut,
   } = useAuth();
   // #29971 — a `redirect` naming the mobile sign-in hand-off: where to go
   // after sign-in, and whether the signed-in session is too old for it, in
@@ -270,12 +271,17 @@ export function LoginPage() {
 
   // Direct sign-in (`./directSignIn`): decided once the server's config is
   // known, from the server's own flag and this URL. `start` navigates a
-  // signed-out visitor straight to the identity provider; `hold` and
-  // `incomplete` draw the page with a retry instead (the loop guard); `off`,
-  // `local` and `handoff` draw today's page.
+  // signed-out visitor straight to the identity provider; `hold`,
+  // `incomplete` and `signedOut` (an explicit sign-out in this tab) draw the
+  // page with a sign-in button instead (the loop guard); `off`, `local` and
+  // `handoff` draw today's page.
   const directSignIn =
     configRead === 'known' && typeof window !== 'undefined'
-      ? decideDirectSignIn({ features: authConfig?.features, search: window.location.search })
+      ? decideDirectSignIn({
+          features: authConfig?.features,
+          search: window.location.search,
+          signedOut: sessionEndedBySignOut,
+        })
       : 'off';
   const directSignInStartedRef = useRef(false);
   const startDirectSignIn = () => {
@@ -289,7 +295,8 @@ export function LoginPage() {
     if (directSignInStartedRef.current) return;
     startDirectSignIn();
   }, [directSignIn, hasBootstrapped, signInNeeded]);
-  const directSignInRetry = directSignIn === 'hold' || directSignIn === 'incomplete';
+  const directSignInRetry =
+    directSignIn === 'hold' || directSignIn === 'incomplete' || directSignIn === 'signedOut';
 
   // Post-login orchestration — fires once we observe an authenticated user.
   useEffect(() => {
@@ -507,8 +514,8 @@ export function LoginPage() {
               <InvitationLinkHint offer={signUpOffer} />
               {/* The row signs in with email and password: with that sign-in
                   off (the same answer `LoginForm` reads) the server refuses
-                  it, and with the local sign-in path `off` the page draws no
-                  local way in, so the row is not drawn. */}
+                  it, and with the local sign-in path `off` the sign-in form
+                  draws no local way in, so neither does this row. */}
               {devSeedAdmin
                 && authConfig?.emailPassword?.enabled !== false
                 && authConfig?.features?.localSignIn !== 'off' ? (
@@ -525,9 +532,9 @@ export function LoginPage() {
 
 /**
  * Direct sign-in's retry, in place of the form when the last attempt came back
- * with an error or without a session (the loop guard in `./directSignIn`): the
- * page says so above, and this starts the sign-in again only when the person
- * asks. No password form: under direct sign-in that page lives at
+ * with an error or without a session, or the person just signed out (the loop
+ * guard in `./directSignIn`): the page says why above where there is a why,
+ * and this starts the sign-in again only when the person asks. No password form: under direct sign-in that page lives at
  * `/login?local=1`, when the deployment keeps it at all.
  */
 function DirectSignInRetry({ onRetry }: { onRetry: () => void }) {

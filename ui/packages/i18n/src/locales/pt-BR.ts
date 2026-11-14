@@ -2792,6 +2792,7 @@ const pt = {
         ssoTechnicalDetails: "Detalhes técnicos",
         directSignInIncomplete: "O login não foi concluído: você voltou do login único sem estar conectado. Verifique se este navegador permite cookies para este site e tente novamente.",
         directSignInUnavailable: "Não foi possível iniciar o login único para este sistema. Peça ao seu administrador para verificar qual serviço de login ele usa.",
+        directSignInRateLimited: "Muitos logins foram iniciados a partir desta rede agora há pouco. Aguarde alguns segundos e tente novamente.",
         twoFactorInvalidCode: "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
         twoFactorInvalidBackupCode: "Esse código de backup não é válido ou já foi usado.",
         twoFactorTooManyAttempts: "Muitos códigos incorretos. Faça login novamente com sua senha.",

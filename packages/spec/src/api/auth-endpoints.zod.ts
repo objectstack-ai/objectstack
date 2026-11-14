@@ -293,7 +293,8 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
     + 'The served value is refined to "one provider resolves" before answering; absent or false means the sign-in page is shown as usual',
   ),
   localSignIn: z.enum(['hidden', 'off']).optional().describe(
-    'The sign-in page behind direct sign-in, served only while direct sign-in is on: hidden keeps it at /login?local=1, off means the page does not offer it. '
+    'The local sign-in path behind direct sign-in, served while the direct sign-in setting is on, whatever directSignIn reads (it can read false when no provider can start): '
+    + 'hidden keeps the sign-in form at /login?local=1, off means the sign-in form offers no local way in. '
     + 'It changes no server door: password sign-in answers the same either way',
   ),
   phoneNumber: z.boolean().optional().describe(

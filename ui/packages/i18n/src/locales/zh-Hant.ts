@@ -2799,6 +2799,7 @@ const zhHant = {
         ssoTechnicalDetails: "技術詳情",
         directSignInIncomplete: "登入沒有完成：你從單點登入返回時仍未登入。請確認瀏覽器允許本站點的 Cookie，然後重試。",
         directSignInUnavailable: "無法為本系統發起單點登入。請聯絡管理員檢查本系統使用的登入服務。",
+        directSignInRateLimited: "剛剛從此網路發起的登入過多。請等待幾秒後再試。",
         twoFactorInvalidCode: '驗證碼無效，請檢查身份驗證器應用後重試。',
         twoFactorInvalidBackupCode: '該備用碼無效或已被使用。',
         twoFactorTooManyAttempts: '錯誤次數過多，請重新使用密碼登入。',

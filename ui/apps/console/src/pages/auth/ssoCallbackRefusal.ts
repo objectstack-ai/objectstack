@@ -53,6 +53,11 @@ const DIRECT_SIGN_IN_UNAVAILABLE: RefusalCopy = {
     "Single sign-on could not be started for this system. Ask your administrator to check which sign-in service it uses.",
 };
 
+const DIRECT_SIGN_IN_RATE_LIMITED: RefusalCopy = {
+  key: 'auth.login.errors.directSignInRateLimited',
+  defaultValue: 'Too many sign-ins were started from this network just now. Wait a few seconds, then try again.',
+};
+
 const GENERIC: RefusalCopy = {
   key: 'auth.login.errors.oauthCallbackFailed',
   defaultValue:
@@ -89,6 +94,7 @@ const SSO_CALLBACK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
   unsolicited_response: START_FROM_LOGIN_PAGE,
   state_not_found: START_FROM_LOGIN_PAGE,
   direct_sign_in_unavailable: DIRECT_SIGN_IN_UNAVAILABLE,
+  direct_sign_in_rate_limited: DIRECT_SIGN_IN_RATE_LIMITED,
 };
 
 /**

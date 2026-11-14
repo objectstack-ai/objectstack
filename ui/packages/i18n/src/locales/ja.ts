@@ -2729,6 +2729,7 @@ const ja = {
         ssoTechnicalDetails: "技術的な詳細",
         directSignInIncomplete: "サインインが完了しませんでした。シングルサインオンから戻りましたが、サインインされていません。このブラウザーでこのサイトの Cookie が許可されているか確認して、もう一度お試しください。",
         directSignInUnavailable: "このシステムのシングルサインオンを開始できませんでした。使用しているサインインサービスの確認を管理者に依頼してください。",
+        directSignInRateLimited: "このネットワークから短時間に多くのサインインが開始されました。数秒待ってから、もう一度お試しください。",
         twoFactorInvalidCode: "コードが無効です。認証アプリを確認して、もう一度お試しください。",
         twoFactorInvalidBackupCode: "このバックアップコードは無効か、すでに使用されています。",
         twoFactorTooManyAttempts: "誤ったコードの入力が多すぎます。パスワードでもう一度サインインしてください。",

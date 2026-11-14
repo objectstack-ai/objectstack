@@ -945,7 +945,7 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * deployment signed out goes straight to the identity provider and comes
    * back to the page they opened. Absent ⇒ off. The environment wins field by
    * field: `OS_AUTH_DIRECT_SIGN_IN_ENABLED`, `OS_AUTH_DIRECT_SIGN_IN_PROVIDER`,
-   * `OS_AUTH_LOCAL_SIGN_IN` (`hidden` | `off`).
+   * `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH` (`hidden` | `off`).
    */
   directSignIn?: DirectSignInOptions;
 

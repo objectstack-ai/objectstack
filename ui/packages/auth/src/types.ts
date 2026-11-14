@@ -319,9 +319,10 @@ export interface AuthPublicConfig {
      */
     directSignIn?: boolean;
     /**
-     * The sign-in page behind direct sign-in, served only while
-     * `directSignIn` is on: `hidden` keeps it at `/login?local=1`, `off` means
-     * the page does not offer it.
+     * The local sign-in path behind direct sign-in, served while the server's
+     * direct sign-in setting is on, whatever `directSignIn` reads (it can read
+     * `false` when no provider can start): `hidden` keeps the sign-in form at
+     * `/login?local=1`, `off` means the sign-in form offers no local way in.
      */
     localSignIn?: 'hidden' | 'off';
     /**

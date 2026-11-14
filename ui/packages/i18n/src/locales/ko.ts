@@ -2727,6 +2727,7 @@ const ko = {
         ssoTechnicalDetails: "기술 세부 정보",
         directSignInIncomplete: "로그인이 완료되지 않았습니다. 싱글 사인온에서 돌아왔지만 로그인되지 않았습니다. 이 브라우저에서 이 사이트의 쿠키가 허용되어 있는지 확인한 후 다시 시도하세요.",
         directSignInUnavailable: "이 시스템의 싱글 사인온을 시작할 수 없습니다. 관리자에게 사용하는 로그인 서비스를 확인해 달라고 요청하세요.",
+        directSignInRateLimited: "방금 이 네트워크에서 너무 많은 로그인이 시작되었습니다. 몇 초 기다린 후 다시 시도하세요.",
         twoFactorInvalidCode: "코드가 올바르지 않습니다. 인증 앱을 확인한 후 다시 시도하세요.",
         twoFactorInvalidBackupCode: "백업 코드가 올바르지 않거나 이미 사용되었습니다.",
         twoFactorTooManyAttempts: "잘못된 코드를 너무 많이 입력했습니다. 비밀번호로 다시 로그인하세요.",

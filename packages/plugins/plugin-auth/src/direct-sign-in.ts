@@ -14,8 +14,8 @@
  * - The Console's `/login` route is the other half: it navigates to the door
  *   when `/auth/config` serves `features.directSignIn: true`, and draws the
  *   page instead whenever its loop guard says so (an `error` on the URL, a
- *   recent start that did not end in a session, `?local=1` while the local
- *   path is `hidden`, an OAuth client's hand-off).
+ *   start that came back without a session, an explicit sign-out, `?local=1`
+ *   while the local path is `hidden`, an OAuth client's hand-off).
  *
  * The redirect is only ever made by that page. No server route answers a
  * request with a redirect it did not answer with before: the API, `/mcp`,
@@ -49,6 +49,7 @@
  * keeps a local credential reachable.
  */
 
+import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@objectstack/rest';
 import { carryForwardedClientAddress } from './client-address-forwarding.js';
 import { SSO_PROVIDER_OBJECT } from './sso-client-secret.js';
 import type { SsoProviderReader } from './sso-sign-in-options.js';
@@ -83,7 +84,7 @@ export type ResolvedDirectSignIn =
 export const DIRECT_SIGN_IN_ENV = {
   enabled: 'OS_AUTH_DIRECT_SIGN_IN_ENABLED',
   provider: 'OS_AUTH_DIRECT_SIGN_IN_PROVIDER',
-  localSignIn: 'OS_AUTH_LOCAL_SIGN_IN',
+  localSignIn: 'OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH',
 } as const;
 
 /** The start door's path under the auth `basePath`. */
@@ -98,6 +99,14 @@ export const DIRECT_SIGN_IN_QUERY_PARAMS: readonly string[] = ['callbackURL'];
  * start). The page draws, and does not navigate again.
  */
 export const DIRECT_SIGN_IN_UNAVAILABLE = 'direct_sign_in_unavailable';
+
+/**
+ * The `error` code the door lands on the sign-in page with when the vendor's
+ * sign-in rate limit refused the start (`429`): too many starts from one
+ * address just now. Told apart from {@link DIRECT_SIGN_IN_UNAVAILABLE} so the
+ * page says "wait and try again", not "ask your administrator".
+ */
+export const DIRECT_SIGN_IN_RATE_LIMITED = 'direct_sign_in_rate_limited';
 
 /** The longest return path kept; a longer one is dropped. */
 export const RETURN_PATH_MAX = 2048;
@@ -172,8 +181,8 @@ function isPlainSameOriginPath(path: string): boolean {
  * Kept only when, at every layer of percent-decoding (up to three), it starts
  * with exactly one `/`, carries no backslash and no control character (a tab or
  * a newline included), and when a URL parser resolving it against an
- * arbitrary origin stays on that origin. A path that does not decode cleanly is
- * dropped too.
+ * arbitrary origin stays on that origin with a path that does not start with
+ * `//`. A path that does not decode cleanly is dropped too.
  */
 export function keptReturnPath(raw: unknown): string | undefined {
   if (typeof raw !== 'string' || raw.length === 0 || raw.length > RETURN_PATH_MAX) return undefined;
@@ -192,7 +201,10 @@ export function keptReturnPath(raw: unknown): string | undefined {
   if (!isPlainSameOriginPath(layer)) return undefined;
   const probe = 'https://return-path.invalid';
   try {
-    if (new URL(raw, probe).origin !== probe) return undefined;
+    const resolved = new URL(raw, probe);
+    if (resolved.origin !== probe) return undefined;
+    // Judge the path the parser resolved too (`/..//x` resolves to `//x`).
+    if (resolved.pathname.startsWith('//')) return undefined;
   } catch {
     return undefined;
   }
@@ -280,7 +292,7 @@ export interface DirectSignInHost {
 }
 
 /** Why the door did not start a sign-in: the `reason` of its one `warn` line. */
-export type DirectSignInMiss = DirectSignInProviderMiss | 'start_refused';
+export type DirectSignInMiss = DirectSignInProviderMiss | 'start_refused' | 'rate_limited';
 
 function startHeaders(request: Request, origin: string): Headers {
   const headers = new Headers({ 'content-type': 'application/json', origin });
@@ -307,9 +319,11 @@ function redirect(location: string, cookies: readonly string[] = []): Response {
   return new Response(null, { status: 302, headers });
 }
 
-/** The query names a request carries, each once per occurrence. */
-function queryNames(url: URL): string[] {
-  return [...url.searchParams.keys()];
+/** The query a request carries, each name with every value it was sent. */
+function queryOf(url: URL): Record<string, string[]> {
+  const query: Record<string, string[]> = {};
+  for (const [name, value] of url.searchParams) (query[name] ??= []).push(value);
+  return query;
 }
 
 /**
@@ -321,29 +335,29 @@ function queryNames(url: URL): string[] {
  *   returning to the kept path ({@link keptReturnPath}) or the Console root;
  *   every failure of the sign-in lands on the Console's `/login` with `error`.
  * - No provider to start, or a start the vendor refused ⇒ `302` to the
- *   Console's `/login?error=direct_sign_in_unavailable`, and one `warn` line.
+ *   Console's `/login?error=direct_sign_in_unavailable`, and one `warn` line;
+ *   a start the vendor's rate limit refused (`429`) ⇒ the same, with
+ *   `error=direct_sign_in_rate_limited` and the reason `rate_limited`.
  *
  * The caller mounts the door only while the setting is on; a call with it off
- * answers 404 like an unmounted route.
+ * answers `404 RESOURCE_NOT_FOUND` like an unmounted route.
  */
 export async function runDirectSignIn(request: Request, host: DirectSignInHost): Promise<Response> {
   const setting = host.setting();
   if (!setting.enabled) {
-    return new Response(JSON.stringify({ success: false, error: { code: 'NOT_FOUND', message: 'Not found' } }), {
+    return new Response(JSON.stringify({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'Not found' } }), {
       status: 404,
       headers: { 'content-type': 'application/json' },
     });
   }
   const url = new URL(request.url);
-  const names = queryNames(url);
-  const unknown = [...new Set(names.filter((name) => !DIRECT_SIGN_IN_QUERY_PARAMS.includes(name)))].sort();
-  const repeated = names.filter((name) => name === 'callbackURL').length > 1;
-  if (unknown.length > 0 || repeated) {
-    const message = unknown.length > 0
-      ? `${unknown.length === 1 ? `The "${unknown[0]}" query parameter is` : `The query parameters ${unknown.map((n) => `"${n}"`).join(', ')} are`} `
-        + 'not supported by this endpoint. This endpoint will not silently ignore a parameter it does not understand. '
-        + `Supported parameters: ${DIRECT_SIGN_IN_QUERY_PARAMS.join(', ')}.`
-      : 'The "callbackURL" query parameter was supplied more than once; send it once.';
+  const query = queryOf(url);
+  // The shared sentences every route answers these two refusals with
+  // (`@objectstack/rest`); the unknown name outranks the repeated one.
+  const callbackCount = query.callbackURL?.length ?? 0;
+  const message = unknownQueryParamRefusalMessage(query, DIRECT_SIGN_IN_QUERY_PARAMS)
+    ?? (callbackCount > 1 ? repeatedQueryParamMessage('callbackURL', callbackCount) : undefined);
+  if (message !== undefined) {
     return new Response(JSON.stringify({ success: false, error: { code: 'VALIDATION_ERROR', message } }), {
       status: 400,
       headers: { 'content-type': 'application/json' },
@@ -355,7 +369,8 @@ export async function runDirectSignIn(request: Request, host: DirectSignInHost):
     const meta = { entry: 'direct_sign_in', reason, ...(providerId ? { providerId } : {}) };
     if (host.logger) host.logger.warn(text, meta);
     else console.warn(text, meta);
-    return redirect(`${host.consolePageUrl('/login')}?error=${DIRECT_SIGN_IN_UNAVAILABLE}`);
+    const code = reason === 'rate_limited' ? DIRECT_SIGN_IN_RATE_LIMITED : DIRECT_SIGN_IN_UNAVAILABLE;
+    return redirect(`${host.consolePageUrl('/login')}?error=${code}`);
   };
 
   let chosen: DirectSignInProvider | { miss: DirectSignInProviderMiss };
@@ -394,6 +409,9 @@ export async function runDirectSignIn(request: Request, host: DirectSignInHost):
   } catch {
     return unavailable('start_refused', chosen.providerId);
   }
+  // The vendor's sign-in limiter counts each start against the caller's
+  // address; a refusal there is load, not configuration, and is said so.
+  if (started.status === 429) return unavailable('rate_limited', chosen.providerId);
   const location = started.status === 200 ? await authorizationUrlOf(started) : undefined;
   if (!location) return unavailable('start_refused', chosen.providerId);
   return redirect(location, started.headers.getSetCookie?.() ?? []);

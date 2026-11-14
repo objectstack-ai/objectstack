@@ -2793,6 +2793,7 @@ const fr = {
         ssoTechnicalDetails: "Détails techniques",
         directSignInIncomplete: "La connexion n'a pas abouti : vous êtes revenu de l'authentification unique sans être connecté. Vérifiez que ce navigateur autorise les cookies pour ce site, puis réessayez.",
         directSignInUnavailable: "L'authentification unique n'a pas pu être lancée pour ce système. Demandez à votre administrateur de vérifier le service de connexion utilisé.",
+        directSignInRateLimited: "Trop de connexions ont été lancées depuis ce réseau à l'instant. Patientez quelques secondes, puis réessayez.",
         twoFactorInvalidCode: "Ce code n'est pas valide. Vérifiez votre application d'authentification et réessayez.",
         twoFactorInvalidBackupCode: "Ce code de secours n'est pas valide ou a déjà été utilisé.",
         twoFactorTooManyAttempts: "Trop de codes incorrects. Reconnectez-vous avec votre mot de passe.",

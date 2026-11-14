@@ -396,10 +396,12 @@ export const PUBLIC_AUTH_FEATURE_NAMES = Object.keys(PUBLIC_AUTH_FEATURES) as [
  * draws each entry with a generic block and no product words of its own (no
  * form reads it yet). `developerEditionCreate` is derived from it.
  *
- * `localSignIn` reports the sign-in page behind direct sign-in: `hidden` (the
- * page stays at `/login?local=1`) or `off` (the page does not offer it).
- * Served only while direct sign-in is on. It gates no spec input and changes
- * no server door: the server's password sign-in is the same either way.
+ * `localSignIn` reports the local sign-in path behind direct sign-in: `hidden`
+ * (the sign-in form stays at `/login?local=1`) or `off` (the sign-in form
+ * offers no local way in). Served while the direct sign-in setting is on,
+ * whatever `directSignIn` reads (it can read `false` when no provider can
+ * start). It gates no spec input and changes no server door: the server's
+ * password sign-in is the same either way.
  */
 export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture', 'audiencePosture', 'turnstileSiteKey', 'organizationEditions', 'localSignIn'] as const;
 

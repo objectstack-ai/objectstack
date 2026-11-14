@@ -3379,6 +3379,7 @@ const en = {
         ssoTechnicalDetails: "Technical details",
         directSignInIncomplete: "Sign-in did not complete: you came back from single sign-on without being signed in. Check that this browser allows cookies for this site, then try again.",
         directSignInUnavailable: "Single sign-on could not be started for this system. Ask your administrator to check which sign-in service it uses.",
+        directSignInRateLimited: "Too many sign-ins were started from this network just now. Wait a few seconds, then try again.",
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
         // server's code (`signInRefusalMessages`).
         twoFactorInvalidCode: 'That code is not valid. Check your authenticator app and try again.',

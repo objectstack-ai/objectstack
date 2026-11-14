@@ -2727,6 +2727,7 @@ const de = {
         ssoTechnicalDetails: "Technische Details",
         directSignInIncomplete: "Die Anmeldung wurde nicht abgeschlossen: Sie sind vom Single Sign-on zurückgekehrt, ohne angemeldet zu sein. Prüfen Sie, ob dieser Browser Cookies für diese Website zulässt, und versuchen Sie es erneut.",
         directSignInUnavailable: "Das Single Sign-on für dieses System konnte nicht gestartet werden. Bitten Sie Ihren Administrator, den verwendeten Anmeldedienst zu prüfen.",
+        directSignInRateLimited: "Von diesem Netzwerk wurden gerade zu viele Anmeldungen gestartet. Warten Sie ein paar Sekunden und versuchen Sie es dann erneut.",
         twoFactorInvalidCode: "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
         twoFactorInvalidBackupCode: "Dieser Backup-Code ist ungültig oder wurde bereits verwendet.",
         twoFactorTooManyAttempts: "Zu viele falsche Codes. Melden Sie sich erneut mit Ihrem Passwort an.",
