@@ -101,11 +101,15 @@ describe('[#21418] the runtime-owned index listing prints no bound value', () =>
 
     // The refusal came from the guard's own catalog statement, after the preflight answered.
     expect(statements.at(-1)).toContain("type = 'index'");
-    expect(steps).toHaveLength(1);
-    expect(steps[0]!.status).toBe('unreadable');
-    expect(steps[0]!.detail).toContain('database is locked');
-    expect(steps[0]!.detail).not.toContain(SENTINEL);
-    expect(steps[0]!.detail).not.toContain('refused to run a raw statement');
+    // One step per guard schema sync builds: the grant's, and the connector
+    // connection's (#31699), each read through the same refusing seam.
+    expect(steps.map((s) => s.migration)).toEqual(['ensureUserPermissionSetPackagelessIndex', 'ensureConnectorConnectionPackagelessIndex']);
+    for (const step of steps) {
+      expect(step.status).toBe('unreadable');
+      expect(step.detail).toContain('database is locked');
+      expect(step.detail).not.toContain(SENTINEL);
+      expect(step.detail).not.toContain('refused to run a raw statement');
+    }
 
     const line = plain(steps);
     expect(line).toContain('database is locked');
@@ -115,10 +119,12 @@ describe('[#21418] the runtime-owned index listing prints no bound value', () =>
   it('a refused engine read: the step is unreadable, its detail and its line carry no sentinel', async () => {
     const steps = await collectSchemaSyncIndexes({ ...deferredWithWork, engine: () => { throw rawStatementFault(); } });
 
-    expect(steps).toHaveLength(1);
-    expect(steps[0]!.status).toBe('unreadable');
-    expect(steps[0]!.detail).toContain('database is locked');
-    expect(steps[0]!.detail).not.toContain(SENTINEL);
+    expect(steps.map((s) => s.migration)).toEqual(['ensureUserPermissionSetPackagelessIndex', 'ensureConnectorConnectionPackagelessIndex']);
+    for (const step of steps) {
+      expect(step.status).toBe('unreadable');
+      expect(step.detail).toContain('database is locked');
+      expect(step.detail).not.toContain(SENTINEL);
+    }
     expect(plain(steps)).not.toContain(SENTINEL);
   });
 });

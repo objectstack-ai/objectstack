@@ -107,6 +107,28 @@ export type {
     UserPermissionSetGuardPassOutcome,
 } from './migrations/user-permission-set-packageless-index.js';
 
+// [ADR-0150 D4 and D8 row R11, #31699] `sys_connector_connection`'s one
+// connection per (organization_id, connector_name) among the connections that
+// name no package — the grant guard's case on the connection table, whose key
+// ADR-0150 D4 widens with the NULL-distinct `connector_package`.
+export {
+    ensureConnectorConnectionPackagelessIndex,
+    createConnectorConnectionGuardAtSchemaSync,
+    buildConnectorConnectionPackagelessIndexSql,
+    buildConnectorConnectionPackagelessIndexPresenceSql,
+    buildConnectorConnectionPackagelessDuplicateProbeSql,
+    resolveConnectorConnectionIndexSeam,
+    buildConnectorConnectionOldKeySql,
+    CONNECTOR_CONNECTION_PACKAGELESS_INDEX_NAME,
+    CONNECTOR_CONNECTION_PACKAGELESS_INDEX_COLUMNS,
+    CONNECTOR_CONNECTION_OLD_KEY_INDEX_NAME,
+} from './migrations/connector-connection-packageless-index.js';
+export type {
+    EnsureConnectorConnectionPackagelessIndexResult,
+    EnsureConnectorConnectionPackagelessIndexStatus,
+    ConnectorConnectionGuardPassOutcome,
+} from './migrations/connector-connection-packageless-index.js';
+
 // [#8629] `sys_setting`'s declared ROW IDENTITY, delivered as a runtime
 // NULL-safe UNIQUE migration — the `ensureOverlayIndex` paradigm again, for the
 // object whose `user_id` key part is NULL on every tenant- and global-scope row

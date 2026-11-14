@@ -205,3 +205,54 @@ describe('ADR-0143 D5 — a connection store that cannot be read refuses 503, ne
         expect(String((err as Error).message)).not.toContain('row 42');
     });
 });
+
+describe('[#31699] a first connect that raced the boot backfill takes its row back, as the old key refused it', () => {
+    /**
+     * The key is `(organization_id, connector_package, connector_name)`. Between
+     * this connect's read ("no row") and its insert, another connect inserted a
+     * row and a booting replica's backfill stamped it with its one holder. The
+     * old `(organization_id, connector_name)` key refused this insert; the wider
+     * key admits it. Ablation (recorded in the PR): with the post-insert count
+     * removed from `connect`, the second row stands and this pin goes red.
+     */
+    it('the second row is deleted and the connect is refused, nothing kept; the stamped row stands', async () => {
+        const ql = await dataEngine();
+        const racing: ConnectorCredentialEngine = {
+            find: (o, q) => ql.find(o, q as never),
+            async insert(o, d, opts) {
+                await ql.insert(
+                    o,
+                    { organization_id: 'org_a', connector_name: 'crm', connector_package: 'com.acme.crm', grant: 'authorization_code', status: 'connected', revision: 1 },
+                    { context: SYSTEM } as never,
+                );
+                return ql.insert(o, d, opts as never);
+            },
+            update: (o, d, opts) => {
+                assertEngineUpdateDispatch(d as never, opts as never);
+                return ql.update(o, d, opts as never);
+            },
+            delete: (o, opts) => {
+                assertEngineDeleteDispatch(opts as never);
+                return ql.delete(o, opts as never);
+            },
+            resolveSecretField: (o, id, f) => (ql as any).resolveSecretField(o, id, f),
+        };
+        const store = new ConnectorConnectionStore(() => racing);
+        await expect(
+            store.connect({ organizationId: 'org_a', connectorName: 'crm', userId: 'usr_admin', refreshToken: 'dummy-rt-1' }),
+        ).rejects.toThrow(/changed while this connect was completing/);
+        const rows = (await ql.find(CONNECTOR_CONNECTION_OBJECT, {
+            where: { organization_id: 'org_a', connector_name: 'crm' },
+            context: SYSTEM,
+        } as never)) as Array<Record<string, unknown>>;
+        expect(rows.map((r) => r.connector_package)).toEqual(['com.acme.crm']);
+    });
+
+    it('CONTROL: a first connect with no race keeps its one row', async () => {
+        const ql = await dataEngine();
+        const { store, record } = await connected(ql);
+        expect((await store.read('org_a', 'crm'))!.id).toBe(record.id);
+        const rows = (await ql.find(CONNECTOR_CONNECTION_OBJECT, { where: { organization_id: 'org_a' }, context: SYSTEM } as never)) as unknown[];
+        expect(rows).toHaveLength(1);
+    });
+});
