@@ -235,10 +235,12 @@ describe('flow conditions under the null-guard gate (#29026)', () => {
 // #33246 — the runtime publish door hands the rules every object as the
 // registry SERVES it: the system columns the registry injects (`created_at`,
 // `updated_at`, `owner_id`, …) are declared fields there, `required: false`
-// with no default. `os build` reads the objects as authored, and its nullable
-// index leaves every injected column out (`buildNullableFieldIndex`). The door
-// reads its objects without those columns, so it gives the build's verdict.
-describe('the publish door judges a flow or hook condition over an injected system column as `os build` does (#33246)', () => {
+// with no default. The two the platform stamps on every stored row
+// (`created_at`, `updated_at`) are never null, so the door's null-guard gate
+// does not judge them, as `os build` does not. The other injected columns can
+// hold null on a stored row and stay judged at the door. The type verdicts on
+// an injected column are untouched: the door keeps the served types.
+describe('the publish door judges a flow or hook condition over an injected system column by what a stored row holds (#33246)', () => {
   /** The trigger object as authored; `sharingModel` keeps `security-owd-unset` quiet. */
   const account = {
     name: 'crm_account',
@@ -250,14 +252,14 @@ describe('the publish door judges a flow or hook condition over an injected syst
   const served = applyInjectedSystemColumns(account);
 
   /** A record-triggered flow with the condition at one of the three slots the gate judges. */
-  const flowAt = (slot: 'start' | 'edge' | 'branch', condition: string): Rec => ({
+  const flowAt = (slot: 'start' | 'edge' | 'branch', condition: string, objectName = 'crm_account'): Rec => ({
     name: `at_${slot}`,
     label: 'Probe',
     type: 'autolaunched',
     nodes: [
       {
         id: 'start', type: 'start', label: 'Start',
-        config: { objectName: 'crm_account', triggerType: 'record-after-update', ...(slot === 'start' ? { condition } : {}) },
+        config: { objectName, triggerType: 'record-after-update', ...(slot === 'start' ? { condition } : {}) },
       },
       {
         id: 'triage', type: 'decision', label: 'Triage',
@@ -277,59 +279,97 @@ describe('the publish door judges a flow or hook condition over an injected syst
   });
 
   type Write = { type: 'flow' | 'hook'; item: Rec; collection: 'flows' | 'hooks' };
-  const writes = (condition: string): Write[] => [
-    ...(['start', 'edge', 'branch'] as const).map((slot): Write => ({ type: 'flow', item: flowAt(slot, condition), collection: 'flows' })),
-    { type: 'hook', item: hookOn('crm_account', condition), collection: 'hooks' },
-    { type: 'hook', item: hookOn(['crm_account'], condition), collection: 'hooks' },
+  /** Every site kind the gate judges: three flow slots, a hook on one object and on a list. */
+  const writes = (condition: string, objectName = 'crm_account'): Write[] => [
+    ...(['start', 'edge', 'branch'] as const).map((slot): Write => ({ type: 'flow', item: flowAt(slot, condition, objectName), collection: 'flows' })),
+    { type: 'hook', item: hookOn(objectName, condition), collection: 'hooks' },
+    { type: 'hook', item: hookOn([objectName], condition), collection: 'hooks' },
   ];
+  const label = (w: Write, condition: string) => `${w.type} ${String(w.item.name)}: ${condition}`;
   const shape = (f: { rule: string; where: string; path?: string; message: string }) =>
     ({ rule: f.rule, where: f.where, path: f.path, message: f.message });
-  /** The door's expression findings on the write, over the objects as served. */
-  const atDoor = ({ type, item }: Write) => {
-    const { errors, advisories } = runRuntimeAuthoringRules({ type, item, context: { objects: [served] } });
+  /** The door's expression findings on the write, over the given objects as served. */
+  const atDoor = ({ type, item }: Write, objects: unknown[] = [served]) => {
+    const { errors, advisories } = runRuntimeAuthoringRules({ type, item, context: { objects } });
     return [...errors, ...advisories].filter((f) => f.rule === EXPRESSION_INVALID).map(shape);
   };
   /** `os build`'s expression findings on the same item, over the object as authored. */
-  const atBuild = ({ item, collection }: Write) => {
-    const stack = { objects: [account], [collection]: [item] };
+  const atBuild = ({ item, collection }: Write, objects: unknown[] = [account]) => {
+    const stack = { objects, [collection]: [item] };
     return runAuthoringRules('build', { normalized: stack, parsed: stack })
       .filter((f) => f.rule === EXPRESSION_INVALID).map(shape);
   };
+  const nullGuardOn = (column: string) => (f: { message: string }) =>
+    f.message.includes(`\`record.${column}\``) && f.message.includes('declares as nullable');
 
   it('serves the trigger object with the injected columns declared, nullable by the field\'s own keys', () => {
-    expect(Object.keys(served.fields)).toEqual(expect.arrayContaining(['created_at', 'updated_at', 'owner_id']));
+    expect(Object.keys(served.fields)).toEqual(expect.arrayContaining([
+      'created_at', 'updated_at', 'owner_id', 'created_by', 'updated_by', 'owning_business_unit_id', 'queue',
+    ]));
   });
 
-  it('⭐ PARITY — an unguarded ordering over `created_at` / `updated_at` publishes at every flow slot and at a hook, as the build accepts it', () => {
+  it('⭐ LIT — an unguarded ordering over `created_at` / `updated_at` publishes at every flow slot and at a hook, as the build accepts it', () => {
     for (const condition of [
       "record.created_at > timestamp('2025-01-01T00:00:00Z')",
       'record.updated_at > record.created_at',
     ]) {
       for (const write of writes(condition)) {
-        const label = `${write.type} ${String(write.item.name)}: ${condition}`;
-        expect(atBuild(write), label).toEqual([]);
-        expect(atDoor(write), label).toEqual([]);
+        expect(atDoor(write), label(write, condition)).toEqual([]);
+        expect(atBuild(write), label(write, condition)).toEqual([]);
       }
     }
   });
 
-  it('⭐ PARITY — the door gives the build\'s verdict on every injected column the build leaves out of its nullable index', () => {
-    // The build's verdict per column is its index's docblock, not this file's:
-    // whatever it says about `owner_id`, the door says the same.
-    for (const condition of ["record.owner_id > 'a'", "record.created_by > 'a'", "record.owning_business_unit_id > 'a'"]) {
+  it('⭐ LIT — an unguarded ordering over an injected column a stored row can hold null in is still refused at the door', () => {
+    for (const column of ['owner_id', 'created_by', 'updated_by', 'owning_business_unit_id', 'queue']) {
+      const condition = `record.${column} > 'a'`;
       for (const write of writes(condition)) {
-        expect(atDoor(write), `${write.type} ${String(write.item.name)}: ${condition}`).toEqual(atBuild(write));
+        const door = atDoor(write);
+        expect(door, label(write, condition)).toHaveLength(1);
+        expect(door.filter(nullGuardOn(column)), label(write, condition)).toHaveLength(1);
       }
+    }
+  });
+
+  it('⭐ LIT — the door keeps its type verdict on an injected column: date arithmetic on `created_at` is refused at a hook, a flow and an action', () => {
+    // A hook reads `record.`; a record-triggered flow binds the trigger
+    // record's fields as bare names, and the type verdict reads that spelling.
+    const cases: Array<[label: string, type: 'flow' | 'hook' | 'action', item: Rec]> = [
+      ['hook', 'hook', hookOn('crm_account', 'record.created_at + 1 > 0')],
+      ['hook', 'hook', hookOn('crm_account', "record.updated_at - record.created_at > duration('1h')")],
+      ['flow start', 'flow', flowAt('start', 'created_at + 1 > 0')],
+      ['flow edge', 'flow', flowAt('edge', 'created_at + 1 > 0')],
+      ['action', 'action', { name: 'touch', label: 'Touch', objectName: 'crm_account', type: 'script', visible: 'record.created_at + 1 > 0', body: { language: 'js', source: 'return;' } }],
+    ];
+    for (const [where, type, item] of cases) {
+      const { errors } = runRuntimeAuthoringRules({ type, item, context: { objects: [served] } });
+      const refused = errors.filter((f) => f.rule === EXPRESSION_INVALID);
+      expect(refused.map((f) => f.message).join(' | '), where).toContain('date arithmetic');
+    }
+  });
+
+  it('⭐ CONTROL — `created_at` stays judged where no stamp is behind it: an author\'s own declaration, an `external` object', () => {
+    const condition = "record.created_at > timestamp('2025-01-01T00:00:00Z')";
+    // The author's own column (its own label): judged as any declared field, at both doors.
+    const declared = { ...account, fields: { ...account.fields, created_at: { type: 'datetime', label: 'Opened' } } };
+    for (const write of writes(condition)) {
+      const door = atDoor(write, [applyInjectedSystemColumns(declared)]);
+      expect(door.filter(nullGuardOn('created_at')), label(write, condition)).toHaveLength(1);
+      expect(door, label(write, condition)).toEqual(atBuild(write, [declared]));
+    }
+    // An `external` object: the remote owns the schema and nothing stamps the column.
+    const remote = { ...account, name: 'crm_remote', external: { connector: 'erp', remoteName: 'accounts' } };
+    for (const write of writes(condition, 'crm_remote')) {
+      expect(atDoor(write, [applyInjectedSystemColumns(remote)]).filter(nullGuardOn('created_at')), label(write, condition)).toHaveLength(1);
     }
   });
 
   it('⭐ CONTROL — an unguarded ordering over a declared nullable field is refused at the door and at the build alike', () => {
     for (const write of writes('record.amount > 0')) {
-      const label = `${write.type} ${String(write.item.name)}`;
       const door = atDoor(write);
-      expect(door, label).toHaveLength(1);
-      expect(door[0]!.message, label).toContain('declares as nullable');
-      expect(door, label).toEqual(atBuild(write));
+      expect(door, label(write, 'record.amount > 0')).toHaveLength(1);
+      expect(door[0]!.message).toContain('declares as nullable');
+      expect(door, label(write, 'record.amount > 0')).toEqual(atBuild(write));
     }
   });
 });

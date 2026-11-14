@@ -134,7 +134,14 @@ import type { FlowNodeParsed, FlowEdgeParsed, FlowTriggerKind } from '@objectsta
 // hand-written notion of "blank" here — that drift is what #15662 built the
 // shared refusal to prevent.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
-import { referenceCarrierOf, referenceTargetOf, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
+import {
+  injectedSystemColumnDefs,
+  isInjectedColumnDefinition,
+  platformProvisionsStorage,
+  referenceCarrierOf,
+  referenceTargetOf,
+  REFERENCE_VALUE_TYPES,
+} from '@objectstack/spec/data';
 import {
   isStoredMetadataBodyObject,
   STORED_METADATA_BODY_PRESCRIPTION,
@@ -567,13 +574,54 @@ interface FlowBareNames {
   readonly timeRelativeSweep: boolean;
 }
 
-function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
+/**
+ * [#33246] The injected system columns the platform writes on EVERY stored
+ * row, so a read of one is never `null`: the wildcard audit hook
+ * (`sys_stamp_audit_insert` in `@objectstack/objectql`) writes `created_at`
+ * and `updated_at` unconditionally, and driver-sql creates both on every
+ * table it provisions (`PLATFORM_PROVISIONED_COLUMNS`, which adds the
+ * primary key `id`; the registry never injects `id` into the field map, so
+ * it has no entry here). The other injected columns are stamped only when
+ * there is something to stamp: a system-context insert stores `NULL` in
+ * `owner_id`, `created_by`, `updated_by`, `owning_business_unit_id` and
+ * `queue` (measured on the real engine), so they stay nullable. This package
+ * may not import a runtime, so the two names are spelled here.
+ */
+const PLATFORM_STAMPED_COLUMNS: ReadonlySet<string> = new Set(['created_at', 'updated_at']);
+
+/**
+ * [#33246] Is this served field a platform-stamped column that is never `null`
+ * on a stored row? Only the platform's own definition counts
+ * (`isInjectedColumnDefinition` against the object's injection plan): a
+ * column the author declared keeps the author's keys and the author's
+ * verdict. An object whose schema the platform does not provision (an
+ * ADR-0015 `external` binding, `platformProvisionsStorage`) has no stamp
+ * behind the column, so it is no exception there.
+ */
+function isPlatformStampedColumn(obj: AnyRec, fname: string, def: AnyRec): boolean {
+  if (!PLATFORM_STAMPED_COLUMNS.has(fname) || !platformProvisionsStorage(obj)) return false;
+  const injected = injectedSystemColumnDefs(obj)[fname];
+  return injected !== undefined && isInjectedColumnDefinition(def, injected);
+}
+
+function buildNullableFieldIndex(
+  objects: AnyRec[],
+  // [#33246] Set at a runtime publish door, whose objects are SERVED: the
+  // registry injects its system columns as declared `required: false` fields
+  // with no default, so the two it stamps on every row would read as nullable
+  // and a flow or hook condition ordering `record.created_at` with no guard
+  // was refused where `os build` (declared fields only) accepts it. The other
+  // injected columns stay nullable here: they can hold `null`. The build reads
+  // authored objects and passes nothing, so its index is unchanged.
+  { platformStamped = false }: { platformStamped?: boolean } = {},
+): Map<string, Set<string>> {
   const idx = new Map<string, Set<string>>();
   for (const obj of objects) {
     const name = typeof obj.name === 'string' ? obj.name : undefined;
     if (!name) continue;
     const nullable = new Set<string>();
     for (const [fname, def] of fieldEntries(obj)) {
+      if (platformStamped && isPlatformStampedColumn(obj, fname, def)) continue;
       if (isNullableField(def)) nullable.add(fname);
     }
     idx.set(name, nullable);
@@ -2275,10 +2323,9 @@ export interface StackExpressionOptions {
    * same served fields (#33216: and a one-hop leaf through a reference an
    * extension adds judged as one through a declared reference), and located
    * at the entry
-   * (`object 'T' · objectExtensions[0] · validation 'N'`). On this write, as
-   * on every runtime write (#33246), the live objects are read without the
-   * system columns the registry injects (`stripInjectedSystemColumns`), as
-   * the build reads them. The
+   * (`object 'T' · objectExtensions[0] · validation 'N'`). On this write the
+   * live objects are read without the system columns the registry injects
+   * (`stripInjectedSystemColumns`), as the build reads them. The
    * object walk reads an empty list (the carried objects are the universe the
    * field or rule resolves in, not the subject) and so does every other pass;
    * the function returns after the extension walk.
@@ -2366,25 +2413,20 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   if (options.runtimeWriteType === 'page') {
     return actionCopyTemplateIssues(stack, { actions: false, objects: false, pages: true });
   }
-  // [#33154, #33246] Every runtime publish door hands the objects as the
-  // registry SERVES them (the gate's one `listRegisteredCollection` read,
-  // whatever the written type), and a served definition carries the system
-  // columns the registry injects (`created_at`, `owner_id`, …) as declared
-  // fields; the build reads the objects as authored. Unstripped, the
-  // null-guard gate judged `record.created_at` as a declared nullable field
-  // and refused at the door a flow condition, a hook `condition` or an
-  // extension rule that `os build` accepts. So on every runtime write each
-  // object is read through `stripInjectedSystemColumns`
-  // (`@objectstack/metadata-core`, the write path's own strip of exactly
-  // those, as `authored-site-expression.ts` reads the served objects), and
-  // the indexes re-derive the injected columns themselves, as they do at the
-  // build: known fields, never judged nullable (`buildNullableFieldIndex`).
-  // One reading for every write type, not one per walk, so no pass at any
-  // door reads a column the build does not. The build passes no write type
-  // and reads its objects as they are.
-  if (options.runtimeWriteType !== undefined) {
-    stack = { ...stack, objects: recordsOf(stack.objects).map((o) => stripInjectedSystemColumns(o)) };
-  }
+  // [#33154] The extension door hands the objects as the registry SERVES
+  // them, and a served definition carries the system columns the registry
+  // injects (`created_at`, `owner_id`, …) as declared fields; the build reads
+  // the objects as authored. Unstripped, the null-guard gate judged
+  // `record.created_at` as a declared nullable field and refused at the door
+  // an extension rule `os build` accepts. So on that write each object is read
+  // through `stripInjectedSystemColumns` (`@objectstack/metadata-core`, the
+  // write path's own strip of exactly those, as `authored-site-expression.ts`
+  // reads the served objects), and the indexes re-derive the injected columns
+  // themselves, as they do at the build. Every other runtime door keeps the
+  // served objects, so its type verdicts on an injected column stand; only its
+  // null-guard reading of the two platform-stamped timestamps changes
+  // (#33246, {@link buildNullableFieldIndex}).
+  if (extensionWrite) stack = { ...stack, objects: recordsOf(stack.objects).map((o) => stripInjectedSystemColumns(o)) };
   const objects = recordsOf(stack.objects);
   // [#30471] The field indexes read the objects as the registry SERVES them,
   // every `objectExtensions` field of any body folded in (`objectsAsServed`,
@@ -2402,7 +2444,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const fieldIndex = buildFieldIndex(servedObjects);
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(typedObjects);
-  const nullableIndex = buildNullableFieldIndex(typedObjects);
+  const nullableIndex = buildNullableFieldIndex(typedObjects, { platformStamped: options.runtimeWriteType !== undefined });
   // [#24316] object name → its references into a stored-metadata-body table,
   // read the first time a site of that object serves a hop, or (#24677) when
   // the walk reaches the object's fields, whichever comes first — never before
