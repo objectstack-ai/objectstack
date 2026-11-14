@@ -4223,7 +4223,9 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   },
   {
     receiver: 'hook',
-    expected: ['condition', 'name', 'object'],
+    // [#33246] `events` picks whether the null-guard gate may leave out an
+    // ordering over a platform-stamped timestamp (never on `beforeInsert`).
+    expected: ['condition', 'events', 'name', 'object'],
     declaredBy: 'ObjectStackSchema.hooks[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.hooks),
   },
@@ -4467,6 +4469,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // bare-name set. Their keys are that module's result key and Set
       // methods, never metadata keys.
       'rootScope', 'declaredVariables', 'nullGuardBare',
+      // [#33246] The door's platform-stamped column index (object name → the
+      // stamped columns it serves) and one object's set of it. Their keys are
+      // Map / Set methods, never metadata keys; the metadata keys the index is
+      // built from are read off the tabled `obj` / `def` receivers.
+      'platformStampedIndex', 'stamped',
       // [#29926] The fault-outcome ledger's own site descriptor (`kind`,
       // `severity`, `triggerKind`, `sweepsTypedObject`), built at each call site from the
       // tabled receivers (`rule.severity`) — never read off metadata itself.
