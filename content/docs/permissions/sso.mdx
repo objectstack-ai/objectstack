@@ -628,10 +628,12 @@ new AuthPlugin({
 |---|---|---|
 | `OS_AUTH_DIRECT_SIGN_IN_ENABLED` | `true` / `false` | Turns it on or off, whatever the option says. |
 | `OS_AUTH_DIRECT_SIGN_IN_PROVIDER` | a `providerId` | An [`oidcProviders`](#enterprise-sso-oidc) entry or a registered SSO provider. Unset, the only one configured is used; with none or several configured, the sign-in page is shown as before. |
-| `OS_AUTH_LOCAL_SIGN_IN` | `hidden` (default) / `off` | `hidden` keeps the password form at `/login?local=1`. `off` means the Console never draws it. Any other value refuses to boot. |
+| `OS_AUTH_LOCAL_SIGN_IN` | `hidden` (default) / `off` | `hidden` keeps the password form at `/login?local=1`. `off` means the Console never draws a local way in. Any other value refuses to boot. |
 
-`off` changes the Console page only. Password sign-in on the server is
-unchanged, so the owner's break-glass account keeps working through the API.
+With `off`, the Console sign-in page draws no local way in, in any state: no
+email or phone form, no sign-up and no "use password" link, also on an OAuth
+client's hand-off and when no provider can be started. It changes the page
+only: `POST /api/v1/auth/sign-in/email` still accepts a password.
 
 **What a visit does.** The Console sign-in page reads `features.directSignIn`
 from `GET /api/v1/auth/config`. That is `true` only while a provider can be
