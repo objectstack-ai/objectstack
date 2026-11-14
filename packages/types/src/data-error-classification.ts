@@ -1065,8 +1065,12 @@ function structuredCodeAnswer(
     // codes parse as `ErrorCode` — the reason) and §1 (`not.toHaveProperty`).
     //
     // **Two sentences — the `DELETE_RESTRICTED` split above.** `error` is the
-    // curated end-user sentence: fixed text plus, at most, the field's display
-    // name the ENGINE resolved — [#26867] its `fieldLabel`, the translation in
+    // curated end-user sentence. The engine composes it (`endUserMessage`) in
+    // the writer's locale from the platform operation catalog, so a `zh-CN`
+    // writer reads Chinese and a composite unique index the object declares
+    // is named by its fields' labels; what follows describes the field naming
+    // that sentence carries. Before that it was fixed English plus, at most,
+    // the field's display name the ENGINE resolved — [#26867] its `fieldLabel`, the translation in
     // the writer's locale or the declared `label`, the same one `message` names
     // it by. It used to interpolate the API key (`field`), so the end user read
     // `gsku` while `developerMessage` read `Global SKU`. A field with no label
@@ -1106,12 +1110,21 @@ function structuredCodeAnswer(
         const label = field && typeof error?.fieldLabel === 'string' && error.fieldLabel.trim().length > 0
             ? error.fieldLabel
             : undefined;
+        // The engine's end-user sentence, composed in the WRITER's locale from
+        // the platform operation catalog (`duplicate_record*`), naming the one
+        // field or a declared composite index's fields by label. This module
+        // holds neither a locale nor a schema, so it relays the producer's
+        // sentence; the fixed English below is only for an envelope that
+        // carries none (one built before the engine composed it).
+        const sentence = typeof error?.endUserMessage === 'string' && error.endUserMessage.trim().length > 0
+            ? error.endUserMessage
+            : undefined;
         return {
             status: 409,
             body: {
-                error: label
+                error: sentence ?? (label
                     ? `A record with this ${label} already exists`
-                    : 'A record with this value already exists',
+                    : 'A record with this value already exists'),
                 code: 'UNIQUE_VIOLATION',
                 ...(typeof error?.message === 'string' && error.message.length > 0
                     ? { developerMessage: error.message }

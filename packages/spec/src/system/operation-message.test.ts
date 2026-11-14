@@ -500,3 +500,52 @@ describe('operation message catalog — the field-label list rules', () => {
       .toBe(' / ');
   });
 });
+
+/**
+ * The unique-constraint refusal's three sentences — one wire code
+ * (`UNIQUE_VIOLATION`), named as far as the engine can name honestly. The call
+ * site is pinned in `packages/objectql/src/engine-duplicate-record-label-sentence.test.ts`,
+ * through the real write doors and `mapDataError`.
+ */
+describe('operation message catalog — the duplicate refusal', () => {
+  const KEYS = {
+    duplicate_record: [],
+    duplicate_record_field: ['{{field}}'],
+    duplicate_record_fields: ['{{fields}}'],
+  } as const;
+
+  it('every locale defines all three, each with exactly its own placeholder', () => {
+    const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+    // Guard the guard: a catalog that lost its locales would make the loop vacuous.
+    expect(locales.length).toBeGreaterThanOrEqual(4);
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const [key, placeholders] of Object.entries(KEYS)) {
+        expect(catalog[key], `${locale} defines ${key}`).toBeTypeOf('string');
+        expect(catalog[key].match(/\{\{\w+\}\}/g) ?? [], `${locale}.${key}`).toEqual([...placeholders]);
+      }
+    }
+  });
+
+  it('the English sentences keep the wording the HTTP doors answered before they were localized', () => {
+    expect(renderOperationMessage({ messageKey: 'duplicate_record' }, { locale: 'en' }))
+      .toBe('A record with this value already exists');
+    expect(renderOperationMessage({ messageKey: 'duplicate_record_field', params: { field: 'Global SKU' } }, { locale: 'en' }))
+      .toBe('A record with this Global SKU already exists');
+  });
+
+  it('renders the caller locale, and falls back to en for a locale the catalog does not carry', () => {
+    expect(renderOperationMessage({ messageKey: 'duplicate_record' }, { locale: 'zh-CN' })).toBe('已存在相同值的记录');
+    expect(renderOperationMessage({ messageKey: 'duplicate_record_field', params: { field: '客户名称' } }, { locale: 'zh' }))
+      .toBe('已存在相同客户名称的记录');
+    expect(renderOperationMessage({ messageKey: 'duplicate_record' }, { locale: 'de-DE' }))
+      .toBe('A record with this value already exists');
+  });
+
+  it('a deployment translation override wins, under the shared `errors.` address', () => {
+    for (const key of Object.keys(KEYS)) {
+      expect(operationMessageTranslationKey(key)).toBe(`errors.${key}`);
+      const translate = (k: string) => (k === `errors.${key}` ? '部署自定义文案。' : k);
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'zh-CN', translate })).toBe('部署自定义文案。');
+    }
+  });
+});

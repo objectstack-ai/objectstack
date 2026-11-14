@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { isUniqueViolationError, uniqueViolationColumn, uniqueViolationField } from './unique-violation.js';
+import { isUniqueViolationError, uniqueViolationColumn, uniqueViolationColumns, uniqueViolationField } from './unique-violation.js';
 
 describe('isUniqueViolationError — input shapes', () => {
     it('accepts a bare string, for callers that already unwrapped `err.message`', () => {
@@ -333,5 +333,53 @@ describe('uniqueViolationField — the implied organization key part is set asid
     ])('names no field for %s', (_label, error) => {
         expect(isUniqueViolationError(error)).toBe(true);
         expect(uniqueViolationField(error)).toBeUndefined();
+    });
+});
+
+describe('uniqueViolationColumns — the composite key the store named', () => {
+    /**
+     * The reading `uniqueViolationField` refuses to reduce to one field: the
+     * columns of a composite key, organization part set aside, for a caller
+     * that matches them against a unique index the object declares before it
+     * names any of them. The Postgres DETAIL is the shape node-postgres hands
+     * back on `error.detail`.
+     */
+    it.each([
+        ['SQLite, organization + three authored', { message: 'UNIQUE constraint failed: t.organization_id, t.plant, t.carbon_grade, t.cost_week' }],
+        ['SQLite, three authored', { message: 'UNIQUE constraint failed: t.plant, t.carbon_grade, t.cost_week' }],
+        [
+            'Postgres DETAIL, organization + three authored',
+            {
+                message: 'duplicate key value violates unique constraint "uniq_t_plant"',
+                code: '23505',
+                detail: 'Key (organization_id, plant, carbon_grade, cost_week)=(org_a, p, g, w) already exists.',
+            },
+        ],
+    ])('reads the authored columns, in the driver\'s order, for %s', (_label, error) => {
+        expect(uniqueViolationColumns(error)).toEqual(['plant', 'carbon_grade', 'cost_week']);
+        // …and never overlaps the single-field answer.
+        expect(uniqueViolationField(error)).toBeUndefined();
+    });
+
+    it('a key that reduces to one field is `uniqueViolationField`\'s answer, not this one\'s', () => {
+        expect(uniqueViolationColumns('UNIQUE constraint failed: t.organization_id, t.invoice_no')).toBeUndefined();
+        expect(uniqueViolationColumns('UNIQUE constraint failed: sys_user.email')).toBeUndefined();
+        expect(uniqueViolationColumns('UNIQUE constraint failed: t.organization_id')).toBeUndefined();
+    });
+
+    it.each([
+        ['a MySQL index name', { message: "Duplicate entry 'a-b' for key 'idx_plant_week'", code: 'ER_DUP_ENTRY', errno: 1062 }],
+        ["SQLite's index form", { message: "UNIQUE constraint failed: index 'idx_plant_week'", code: 'SQLITE_CONSTRAINT_UNIQUE' }],
+        [
+            'an expression part',
+            {
+                message: 'duplicate key value violates unique constraint "uniq_t"',
+                code: '23505',
+                detail: "Key (COALESCE(organization_id, '__global__'::text), plant, cost_week)=(o, p, w) already exists.",
+            },
+        ],
+        ['a NOT NULL refusal (gated on the predicate)', { message: 'NOT NULL constraint failed: t.plant' }],
+    ])('names no columns for %s', (_label, error) => {
+        expect(uniqueViolationColumns(error)).toBeUndefined();
     });
 });
