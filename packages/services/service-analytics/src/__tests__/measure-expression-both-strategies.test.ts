@@ -255,7 +255,7 @@ describe('native-SQL path: every admitted aggregate is still wrapped', () => {
     }, 'native');
     expect(r.error).toBeUndefined();
     expect(r.sqls).toHaveLength(1);
-    for (const fragment of ['COUNT(*)', 'SUM(amount)', 'AVG(amount)', 'MIN(amount)', 'MAX(amount)', 'COUNT(DISTINCT buyer)']) {
+    for (const fragment of ['COUNT(*)', 'SUM("amount")', 'AVG("amount")', 'MIN("amount")', 'MAX("amount")', 'COUNT(DISTINCT "buyer")']) {
       expect(r.sqls[0]).toContain(fragment);
     }
   });
