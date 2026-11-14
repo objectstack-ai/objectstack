@@ -2840,8 +2840,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             }
             // [#33302] Whether this enable puts the package back into service,
             // read by the registry's own predicate before it switches (the one
-            // `enablePackage` asks before telling its enable listeners).
-            const wasDisabled = registry.isPackageDisabled?.(id) === true;
+            // `enablePackage` asks before telling its enable listeners). The
+            // registry view the contract declares does not carry it; a registry
+            // that cannot say is announced to, since every subscriber is
+            // idempotent.
+            const isPackageDisabled = (registry as { isPackageDisabled?: (packageId: string) => boolean }).isPackageDisabled;
+            const wasDisabled = typeof isPackageDisabled !== 'function' || isPackageDisabled.call(registry, id) === true;
             const pkg = registry.enablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             await summaryRefreshSettled(qlService);
