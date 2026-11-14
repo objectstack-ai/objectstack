@@ -29,7 +29,10 @@ import '@objectstack/metadata';
 import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { PackageScopedNameRefusedError, resolvePackageScopedHolders } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { actionHandlerOwnerRefusal, executeRegisteredAction, resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
+import {
+    actionHandlerOwnerRefusal, executeRegisteredAction, resolveAddressedRouteActionDeclaration, resolveRouteActionDeclaration,
+    type ActionExecutionDeps,
+} from './action-execution.js';
 
 const A = 'com.acme.alpha';
 const B = 'com.acme.beta';
@@ -873,7 +876,7 @@ describe('[#32365] the bare action read weighs the package-less holder and serve
                 }
             });
 
-            it('[ruling 6824698376, A] a DISABLED package binding `lead` is still a holder: `lead` stays no declaration, never the environment\'s item', async () => {
+            it('a DISABLED package binding `lead` is still a holder there (main\'s own answer): `lead` stays no declaration, never the environment\'s item', async () => {
                 const D = 'com.acme.delta';
                 for (const envFirst of [false, true]) {
                     twoHoldersAndEnvironment(envFirst);
@@ -882,6 +885,22 @@ describe('[#32365] the bare action read weighs the package-less holder and serve
                     engine.registry.disablePackage(D);
                     const onLead = await routeTo('lead');
                     expect([onLead.action, onLead.refusal, onLead.degraded]).toEqual([undefined, undefined, undefined]);
+                }
+            });
+
+            it('[#32995] a DISABLED package\'s OBJECT-LESS action owns `lead` too: `lead` stays no declaration, never the environment\'s item, in either registration order', async () => {
+                const D = 'com.acme.delta';
+                for (const envFirst of [false, true]) {
+                    twoHoldersAndEnvironment(envFirst);
+                    install(D);
+                    engine.registry.registerItem('action', {
+                        name: 'approve', label: 'delta', type: 'script', target: 'approve',
+                        body: { language: 'js', source: 'return 1;', capabilities: [] },
+                    } as never, 'name' as never, D);
+                    engine.registry.disablePackage(D);
+                    const onLead = await routeTo('lead');
+                    expect([onLead.action, onLead.refusal, onLead.degraded], `env registered ${envFirst ? 'first' : 'last'}`)
+                        .toEqual([undefined, undefined, undefined]);
                 }
             });
 
@@ -1252,6 +1271,238 @@ describe('[#32365] the bare action read weighs the package-less holder and serve
             const err = await refused(read);
             expect(err, 'never the stale entry').toBeInstanceOf(PackageScopedNameRefusedError);
             expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+        });
+    });
+});
+
+/**
+ * [#32996, #32989, #32988] The `/actions` route answers by who holds the name
+ * ON THE ROUTE — the items bound to the routed object, else the object-less
+ * ones — never by how many holders sit elsewhere or which registered last.
+ * The protocol's bare by-name read cannot see the object: beside one package
+ * it answered the environment's item wherever that item is bound, beside a
+ * disabled package its answer moved with registration order. The route reads
+ * the registry's listing of every holder (disabled packages included) and the
+ * environment's own store instead. Every cell runs in both registration
+ * orders.
+ *
+ * BASE (main e540baf8) per cell, in its test's title.
+ */
+describe('[#32996, #32989, #32988] the action route answers by who holds the name on the route', () => {
+    const C = 'com.acme.gamma';
+    const D = 'com.acme.delta';
+    /** A fresh engine whose `find` reads the environment's store, as one kernel's engine does. */
+    const freshEngine = () => {
+        engine = new ObjectQL();
+        engine.registry.logLevel = 'silent';
+        (protocol as any).engine.registry = engine.registry;
+        storedRows = [];
+        (engine as any).find = async (object: string, query: any) => {
+            if (object !== 'sys_metadata') return [];
+            const where: Record<string, any> = query?.where ?? {};
+            return storedRows.filter((row) => Object.keys(where).every((field) => {
+                if (field.startsWith('$')) throw new Error(`engine store double: combinator ${field} is not implemented`);
+                return row[field] === where[field];
+            }));
+        };
+    };
+    const shipAt = (packageId: string | undefined, label: string, objectName?: string) =>
+        engine.registry.registerItem('action', {
+            name: 'approve', label, type: 'script', ...(objectName ? { objectName } : {}), target: 'approve',
+            body: { language: 'js', source: 'return 1;', capabilities: [] },
+        } as never, 'name' as never, packageId);
+    /** The environment's own item: registered, and its row stored bound to no package. */
+    const environmentItem = (objectName?: string) => {
+        shipAt(undefined, 'env', objectName);
+        storedRows = [{
+            id: 'env-approve', type: 'action', name: 'approve', state: 'active', package_id: null,
+            metadata: JSON.stringify({ name: 'approve', label: 'env', type: 'script', ...(objectName ? { objectName } : {}) }),
+        }];
+    };
+    const routeTo = (objectName: string) =>
+        resolveRouteActionDeclaration(deps, { request: {} } as any, { ql: engine, objectName, actionName: 'approve' });
+    const envAddress = (objectName: string) =>
+        resolveAddressedRouteActionDeclaration(deps, { request: {} } as any, {
+            ql: engine, objectName, actionName: 'approve', qualifier: { environment: true },
+        });
+    /** One registration order of `steps`, and its reverse. */
+    const bothOrders = (steps: Array<() => unknown>): Array<[string, () => void]> => [
+        ['registered in order', () => steps.forEach((step) => step())],
+        ['registered in reverse', () => [...steps].reverse().forEach((step) => step())],
+    ];
+    const answerOf = (answer: { action?: any; refusal?: unknown; degraded?: unknown; packageId?: unknown }) =>
+        [answer.refusal, answer.degraded, answer.packageId, answer.action?.label];
+
+    describe('#32996 — a disabled package on `lead` beside the environment\'s item there', () => {
+        for (const [shape, dObject] of [['bound to `lead`', 'lead'], ['object-less', undefined]] as const) {
+            for (const elsewhere of [0, 1, 2]) {
+                it(`disabled D ${shape}, ${elsewhere} enabled holder(s) elsewhere: \`lead\` answers no declaration, never the environment's item (BASE with one: the environment's item)`, async () => {
+                    for (const [order, register] of bothOrders([
+                        () => environmentItem('lead'),
+                        () => shipAt(D, 'delta', dObject),
+                        ...(elsewhere >= 1 ? [() => shipAt(A, 'alpha', 'account')] : []),
+                        ...(elsewhere >= 2 ? [() => shipAt(B, 'beta', 'contact')] : []),
+                    ])) {
+                        freshEngine();
+                        [A, B, D].forEach((id) => install(id));
+                        register();
+                        engine.registry.disablePackage(D);
+                        expect(answerOf(await routeTo('lead')), order).toEqual([undefined, undefined, undefined, undefined]);
+                    }
+                });
+            }
+        }
+
+        it('CONTROL — with no disabled package, the environment\'s item answers `lead` whatever the holders elsewhere', async () => {
+            for (const elsewhere of [0, 1, 2]) {
+                for (const [order, register] of bothOrders([
+                    () => environmentItem('lead'),
+                    ...(elsewhere >= 1 ? [() => shipAt(A, 'alpha', 'account')] : []),
+                    ...(elsewhere >= 2 ? [() => shipAt(B, 'beta', 'contact')] : []),
+                ])) {
+                    freshEngine();
+                    [A, B].forEach((id) => install(id));
+                    register();
+                    expect(answerOf(await routeTo('lead')), `${elsewhere} elsewhere, ${order}`).toEqual([undefined, undefined, undefined, 'env']);
+                }
+            }
+        });
+
+        it('CONTROL — an ENABLED package bound to `lead` beside a disabled one: the enabled package\'s own declaration', async () => {
+            for (const [order, register] of bothOrders([
+                () => shipAt(D, 'delta', 'lead'),
+                () => shipAt(C, 'gamma', 'lead'),
+            ])) {
+                freshEngine();
+                [C, D].forEach((id) => install(id));
+                register();
+                engine.registry.disablePackage(D);
+                expect(answerOf(await routeTo('lead')), order).toEqual([undefined, undefined, undefined, 'gamma']);
+            }
+        });
+    });
+
+    describe('#32989 — a served holder\'s own route', () => {
+        for (const [envShape, envObject] of [['none', null], ['on `lead`', 'lead'], ['object-less', undefined]] as const) {
+            for (const [aShape, aObject] of [['on `account`', 'account'], ['on `contact`', 'contact'], ['object-less', undefined], ['absent', null]] as const) {
+                it(`B on \`contact\`, disabled A ${aShape}, the environment's item ${envShape}: \`contact\` answers B's own declaration, with no package (BASE with the environment's item: no declaration, or its object-less item)`, async () => {
+                    for (const [order, register] of bothOrders([
+                        ...(aObject !== null ? [() => shipAt(A, 'alpha', aObject)] : []),
+                        () => shipAt(B, 'beta', 'contact'),
+                        ...(envObject !== null ? [() => environmentItem(envObject)] : []),
+                    ])) {
+                        freshEngine();
+                        [A, B].forEach((id) => install(id));
+                        register();
+                        if (aObject !== null) engine.registry.disablePackage(A);
+                        const onContact = await routeTo('contact');
+                        expect(answerOf(onContact), order).toEqual([undefined, undefined, undefined, 'beta']);
+                        expect(onContact.action, order).toMatchObject({ name: 'approve', objectName: 'contact' });
+                    }
+                });
+            }
+        }
+
+        it('B on `contact` beside the platform\'s item on `lead` (no row behind it): `contact` answers B\'s own declaration (BASE: no declaration)', async () => {
+            for (const [order, register] of bothOrders([() => shipAt(B, 'beta', 'contact'), () => shipAt(undefined, 'platform', 'lead')])) {
+                freshEngine();
+                install(B);
+                register();
+                expect(answerOf(await routeTo('contact')), order).toEqual([undefined, undefined, undefined, 'beta']);
+                expect((await routeTo('lead')).action?.label, `${order}: the platform's own route keeps its answer`).toBe('platform');
+            }
+        });
+
+        it('the environment\'s item on `contact` beside B on `contact`: the environment\'s item answers first (ADR-0150 D3), with or without a disabled A (BASE with A registered first: no declaration)', async () => {
+            for (const withA of [false, true]) {
+                for (const [order, register] of bothOrders([
+                    ...(withA ? [() => shipAt(A, 'alpha', 'account')] : []),
+                    () => shipAt(B, 'beta', 'contact'),
+                    () => environmentItem('contact'),
+                ])) {
+                    freshEngine();
+                    [A, B].forEach((id) => install(id));
+                    register();
+                    if (withA) engine.registry.disablePackage(A);
+                    expect(answerOf(await routeTo('contact')), `${withA ? 'with' : 'without'} A, ${order}`).toEqual([undefined, undefined, undefined, 'env']);
+                }
+            }
+        });
+
+        it('the environment\'s item on `lead` beside B on `contact` and a disabled A: `lead` answers the environment\'s item when A binds another object, no declaration when A is object-less (BASE: moved with registration order)', async () => {
+            for (const [aObject, want] of [['account', 'env'], [undefined, undefined]] as const) {
+                for (const [order, register] of bothOrders([
+                    () => shipAt(A, 'alpha', aObject),
+                    () => shipAt(B, 'beta', 'contact'),
+                    () => environmentItem('lead'),
+                ])) {
+                    freshEngine();
+                    [A, B].forEach((id) => install(id));
+                    register();
+                    engine.registry.disablePackage(A);
+                    expect(answerOf(await routeTo('lead')), `A ${aObject ?? 'object-less'}, ${order}`).toEqual([undefined, undefined, undefined, want]);
+                }
+            }
+        });
+
+        it('a store read that fails is the plane failing to answer: `degraded`, never a declaration (ADR-0110 D3)', async () => {
+            freshEngine();
+            install(B);
+            shipAt(B, 'beta', 'contact');
+            environmentItem('contact');
+            (engine as any).find = async () => { throw new Error('store unreachable'); };
+            const onContact = await routeTo('contact');
+            expect([onContact.action, onContact.degraded, onContact.reason]).toEqual([undefined, true, 'store unreachable']);
+        });
+    });
+
+    describe('#32988 — the environment\'s exact address', () => {
+        for (const holders of [1, 2]) {
+            for (const [envShape, envObject, address] of [['on `lead`', 'lead', 'lead'], ['object-less', undefined, 'lead'], ['object-less', undefined, 'global']] as const) {
+                it(`${holders} package holder(s), the environment's item ${envShape}: \`/actions/_env/${address}/approve\` answers the environment's own item, with no package (BASE: 404)`, async () => {
+                    for (const [order, register] of bothOrders([
+                        () => shipAt(A, 'alpha', 'account'),
+                        ...(holders === 2 ? [() => shipAt(B, 'beta', 'contact')] : []),
+                        () => environmentItem(envObject),
+                    ])) {
+                        freshEngine();
+                        [A, B].forEach((id) => install(id));
+                        register();
+                        const answer = await envAddress(address);
+                        expect(answerOf(answer), order).toEqual([undefined, undefined, undefined, 'env']);
+                        expect(answer.action, order).toMatchObject({ name: 'approve' });
+                    }
+                });
+            }
+        }
+
+        it('a disabled package bound to the same object does not change the environment\'s own address', async () => {
+            for (const [order, register] of bothOrders([() => shipAt(D, 'delta', 'lead'), () => environmentItem('lead')])) {
+                freshEngine();
+                install(D);
+                register();
+                engine.registry.disablePackage(D);
+                expect(answerOf(await envAddress('lead')), order).toEqual([undefined, undefined, undefined, 'env']);
+            }
+        });
+
+        it('CONTROL — the platform\'s item (no row behind it) is never the environment\'s: the address still answers 404', async () => {
+            for (const [order, register] of bothOrders([() => shipAt(A, 'alpha', 'account'), () => shipAt(undefined, 'platform', 'lead')])) {
+                freshEngine();
+                install(A);
+                register();
+                const err = await envAddress('lead').then(() => undefined, (e: any) => e);
+                expect([err?.code, err?.status], order).toEqual(['RESOURCE_NOT_FOUND', 404]);
+            }
+        });
+
+        it('CONTROL — an object the environment\'s item does not reach still answers 404', async () => {
+            freshEngine();
+            install(A);
+            shipAt(A, 'alpha', 'account');
+            environmentItem('lead');
+            const err = await envAddress('contact').then(() => undefined, (e: any) => e);
+            expect([err?.code, err?.status]).toEqual(['RESOURCE_NOT_FOUND', 404]);
         });
     });
 });
