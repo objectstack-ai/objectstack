@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { HookSchema } from '@objectstack/spec/data';
 import {
   AUTHORED_BODY_BESIDE_FUNCTION_REASON,
   FUNCTIONS_ENTRY_NO_BODY_REASON,
@@ -475,8 +476,7 @@ describe('[#33214] lowerCallables — a handler hook\'s refusal catalogue', () =
     VALIDATION_FAILED: { message: 'Cannot submit.', params: ['state'], reasons: { plan_locked: { message: 'Locked: {{ state }}.' } } },
   };
 
-  it('keeps `refusals` beside the lowered body, and the lowered hook parses', async () => {
-    const { HookSchema } = await import('@objectstack/spec/data');
+  it('keeps `refusals` beside the lowered body, and the lowered hook parses', () => {
     const handler = async (ctx: any) => {
       if (ctx.input.locked) throw { code: 'VALIDATION_FAILED', reason: 'plan_locked', params: { state: ctx.input.state } };
     };
@@ -488,8 +488,7 @@ describe('[#33214] lowerCallables — a handler hook\'s refusal catalogue', () =
     expect(HookSchema.safeParse(hook).success).toBe(true);
   });
 
-  it('a literal reason the code does not declare is refused on the lowered body, at `body.source`', async () => {
-    const { HookSchema } = await import('@objectstack/spec/data');
+  it('a literal reason the code does not declare is refused on the lowered body, at `body.source`', () => {
     const handler = async () => {
       throw { code: 'VALIDATION_FAILED', reason: 'plan_lockd' };
     };

@@ -26,6 +26,9 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defineStack } from '@objectstack/spec';
 import { bootStack, type VerifyStack } from './harness.js';
+// The boot's dynamic loads, paid at collection rather than inside a clocked case.
+import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
 
 const BOOT_TIMEOUT = 120_000;
 
