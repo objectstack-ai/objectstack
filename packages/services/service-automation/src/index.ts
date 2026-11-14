@@ -78,6 +78,10 @@ export type {
     // barrel-reachable through that method, for a host composing its own
     // registry over the one package-scoped resolver.
     FlowNameResolver,
+    // [#31699] What `AutomationEngine.resolveConnectorInstance` and
+    // `resolveConnectorInstanceFor` answer: the instance a connector name
+    // addresses, by package.
+    ConnectorInstanceResolution,
     // [#28405] The reader `AutomationEngine.setFlowHistorySource` takes —
     // barrel-reachable through that method, for a host composing its own
     // metadata history.
@@ -98,6 +102,8 @@ export type {
     MissedScheduledRun,
     MissedRunOutcome,
 } from './engine.js';
+// [#31699] Which instance a registration is: `AutomationEngine.registerConnector`'s `instance` argument.
+export type { ConnectorInstanceOptions } from './plugin-extension-api.js';
 
 // [#11997] ADR-0005 overlay precedence for same-named flow definitions. The boot
 // pull applies this; exported so a host that assembles its own flow list (or a

@@ -247,6 +247,7 @@ async function boot(
 ) {
     const ql = await dataEngine();
     const provider = grantedProvider();
+    let captured: any;
     const kernel = new LiteKernel({ logger: { level: 'debug', format: 'json' } } as never);
     kernels.push(kernel);
     kernel.use(new AutomationServicePlugin({
@@ -260,6 +261,7 @@ async function boot(
         version: '1.0.0',
         dependencies: ['com.objectstack.service-automation'],
         async init(ctx: any) {
+            captured = ctx;
             const listItems = (t: string) => (t === 'connector' ? declared : []);
             const registry = opts.registry ? Object.assign(Object.create(opts.registry), { listItems }) : { listItems };
             ctx.registerService('objectql', { registry });
@@ -283,7 +285,9 @@ async function boot(
         const query = opts2.query ?? { code: opts2.code ?? GOOD_CODE, state };
         return { begun, state, done: () => engine.completeConnectorConnection({ query: { state, ...query }, context: (opts2.as ?? context) as never }) };
     };
-    return { ql, engine, provider, call, connect, kernel };
+    /** Fire the reload hook: the runtime reconcile, over `declared` as it stands now. */
+    const reload = async () => { await captured.trigger('metadata:reloaded'); await flush(); };
+    return { ql, engine, provider, call, connect, kernel, reload };
 }
 
 const rowsOf = async (ql: ObjectQL) => (await ql.find(CONNECTOR_CONNECTION_OBJECT, { context: SYSTEM } as never)) as any[];
@@ -1103,6 +1107,66 @@ describe('ADR-0150 D4 [#31699] — the connection door connects one instance, by
         await expect(call('org_a')).resolves.toMatchObject({ status: 200 });
         await engine.revokeConnectorConnection({ connector: 'crm', context: ADMIN_A as never });
         expect(await rowsOf(ql)).toHaveLength(0);
+    });
+
+    it('[3b] the materializer registers the instance by its package, and the dispatch handle reads the package as the name resolves now', async () => {
+        const registry = registryHolding('com.example.crm');
+        const { connect, call, engine } = await boot([crm({ _packageId: undefined })], { registry });
+        await (await connect()).done();
+        expect(engine.resolveConnectorInstanceFor('crm', null)).toEqual({ status: 'instance', packageId: 'com.example.crm' });
+        await expect(call('org_a')).resolves.toMatchObject({ status: 200 });
+        // A second durable holder: the unstamped entry is no one package's any
+        // more, so its connection (the package's row) is not its own.
+        hold(registry, OTHER);
+        await expect(call('org_a')).rejects.toMatchObject({ status: 503 });
+    });
+
+    it('[3b] the holder of an unstamped entry is replaced, leaving one holder: the dispatch keeps its connection', async () => {
+        const registry = registryHolding('com.example.crm');
+        const { connect, call, engine } = await boot([crm({ _packageId: undefined })], { registry });
+        await (await connect()).done();
+        registry.uninstallPackage('com.example.crm');
+        registry.unregisterItemsByPackage('com.example.crm');
+        hold(registry, OTHER);
+        expect(engine.resolveConnectorInstanceFor('crm', null)).toEqual({ status: 'instance', packageId: 'com.example.crm' });
+        await expect(call('org_a')).resolves.toMatchObject({ status: 200 });
+    });
+
+    it('[3b, review M1] the package an unstamped entry is registered under follows the name\'s holder, and a removed entry leaves no instance behind', async () => {
+        // Not connected: the instance is the degraded husk.
+        const registry = registryHolding('com.example.crm');
+        const declared: unknown[] = [crm({ _packageId: undefined })];
+        const { engine, reload } = await boot(declared, { registry });
+        expect(engine.resolveConnectorInstanceFor('crm', null)).toEqual({ status: 'instance', packageId: 'com.example.crm' });
+        expect(engine.getConnectorDegradedReason('crm')).toBeDefined();
+        // The holder is uninstalled; the declared list is unchanged. The
+        // reconcile registers the instance again, under no package.
+        registry.uninstallPackage('com.example.crm');
+        registry.unregisterItemsByPackage('com.example.crm');
+        await reload();
+        expect(engine.resolveConnectorInstanceFor('crm', null)).toEqual({ status: 'instance', packageId: null });
+        expect(engine.getConnectorDescriptors().filter((d) => d.name === 'crm')).toHaveLength(1);
+        // The entry is removed: no instance of the name is left, under any package.
+        declared.length = 0;
+        await reload();
+        expect(engine.getRegisteredConnectors()).not.toContain('crm');
+        expect(engine.getConnectorDegradedReason('crm')).toBeUndefined();
+    });
+
+    it('[3b, review M1] an entry removed while its package holds the name: both the degraded and the live instance are dropped', async () => {
+        const declared: unknown[] = [crm({ _packageId: undefined })];
+        const degraded = await boot(declared, { registry: registryHolding('com.example.crm') });
+        declared.length = 0;
+        await degraded.reload();
+        expect(degraded.engine.getRegisteredConnectors()).not.toContain('crm');
+
+        const declaredLive: unknown[] = [crm({ _packageId: undefined })];
+        const live = await boot(declaredLive, { registry: registryHolding('com.example.crm') });
+        await (await live.connect()).done();
+        expect(live.engine.getConnectorDegradedReason('crm')).toBeUndefined();
+        declaredLive.length = 0;
+        await live.reload();
+        expect(live.engine.getRegisteredConnectors()).not.toContain('crm');
     });
 
     it('a resolved holder no declared entry is the instance of: the one declared entry is served, with its own package', async () => {

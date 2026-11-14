@@ -237,6 +237,8 @@ import { packageScopedRefusalMessage, PackageScopedNameRefusedError } from '@obj
 import { ENVIRONMENT_ADDRESS_SEGMENT } from '@objectstack/spec/kernel';
 import { FlowSlotTable, flowRunKey, flowRunPackage, isSlotKeySpelling, qualifiedFlowKey, unfiledFlowKey, stampFlowRunSlot, type FlowKeyMove, type FlowSlot } from './flow-slots.js';
 import { flowSlotRunStore } from './flow-slot-run-store.js';
+import { ConnectorInstances } from './connector-instances.js';
+import type { ConnectorInstanceOptions } from './plugin-extension-api.js';
 import { describeRegionSuspendingCall, regionSuspendingCall } from './subflow-region-guard.js';
 // [#25222] The consumed-suspension restore's bodies: journaling a consumed
 // suspension, resolving its witnesses, and restoring, peeking at or inspecting
@@ -2697,6 +2699,17 @@ export type FlowNameResolver = (
  * means the host serves no registry to ask. ⛔ Never a second implementation
  * of the rule. [#32183] `options` as {@link FlowNameResolver}'s.
  */
+/**
+ * [#31699] The answer of {@link AutomationEngine.resolveConnectorInstanceFor}:
+ * the registered instance a name addresses (its package, `null` for none), a
+ * refusal naming every candidate, or `none` (not registered, or two instances
+ * and nothing to choose by).
+ */
+export type ConnectorInstanceResolution =
+    | { readonly status: 'instance'; readonly packageId: string | null }
+    | { readonly status: 'refused'; readonly refusal: PackageScopedRefusal }
+    | { readonly status: 'none' };
+
 export type ConnectorNameResolver = (
     name: string,
     callerPackageId: string | null,
@@ -3166,8 +3179,12 @@ export class AutomationEngine implements IAutomationService {
      * {@link withdrawFlow}.
      */
     private readonly subflowRegionDeclinedFlows = new Map<string, string>();
-    /** Connectors registered by integration plugins, keyed by connector name (ADR-0018 §Addendum). */
-    private connectors = new Map<string, RegisteredConnector>();
+    /**
+     * Registered connector instances (ADR-0018 §Addendum), by package and name
+     * ([#31699] ADR-0150 D4: a plugin's connector, or an instance the
+     * environment authored, is of no package).
+     */
+    private connectors = new ConnectorInstances();
     /** Connector provider factories keyed by provider name (ADR-0097 §2 — `openapi`/`mcp`/`rest`/…). */
     private connectorProviders = new Map<string, ConnectorProviderFactory>();
     /** ADR-0143 D4 — provider keys registered with `credentialHandle: true`. */
@@ -4385,6 +4402,7 @@ export class AutomationEngine implements IAutomationService {
         def: Connector,
         handlers: Record<string, ConnectorActionHandler>,
         origin: ConnectorOrigin = 'plugin',
+        instance?: ConnectorInstanceOptions,
     ): void {
         // The body lives in ./plugin-extension-api.ts (#25222).
         const host: ThisParameterType<typeof registerConnector> = {
@@ -4392,7 +4410,7 @@ export class AutomationEngine implements IAutomationService {
             connectors: this.connectors,
             logger: this.logger,
         };
-        registerConnector.call(host, def, handlers, origin);
+        registerConnector.call(host, def, handlers, origin, instance);
     }
 
     /**
@@ -4462,6 +4480,7 @@ export class AutomationEngine implements IAutomationService {
         origin: ConnectorOrigin = 'declarative',
         cause?: unknown,
         hold?: ConnectorHold,
+        instance?: ConnectorInstanceOptions,
     ): void {
         // The body lives in ./plugin-extension-api.ts (#25222).
         const host: ThisParameterType<typeof registerDegradedConnector> = {
@@ -4469,36 +4488,60 @@ export class AutomationEngine implements IAutomationService {
             connectors: this.connectors,
             logger: this.logger,
         };
-        registerDegradedConnector.call(host, def, reason, origin, cause, hold);
+        registerDegradedConnector.call(host, def, reason, origin, cause, hold, instance);
     }
 
     /** Enforce the ADR-0097 §4 two-sources-of-truth rule; warn on same-origin replace. */
-    private assertSameOriginOrFree(name: string, origin: ConnectorOrigin): void {
+    private assertSameOriginOrFree(name: string, origin: ConnectorOrigin, packageId?: string | null, soleOfName?: boolean): void {
         // The body lives in ./plugin-extension-api.ts (#25222).
         const host: ThisParameterType<typeof assertSameOriginOrFree> = {
             connectors: this.connectors,
             logger: this.logger,
         };
-        assertSameOriginOrFree.call(host, name, origin);
+        assertSameOriginOrFree.call(host, name, origin, packageId ?? null, soleOfName ?? false);
     }
 
-    /** Unregister a connector (hot-unplug). */
-    unregisterConnector(name: string): void {
+    /**
+     * Unregister a connector (hot-unplug): [#31699] the instance of
+     * `packageId`, or every instance of `name` when `packageId` is absent.
+     */
+    unregisterConnector(name: string, packageId?: string | null): void {
         // The body lives in ./plugin-extension-api.ts (#25222).
         const host: ThisParameterType<typeof unregisterConnector> = {
             connectors: this.connectors,
             logger: this.logger,
         };
-        unregisterConnector.call(host, name);
+        unregisterConnector.call(host, name, packageId);
+    }
+
+    /**
+     * [#31699] The registered instance `packageId` addresses: exactly that
+     * package's instance of `name` (`null`: the one of no package), or, with
+     * `packageId` absent, the one instance of the name, `undefined` when there
+     * are two (never one of them, ADR-0150 red line 2).
+     */
+    private connectorInstance(name: string, packageId?: string | null): RegisteredConnector | undefined {
+        return packageId === undefined ? this.connectors.sole(name)?.registered : this.connectors.get(name, packageId);
     }
 
     /**
      * Resolve the handler for a connector action, used by the baseline
      * `connector_action` node. Returns `undefined` when the connector or action
      * is not registered, so the node can fail the step with a clear error.
+     * [#31699] `packageId` addresses the instance ({@link connectorInstance}).
      */
-    resolveConnectorAction(connectorId: string, actionId: string): ConnectorActionHandler | undefined {
-        return this.connectors.get(connectorId)?.handlers[actionId];
+    resolveConnectorAction(connectorId: string, actionId: string, packageId?: string | null): ConnectorActionHandler | undefined {
+        return this.connectorInstance(connectorId, packageId)?.handlers[actionId];
+    }
+
+    /**
+     * [#31699] The declared `inputSchema` of an action of the instance
+     * `packageId` addresses ({@link connectorInstance}), read from its stored
+     * def as {@link getConnectorDescriptors} projects it; `undefined` when it
+     * declares none or is not registered.
+     */
+    resolveConnectorActionInputSchema(connectorId: string, actionId: string, packageId?: string | null): unknown {
+        return this.connectorInstance(connectorId, packageId)?.def.actions?.find((a) => a.key === actionId)?.inputSchema;
     }
 
     /**
@@ -4514,8 +4557,8 @@ export class AutomationEngine implements IAutomationService {
      * ADR-0097 declarative materialization path store their def here, so one
      * lookup covers both origins.
      */
-    resolveConnectorActionEffect(connectorId: string, actionId: string): ConnectorActionEffect | undefined {
-        return this.connectors.get(connectorId)?.def.actions?.find((a) => a.key === actionId)?.effect;
+    resolveConnectorActionEffect(connectorId: string, actionId: string, packageId?: string | null): ConnectorActionEffect | undefined {
+        return this.connectorInstance(connectorId, packageId)?.def.actions?.find((a) => a.key === actionId)?.effect;
     }
 
     /**
@@ -4609,12 +4652,16 @@ export class AutomationEngine implements IAutomationService {
 
     /** Get all registered connector names. */
     getRegisteredConnectors(): string[] {
-        return [...this.connectors.keys()];
+        return this.connectors.names();
     }
 
-    /** The origin a connector was registered under, or `undefined` if unregistered. */
-    getConnectorOrigin(name: string): ConnectorOrigin | undefined {
-        return this.connectors.get(name)?.origin;
+    /**
+     * The origin a connector was registered under, or `undefined` if
+     * unregistered. [#31699] `packageId` addresses the instance
+     * ({@link connectorInstance}).
+     */
+    getConnectorOrigin(name: string, packageId?: string | null): ConnectorOrigin | undefined {
+        return this.connectorInstance(name, packageId)?.origin;
     }
 
     /**
@@ -4623,8 +4670,8 @@ export class AutomationEngine implements IAutomationService {
      * `connector_action` node distinguish "degraded, retrying" from "no such
      * connector/action" in its failure message (#3017).
      */
-    getConnectorDegradedReason(name: string): string | undefined {
-        const reg = this.connectors.get(name);
+    getConnectorDegradedReason(name: string, packageId?: string | null): string | undefined {
+        const reg = this.connectorInstance(name, packageId);
         return reg?.state === 'degraded' ? (reg.degradedReason ?? 'upstream unavailable') : undefined;
     }
 
@@ -4634,8 +4681,8 @@ export class AutomationEngine implements IAutomationService {
      * Lets the `connector_action` node say "retries automatically" only when
      * that is true.
      */
-    getConnectorDegradedHold(name: string): ConnectorHold | undefined {
-        const reg = this.connectors.get(name);
+    getConnectorDegradedHold(name: string, packageId?: string | null): ConnectorHold | undefined {
+        const reg = this.connectorInstance(name, packageId);
         return reg?.state === 'degraded' ? reg.degradedHold : undefined;
     }
 
@@ -4703,7 +4750,7 @@ export class AutomationEngine implements IAutomationService {
      * Handlers are omitted — they are runtime code, not metadata.
      */
     getConnectorDescriptors(): ConnectorDescriptor[] {
-        return [...this.connectors.values()].map(({ def, origin, state, degradedReason }) => ({
+        return this.connectors.values().map(({ def, origin, state, degradedReason }) => ({
             name: def.name,
             label: def.label,
             type: def.type,
@@ -5832,10 +5879,46 @@ export class AutomationEngine implements IAutomationService {
      * as before. Read-only.
      */
     connectorNameRefusal(connectorId: string, context: AutomationContext | undefined): PackageScopedRefusal | undefined {
-        const callerPackageId = this.flowCallerPackage(context);
-        if (callerPackageId === null) return undefined;
-        const meant = this.connectorNameResolver?.(connectorId, callerPackageId);
-        return meant?.status === 'refused' ? meant : undefined;
+        const resolved = this.resolveConnectorInstanceFor(connectorId, this.flowCallerPackage(context));
+        return resolved.status === 'refused' ? resolved.refusal : undefined;
+    }
+
+    /**
+     * [ADR-0150 D3/D4, #31699] Which registered instance the bare name
+     * `connectorId` means for the run of `context`'s flow
+     * ({@link resolveConnectorInstanceFor} for {@link flowCallerPackage}).
+     */
+    resolveConnectorInstance(connectorId: string, context: AutomationContext | undefined): ConnectorInstanceResolution {
+        return this.resolveConnectorInstanceFor(connectorId, this.flowCallerPackage(context));
+    }
+
+    /**
+     * [ADR-0150 D3/D4, #31699] Which registered instance the bare name
+     * `connectorId` means for a caller of package `callerPackageId`:
+     *
+     * - a package caller: the resolver's answer. `refused` is said with the
+     *   resolver's own message (every candidate named, {@link connectorNameRefusal});
+     *   `resolved` addresses the holder's instance, when one is registered;
+     * - otherwise (no package, no resolver, a name no registry holds, a
+     *   resolved holder with no instance registered under it): the one
+     *   instance of the name, as a dispatch by name answered before; two are
+     *   `none`, never one of them.
+     *
+     * The second arm is the connection door's rule
+     * (`AutomationServicePlugin.connectionDoorInstance`), so the door and the
+     * dispatch address one instance. Read-only.
+     */
+    resolveConnectorInstanceFor(connectorId: string, callerPackageId: string | null): ConnectorInstanceResolution {
+        if (callerPackageId !== null) {
+            const meant = this.connectorNameResolver?.(connectorId, callerPackageId);
+            if (meant?.status === 'refused') return { status: 'refused', refusal: meant };
+            if (meant?.status === 'resolved') {
+                const packageId = meant.holder.kind === 'package' ? meant.holder.packageId : null;
+                if (this.connectors.get(connectorId, packageId)) return { status: 'instance', packageId };
+            }
+        }
+        const sole = this.connectors.sole(connectorId);
+        return sole ? { status: 'instance', packageId: sole.packageId } : { status: 'none' };
     }
 
     /**

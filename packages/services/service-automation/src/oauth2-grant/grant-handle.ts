@@ -84,9 +84,12 @@ export interface OAuth2GrantHandleDeps {
     /**
      * [#31699] The instance's package (`null`: the environment's or the
      * platform's instance): its connections are read by `(package, name)`.
-     * Absent, every connection of the name answers, as before.
+     * Absent, every connection of the name answers, as before. A function is
+     * asked on every read, so a package the instance's name resolves to
+     * (an unstamped entry's) is read as it is now, never as it was when the
+     * handle was made.
      */
-    readonly packageId?: string | null;
+    readonly packageId?: string | null | (() => string | null);
     readonly config: OAuth2GrantConfig;
     /** The connection store (`authorization_code` only). */
     readonly connections: ConnectorConnectionStore;
@@ -106,8 +109,11 @@ export interface OAuth2GrantHandleDeps {
 
 /** The handle, plus what the connect door needs to hand it a token it just obtained. */
 export interface OAuth2GrantHandle extends ConnectorCredentialHandle {
-    /** Keep the access token a completed connect obtained for `organizationId`, under the connection's `revision`. */
-    seed(organizationId: string, revision: number, token: OAuth2TokenResponse): void;
+    /**
+     * Keep the access token a completed connect obtained for `organizationId`,
+     * under the connection's `revision` and [#31699] its row id (`rowId`).
+     */
+    seed(organizationId: string, revision: number, token: OAuth2TokenResponse, rowId: string): void;
     /** Drop every cached access token (a revoke, a reconnect, the instance torn down). */
     forget(organizationId?: string): void;
 }
@@ -117,6 +123,14 @@ export const OAUTH2_REFRESH_LOCK_TTL_MS = 30_000;
 
 interface CachedToken {
     readonly revision: number;
+    /**
+     * [#31699] The id of the connection row the token was obtained for. A
+     * revision is per row and every row starts at 1, so a token is served only
+     * for its own row: never for another package's connection of the
+     * organization that a later read chose. A client_credentials token has
+     * no row.
+     */
+    readonly rowId?: string;
     readonly accessToken: string;
     readonly expiresAt?: number;
 }
@@ -233,6 +247,9 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
 
     // authorization_code
     const cache = new Map<string, CachedToken>();
+    /** [#31699] The instance's package as it is at this read ({@link OAuth2GrantHandleDeps.packageId}). */
+    const packageNow = (): string | null | undefined =>
+        typeof deps.packageId === 'function' ? deps.packageId() : deps.packageId;
     const inflight = new Map<string, Promise<CachedToken>>();
 
     /** The connection a request dispatches with (D4, Q1 = A). */
@@ -241,9 +258,9 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
         let record: ConnectorConnectionRecord | undefined;
         try {
             if (organizationId !== undefined) {
-                record = await deps.connections.read(organizationId, connector, deps.packageId);
+                record = await deps.connections.read(organizationId, connector, packageNow());
             } else {
-                const all = await deps.connections.listFor(connector, deps.packageId);
+                const all = await deps.connections.listFor(connector, packageNow());
                 if (all.length > 1) {
                     throw connectorCredentialRefusal(
                         `connector instance '${connector}' is connected for ${all.length} organizations, and this dispatch carries `
@@ -323,7 +340,7 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
     const refreshOnce = async (organizationId: string): Promise<CachedToken> => {
         let current: ConnectorConnectionRecord | undefined;
         try {
-            current = await deps.connections.read(organizationId, connector, deps.packageId);
+            current = await deps.connections.read(organizationId, connector, packageNow());
         } catch (err) {
             // [#31699] As `select` says it: a conflict is no transient fault, never a 409 out of the dispatch.
             if (err instanceof ConnectorConnectionConflictError) throw unavailable(err.message.replace(/\.$/, ''));
@@ -371,6 +388,7 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
         }
         const cached: CachedToken = {
             revision: token.refreshToken === undefined ? current.revision : current.revision + 1,
+            rowId: current.id,
             accessToken: token.accessToken,
             ...(token.expiresAt === undefined ? {} : { expiresAt: token.expiresAt }),
         };
@@ -402,22 +420,37 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
         return flight;
     };
 
+    /**
+     * [#31699] A refresh already in flight for the organization may be of
+     * another row than the one this read chose (the instance's package changed
+     * while it was out): its token is not this row's, so the dispatch is
+     * refused and the next one refreshes the row it chooses.
+     */
+    const ownRow = (token: CachedToken, record: ConnectorConnectionRecord): CachedToken => {
+        if (token.rowId === record.id) return token;
+        throw unavailable(`the connection of connector instance '${connector}' for organization '${record.organizationId}' `
+            + 'changed while it was being refreshed; the next dispatch uses the new one');
+    };
+
     return {
         connector,
         async get(request) {
             const record = await select(request);
             const held = cache.get(record.organizationId);
-            if (fresh(held) && held.revision === record.revision) return toCredential(held);
-            return toCredential(await refreshFor(record.organizationId));
+            if (fresh(held) && held.revision === record.revision && held.rowId === record.id) {
+                return toCredential(held);
+            }
+            return toCredential(ownRow(await refreshFor(record.organizationId), record));
         },
         async refresh(request) {
             const record = await select(request);
             cache.delete(record.organizationId);
-            return toCredential(await refreshFor(record.organizationId));
+            return toCredential(ownRow(await refreshFor(record.organizationId), record));
         },
-        seed(organizationId, revision, token) {
+        seed(organizationId, revision, token, rowId) {
             cache.set(organizationId, {
                 revision,
+                rowId,
                 accessToken: token.accessToken,
                 ...(token.expiresAt === undefined ? {} : { expiresAt: token.expiresAt }),
             });
