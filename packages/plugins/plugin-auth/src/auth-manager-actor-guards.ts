@@ -34,12 +34,14 @@
  * after construction (the first on every plugin-list build, the second when
  * `AuthPlugin` hands the last-administrator guard over), and the guards read
  * them after an `await`, so a value copied when the guard was called could
- * part from the field the body used to read.
+ * part from the field the body used to read. [#32925] `organizationDeleteGate`,
+ * the host's own check on an organization delete, goes as a getter over the
+ * manager's config for the same reason: `updateConfig` replaces the config.
  *
  * Nothing re-exports this module, so the published surface does not move.
  */
 
-import type { AuthManager } from './auth-manager.js';
+import type { AuthManager, AuthManagerOptions, OrganizationDeleteGateRefusal } from './auth-manager.js';
 import type { StandardErrorCode } from '@objectstack/spec/api';
 // [#10348] The ONE id-shaped platform-admin predicate (ADR-0068 D2).
 // `auth-manager` used to re-derive that standing itself, in two spellings
@@ -116,6 +118,8 @@ async function invitationRoleCapReadFaultApiError(cause: unknown): Promise<Error
  */
 export interface ActorGuardHost {
   readonly orgRolesMap: AuthManager['orgRolesMap'];
+  /** [#32925] The host's check on an organization delete, read from the manager's config per call. */
+  readonly organizationDeleteGate: AuthManagerOptions['organizationDeleteGate'];
   readonly organizationDeleteStandingJudge: AuthManager['organizationDeleteStandingJudge'];
   computeAuthGate: AuthManager['computeAuthGate'];
   getAudience: AuthManager['getAudience'];
@@ -223,7 +227,7 @@ export async function assertActorNotHeld(this: Pick<ActorGuardHost, 'computeAuth
 }
 
 /** The body of `AuthManager#assertOrganizationDeletable`; the method's docblock there is its contract. */
-export async function assertOrganizationDeletable(this: Pick<ActorGuardHost, 'getAudience' | 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteStandingJudge' | 'resolveActor'>, ctx: any): Promise<void> {
+export async function assertOrganizationDeletable(this: Pick<ActorGuardHost, 'getAudience' | 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteGate' | 'organizationDeleteStandingJudge' | 'resolveActor'>, ctx: any): Promise<void> {
   const engine = this.getDataEngine();
   if (!engine) return;
   const organizationId = typeof ctx?.body?.organizationId === 'string' ? ctx.body.organizationId : '';
@@ -334,6 +338,88 @@ export async function assertOrganizationDeletable(this: Pick<ActorGuardHost, 'ge
     const { APIError } = await import('better-auth/api');
     throw new APIError('CONFLICT', { code: ORGANIZATION_DELETE_REFUSAL_CODE, ...organizationNotEmptyBody(owned) });
   }
+
+  // [#32925] The host's own check, last: asked only of a delete the mount
+  // gates admitted and every refusal above let through, once, before the
+  // vendor's first write, with the id the vendor parsed and the caller.
+  const gate = this.organizationDeleteGate;
+  if (gate) {
+    await organizationDeleteGateAnswer(gate, {
+      organizationId,
+      session: {
+        userId: actor.userId,
+        ...(actor.activeOrgId ? { activeOrganizationId: actor.activeOrgId } : {}),
+        ...(actor.impersonatedBy ? { impersonatedBy: actor.impersonatedBy } : {}),
+      },
+      ...acceptLanguageOf(ctx),
+    });
+  }
+}
+
+/** The request's `Accept-Language`, when it carries one. */
+function acceptLanguageOf(ctx: any): { acceptLanguage?: string } {
+  const read = (headers: any): unknown => (typeof headers?.get === 'function' ? headers.get('accept-language') : undefined);
+  const value = read(ctx?.headers) ?? read(ctx?.request?.headers);
+  return typeof value === 'string' && value ? { acceptLanguage: value } : {};
+}
+
+/**
+ * Is `answer` a refusal the platform answers unchanged: a `400`–`499` status
+ * and a body carrying a non-empty `code` and `message`, and a `userMessage`
+ * only as a string? `null` when it is, else what is wrong with it.
+ */
+function organizationDeleteGateRefusalFault(answer: unknown): string | null {
+  if (typeof answer !== 'object' || answer === null) return `it answered a ${typeof answer}, not a refusal object`;
+  const { status, body } = answer as { status?: unknown; body?: unknown };
+  if (typeof status !== 'number' || !Number.isInteger(status) || status < 400 || status > 499) {
+    return 'its `status` is not a client-error status (400-499)';
+  }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return 'it has no `body` object';
+  const { code, message, userMessage } = body as { code?: unknown; message?: unknown; userMessage?: unknown };
+  if (typeof code !== 'string' || !code) return 'its `body.code` is not a non-empty string';
+  if (typeof message !== 'string' || !message) return 'its `body.message` is not a non-empty string';
+  if (userMessage !== undefined && typeof userMessage !== 'string') return 'its `body.userMessage` is not a string';
+  return null;
+}
+
+/**
+ * [#32925] Ask the host's organization delete check and act on its answer:
+ * nothing (`undefined` / `null`) admits; a well-formed refusal is thrown as
+ * its own status and body, unchanged. Fail-closed on everything else: a check
+ * that throws, or answers anything that is neither, refuses with 503
+ * `SERVICE_UNAVAILABLE`, never letting the delete through for want of an
+ * answer. The 503 names the option, never the host's error text, which rides
+ * `cause`.
+ */
+async function organizationDeleteGateAnswer(
+  gate: NonNullable<AuthManagerOptions['organizationDeleteGate']>,
+  request: Parameters<NonNullable<AuthManagerOptions['organizationDeleteGate']>>[0],
+): Promise<void> {
+  const { APIError } = await import('better-auth/api');
+  const undecided = (why: string, cause?: unknown): Error => {
+    const err = new APIError('SERVICE_UNAVAILABLE', {
+      code: ORGANIZATION_DELETE_READ_FAULT_CODE,
+      message:
+        `The host's organization delete check (\`organizationDeleteGate\`) ${why}, so whether this ` +
+        'organization may be deleted was never decided, and nothing was deleted. This is a server-side ' +
+        'fault, not a refusal of the delete: retry once the check can answer.',
+    });
+    if (cause !== undefined) (err as { cause?: unknown }).cause = cause;
+    return err;
+  };
+  let answer: unknown;
+  try {
+    answer = await gate(request);
+  } catch (cause) {
+    throw undecided('failed', cause);
+  }
+  if (answer === undefined || answer === null) return;
+  const fault = organizationDeleteGateRefusalFault(answer);
+  if (fault) throw undecided(`answered something that is not a refusal (${fault})`);
+  const refusal = answer as OrganizationDeleteGateRefusal;
+  // Any 400-499 integer: better-call answers a numeric status as given, its
+  // type lists only the named ones.
+  throw new APIError(refusal.status as ConstructorParameters<typeof APIError>[0], { ...refusal.body });
 }
 
 /** The body of `AuthManager#assertRemoveMemberPermitted`; the method's docblock there is its contract. */

@@ -42,9 +42,17 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { Hono } from 'hono';
+import type { PluginContext } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { AuthManager } from './auth-manager.js';
+import {
+  AuthManager,
+  type AuthManagerOptions,
+  type OrganizationDeleteGateRefusal,
+  type OrganizationDeleteGateRequest,
+} from './auth-manager.js';
+import { AuthPlugin } from './auth-plugin.js';
 import { authIdentityObjects } from './manifest.js';
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 
@@ -111,13 +119,14 @@ async function rows(engine: ObjectQL, object: string, where: Record<string, unkn
  * slug is not `default` and it is not the only one), and better-auth's first
  * write, were the request to reach it, is the session's active organization.
  */
-async function ownerOfTarget(role: string | null = 'owner') {
+async function ownerOfTarget(role: string | null = 'owner', options: Partial<AuthManagerOptions> = {}) {
   const engine = await bootEngine();
   const manager = new AuthManager({
     secret: SECRET,
     baseUrl: BASE,
     dataEngine: engine as never,
     plugins: { organization: true },
+    ...options,
   } as never);
   const signedUp = await manager.handleRequest(new Request(`${AUTH}/sign-up/email`, {
     method: 'POST',
@@ -371,5 +380,189 @@ describe('[#25364] the last-administrator guard\'s question about the Default Or
     expect(verdict.status, verdictText).toBe(403);
     expect((JSON.parse(verdictText) as { code?: string }).code).toBe('PERMISSION_DENIED');
     await expectNothingChanged(engine, again);
+  });
+});
+
+describe('[#32925] the host\'s organization delete check: asked once, after the mount gates and the platform\'s own refusals, before better-auth\'s first write', () => {
+  /** A recording `organizationDeleteGate` that answers what `answer` returns or throws. */
+  function hostGate(answer: (request: OrganizationDeleteGateRequest) => unknown = () => undefined) {
+    const calls: OrganizationDeleteGateRequest[] = [];
+    const gate = vi.fn(async (request: OrganizationDeleteGateRequest) => {
+      calls.push(request);
+      return answer(request) as OrganizationDeleteGateRefusal | undefined;
+    });
+    return { gate, calls };
+  }
+
+  /** A refusal shaped like the platform's own `DELETE_RESTRICTED`, with a field of the host's own. */
+  const REFUSAL: OrganizationDeleteGateRefusal = {
+    status: 409,
+    body: {
+      code: 'DELETE_RESTRICTED',
+      message: 'This organization has a subscription that will charge again and 2 environments.',
+      userMessage: 'Cancel the subscription and delete the environments first.',
+      steps: ['Cancel the subscription', 'Delete the remaining environments'],
+    },
+  };
+
+  async function userIdOf(engine: ObjectQL): Promise<string> {
+    const [user] = await rows(engine, 'sys_user', { email: 'owner@example.com' });
+    return String(user.id);
+  }
+
+  it('is called once, with the id better-auth parsed and the caller; answering nothing lets the delete go ahead', async () => {
+    const { gate, calls } = hostGate();
+    const { engine, manager, cookie } = await ownerOfTarget('owner', { organizationDeleteGate: gate });
+    const attempted = recordAttemptedWrites(engine);
+
+    const res = await manager.handleRequest(new Request(`${AUTH}/organization/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', origin: BASE, cookie, 'accept-language': 'de-DE' },
+      body: JSON.stringify({ organizationId: TARGET }),
+    }));
+    engine.unregisterHooksByPackage(RECORDER);
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(gate).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual([{
+      organizationId: TARGET,
+      session: { userId: await userIdOf(engine), activeOrganizationId: TARGET },
+      acceptLanguage: 'de-DE',
+    }]);
+    expect(attempted).toEqual(expect.arrayContaining(['update sys_session', 'delete sys_member', 'delete sys_organization']));
+    expect(await rows(engine, 'sys_organization', { id: TARGET })).toHaveLength(0);
+  });
+
+  it('CONTROL: with no check set, the same delete goes ahead as before', async () => {
+    const { engine, manager, cookie } = await ownerOfTarget();
+    await expectControlDeletes(engine, manager, cookie);
+  });
+
+  it('its refusal is answered unchanged, status and body, and nothing is attempted', async () => {
+    const { gate } = hostGate(() => REFUSAL);
+    const { engine, manager, cookie } = await ownerOfTarget('owner', { organizationDeleteGate: gate });
+    const attempted = recordAttemptedWrites(engine);
+
+    const res = await post(manager, '/organization/delete', { organizationId: TARGET }, cookie);
+    engine.unregisterHooksByPackage(RECORDER);
+
+    const text = await res.clone().text();
+    expect(res.status, text).toBe(409);
+    expect(JSON.parse(text)).toEqual(REFUSAL.body);
+    expect(gate).toHaveBeenCalledTimes(1);
+    await expectNothingChanged(engine, attempted);
+  });
+
+  it('a form-encoded body reaches it as the same parsed id: the host reads no body of its own', async () => {
+    const { gate, calls } = hostGate(() => REFUSAL);
+    const { engine, manager, cookie } = await ownerOfTarget('owner', { organizationDeleteGate: gate });
+    const attempted = recordAttemptedWrites(engine);
+
+    const res = await manager.handleRequest(new Request(`${AUTH}/organization/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', origin: BASE, cookie },
+      body: new URLSearchParams({ organizationId: TARGET }).toString(),
+    }));
+    engine.unregisterHooksByPackage(RECORDER);
+
+    expect(res.status, await res.clone().text()).toBe(409);
+    expect(calls.map((c) => c.organizationId)).toEqual([TARGET]);
+    await expectNothingChanged(engine, attempted);
+  });
+
+  const failClosed: Array<{ name: string; answer: () => unknown }> = [
+    { name: 'throws', answer: () => { throw new Error('billing store unreachable (host)'); } },
+    { name: 'answers a success status', answer: () => ({ status: 200, body: { code: 'OK', message: 'fine (host)' } }) },
+    { name: 'answers a server-error status', answer: () => ({ status: 503, body: { code: 'SERVICE_UNAVAILABLE', message: 'down (host)' } }) },
+    { name: 'answers a body with no code', answer: () => ({ status: 409, body: { message: 'no code (host)' } }) },
+    { name: 'answers false', answer: () => false },
+  ];
+  for (const c of failClosed) {
+    it(`fails closed when it ${c.name}: 503 SERVICE_UNAVAILABLE naming the option, the host's words withheld, nothing attempted`, async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { gate } = hostGate(c.answer);
+      const { engine, manager, cookie } = await ownerOfTarget('owner', { organizationDeleteGate: gate });
+      const attempted = recordAttemptedWrites(engine);
+
+      const res = await post(manager, '/organization/delete', { organizationId: TARGET }, cookie);
+      engine.unregisterHooksByPackage(RECORDER);
+
+      const text = await res.clone().text();
+      expect(res.status, text).toBe(503);
+      const body = JSON.parse(text) as { code?: string; message?: string };
+      expect(body.code).toBe('SERVICE_UNAVAILABLE');
+      expect(body.message).toContain('`organizationDeleteGate`');
+      expect(text).not.toContain('(host)');
+      expect(gate).toHaveBeenCalledTimes(1);
+      await expectNothingChanged(engine, attempted);
+    });
+  }
+
+  it('a delete the platform refuses never reaches it: no session (401), records remaining (409); CONTROL: the records gone, the same caller reaches it', async () => {
+    const { gate } = hostGate(() => REFUSAL);
+    const { engine, manager, cookie } = await ownerOfTarget('owner', { organizationDeleteGate: gate });
+
+    const anonymous = await post(manager, '/organization/delete', { organizationId: TARGET }, '');
+    expect(anonymous.status, await anonymous.clone().text()).toBe(401);
+    expect(gate).not.toHaveBeenCalled();
+
+    await engine.insert('sys_user_permission_set', {
+      id: 'grant_sales', user_id: await userIdOf(engine), permission_set: 'sales_rep', organization_id: TARGET,
+    }, SYSTEM);
+    const remaining = await post(manager, '/organization/delete', { organizationId: TARGET }, cookie);
+    const remainingText = await remaining.clone().text();
+    expect(remaining.status, remainingText).toBe(409);
+    expect((JSON.parse(remainingText) as { dependents?: unknown }).dependents).toEqual([{ object: 'sys_user_permission_set', count: 1 }]);
+    expect(gate).not.toHaveBeenCalled();
+
+    await engine.delete('sys_user_permission_set', { where: { id: 'grant_sales' }, ...(SYSTEM as object) } as never);
+    const reached = await post(manager, '/organization/delete', { organizationId: TARGET }, cookie);
+    const reachedText = await reached.clone().text();
+    expect(reached.status, reachedText).toBe(409);
+    expect(JSON.parse(reachedText)).toEqual(REFUSAL.body);
+    expect(gate).toHaveBeenCalledTimes(1);
+  });
+
+  it('a request the IP allow-list refuses at the mount never reaches it; CONTROL: from inside the range it does, its refusal answered unchanged through the mount', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { gate } = hostGate(() => REFUSAL);
+    const { engine, manager, cookie } = await ownerOfTarget('owner', {
+      organizationDeleteGate: gate,
+      allowedIpRanges: ['203.0.113.0/24'],
+    });
+    const ctx = {
+      registerService: vi.fn(),
+      getService: vi.fn((name: string) => (name === 'manifest' ? { register: vi.fn() } : undefined)),
+      getServices: vi.fn(() => new Map()),
+      hook: vi.fn(),
+      trigger: vi.fn(),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      getKernel: vi.fn(),
+    } as unknown as PluginContext;
+    const plugin = new AuthPlugin({ secret: SECRET });
+    await plugin.init(ctx);
+    (plugin as any).authManager = manager;
+    const app = new Hono();
+    (plugin as any).registerAuthRoutes({ getRawApp: () => app, getPort: () => 0 }, ctx);
+    const deleteFrom = (peer: string) => app.request(`${AUTH}/organization/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', origin: BASE, cookie },
+      body: JSON.stringify({ organizationId: TARGET }),
+    }, { incoming: { socket: { remoteAddress: peer } } });
+
+    const attempted = recordAttemptedWrites(engine);
+    const outside = await deleteFrom('198.51.100.9');
+    const outsideText = await outside.clone().text();
+    expect(outside.status, outsideText).toBe(403);
+    expect((JSON.parse(outsideText) as { error?: { code?: string } }).error?.code).toBe('IP_NOT_ALLOWED');
+    expect(gate).not.toHaveBeenCalled();
+
+    const inside = await deleteFrom('203.0.113.7');
+    engine.unregisterHooksByPackage(RECORDER);
+    const insideText = await inside.clone().text();
+    expect(inside.status, insideText).toBe(409);
+    expect(JSON.parse(insideText)).toEqual(REFUSAL.body);
+    expect(gate).toHaveBeenCalledTimes(1);
+    await expectNothingChanged(engine, attempted);
   });
 });

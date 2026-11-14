@@ -28,6 +28,8 @@ export {
   type InvitationPlacementServiceLike,
   readInvitationPlacementIntent,
   type AuthManagerOptions,
+  type OrganizationDeleteGateRequest,
+  type OrganizationDeleteGateRefusal,
   ipMatchesRange,
   normalizeAuthEmailLocale,
   authEmailLocaleFromRequest,
