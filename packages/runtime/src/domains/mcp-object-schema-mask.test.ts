@@ -1663,6 +1663,34 @@ describe('[#32530] describe_object serves readonly where a write never stands â€
         expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
     });
 
+    // The stdio twin holds this same map for the same declaration and mask
+    // (`packages/mcp/src/stdio-data-bridge.object-schema-mask.test.ts`, "stdio
+    // describe_object and the objects resource judge readonly on the DECLARED
+    // field"): neither package depends on the other, so the two doors' parity
+    // is this literal, pinned on each side, field for field. Read over the
+    // authored fields: the registry adds its audit, tenant and owner columns
+    // here, which the stdio fixture does not declare.
+    it('PARITY: the member is served exactly the readonly map the stdio door serves the same member', async () => {
+        const STDIO_TWIN_MEMBER_READONLY = {
+            title: false,
+            qty: false,
+            frozen_note: true,
+            ticket_no: true,
+            total: true,
+            bare_formula: true,
+            doubled: true,
+            locked_note: false,
+            marked_up: true,
+        };
+        const { bridge } = await bridgeFor(kernelOver(services), MEMBER);
+        const served = readonlyOf(await bridge.describeObject(OBJ));
+        expect(served).not.toHaveProperty('hidden_cost');
+        const authored = Object.fromEntries(
+            Object.keys(STDIO_TWIN_MEMBER_READONLY).map((k) => [k, served[k]]),
+        );
+        expect(authored).toEqual(STDIO_TWIN_MEMBER_READONLY);
+    });
+
     it('a stored expression over a field the caller cannot read is still served readonly: true, and neither the expression nor that field is served', async () => {
         const { bridge } = await bridgeFor(kernelOver(services), MEMBER);
         const described: any = await bridge.describeObject(OBJ);

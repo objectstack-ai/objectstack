@@ -146,3 +146,19 @@ describe('renderSkillMarkdown is mirrored by the Console download', () => {
     expect(renderObjectStackSkill(options)).toBe(renderSkillMarkdown(options));
   });
 });
+
+describe('[ruling 6844187236, B] the served skill teaches an agent to find a colleague for a person field', () => {
+  it('names sys_user as the read-only lookup, by email or by name, and says namesakes are told apart by email', () => {
+    const md = renderSkillMarkdown();
+    const at = md.indexOf('**People are `sys_user` records.**');
+    expect(at, 'the conventions bullet is served').toBeGreaterThan(md.indexOf('## Conventions & gotchas'));
+    const bullet = md.slice(at, md.indexOf('\n- ', at + 1));
+    expect(bullet).toContain('query_records');
+    expect(bullet).toContain('"email"');
+    expect(bullet).toContain('$contains');
+    expect(bullet).toContain('tell them apart by email');
+    expect(bullet).toContain('read only');
+    // The tools line no longer claims every system object is hidden.
+    expect(md).not.toContain('(system `sys_*` objects are hidden)');
+  });
+});

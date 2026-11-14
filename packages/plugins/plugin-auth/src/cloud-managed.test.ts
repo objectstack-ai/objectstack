@@ -28,6 +28,7 @@ import { AuthManager } from './auth-manager';
 import { AuthPlugin } from './auth-plugin';
 import { assertAudienceConfig, decideAudienceAdmission, resolveAudience } from './audience-posture';
 import { CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed';
+import { SSO_ONLY_REFUSAL_MESSAGES } from './sso-only-local-password';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 
@@ -551,9 +552,24 @@ describe('[#25083] the password doors on a cloud-managed environment', () => {
     expect(v.code, v.text).not.toBe('RESOURCE_CONFLICT');
   }, 120_000);
 
-  it('unmanaged with SSO-only on, both doors answer the idp user as before', async () => {
+  it('unmanaged with SSO-only on, the idp user meets the SSO-only refusal, not the managed one', async () => {
+    // SSO-only mode has its own rule for this population
+    // (`sso-only-local-password.ts`, pinned in the describe below); this leg
+    // keeps the two rules apart: the sentence is SSO-only's, never the
+    // cloud-managed one, on a deployment that is not cloud-managed.
     const s = await stage();
     process.env[SSO_ONLY_ENV] = 'true';
+    const setByAdmin = await verdict(
+      await s.fire('/admin/set-user-password', { userId: s.ids.idp, newPassword: NEW_PASSWORD }, s.bearers.admin),
+    );
+    expect(setByAdmin.status, setByAdmin.text).toBe(409);
+    expect(setByAdmin.message, setByAdmin.text).toBe(SSO_ONLY_REFUSAL_MESSAGES.setUserPassword);
+    expect(setByAdmin.message, setByAdmin.text).not.toBe(CLOUD_MANAGED_REFUSAL_MESSAGES.setUserPassword);
+    expect(s.credentialOf(s.ids.idp)).toBeUndefined();
+  }, 120_000);
+
+  it('unmanaged with SSO-only off, an administrator sets the idp user a password as before', async () => {
+    const s = await stage();
     const setByAdmin = await verdict(
       await s.fire('/admin/set-user-password', { userId: s.ids.idp, newPassword: NEW_PASSWORD }, s.bearers.admin),
     );
@@ -567,6 +583,177 @@ describe('[#25083] the password doors on a cloud-managed environment', () => {
     expect(v.status, v.text).toBe(200);
     expect(s.credentialOf(s.ids.idp)).toBeDefined();
   }, 120_000);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SSO-only mode: the set doors give an IdP-provisioned user no local password
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('SSO-only mode keeps IdP-provisioned users off local passwords at the set doors', () => {
+  /** SSO-only mode on, as a self-hosted deployment declares it. */
+  const ssoOnly = () => {
+    process.env[SSO_ONLY_ENV] = 'true';
+  };
+
+  /** Assert an SSO-only refusal: 409, RESOURCE_CONFLICT, and the door's own sentence. */
+  function expectSsoOnlyRefusal(
+    v: Awaited<ReturnType<typeof verdict>>,
+    door: keyof typeof SSO_ONLY_REFUSAL_MESSAGES,
+  ): void {
+    expect(v.status, v.text).toBe(409);
+    expect(v.code, v.text).toBe('RESOURCE_CONFLICT');
+    expect(v.message, v.text).toBe(SSO_ONLY_REFUSAL_MESSAGES[door]);
+  }
+
+  /** Give the staged idp user platform-admin standing (the legacy scalar `isPlatformAdminUser` accepts). */
+  const makeIdpAdmin = (s: Awaited<ReturnType<typeof stage>>) => {
+    s.users().find((r) => String(r.id) === s.ids.idp)!.role = 'admin';
+  };
+
+  /** Drop a user's local credential, as a user who never set one arrives. */
+  const dropCredential = (s: Awaited<ReturnType<typeof stage>>, userId: string) => {
+    s.engine.tables.set(
+      'sys_account',
+      ((s.engine.tables.get('sys_account') ?? []) as any[]).filter(
+        (r) => !(r.provider_id === 'credential' && String(r.user_id) === userId),
+      ),
+    );
+  };
+
+  describe('set-initial-password', () => {
+    it('refuses an idp_provisioned caller with 409 and writes no credential', async () => {
+      const s = await stage();
+      ssoOnly();
+      const v = await verdict(await s.fire('/set-initial-password', { newPassword: NEW_PASSWORD }, s.bearers.idp));
+      expectSsoOnlyRefusal(v, 'setInitialPassword');
+      expect(s.credentialOf(s.ids.idp)).toBeUndefined();
+    }, 120_000);
+
+    it('admits an idp_provisioned platform administrator setting their own break-glass password', async () => {
+      const s = await stage();
+      makeIdpAdmin(s);
+      ssoOnly();
+      const v = await verdict(await s.fire('/set-initial-password', { newPassword: NEW_PASSWORD }, s.bearers.idp));
+      expect(v.status, v.text).toBe(200);
+      expect(s.credentialOf(s.ids.idp)).toBeDefined();
+    }, 120_000);
+
+    it('answers an environment-native caller as before', async () => {
+      const s = await stage();
+      dropCredential(s, s.ids.member);
+      ssoOnly();
+      const v = await verdict(await s.fire('/set-initial-password', { newPassword: NEW_PASSWORD }, s.bearers.member));
+      expect(v.status, v.text).toBe(200);
+      expect(s.credentialOf(s.ids.member)).toBeDefined();
+    }, 120_000);
+
+    it('answers an anonymous caller as before', async () => {
+      const s = await stage();
+      ssoOnly();
+      const v = await verdict(await s.fire('/set-initial-password', { newPassword: NEW_PASSWORD }));
+      expect(v.status, v.text).toBe(401);
+      expect(v.code, v.text).not.toBe('RESOURCE_CONFLICT');
+    }, 120_000);
+
+    it('CONTROL: SSO-only off, the idp_provisioned caller sets their own initial password as before', async () => {
+      const s = await stage();
+      const v = await verdict(await s.fire('/set-initial-password', { newPassword: NEW_PASSWORD }, s.bearers.idp));
+      expect(v.status, v.text).toBe(200);
+      expect(s.credentialOf(s.ids.idp)).toBeDefined();
+    }, 120_000);
+  });
+
+  describe('admin set-user-password', () => {
+    it('refuses an idp_provisioned target with 409 and writes no credential', async () => {
+      const s = await stage();
+      ssoOnly();
+      const v = await verdict(
+        await s.fire('/admin/set-user-password', { userId: s.ids.idp, newPassword: NEW_PASSWORD }, s.bearers.admin),
+      );
+      expectSsoOnlyRefusal(v, 'setUserPassword');
+      expect(s.credentialOf(s.ids.idp)).toBeUndefined();
+    }, 120_000);
+
+    it('refuses an administrator setting one for ANOTHER idp_provisioned administrator', async () => {
+      const s = await stage();
+      makeIdpAdmin(s);
+      ssoOnly();
+      const v = await verdict(
+        await s.fire('/admin/set-user-password', { userId: s.ids.idp, newPassword: NEW_PASSWORD }, s.bearers.admin),
+      );
+      expectSsoOnlyRefusal(v, 'setUserPassword');
+      expect(s.credentialOf(s.ids.idp)).toBeUndefined();
+    }, 120_000);
+
+    it('admits an idp_provisioned platform administrator setting their own break-glass password', async () => {
+      const s = await stage();
+      makeIdpAdmin(s);
+      ssoOnly();
+      const v = await verdict(
+        await s.fire('/admin/set-user-password', { userId: s.ids.idp, newPassword: NEW_PASSWORD }, s.bearers.idp),
+      );
+      expect(v.status, v.text).toBe(200);
+      expect(s.credentialOf(s.ids.idp)).toBeDefined();
+    }, 120_000);
+
+    it('answers an environment-native target as before', async () => {
+      const s = await stage();
+      ssoOnly();
+      const before = s.credentialOf(s.ids.member)?.password;
+      const v = await verdict(
+        await s.fire('/admin/set-user-password', { userId: s.ids.member, newPassword: NEW_PASSWORD }, s.bearers.admin),
+      );
+      expect(v.status, v.text).toBe(200);
+      expect(s.credentialOf(s.ids.member)?.password).not.toBe(before);
+    }, 120_000);
+
+    it('on a cloud-managed environment the cloud-managed refusal is the one that answers', async () => {
+      const s = await stage();
+      setManaged(true);
+      ssoOnly();
+      const v = await verdict(
+        await s.fire('/admin/set-user-password', { userId: s.ids.idp, newPassword: NEW_PASSWORD }, s.bearers.admin),
+      );
+      expectManagedRefusal(v, 'setUserPassword');
+      expect(s.credentialOf(s.ids.idp)).toBeUndefined();
+    }, 120_000);
+  });
+
+  describe('not retroactive', () => {
+    it('an idp_provisioned user who already holds a local password still signs in and changes it; no door sets it anew', async () => {
+      const s = await stage();
+      // The idp user as one who set a password before SSO-only mode: the
+      // member's credential row, re-keyed, carries PASSWORD.
+      const memberCredential = s.credentialOf(s.ids.member);
+      expect(memberCredential, 'fixture invariant: the member holds a credential to copy').toBeDefined();
+      (s.engine.tables.get('sys_account') as any[]).push({
+        ...structuredClone(memberCredential),
+        id: `acct_idp_holder`,
+        user_id: s.ids.idp,
+        account_id: s.ids.idp,
+      });
+      ssoOnly();
+
+      const signIn = await verdict(
+        await s.fire('/sign-in/email', { email: 'idp.25083@example.com', password: PASSWORD }),
+      );
+      expect(signIn.status, signIn.text).toBe(200);
+
+      const setByAdmin = await verdict(
+        await s.fire('/admin/set-user-password', { userId: s.ids.idp, newPassword: NEW_PASSWORD }, s.bearers.admin),
+      );
+      expectSsoOnlyRefusal(setByAdmin, 'setUserPassword');
+
+      const changed = await verdict(
+        await s.fire(
+          '/change-password',
+          { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+          s.bearers.idp,
+        ),
+      );
+      expect(changed.status, changed.text).toBe(200);
+    }, 120_000);
+  });
 });
 
 describe('[#25083] what a host that mounts its own twin of a door imports', () => {

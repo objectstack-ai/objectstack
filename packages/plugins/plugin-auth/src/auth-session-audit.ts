@@ -238,6 +238,13 @@ interface BetterAuthSessionRow {
 /** The endpoint whose whole job is ending the caller's own session. */
 export const SIGN_OUT_PATH = '/sign-out';
 
+/**
+ * The vendor's SAML SP-initiated single logout: a sign-out of a session that
+ * started at a provider with "sign out of the company sign-in too" on ends the
+ * session here (`sso-sign-out-of-idp.ts`), and its whole job is the same.
+ */
+export const SAML_SIGN_OUT_PATH = '/sso/saml2/logout/:providerId';
+
 /** The password sign-in endpoint — the one the ADR-0069 D2 lockout governs. */
 export const SIGN_IN_EMAIL_PATH = '/sign-in/email';
 
@@ -290,7 +297,7 @@ export function logoutEventFor(
   session: BetterAuthSessionRow | null | undefined,
   path?: string,
 ): AuthSessionAuditEventInput | null {
-  if (path !== SIGN_OUT_PATH) return null;
+  if (path !== SIGN_OUT_PATH && path !== SAML_SIGN_OUT_PATH) return null;
   const userId = str(session?.userId);
   if (!userId) return null;
   return {

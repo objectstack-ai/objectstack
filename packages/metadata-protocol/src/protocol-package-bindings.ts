@@ -341,7 +341,7 @@ function boundPackageOf(packageId: unknown): string | undefined {
  * as these three types' reads do. `flow` registers with no artifact envelope at all (Regime C,
  * #20913), and the boot pull arms its declared override from the bare slot.
  */
-const BORROWED_ENVELOPE_DECLINED_TYPES: ReadonlySet<string> = new Set([
+export const BORROWED_ENVELOPE_DECLINED_TYPES: ReadonlySet<string> = new Set([
     'dashboard',
     'report',
     'email_template',

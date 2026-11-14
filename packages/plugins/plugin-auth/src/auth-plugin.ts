@@ -160,6 +160,7 @@ import {
   type DemoStaffRefusal,
 } from './demo-staff.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
+import { identitySourceUnreadable, judgeSsoOnlyLocalPassword, ssoOnlyPasswordRefusal } from './sso-only-local-password.js';
 import { registerCopyInvitationLinkAction } from './invitation-link-action.js';
 import {
   ALLOWED_IP_RANGES_ENV,
@@ -4013,6 +4014,30 @@ export class AuthPlugin implements Plugin {
             return c.json(refusal.body, refusal.status);
           }
         }
+        // With SSO-only mode on, an IdP-provisioned caller signs in through the
+        // identity provider and gives themselves no local password here; a
+        // platform administrator still may, for break-glass, by the same
+        // predicate as above (`sso-only-local-password.ts`). An
+        // environment-native caller, and a caller with no session, fall
+        // through to the body as before.
+        if (this.authManager!.isSsoOnlyMode()) {
+          const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
+          const callerId = session?.user?.id;
+          if (callerId) {
+            const verdict = await judgeSsoOnlyLocalPassword({
+              ssoOnly: true,
+              engine: this.authManager!.getDataEngine(),
+              userId: String(callerId),
+              selfPlatformAdmin: () => isPlatformAdminUser(session.user),
+            });
+            if (verdict !== 'allow') {
+              const refusal = verdict === 'refuse'
+                ? ssoOnlyPasswordRefusal('setInitialPassword')
+                : identitySourceUnreadable('this SSO-only environment may set your password here');
+              return c.json(refusal.body, refusal.status);
+            }
+          }
+        }
         const { status, body } = await runSetInitialPassword(authApi as any, c.req.raw);
         return c.json(body, status);
       } catch (error) {
@@ -4657,6 +4682,8 @@ export class AuthPlugin implements Plugin {
         // the deployment to `invite-only`, which is the exact defect the
         // accessor exists to prevent.
         getMembershipPolicy: () => this.authManager!.getMembershipPolicy(),
+        // SSO-only mode, read live per call (`sso-only-local-password.ts`).
+        ssoOnlyMode: () => this.authManager!.isSsoOnlyMode(),
         logger: ctx.logger,
       });
       // Gate: the shared `gateAdmin` hoisted above the SSO mounts (#9653).
