@@ -285,7 +285,9 @@ describe('ChatbotEnhanced (AI Elements composition)', () => {
     expect(onSendMessage).toHaveBeenCalledWith('APPROVE_PLAIN');
   });
 
-  it('flips the clicked card to a "Building…" badge immediately (#2627)', () => {
+  // objectstack#32984 — the click confirms; it does not build. The card reads
+  // 已确认 until an apply_blueprint actually starts.
+  it('flips the clicked card to a "Confirmed" badge immediately (#2627)', () => {
     const onSendMessage = vi.fn();
     render(
       <ChatbotEnhanced
@@ -298,7 +300,8 @@ describe('ChatbotEnhanced (AI Elements composition)', () => {
     // The approval's chat-level effects land at the bottom of the thread —
     // the card ITSELF must show the state change or the click reads as lost.
     expect(screen.queryByTestId('proposed-plan-approve')).not.toBeInTheDocument();
-    expect(screen.getByTestId('proposed-plan-building')).toHaveTextContent('BUILDING_NOW');
+    expect(screen.getByTestId('proposed-plan-confirmed')).toHaveTextContent('Confirmed');
+    expect(screen.queryByTestId('proposed-plan-building')).not.toBeInTheDocument();
     expect(onSendMessage).toHaveBeenCalledTimes(1);
   });
 
@@ -317,7 +320,13 @@ describe('ChatbotEnhanced (AI Elements composition)', () => {
       role: 'assistant',
       content: '',
       toolInvocations: [
-        { toolCallId: 't2', toolName: 'apply_blueprint', state: 'output-available' },
+        {
+          toolCallId: 't2',
+          toolName: 'apply_blueprint',
+          state: 'output-available',
+          // objectstack#32984 — a build is what the envelope says it is.
+          result: { status: 'drafted', drafted: [{ type: 'app', name: 'crm' }] },
+        },
       ],
     },
   ];
@@ -673,8 +682,11 @@ describe('ChatbotEnhanced (AI Elements composition)', () => {
     render(<ChatbotEnhanced messages={[issueTool]} onReviewDraft={vi.fn()} />);
     // The chip still shows the COUNT, and the new detail block expands it into
     // the actual finding + fix hint \u2014 no more dead-end "1 issue" badge.
-    expect(screen.getByTestId('draft-verification-chip')).toHaveTextContent('1 issue');
-    const detail = screen.getByTestId('draft-issues');
+    // objectstack#32984 — the count through the pack ("1 to fix"), and the
+    // findings (written for the agent) kept behind the Technical details
+    // disclosure under a customer sentence.
+    expect(screen.getByTestId('draft-verification-chip')).toHaveTextContent('1 to fix');
+    const detail = screen.getByTestId('draft-issues-details');
     expect(detail).toHaveTextContent('genre is a required select with no options');
     expect(detail).toHaveTextContent('Add an options array.');
   });
@@ -771,7 +783,13 @@ describe('ChatbotEnhanced (AI Elements composition)', () => {
           role: 'assistant',
           content: '',
           toolInvocations: [
-            { toolCallId: 't2', toolName: 'apply_blueprint', state: 'output-available' },
+            {
+              toolCallId: 't2',
+              toolName: 'apply_blueprint',
+              state: 'output-available',
+              // objectstack#32984 — a build is what the envelope says it is.
+              result: { status: 'drafted', drafted: [{ type: 'app', name: 'crm' }] },
+            },
           ],
         },
       ];

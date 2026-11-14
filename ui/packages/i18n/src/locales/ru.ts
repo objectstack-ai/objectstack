@@ -4139,6 +4139,11 @@ const ru = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Отправить сообщение',
     scrollToBottom: 'Перейти к последнему сообщению',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "Отправится, когда закончится текущий ответ",
+      queuedCancel: "Отмена",
+    },
     answer: {
       showFull: 'Показать ответ полностью',
       collapse: 'Свернуть',
@@ -4240,6 +4245,9 @@ const ru = {
       countSeedData: "демоданные",
       extendTarget: "Добавление в существующее приложение: {{app}}",
       awaitingConfirm: "Ожидает подтверждения",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "Подтверждено",
+      buildFailed: "Не создано — ничего не было создано",
       iterateOrNew: {
         question: "Это пересекается с «{{app}}» — приложением, которое у вас уже есть. Продолжить улучшать его или создать отдельное приложение?",
         questionUnnamed: "Это пересекается с приложением, которое у вас уже есть. Продолжить улучшать его или создать отдельное приложение?",
@@ -4272,6 +4280,17 @@ const ru = {
       verifying: "Проверка изменения…",
       verifyStep: "шаг {{n}}",
       verified: "Изменение проверено",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "Нужно исправить: {{count}}",
+      issuesSummary: "Часть этой сборки нужно исправить, прежде чем ею можно будет пользоваться. Ответьте «исправь проблемы», и ассистент всё починит.",
+      warningsSummary: "Приложение собрано, но несколько моментов стоит проверить. Спросите ассистента, какие именно, если хотите его улучшить.",
+      issuesDetails: "Технические подробности",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "{{count}} требуют внимания",
+      needsAttention_one: "{{count}} требует внимания",
+      needsAttention_few: "{{count}} требуют внимания",
+      needsAttention_many: "{{count}} требуют внимания",
+      needsAttention_other: "{{count}} требуют внимания",
       unknownPhase: "Неизвестный этап сборки",
       nextStepsLead: "Дальше можно сказать: {{steps}}",
       nextStepQuote: "«{{step}}»",
@@ -4642,6 +4661,11 @@ const ru = {
     daysAgo_other: '{{count}} дн назад',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "Записи появятся здесь после публикации",
+      message: "Вы просматриваете ещё не опубликованный объект, поэтому в нём нет записей. Опубликуйте его, чтобы добавлять записи или загрузить примеры данных.",
+    },
     empty: {
       loadFailedTitle: 'Не удалось загрузить предпросмотр черновика',
       loadFailedDescription: 'Не удалось прочитать слой черновика. Повторите попытку или проверьте соединение.',

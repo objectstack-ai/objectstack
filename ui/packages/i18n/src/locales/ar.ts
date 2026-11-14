@@ -4297,6 +4297,11 @@ const ar = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'إرسال الرسالة',
     scrollToBottom: 'الانتقال إلى أحدث رسالة',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "سيُرسل عند انتهاء الرد الحالي",
+      queuedCancel: "إلغاء",
+    },
     answer: {
       showFull: 'عرض الإجابة كاملة',
       collapse: 'طي',
@@ -4406,6 +4411,9 @@ const ar = {
       countSeedData: "بيانات تجريبية",
       extendTarget: "إضافة إلى التطبيق الحالي: {{app}}",
       awaitingConfirm: "بانتظار التأكيد",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "تم التأكيد",
+      buildFailed: "لم يتم البناء — لم يُنشأ أي شيء",
       iterateOrNew: {
         question: "يتداخل هذا مع «{{app}}»، وهو تطبيق لديك بالفعل. هل تريد مواصلة تحسينه أم إنشاء تطبيق منفصل؟",
         questionUnnamed: "يتداخل هذا مع تطبيق لديك بالفعل. هل تريد مواصلة تحسين ذلك التطبيق أم إنشاء تطبيق منفصل؟",
@@ -4438,6 +4446,19 @@ const ar = {
       verifying: "جارٍ التحقق من التغيير…",
       verifyStep: "الخطوة {{n}}",
       verified: "تم التحقق من التغيير",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "يلزم إصلاح: {{count}}",
+      issuesSummary: "تحتاج بعض أجزاء هذا البناء إلى إصلاح قبل أن يصبح جاهزًا. أجب بـ «أصلح المشكلات» وسيقوم المساعد بإصلاحها.",
+      warningsSummary: "تم بناء التطبيق، مع بعض النقاط التي تستحق المراجعة. اسأل المساعد عنها إذا أردت تحسينه.",
+      issuesDetails: "تفاصيل تقنية",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "بحاجة إلى مراجعة: {{count}}",
+      needsAttention_zero: "بحاجة إلى مراجعة: {{count}}",
+      needsAttention_one: "بحاجة إلى مراجعة: {{count}}",
+      needsAttention_two: "بحاجة إلى مراجعة: {{count}}",
+      needsAttention_few: "بحاجة إلى مراجعة: {{count}}",
+      needsAttention_many: "بحاجة إلى مراجعة: {{count}}",
+      needsAttention_other: "بحاجة إلى مراجعة: {{count}}",
       unknownPhase: "مرحلة إنشاء غير معروفة",
       nextStepsLead: "بعد ذلك يمكنك أن تقول: {{steps}}",
       nextStepQuote: "«{{step}}»",
@@ -4838,6 +4859,11 @@ const ar = {
     daysAgo_other: 'قبل {{count}} يوم',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "ستظهر السجلات هنا بعد النشر",
+      message: "أنت تعاين كائنًا لم يُنشر بعد، لذلك لا يحتوي على أي سجلات. انشره لبدء إضافة السجلات أو لتحميل بياناته النموذجية.",
+    },
     empty: {
       loadFailedTitle: 'تعذّر تحميل معاينة المسودة',
       loadFailedDescription: 'تعذّرت قراءة طبقة المسودة. أعد المحاولة أو تحقق من الاتصال.',
