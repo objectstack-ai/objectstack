@@ -103,7 +103,10 @@
  *    is the environment's: a caller with no package is served it, and a
  *    package's reference is the D3 (a) refusal naming the environment.
  *  - **The list** answers one entry per `(package, name)` holder, plus the
- *    environment's own item — never one entry per name picked among holders.
+ *    environment's own item — never one entry per name picked among holders,
+ *    on the registry's answer and, for a name the registry holds nowhere, on
+ *    the metadata service's alike, in an order that does not follow the
+ *    service's row order.
  *  - **Positions are unchanged** (ADR-0150 D7, ruled Q2 = A): one
  *    environment-wide slot per name, by the registry's own read, and the
  *    one-holder refusal (`@objectstack/objectql`,
@@ -409,6 +412,24 @@ function isDefinition(value: unknown): value is Definition {
 function ownerOf(definition: Definition): string | undefined {
   const owner = definition._packageId;
   return typeof owner === 'string' && owner !== '' ? owner : undefined;
+}
+
+/**
+ * [ADR-0150 D4] The holder a metadata-service body is kept for: its package,
+ * or `''` for the environment's own row — one with no package, or rehydrated
+ * from `sys_metadata` (its provenance sentinel is no package).
+ */
+function metadataHolderAddress(definition: Definition): string {
+  const owner = ownerOf(definition);
+  return owner === undefined || owner === OVERLAY_PROVENANCE_SENTINEL ? '' : owner;
+}
+
+/** Package holders in id order, the environment's own row (`''`) last. */
+function compareMetadataHolderAddresses(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a === '') return 1;
+  if (b === '') return -1;
+  return a < b ? -1 : 1;
 }
 
 function nameOf(definition: Definition): string | undefined {
@@ -896,11 +917,19 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       // The metadata service's own body per name, read once — the answer its
       // by-name read gives for a name the registry does not serve.
       const declaredByName = new Map<string, Definition>();
+      // [ADR-0150 D4] And, for permission sets read by (package, name), every
+      // holder of the name it keeps: one body per (package, name), the
+      // environment's own row counted as one holder.
+      const declaredHolders = new Map<string, Map<string, Definition>>();
       for (const item of declared) {
         const definition = servable(item);
-        if (definition && !declaredByName.has(nameOf(definition) as string)) {
-          declaredByName.set(nameOf(definition) as string, definition);
-        }
+        if (!definition) continue;
+        const name = nameOf(definition) as string;
+        if (!declaredByName.has(name)) declaredByName.set(name, definition);
+        const holders = declaredHolders.get(name) ?? new Map<string, Definition>();
+        const address = metadataHolderAddress(definition);
+        if (!holders.has(address)) holders.set(address, definition);
+        declaredHolders.set(name, holders);
       }
 
       const out: SecurityCatalogEntry[] = [];
@@ -921,8 +950,16 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
             out.push(...held);
             continue;
           }
-          const fromMeta = declaredByName.get(name);
-          if (fromMeta) out.push(entry(type, fromMeta, 'metadata'));
+          // [ADR-0150 D4] The metadata service's holders of the name, each of
+          // them, never the first one listed: a named grant is judged by
+          // (package, name) here as on the registry path, and neither the
+          // holder it accepts nor the holders a refusal names depends on the
+          // order the service lists its rows in. Packages in id order, the
+          // environment's own row last — the registry path's shape.
+          const fromMeta = [...(declaredHolders.get(name)?.entries() ?? [])]
+            .sort(([a], [b]) => compareMetadataHolderAddresses(a, b))
+            .map(([, definition]) => entry(type, definition, 'metadata'));
+          out.push(...fromMeta);
           continue;
         }
         // Each name gets the answer the by-name read gives it: the registry's

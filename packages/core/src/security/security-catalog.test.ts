@@ -781,4 +781,66 @@ describe('[#31698] two packages\' slots of a set in the metadata service: the D3
     });
     expect(isAuthzStoreUnavailableError(await rejection(reader.resolve('permission', 'ops_reader')))).toBe(true);
   });
+
+  /**
+   * [ADR-0150 D4, #32867] The list on this path keeps every holder the
+   * metadata service lists for a name the registry holds nowhere — the shape
+   * the registry path gives — and its order does not follow the service's row
+   * order. BASE: one entry per name, the first row listed, so the holder a
+   * named grant was matched against changed with the row order.
+   */
+  describe('[#32867] the list keeps every holder, whatever order the service lists them in', () => {
+    const rowA = { name: 'ops_reader', label: 'alpha', _packageId: A };
+    const rowB = { name: 'ops_reader', label: 'beta', _packageId: B };
+    const rowEnv = { name: 'ops_reader', label: 'environment' };
+    const rowOverlay = { name: 'ops_reader', label: 'overlay', _packageId: 'sys_metadata' };
+    const listed = async (rows: Def[]) => {
+      const reader = createSecurityCatalogReader({ registry: silentRegistry(), metadata: metadata({ permission: rows }) });
+      return (await reader.list('permission')).map((e) => [e.packageId ?? null, e.definition.label, e.source]);
+    };
+
+    it('two packages\' rows: one entry per (package, name), in either listed order', async () => {
+      const both = [[A, 'alpha', 'metadata'], [B, 'beta', 'metadata']];
+      expect(await listed([rowA, rowB])).toEqual(both);
+      expect(await listed([rowB, rowA])).toEqual(both);
+    });
+
+    it('a package-less row first or last: the environment\'s own holder, listed after the packages either way', async () => {
+      const all = [[A, 'alpha', 'metadata'], [B, 'beta', 'metadata'], [null, 'environment', 'metadata']];
+      expect(await listed([rowEnv, rowA, rowB])).toEqual(all);
+      expect(await listed([rowB, rowA, rowEnv])).toEqual(all);
+    });
+
+    it('an overlay row (the sys_metadata provenance sentinel) is the environment\'s holder too, never a package', async () => {
+      const entries = [[A, 'alpha', 'metadata'], ['sys_metadata', 'overlay', 'metadata']];
+      expect(await listed([rowOverlay, rowA])).toEqual(entries);
+      expect(await listed([rowA, rowOverlay])).toEqual(entries);
+    });
+
+    it('a disabled package\'s row is not listed, as on the registry path; the other holder still is', async () => {
+      const reader = createSecurityCatalogReader({
+        registry: { ...silentRegistry(), isPackageDisabled: (pkg?: string) => pkg === A },
+        metadata: metadata({ permission: [rowA, rowB] }),
+      });
+      expect((await reader.list('permission')).map((e) => e.packageId)).toEqual([B]);
+    });
+
+    it('CONTROL one holder: listed once, as before; a row repeating its (package, name) is not a second holder', async () => {
+      expect(await listed([rowA])).toEqual([[A, 'alpha', 'metadata']]);
+      expect(await listed([rowA, { ...rowA, label: 'again' }])).toEqual([[A, 'alpha', 'metadata']]);
+    });
+
+    it('CONTROL a name the registry holds: its holders answer, the metadata service\'s rows of the name are not added', async () => {
+      const reader = createSecurityCatalogReader({
+        registry: {
+          ...silentRegistry(),
+          packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' && name === 'ops_reader' ? [A] : []),
+          getPackageScopedItem: (type: string, name: string, pkg: string) => (pkg === A ? { name, label: 'registry', _packageId: A } : undefined),
+          listItems: () => [{ name: 'ops_reader', _packageId: A }],
+        },
+        metadata: metadata({ permission: [rowB, rowA] }),
+      });
+      expect((await reader.list('permission')).map((e) => [e.packageId, e.source])).toEqual([[A, 'registry']]);
+    });
+  });
 });
