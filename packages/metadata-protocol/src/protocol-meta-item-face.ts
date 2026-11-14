@@ -279,7 +279,7 @@ async function storedRowHoldersRefusal(
     every: readonly string[],
     activeRows: Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>,
     bound: readonly string[],
-): Promise<{ kind: 'refused'; error: PackageScopedNameRefusedError } | undefined> {
+): Promise<{ kind: 'served'; packageId: string } | { kind: 'refused'; error: PackageScopedNameRefusedError } | undefined> {
     const registry: any = host.engine?.registry;
     if ([...shippingPackageIds(host.shippedArtifactsOf(type, name))].some((id) => registry.isPackageDisabled(id) !== true)) return undefined;
     const installed = installedManifestsOfEngine(host.engine);
@@ -288,7 +288,18 @@ async function storedRowHoldersRefusal(
         && known.some((holder) => holder !== row.package_id && pairsOf(holder, installed).includes(row.package_id as string));
     const holding = await host.packagelessAddress(type, name, member, 'active', activeRows.filter((row) =>
         !host.declinesStoredRow(type, name, row) && !pairOfAnother(row)));
-    if (holding.unbound || holding.candidates.length < 2) return undefined;
+    if (holding.unbound) return undefined;
+    // [#32662 scope note (b), ADR-0150 D3] One holder whose rows are its own
+    // and its customization pair's: the read is that holder's, at its address,
+    // as `/published` reads it, so the layer served is its own row in both
+    // save orders. Read as it was, it served the row stored first.
+    if (holding.candidates.length === 1) {
+        const [holder] = holding.candidates;
+        const ownAndPair = bound.length > 1 && bound.includes(holder)
+            && bound.every((id) => id === holder || pairsOf(holder, installed).includes(id));
+        return ownAndPair ? { kind: 'served', packageId: holder } : undefined;
+    }
+    if (holding.candidates.length < 2) return undefined;
     const base = {
         status: 'refused' as const,
         reason: 'ambiguous-in-environment' as const,

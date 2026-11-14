@@ -34,6 +34,7 @@ import { storedRowDocument } from './item-lock.js';
 import { installedManifestsOf, isPairOf, isTenantAuthored, itemDiscriminator } from '@objectstack/metadata-core';
 import type { InstalledPackageSource } from '@objectstack/metadata-core';
 import { isPackageScopedType } from '@objectstack/core';
+import { PACKAGE_SLOTTED_STORE_TYPES } from '@objectstack/metadata';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { bindStoredRow } from './stored-row-binding.js';
@@ -224,6 +225,28 @@ function namesNoHolderAmongMany(
     if (holders.length < 2) return false;
     const installed = installedManifestsOf(registry);
     return !holders.some((holder) => isPairOf(bound, holder, installed));
+}
+
+/**
+ * [#33127, ADR-0150 D4 "registry overlay slot (ADR-0005)"] Whether a stored row
+ * of `canonicalType` bound to a package registers into that package's overlay
+ * slot (`SchemaRegistry#registerItem`'s `storedRowPackage`) instead of the
+ * name's one bare slot: the types the metadata service stores per `(package,
+ * name)` ({@link PACKAGE_SLOTTED_STORE_TYPES}), so the registry keeps one entry
+ * per stored row as the store keeps one row per package. With one bare slot,
+ * two packages' rows of a name (or a package's row beside its pair's, or a
+ * pair's row beside the package-less row of one member) kept only the row
+ * registered last: the other package's exact read and its registry item
+ * answered its shipped item, or nothing, by save or hydration order.
+ *
+ * ⛔ Not a `flow`: the name's one bare slot keeps the shipping package's
+ * declared override over any other row ({@link incomingTakesStoredFlowSlot},
+ * #28717), which the boot pull reads. ⛔ Not a `permission`: a stored fork of
+ * a shipped permission set keeps the disposition of its own maintainer ruling
+ * (see {@link judgesRowHolder}). A package-less row keeps the bare slot.
+ */
+function takesPackageOverlaySlot(canonicalType: string): boolean {
+    return PACKAGE_SLOTTED_STORE_TYPES.has(canonicalType) && canonicalType !== 'flow' && canonicalType !== 'permission';
 }
 
 /** {@link pairRowEnvelopeHolder}'s answer for a row that is not a customization pair's row of a two-holder name. */
@@ -898,13 +921,19 @@ export class ProtocolRegistryHydrationFacet {
             if (typeof owner === 'string' && owner !== '') shippers.add(owner);
             if (!incomingTakesStoredFlowSlot(held, registered, shippers, installedManifestsOf(registry))) return true;
         }
-        registry.registerItem(type, registered, 'name' as any);
+        // [#33127, ADR-0150 D4] A row bound to a package takes that package's
+        // overlay slot ({@link takesPackageOverlaySlot}), so each stored row of
+        // the name keeps its own entry and each package's exact read serves its
+        // own, in every save and hydration order.
+        const rowPackage = boundPackageOf(options.packageId);
+        const overlaySlot = rowPackage !== undefined && takesPackageOverlaySlot(canonicalType);
+        registry.registerItem(type, registered, 'name' as any, undefined, overlaySlot ? { storedRowPackage: rowPackage } : undefined);
         // [#32820] A package-less row wearing the envelope of the one holder
         // served now is recorded, so an enable serving a second holder builds
         // it again ({@link healSoleHolderEnvelopes}); any other registration
-        // of the key forgets it.
+        // of the key forgets it. [#33127] A package overlay slot is another key.
         const member = bundleMemberOf(type, data);
-        recordSoleHolderEnvelope(registry, envelopeKey(type, rowName, member),
+        if (!overlaySlot) recordSoleHolderEnvelope(registry, envelopeKey(type, rowName, member),
             !options.packageId && typeof envelopePackage === 'string' && envelope && HEALED_OVERLAY_TYPES.has(canonicalType)
                 ? { host, type, canonicalType, name: rowName, member, data, holder: envelopePackage, registered }
                 : undefined);
@@ -1754,8 +1783,17 @@ export class ProtocolRegistryHydrationFacet {
                 registry.removeObjectOverlay(name);
             }
 
-            let healed = false;
-            if (typeof registry.removeRuntimeShadow === 'function') {
+            // [#33127, ADR-0150 D4] A removed row bound to a package sat in that
+            // package's overlay slot (`SchemaRegistry#removePackageOverlaySlots`,
+            // the types {@link takesPackageOverlaySlot} names): that slot is
+            // retired, and tier 1 does not touch the bare slot, which holds the
+            // package-less row, still stored. The walk then stops where tier 1
+            // stops, where a packaged artifact of the name is served.
+            const removedBinding = packageId === HEAL_BINDING_UNKNOWN ? undefined : boundPackageOf(packageId);
+            const slotRetired = removedBinding !== undefined && typeof registry.removePackageOverlaySlots === 'function'
+                && registry.removePackageOverlaySlots(singular, name, memberKey, (id: string) => id === removedBinding).length > 0;
+            let healed = slotRetired && host.isArtifactBacked(singular, name);
+            if (!slotRetired && typeof registry.removeRuntimeShadow === 'function') {
                 healed = registry.removeRuntimeShadow(singular, name, memberKey);
                 if (type !== singular) {
                     healed = registry.removeRuntimeShadow(type, name, memberKey) || healed;
@@ -1815,6 +1853,13 @@ export class ProtocolRegistryHydrationFacet {
             const remainingRows = canonical === 'object' && host.isUnservedSealedOverlay(canonical, name)
                 ? []
                 : storedRows ?? [];
+            // [#33127] A caller that does not know the removed row's binding (a
+            // peer on a signal naming no package): every package overlay slot
+            // whose package no remaining row is bound to is the removed row's.
+            if (packageId === HEAL_BINDING_UNKNOWN && storedRows != null && typeof registry.removePackageOverlaySlots === 'function') {
+                const bindings = new Set(remainingRows.map((row) => boundPackageOf(row.package_id)));
+                registry.removePackageOverlaySlots(singular, name, memberKey, (id: string) => !bindings.has(id));
+            }
             if (remainingRows.length > 0) {
                 if (canonical === 'object' && !host.isArtifactBacked(canonical, name)) {
                     const bindings = new Set(remainingRows.map((row) => boundPackageOf(row.package_id) ?? 'sys_metadata'));

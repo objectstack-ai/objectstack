@@ -3725,6 +3725,53 @@ function bundleBaseKey(key: string): string {
 type BundleEntry = { key: string; item: any };
 
 /**
+ * [#33127, ADR-0150 D4 "registry overlay slot (ADR-0005)"] The mark that opens
+ * and separates a package overlay slot's storage key: the slot of the stored
+ * row of `(type, name[, member])` bound to one package, beside the bare slot
+ * (a package-less row) and the composite slots (code artifacts). A NUL never
+ * occurs in a package id or a name, so no reader of the other two key forms
+ * mistakes this one for its own: it is never a bare key (`name`, `name@member`)
+ * and never ends `:name` ({@link bundleBaseKey}, {@link collectBundle}, the
+ * composite scans), so it adds no holder and is no artifact.
+ */
+const OVERLAY_SLOT_MARK = '\u0000';
+
+/** `com.acme.alpha` + `auth.welcome@zh-CN` → the package overlay slot key of that member. */
+function overlaySlotKey(packageId: string, bareKey: string): string {
+  return `${OVERLAY_SLOT_MARK}${packageId}${OVERLAY_SLOT_MARK}${bareKey}`;
+}
+
+/** The package and the bare key of a package overlay slot key, or `undefined` for any other key. */
+function parseOverlaySlotKey(key: string): { packageId: string; bareKey: string } | undefined {
+  if (!key.startsWith(OVERLAY_SLOT_MARK)) return undefined;
+  const sep = key.indexOf(OVERLAY_SLOT_MARK, 1);
+  return sep < 0 ? undefined : { packageId: key.slice(1, sep), bareKey: key.slice(sep + 1) };
+}
+
+/**
+ * [#33127] The package overlay slots of `(name)` in `collection`, every member
+ * of a bundled type (`disc`), in the store's order: the stored rows bound to a
+ * package, one slot per row package.
+ */
+function overlaySlotEntriesOf(collection: Map<string, any>, name: string, disc?: { field: string; canonical: string }): BundleEntry[] {
+  const out: BundleEntry[] = [];
+  for (const [key, item] of collection) {
+    const slot = parseOverlaySlotKey(key);
+    if (slot === undefined) continue;
+    if ((disc ? bundleBaseKey(slot.bareKey) : slot.bareKey) === name) out.push({ key, item });
+  }
+  return out;
+}
+
+/** The package a bare-slot or package overlay slot entry's stored row is bound to: the slot's package, else the entry's stamp. */
+function storedRowPackageOf(entry: BundleEntry): string | undefined {
+  const slot = parseOverlaySlotKey(entry.key);
+  if (slot !== undefined) return slot.packageId;
+  const stamped = (entry.item as { _packageId?: unknown } | null | undefined)?._packageId;
+  return typeof stamped === 'string' && stamped !== '' && stamped !== 'sys_metadata' ? stamped : undefined;
+}
+
+/**
  * [#32408, contract review F2, delta review N1] What a door's registration
  * brings to a bundled name: the package and the members it adds to its
  * composite slot.
@@ -6657,11 +6704,27 @@ export class SchemaRegistry {
   private boundServedActions(): any[] {
     const collection = this.metadata.get('action');
     if (!collection) return [];
+    // [#33127, ADR-0150 D4] A stored row in a package overlay slot shadows the
+    // composite entry of the package it customizes (its envelope's), as the
+    // bare slot shadows every composite of its name; of two rows customizing
+    // one package, the one its read serves ({@link rankedForPackage}).
+    const overlaysOf = new Map<string, BundleEntry[]>();
+    for (const [key, item] of collection) {
+      if (parseOverlaySlotKey(key) === undefined) continue;
+      const holder = storedRowPackageOf({ key: '', item }) ?? parseOverlaySlotKey(key)!.packageId;
+      const group = `${holder}:${String((item as any)?.name)}`;
+      overlaysOf.set(group, [...(overlaysOf.get(group) ?? []), { key, item }]);
+    }
+    const servedOverlays = new Set<string>();
+    for (const [group, entries] of overlaysOf) {
+      servedOverlays.add(this.rankedForPackage(entries, group.slice(0, group.lastIndexOf(':')))[0].key);
+    }
     const out: any[] = [];
     for (const [key, action] of collection) {
       if (!action || typeof action !== 'object' || typeof (action as any).name !== 'string') continue;
       const name: string = (action as any).name;
       if (key !== name && collection.has(name)) continue;
+      if (parseOverlaySlotKey(key) !== undefined ? !servedOverlays.has(key) : overlaysOf.has(key)) continue;
       if (isObjectLessActionKey(standaloneActionOwnerKey(action))) continue;
       // [#28877] …and so is an action that launches into a disabled package.
       if (this.isActionWithheldByDisabledPackage(action)) continue;
@@ -8446,8 +8509,20 @@ export class SchemaRegistry {
 
   /**
    * Universal Register Method for non-object metadata.
+   *
+   * @param options.storedRowPackage - [#33127, ADR-0150 D4] For a registration
+   *   with no `packageId` (a stored `sys_metadata` row, the ADR-0005 overlay):
+   *   the package the row is bound to (its `package_id` column). The row then
+   *   takes that package's overlay slot ({@link overlaySlotKey}) instead of the
+   *   name's one bare slot, so two packages' rows of one name, and a package's
+   *   row beside its pair's or beside the package-less row, each keep their own
+   *   entry, whatever order they are registered in. Judged as the bare slot is
+   *   (it is an overlay, never a package's declaration), and read by every
+   *   overlay-slot reader ({@link bareSlotEntriesOf}) and by {@link getItem}'s
+   *   overlay tier. Ignored with a `packageId`.
    */
-  registerItem<T>(type: string, item: T, keyField: keyof T = 'name' as keyof T, packageId?: string) {
+  registerItem<T>(type: string, item: T, keyField: keyof T = 'name' as keyof T, packageId?: string,
+    options?: { storedRowPackage?: string }) {
     this.noteItemType(type);
     if (!this.metadata.has(type)) {
       this.metadata.set(type, new Map());
@@ -8650,7 +8725,13 @@ export class SchemaRegistry {
     // The bare (overlay) slot for this item — see the artifact-vs-DB warning below.
     const bareKey = withDisc(baseName);
     // Use composite key (packageId:name) when packageId is provided
-    const storageKey = packageId ? withDisc(`${packageId}:${baseName}`) : bareKey;
+    // [#33127] …and a stored row bound to a package its package's overlay slot.
+    const rowPackage = !packageId && typeof options?.storedRowPackage === 'string' && options.storedRowPackage !== ''
+      ? options.storedRowPackage
+      : undefined;
+    const storageKey = packageId
+      ? withDisc(`${packageId}:${baseName}`)
+      : rowPackage !== undefined ? overlaySlotKey(rowPackage, bareKey) : bareKey;
 
     if (collection.has(storageKey)) {
       this.log(`[Registry] Overwriting ${type}: ${storageKey}`);
@@ -8770,7 +8851,9 @@ export class SchemaRegistry {
     // the TRANSITION (a bare slot that was empty is now taken), not the state,
     // so the read-side hydration and the write-through, which re-register the
     // same overlay on later reads and writes, stay silent.
-    if (!packageId && !collection.has(bareKey)) {
+    // [#33127] A package overlay slot marks the same transition for its own
+    // key: the first row of its package to shadow the name.
+    if (!packageId && !collection.has(storageKey) && (rowPackage === undefined || !collection.has(bareKey))) {
       let shadowed: any;
       for (const [key, existing] of collection) {
         if (key !== bareKey && key.endsWith(`:${bareKey}`) && isCodeArtifactBody(existing)) {
@@ -8855,8 +8938,23 @@ export class SchemaRegistry {
     // group if it exists, else the first composite group in insertion order),
     // so this does not start deleting a second package's same-named item.
     const disc = ITEM_KEY_DISCRIMINATORS[type];
+    // [#33127] With no bare entry, the package overlay slots the overlay tier of
+    // {@link getItem} reads first are the item's entries (one package's).
+    const overlayGroup = (entries: BundleEntry[]): BundleEntry[] => {
+      const first = this.orderedOverlayTier(type, collection, name, entries)[0];
+      const pkg = first === undefined ? undefined : parseOverlaySlotKey(first.key)?.packageId;
+      return entries.filter(({ key }) => parseOverlaySlotKey(key)?.packageId === pkg);
+    };
     if (disc) {
       const { bare, local, other } = collectBundle(collection, name, disc);
+      const overlays = bare.length > 0 ? [] : overlayGroup(overlaySlotEntriesOf(collection, name, disc));
+      if (overlays.length > 0) {
+        for (const { key } of overlays) {
+          collection.delete(key);
+          this.log(`[Registry] Unregistered ${type}: ${key}`);
+        }
+        return;
+      }
       const group = bare.length > 0 ? bare : [...local, ...other];
       if (group.length === 0) {
         console.warn(`[Registry] Attempted to unregister non-existent ${type}: ${name}`);
@@ -8874,6 +8972,12 @@ export class SchemaRegistry {
     if (collection.has(name)) {
       collection.delete(name);
       this.log(`[Registry] Unregistered ${type}: ${name}`);
+      return;
+    }
+    const [overlay] = overlayGroup(overlaySlotEntriesOf(collection, name));
+    if (overlay !== undefined) {
+      collection.delete(overlay.key);
+      this.log(`[Registry] Unregistered ${type}: ${overlay.key}`);
       return;
     }
     // Scan composite keys
@@ -9174,9 +9278,11 @@ export class SchemaRegistry {
     // all still answers its first member, as it always did. A named `member`
     // answers that member, in the same tier order, or nothing.
     const disc = ITEM_KEY_DISCRIMINATORS[type];
+    // [#33127] The package overlay slots join the overlay tier, after the bare slot.
     if (disc) {
       const { bare, local, other } = collectBundle(collection, name, disc, currentPackageId);
-      const tiers = [...bare, ...local, ...other];
+      const overlays = this.orderedOverlayTier(type, collection, name, overlaySlotEntriesOf(collection, name, disc), currentPackageId);
+      const tiers = [...bare, ...overlays, ...local, ...other];
       if (member !== undefined) return (entriesOfMember(tiers, disc, member)[0]?.item as T) ?? undefined;
       return ((entriesOfMember(tiers, disc, disc.canonical)[0] ?? tiers[0])?.item as T) ?? undefined;
     }
@@ -9190,6 +9296,13 @@ export class SchemaRegistry {
     // not package) and resolves to the single overlay row.
     const direct = collection.get(name);
     if (direct) return direct as T;
+    // [#33127, ADR-0150 D4] …and with no package-less row, a stored row bound
+    // to a package (its package overlay slot): the caller's package's first,
+    // else in the holders' order ({@link orderedOverlayTier}), never in the
+    // order the rows were registered. One stored row reads as it did in the
+    // bare slot.
+    const overlays = overlaySlotEntriesOf(collection, name);
+    if (overlays.length > 0) return this.orderedOverlayTier(type, collection, name, overlays, currentPackageId)[0].item as T;
 
     // Prefer-local: resolve within the caller's package first.
     if (currentPackageId) {
@@ -9271,6 +9384,12 @@ export class SchemaRegistry {
     if (paired !== NOT_A_PAIR_ROW_OF_A_HOLDER) return paired;
     const base = customizationBasePackageId(stamped);
     if (base !== null && composite.has(base)) return base;
+    // [#33127] …or whose base holds it as its own stored row (its package
+    // overlay slot): the pair's row customizes that base's item, as beside a
+    // composite slot, and is never a holder of its own. One bare slot never
+    // held both rows; the package overlay slots keep each.
+    if (base !== null && overlaySlotEntriesOf(collection, name, ITEM_KEY_DISCRIMINATORS[type])
+      .some(({ key }) => parseOverlaySlotKey(key)?.packageId === base)) return base;
     return stamped;
   }
 
@@ -9455,12 +9574,14 @@ export class SchemaRegistry {
     }
     const memberOf = (item: unknown) => discriminatorValue(item, disc.field) || disc.canonical;
     const membersOf = new Map<string, Set<string>>();
+    const codeMembersOf = new Map<string, Set<string>>();
     for (const id of new Set([...composite, ...bound.keys()])) {
       const { local } = collectBundle(collection, name, disc, id);
       membersOf.set(id, new Set([...local.map((e) => e.item), ...(bound.get(id) ?? [])].map(memberOf)));
+      codeMembersOf.set(id, new Set(local.map((e) => memberOf(e.item))));
     }
     const rowMember = memberOf(row);
-    return owners.filter((id) => membersOf.get(id)!.has(rowMember) || !this.isBundleAddition(id, membersOf));
+    return owners.filter((id) => membersOf.get(id)!.has(rowMember) || !this.isBundleAddition(id, membersOf, codeMembersOf));
   }
 
   /**
@@ -9538,8 +9659,12 @@ export class SchemaRegistry {
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (!disc || holders.size < 2) return served([...holders]);
     const membersOf = new Map<string, Set<string>>();
-    for (const id of holders) membersOf.set(id, this.bundleMembersHeldBy(type, collection, name, id, compositeSet, disc));
-    return served([...holders].filter((id) => id === callerPackageId || !this.isBundleAddition(id, membersOf)));
+    const codeMembersOf = new Map<string, Set<string>>();
+    for (const id of holders) {
+      membersOf.set(id, this.bundleMembersHeldBy(type, collection, name, id, compositeSet, disc));
+      codeMembersOf.set(id, new Set(collectBundle(collection, name, disc, id).local.map((e) => discriminatorValue(e.item, disc.field) || disc.canonical)));
+    }
+    return served([...holders].filter((id) => id === callerPackageId || !this.isBundleAddition(id, membersOf, codeMembersOf)));
   }
 
   /**
@@ -9594,13 +9719,21 @@ export class SchemaRegistry {
    * dependency closure (the save door's walk), `packageId` is not in that
    * holder's, and none of `packageId`'s members is one that holder holds.
    */
-  private isBundleAddition(packageId: string, membersOf: ReadonlyMap<string, ReadonlySet<string>>): boolean {
+  private isBundleAddition(packageId: string, membersOf: ReadonlyMap<string, ReadonlySet<string>>,
+    codeMembersOf?: ReadonlyMap<string, ReadonlySet<string>>): boolean {
     const own = membersOf.get(packageId)!;
     const reach = new Set(packageDependencyClosure(packageId, this)?.dependencies ?? []);
+    // [#33127] With `codeMembersOf`, a member both packages hold only as
+    // stored rows is no clash: the registry used to keep ONE row per member,
+    // so one of the two was never counted and the base held the name, in
+    // either row order. The package overlay slots keep both rows; this keeps
+    // that judgment. A member either package ships in code still clashes.
+    const clashes = (base: string, m: string): boolean => codeMembersOf === undefined
+      || codeMembersOf.get(packageId)?.has(m) === true || codeMembersOf.get(base)?.has(m) === true;
     for (const [base, baseMembers] of membersOf) {
       if (base === packageId || !reach.has(base)) continue;
       if (packageDependencyClosure(base, this)?.dependencies.includes(packageId)) continue;
-      if ([...own].some((m) => baseMembers.has(m))) continue;
+      if ([...own].some((m) => baseMembers.has(m) && clashes(base, m))) continue;
       return true;
     }
     return false;
@@ -9630,9 +9763,10 @@ export class SchemaRegistry {
     const collection = this.metadata.get(type);
     if (!collection) return undefined;
     const holders = new Set(this.compositeHoldersOf(collection, name));
-    const bound = this.bareSlotEntriesOf(type, collection, name)
+    // [#33127] Every stored row bound to it, in the order its stored-row read serves them ({@link rankedForPackage}).
+    const bound = this.rankedForPackage(this.bareSlotEntriesOf(type, collection, name)
       .filter(({ item }) => this.overlaySlotBinding(type, item, name, collection, holders) === packageId
-        && !pairRowDeclaresAnotherHolder(item, packageId, holders));
+        && !pairRowDeclaresAnotherHolder(item, packageId, holders)), packageId);
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (disc) {
       const { local } = collectBundle(collection, name, disc, packageId);
@@ -9767,11 +9901,98 @@ export class SchemaRegistry {
     if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
   }
 
-  /** The bare-slot entries of `(type, name)`: one, or a bundle's members, canonical first. */
+  /**
+   * The bare-slot entries of `(type, name)`: one, or a bundle's members, canonical first.
+   * [#33127, ADR-0150 D4] …then its package overlay slots ({@link overlaySlotKey}): every
+   * stored row of the name, each bound to its package, read as the bare slot's entry is.
+   */
   private bareSlotEntriesOf(type: string, collection: Map<string, any>, name: string): BundleEntry[] {
     const disc = ITEM_KEY_DISCRIMINATORS[type];
-    if (disc) return collectBundle(collection, name, disc).bare;
-    return collection.has(name) ? [{ key: name, item: collection.get(name) }] : [];
+    const bare = disc
+      ? collectBundle(collection, name, disc).bare
+      : collection.has(name) ? [{ key: name, item: collection.get(name) }] : [];
+    return [...bare, ...overlaySlotEntriesOf(collection, name, disc)];
+  }
+
+  /**
+   * [#33127, ADR-0150 D4] `entries`, the stored rows that bind to `packageId`
+   * ({@link overlaySlotBinding}), in the order the stored-row read serves them
+   * for that package (`servedOverlayRowCandidates`, metadata-protocol): the
+   * declared override of its customization pair (a row of another package
+   * whose `overrides.package` names it), then its own row, then the
+   * package-less row, then any other row bound to it (a pair's undeclared
+   * row). Ties keep the store's order. So the item the registry answers for a
+   * package does not follow the order its rows were registered in.
+   */
+  private rankedForPackage(entries: readonly BundleEntry[], packageId: string): BundleEntry[] {
+    const rank = (entry: BundleEntry): number => {
+      const rowPackage = storedRowPackageOf(entry);
+      if (rowPackage === packageId) return 1;
+      if (rowPackage === undefined) return 2;
+      return declaredOverrideBase(entry.item) === packageId ? 0 : 3;
+    };
+    return entries.map((entry, index) => ({ entry, index, rank: rank(entry) }))
+      .sort((a, b) => a.rank - b.rank || a.index - b.index)
+      .map(({ entry }) => entry);
+  }
+
+  /**
+   * [#33127, ADR-0150 D4] Retire the package overlay slots of `(type, name)`
+   * whose package `select` picks ({@link registerItem}'s `storedRowPackage`):
+   * one bundle member's (`member`, its discriminator value) or, with none
+   * named, every member's. The heal of a removed stored row
+   * (`restoreArtifactRegistryView`, metadata-protocol) retires the removed
+   * row's own slot, and only it: another package's row and the package-less
+   * row keep their entries. A slot holds a stored row by construction, never
+   * a packaged artifact. Touches no bare and no composite slot.
+   *
+   * @returns the packages whose slot was retired.
+   */
+  removePackageOverlaySlots(type: string, name: string, member: string | undefined, select: (packageId: string) => boolean): string[] {
+    const collection = this.metadata.get(type);
+    if (!collection) return [];
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    const slots = overlaySlotEntriesOf(collection, name, disc);
+    const removed = new Set<string>();
+    for (const { key } of disc && member !== undefined ? entriesOfMember(slots, disc, member) : slots) {
+      const packageId = parseOverlaySlotKey(key)!.packageId;
+      if (!select(packageId)) continue;
+      this.noteItem(type, key);
+      collection.delete(key);
+      removed.add(packageId);
+      this.log(`[Registry] Removed package overlay slot ${type}: ${name} of ${packageId} (its stored row is gone)`);
+    }
+    if (removed.size > 0 && (type === 'picklist' || type === 'action')) this.invalidateAll();
+    return [...removed];
+  }
+
+  /**
+   * [#33127] The overlay tier of a read naming no package ({@link getItem}),
+   * when the bare slot is empty and package overlay slots hold rows of the
+   * name: the rows of `preferred` first ({@link rankedForPackage}), then each
+   * other package's, holder by holder in the item store's order (the code
+   * holders, as the composite fallback reads them), then by package id. Never
+   * the order the rows were registered in.
+   */
+  private orderedOverlayTier(type: string, collection: Map<string, any>, name: string, entries: readonly BundleEntry[],
+    preferred?: string): BundleEntry[] {
+    if (entries.length <= 1) return [...entries];
+    const composite = new Set(this.compositeHoldersOf(collection, name));
+    const byHolder = new Map<string, BundleEntry[]>();
+    for (const entry of entries) {
+      const bound = this.overlaySlotBinding(type, entry.item, name, collection, composite);
+      const holder = typeof bound === 'string' ? bound : `${OVERLAY_SLOT_MARK}${storedRowPackageOf(entry) ?? ''}`;
+      byHolder.set(holder, [...(byHolder.get(holder) ?? []), entry]);
+    }
+    const order = [...composite];
+    const holders = [...byHolder.keys()].sort((a, b) => {
+      if (a === preferred || b === preferred) return a === preferred ? -1 : 1;
+      const ia = order.indexOf(a);
+      const ib = order.indexOf(b);
+      if (ia !== ib) return ia === -1 ? 1 : ib === -1 ? -1 : ia - ib;
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+    return holders.flatMap((holder) => this.rankedForPackage(byHolder.get(holder)!, holder));
   }
 
   /**
