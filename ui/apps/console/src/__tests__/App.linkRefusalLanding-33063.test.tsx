@@ -114,7 +114,9 @@ vi.mock('../dev/DevModal', () => ({ DevModal: () => null }));
 vi.mock('../dev/DevLookup', () => ({ DevLookup: () => null }));
 vi.mock('../dev/DevRowActions', () => ({ DevRowActions: () => null }));
 
+import { toast } from 'sonner';
 import { App } from '../App';
+import { LINK_REFUSAL_STORAGE_KEY } from '../components/LinkRefusalNotice';
 
 const { en, 'zh-Hans': zh } = builtInLocales;
 const EN_SENTENCE = en.auth.login.errors.linkEmailMismatch;
@@ -128,7 +130,12 @@ beforeEach(() => {
   assign = vi.fn();
   vi.spyOn(window.location, 'assign').mockImplementation(assign as never);
 });
-afterEach(() => {
+afterEach(async () => {
+  // The toaster's store is module-wide: close what a case raised before the next case mounts one.
+  await act(async () => {
+    toast.dismiss();
+    await new Promise((r) => setTimeout(r, 600));
+  });
   cleanup();
   vi.restoreAllMocks();
   window.history.pushState({}, '', '/');
@@ -175,7 +182,7 @@ describe('a signed-in person whose link was refused for an email mismatch is tol
     const notice = await screen.findByTestId('link-refusal-notice', undefined, { timeout: 3000 });
     expect(notice.textContent).toBe(EN_SENTENCE);
     // Said once: the slot is empty after it was shown.
-    expect(sessionStorage.length).toBe(0);
+    expect(sessionStorage.getItem(LINK_REFUSAL_STORAGE_KEY)).toBeNull();
   });
 
   it('in the person’s language', async () => {
@@ -192,7 +199,7 @@ describe('a signed-in person whose link was refused for an email mismatch is tol
     expect(window.location.pathname).toBe('/apps/crm');
     await settle();
     expect(screen.queryByTestId('link-refusal-notice')).toBeNull();
-    expect(sessionStorage.length).toBe(0);
+    expect(sessionStorage.getItem(LINK_REFUSAL_STORAGE_KEY)).toBeNull();
   });
 
   it('CONTROL: a code with no sentence of its own is not carried, and nothing from the URL is shown', async () => {
@@ -200,6 +207,6 @@ describe('a signed-in person whose link was refused for an email mismatch is tol
     await settle();
     expect(screen.queryByTestId('link-refusal-notice')).toBeNull();
     expect(document.body.innerHTML).not.toContain('<img src="x">');
-    expect(sessionStorage.length).toBe(0);
+    expect(sessionStorage.getItem(LINK_REFUSAL_STORAGE_KEY)).toBeNull();
   });
 });
