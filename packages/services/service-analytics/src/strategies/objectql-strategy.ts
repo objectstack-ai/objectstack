@@ -35,6 +35,14 @@ import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator
 // [#20986] The one resolver of the object a relationship-path hop reads.
 import { columnObjectOf, relationshipReferenceOf, resolvePathHops, type HopReference } from '../hop-object.js';
 import { invalidMemberError } from '../dataset-refusal.js';
+// A cross-object `where` leaf, served as the engine's nested-relation condition.
+import {
+  CROSS_OBJECT_JOIN_ROUTE,
+  lowerCrossObjectWhere,
+  type CrossObjectWhereLowering,
+  type ServedCrossObjectLeaf,
+  type UnservedCrossObjectLeaf,
+} from './cross-object-where.js';
 import { projectedDimensions } from '../order-key-door.js';
 // [#21316] The package's one row comparator and window, shared with the
 // dataset door's post-pass (#3588) — this face orders by it, never by a copy.
@@ -246,6 +254,66 @@ function bucketEchoRefused(dimension: string, granularity: string, cause: Bucket
 
 /** One `engine.aggregate` group key: a column, or a column bucketed by a granularity. */
 export type AggregateGroupKey = string | { field: string; dateGranularity: string };
+
+/**
+ * The refusal of a cross-object `where` leaf this strategy leaves dotted
+ * (`cross-object-where.ts`): `INVALID_FIELD` / 400 naming the member and the
+ * `where`, as every cross-object refusal here is, with the reason this leaf
+ * cannot be served exactly, what to write instead, and where the dotted form
+ * is evaluated by a join.
+ */
+function unservedCrossObjectFilterRefused(field: string, leaf: UnservedCrossObjectLeaf, cube: string): Error {
+  const head = `[Analytics] ObjectQLStrategy cannot evaluate the cross-object filter ("${field}")`;
+  const served =
+    'this strategy evaluates a cross-object filter by reading the related object as the caller ' +
+    'and matching the relation field against the ids that read returns';
+  let why: string;
+  switch (leaf.reason) {
+    case 'multi-hop':
+      why =
+        `: it traverses ${field.split('.').length - 1} relationships, and ${served}, one relationship ` +
+        `deep. Filter on a field of the first related object instead, or remove the filter.`;
+      break;
+    case 'negated':
+      why =
+        ` under a $not: ${served}, and negating that match would select every row whose related ` +
+        `record is absent or one the caller cannot read. Put the negation inside the leaf instead ` +
+        `({ "${field}": { "$ne": … } } or { "${field}": { "$nin": [ … ] } }), which is evaluated on ` +
+        `the related records the caller can read.`;
+      break;
+    case 'field-reference':
+      why =
+        ` with a { "$field" } comparand: ${served}, so the reference would name a column of the ` +
+        `related object, while this spelling reads as a comparison with the queried row's own ` +
+        `column. Compare the related field with a value instead.`;
+      break;
+    case 'join-target':
+      why =
+        `: the cube joins "${field.split('.')[0]}" onto "${leaf.joined}", but the field declares ` +
+        `"${leaf.declared}" as its reference, and ${served}, which is the declared reference. ` +
+        `Align the cube's join with the field's reference.`;
+      break;
+  }
+  return invalidMemberError(`${head}${why} ${CROSS_OBJECT_JOIN_ROUTE}`, { member: field, param: 'where', cube });
+}
+
+/**
+ * The SQL echo's refusal of a cross-object `where` leaf `execute()` serves
+ * through the engine's related read — the authored nested-relation form's echo
+ * refusal (`renderFilterNodeSql`), in words that name the dotted member the
+ * caller wrote.
+ */
+function crossObjectEchoRefused(leaf: ServedCrossObjectLeaf): Error {
+  const attr = leaf.field.split('.').slice(1).join('.');
+  return invalidFilterError(
+    `[analytics] cannot render display SQL for the cross-object filter "${leaf.member}". The query ` +
+    `itself is answered by the engine, as the nested-relation condition { "${leaf.relation}": ` +
+    `{ "${attr}": … } }: it reads "${leaf.object}" as the caller, with that object's row scope and ` +
+    `field permissions, and matches "${leaf.relation}" against the ids it returns, refusing a match ` +
+    `past its cap. No statement printed here reproduces that read. Run the query itself ` +
+    `(/analytics/query) for its rows.`,
+  );
+}
 
 /**
  * [#28692, #28744] Append `item` to an `engine.aggregate` `groupBy` unless an
@@ -517,7 +585,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // Operands that cannot merge into their field's entry without one silently
     // replacing the other; ANDed in below so the engine intersects them.
     const conjuncts: Record<string, unknown>[] = [];
-    this.applyFilterNode(normalizeAnalyticsFilterTree(query, lowering), cube, filter, conjuncts);
+    // A cross-object leaf in the caller's `where` reaches the engine as the
+    // nested-relation condition it serves (`cross-object-where.ts`); a leaf this
+    // path cannot serve exactly stays dotted, for `planCrossObject` to refuse.
+    const served = this.servedWhere(cube, query, ctx);
+    this.applyFilterNode(normalizeAnalyticsFilterTree(served.query, lowering), cube, filter, conjuncts);
     // #3650 — and the time-dimension WINDOWS, through the SAME merge, so a
     // `dateRange` and a caller `where` bound on one field compose instead of
     // clobbering each other.
@@ -585,7 +657,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // differently for one query. `/analytics/query` reached `engine.aggregate`
     // with a predicate the engine cannot join and silently mis-bucketed it,
     // which is the exact outcome #3654's loud refusal exists to prevent.
-    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx), relationshipReferenceOf(ctx));
+    const plan = this.planCrossObject(
+      cube, query, this.filterMemberView(cube, served.query, ctx), relationshipReferenceOf(ctx), served.lowering.unserved,
+    );
     if (plan) {
       return this.executeCrossObject(cube, query, aggregations, filter, plan, ctx);
     }
@@ -796,7 +870,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // rather than two copies: "the preview accepts/rejects the same set" is an
     // invariant between two call sites, and two copies of a view can drift
     // apart while each stays individually correct — which is how they drifted.
-    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx), relationshipReferenceOf(ctx));
+    // The same respelling of a cross-object `where` leaf `execute()` makes, so
+    // both faces judge one member view.
+    const served = this.servedWhere(cube, query, ctx);
+    const plan = this.planCrossObject(
+      cube, query, this.filterMemberView(cube, served.query, ctx), relationshipReferenceOf(ctx), served.lowering.unserved,
+    );
     // Read once, reused below for both the per-measure conditional aggregate
     // (#10413 phase 2) and the dataset-scope WHERE conjunct (#10413 phase 1) —
     // the same channel `execute()` reads it from, so the echo cannot drift
@@ -963,6 +1042,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // so `/analytics/sql` rejects the same out-of-envelope set `execute()` does.)
 
     const whereParts: string[] = [];
+    // A cross-object leaf `execute()` serves through the engine's related read
+    // has no statement here that reproduces it: refused, as the authored
+    // nested-relation form is below, in words that name the dotted member.
+    if (served.lowering.served.length > 0) throw crossObjectEchoRefused(served.lowering.served[0]);
     // Recursive, so the echoed statement carries the same disjunctions the
     // engine filter does — the echo exists to REPRODUCE execution, and an
     // `$or` rendered as a conjunction (or dropped) is exactly the lie this
@@ -1176,6 +1259,34 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   /**
+   * The query with its `where`'s servable cross-object leaves respelled as the
+   * engine's nested-relation condition, and the leaves left dotted with why
+   * (`cross-object-where.ts` carries what a respelled leaf means and why each
+   * kept leaf is refused). The query itself, unchanged, when no leaf was
+   * respelled — so a query with no cross-object `where` compiles as before.
+   * Read on the AUTHORED condition (`lowerAnalyticsWhere`), before the shared
+   * lowering, so the related object's comparands reach the engine as written,
+   * which lowers them against that object's own declarations.
+   */
+  private servedWhere(
+    cube: Cube,
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+  ): { query: AnalyticsQuery; lowering: CrossObjectWhereLowering } {
+    const baseObject = this.extractObjectName(cube);
+    const referenceOf = relationshipReferenceOf(ctx);
+    const lowering = lowerCrossObjectWhere(lowerAnalyticsWhere(query), {
+      cube,
+      baseObject,
+      referenceOf,
+      resolveField: (member) => this.resolveFieldName(cube, member, 'any'),
+      isCrossObject: (field) => this.isCrossObjectField(cube, field, baseObject, referenceOf),
+    });
+    if (lowering.served.length === 0) return { query, lowering };
+    return { query: { ...query, where: lowering.where } as AnalyticsQuery, lowering };
+  }
+
+  /**
    * Is `field` a resolved cross-object (relationship-traversal) reference?
    *
    * [#20986] Its first hop is resolved by the one resolver
@@ -1365,6 +1476,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     query: AnalyticsQuery,
     filter: Record<string, FilterMemberOrigin>,
     referenceOf: HopReference | undefined,
+    // The caller's cross-object `where` leaves `servedWhere` left dotted, and
+    // why: every other one reached `filter` already respelled beneath its
+    // relation field, so it is no longer a cross-object member here.
+    unserved: ReadonlyMap<string, UnservedCrossObjectLeaf> = new Map(),
   ): CrossObjectPlan | null {
     const baseObject = this.extractObjectName(cube);
 
@@ -1397,6 +1512,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         .map(([f]) => ({ where: 'filter', member: f, field: f })),
     ].filter((r) => this.isCrossObjectField(cube, r.field, baseObject, referenceOf));
     if (nonDim.length > 0) {
+      const leaf = nonDim[0].where === 'filter' ? unserved.get(nonDim[0].field) : undefined;
+      if (leaf) throw unservedCrossObjectFilterRefused(nonDim[0].field, leaf, cube.name);
       throw invalidMemberError(
         `[Analytics] ObjectQLStrategy cannot evaluate a cross-object ${nonDim[0].where} ` +
         `("${nonDim[0].field}") — the engine cannot join in an aggregate. Run this ` +
