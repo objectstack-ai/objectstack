@@ -14,10 +14,14 @@
  * Self-hosted deployments never set the variable, so there every door answers
  * exactly as it did before.
  *
- * The doors split by POPULATION, never switched off wholesale (ADR-0135 D5.2):
- * a password can still be set on a local (`env_native`) account, and a
- * platform administrator can still give themselves a local password, so the
- * break-glass administrator stays reachable when the identity provider is not.
+ * The two password doors are closed to everyone. A hosted environment keeps
+ * no local password for anyone and has no local break-glass administrator
+ * (ruling 10 of objectstack-ai/cloud#4465, recorded on objectstack#33203):
+ * `admin/set-user-password` refuses every target, an `env_native` row
+ * included, and `set-initial-password` refuses every signed-in caller, a
+ * platform administrator included. ADR-0135 D5.2's break-glass clause, which
+ * kept a local credential reachable by population, holds on self-hosted
+ * deployments only.
  *
  * Every refusal is `409 RESOURCE_CONFLICT`, no code minted — the answer
  * cloud-connection's platform-managed doors give, on the same rule: the
@@ -53,12 +57,11 @@ export const CLOUD_MANAGED_REFUSAL_MESSAGES = {
     'This environment is cloud-managed: its users are invited by the organisation that hosts it, in the cloud, so users '
     + 'cannot be imported here. Invite them from the organisation in the cloud console. No user was imported.',
   setUserPassword:
-    "This environment is cloud-managed and this user signs in through the hosting organisation's identity provider, so "
-    + 'their password is managed there. A password can be set here only on a local account (source env_native), such '
-    + 'as the break-glass administrator. No password was changed.',
+    "This environment is cloud-managed: everyone who uses it signs in through the hosting organisation's identity "
+    + 'provider, and no one holds a local password here, an administrator included. No password was changed.',
   setInitialPassword:
-    "This environment is cloud-managed: you sign in through the hosting organisation's identity provider, and a local "
-    + "password here is reserved for a platform administrator's break-glass access. No password was set.",
+    "This environment is cloud-managed: you sign in through the hosting organisation's identity provider, and no one "
+    + 'holds a local password here, an administrator included. No password was set.',
 } as const;
 
 /** The doors a cloud-managed environment narrows. */

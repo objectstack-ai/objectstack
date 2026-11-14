@@ -370,6 +370,13 @@ nothing; the user signs in through the identity provider.
   a local password a user already holds — it still signs in, and
   `POST /api/v1/auth/change-password` still changes it. On a cloud-managed
   environment the cloud-managed rules answer first.
+- **A cloud-managed environment sets no local password for anyone.** There
+  (`OS_CLOUD_MANAGED=1`), `POST /api/v1/auth/set-initial-password` refuses every
+  signed-in caller and `POST /api/v1/auth/admin/set-user-password` refuses every
+  target, with `409 RESOURCE_CONFLICT`, whatever the user's identity source and
+  a platform administrator included. Everyone signs in through the hosting
+  organisation's identity provider, so a hosted environment has no local
+  break-glass administrator. Self-hosted deployments keep the rules above.
 
 ### Email Verification
 

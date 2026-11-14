@@ -4000,16 +4000,17 @@ export class AuthPlugin implements Plugin {
     rawApp.post(`${basePath}/set-initial-password`, async (c: any) => {
       try {
         const authApi = await this.authManager!.getApi();
-        // [#25083] On a cloud-managed environment the door narrows to a caller
-        // with platform-admin standing: everyone else signs in through the
-        // hosting organisation's identity provider, while an administrator can
-        // still give themselves the local password break-glass needs (ADR-0135
-        // D5.2 splits by population, never wholesale). A caller with no
-        // session falls through to the body, which answers it as before.
+        // [#25083] [#33203] On a cloud-managed environment the door refuses
+        // every signed-in caller, a platform administrator included: everyone
+        // signs in through the hosting organisation's identity provider, and a
+        // hosted environment keeps no local break-glass password (ruling 10 of
+        // objectstack-ai/cloud#4465; `cloud-managed.ts` states the rule). A
+        // caller with no session falls through to the body, which answers it
+        // as before.
         if (isCloudManaged()) {
           // [#24222] Read as `AuthSessionApi` declares the answer (see `SessionRead`).
           const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
-          if (session?.user?.id && !isPlatformAdminUser(session.user)) {
+          if (session?.user?.id) {
             const refusal = cloudManagedRefusal('setInitialPassword');
             return c.json(refusal.body, refusal.status);
           }
