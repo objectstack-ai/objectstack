@@ -666,8 +666,10 @@ function describeServedObject(def: any, declared: any): Record<string, unknown> 
  * caller cannot read, while the engine still computes the column from it.
  *
  * The twin is `writeNeverSetsField` in `packages/mcp/src/mcp-server-runtime.ts`,
- * which has only the masked object to ask: there the expression arm holds where
- * the caller is served the expression.
+ * which the stdio bridge and the `objectstack://objects/{name}` resource ask of
+ * the declared field too: the stdio caller view hands the declaration it masked
+ * beside the served object (`readObjectWithDeclaration`), so every transport
+ * answers this verdict alike.
  */
 function writeNeverSetsField(f: any): boolean {
     if (!f || typeof f !== 'object') return false;

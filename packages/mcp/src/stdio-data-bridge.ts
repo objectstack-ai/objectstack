@@ -147,7 +147,14 @@ import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 import { declaresOptions } from '@objectstack/formula';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
 import type { ListDatasetsOutput, QueryDatasetOutput } from '@objectstack/spec/ai';
-import { describeServedObject, metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
+import {
+  describeServedObject,
+  metaItemsArray,
+  readObjectWithDeclaration,
+  setDeclaredObjectRead,
+  type McpObjectView,
+  type ServedObjectDef,
+} from './mcp-server-runtime.js';
 import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
@@ -584,22 +591,31 @@ export function callerObjectView(view: McpObjectView, deps: CallerObjectViewDeps
       return masked.document;
     };
   };
-  return {
+  // One read of the definition, served to the principal, with the declaration
+  // it was projected from beside it: `getObject` answers the first half, and
+  // the describe readers ask both (`readObjectWithDeclaration`) to judge
+  // `readonly` on the declared field, as the HTTP twin does.
+  const readWithDeclaration = async (name: string) => {
+    const serve = await servedToPrincipal();
+    const def = (await view.getObject(name)) as ObjectDef | undefined;
+    return { served: def ? await serve(def) : def, declared: def };
+  };
+  const served: McpObjectView = {
     async listObjects() {
       const serve = await servedToPrincipal();
-      const served: ObjectDef[] = [];
+      const listed: ObjectDef[] = [];
       for (const def of ((await view.listObjects()) ?? []) as ObjectDef[]) {
         const one = await serve(def);
-        if (one !== undefined) served.push(one);
+        if (one !== undefined) listed.push(one);
       }
-      return served;
+      return listed;
     },
     async getObject(name) {
-      const serve = await servedToPrincipal();
-      const def = (await view.getObject(name)) as ObjectDef | undefined;
-      return def ? await serve(def) : def;
+      return (await readWithDeclaration(name)).served;
     },
   };
+  setDeclaredObjectRead(served, readWithDeclaration);
+  return served;
 }
 
 /**
@@ -1172,15 +1188,19 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     // describe, and a name the listing omits (a disabled package's object among
     // them) is "not found" here too, as on the HTTP bridge.
     // [ADR-0106 D1/D5] …as the principal is served it ({@link callerObjectView}).
+    // …and `readonly` judged on the declaration that view masked, as the HTTP
+    // twin judges it ({@link readObjectWithDeclaration}): only that boolean
+    // is read off the declaration.
     async describeObject(name: string): Promise<unknown | null> {
-      const def = (await servedView.getObject(name)) as ObjectDef | undefined;
+      const { served, declared } = await readObjectWithDeclaration(servedView, name);
+      const def = served as ObjectDef | undefined;
       if (!def) return null;
       // The field list is an ARRAY here, not the stored map: `validate_expression`
       // reads `Array.isArray(def.fields)` off this very value, and the HTTP
       // bridge projects the same shape. A map would type-check and silently
       // leave that tool with zero fields in scope.
       // [#32435] …each field and rule carrying what a write needs.
-      return describeServedObject(def);
+      return describeServedObject(def, declared as ServedObjectDef);
     },
 
     // [#28715] From the object `describeObject` reads: the protocol's served
@@ -1246,8 +1266,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     async get(object, id) {
       const context = await resolvePrincipal();
       await enforceApiExposure(reads, object, GATED_ACTIONS.get, context);
-      // `null` rather than a throw: `get_record` owns the not-found wording on
-      // this path and already branches on a nullish record.
+      // `null` rather than a throw: `get_record` branches on a nullish record
+      // and refuses it with the shared `recordNotFoundError`, the value the
+      // HTTP bridge's `get` throws, so the two doors answer one coded 404.
       // [#21207] A stored metadata body is served as its type's projection,
       // and its stored content hash keyed (or not at all).
       return serveStoredMetadataHashes(

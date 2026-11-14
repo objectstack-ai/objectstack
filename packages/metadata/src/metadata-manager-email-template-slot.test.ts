@@ -277,3 +277,120 @@ describe('[#32517] a bundled type keeps one item per (package, name, member) in 
     }
   });
 });
+
+/**
+ * [#32714 item 1] Which watcher event a write of a bundled type's member
+ * announces. Decided by the governing text, not picked: an email template's
+ * identity is `(name, locale)` — `EmailTemplateDefinitionSchema.locale` is "the
+ * second half of the bundle key" and "multiple rows sharing one `name` form an
+ * i18n bundle" (`packages/spec/src/system/email-template.zod.ts`; the identity
+ * table `ITEM_KEY_DISCRIMINATORS` in `@objectstack/metadata-core` says the
+ * same) — and `register()` announces `added` for a first registration and
+ * `changed` for an overwrite (its own contract, matching the repository
+ * watch path's `create` / `update` split). A second locale is a new row of the
+ * bundle and overwrites nothing, so it is `added`; a rewrite of a locale the
+ * slot already holds is `changed`. `watchService` maps them to `registered` /
+ * `updated`. No realtime event is published for either: `email_template` has
+ * no declared `MetadataEventType`.
+ */
+describe('[#32714 item 1] a second locale of a bundled item is announced `added`, a rewrite of a held locale `changed`', () => {
+  const member = (packageId: string | undefined, locale: string, subject = `${packageId ?? 'env'}:${locale}`) => ({
+    name: NAME,
+    locale,
+    subject,
+    bodyHtml: '<p>hi</p>',
+    ...(packageId === undefined ? {} : { _packageId: packageId, _provenance: 'package' }),
+  });
+
+  function watched(type = 'email_template') {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    const raw: string[] = [];
+    const service: string[] = [];
+    const published: unknown[] = [];
+    manager.subscribe(type, (event) => { raw.push(event.type); });
+    manager.watchService(type, (event) => { service.push(event.type); });
+    manager.setRealtimeService({
+      publish: async (event: unknown) => { published.push(event); },
+      subscribe: async () => 'sub-1',
+      unsubscribe: async () => undefined,
+    } as never);
+    return { manager, raw, service, published };
+  }
+
+  it('one package: en-US added, fr-FR added (a new member of the bundle), fr-FR again and en-US again changed', async () => {
+    const { manager, raw, service, published } = watched();
+    for (const item of [member(ALPHA, 'en-US'), member(ALPHA, 'fr-FR'), member(ALPHA, 'fr-FR', 'fr again'), member(ALPHA, 'en-US', 'en again')]) {
+      await manager.register('email_template', NAME, item);
+    }
+    expect(raw).toEqual(['added', 'added', 'changed', 'changed']);
+    expect(service).toEqual(['registered', 'registered', 'updated', 'updated']);
+    expect(published, 'no declared realtime event for the type').toEqual([]);
+  });
+
+  it('the environment\'s bundle: its second locale is added too, and a package taking over its canonical member is changed (it replaces that row)', async () => {
+    const { manager, raw } = watched();
+    for (const item of [member(undefined, 'en-US'), member(undefined, 'fr-FR'), member(ALPHA, 'en-US')]) {
+      await manager.register('email_template', NAME, item);
+    }
+    expect(raw).toEqual(['added', 'added', 'changed']);
+  });
+
+  it('CONTROL — an unbundled by-package type keeps one item per slot: its second write is changed, whatever `locale` it carries', async () => {
+    const { manager, raw } = watched('agent');
+    await manager.register('agent', NAME, { name: NAME, locale: 'en-US', _packageId: ALPHA });
+    await manager.register('agent', NAME, { name: NAME, locale: 'fr-FR', _packageId: ALPHA });
+    expect(raw).toEqual(['added', 'changed']);
+  });
+});
+
+/**
+ * [#32714 item 2] The environment holds a bundle (`en-US`, `fr-FR`) of a name
+ * no package holds; then a package ships the name's canonical member. The
+ * package's write takes over the bare slot's SAME member only (its row, as
+ * `DatabaseLoader` binds the package-less row of the member it writes): the
+ * environment's `fr-FR` stays the environment's. Pinned as it stands — the
+ * registry and the door's `MemoryLoader` agree, and `DatabaseLoader` leaves
+ * that row package-less too — so no layer moves a member nobody wrote.
+ */
+describe('[#32714 item 2] a package taking over a bundled name moves only the member it writes', () => {
+  const member = (packageId: string | undefined, locale: string, subject = `${packageId ?? 'env'}:${locale}`) => ({
+    name: NAME,
+    label: 'Welcome',
+    locale,
+    subject,
+    bodyHtml: '<p>hi</p>',
+    ...(packageId === undefined ? {} : { _packageId: packageId, _provenance: 'package' }),
+  });
+  const subjects = (items: unknown[]) => (items as Array<{ subject: string }>).map((item) => item.subject).sort();
+  const TAKEN_OVER = () => [member(undefined, 'en-US'), member(undefined, 'fr-FR'), member(ALPHA, 'en-US')];
+
+  async function shapes(): Promise<Array<[string, MetadataManager]>> {
+    const registry = new MetadataManager({ formats: ['json'], loaders: [] });
+    for (const item of TAKEN_OVER()) registry.registerInMemory('email_template', NAME, item);
+    const loader = new MemoryLoader();
+    for (const item of TAKEN_OVER()) await loader.save('email_template', NAME, item);
+    return [['registry', registry], ['MemoryLoader', new MetadataManager({ formats: ['json'], loaders: [loader] })]];
+  }
+
+  it('list: the package\'s en-US and the environment\'s fr-FR, each once; reads answer the package\'s slot', async () => {
+    for (const [label, manager] of await shapes()) {
+      expect(subjects(await manager.list('email_template')), label).toEqual([`${ALPHA}:en-US`, 'env:fr-FR']);
+      expect(((await manager.get('email_template', NAME, ALPHA)) as any)?.subject, label).toBe(`${ALPHA}:en-US`);
+      expect(((await manager.get('email_template', NAME)) as any)?.subject, label).toBe(`${ALPHA}:en-US`);
+    }
+  });
+
+  it('a removal naming the package leaves the environment\'s fr-FR, which a read naming none then answers', async () => {
+    for (const [label, manager] of await shapes()) {
+      await manager.unregister('email_template', NAME, { packageId: ALPHA });
+      expect(subjects(await manager.list('email_template')), label).toEqual(['env:fr-FR']);
+      expect(((await manager.get('email_template', NAME)) as any)?.subject, label).toBe('env:fr-FR');
+    }
+  });
+
+  it('the package\'s own fr-FR then takes the environment\'s over in turn: one fr-FR, the package\'s', async () => {
+    const registry = new MetadataManager({ formats: ['json'], loaders: [] });
+    for (const item of [...TAKEN_OVER(), member(ALPHA, 'fr-FR')]) registry.registerInMemory('email_template', NAME, item);
+    expect(subjects(await registry.list('email_template'))).toEqual([`${ALPHA}:en-US`, `${ALPHA}:fr-FR`]);
+  });
+});

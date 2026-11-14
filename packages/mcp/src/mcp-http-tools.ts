@@ -52,6 +52,9 @@ import { AggregationNodeSchema } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
 import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
+// The repo's ONE not-found envelope, which the HTTP bridge's `get` throws:
+// `get_record` refuses a null read with it, so both doors answer one 404.
+import { recordNotFoundError } from '@objectstack/core';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
@@ -2801,7 +2804,14 @@ export function registerObjectTools(
         if (bad) return errorResult(bad);
         try {
           const record = await bridge.get(objectName, recordId);
-          if (record == null) return errorResult(`Record "${recordId}" not found in "${objectName}"`);
+          // A bridge that answers a miss with `null` (the stdio bridge, by
+          // design) is refused with the repo's ONE not-found envelope, thrown
+          // into the catch below: the HTTP bridge's `get` throws that same
+          // value (`protocol.getData`, through `callData`), so both doors
+          // render one throw through one renderer and answer one coded
+          // `RECORD_NOT_FOUND` / 404. A missing id and an id the caller may not
+          // read reach here as the same empty read, so they answer alike.
+          if (record == null) throw recordNotFoundError(objectName, recordId);
           return textResult(record);
         } catch (err) {
           return dataDoorErrorResult(err, 'get_record', objectName);
