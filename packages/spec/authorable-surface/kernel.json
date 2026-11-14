@@ -203,6 +203,7 @@
     "kernel/ExecutionContext:traceId",
     "kernel/ExecutionContext:transaction",
     "kernel/ExecutionContext:userId",
+    "kernel/ExecutionContext:workspaceLocale",
     "kernel/ExtensionPoint:cardinality",
     "kernel/ExtensionPoint:contract",
     "kernel/ExtensionPoint:description",

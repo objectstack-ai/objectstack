@@ -287,6 +287,7 @@ import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-i
 import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
 import { createEngineSsoProviderConfigReader, emailClaimOfStoredOidcConfig, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { readSsoProviderSignInOptions, runWithSamlProviderScope } from './sso-sign-in-options.js';
+import { readSamlAssertionAttributeNames } from './sso-saml-standard-claims.js';
 import {
   judgeSignOutOfIdpCapability,
   parkOidcEndSessionEndpoint,
@@ -4308,7 +4309,16 @@ export class AuthManager {
               const auth: any = await this.getOrCreateAuth();
               return readStoredSamlConfig(await auth.$context, callback.providerId);
             };
-            return runWithSamlProviderScope({ allowIdpInitiated: options.allowIdpInitiated, singleLogout: options.signOutOfIdp }, () =>
+            // An unmapped member reads the standard claim the assertion
+            // carries, before the NameID (`sso-saml-standard-claims.ts`): the
+            // attribute names, read before the vendor consumes the body.
+            const assertionAttributeNames = await readSamlAssertionAttributeNames(callback.request);
+            return runWithSamlProviderScope({
+              allowIdpInitiated: options.allowIdpInitiated,
+              singleLogout: options.signOutOfIdp,
+              providerId: callback.providerId,
+              assertionAttributeNames,
+            }, () =>
               runSsoSamlRefusalCauseScope(callback, this.config.logger, readSamlConfig, run),
             );
           }
