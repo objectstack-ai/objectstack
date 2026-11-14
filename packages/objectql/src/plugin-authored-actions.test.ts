@@ -672,4 +672,14 @@ describe('[#32990] the resync judges artifact-shipped by each holder\'s owner ke
       expect(await run(ql, ON_A), order).toBe('ran alpha');
     }
   });
+
+  it('[review S1] two holders both shipping an object-less action: the declared override of B binds over B\'s handler, in either registration order', async () => {
+    const override = storedRow('pair-approve', script('override', undefined, { overrides: { package: B, basedOn: '1.0.0' } }), PAIR_OF_B);
+    const objectLess = [packageOf(A, ON_A, { objectLess: true }), packageOf(B, ON_B, { objectLess: true })];
+    for (const [order, packages] of [['A then B', objectLess], ['B then A', [...objectLess].reverse()]] as const) {
+      const ql = await boot([...packages], [override]);
+      expect(await ql.executeAction('global', 'approve', {}, { packageId: B }), order).toBe('ran override');
+      expect(await ql.executeAction('global', 'approve', {}, { packageId: A }), order).toBe('ran alpha');
+    }
+  });
 });

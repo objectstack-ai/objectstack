@@ -4089,7 +4089,7 @@ export class ObjectQLPlugin implements Plugin {
         const data = parseRow(row, 'action');
         if (data && typeof data.name === 'string') {
           actions.push(data);
-          if (this.isDeclaredArtifactActionOverride(row, data)) this.declaredActionOverrides.add(data);
+          if (this.isDeclaredArtifactActionOverride(row, data, ctx)) this.declaredActionOverrides.add(data);
         }
       }
 
@@ -4133,6 +4133,9 @@ export class ObjectQLPlugin implements Plugin {
    */
   private readonly declaredActionOverrides = new WeakSet<object>();
 
+  /** [#32990 review S1] Once-per-process dedupe for the ambiguous-override-base warning, keyed `OBJECT:NAME`. */
+  private readonly overrideBaseAmbiguityWarned = new Set<string>();
+
   /**
    * [#30065, ADR-0146 D9 `action`] Whether a stored `action` row is the
    * declared override of the action a code package ships under its name, on
@@ -4152,7 +4155,7 @@ export class ObjectQLPlugin implements Plugin {
    * a row of another base's pair that ships the same key is replaced by the
    * real base's handler when it arrives, as the reads decline it.
    */
-  private isDeclaredArtifactActionOverride(row: unknown, action: any): boolean {
+  private isDeclaredArtifactActionOverride(row: unknown, action: any, ctx?: PluginContext): boolean {
     const registry: any = this.ql?.registry;
     if (!registry || typeof registry.getArtifactItem !== 'function') return false;
     const installed = installedManifestsOf(registry);
@@ -4162,8 +4165,26 @@ export class ObjectQLPlugin implements Plugin {
     if (artifacts.length === 0) {
       return isServedOverrideRowOf(row as any, action?.overrides?.package, installed);
     }
+    // [#32990 review S1] Several holders may ship the name at one owner key
+    // (two object-less actions both own `global`): the base is the one the row
+    // declares; with several and none declared, no base is picked (an
+    // ambiguity is reported, never guessed).
     const objectKey = standaloneActionOwnerKey(action);
-    const artifact: any = artifacts.find((a) => standaloneActionOwnerKey(a) === objectKey);
+    const atKey = artifacts.filter((a) => standaloneActionOwnerKey(a) === objectKey);
+    const declared = action?.overrides?.package;
+    const named = atKey.filter((a) => a?._packageId === declared);
+    const artifact: any = named.length === 1 ? named[0] : atKey.length === 1 ? atKey[0] : undefined;
+    if (artifact === undefined && atKey.length > 1) {
+      const key = `${objectKey}:${String(action.name)}`;
+      if (!this.overrideBaseAmbiguityWarned.has(key)) {
+        this.overrideBaseAmbiguityWarned.add(key);
+        ctx?.logger.warn(
+          `[ObjectQLPlugin] stored action '${String(action.name)}' on '${objectKey}' is bound as no override: `
+          + `${atKey.length} packages ship it there (${atKey.map((a) => `'${String(a?._packageId)}'`).join(', ')}) and the row `
+          + 'declares none of them in overrides.package. Fix: name the base package in the row\'s overrides.package.',
+        );
+      }
+    }
     const base = artifact?._packageId;
     if (typeof base !== 'string' || base === '') return false;
     return isServedOverrideRowOf(row as any, base, installed);
