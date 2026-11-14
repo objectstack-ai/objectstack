@@ -5,7 +5,7 @@
 
 fix(console): the fields no declared field group claims render under their own "Other" heading after the declared groups, on the record page, the record drawer and the form arms (#33229)
 
-Clause-②: yes (widening) — `@object-ui/i18n` adds the pack key `common.ungroupedSection` in every shipped locale ("Other" / 「其他」), and `@object-ui/plugin-form`'s `deriveFieldGroupSections` takes an optional third argument, the heading of its trailing bucket. Nothing is removed or renamed; a caller that passes no heading gets the sections it got before.
+Clause-②: yes (widening) — `@object-ui/i18n` adds the pack key `common.ungroupedSection` in every shipped locale ("Other" / 「其他」). Nothing is removed or renamed. `@object-ui/plugin-form` changes what its form arms draw, not its exports: the adapter that gains the heading argument (`deriveFieldGroupSections`) is internal to the package.
 Metadata-protocol: none
 
 `deriveFieldGroupLayout` (`@objectstack/spec/data`, ADR-0085 §5) ends an object's grouped layout with a keyless bucket holding every visible field no declared group claims. It exists only after at least one declared group. The Console drew it with no heading, so its fields read as members of the group above it, and when that group was collapsed they looked like its hidden contents.
