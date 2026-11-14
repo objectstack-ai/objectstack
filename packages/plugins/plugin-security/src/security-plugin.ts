@@ -191,6 +191,9 @@ import {
   objectReadAdmission,
   type ObjectAdmissionHost,
 } from './security-plugin-object-admission.js';
+// The ADR-0090 D10 delegator resolution the two object-schema read sites ask
+// through {@link SecurityPlugin.resolveDelegatorForContext}.
+import { resolveDelegatorContext, type DelegatorResolution } from './explain-engine.js';
 // [#25223 cut 10] The `everyone` anchor's declarations: the anchor's
 // definition a started kernel derives, and the built-in positions `init()`
 // declares; the methods of the same names below hand each body the members it
@@ -3343,7 +3346,7 @@ export class SecurityPlugin implements Plugin {
     const readPermissionEvaluator = () => this.permissionEvaluator;
     const readQl = () => this.ql;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveFallbackPermissionSets' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+    const host: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveDelegatorForContext' | 'resolveFallbackPermissionSets' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
       computeForbiddenFieldWrites: (...a) => this.computeForbiddenFieldWrites(...a),
       computeQueryGuardFieldPerms: (...a) => this.computeQueryGuardFieldPerms(...a),
       computeReadPartialMaskRules: (...a) => this.computeReadPartialMaskRules(...a),
@@ -3353,6 +3356,7 @@ export class SecurityPlugin implements Plugin {
       get permissionEvaluator() { return readPermissionEvaluator(); },
       get ql() { return readQl(); },
       resolveCallerPosture: (...a) => this.resolveCallerPosture(...a),
+      resolveDelegatorForContext: (...a) => this.resolveDelegatorForContext(...a),
       resolveFallbackPermissionSets: (...a) => this.resolveFallbackPermissionSets(...a),
       resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
       get tenancyPosture() { return readTenancyPosture(); },
@@ -3476,11 +3480,12 @@ export class SecurityPlugin implements Plugin {
     const readLogger = () => this.logger;
     const readQl = () => this.ql;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<ObjectAdmissionHost, 'delegatedAdminGate' | 'logger' | 'objectReadAdmission' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+    const host: Pick<ObjectAdmissionHost, 'delegatedAdminGate' | 'logger' | 'objectReadAdmission' | 'ql' | 'resolveDelegatorForContext' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
       get delegatedAdminGate() { return readDelegatedAdminGate(); },
       get logger() { return readLogger(); },
       objectReadAdmission: (...a) => this.objectReadAdmission(...a),
       get ql() { return readQl(); },
+      resolveDelegatorForContext: (...a) => this.resolveDelegatorForContext(...a),
       resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
       get tenancyPosture() { return readTenancyPosture(); },
     };
@@ -3761,6 +3766,80 @@ export class SecurityPlugin implements Plugin {
   private permissionSetMemoKey(context: any): string {
     // [#25223 cut 8] The body moved to `security-plugin-permission-sets.ts` (see `PermissionSetsHost`).
     return permissionSetMemoKey(context);
+  }
+
+  /**
+   * The ADR-0090 D10 delegator resolutions {@link resolveDelegatorForContext}
+   * has made, per live execution context — the {@link permissionSetMemo}
+   * discipline, for the second question an on-behalf-of read asks.
+   */
+  private readonly delegatorMemo = new WeakMap<
+    object,
+    { epoch: number; key: string; resolution: Promise<DelegatorResolution> }
+  >();
+
+  /**
+   * [ADR-0090 D10] The delegator behind an on-behalf-of `context`
+   * ({@link resolveDelegatorContext}), resolved once per context while no
+   * write intervenes. Asked by the two object-schema read questions —
+   * {@link canReadObject} and the field projection
+   * ({@link resolveProjectionFieldMask}) — which a schema-serving door asks
+   * once PER OBJECT: `/meta` lists and MCP `list_objects` ask both of every
+   * object in the environment.
+   *
+   * ## The duplicate it removes
+   *
+   * Each ask re-read the delegator (`sys_user`, memberships, grants,
+   * positions) and handed back a context object nobody had seen, so the
+   * delegator's sets missed {@link permissionSetMemo} too: one OAuth client's
+   * `list_objects` issued 22 statements per object (two questions x 11) for
+   * one unchanged answer, measured on a real kernel. Against a database a
+   * network hop away that is the listing's whole latency.
+   *
+   * ## Why it is not a cache
+   *
+   * Exactly the {@link permissionSetMemo} argument, unchanged: keyed on the
+   * context OBJECT, which a door builds once per request (the `/mcp` door,
+   * REST's per-`req` memo), so nothing outlives the caller it was resolved
+   * for; reused only while {@link epoch} stands, so any write in this process
+   * — a grant revoked, a membership removed — retires it; and keyed on the
+   * three members the resolution reads off the context (`onBehalfOf.userId`,
+   * `tenantId`, `org_user_ids`), so a context edited in place resolves again.
+   * Every kind is kept (`none`, `missing`, `resolved`); a rejection is not.
+   *
+   * One consequence, stated: `resolveDelegatorContext`'s clock is read at the
+   * first resolution, so one request judges the delegator's time-limited
+   * grants (ADR-0091) at one instant rather than at each object's — which
+   * makes one listing coherent, and moves no answer except one whose grant
+   * window closes inside the request.
+   *
+   * The resolved context is FROZEN (shallowly, with its arrays): every asker
+   * shares it, and the two sites only read it — the organization check
+   * ({@link delegatedOrganizationRefusal}, still asked at each site, every
+   * call) and the delegator's sets. ⛔ Not for a site that carries the
+   * delegator context onward into a filter or a write (the read filter, the
+   * operation prologue, explain): those keep resolving their own.
+   */
+  private resolveDelegatorForContext(context: any): Promise<DelegatorResolution> {
+    // A primitive/absent context has no identity to key on: resolved, not kept.
+    const keyed = !!context && typeof context === 'object';
+    const key = keyed
+      ? JSON.stringify([context.onBehalfOf?.userId ?? null, context.tenantId ?? null, context.org_user_ids ?? null])
+      : '';
+    const hit = keyed ? this.delegatorMemo.get(context) : undefined;
+    if (hit && hit.epoch === this.epoch.current && hit.key === key) return hit.resolution;
+    const resolution = resolveDelegatorContext(this.ql, context).then((resolved) => {
+      if (resolved.kind !== 'resolved') return Object.freeze(resolved);
+      for (const value of Object.values(resolved.context)) if (Array.isArray(value)) Object.freeze(value);
+      return Object.freeze({ kind: 'resolved' as const, context: Object.freeze(resolved.context) });
+    });
+    if (!keyed) return resolution;
+    const entry = { epoch: this.epoch.current, key, resolution };
+    this.delegatorMemo.set(context, entry);
+    resolution.catch(() => {
+      if (this.delegatorMemo.get(context) === entry) this.delegatorMemo.delete(context);
+    });
+    return resolution;
   }
 
   /**
