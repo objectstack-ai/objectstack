@@ -107,7 +107,7 @@
           "status": "live",
           "verifiedAt": "2026-11-14",
           "evidenceScope": "in-repo",
-          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#answerDeclaredCode (a throw naming a `reason` the code declares is answered with that reason's sentence, the code's status and the code on the wire; an undeclared reason is refused as a fault naming the hook, the code and the reason); packages/runtime/src/sandbox/hook-refusal-catalogue.ts#declaredRefusalMessage (picks the reason's sentence and its key, `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`); packages/runtime/src/sandbox/quickjs-runner.ts#readRefusalAddress (carries the body's `reason` across the VM)",
+          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#declaredAnswer (a throw naming a `reason` the code declares is answered with that reason's sentence, the code's status and the code on the wire; an undeclared reason is refused as a fault naming the hook, the code and the reason); packages/runtime/src/sandbox/hook-refusal-catalogue.ts#declaredRefusalMessage (picks the reason's sentence and its key, `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`); packages/runtime/src/sandbox/quickjs-runner.ts#readRefusalAddress (carries the body's `reason` across the VM)",
           "producer": "packages/spec/src/data/hook.zod.ts#refuseUndeclaredLiteralRefusalCode (refuses at save a reason the hook's source throws literally and the code does not declare)",
           "note": "[#33214, ruling 6879477573 S1] Seeded `live` with its reader in one change (Prime Directive 10): the key, the runtime that answers it on both paths, the translation group and the coverage count.",
           "children": {

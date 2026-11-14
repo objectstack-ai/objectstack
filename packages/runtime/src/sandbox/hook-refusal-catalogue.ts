@@ -247,41 +247,37 @@ function pickTranslatedSentence(
 }
 
 /**
- * The error a declared code answers with, or the loud fault for a reason the
- * code does not declare — shared by the body path and the in-process path so
- * the two cannot answer differently.
+ * What a declared code answers with — the picked sentence and the status — or
+ * the loud fault for a reason the code does not declare. Shared by the body
+ * path and the in-process path so the two cannot answer differently; each
+ * builds its `SandboxError` from it with the code it read.
  */
-function answerDeclaredCode(
+function declaredAnswer(
   hook: Pick<Hook, 'name'>,
-  code: string,
+  thrownCode: string,
   entry: DeclaredRefusal,
   address: HookRefusalAddress | undefined,
-  logMessage: string,
   engineCtx: { session?: { locale?: unknown } } | undefined,
   opts: { i18n?: HookRefusalI18nSource; logger?: { warn?: (...args: any[]) => void } },
-): SandboxError {
+): { fault: SandboxError } | { message: string; status: number } {
   const reason = address?.reason;
   if (reason !== undefined) {
     const reasons = entry.reasons && typeof entry.reasons === 'object' ? entry.reasons : {};
     if (!Object.prototype.hasOwnProperty.call(reasons, reason)) {
-      return new SandboxError(undeclaredHookRefusalReasonAtRun(String(hook.name), code, reason, Object.keys(reasons)));
+      return { fault: new SandboxError(undeclaredHookRefusalReasonAtRun(String(hook.name), thrownCode, reason, Object.keys(reasons))) };
     }
   }
   const locale = engineCtx?.session?.locale;
   const message = declaredRefusalMessage(
     String(hook.name),
-    code,
+    thrownCode,
     entry,
     typeof locale === 'string' ? locale : undefined,
     opts.i18n,
     opts.logger,
     address,
   );
-  return new SandboxError(logMessage, message, {
-    code,
-    status: typeof entry.status === 'number' ? entry.status : DEFAULT_HOOK_REFUSAL_STATUS,
-    userMessage: message,
-  });
+  return { message, status: typeof entry.status === 'number' ? entry.status : DEFAULT_HOOK_REFUSAL_STATUS };
 }
 
 /**
@@ -309,7 +305,9 @@ export function resolveHookRefusal(
   if (code === undefined || !entry) {
     return new SandboxError(undeclaredHookRefusalAtRun(String(hook.name), code, Object.keys(catalogue)));
   }
-  return answerDeclaredCode(hook, code, entry, sandboxRefusalAddressOf(err), err.message, engineCtx, opts);
+  const answer = declaredAnswer(hook, code, entry, sandboxRefusalAddressOf(err), engineCtx, opts);
+  if ('fault' in answer) return answer.fault;
+  return new SandboxError(err.message, answer.message, { code, status: answer.status, userMessage: answer.message });
 }
 
 // ── The in-process half (#33214, ruling 6879477573 letter A) ─────────────────
@@ -495,13 +493,11 @@ export function resolveInProcessHookRefusal(
   if (thrown.params !== null && typeof thrown.params === 'object' && !Array.isArray(thrown.params)) {
     address.params = thrown.params as Record<string, unknown>;
   }
-  return answerDeclaredCode(
-    hook,
+  const answer = declaredAnswer(hook, code, entry, address, engineCtx, opts);
+  if ('fault' in answer) return answer.fault;
+  return new SandboxError(`hook '${String(hook.name)}' threw: ${flattenThrown(err)}`, answer.message, {
     code,
-    entry,
-    address,
-    `hook '${String(hook.name)}' threw: ${flattenThrown(err)}`,
-    engineCtx,
-    opts,
-  );
+    status: answer.status,
+    userMessage: answer.message,
+  });
 }

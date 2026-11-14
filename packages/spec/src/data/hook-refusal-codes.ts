@@ -210,21 +210,14 @@ export function hookRefusalCodesThrownIn(source: string): string[] {
  * is left to the run-time refusal.
  */
 export function hookRefusalReasonsThrownIn(source: string): Array<{ code: string; reason: string }> {
-  const pairs: Array<{ code: string; reason: string }> = [];
-  const seen = new Set<string>();
-  const add = (code: string, reason: string) => {
-    const key = `${code}.${reason}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    pairs.push({ code, reason });
-  };
+  const found: Array<[string, string]> = [];
   const thrownNames = new Set<string>();
   const masked = maskedSource(source);
   for (const statement of throwStatements(masked)) {
     const codes = new Set([...statement.matchAll(CODE_PROPERTY)].map((m) => m.groups!.code));
     if (codes.size === 1) {
-      const [code] = codes;
-      for (const m of statement.matchAll(REASON_PROPERTY)) add(code!, m.groups!.reason);
+      const [only] = codes;
+      for (const m of statement.matchAll(REASON_PROPERTY)) found.push([only!, m.groups!.reason]);
     }
     const binding = thrownBinding(statement);
     if (binding) thrownNames.add(binding);
@@ -234,8 +227,15 @@ export function hookRefusalReasonsThrownIn(source: string): Array<{ code: string
     if (thrownNames.has(m.groups!.binding)) codeOf.set(m.groups!.binding, m.groups!.code);
   }
   for (const m of masked.matchAll(REASON_ASSIGNMENT)) {
-    const code = codeOf.get(m.groups!.binding);
-    if (code !== undefined) add(code, m.groups!.reason);
+    const bound = codeOf.get(m.groups!.binding);
+    if (bound !== undefined) found.push([bound, m.groups!.reason]);
+  }
+  const pairs: Array<{ code: string; reason: string }> = [];
+  const seen = new Set<string>();
+  for (const [code, reason] of found) {
+    if (seen.has(`${code}.${reason}`)) continue;
+    seen.add(`${code}.${reason}`);
+    pairs.push({ code, reason });
   }
   return pairs;
 }
