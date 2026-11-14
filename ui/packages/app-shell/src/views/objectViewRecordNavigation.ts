@@ -23,12 +23,21 @@
  * apply: a `?recordId=` link opened on a phone lands on that record's page,
  * and the record form the link carries (`?form=`, `?formObject=`,
  * `?formLink=`) opens over that page (objectstack#32750).
+ *
+ * An object the server does not read one record of — its served operations
+ * leave `get` out (`servesRecordRead`), a list-only object — has no record
+ * surface at all: its rows resolve to the `none` mode on every viewport, a
+ * modifier click opens no tab, its link column draws plain values, and a
+ * `?recordId=` link opens nothing. Its row menu (`list_item` actions) is
+ * untouched: it acts on the row the list already holds.
  */
 
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import type { NavigateFunction, Location, SetURLSearchParams } from 'react-router-dom';
 import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view';
 import { useNavigationOverlay } from '@object-ui/react';
+import { servesRecordRead } from '@object-ui/core';
+import { usePermissions } from '@object-ui/permissions';
 import type { ViewNavigationConfig } from '@object-ui/types';
 import { RECORD_DRAWER_PARAM, RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
 import { RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
@@ -162,8 +171,13 @@ export function useObjectViewRecordNavigation({
     /** The console is on a phone (`usePhoneViewport`, objectstack#27058): every record opens as a page. */
     phone: boolean;
 }) {
+    // Whether the server reads one record of this object at all: a list-only
+    // object's record page and drawer could only answer
+    // `OBJECT_API_METHOD_NOT_ALLOWED`, so its records open nowhere.
+    const perms = usePermissions();
+    const recordServed = servesRecordRead(objectDef.name, perms);
     // Navigation overlay for record detail.
-    // Priority: activeView.navigation > objectDef.navigation > default drawer.
+    // Priority: no record read > activeView.navigation > objectDef.navigation > default drawer.
     //
     // Default mode = 'drawer' (objectstack#26677, maintainer ruling 2026-10-27:
     // an object opens its records in the drawer, which expands to the full
@@ -175,6 +189,8 @@ export function useObjectViewRecordNavigation({
     // side-by-side pane is the reader's preference, read by `ObjectView`.
     const detailNavigation: ViewNavigationConfig = useMemo(
         () => {
+            // No record surface to open, on any viewport, whatever is authored.
+            if (!recordServed) return { mode: 'none' };
             // objectstack#27058 — on a phone the spec's rule decides, and it
             // answers `page` whatever the view or the object declares.
             if (phone) return { mode: deriveRecordSurface(objectDef, { viewport: 'mobile' }) };
@@ -202,7 +218,7 @@ export function useObjectViewRecordNavigation({
             // reader drags and `⤢` widens.
             return { mode: 'drawer', width: overlayWidthFor(recordPaneSize(undefined), objectDef) };
         },
-        [activeView?.navigation, objectDef, phone]
+        [activeView?.navigation, objectDef, phone, recordServed]
     );
     const drawerRecordId = searchParams.get(RECORD_DRAWER_PARAM);
     // The location as of the latest render, read when a handler runs: the
@@ -306,8 +322,9 @@ export function useObjectViewRecordNavigation({
                 objects,
                 navigate,
                 routerRootHref,
+                perms,
             }),
-        [objectDef.name, handleNavOverlayNavigate, appName, objects, navigate, routerRootHref],
+        [objectDef.name, handleNavOverlayNavigate, appName, objects, navigate, routerRootHref, perms],
     );
     const navOverlay = useNavigationOverlay({
         navigation: detailNavigation,
@@ -334,11 +351,13 @@ export function useObjectViewRecordNavigation({
     // (objectstack#27545): the list it is handed to must not re-render when
     // `?recordId=` changes, and the overlay state, the search params and their
     // setter all change with it.
-    const rowClickInputs = useRef({ navOverlay, searchParams, setSearchParams, recordOpenPreference, handleNavOverlayNavigate });
-    rowClickInputs.current = { navOverlay, searchParams, setSearchParams, recordOpenPreference, handleNavOverlayNavigate };
+    const rowClickInputs = useRef({ navOverlay, searchParams, setSearchParams, recordOpenPreference, handleNavOverlayNavigate, recordServed });
+    rowClickInputs.current = { navOverlay, searchParams, setSearchParams, recordOpenPreference, handleNavOverlayNavigate, recordServed };
     const handleRowClick = useCallback(
         (record: any, event?: React.MouseEvent | { metaKey?: boolean; ctrlKey?: boolean; button?: number }) => {
-            const { navOverlay: overlay, searchParams: params, setSearchParams: setParams, recordOpenPreference: preference, handleNavOverlayNavigate: navigateTo } = rowClickInputs.current;
+            const { navOverlay: overlay, searchParams: params, setSearchParams: setParams, recordOpenPreference: preference, handleNavOverlayNavigate: navigateTo, recordServed: served } = rowClickInputs.current;
+            // No record surface: not even a modifier click opens one in a new tab.
+            if (!served) return;
             // Cmd/Ctrl/middle-click — let the hook open in a new tab (full page)
             // regardless of configured mode. Matches browser link convention.
             const isModifier = !!(
@@ -441,31 +460,34 @@ export function useObjectViewRecordNavigation({
     }, [setSearchParams]);
     /**
      * The drawer's root — the list row `?recordId=` names — or `null`, with the
-     * list's shown rows as its sibling set when the list reported any.
+     * list's shown rows as its sibling set when the list reported any. Always
+     * `null` for an object with no record surface.
      */
     const drawerRoot = useMemo<RecordDrawerLevel | null>(
-        () => (drawerRecordId
+        () => (drawerRecordId && recordServed
             ? {
                 objectName: objectDef.name,
                 recordId: drawerRecordId,
                 ...(listSiblingSetOf(listRows, drawerRecordId) ?? {}),
             }
             : null),
-        [drawerRecordId, objectDef.name, listRows],
+        [drawerRecordId, objectDef.name, listRows, recordServed],
     );
     // Sync URL-based recordId to overlay state. On a phone there is no pane to
     // open: the drawer link is answered by the record's page, in its place in
     // the history (objectstack#27058).
+    // A `?recordId=` link to an object with no record surface opens nothing.
     useEffect(() => {
+        const openedId = recordServed ? drawerRecordId : null;
         if (phone) {
-            if (drawerRecordId) handleNavOverlayNavigate(drawerRecordId, undefined, undefined, true);
+            if (openedId) handleNavOverlayNavigate(openedId, undefined, undefined, true);
             return;
         }
-        if (drawerRecordId && !navOverlay.isOpen) {
-            navOverlay.open({ id: drawerRecordId });
-        } else if (!drawerRecordId && navOverlay.isOpen) {
+        if (openedId && !navOverlay.isOpen) {
+            navOverlay.open({ id: openedId });
+        } else if (!openedId && navOverlay.isOpen) {
             navOverlay.close();
         }
-    }, [drawerRecordId, phone]);
+    }, [drawerRecordId, phone, recordServed]);
     return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep, listLabel };
 }

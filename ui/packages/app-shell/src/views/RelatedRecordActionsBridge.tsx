@@ -92,7 +92,7 @@ import {
   type RelatedRecordHandlers,
   type RelatedRowActionDef,
 } from '@object-ui/react';
-import { evalRowPredicate, isMultiValueRelationship, resolveAffordance, type ActionDef, type RowCrudPredicates } from '@object-ui/core';
+import { evalRowPredicate, isMultiValueRelationship, resolveAffordance, servesRecordRead, type ActionDef, type RowCrudPredicates } from '@object-ui/core';
 import { actionRendersAt, type ActionLocation } from '@object-ui/types';
 import { usePermissions } from '@object-ui/permissions';
 import { RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM, RECORD_TRAIL_PARAM, appendRecordTrail } from '../urlParams.js';
@@ -156,17 +156,24 @@ function evalCreatePredicate(
 
 /**
  * The names of the objects a console host can route to: one record route
- * exists per object definition it holds (objectui#12673).
+ * exists per object definition it holds (objectui#12673), for an object whose
+ * records the server serves one at a time (`servesRecordRead`, read off
+ * `perms`). A list-only object's record route would only ever answer
+ * `OBJECT_API_METHOD_NOT_ALLOWED`, so it is not routable: its records render
+ * as plain values and open nothing.
  *
  * Shared by this bridge and the object list host (`listRecordActionsValue` in
  * `ObjectView`), which both read the console's `objects` prop, so the two
  * cannot disagree on which targets are linkable.
  */
-export function routableObjectNames(objects: ReadonlyArray<unknown> | null | undefined): Set<string> {
+export function routableObjectNames(
+  objects: ReadonlyArray<unknown> | null | undefined,
+  perms?: Parameters<typeof servesRecordRead>[1],
+): Set<string> {
   return new Set(
     (objects ?? [])
       .map((o) => (o as { name?: unknown } | null | undefined)?.name)
-      .filter((name): name is string => typeof name === 'string' && name !== ''),
+      .filter((name): name is string => typeof name === 'string' && name !== '' && servesRecordRead(name, perms)),
   );
 }
 
@@ -340,8 +347,11 @@ export function RelatedRecordActionsBridge({
   /** A parent record is in scope: the related lists below sit inside it. */
   const hasParentRecord = parentRecordId != null && parentRecordId !== '';
 
-  /** Objects this host can route to — the record route exists per object def. */
-  const routableObjects = useMemo(() => routableObjectNames(objects), [objects]);
+  /**
+   * Objects this host can route to — the record route exists per object def
+   * whose records the server serves one at a time.
+   */
+  const routableObjects = useMemo(() => routableObjectNames(objects, perms), [objects, perms]);
 
   /**
    * THE record-detail route for this page — one route shape, one place.
