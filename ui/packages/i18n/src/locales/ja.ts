@@ -2735,6 +2735,7 @@ const ja = {
         ssoSwitchAccount: "アカウントを切り替える",
         ssoBackToConsole: "コンソールに戻る",
         ssoSwitchAccountHint: "「アカウントを切り替える」を選ぶと、新しいタブでサインインサービスが開き、そこでサインアウトします。その後、アクセス権のあるアカウントでここから再度サインインしてください。",
+        linkEmailMismatch: "アカウントはリンクされませんでした。そのメールアドレスが、サインイン中のアカウントのメールアドレスと一致しません。同じメールアドレスを使用するアカウントをリンクしてください。",
         twoFactorInvalidCode: "コードが無効です。認証アプリを確認して、もう一度お試しください。",
         twoFactorInvalidBackupCode: "このバックアップコードは無効か、すでに使用されています。",
         twoFactorTooManyAttempts: "誤ったコードの入力が多すぎます。パスワードでもう一度サインインしてください。",
