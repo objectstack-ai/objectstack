@@ -3678,6 +3678,12 @@ describe('[#32680] the plural read takes a by-package name\'s bodies and package
     expect(await stamps(cold(new ReorderingLoader({ driver })), 'agent')).toEqual([[ALPHA, ALPHA], [BETA, BETA]]);
     const m = await bootPass(new ReorderingLoader({ driver }));
     expect(await answer(m, 'agent', 'helper')).toEqual(REFUSED);
+    // A row the keyed read cannot name (its `name` column empty) is still handed on, once, unstamped.
+    await driver.create('sys_metadata', {
+      id: 'agent_unnamed', type: 'agent', name: null, state: 'active', version: 3, checksum: 'agent_unnamed',
+      source: 'database', package_id: null, metadata: JSON.stringify({ label: 'empty name column' }),
+    });
+    expect(await stamps(cold(new ReorderingLoader({ driver })), 'agent')).toEqual([[ALPHA, ALPHA], [BETA, BETA], [null, 'empty name column']]);
   });
 
   for (const type of UNBUNDLED) {

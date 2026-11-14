@@ -3873,13 +3873,14 @@ export class MetadataManager implements IMetadataService {
             // the same way ({@link keyedEntryBodies}): handed on unstamped,
             // such a row filled the name's package-less slot, and with two
             // holders its save inserted a package-less row. Each body is its
-            // own entry's, so nothing pairs a body to a row by its content.
+            // own entry's, so no stamp pairs a body to a row by its content;
+            // a body the keyed read cannot name is kept after them, unstamped.
             // Any other loader's bodies are handed on as its `loadMany`
             // answers them.
             const items = PACKAGE_SLOTTED_STORE_TYPES.has(type) && isBundledStoreType(type) && typeof loader.loadManyKeyed === 'function'
                 ? (await loader.loadManyKeyed<T>(type, options)).map((entry) => withEntryPackage(entry))
                 : PACKAGE_SLOTTED_STORE_TYPES.has(type) && typeof loader.loadManyKeyed === 'function' && typeof loader.loadManySlots === 'function'
-                    ? keyedEntryBodies(await loader.loadManyKeyed<T>(type, options))
+                    ? await keyedEntryBodies<T>(loader, type, options)
                     : await loader.loadMany<T>(type, options);
             for (const item of items) gathered.push({ item, loader });
             this.reportLoaderReadRecovered(loader.contract.name);
@@ -4776,17 +4777,44 @@ function keyedEntryOf<T>(entry: MetadataKeyedItem<T>): MetadataKeyedItem<T> {
  * unstamped: a row's key and its body's `name` are two identities (#14205),
  * and its package is never given to the name its body says.
  *
- * Each body is its own entry's, so no body is paired to a row by its content
- * (#32680, FROM matching `loadMany`'s bodies to the keyed entries by their
- * serialisation): every holder of a name two packages hold is handed on
- * stamped with its own row's package, whatever another row's body says and
- * however the loader serialises its two reads (#32521; epic #31527 red line
- * 2), and a name one package holds is stamped whatever another row's body
- * says. An entry the loader holds for no package — the environment's own row,
- * or a holder's customization (ADR-0150 D4) — is handed on unstamped. A row
- * the keyed read cannot name (its `name` column empty) is not handed on, as
- * the keyed read, `list` and a bundled type's plural read leave it out.
+ * Each body is its own entry's, so no stamp depends on pairing a body to a
+ * row by its content (#32680, FROM matching `loadMany`'s bodies to the keyed
+ * entries by their serialisation): every holder of a name two packages hold
+ * is handed on stamped with its own row's package, whatever another row's
+ * body says and however the loader serialises its two reads (#32521; epic
+ * #31527 red line 2), and a name one package holds is stamped whatever
+ * another row's body says. An entry the loader holds for no package — the
+ * environment's own row, or a holder's customization (ADR-0150 D4) — is
+ * handed on unstamped.
+ *
+ * Every other body `loader.loadMany` answers is kept after them, unstamped, as
+ * before: one the keyed read cannot name (a row whose `name` column is empty).
+ * They are `loadMany`'s bodies less one per keyed entry whose body is the same
+ * value ({@link sameBody}, key order aside), so only a loader whose `loadMany`
+ * answers more bodies than its keyed read is compared at all, and the
+ * comparison decides what is kept, never a package.
  */
-function keyedEntryBodies<T>(entries: ReadonlyArray<MetadataKeyedItem<T>>): T[] {
-  return entries.map((entry) => ((entry.data as { name?: unknown } | null)?.name === entry.name ? withEntryPackage(entry) : entry.data));
+async function keyedEntryBodies<T>(loader: MetadataLoader, type: string, options?: MetadataLoadOptions): Promise<T[]> {
+  const entries = await loader.loadManyKeyed!<T>(type, options);
+  const bodies = entries.map((entry) => ((entry.data as { name?: unknown } | null)?.name === entry.name ? withEntryPackage(entry) : entry.data));
+  const answered = await loader.loadMany<T>(type, options);
+  if (answered.length <= entries.length) return bodies;
+  const keyed: unknown[] = entries.map((entry) => entry.data);
+  const unkeyed = answered.filter((body) => {
+    const at = keyed.findIndex((data) => sameBody(data, body));
+    if (at === -1) return true;
+    keyed.splice(at, 1);
+    return false;
+  });
+  return [...bodies, ...unkeyed];
+}
+
+/** [#32680] Whether two stored bodies are the same JSON value, whatever order their keys were written in. */
+function sameBody(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => Object.prototype.hasOwnProperty.call(b, key)
+    && sameBody((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
 }
