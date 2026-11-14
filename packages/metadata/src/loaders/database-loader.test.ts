@@ -3220,6 +3220,162 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
 });
 
 /**
+ * [#32681; seat ruling A on #32681, ADR-0150 D4] A package-less action row
+ * bound to an object is keyed per `(object, name)` on the stored side, as the
+ * in-memory store keys it (`storeWriteKey`): `DatabaseLoader`'s save counts
+ * the holders of the written body's `(object, name)` (`storeRowWriteKey` over
+ * `storeRowSlotKey`), and its slot read hands a stored package-less row bound
+ * to an object one package binds the name to, under a name two packages
+ * hold, on as that package's customization (`loadManySlots`), where the boot
+ * priming pass files it.
+ *
+ * BEFORE (measured on main `9f736f2e`, same fixtures): every save cell not
+ * marked CONTROL wrote the row the FROM column of the PR names (a package-less
+ * row beside ALPHA's; BETA's row bound to `account`; ALPHA's object-less
+ * row; a third row beside the package-less one); every cold read naming
+ * ALPHA answered ALPHA's own row where the read after the pass answered the
+ * package-less one. The CONTROLs answered as here.
+ */
+describe('[#32681] a package-less object-bound action row is keyed per (object, name) on the stored side', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  const GAMMA = 'com.gamma.app';
+  let driver: IDataDriver;
+
+  /** A binding of `approve`: its package (`null`: none) and its object (`null`: object-less). */
+  type Binding = readonly [packageId: string | null, objectName: string | null];
+  const labelOf = ([packageId, objectName]: Binding) => `${packageId ?? 'env'}@${objectName ?? 'global'}`;
+  const bodyOf = (binding: Binding, label = labelOf(binding)) => ({ name: 'approve', label, ...(binding[1] ? { objectName: binding[1] } : {}) });
+  /** A stored row of `approve`, bound by its columns, at `version`. */
+  const seed = (binding: Binding, version: number) =>
+    driver.create('sys_metadata', {
+      id: `approve_${labelOf(binding)}`, type: 'action', name: 'approve', state: 'active', version, checksum: `approve_${version}`,
+      source: 'database', package_id: binding[0], bundle_member: binding[1], metadata: JSON.stringify(bodyOf(binding)),
+    });
+  /** A save through the loader: a package's body carries its stamp, a package-less one none. */
+  const save = (binding: Binding, label?: string) =>
+    new DatabaseLoader({ driver }).save('action', 'approve', { ...bodyOf(binding, label), ...(binding[0] ? { _packageId: binding[0] } : {}) });
+  /** Every stored row of `approve`: `[package_id, bundle_member, label]`, sorted. */
+  const stored = async () => ((await driver.find('sys_metadata', { where: { type: 'action' } } as never)) as Array<Record<string, any>>)
+    .map((row) => [row.package_id ?? null, row.bundle_member ?? null, JSON.parse(row.metadata).label])
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  const cold = () => {
+    const m = new MetadataManager({ formats: ['json'], loaders: [] });
+    m.registerLoader(new DatabaseLoader({ driver }));
+    return m;
+  };
+  const bootPass = async () => {
+    const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  /** What a read answers: the body's label, or the refusal's code, status, reason and holders. */
+  const answer = async (m: MetadataManager, packageId?: string) => {
+    try {
+      return ((await m.get('action', 'approve', packageId)) as { label?: string } | undefined)?.label;
+    } catch (e: any) {
+      return [e?.code, e?.status, e?.refusal?.reason, ...(e?.refusal?.candidates ?? []).map((c: any) => c.packageId ?? c.kind).sort()];
+    }
+  };
+  /** Every read: bare, naming ALPHA, BETA and a package that holds nothing; and the listed labels. */
+  const reads = async (m: MetadataManager) => [
+    ...(await Promise.all([undefined, ALPHA, BETA, GAMMA].map((packageId) => answer(m, packageId)))),
+    ((await m.list('action')) as Array<{ label?: string }>).map((item) => item.label).sort(),
+  ];
+  const REFUSED = ['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', ALPHA, BETA];
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('ALPHA binds `approve` to account, BETA to contact: a package-less save on account goes into ALPHA\'s row, its customization (BEFORE: a package-less row beside it)', async () => {
+    await save([ALPHA, 'account']);
+    await save([BETA, 'contact']);
+    await save([null, 'account'], 'custom');
+    expect(await stored()).toEqual([[ALPHA, 'account', 'custom'], [BETA, 'contact', `${BETA}@contact`]]);
+  });
+
+  it('the same saves in the other registration order: ALPHA\'s first account binding takes the package-less row over, and BETA keeps only its contact binding (BEFORE: the package-less save went into BETA\'s row, bound to account)', async () => {
+    await save([BETA, 'contact']);
+    await save([null, 'account'], 'custom');
+    expect(await stored()).toEqual([[BETA, 'contact', `${BETA}@contact`], [null, 'account', 'custom']]);
+    await save([ALPHA, 'account']);
+    expect(await stored()).toEqual([[ALPHA, 'account', `${ALPHA}@account`], [BETA, 'contact', `${BETA}@contact`]]);
+  });
+
+  it('a stored package-less account row beside BETA\'s contact binding: ALPHA\'s first account save takes it over (BEFORE: a third row beside it)', async () => {
+    await seed([BETA, 'contact'], 1);
+    await seed([null, 'account'], 2);
+    await save([ALPHA, 'account']);
+    expect(await stored()).toEqual([[ALPHA, 'account', `${ALPHA}@account`], [BETA, 'contact', `${BETA}@contact`]]);
+  });
+
+  it('single holder on another object: beside BETA\'s contact binding alone, a package-less save on account is the environment\'s own row (BEFORE: BETA\'s row bound to account)', async () => {
+    await save([BETA, 'contact']);
+    await save([null, 'account'], 'custom');
+    expect(await stored()).toEqual([[BETA, 'contact', `${BETA}@contact`], [null, 'account', 'custom']]);
+    expect((await new DatabaseLoader({ driver }).loadManySlots('action')).map((slot) => [slot.packageId ?? null, (slot.data as { label?: string }).label]))
+      .toEqual([[BETA, `${BETA}@contact`], [null, 'custom']]);
+  });
+
+  it('beside ALPHA\'s account binding alone, a package-less object-less save is the environment\'s own row (BEFORE: ALPHA\'s object-less row)', async () => {
+    await save([ALPHA, 'account']);
+    await save([null, null], 'custom');
+    expect(await stored()).toEqual([[ALPHA, 'account', `${ALPHA}@account`], [null, null, 'custom']]);
+  });
+
+  it('CONTROL: beside ALPHA\'s account binding alone a package-less account save goes into ALPHA\'s row; beside ALPHA\'s and BETA\'s account bindings into a package-less row, as before', async () => {
+    await save([ALPHA, 'account']);
+    await save([null, 'account'], 'custom');
+    expect(await stored()).toEqual([[ALPHA, 'account', 'custom']]);
+    driver = createMockDriver();
+    await save([ALPHA, 'account']);
+    await save([BETA, 'account']);
+    await save([null, 'account'], 'custom');
+    expect(await stored()).toEqual([[ALPHA, 'account', `${ALPHA}@account`], [BETA, 'account', `${BETA}@account`], [null, 'account', 'custom']]);
+  });
+
+  for (const [order, rows] of [
+    ['holders first, the package-less row saved last', [[[ALPHA, 'account'], 1], [[BETA, 'contact'], 2], [[null, 'account'], 3]]],
+    ['the package-less row stored first, saved last', [[[null, 'account'], 3], [[BETA, 'contact'], 2], [[ALPHA, 'account'], 1]]],
+    ['the package-less row saved first', [[[null, 'account'], 1], [[BETA, 'contact'], 2], [[ALPHA, 'account'], 3]]],
+  ] as Array<[string, Array<[Binding, number]>]>) {
+    it(`stored rows, ALPHA on account, BETA on contact, a package-less row on account (${order}): every read without the pass answers what it answers after it — a read naming ALPHA its customization (BEFORE: ALPHA's own row without the pass)`, async () => {
+      for (const [binding, version] of rows) await seed(binding, version);
+      const without = await reads(cold());
+      expect(without).toEqual([REFUSED, 'env@account', `${BETA}@contact`, undefined, [`${BETA}@contact`, 'env@account']]);
+      expect(await reads(await bootPass())).toEqual(without);
+      expect(driver.update).not.toHaveBeenCalled();
+    });
+  }
+
+  for (const order of ['ALPHA first', 'the package-less item first'] as const) {
+    it(`registered through the manager (${order}), BETA on contact: the item in memory, the stored row and every read after a reboot agree (BEFORE, package-less first: the stored row went to BETA, so after a reboot a read naming BETA answered it)`, async () => {
+      const m = cold();
+      const register = (binding: Binding, label?: string) =>
+        m.register('action', 'approve', { ...bodyOf(binding, label), ...(binding[0] ? { _packageId: binding[0] } : {}) });
+      await register([BETA, 'contact']);
+      if (order === 'ALPHA first') {
+        await register([ALPHA, 'account']);
+        await register([null, 'account'], 'custom');
+      } else {
+        await register([null, 'account'], 'custom');
+        await register([ALPHA, 'account']);
+      }
+      const inProcess = await reads(m);
+      const winner = order === 'ALPHA first' ? 'custom' : `${ALPHA}@account`;
+      expect(inProcess).toEqual([REFUSED, winner, `${BETA}@contact`, undefined, [winner, `${BETA}@contact`].sort()]);
+      expect(await stored()).toEqual([[ALPHA, 'account', winner], [BETA, 'contact', `${BETA}@contact`]]);
+      expect(await reads(cold())).toEqual(inProcess);
+      expect(await reads(await bootPass())).toEqual(inProcess);
+    });
+  }
+});
+
+/**
  * [#32986; follow-up of #32198, ADR-0150 D4] On a host that declares its
  * package, the boot priming pass stamps a package-less stored row of a type
  * NOT stored per `(package, name)` (`object`, `view`, `app`, `hook`,

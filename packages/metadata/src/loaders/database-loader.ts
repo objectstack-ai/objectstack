@@ -31,6 +31,7 @@ import {
   isBundledStoreType,
   isPackageCaller,
   namedRowColumnOf,
+  pluralEntryCustomizedHolders,
   pluralEntryKeys,
   refuseSeveralSlots,
   refuseSlotNotHeld,
@@ -40,6 +41,7 @@ import {
   storedRowMemberOf,
   storeRemovalKeys,
   storeRowKey,
+  storeRowSlotKey,
   storeRowWriteKey,
 } from '../package-slotted-store.js';
 import { LRUCache } from '../utils/lru-cache.js';
@@ -1396,12 +1398,49 @@ export class DatabaseLoader implements MetadataLoader {
     return (await this.loadManySlots<T>(type)).filter((slot) => slot.name === name);
   }
 
-  /** [ADR-0150 D4, #32246] Every named row of `type`, each with the package it holds the item for. */
+  /**
+   * [ADR-0150 D4, #32246] Every named row of `type`, each with the package it holds the item for.
+   *
+   * [#32681] A package-less action row bound to an object that exactly one
+   * package binds the name to, under a name two or more packages hold
+   * (`pluralEntryCustomizedHolders`), is held for that package: it is its
+   * customization (D4, keyed per `(object, name)`), which the boot priming
+   * pass files into that package's slot. It is handed on just before that
+   * package's own row of the object, so a reader keeping a slot's first item
+   * (`slotStoreOf`, `list`) answers it, as the store answers after the pass.
+   * FROM held for no package: a read naming the holder answered the holder's
+   * own row without the pass and the package-less row after it. The row
+   * itself is not rebound: no write, its `package_id` stays empty.
+   */
   async loadManySlots<T = any>(type: string): Promise<MetadataKeyedItem<T>[]> {
+    const rows = (await this.readTypeRows(type)).filter((entry): entry is StoredTypeRow & { name: string } => entry.name !== null);
+    const keys = PACKAGE_SLOTTED_STORE_TYPES.has(type) && !isBundledStoreType(type) ? pluralEntryKeys(type, rows) : [];
+    // Only the row the unscoped read keeps of its key ({@link unscopedTypeRows}:
+    // the one saved last) is registered by the pass, so only it is held for a holder.
+    const kept = new Map<string, number>();
+    rows.forEach((entry, at) => {
+      const held = kept.get(keys[at]!);
+      if (held === undefined || (entry.version ?? 0) >= (rows[held]!.version ?? 0)) kept.set(keys[at]!, at);
+    });
+    const customizes = pluralEntryCustomizedHolders(type, rows, keys).map((holder, at) => (kept.get(keys[at]!) === at ? holder : undefined));
+    if (customizes.every((holder) => holder === undefined)) return rows.map((entry) => keyedRow<T>(entry.name, entry));
+    const slotOf = (entry: StoredTypeRow & { name: string }, at: number) =>
+      storeRowSlotKey(type, entry.name, customizes[at] ?? entry.packageId, entry.member);
+    const customizationOf = new Map<string, MetadataKeyedItem<T>>();
+    rows.forEach((entry, at) => {
+      const holder = customizes[at];
+      if (holder !== undefined) customizationOf.set(slotOf(entry, at), { name: entry.name, data: entry.data as T, packageId: holder });
+    });
     const slots: MetadataKeyedItem<T>[] = [];
-    for (const entry of await this.readTypeRows(type)) {
-      if (entry.name !== null) slots.push(keyedRow<T>(entry.name, entry));
-    }
+    rows.forEach((entry, at) => {
+      if (customizes[at] !== undefined) return;
+      const customization = customizationOf.get(slotOf(entry, at));
+      if (customization !== undefined) {
+        slots.push(customization);
+        customizationOf.delete(slotOf(entry, at));
+      }
+      slots.push(keyedRow<T>(entry.name, entry));
+    });
     return slots;
   }
 
@@ -1915,6 +1954,12 @@ export class DatabaseLoader implements MetadataLoader {
    * other package holds the name, as the in-memory store does, so that row is
    * updated and bound rather than left beside it. `rows` are the name's rows,
    * from which {@link nextNameVersion} numbers a write.
+   *
+   * [#32681, ADR-0150 D4] For an action bound to an object, "holds" is per
+   * `(object, name)`, as the in-memory store counts it: the one holder is the
+   * package binding the name to the written body's object, and "no other
+   * package" means none binding it to that object. A package binding the name
+   * to another object is a different key, never a holder of this one.
    */
   private async slottedSaveTarget(
     type: string,
@@ -1928,9 +1973,15 @@ export class DatabaseLoader implements MetadataLoader {
     unnamed?: Array<{ id: string; member: string }>;
   }> {
     const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
+    // [#32681, ADR-0150 D4] Each row keyed as the in-memory store keys its item
+    // (`storeRowSlotKey`): an action bound to an object by its package, object
+    // and name, so the write counts the holders of its `(object, name)` as
+    // `storeWriteKey` does, never every package holding the name.
+    const memberOf = (row: Record<string, unknown>) => storedRowMemberOf(type, this.rowToData(row), row.bundle_member);
+    const slotOf = (row: Record<string, unknown>) => storeRowSlotKey(type, name, storedRowPackageId(row), memberOf(row));
     const bySlot = new Map<string, Record<string, unknown>>();
     for (const row of rows) {
-      const key = storeRowKey(name, storedRowPackageId(row));
+      const key = slotOf(row);
       if (!bySlot.has(key)) bySlot.set(key, row);
     }
     const { key, replaces } = storeRowWriteKey(bySlot, type, name, data);
@@ -1945,19 +1996,20 @@ export class DatabaseLoader implements MetadataLoader {
     // (`storedRowMemberOf`) — ⛔ never written over another binding's row.
     const member = storedRowMemberOf(type, data);
     if (member !== undefined) {
-      const memberOf = (row: Record<string, unknown>) => storedRowMemberOf(type, this.rowToData(row), row.bundle_member) ?? null;
-      const inSlot = (row: Record<string, unknown>, slot: string) => storeRowKey(name, storedRowPackageId(row)) === slot;
-      const rowOf = (slot: string) => rows.find((row) => inSlot(row, slot) && memberOf(row) === member);
+      const rowOf = (slot: string) => rows.find((row) => slotOf(row) === slot && (memberOf(row) ?? null) === member);
       const existing = rowOf(key) ?? replaces.map(rowOf).find(Boolean) ?? null;
       // [#32540] A row of the slot written before its member was named
       // (`bundle_member` NULL, a body bound to an object) holds the key of the
       // object-less member until it is named: the write names it first, so
       // the object-less binding's row can never collide with it.
       // A bundled type's row is left as it was (#31699 R3-B reads its member
-      // off its body).
+      // off its body). [#32681] The unique key's bucket is the package's,
+      // whatever object a row binds: every row of the package (or package-less
+      // rows) the write's slots belong to.
+      const buckets = new Set([key, ...replaces].map((slot) => storeRowKey(name, slotPackageOf(slot))));
       const unnamed = isBundledStoreType(type)
         ? []
-        : unnamedRowsOf(type, rows.filter((row) => [key, ...replaces].some((slot) => inSlot(row, slot))), (row) => this.rowToData(row));
+        : unnamedRowsOf(type, rows.filter((row) => buckets.has(storeRowKey(name, storedRowPackageId(row)))), (row) => this.rowToData(row));
       return { existing, packageId: slotPackageOf(key), rows, member: member ?? null, unnamed };
     }
     const existing = bySlot.get(key) ?? replaces.map((replaced) => bySlot.get(replaced)).find(Boolean) ?? null;
