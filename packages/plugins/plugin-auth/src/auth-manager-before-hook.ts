@@ -109,8 +109,8 @@ export interface BeforeHookHost {
   assertSsoSignOutOfIdpSupported: AuthManager['assertSsoSignOutOfIdpSupported'];
   readonly config: AuthManager['config'];
   existingAddressSignUpAnswersSuccess: AuthManager['existingAddressSignUpAnswersSuccess'];
+  getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
-  getConsoleUrl: AuthManager['getConsoleUrl'];
   hasExistingUserFor: AuthManager['hasExistingUserFor'];
   isAuthGateActive: AuthManager['isAuthGateActive'];
   isBootstrapCreation: AuthManager['isBootstrapCreation'];
@@ -516,7 +516,7 @@ export async function globalBeforeHook(
           // REGISTERED `redirect_uri`, or a readable page when there is none.
           return answerRefusedAuthorization(ctx, {
             userId: actor.userId,
-            consoleUrl: this.getConsoleUrl('/'),
+            consoleUrl: this.getConsolePageUrl('/'),
           });
         }
       }
