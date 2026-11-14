@@ -24,6 +24,9 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+// The source under test reaches a dynamic `import('@objectstack/lint')`; pay
+// that load during collection, never inside a case's clocked window.
+import '@objectstack/lint';
 
 const PKG = 'app.example.crm';
 
