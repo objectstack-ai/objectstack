@@ -45,10 +45,10 @@
  * `enabled` leg is not the spec key the objectui#11811 surfaces read, so none of
  * them says "not available for this record".
  *
- * Module-private on purpose: nothing here is re-exported from the package
- * entry, so the public surface is unchanged. `containers.tsx`, `app-shell` and
- * `plugin-detail` keep their own copies of the wrapper; sharing one across
- * packages would need an export.
+ * The row-action surfaces read it too: the data-table's row menu item beside
+ * it, and plugin-grid's row menu item and inline primary button, which import
+ * the hook and the two wrappers from the package entry. `containers.tsx`,
+ * `app-shell` and `plugin-detail` still keep their own copies of the wrapper.
  */
 
 import React from 'react';
