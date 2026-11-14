@@ -2732,8 +2732,16 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // The load it does take (~64 ms cold once, ~15 ms warm per publish
     // carrying such a rule) is the measured, adjudicated price of refusing a
     // validation rule that would otherwise ship compiled-by-nothing.
+    //
+    // [#33217] `object_extension` joins: the walk reads the `validations[]`
+    // an extension adds (the registry merges them onto the target, and every
+    // save runs them), so a regex or schema the build refuses on an extension
+    // is refused at that publish door too, same rule id, located at the entry
+    // (`object 'TARGET' · objectExtensions[0] · validation 'N'`). The target's
+    // own rules the door's live objects carry are judged in the baseline as
+    // well, so the differential charges the write with its entry's alone.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['object'],
+    runtimeTypes: ['object', 'object_extension'],
     run: (stack) => validateRuleCompilability(stack),
   },
   // #5178 — the residual half of #5029, which registering `ajv-formats` does
@@ -2758,8 +2766,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // the two judgements over one artifact stay on one side of the wall
     // (#7220's family discipline). Same lazy-ajv contract: the registered
     // format set is only enumerated once a schema actually names a format.
+    // [#33217] And it crosses on `object_extension` with its sibling, for the
+    // same reason: the shared walk reads the rules an extension adds.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['object'],
+    runtimeTypes: ['object', 'object_extension'],
     run: (stack) => validateRuleSchemaFormats(stack),
   },
   // [#25189] The email half of #25082 (ruling `6335348115`, F1 A2): a hole an

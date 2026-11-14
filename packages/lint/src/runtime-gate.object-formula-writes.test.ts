@@ -362,8 +362,9 @@ describe('#33072 — the object_extension door judges an extension field\'s form
   const ofRule = <T extends { rule: string }>(rule: string, fs: readonly T[]): T[] => fs.filter((f) => f.rule === rule);
 
   it('`validateStackExpressions` is on the object_extension door, beside the vocabulary freeze', () => {
+    // [#33217] And the two validation-rule artifact checks (regex, JSON schema).
     expect(runtimeAuthoringRulesFor('object_extension').map((r) => r.name))
-      .toEqual(['validateStackExpressions', 'validateSecurityRoleWord']);
+      .toEqual(['validateStackExpressions', 'validateSecurityRoleWord', 'validateRuleCompilability', 'validateRuleSchemaFormats']);
   });
 
   it('⭐ LIT — an extension formula calling an unregistered function (`sqrt`) is REFUSED, at the entry the build names', () => {
@@ -421,7 +422,7 @@ describe('#33072 — the object_extension door judges an extension field\'s form
       const result = gateExtension(item);
       expect(result.errors, dump(result)).toEqual([]);
       expect(result.advisories, dump(result)).toEqual([]);
-      expect(result.rulesRun).toEqual(['validateStackExpressions', 'validateSecurityRoleWord']);
+      expect(result.rulesRun).toEqual(['validateStackExpressions', 'validateSecurityRoleWord', 'validateRuleCompilability', 'validateRuleSchemaFormats']);
     }
   });
 

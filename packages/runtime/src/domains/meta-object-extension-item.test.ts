@@ -623,6 +623,62 @@ describe('[#33216] the publish door judges the one-hop leaf through a lookup the
     }
 });
 
+describe('[#33217] the publish door judges an extension\'s `format` regex and `json_schema` schema as `os build` does', () => {
+    const ruleBody = (rule: Record<string, unknown>) => ({
+        extend: TARGET,
+        fields: { code__c: { type: 'text', label: 'Code' }, config__c: { type: 'json', label: 'Config' } },
+        validations: [rule],
+    });
+    const BAD_REGEX = { name: 'code_shape', type: 'format', field: 'code__c', regex: '([', message: 'Refused.' };
+    const BAD_SCHEMA = { name: 'config_shape', type: 'json_schema', field: 'config__c', schema: { type: 'not-a-type' }, message: 'Refused.' };
+    const ARTIFACT_IDS = ['validation-rule-regex-uncompilable', 'validation-rule-json-schema-uncompilable'];
+    const atBuild = (item: unknown) => {
+        const stack = { objects: baseManifest().objects, objectExtensions: [item] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack } as any)
+            .filter((f) => ARTIFACT_IDS.includes(f.rule))
+            .map((f) => ({ rule: f.rule, where: f.where, path: f.path }));
+    };
+    const servedRules = (rig: Awaited<ReturnType<typeof boot>>) =>
+        ((rig.engine.registry.getObject(TARGET) as any)?.validations ?? []).map((r: any) => r?.name);
+
+    for (const [label, rule, rid, slot] of [
+        ['an invalid `regex`', BAD_REGEX, 'validation-rule-regex-uncompilable', 'regex'],
+        ['an uncompilable `schema`', BAD_SCHEMA, 'validation-rule-json-schema-uncompilable', 'schema'],
+    ] as const) {
+        it(`⭐ LIT — ${label} is refused with the build's rule id and a locator at the extension's rule; the rule is not served`, async () => {
+            const expected = [{
+                rule: rid,
+                where: `object 'crm_account' · objectExtensions[0] · validation '${rule.name}'`,
+                path: `objectExtensions[0].validations.${rule.name}.${slot}`,
+            }];
+            expect(atBuild(ruleBody(rule))).toEqual(expected);
+
+            const rig = await boot();
+            await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: ruleBody(rule), mode: 'draft', packageId: PAIR });
+            const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+            expect(err, 'the publish was admitted').toBeInstanceOf(Error);
+            expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect((err.issues ?? []).filter((i: any) => ARTIFACT_IDS.includes(i.rule))
+                .map((i: any) => ({ rule: i.rule, where: i.where, path: i.path })), JSON.stringify(err.issues)).toEqual(expected);
+            expect(servedRules(rig)).not.toContain(rule.name);
+            expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
+        }, 60_000);
+    }
+
+    it('⭐ CONTROL — a valid regex and a valid schema publish and are served on the account', async () => {
+        const body = {
+            ...ruleBody({ name: 'code_ok', type: 'format', field: 'code__c', regex: '^[A-Z]{3}$', message: 'Refused.' }),
+        };
+        body.validations.push({ name: 'config_ok', type: 'json_schema', field: 'config__c', schema: { type: 'object' }, message: 'Refused.' } as any);
+        expect(atBuild(body)).toEqual([]);
+
+        const rig = await boot();
+        await rig.saveAndPublish(PAIR, body);
+        expect(servedRules(rig)).toEqual(expect.arrayContaining(['code_ok', 'config_ok']));
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+    }, 60_000);
+});
+
 describe('[ADR-0146 D10] a module\'s extension that re-declares the base\'s field beyond its display properties', () => {
     /** A writable module package that depends on the base: the account is inside its closure. */
     const MODULE = 'com.acme.module';

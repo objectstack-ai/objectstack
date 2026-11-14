@@ -80,11 +80,15 @@
  * re-implemented so the two rules can never disagree about which rules exist.
  * That covers `object.validations[]` including the rules nested in a
  * `conditional`'s `then` / `otherwise`, since `evaluateRule` recurses into those
- * and reaches the very same `checkJsonSchema`.
+ * and reaches the very same `checkJsonSchema`. [#33217] Through that walk, the
+ * `validations[]` an `objectExtensions` entry adds are judged too, located at
+ * the entry (`object 'T' · objectExtensions[i] · validation 'N'`), since the
+ * registry merges them onto the target and every save runs them.
  *
  * | Read                             | Declared by            |
  * |----------------------------------|------------------------|
  * | `objects[].validations[]`        | `ObjectSchema`         |
+ * | `objectExtensions[].validations[]` | `ObjectExtensionSchema` (#33217, via the walk) |
  * | `validations[].type` / `.name`   | every `*ValidationSchema` variant |
  * | `validations[].schema`           | `JSONValidationSchema` |
  * | `validations[].then`/`.otherwise`| `ConditionalValidationSchema` |

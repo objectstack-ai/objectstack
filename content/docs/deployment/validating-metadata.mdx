@@ -523,7 +523,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ | ✓ˢᵖᵉᵇᵒ |
 | Security vocabulary freeze (ADR-0090 D3 — the reserved word, replaced by `permission_set` / `position` / `business_unit`) | ✓ | ✓ | ✓ | ✓ᵒᵖᵉᵇᵖᵒᵃᵒˣ |
 | Organization-axis red lines (ADR-0105 D6) | ✓ | ✓ | ✓ | — |
-| Declared enforcement that cannot run, **declared on the object being written** — a validation rule's regex / JSON Schema (#4762) and its `format` names (#5178) | ✓ | ✓ | ✓ | ✓ᵒ |
+| Declared enforcement that cannot run, **declared on the object being written** — a validation rule's regex / JSON Schema (#4762) and its `format` names (#5178), and (#33217) those of a rule an object extension adds | ✓ | ✓ | ✓ | ✓ᵒᵒˣ |
 | Declared enforcement that cannot run, **declared on another collection** — sharing-rule conditions (#4698) | ✓ | ✓ | ✓ | — |
 | Row-level-security predicates (#4983) — a permission set's policies, an object's `defaultRowScope`, a membership key's `filter` and a field permission entry's `when` (#25866); at the save door also a membership key nothing owns (#25234) | ✓ | ✓ | ✓ | ✓ᵖᵉᵒ |
 | Membership key declarations — `userField` / `valueField` columns, one key on one object, a key the registered resolver also owns (save door only) (#25234) | ✓ | ✓ | ✓ | ✓ᵒ |
@@ -613,7 +613,12 @@ the write replaces, and refuses with the build's rule id (`expression-invalid`).
 Each validation rule the entry adds is judged the same way (#33154), by the
 object's own rule pass, at the door and in `os build` alike: the registry merges
 an extension's `validations` onto the target, so every save of the target runs
-them (`object 'TARGET' · objectExtensions[0] · validation 'RULE'`).
+them (`object 'TARGET' · objectExtensions[0] · validation 'RULE'`). A one-hop
+read through a lookup the entry adds (`record.manager__c.LEAF`) is judged as
+one through a lookup the target declares (#33216), and a `format` rule's regex
+and a `json_schema` rule's schema and format names are checked as on the
+object's own rules (#33217), with the same rule ids, at the door and in
+`os build` alike.
 
 **Declared enforcement that cannot run** is two rows for the mirror-image
 reason, and #4716 is where it split. That heading covers four rule ids, and

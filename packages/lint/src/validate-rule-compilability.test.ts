@@ -31,6 +31,8 @@ import {
 } from './validate-rule-compilability.js';
 import { AUTHORING_COMMANDS, AUTHORING_RULES, authoringRulesFor, runAuthoringRules } from './authoring-rules.js';
 import { explainRule } from './rule-explanations.js';
+import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
+import { VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT } from './validate-rule-schema-formats.js';
 
 // [#22161] Each finding of the two ids is one verdict sentence; the reasoning
 // it used to carry is the id's `os explain` entry. Every call below records
@@ -1056,5 +1058,123 @@ describe('[#22161] one-line fixes — the two compile ids', () => {
     for (const t of ['null', 'boolean', 'object', 'array', 'number', 'string', 'integer']) {
       expect(text, t).toContain(`\`${t}\``);
     }
+  });
+});
+
+describe('#33217 — the regex and JSON-schema checks reach the validation rules an object extension adds', () => {
+  /** The extended object, as the door's live universe carries it. */
+  const target = {
+    name: 'fx_ticket',
+    label: 'Ticket',
+    sharingModel: 'private',
+    fields: {
+      code: { type: 'text', label: 'Code' },
+      config: { type: 'json', label: 'Config' },
+    },
+  };
+  const BAD_REGEX = { name: 'code_shape', type: 'format', field: 'code', regex: '([', message: 'Refused.' };
+  const BAD_SCHEMA = { name: 'config_shape', type: 'json_schema', field: 'config', schema: { type: 'not-a-type' }, message: 'Refused.' };
+  const BAD_FORMAT_NAME = {
+    name: 'config_email', type: 'json_schema', field: 'config', message: 'Refused.',
+    schema: { type: 'object', properties: { e: { type: 'string', format: 'emial' } } },
+  };
+  const GOOD = [
+    { name: 'code_ok', type: 'format', field: 'code', regex: '^[A-Z]{3}$', message: 'Refused.' },
+    { name: 'config_ok', type: 'json_schema', field: 'config', message: 'Refused.', schema: { type: 'object', properties: { e: { type: 'string', format: 'email' } } } },
+  ];
+  const ARTIFACT_IDS = [VALIDATION_RULE_REGEX_UNCOMPILABLE, VALIDATION_RULE_SCHEMA_UNCOMPILABLE, VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT];
+  const extension = (validations: unknown[]) => ({ extend: 'fx_ticket', fields: { note__c: { type: 'text', label: 'Note' } }, validations });
+  const located = (fs: readonly { rule: string; where: string; path: string }[]) =>
+    fs.filter((f) => ARTIFACT_IDS.includes(f.rule)).map((f) => ({ rule: f.rule, where: f.where, path: f.path }));
+  const atBuild = (stack: Record<string, unknown>) => located(runAuthoringRules('build', { normalized: stack, parsed: stack }));
+  const atDoor = (item: unknown, objects: unknown[] = [target]) => {
+    const result = runRuntimeAuthoringRules({ type: 'object_extension', item, context: { objects } });
+    return { result, errors: located(result.errors), advisories: located(result.advisories) };
+  };
+  const ENTRY = "object 'fx_ticket' · objectExtensions[0]";
+
+  it('both rules are on the object_extension door, and still on the object door', () => {
+    for (const type of ['object', 'object_extension']) {
+      expect(runtimeAuthoringRulesFor(type).map((r) => r.name)).toEqual(expect.arrayContaining(['validateRuleCompilability', 'validateRuleSchemaFormats']));
+    }
+  });
+
+  it('⭐ LIT — an invalid `regex`, an uncompilable `schema` and a misspelt format name an extension adds are each REFUSED at the build, at the entry', () => {
+    expect(atBuild({ objects: [target], objectExtensions: [extension([BAD_REGEX, BAD_SCHEMA, BAD_FORMAT_NAME])] })).toEqual([
+      { rule: VALIDATION_RULE_REGEX_UNCOMPILABLE, where: `${ENTRY} · validation 'code_shape'`, path: 'objectExtensions[0].validations.code_shape.regex' },
+      { rule: VALIDATION_RULE_SCHEMA_UNCOMPILABLE, where: `${ENTRY} · validation 'config_shape'`, path: 'objectExtensions[0].validations.config_shape.schema' },
+      { rule: VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT, where: `${ENTRY} · validation 'config_email'`, path: 'objectExtensions[0].validations.config_email.schema#/properties/e/format' },
+    ]);
+  });
+
+  it('⭐ LIT — each is REFUSED at the object_extension publish door with the build\'s finding, byte for byte', () => {
+    for (const rule of [BAD_REGEX, BAD_SCHEMA, BAD_FORMAT_NAME]) {
+      const item = extension([rule]);
+      const door = atDoor(item);
+      const build = runAuthoringRules('build', { normalized: { objects: [target], objectExtensions: [item] }, parsed: { objects: [target], objectExtensions: [item] } })
+        .filter((f) => ARTIFACT_IDS.includes(f.rule));
+      expect(build, rule.name).toHaveLength(1);
+      expect(door.result.errors.filter((f) => ARTIFACT_IDS.includes(f.rule)), JSON.stringify(door.result)).toEqual(build);
+      expect(door.advisories).toEqual([]);
+    }
+  });
+
+  it('⭐ LIT — a `conditional` branch an extension adds is judged too, located at the branch', () => {
+    const item = extension([{ name: 'outer', type: 'conditional', when: 'record.code != null', message: 'Refused.', then: BAD_REGEX }]);
+    const expected = [{
+      rule: VALIDATION_RULE_REGEX_UNCOMPILABLE,
+      where: `${ENTRY} · validation 'outer' → 'code_shape'`,
+      path: 'objectExtensions[0].validations.outer.then.code_shape.regex',
+    }];
+    expect(atBuild({ objects: [target], objectExtensions: [item] })).toEqual(expected);
+    expect(atDoor(item).errors).toEqual(expected);
+  });
+
+  it('⭐ PARITY — the same rule ids the object\'s own rules get, the object\'s own location unchanged', () => {
+    const own = { ...target, validations: [BAD_REGEX, BAD_SCHEMA, BAD_FORMAT_NAME] };
+    const ownFindings = atBuild({ objects: [own] });
+    expect(ownFindings.map((f) => [f.where, f.path])).toEqual([
+      ["object 'fx_ticket' · validation 'code_shape'", 'objects.fx_ticket.validations.code_shape.regex'],
+      ["object 'fx_ticket' · validation 'config_shape'", 'objects.fx_ticket.validations.config_shape.schema'],
+      ["object 'fx_ticket' · validation 'config_email'", 'objects.fx_ticket.validations.config_email.schema#/properties/e/format'],
+    ]);
+    const extFindings = atBuild({ objects: [target], objectExtensions: [extension([BAD_REGEX, BAD_SCHEMA, BAD_FORMAT_NAME])] });
+    expect(extFindings.map((f) => f.rule)).toEqual(ownFindings.map((f) => f.rule));
+  });
+
+  it('⭐ CONTROL — a valid regex and a valid schema an extension adds pass at the build and the door', () => {
+    const item = extension(GOOD);
+    expect(atBuild({ objects: [target], objectExtensions: [item] })).toEqual([]);
+    const door = atDoor(item);
+    expect(door.errors, JSON.stringify(door.result)).toEqual([]);
+    expect(door.result.rulesRun).toEqual(expect.arrayContaining(['validateRuleCompilability', 'validateRuleSchemaFormats']));
+  });
+
+  it('a rule a SIBLING package\'s extension adds is located at its body; an extension of an undeclared object is judged all the same', () => {
+    const stack = {
+      objects: [target],
+      packages: [{ manifest: { objects: [target] } }, { manifest: { objectExtensions: [extension([BAD_REGEX])] } }],
+    };
+    expect(atBuild(stack)).toEqual([{
+      rule: VALIDATION_RULE_REGEX_UNCOMPILABLE,
+      where: "object 'fx_ticket' · packages[1].manifest.objectExtensions[0] · validation 'code_shape'",
+      path: 'packages[1].manifest.objectExtensions[0].validations.code_shape.regex',
+    }]);
+    expect(atDoor(extension([BAD_REGEX]), []).errors.map((f) => f.rule)).toEqual([VALIDATION_RULE_REGEX_UNCOMPILABLE]);
+  });
+
+  it('the target\'s own broken rule, carried by the door\'s live objects, is not the extension write\'s to answer for', () => {
+    const broken = { ...target, validations: [BAD_REGEX] };
+    const door = atDoor(extension(GOOD), [broken]);
+    expect(door.errors, JSON.stringify(door.result)).toEqual([]);
+  });
+
+  it('CONTROL — the object save door still refuses the object\'s own invalid regex, at the object', () => {
+    const result = runRuntimeAuthoringRules({ type: 'object', item: { ...target, validations: [BAD_REGEX] }, context: { objects: [] } });
+    expect(located(result.errors)).toEqual([{
+      rule: VALIDATION_RULE_REGEX_UNCOMPILABLE,
+      where: "object 'fx_ticket' · validation 'code_shape'",
+      path: 'objects.fx_ticket.validations.code_shape.regex',
+    }]);
   });
 });
