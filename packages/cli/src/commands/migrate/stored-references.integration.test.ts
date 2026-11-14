@@ -418,6 +418,41 @@ describe('os migrate stored-references bind', () => {
     expect((await shareRow(db)).package_id).toBe(A);
   }, CASE_TIMEOUT_MS);
 
+  // [#31699] A table whose unique key carries the package column (R1's grant,
+  // R11's connection) refuses a bind that would make the row a second row of
+  // one key. The bind says so by name and writes nothing, never a crash.
+  // Simulated on R5's row: the update is refused the way the database refuses
+  // it (a UNIQUE constraint failure), as the connection table's widened key does.
+  it('a bind the database refuses as a unique violation is refused by name (`duplicate`), writing nothing', async () => {
+    const db = caseDb();
+    const share = await shareRow(db);
+    const stack = await bootSchemaStack({
+      jsonOutput: true, databaseUrl: `file:${db}`, projectRoot: dir,
+      composeHostStack: true, composeServedPlatform: true, composeAuthGatedSecurity: true,
+    });
+    try {
+      const engine = stack.kernel.getService('objectql') as StoredReferenceEngine & { registry: any };
+      const refusing: StoredReferenceEngine = {
+        find: (object, options) => engine.find(object, options),
+        update: async () => {
+          throw Object.assign(new Error('UNIQUE constraint failed: sys_sharing_rule.package_id'), { code: 'SQLITE_CONSTRAINT_UNIQUE' });
+        },
+      };
+      const outcome = await bindStoredPackageReference(refusing, engine.registry, { table: 'sys_sharing_rule', id: String(share.id), packageId: B });
+      expect(outcome).toMatchObject({ outcome: 'refused', reason: 'duplicate' });
+      expect((outcome as { message: string }).message).toContain('would be a second one');
+      expect((outcome as { candidates?: Array<{ packageId?: string }> }).candidates?.map((c) => c.packageId)).toEqual([A, B]);
+
+      // CONTROL: any other refused write is still thrown.
+      const failing: StoredReferenceEngine = { ...refusing, update: async () => { throw new Error('disk full'); } };
+      await expect(bindStoredPackageReference(failing, engine.registry, { table: 'sys_sharing_rule', id: String(share.id), packageId: B }))
+        .rejects.toThrow('disk full');
+    } finally {
+      await stack.shutdown();
+    }
+    expect((await shareRow(db)).package_id ?? null).toBeNull();
+  }, CASE_TIMEOUT_MS);
+
   it('CONTROL: a database of one package has nothing to bind', async () => {
     writeArtifact(CONTROL);
     const db = caseDb(controlDb);

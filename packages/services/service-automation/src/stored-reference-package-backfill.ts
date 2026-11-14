@@ -46,8 +46,9 @@
  * packages hold reads the row's package (a row with none answers only while
  * one package holds the name). A null left by this backfill still reads by
  * name. The connection store (R11) still reads by name, until the connector
- * child moves it. S4's upgrade report reads the columns too. No unique key
- * changes.
+ * child moves it. S4's upgrade report reads the columns too. R11's column is a
+ * part of its table's unique key (#31699), so a bind there can meet a unique
+ * violation (below); no other reference's key carries its column.
  *
  * ## Re-runnable
  *
@@ -55,10 +56,21 @@
  * column, so a second run binds nothing and reports the same ambiguous and
  * unheld names. A row that names a package is never read as a candidate, so a
  * run can only add a package, never move one.
+ *
+ * [#31699] A bind the database refuses as a unique violation — the row would be
+ * a second row of one key, a connection beside another of the same organization
+ * and instance that already names the holder (R11's key is `(organization_id,
+ * connector_package, connector_name)`) — is reported by id (`duplicated`, at
+ * `warn`) and the row is left naming no package; the walk goes on, so one such
+ * row never stops every later row from being bound, nor every later boot. The
+ * plugin-security grant backfill's rule (#32164). Any other failed write still
+ * ends the run. A dry run asks the key's own question of each row it would bind
+ * (`identityColumns`), and reports a row the write would refuse as
+ * `duplicated`, not `bound`.
  */
 
 import { describePackageScopedHolder, type PackageScopedResolution } from '@objectstack/objectql';
-import { keysetWalk } from '@objectstack/types';
+import { isUniqueViolationError, keysetWalk } from '@objectstack/types';
 
 /** The declared type a stored reference names. */
 export type StoredReferenceType = 'flow' | 'connector';
@@ -77,6 +89,13 @@ export interface StoredReference {
     readonly packageColumn: string;
     /** The rows asked, beyond "the package column is null" (none of the three narrows it). */
     readonly where?: Record<string, unknown>;
+    /**
+     * [#31699] The columns beside the name and the package that make up the
+     * table's unique key, when it carries the package (R11: the organization).
+     * A dry run asks that key of each row it would bind; absent, a bind cannot
+     * collide with another row.
+     */
+    readonly identityColumns?: readonly string[];
 }
 
 /** The three stored references this service owns (ADR-0150 D8 rows R8, R9, R11). */
@@ -89,7 +108,14 @@ export const STORED_AUTOMATION_REFERENCES: readonly StoredReference[] = Object.f
         packageColumn: 'flow_package',
     },
     { row: 'R9', type: 'flow', object: 'sys_flow_credential', nameColumn: 'flow_name', packageColumn: 'flow_package' },
-    { row: 'R11', type: 'connector', object: 'sys_connector_connection', nameColumn: 'connector_name', packageColumn: 'connector_package' },
+    {
+        row: 'R11',
+        type: 'connector',
+        object: 'sys_connector_connection',
+        nameColumn: 'connector_name',
+        packageColumn: 'connector_package',
+        identityColumns: ['organization_id'],
+    },
 ]);
 
 /** Infrastructure rows, written and read the way the service's other boot passes do. */
@@ -142,6 +168,13 @@ export interface StoredReferenceBackfillReport {
     readonly unheld: readonly ReferencedName[];
     /** Names the environment's own item, or the platform's, answers: left null, its spelling. */
     readonly unpackaged: ReadonlyArray<ReferencedName & { readonly holder: 'environment' | 'platform' }>;
+    /**
+     * [#31699] Rows the bind would make a second row of one key (another row of
+     * the same key already names the holder): the write was refused as a
+     * unique violation, the row is left naming no package, and the walk goes
+     * on. Each is named by id, so an operator can review the pair.
+     */
+    readonly duplicated: ReadonlyArray<{ readonly id: string; readonly name: string; readonly packageId: string }>;
 }
 
 /** The engine slice the backfill reads and writes through. */
@@ -178,13 +211,20 @@ export async function backfillStoredReferencePackages(
     const ambiguous = new Map<string, ReferencedName & { candidates: readonly string[] }>();
     const unheld = new Map<string, ReferencedName>();
     const unpackaged = new Map<string, ReferencedName & { holder: 'environment' | 'platform' }>();
+    const duplicated: Array<{ id: string; name: string; packageId: string }> = [];
     const answers = new Map<string, StoredReferenceHolder>();
     const { object, nameColumn, packageColumn, type } = reference;
+    const identityColumns = reference.identityColumns ?? [];
     const unbound = { [packageColumn]: null };
+    const dryBound = new Set<string>();
 
     const walk = keysetWalk<Row>(
         async (query) => {
-            const page = await engine.find(object, { ...query, fields: ['id', nameColumn, packageColumn], context: SYSTEM_CTX });
+            const page = await engine.find(object, {
+                ...query,
+                fields: ['id', nameColumn, packageColumn, ...identityColumns],
+                context: SYSTEM_CTX,
+            });
             return Array.isArray(page) ? (page as Row[]) : [];
         },
         { where: reference.where ? { $and: [unbound, reference.where] } : unbound, pageSize: PAGE_SIZE },
@@ -204,10 +244,31 @@ export async function backfillStoredReferencePackages(
             }
             switch (holder.kind) {
                 case 'package': {
-                    if (!options?.dryRun) {
-                        await engine.update(object, { id, [packageColumn]: holder.packageId }, { context: SYSTEM_CTX });
-                    }
                     const packageId = holder.packageId;
+                    if (options?.dryRun) {
+                        // A dry run writes nothing, so it also counts the keys it has
+                        // already bound in this pass: two unbound rows of one key bind
+                        // once, and the second is a second row, as the real run finds.
+                        const key = keyOf(identityColumns, row, name, packageId);
+                        if ((key !== undefined && dryBound.has(key)) || (await wouldBeSecondRow(engine, reference, row, name, packageId))) {
+                            duplicated.push({ id: String(id), name, packageId });
+                            break;
+                        }
+                        if (key !== undefined) dryBound.add(key);
+                    } else {
+                        try {
+                            await engine.update(object, { id, [packageColumn]: packageId }, { context: SYSTEM_CTX });
+                        } catch (e: unknown) {
+                            // [#31699] One row whose bind is a unique violation is reported
+                            // and left as it stands; the walk goes on (`duplicated`). Only
+                            // where the key carries the package, and only once a read
+                            // confirms the row that already names the holder: anything
+                            // else still ends this reference's pass.
+                            if (!isUniqueViolationError(e) || !(await wouldBeSecondRow(engine, reference, row, name, packageId))) throw e;
+                            duplicated.push({ id: String(id), name, packageId });
+                            break;
+                        }
+                    }
                     tally(bound, name, () => ({ name, rows: 0, packageId }));
                     break;
                 }
@@ -234,7 +295,51 @@ export async function backfillStoredReferencePackages(
         ambiguous: [...ambiguous.values()],
         unheld: [...unheld.values()],
         unpackaged: [...unpackaged.values()],
+        duplicated,
     };
+}
+
+/**
+ * [#31699] The unique key `row` would take once bound to `packageId`, or
+ * `undefined` when the reference's key does not carry the package or a key
+ * part is NULL (a NULL key part collides with nothing).
+ */
+function keyOf(identityColumns: readonly string[], row: Row, name: string, packageId: string): string | undefined {
+    if (identityColumns.length === 0) return undefined;
+    const parts: unknown[] = [];
+    for (const column of identityColumns) {
+        const value = row[column];
+        if (value === null || value === undefined) return undefined;
+        parts.push(value);
+    }
+    return JSON.stringify([...parts, name, packageId]);
+}
+
+/**
+ * [#31699] Would binding `row` to `packageId` make it a second row of the
+ * table's unique key? Asked by a dry run, and by a real run to confirm a
+ * unique violation before reporting it, only of a reference whose
+ * key carries the package (`identityColumns`): one read of the row that already
+ * names the holder under the same key.
+ */
+async function wouldBeSecondRow(
+    engine: StoredReferenceBackfillEngine,
+    reference: StoredReference,
+    row: Row,
+    name: string,
+    packageId: string,
+): Promise<boolean> {
+    const identityColumns = reference.identityColumns ?? [];
+    if (identityColumns.length === 0) return false;
+    const where: Record<string, unknown> = { [reference.nameColumn]: name, [reference.packageColumn]: packageId };
+    for (const column of identityColumns) {
+        const value = row[column];
+        // A NULL key part collides with nothing under a UNIQUE index.
+        if (value === null || value === undefined) return false;
+        where[column] = value;
+    }
+    const found = await engine.find(reference.object, { where, fields: ['id'], limit: 1, context: SYSTEM_CTX });
+    return Array.isArray(found) && found.length > 0;
 }
 
 /** The logger slice a run writes to. */
@@ -304,6 +409,15 @@ export function logStoredReferenceBackfill(report: StoredReferenceBackfillReport
             `[automation] ${at}: nothing holds these names, so their rows name no package — ` +
                 report.unheld.map((u) => `'${u.name}' (${rowsOf(u.rows)})`).join(', ') + '.',
             { unheld: report.unheld },
+        );
+    }
+    if (report.duplicated.length > 0) {
+        logger.warn(
+            `[automation] ${at}: binding these rows would make each a second row of one key — another row of the same key ` +
+                'already names the holder — so each is left naming no package. Review the pair and delete the row that ' +
+                'should not stand — ' +
+                report.duplicated.map((d) => `'${d.name}' row ${d.id} → ${d.packageId}`).join(', ') + '.',
+            { duplicated: report.duplicated },
         );
     }
 }

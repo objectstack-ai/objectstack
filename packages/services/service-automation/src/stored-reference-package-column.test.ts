@@ -310,6 +310,90 @@ describe('R11 — a connector connection gains the package that holds its connec
         expect(report.ambiguous).toEqual([{ name: 'mailer', rows: 1, candidates: [`package "${A}"`, `package "${B}"`] }]);
         expect(report.unpackaged).toEqual([{ name: 'my_api', rows: 1, holder: 'environment' }]);
         expect(report.unheld).toEqual([{ name: 'gone', rows: 1 }]);
+        expect(report.duplicated).toEqual([]);
+    });
+
+    /**
+     * [#31699] R11's column is a part of its table's unique key
+     * (`(organization_id, connector_package, connector_name)`). A row naming no
+     * package beside a row of the same organization and instance that already
+     * names the holder cannot be bound: the write is a unique violation. It is
+     * reported by id and left naming no package, and the walk goes on, so the
+     * rows after it are still bound and the next boot is not stuck on it.
+     *
+     * ABLATED (the walk without its per-row catch, measured): the run throws
+     * `DuplicateRecordError` at k1, so the boot pass logs "did not finish",
+     * makes no R11 report, and every later boot stops at the same row.
+     */
+    it('a bind that would be a second row of one key is reported by id and left naming no package; the walk goes on', async () => {
+        const engine = await boot();
+        const connection = (id: string, name: string, pkg: string | null = null) => ({
+            id, organization_id: ORG, connector_name: name, connector_package: pkg,
+            grant: 'authorization_code', status: 'connected', revision: 1,
+        });
+        // k0 already names A; k1 is the stray row of the same key; k9 sorts after it.
+        for (const row of [connection('k0', 'billing', A), connection('k1', 'billing'), connection('k9', 'billing', null)]) {
+            if (row.id === 'k9') row.organization_id = 'org_b';
+            await engine.insert(CONNECTIONS.object, row, { context: { isSystem: true, tenantId: row.organization_id } });
+        }
+
+        const dry = await backfillStoredReferencePackages(engine, CONNECTIONS, holderOf, { dryRun: true });
+        expect(dry.duplicated).toEqual([{ id: 'k1', name: 'billing', packageId: A }]);
+        expect(dry.bound).toEqual([{ name: 'billing', rows: 1, packageId: A }]);
+
+        const report = await backfillStoredReferencePackages(engine, CONNECTIONS, holderOf);
+        expect(report.duplicated).toEqual([{ id: 'k1', name: 'billing', packageId: A }]);
+        expect(report.bound).toEqual([{ name: 'billing', rows: 1, packageId: A }]);
+        expect(await column(engine, CONNECTIONS.object, 'connector_package')).toEqual({ k0: A, k1: null, k9: A });
+
+        // The boot pass says so at warn, and finishes R11.
+        const logger = silentLogger();
+        const reports = await backfillStoredReferencePackagesAtBoot(engine, (object) => object === CONNECTIONS.object, holderOf, logger);
+        expect(reports.map((r) => [r.row, r.duplicated.length])).toEqual([['R11', 1]]);
+        expect(logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining(`'billing' row k1 → ${A}`),
+            { duplicated: [{ id: 'k1', name: 'billing', packageId: A }] },
+        );
+        expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('did not finish'), expect.anything());
+    });
+
+    it('two unbound rows of one key: the dry run binds one and lists the other, as the real run does', async () => {
+        const engine = await boot();
+        for (const id of ['k1', 'k2']) {
+            await engine.insert(CONNECTIONS.object, {
+                id, organization_id: ORG, connector_name: 'billing', grant: 'authorization_code', status: 'connected', revision: 1,
+            }, { context: SYS_ORG });
+        }
+        const dry = await backfillStoredReferencePackages(engine, CONNECTIONS, holderOf, { dryRun: true });
+        const real = await backfillStoredReferencePackages(engine, CONNECTIONS, holderOf);
+        expect(real.duplicated).toEqual([{ id: 'k2', name: 'billing', packageId: A }]);
+        expect(real.bound).toEqual([{ name: 'billing', rows: 1, packageId: A }]);
+        expect({ duplicated: dry.duplicated, bound: dry.bound }).toEqual({ duplicated: real.duplicated, bound: real.bound });
+    });
+
+    it('a unique violation no row of the holder confirms is not read as a second row: it ends the run', async () => {
+        const engine = await boot();
+        await engine.insert(CONNECTIONS.object, {
+            id: 'k1', organization_id: ORG, connector_name: 'billing', grant: 'authorization_code', status: 'connected', revision: 1,
+        }, { context: SYS_ORG });
+        vi.spyOn(engine, 'update').mockRejectedValueOnce(Object.assign(new Error('UNIQUE constraint failed: other_key'), { code: 'SQLITE_CONSTRAINT_UNIQUE' }));
+        await expect(backfillStoredReferencePackages(engine, CONNECTIONS, holderOf)).rejects.toThrow('other_key');
+    });
+
+    it('a unique violation on a reference whose key does not carry the package (R8) ends the run', async () => {
+        const engine = await boot();
+        await engine.insert(RUNS.object, run('r1', ONE_HOLDER, 'paused'), { context: SYS_ORG });
+        vi.spyOn(engine, 'update').mockRejectedValueOnce(Object.assign(new Error('UNIQUE constraint failed: runs'), { code: 'SQLITE_CONSTRAINT_UNIQUE' }));
+        await expect(backfillStoredReferencePackages(engine, RUNS, holderOf)).rejects.toThrow('UNIQUE constraint failed: runs');
+    });
+
+    it('CONTROL — any other failed write still ends the run', async () => {
+        const engine = await boot();
+        await engine.insert(CONNECTIONS.object, {
+            id: 'k1', organization_id: ORG, connector_name: 'billing', grant: 'authorization_code', status: 'connected', revision: 1,
+        }, { context: SYS_ORG });
+        vi.spyOn(engine, 'update').mockRejectedValueOnce(new Error('disk full'));
+        await expect(backfillStoredReferencePackages(engine, CONNECTIONS, holderOf)).rejects.toThrow('disk full');
     });
 });
 
@@ -631,7 +715,7 @@ describe('R10 — the missed-run check reads the window\'s bare key too (the tra
     });
 });
 
-// ── Keys that do not move: byte-identical pins (seat rulings Q2, R14) ────────
+// ── Keys that do not move: byte-identical pins (seat rulings Q2, R14; R11 moved by #31699) ──
 
 describe('no key moves: each table keeps its indexes byte for byte (ADR-0150 D8, seat ruling Q2)', () => {
     it('sys_automation_run', () => {
@@ -651,9 +735,14 @@ describe('no key moves: each table keeps its indexes byte for byte (ADR-0150 D8,
         ]));
     });
 
-    it('sys_connector_connection (R11: one connection per instance name in an organization)', () => {
+    // [#31699] The one key that moves, by the maintainer's ruling on that card
+    // ("unique by package and name", 2026-11-14): an instance is (package,
+    // name), so one organization may connect both packages' instances of one
+    // name. Spelled 'global' with the organization listed, the spelling the
+    // drivers' widening arms retire the old key under.
+    it('sys_connector_connection (R11: one connection per instance — package and name — in an organization)', () => {
         expect(JSON.stringify(SysConnectorConnection.indexes)).toBe(JSON.stringify([
-            { fields: ['connector_name'], unique: 'organization' },
+            { fields: ['organization_id', 'connector_package', 'connector_name'], unique: 'global' },
         ]));
     });
 

@@ -5519,12 +5519,12 @@
     {
       "file": "packages/services/service-automation/src/connector-connections.test.ts",
       "verb": "delete",
-      "pinned": 2
+      "pinned": 3
     },
     {
       "file": "packages/services/service-automation/src/connector-connections.test.ts",
       "verb": "update",
-      "pinned": 2
+      "pinned": 3
     },
     {
       "file": "packages/services/service-automation/src/datasource-pull.test.ts",
