@@ -1,0 +1,29 @@
+{
+  "number": 33241,
+  "kind": "issue",
+  "title": "deps: raise hono to >=4.13.16 and @hono/node-server to >=2.1.6 (fixed releases of published advisories)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T14:08:46Z",
+  "updated_at": "2026-11-14T14:08:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33241",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiled on the maintainer's word, in seat session `session_01Q4EjjPP1zuWBNq3nBXVei9`: 「没必要走安全流程，直接升级卡」 and 「定位 p1」.\n\n## 维护者速读\n\n1. **做什么**：框架用的两个网络库 hono 和 @hono/node-server 有已公开的漏洞，修好的版本已经发布。把框架里这两个库的最低版本提上去，重新生成依赖锁文件，然后发版。\n2. **为什么**：云端镜像运行时用的是框架打包的这两个库。云端自己已经升好了（cloud PR #4479），但要框架升级、发版，云端再跟着升级框架版本，才算真正修好。\n3. **风险**：只是补丁版本的小升级，不改接口。\n4. **验收**：锁文件里 hono 是 4.13.16 及以上、@hono/node-server 是 2.1.6 及以上；构建和测试全绿；osv 扫描不再报这两个库。\n5. **之后**：发版后，云端升级框架版本（cloud 车道跟进）。\n6. **需要你做的**：无。\n\n## Measured\n\n- At objectstack main (read 2026-11-14), `pnpm-lock.yaml` resolves `hono@4.13.12` and `@hono/node-server@2.1.5`.\n- The fixed releases are hono 4.13.16 (GHSA-h7mg-cq63-vhpq, GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-4m76-xfj5-7975, GHSA-3gg2-335m-rxc6) and @hono/node-server 2.1.6 (GHSA-jpvv-r467-5p4w, GHSA-qv5m-9pm6-hqp3). All of these advisories are public.\n- `pnpm-workspace.yaml` holds the floors today: `'@hono/node-server@<3.0.0': '^2.1.3'` (around line 413) and the hono override block (around line 430). `@objectstack/plugin-hono-server` and the client declare `@hono/node-server` directly and move in lockstep (the comment at around line 399).\n\n## Change\n\nRaise both override floors to the first fixed release, keeping the upper bounds on the major boundary. Move the direct declarations in lockstep. Regenerate the lockfile so only these packages move. Run the build, the affected packages' tests, and the OSV check. Release through the normal changeset path.\n\nReader: triage sets the lane (`priority:p1` is the maintainer's).\n\n<!-- signed: repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9 -->"
+}

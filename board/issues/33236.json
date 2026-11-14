@@ -1,0 +1,35 @@
+{
+  "number": 33236,
+  "kind": "pull_request",
+  "title": "fix(runtime): tell search engines not to index the API and Console surfaces; serve a default robots.txt",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T08:29:45Z",
+  "updated_at": "2026-11-14T14:14:11Z",
+  "closed_at": "2026-11-14T14:14:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-11-14T14:14:09Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33236",
+  "body": "## Why\n\nA Search Console audit of the `objectos.ai` domain found runtime pages from two ObjectStack deployments in Google's crawl: Console login pages flagged as duplicates (`/_console/login`, `/_console/`), the anonymous `GET /api/v1/runtime/config` door, and auth paths. These are app and API surfaces, not content, and every self-hosted ObjectStack deployment has the same exposure. This makes the runtime itself send noindex signals by default. No card: this is a direct order from the seat running the indexing audit (the marketing site and docs are fixed separately).\n\n## What changes\n\n| Surface | Owner | Signal |\n|:---|:---|:---|\n| every answer under `/api` (data, metadata, auth `/api/v1/auth/*`, `runtime/config`, error envelopes, the unmatched 404) | `HonoHttpServer` (`plugin-hono-server/src/api-noindex.ts`), installed in the constructor beside the other seams | `X-Robots-Tag: noindex, nofollow`, unless the route set its own (the storage upload-link page already does) |\n| the same, on the hosted door | `createHonoApp` (`@objectstack/hono`) installs the same lane (`installApiNoindex`, exported from `plugin-hono-server`), so both doors answer identical headers, as `http-conformance` requires | same header |\n| every answer under `/_console/` (documents, SPA fallback, assets, the `503` of a refused Console) | `createConsoleStaticPlugin` / the console-unavailable responders (`cli/src/utils/console.ts`) | same header |\n| Console HTML documents | `createConsoleStaticPlugin` | `<meta name=\"robots\" content=\"noindex, nofollow\">`, unless the build ships its own |\n| `GET /robots.txt` | `createConsoleStaticPlugin` (the plugin that already claims `/`), new ledger row in `console-route-ledger.ts` | a default file, served only when nothing else serves the path |\n\nThe default `robots.txt`:\n\n```\nUser-agent: *\nAllow: /forms/\nAllow: /_console/f/\nAllow: /_console/assets/\nAllow: /api/v1/forms/\nDisallow: /_console/\nDisallow: /api/\n```\n\n**Public surfaces stay indexable.** The runtime's one intentionally shareable page is the public form: `/forms/<slug>` (the authored `sharing.publicLink`) redirects to `/_console/f/<slug>`. That page gets neither the header nor the meta tag, and the `Allow` lines let a crawler reach it, the bundle it runs and the anonymous form door it reads to render. A crawler picks the longest matching rule, so each `Allow` wins over the shorter `Disallow`. There is no `/_account/` mount in this runtime.\n\n**An app's own robots.txt wins.** The default route calls `next()` first and answers only when the rest of the chain ends in the unmatched-request 404, so an app's own route, static mount or fallback wins whether it registered before or after the Console. Pinned both ways in `console.robots.test.ts`.\n\n**Coverage of real deployments.** `os serve` / `os start` / `os dev` and the Docker image mount both pieces. The cloud's `apps/cloud/server` builds its app on a `HonoHttpServer` in both modes (node and the bare adapter) and mounts the Console through `createConsoleStaticPlugin`, so it gets both once it takes this release; no cloud change is needed.\n\nClause-②: yes (widening) — new export `installApiNoindex` from `@objectstack/plugin-hono-server`, which `createHonoApp` (`@objectstack/hono`) now installs; `/api/` and `/_console/` answers gain a header, Console documents gain a meta tag, and `GET /robots.txt` answers a default where it answered 404. Nothing served before is refused.\nMetadata-protocol: none\n\n## Tests\n\n- `packages/plugins/plugin-hono-server/src/api-noindex.test.ts`: the header on a contract-registered route, a raw-app auth route, the unmatched 404, a thrown 500, HEAD and POST; a route's own `X-Robots-Tag` is kept; `/forms/…`, `/apis-overview` and an unrouted `/get-session` are untouched.\n- `packages/cli/src/utils/console.robots.test.ts`: header and single meta tag on Console pages, assets and the refused-Console `503`; none on `/_console/f/<slug>` or the `/forms/<slug>` redirect; the API header read off the same app; the default `robots.txt` body, its content-type, HEAD, no leftover headers from the replaced 404, and an app's robots.txt winning when registered before and after the Console.\n- `packages/qa/http-conformance` holds both doors' headers equal, which now includes the new header.\n- `scripts/check-wildcard-fallthrough.mjs` declares the two new `use()` lanes as yielding.\n- `console.branded-head.test.ts` and `console.content-security-policy.test.ts` pin the served document byte for byte; their expected documents gain the meta tag.\n\n## Acceptance notes\n\n- `Disallow` and `noindex` pull against each other for a URL that is already indexed: a crawler that may not fetch a page never sees its noindex header. The audit lists the Console pages as crawled but not indexed, so the robots.txt mainly stops further crawling; the header and meta tag are the signal for anything fetched anyway (a crawler that ignores robots.txt, or a link followed before the file was read).\n- `.well-known/*` discovery documents are outside `/api` and carry no header; they are JSON for OAuth clients and were not in the audit.\n- When the default `robots.txt` answers, the response observation still labels the request as unmatched (the not-found sink ran inside the chain before the fallback replaced its answer), with status 200. Only the metrics route label is affected.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_767898638fa74bab9318b6928285a2a7)_\n"
+}

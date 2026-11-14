@@ -1,0 +1,33 @@
+{
+  "number": 33237,
+  "kind": "issue",
+  "title": "plugin-auth: a SCIM bearer write that carries any Cookie and no Origin is refused 403 MISSING_OR_NULL_ORIGIN",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T08:50:05Z",
+  "updated_at": "2026-11-14T14:14:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33237",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFound while fixing objectstack-ai/cloud#4491 (hosted SCIM writes refused). Measured in-process by the cloud os-dev agent through plugin-auth `handleRequest`, at cloud's framework pin c5758b0d.\n\n## Measured\n\n- `POST /api/v1/auth/scim/v2/Users` with a valid SCIM bearer and **no Cookie** answers 201.\n- The same request with **any** `Cookie` header and no `Origin` answers **403 `MISSING_OR_NULL_ORIGIN`**. The same holds for `PATCH … active:false`. This includes an unrelated edge cookie such as Cloudflare's `__cf_bm`, and expired names with empty values.\n- Cause: better-auth 1.7.12 `validateOrigin` decides `useCookies = headers.has('cookie')` and then requires an Origin. plugin-auth forwards the Cookie header into the vendor on `/scim/v2/*` and does not exempt that path.\n- `@better-auth/scim` authenticates `/scim/v2/*` by the bearer alone, so a cookie never carries authority there. The origin check protects nothing on this path; it only refuses real IdP clients that keep a cookie jar (Okta did on staging), or a sticky-session load-balancer cookie on self-hosted.\n- The EE suite cannot see it: `apps/objectos-ee/test/scim-leaver-lifecycle.e2e.test.ts` (cloud repo) always sends an Origin.\n\n## Expected\n\nA `/scim/v2/*` request authenticated by a SCIM bearer is not subject to the browser origin/CSRF check. Either do not forward Cookie into the vendor on `/scim/v2/*`, or skip the origin check there for bearer-authenticated calls. Every cookie-authenticated browser route keeps its origin check.\n\n## Acceptance\n\n- A SCIM bearer POST and PATCH carrying a Cookie and no Origin succeed.\n- A cookie-authenticated non-SCIM POST with no Origin is still refused (a positive control).\n- A SCIM POST with a cookie and no bearer is still refused.\n\nThe cloud PR objectstack-ai/cloud#4498 carries a hosted proxy strip of the same shape. Whether it lands as a transition is the maintainer's decision on cloud#4491. Once this ships in a release and cloud's pin carries it, that strip retires.\n\nCarrier: objectstack. Triage sets the lane and the level.\n\n<!-- signed: repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9 -->"
+}

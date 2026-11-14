@@ -1,0 +1,30 @@
+{
+  "number": 33235,
+  "kind": "issue",
+  "title": "skills(objectstack-ui): the navigation rule teaches the approvals inbox entry gated by `requiresObject: 'sys_approval_request'` — which hides it from every approver until a request already involves them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T08:26:24Z",
+  "updated_at": "2026-11-14T08:47:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33235",
+  "body": "Found by a downstream app on the published 18.4.0 packages (steedos-labs/os-project-blackcat-crm#83, PR #87).\n\n## The trap\n\n`skills/objectstack-ui/rules/navigation.md` (line ~39) — and its eval in `evals/views-apps-actions-pages.json` — teach the approvals entry as:\n\n```ts\n{ id: 'nav_approval_requests', type: 'object', objectName: 'sys_approval_request', label: 'Approval Requests', icon: 'inbox', requiresObject: 'sys_approval_request' }\n```\n\nAn app that copies it (as HotCRM-derived apps do, with `type: 'component', componentRef: 'approvals:inbox'` plus the same `requiresObject`) gets **history-dependent visibility**, measured on 18.4.0: `GET /api/v1/meta/object/sys_approval_request` answers **404** to a non-administrator approver (sales manager, quality manager, director) until some approval request already involves them, then 200; administrators always 200. The console prunes the entry against the served objects, so on a fresh environment **no approver sees the inbox entry** — while the approval centre itself works for all of them through the approvals REST path.\n\nThe platform's own Account app gates the same component differently: `nav_account_approvals` in `@objectstack/platform-objects` uses `requiresService: 'approvals'`, with the comment \"`requiresObject` cannot gate a component item\"; plugin-approvals also warns against granting non-administrators read on its tables.\n\n## Why it matters\n\nThe skill is what AI authors copy; it currently teaches a gate that stages clean, validates, and hides the entry from exactly the users it exists for.\n\n## Suggested fix\n\nTeach the approvals inbox as `type: 'component', componentRef: 'approvals:inbox', requiresService: 'approvals'` (the Account app's shape), state why `requiresObject` is wrong for it, and update the eval.\n\nDedupe words: approvals inbox nav requiresObject skill example · requiresService approvals · navigation rule approvals."
+}

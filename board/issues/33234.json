@@ -10,16 +10,20 @@
     "id": 353326562,
     "type": "User"
   },
-  "labels": [],
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T08:16:42Z",
-  "updated_at": "2026-11-14T08:16:42Z",
+  "updated_at": "2026-11-14T08:46:43Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33234",
   "body": "Found by a downstream app on the published 18.4.0 packages (steedos-labs/os-project-blackcat-crm#70: reorganising one CRM app's navigation around an industry module, measured per role on 10 accounts).\n\n## Limits hit\n\n1. An app's landing item may name only the app's **own** navigation entries. An entry contributed by a module package through `navigationContributions` (e.g. the industry module's Sales Order list, its Master Data group, or a service module's Service Overview) can never be a per-audience landing. Consequence downstream: a sales rep cannot land on the module's Sales Orders; the system officer cannot land on Master Data; and the app must keep the Service group ahead of Customers / Sales only because the service staff's landing (Service Overview, a contributed entry) is reached by ordering, not by a landing key.\n2. A contribution is appended after the target group's own items (`applyNavContributions`, by group id + priority): a module cannot place its entry between two of the app's entries (e.g. Sales Order next to Opportunities), and cannot declare a group in the app — the app must pre-declare every group a module may fill.\n\n## Why it matters\n\nIndustry modules (the intended way to extend a packaged CRM per customer) cannot shape the daily entry point of the roles they exist for; apps end up editing the upstream app's navigation to make room, which every upstream sync must replay.\n\n## Suggested fix shape (for the lane to judge)\n\nLet a landing name any entry present in the merged navigation (own or contributed), validated after contributions are applied; and let a contribution declare a position relative to an app entry (`before` / `after` an id) within the bounds the app allows.\n\nDedupe words: landing contributed entry · navigationContributions position · module landing page · nav contribution before after."
