@@ -67,24 +67,24 @@ describe('[#25778] NativeSQLStrategy — the duration measure as a statement', (
   it.each([
     [
       'sqlite',
-      'AVG(((ROUND((julianday(resolved_at) - julianday(opened_at)) * 86400000.0) / 1000.0) / 3600.0)) AS "avg_hours"',
-      'COALESCE(SUM(CASE WHEN priority = $1 THEN (ROUND((julianday(resolved_at) - julianday(opened_at)) * 86400000.0) / 1000.0) END), 0) AS "total_seconds"',
+      'AVG(((ROUND((julianday("resolved_at") - julianday("opened_at")) * 86400000.0) / 1000.0) / 3600.0)) AS "avg_hours"',
+      'COALESCE(SUM(CASE WHEN "priority" = $1 THEN (ROUND((julianday("resolved_at") - julianday("opened_at")) * 86400000.0) / 1000.0) END), 0) AS "total_seconds"',
     ],
     [
       'postgres',
-      'AVG((CAST(EXTRACT(EPOCH FROM (resolved_at - opened_at)) AS DOUBLE PRECISION) / 3600.0)) AS "avg_hours"',
-      'COALESCE(SUM(CASE WHEN priority = $1 THEN CAST(EXTRACT(EPOCH FROM (resolved_at - opened_at)) AS DOUBLE PRECISION) END), 0) AS "total_seconds"',
+      'AVG((CAST(EXTRACT(EPOCH FROM ("resolved_at" - "opened_at")) AS DOUBLE PRECISION) / 3600.0)) AS "avg_hours"',
+      'COALESCE(SUM(CASE WHEN "priority" = $1 THEN CAST(EXTRACT(EPOCH FROM ("resolved_at" - "opened_at")) AS DOUBLE PRECISION) END), 0) AS "total_seconds"',
     ],
     [
       'mysql',
-      'AVG(((TIMESTAMPDIFF(MICROSECOND, opened_at, resolved_at) / 1.0E6) / 3600.0)) AS "avg_hours"',
-      'COALESCE(SUM(CASE WHEN priority = $1 THEN (TIMESTAMPDIFF(MICROSECOND, opened_at, resolved_at) / 1.0E6) END), 0) AS "total_seconds"',
+      'AVG(((TIMESTAMPDIFF(MICROSECOND, "opened_at", "resolved_at") / 1.0E6) / 3600.0)) AS "avg_hours"',
+      'COALESCE(SUM(CASE WHEN "priority" = $1 THEN (TIMESTAMPDIFF(MICROSECOND, "opened_at", "resolved_at") / 1.0E6) END), 0) AS "total_seconds"',
     ],
   ])('%s: the per-dialect difference, divided by the unit, under the aggregate and its measure filter', async (dialect, avg, filteredSum) => {
     // [#25907] The `sum` answers its empty-group identity `0` in the statement,
     // where the order and the window read it; the `avg` has none and keeps NULL.
     const { sql, params } = await native.generateSql(q(), nativeCtx({ dialect }));
-    expect(sql).toBe(`SELECT category AS "category", ${avg}, ${filteredSum} FROM "${OBJECT}" GROUP BY category`);
+    expect(sql).toBe(`SELECT "category" AS "category", ${avg}, ${filteredSum} FROM "${OBJECT}" GROUP BY "category"`);
     expect(params).toEqual(['high']);
   });
 
@@ -101,7 +101,7 @@ describe('[#25778] NativeSQLStrategy — the duration measure as a statement', (
       return `canon(${col})`;
     };
     const { sql } = await native.generateSql(q({ measures: ['avg_hours'] }), nativeCtx({ dialect: 'sqlite', coerce }));
-    expect(sql).toContain('julianday(canon(resolved_at)) - julianday(canon(opened_at))');
+    expect(sql).toContain('julianday(canon("resolved_at")) - julianday(canon("opened_at"))');
     expect(seen).toEqual([`${OBJECT}.opened_at`, `${OBJECT}.resolved_at`]);
   });
 
@@ -225,8 +225,8 @@ describe('[#25778] AnalyticsService — the gates a duration measure passes thro
     const { service, executed } = makeService();
     await service.queryDataset(dataset, { measures: ['resolution_seconds_sum'], dimensions: ['category'] } as never, MEMBER);
     expect(executed).toHaveLength(1);
-    expect(executed[0]).toContain('SUM((ROUND((julianday(resolved_at) - julianday(opened_at))');
-    expect(executed[0]).not.toContain('SUM(resolution_seconds)');
+    expect(executed[0]).toContain('SUM((ROUND((julianday("resolved_at") - julianday("opened_at"))');
+    expect(executed[0]).not.toContain('SUM("resolution_seconds")');
   });
 
   it('the field-level read gate judges both columns: an unreadable one refuses the measure, nothing runs', async () => {
@@ -306,7 +306,7 @@ describe('[#25778] AnalyticsService — the gates a duration measure passes thro
       service.registerDataset(listed);
       await service.query({ cube: listed.name, measures: ['resolution.high_hours'], dimensions: ['category'] } as never, MEMBER);
       expect(executed).toHaveLength(1);
-      expect(executed[0]).toContain('AVG(CASE WHEN priority = $1 THEN ((ROUND((julianday(resolved_at) - julianday(opened_at))');
+      expect(executed[0]).toContain('AVG(CASE WHEN "priority" = $1 THEN ((ROUND((julianday("resolved_at") - julianday("opened_at"))');
       expect(executed[0]).toContain('AS "resolution.high_hours"');
     });
 

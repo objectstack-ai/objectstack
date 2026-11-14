@@ -972,6 +972,57 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
       expect(labelOf(await read(PAIR, 'fr-FR'))).toBe('pair fr-FR');
     });
 
+    // [#32606] A row of the App's pair declaring X is X's (its declared
+    // override of an added member, #28802), served at X's address and in X's
+    // lists. The moved-edit rule (#31593, `isMovedOverrideRowOf`) asked
+    // whether X still ships the item at the MEMBER's grain, so beside an
+    // addition Z that ships the row's locale (`fr-FR`) while X ships only
+    // `en-US`, it read the row as an edit that moved from X to Z: Z's exact
+    // address, Z's list and the execution list a send resolved to Z reads all
+    // served the row declared for X, stamped Z, while the registry answers
+    // Z's own. One row at two packages' addresses (red line 2). X ships the
+    // name, so it is still the row's holder: the former owner is asked at the
+    // name's grain, and Z answers its own member everywhere.
+    const declaredForX = () => {
+      pairRow({ overrides: { package: X } });
+      registry.registerItem('email_template', {
+        name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', overrides: { package: X }, _packageId: PAIR, _provenance: 'org',
+      }, 'name' as never);
+    };
+    it.each([
+      ['addition installed first', () => { installZ(); tpl('en-US', X); tpl('fr-FR', Z); declaredForX(); }],
+      ['row stored first', () => { tpl('en-US', X); declaredForX(); installZ(); tpl('fr-FR', Z); }],
+    ] as const)('[#32606] NARROWING — a row declared for X is never served at an addition Z that ships its locale (%s; BASE: Z\'s address, list and execution list served `pair fr-FR` stamped Z)', async (_order, arrange) => {
+      arrange();
+      expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', Z, 'fr-FR')?.label, 'the registry at Z').toBe('zeta fr-FR');
+      const atZ = await read(Z, 'fr-FR');
+      expect(labelOf(atZ), '`?package=Z&member=fr-FR`: Z\'s own').toBe('zeta fr-FR');
+      expect((atZ as { item?: { _diagnostics?: { valid?: boolean } } })?.item?._diagnostics?.valid, 'Z\'s own item is valid').toBe(true);
+      expect(await listed(Z), 'Z\'s list').toEqual(['zeta fr-FR']);
+      expect(await forSend(Z), 'Z\'s execution list').toEqual(['zeta fr-FR']);
+      expect((await protocol.listServedOverrides({ packageId: Z })).map((e) => `${e.name}:${e.member}`), 'Z\'s customizations').toEqual([]);
+      expect((await protocol.listServedOverrides({ packageId: X })).map((e) => `${e.name}:${e.member}`), 'X\'s customizations').toEqual(['welcome:fr-FR']);
+      // CONTROL: X's address and X's lists serve the row declared for X (UNCHANGED).
+      expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+      expect(await listed(X)).toEqual(['pair fr-FR', 'suitex en-US']);
+      expect(await forSend(X)).toEqual(['pair fr-FR', 'suitex en-US']);
+      expect(labelOf(await read(PAIR, 'fr-FR'))).toBe('pair fr-FR');
+    });
+
+    // [#31593] CONTROL — the moved edit still follows its item: X ships
+    // nothing of the name any more (no member), so the row declaring X is
+    // the tenant's edit of the item that moved to Z, served at Z.
+    it.each([
+      ['addition installed first', () => { installZ(); tpl('fr-FR', Z); declaredForX(); }],
+      ['row stored first', () => { declaredForX(); installZ(); tpl('fr-FR', Z); }],
+    ] as const)('[#32606] CONTROL — X ships nothing of the name: the row declaring X is the moved edit, served at Z (%s; UNCHANGED)', async (_order, arrange) => {
+      arrange();
+      expect(labelOf(await read(Z, 'fr-FR'))).toBe('pair fr-FR');
+      expect(await listed(Z)).toEqual(['pair fr-FR']);
+      expect(await forSend(Z)).toEqual(['pair fr-FR']);
+      expect((await protocol.listServedOverrides({ packageId: Z })).map((e) => `${e.name}:${e.member}`)).toEqual(['welcome:fr-FR']);
+    });
+
     it('NARROWING — an undeclared row while another App\'s pair stores an undeclared row of the name: neither address serves it, as the registry binds neither (residual 2, contract review F6; BASE at 075fb3188: `?package=Y` served es-ES, `?package=P` fr-FR)', async () => {
       // App B: P ships en-US, Q (on P) ships de-DE; B's pair stores an undeclared fr-FR row.
       // App A: U (on A and P, A's namespace) ships fr-FR, Y ships it-IT; A's pair stores an undeclared es-ES row.
@@ -1070,8 +1121,11 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     // App's undeclared de-DE pair row is X's member on X's address, as on
     // main. Counting composite slots only leaves X out, the row binds to the
     // pair, and X's address would lose it: ablation.
+    // [#33131 item 5] X's list and execution list count X's holding the same
+    // way, so they carry the member the exact read serves (FROM: they left it
+    // out when X held the name through its stored row alone).
     for (const holding of ['its own stored row in the bare slot', 'CONTROL: its composite slot'] as const) {
-      it.each([['holding first', true], ['pair row first', false]] as const)(`${holding === 'CONTROL: its composite slot' ? 'CONTROL' : 'UNCHANGED'} — X holds the name through ${holding} (%s): X's address and lists keep the App's undeclared pair row`, async (_order, holdingFirst) => {
+      it.each([['holding first', true], ['pair row first', false]] as const)(`${holding === 'CONTROL: its composite slot' ? 'CONTROL' : '[#33131] exact read UNCHANGED, lists now agree'} — X holds the name through ${holding} (%s): X's address and lists keep the App's undeclared pair row`, async (_order, holdingFirst) => {
         const xEn = { name: 'welcome', label: 'suitex en-US', locale: 'en-US', subject: 'suitex en-US', bodyHtml: '<p>x</p>' };
         const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
         const registerHolding = () => {
@@ -1087,15 +1141,79 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
         expect(registry.overlayRowBinding('email_template', 'welcome', { ...pairDe, _packageId: PAIR }), 'the adoption counts X as the exact read does').toBe(X);
         expect(labelOf(await read(X, 'de-DE'))).toBe('pair de-DE');
         expect(labelOf(await read(X, 'en-US'))).toBe('suitex en-US');
-        // The lists are pinned for the composite slot only: with X holding through its stored row alone, X's
-        // lists leave the row out on main and here alike (the list door's own count, outside this card).
-        if (holding === 'CONTROL: its composite slot') {
-          expect(await listed(X)).toContain('pair de-DE');
-          expect(await forSend(X)).toContain('pair de-DE');
-        }
+        // [#33131 item 5] …and X's list and execution list carry it, through either holding: the list counts
+        // X's holding as the exact read does (FROM, with X holding through its stored row alone: both lists
+        // were `['suitex en-US']`, the exact read serving a member its lists left out).
+        expect(await listed(X)).toEqual(['pair de-DE', 'suitex en-US']);
+        expect(await forSend(X)).toEqual(['pair de-DE', 'suitex en-US']);
       });
     }
 
+    // [#33131 item 5] The list's widened count is the exact read's: a second holder of the name, or a row that
+    // declares another base, still leaves the row out of X's list, as X's exact read refuses or declines it.
+    it.each([['holding first', true], ['pair row first', false]] as const)('[#33131] CONTROL — X holds the name through its own stored row beside a second holder Y (%s): X\'s exact read refuses the undeclared pair row naming both, and X\'s lists leave it out', async (_order, holdingFirst) => {
+      const xEn = { name: 'welcome', label: 'suitex en-US', locale: 'en-US', subject: 'suitex en-US', bodyHtml: '<p>x</p>' };
+      const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
+      const registerHolding = () => {
+        rows.push({ id: 'row_x', type: 'email_template', name: 'welcome', state: 'active', package_id: X, bundle_member: 'en-US', metadata: JSON.stringify(xEn) });
+        registry.registerItem('email_template', { ...xEn, _packageId: X, _provenance: 'org' }, 'name' as never);
+        tpl('en-US', Y);
+      };
+      const registerPairRow = () => {
+        rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+        registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+      };
+      if (holdingFirst) { registerHolding(); registerPairRow(); } else { registerPairRow(); registerHolding(); }
+      const err = await refusalOf(() => read(X, 'de-DE'));
+      expect([err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()]).toEqual([409, [X, Y]]);
+      expect(await listed(X)).toEqual(['suitex en-US']);
+      expect(await forSend(X)).toEqual(['suitex en-US']);
+    });
+
+    it.each([['holding first', true], ['pair row first', false]] as const)('[#33131] CONTROL — X holds the name through its own stored row, and the pair row declares Y (%s): neither X\'s exact read nor X\'s lists serve it', async (_order, holdingFirst) => {
+      const xEn = { name: 'welcome', label: 'suitex en-US', locale: 'en-US', subject: 'suitex en-US', bodyHtml: '<p>x</p>' };
+      const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>', overrides: { package: Y } };
+      const registerHolding = () => {
+        rows.push({ id: 'row_x', type: 'email_template', name: 'welcome', state: 'active', package_id: X, bundle_member: 'en-US', metadata: JSON.stringify(xEn) });
+        registry.registerItem('email_template', { ...xEn, _packageId: X, _provenance: 'org' }, 'name' as never);
+      };
+      const registerPairRow = () => {
+        rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+        registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+      };
+      if (holdingFirst) { registerHolding(); registerPairRow(); } else { registerPairRow(); registerHolding(); }
+      let atX: unknown;
+      try { atX = labelOf(await read(X, 'de-DE')); } catch (e) { atX = (e as { status?: number }).status; }
+      expect(atX).not.toBe('pair de-DE');
+      expect(await listed(X)).toEqual(['suitex en-US']);
+      expect(await forSend(X)).toEqual(['suitex en-US']);
+    });
+
+  });
+
+  // [#33131 item 4, ruling 6868829990 = A] A pair row declaring a module X of
+  // the App that ships nothing of the name, while another module W of the App
+  // ships the member, is read as a tenant's edit of an item that moved from X
+  // to W (#31593, `isMovedOverrideRowOf`): W's address and lists serve it.
+  // Measured, by design: nothing in the stored state tells it apart from a
+  // genuine module-to-module move. X's own address refuses naming W.
+  it.each([['row stored first', true], ['W registered first', false]] as const)('[#33131 item 4, by design #31593] a pair row declaring a module that ships nothing of the name is the moved edit of the module that ships it (%s): W\'s address and lists serve it, X\'s address refuses naming W', async (_order, rowFirst) => {
+    const W = 'com.other.wolf';
+    registry.installPackage({ id: W, name: W, version: '1.0.0', type: 'module', namespace: 'wolf', dependencies: { [APP]: '^1.0.0', [X]: '^1.0.0' } } as never, 'code');
+    const deRow = { name: 'welcome', label: 'pair de-DE for X', locale: 'de-DE', subject: 's', bodyHtml: '<p>p</p>', overrides: { package: X } };
+    const store = () => {
+      rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(deRow) });
+      registry.registerItem('email_template', { ...deRow, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+    };
+    if (rowFirst) { store(); tpl('de-DE', W); } else { tpl('de-DE', W); store(); }
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([W]);
+    expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', W, 'de-DE')?.label, 'the registry item at W is W\'s own').toBe('wolf de-DE');
+    const atW = await read(W, 'de-DE') as { item?: { label?: string; _packageId?: string } };
+    expect([atW?.item?.label, atW?.item?._packageId]).toEqual(['pair de-DE for X', W]);
+    expect(await listed(W)).toEqual(['pair de-DE for X']);
+    expect(await forSend(W)).toEqual(['pair de-DE for X']);
+    const err = await refusalOf(() => read(X, 'de-DE'));
+    expect([err.status, err.refusal.candidates]).toEqual([409, [{ kind: 'package', packageId: W }]]);
   });
 
   it('a sole owner keeps its member: another package of the pair does not serve it (delta review S2; through the doors the qualifier refuses the non-holder first)', async () => {
