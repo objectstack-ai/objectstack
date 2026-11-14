@@ -116,27 +116,36 @@ function shell(copy: UploadLinkCopy, title: string, body: string, nonce: string,
  *    page, and the difference from the browser's clock is kept, so a browser
  *    whose clock is off neither disables a live link nor sends into a dead
  *    one. The server's one unusable-link refusal is unchanged; this is the
- *    page reading its own printed time.
+ *    page reading its own printed time. Once Send is pressed the timer is
+ *    stopped and the line belongs to the send: a send still running at the
+ *    moment is not talked over, and a file that landed is never followed by
+ *    "expired". A send that fails re-arms it while the link has time left.
  */
 function uploadScript(text: string): string {
   return [
     '(function(){',
     `var T=${text};`,
     'var input=document.getElementById("file"),button=document.getElementById("send"),status=document.getElementById("status");',
-    'var skew=T.now-Date.now(),end=Date.parse(T.expiresAt),expired=false;',
+    'var skew=T.now-Date.now(),end=Date.parse(T.expiresAt),expired=false,timer=null,busy=false,done=false;',
     'function now(){return Date.now()+skew;}',
-    'function lapsed(){if(!expired&&end<=now()){expired=true;button.disabled=true;input.disabled=true;status.textContent=T.expired;}return expired;}',
+    // [#32712] Once a send is under way the page's line is the send's: the
+    // expiry neither talks over it while it runs nor replaces its answer, and
+    // a link the upload used is finished, not expired.
+    'function lapsed(){if(done)return true;if(!expired&&end<=now()){expired=true;if(!busy){button.disabled=true;input.disabled=true;status.textContent=T.expired;}}return expired;}',
+    'function arm(){if(typeof setTimeout!=="function")return;var wait=end-now();if(wait<2147483647)timer=setTimeout(lapsed,wait+50);}',
+    'function disarm(){if(timer!==null&&typeof clearTimeout==="function")clearTimeout(timer);timer=null;}',
+    'function settle(text){busy=false;status.textContent=text;if(end>now())arm();}',
     'var until=document.getElementById("expires");',
     'if(until&&typeof Intl==="object"){try{until.textContent=new Intl.DateTimeFormat(T.lang,',
     '{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit",timeZoneName:"short"}).format(new Date(end));}catch(e){}}',
-    'if(!lapsed()&&typeof setTimeout==="function"){var wait=end-now();if(wait<2147483647)setTimeout(lapsed,wait+50);}',
+    'if(!lapsed())arm();',
     'function picked(){return input.files?input.files.length:0;}',
     'input.addEventListener("change",function(){if(lapsed())return;var n=picked();var fits=n>=T.min&&n<=T.max;',
     'button.disabled=!n||!fits;status.textContent=n&&!fits?T.pickCount:"";});',
     'button.addEventListener("click",function(){',
     'if(lapsed())return;',
     'var n=picked();if(!n||n<T.min||n>T.max)return;var files=input.files;',
-    'button.disabled=true;input.disabled=true;status.textContent=T.uploading;',
+    'busy=true;disarm();button.disabled=true;input.disabled=true;status.textContent=T.uploading;',
     'var request;',
     'if(T.max>1){var form=new FormData();form.append("count",String(n));',
     'for(var i=0;i<n;i++){form.append("file"+i,files[i],encodeURIComponent(files[i].name));}',
@@ -148,11 +157,11 @@ function uploadScript(text: string): string {
     '.then(function(r){',
     // [#32734] "Attached" only on the answer that says where the file landed:
     // a success naming the stored file. Anything else is the refusal it carries.
-    'if(r.ok&&r.body&&r.body.success===true&&r.body.data&&r.body.data.fileId){status.textContent=n>1?T.attachedSeveral:T.attached;return;}',
+    'if(r.ok&&r.body&&r.body.success===true&&r.body.data&&r.body.data.fileId){done=true;busy=false;status.textContent=n>1?T.attachedSeveral:T.attached;return;}',
     // [#32712] The refusal as the door wrote it for a person, in this page's
     // language; an answer that carries none gets the page's own sentence.
-    'var u=r.body&&r.body.error&&r.body.error.userMessage;status.textContent=typeof u==="string"&&u?u:T.failed;})',
-    '.catch(function(){status.textContent=T.connectionLost;});',
+    'var u=r.body&&r.body.error&&r.body.error.userMessage;settle(typeof u==="string"&&u?u:T.failed);})',
+    '.catch(function(){settle(T.connectionLost);});',
     '});',
     '})();',
   ].join('');

@@ -248,6 +248,16 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
           invoice_no: { name: 'invoice_no', type: 'text' },
           invoice: { name: 'invoice', label: 'E-invoice', type: 'file', required: true },
         },
+      }, {
+        // [#32712] A display field that is not title-typed: an explicit
+        // `nameField` on a lookup, whose served value is the claim's id.
+        name: 'trip',
+        label: 'Trip',
+        nameField: 'claim_ref',
+        fields: {
+          claim_ref: { name: 'claim_ref', label: 'For claim', type: 'lookup', reference: 'claim' },
+          ticket: { name: 'ticket', label: 'Ticket', type: 'file' },
+        },
       }],
     } as never);
     await engine.syncSchemas();
@@ -1107,6 +1117,76 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect(unusableBytes(await openIn(token, ZH))).toEqual(unusableBytes(await openIn(token, ZH, OUTSIDER.userId)));
     });
 
+    it('a user who can no longer act in the link\'s organization answers the stranger\'s 404, byte for byte', async () => {
+      const id = await titledClaim('Left the organization');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const stranger = unusableBytes(await openIn(token, EN, OUTSIDER.userId));
+      expect(stranger.status).toBe(404);
+      const members = engine.getDriverForObject('sys_member')!;
+      await members.delete('sys_member', `mem_${OWNER.userId}`);
+      try {
+        const owner = unusableBytes(await openIn(token, EN));
+        expect(owner).toEqual(stranger);
+        expect(owner.body).not.toContain('Left the organization');
+      } finally {
+        await members.create('sys_member', { id: `mem_${OWNER.userId}`, user_id: OWNER.userId, organization_id: ORG, role: 'member' });
+      }
+      // A member again: the page names the record once more.
+      expect(String((await openIn(token, EN))._sent)).toContain(row(en.recordRow, en.recordTitled('Claim', 'Left the organization')));
+    });
+
+    it('a record read the engine refuses 403 or 404 answers the stranger\'s 404; any other failure names nothing', async () => {
+      const id = await titledClaim('Refused on read');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const stranger = unusableBytes(await openIn(token, EN, OUTSIDER.userId));
+      const findOne = engine.findOne.bind(engine);
+      let refusal: { status?: number } | null = null;
+      const spy = vi.spyOn(engine as any, 'findOne').mockImplementation(async (object: any, query: any, options: any) => {
+        if (refusal && object === 'claim' && query?.where?.id === id && options?.context?.userId === OWNER.userId) {
+          throw Object.assign(new Error('refused'), refusal);
+        }
+        return findOne(object, query, options);
+      });
+      try {
+        for (const status of [403, 404]) {
+          refusal = { status };
+          const owner = unusableBytes(await openIn(token, EN));
+          expect(owner, String(status)).toEqual(stranger);
+          expect(owner.body).not.toContain('Refused on read');
+        }
+        // A failure that is not a refusal: today's page, which names nothing.
+        refusal = { status: 500 };
+        const page = await openIn(token, EN);
+        expect(page._status).toBe(200);
+        expect(String(page._sent)).not.toContain('<dl>');
+        expect(String(page._sent)).not.toContain('Refused on read');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('a display field that is not title-typed (a lookup as nameField) shows the object\'s label only, never the id it serves', async () => {
+      const claimId = await titledClaim('Referenced claim');
+      const trip = await engine.insert('trip', { claim_ref: claimId, organization_id: ORG }, { context: SYS } as never);
+      const tripId = String(trip.id);
+      const fetched = await engine.findOne('trip', { where: { id: tripId } }, { context: OWNER } as never);
+      expect(fetched?.claim_ref, 'the lookup serves the bare foreign id').toBe(claimId);
+      const grant = await files.createUploadLinkAs('trip', tripId, { field: 'ticket' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      for (const [headers, copy] of [[EN, en], [ZH, zh]] as const) {
+        const page = await openIn(token, headers);
+        expect(page._status).toBe(200);
+        const html = String(page._sent);
+        expect(html).toContain(`<dl>${row(copy.recordRow, copy.recordOfObject('Trip'))}${row(copy.goesIntoRow, copy.intoField('Ticket'))}</dl>`);
+        expect(html).not.toContain(claimId);
+        expect(html).not.toContain(tripId);
+        expect(html).not.toContain('Referenced claim');
+        expect(JSON.stringify(page._headers)).not.toContain(claimId);
+      }
+    });
+
     it('opening the page writes nothing and spends nothing: the link still takes its upload', async () => {
       const id = await titledClaim();
       const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
@@ -1142,11 +1222,15 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
     });
 
     /** Run the page's script on a stubbed DOM; the elements it touched. */
-    const runPage = (html: string, clock: () => number = () => Date.now()) => {
+    const runPage = (
+      html: string,
+      clock: () => number = () => Date.now(),
+      answer: () => Promise<unknown> = async () => ({ ok: true, json: async () => ({ success: true, data: { fileId: 'f1' } }) }),
+    ) => {
       const script = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html)?.[1];
       expect(script, 'the page carries its upload script').toBeTruthy();
       const handlers: Record<string, () => void> = {};
-      const timers: Array<{ fn: () => void; ms: number }> = [];
+      const timers: Array<{ fn: () => void; ms: number; cleared?: boolean }> = [];
       let fetched = 0;
       const el = (id: string) => ({
         id, disabled: id === 'send', textContent: id === 'expires' ? 'SERVER TEXT' : '',
@@ -1162,8 +1246,9 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
         Date: BrowserDate,
         document: { getElementById: (id: string) => els[id] },
         location: { pathname: '/api/v1/storage/upload-links/t' },
-        fetch: async () => { fetched += 1; return { ok: true, json: async () => ({ success: true, data: { fileId: 'f1' } }) }; },
-        setTimeout: (fn: () => void, ms: number) => { timers.push({ fn, ms }); },
+        fetch: async () => { fetched += 1; return answer(); },
+        setTimeout: (fn: () => void, ms: number) => timers.push({ fn, ms }) - 1,
+        clearTimeout: (handle: number) => { if (timers[handle]) timers[handle].cleared = true; },
       });
       return { els, handlers, timers, fetched: () => fetched };
     };
@@ -1216,6 +1301,52 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       open.timers[0].fn();
       expect(open.els.status.textContent).toBe(zh.expired);
       expect(open.els.send.disabled).toBe(true);
+    });
+
+    it('a file that landed is never followed by "expired": the timer stops once Send is pressed', async () => {
+      const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+      let browserNow = Date.now();
+      const end = browserNow + 60_000;
+      const done = runPage(render(new Date(end).toISOString(), browserNow, en), () => browserNow);
+      expect(done.timers).toHaveLength(1);
+      done.handlers['send:click']!();
+      expect(done.timers[0].cleared, 'Send stops the timer').toBe(true);
+      await settle();
+      expect(done.els.status.textContent).toBe(en.attached);
+      // The moment passes with the page still open, and the timer fires anyway (a browser that runs a cleared one late).
+      browserNow = end + 1_000;
+      done.timers[0].fn();
+      expect(done.els.status.textContent).toBe(en.attached);
+      done.handlers['file:change']!();
+      expect(done.els.status.textContent).toBe(en.attached);
+      // A send still running at the moment is not talked over: its answer is the line.
+      browserNow = Date.now();
+      const late = browserNow + 60_000;
+      let land!: (value: unknown) => void;
+      const running = runPage(render(new Date(late).toISOString(), browserNow, en), () => browserNow,
+        () => new Promise((resolve) => { land = resolve; }));
+      running.handlers['send:click']!();
+      expect(running.els.status.textContent).toBe(en.uploading);
+      browserNow = late + 1_000;
+      running.timers[0].fn();
+      expect(running.els.status.textContent).toBe(en.uploading);
+      land({ ok: true, json: async () => ({ success: true, data: { fileId: 'f2' } }) });
+      await settle();
+      expect(running.els.status.textContent).toBe(en.attached);
+      // A send that fails while the link has time left re-arms the timer; the moment then says so.
+      browserNow = Date.now();
+      const later = browserNow + 60_000;
+      const failed = runPage(render(new Date(later).toISOString(), browserNow, en), () => browserNow,
+        async () => ({ ok: false, json: async () => ({ success: false }) }));
+      failed.handlers['send:click']!();
+      await settle();
+      expect(failed.els.status.textContent).toBe(en.failed);
+      expect(failed.timers).toHaveLength(2);
+      expect(failed.timers[1].cleared).toBeUndefined();
+      browserNow = later + 1_000;
+      failed.timers[1].fn();
+      expect(failed.els.status.textContent).toBe(en.expired);
+      expect(failed.els.send.disabled).toBe(true);
     });
   });
 

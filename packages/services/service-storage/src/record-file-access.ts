@@ -16,6 +16,7 @@ import {
   FILE_REFERENCE_TYPES,
   RAW_FILE_VALUES_CONTEXT_KEY,
   isFileIdToken,
+  isTitleEligible,
   resolveDisplayField,
   type DroppedFieldsEvent,
 } from '@objectstack/spec/data';
@@ -1215,7 +1216,13 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
    *  - **The title** is the object's display field (`resolveDisplayField`,
    *    ADR-0079) as that read serves it, shown only when the security service
    *    answers it queryable for that user (readable and not masked, the
-   *    `getQueryableFields` rule); never the id, and never a blank.
+   *    `getQueryableFields` rule); never the id, and never a blank. An
+   *    explicit `nameField` is honoured even when it is not title-typed, so
+   *    the column must also be title-eligible (`isTitleEligible`, or the
+   *    autonumber primary) and declare no masking rule, the gate the
+   *    engine's own title disclosure applies: a lookup, user or select
+   *    display field serves a foreign id or a machine value, and the row
+   *    then shows the object's label only.
    *  - **The field's label** only when the field is readable for that user
    *    (`getReadableFields`). A security service that cannot answer either
    *    question shows less, never more. No security service: no field-level
@@ -1259,7 +1266,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
 
     try {
       const schema = engine.getObject?.(state.object) as
-        | { label?: unknown; fields?: Record<string, { label?: unknown }> }
+        | { label?: unknown; fields?: Record<string, { label?: unknown; type?: string; maskingRule?: unknown }> }
         | undefined;
       const labels = this.labelsIn(schema, state.object, state.field, lang);
       const names: UploadLinkNames = {};
@@ -1267,7 +1274,11 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
         names.objectLabel = labels.objectLabel;
         const titleField = resolveDisplayField(schema as never);
         const title = record && titleField ? titleOf(record[titleField], state.record_id as string) : undefined;
-        if (title !== undefined && titleField !== 'id' && titleField !== '_id') {
+        const titleDef = titleField ? schema?.fields?.[titleField] : undefined;
+        const titleTyped = !!titleDef
+          && (isTitleEligible(titleDef as never) || titleDef.type === 'autonumber')
+          && titleDef.maskingRule == null;
+        if (title !== undefined && titleTyped && titleField !== 'id' && titleField !== '_id') {
           if (await this.servedUnmasked(state.object, titleField as string, user)) names.recordTitle = title;
         }
       }
