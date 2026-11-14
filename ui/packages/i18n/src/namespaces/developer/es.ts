@@ -222,21 +222,21 @@ const es = {
     },
     codex: {
       body: 'En la app de Codex: Ajustes → Servidores MCP → Añadir servidor y rellena:',
-      hint: 'Guarda, reinicia cuando se te pida y haz clic en Authenticate junto a objectstack para iniciar sesión en el navegador. Escribe /mcp en el cuadro de mensaje para comprobar la conexión. Si tu versión no ofrece inicio de sesión en el navegador, añade la cabecera Authorization: Bearer <clave API> (crea una en «Avanzado: scripts y CI», abajo).',
+      hint: 'Guarda, reinicia cuando se te pida y haz clic en Authenticate junto a objectstack para iniciar sesión en el navegador. Escribe /mcp en el cuadro de mensaje para comprobar la conexión. Si tu versión no ofrece inicio de sesión en el navegador, añade la cabecera Authorization: Bearer <clave API> (crea una en «Avanzado: scripts y CI», abajo). Con una clave, tu asistente solo trabaja con registros y acciones y no puede crear aplicaciones.',
     },
     workbuddy: {
       body: 'Conectores → Conector personalizado → Configurar MCP y fusiona esta entrada en mcpServers (se guarda en ~/.workbuddy/mcp.json):',
-      hint: 'Guarda y haz clic en Confiar en el conector objectstack; no se activa hasta que confíes en él. Si tu versión no muestra el inicio de sesión, añade la cabecera Authorization: Bearer <clave API> (crea una en «Avanzado: scripts y CI», abajo).',
+      hint: 'Guarda y haz clic en Confiar en el conector objectstack; no se activa hasta que confíes en él. Si tu versión no muestra el inicio de sesión, añade la cabecera Authorization: Bearer <clave API> (crea una en «Avanzado: scripts y CI», abajo). Con una clave, tu asistente solo trabaja con registros y acciones y no puede crear aplicaciones.',
     },
     doubao: {
       title: 'Doubao Work',
       body: 'Habilidades · Conectores → Nuevo → Nuevo conector personalizado y rellena:',
-      hint: 'Inicia sesión en el navegador cuando se te pida. Si no aparece el inicio de sesión, añade la cabecera personalizada Authorization: Bearer <clave API> (crea una en «Avanzado: scripts y CI», abajo). Las tareas que se ejecutan en la nube requieren un despliegue accesible por HTTPS público.',
+      hint: 'Inicia sesión en el navegador cuando se te pida. Si no aparece el inicio de sesión, añade la cabecera personalizada Authorization: Bearer <clave API> (crea una en «Avanzado: scripts y CI», abajo). Con una clave, tu asistente solo trabaja con registros y acciones y no puede crear aplicaciones. Las tareas que se ejecutan en la nube requieren un despliegue accesible por HTTPS público.',
     },
     qwenwork: {
       title: 'QwenWork',
       body: 'Extensiones → Conectores → + Añadir → Pegar configuración JSON:',
-      hint: 'O añádelo a mano como Streamable HTTP con esta URL. Si tu versión no ofrece inicio de sesión en el navegador, añade la cabecera Authorization: Bearer <clave API> (crea una en «Avanzado: scripts y CI», abajo).',
+      hint: 'O añádelo a mano como Streamable HTTP con esta URL. Si tu versión no ofrece inicio de sesión en el navegador, añade la cabecera Authorization: Bearer <clave API> (crea una en «Avanzado: scripts y CI», abajo). Con una clave, tu asistente solo trabaja con registros y acciones y no puede crear aplicaciones.',
     },
     client: {
       title: '¿Qué asistente de IA usas?',
@@ -255,7 +255,7 @@ const es = {
     apiKey: {
       title: 'Claves API',
       badge: 'headless',
-      body: 'Para CI, scripts y agentes sin navegador. La clave actúa como usted — trátela como una contraseña. Se muestra UNA sola vez.',
+      body: 'Para CI, scripts y agentes sin navegador. La clave actúa como usted — trátela como una contraseña. Un asistente de IA conectado con una clave solo trabaja con registros y acciones: no puede crear aplicaciones. Se muestra UNA sola vez.',
       namePlaceholder: 'Nombre de la clave (p. ej. ci-agent)',
       mint: 'Crear clave',
       confirmTitle: '¿Crear la clave API «{{name}}»?',

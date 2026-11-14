@@ -222,21 +222,21 @@ const pt = {
     },
     codex: {
       body: 'No app do Codex: Configurações → Servidores MCP → Adicionar servidor e preencha:',
-      hint: 'Salve, reinicie quando solicitado e clique em Authenticate ao lado de objectstack para entrar pelo navegador. Digite /mcp na caixa de mensagem para verificar a conexão. Se a sua versão não oferecer login pelo navegador, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma em “Avançado: scripts e CI”, abaixo).',
+      hint: 'Salve, reinicie quando solicitado e clique em Authenticate ao lado de objectstack para entrar pelo navegador. Digite /mcp na caixa de mensagem para verificar a conexão. Se a sua versão não oferecer login pelo navegador, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma em “Avançado: scripts e CI”, abaixo). Com uma chave, seu assistente só trabalha com registros e ações e não pode criar aplicativos.',
     },
     workbuddy: {
       body: 'Conectores → Conector personalizado → Configurar MCP e mescle esta entrada em mcpServers (salva em ~/.workbuddy/mcp.json):',
-      hint: 'Salve e clique em Confiar no conector objectstack; ele só fica ativo depois de confiável. Se a sua versão não mostrar o login, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma em “Avançado: scripts e CI”, abaixo).',
+      hint: 'Salve e clique em Confiar no conector objectstack; ele só fica ativo depois de confiável. Se a sua versão não mostrar o login, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma em “Avançado: scripts e CI”, abaixo). Com uma chave, seu assistente só trabalha com registros e ações e não pode criar aplicativos.',
     },
     doubao: {
       title: 'Doubao Work',
       body: 'Habilidades · Conectores → Novo → Novo conector personalizado e preencha:',
-      hint: 'Entre pelo navegador quando solicitado. Se o login não aparecer, adicione o cabeçalho personalizado Authorization: Bearer <chave de API> (crie uma em “Avançado: scripts e CI”, abaixo). Tarefas executadas na nuvem exigem uma implantação acessível por HTTPS público.',
+      hint: 'Entre pelo navegador quando solicitado. Se o login não aparecer, adicione o cabeçalho personalizado Authorization: Bearer <chave de API> (crie uma em “Avançado: scripts e CI”, abaixo). Com uma chave, seu assistente só trabalha com registros e ações e não pode criar aplicativos. Tarefas executadas na nuvem exigem uma implantação acessível por HTTPS público.',
     },
     qwenwork: {
       title: 'QwenWork',
       body: 'Extensões → Conectores → + Adicionar → Colar configuração JSON:',
-      hint: 'Ou adicione manualmente como Streamable HTTP com esta URL. Se a sua versão não oferecer login pelo navegador, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma em “Avançado: scripts e CI”, abaixo).',
+      hint: 'Ou adicione manualmente como Streamable HTTP com esta URL. Se a sua versão não oferecer login pelo navegador, adicione o cabeçalho Authorization: Bearer <chave de API> (crie uma em “Avançado: scripts e CI”, abaixo). Com uma chave, seu assistente só trabalha com registros e ações e não pode criar aplicativos.',
     },
     client: {
       title: 'Qual assistente de IA você usa?',
@@ -255,7 +255,7 @@ const pt = {
     apiKey: {
       title: 'Chaves de API',
       badge: 'headless',
-      body: 'Para CI, scripts e agentes sem navegador. A chave age como você — trate-a como uma senha. É mostrada UMA única vez.',
+      body: 'Para CI, scripts e agentes sem navegador. A chave age como você — trate-a como uma senha. Um assistente de IA conectado com uma chave só trabalha com registros e ações: não pode criar aplicativos. A chave é mostrada UMA única vez.',
       namePlaceholder: 'Nome da chave (ex. ci-agent)',
       mint: 'Criar chave',
       confirmTitle: 'Criar a chave de API "{{name}}"?',

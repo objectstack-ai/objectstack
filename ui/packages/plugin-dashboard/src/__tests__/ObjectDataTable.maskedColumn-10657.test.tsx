@@ -153,8 +153,9 @@ const SHAPES: Array<{ shape: string; widget: Record<string, unknown>; key: strin
     key: 'API Key',
     token: 'Token',
   },
-  // Auto-derived headers are the humanized keys.
-  { shape: 'auto-derived columns', widget: {}, key: 'Api Key', token: 'Token' },
+  // Auto-derived headers are the fields' declared labels (bundle → declared
+  // `label` → humanized key), so the lookup reads them off the fixture.
+  { shape: 'auto-derived columns', widget: {}, key: FIELDS.api_key.label, token: FIELDS.token.label },
 ];
 
 describe('ObjectDataTable — a masked column is withheld on every table path (objectui#10657)', () => {
