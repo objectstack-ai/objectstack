@@ -57,7 +57,9 @@ export const entry: SemanticMigration = {
     + '⚠️ No D2 conversion: every rewrite that draws something changes what the page shows. '
     + '⚠️ A page row already stored this way is served unchanged, with _diagnostics.valid false and the finding '
     + 'at regions, and saving it again is refused until it places a component; until it is fixed or deleted, '
-    + 'the console still draws the blank panel for its object. ADR-0087.',
+    + 'opening a record of its object in the console draws an explanation panel in place of the detail view, '
+    + 'naming the page and the three fixes: place components in a region, make the page kind slotted, or delete '
+    + 'it. ADR-0087.',
   acceptanceCriteria:
     'Grep every page in defineStack pages sources, exported stacks and every page row in sys_metadata for a '
     + 'record page (type record or no type) of kind full (or no kind) whose regions are absent, empty, or hold no '
@@ -66,5 +68,5 @@ export const entry: SemanticMigration = {
     + 'artifact built from those sources before this change. Then objectstack validate '
     + 'reports nothing at pages.N.regions, saving each kept page through the metadata API succeeds, and opening '
     + 'a record of each affected object shows its detail view — the default record page, or the components you '
-    + 'placed — not a blank panel.',
+    + 'placed — not the explanation panel that names the page and its fixes.',
 };

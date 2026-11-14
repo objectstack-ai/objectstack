@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AutomationEngine } from '../engine.js';
 import { registerHttpNodes } from './http-nodes.js';
+import { registerTryCatchNode } from './index.js';
 
 function createTestLogger() {
     return {
@@ -311,6 +312,85 @@ describe('http (canonical node) — a failed call names its host and cause', () 
             expect(result.error).toMatch(/http: boom \u2014 api\.test$/);
         } finally {
             vi.unstubAllGlobals();
+        }
+    });
+});
+
+// Ruling 6810500711, letter D: the record save never waits on an external
+// system. A durable `http` node with no messaging HTTP outbox wired used to
+// fall back to the inline call on every path, so on a run after a record
+// change a retry around it held the save through the whole backoff ladder.
+// On the save path (the record-change trigger's after-phase events, which a
+// subflow child inherits) the fallback now sends the request once, in the
+// background, and the run neither waits for it nor sees its outcome.
+describe('durable http with no outbox on the save path', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    function retriedDurableFlow() {
+        const flow = httpFlow('http', { url: 'https://example.test/hook', durable: true });
+        return {
+            ...flow,
+            nodes: [
+                flow.nodes[0],
+                {
+                    id: 'guard', type: 'try_catch' as const, label: 'Guard',
+                    config: {
+                        retry: { maxRetries: 3, backoffMs: 1000 },
+                        try: { nodes: [flow.nodes[1]], edges: [] },
+                    },
+                },
+                flow.nodes[2],
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'guard' },
+                { id: 'e2', source: 'guard', target: 'end' },
+            ],
+        };
+    }
+
+    function rig() {
+        const logger = { ...createTestLogger(), warn: vi.fn(), error: vi.fn() };
+        const ctx = { ...createCtx({ isHttpDeliveryReady: () => false }), logger };
+        const engine = new AutomationEngine(createTestLogger());
+        registerHttpNodes(engine, ctx);
+        registerTryCatchNode(engine, ctx);
+        engine.registerFlow('http_flow', retriedDurableFlow());
+        return { engine, logger };
+    }
+
+    it.each(['afterInsert', 'afterUpdate', 'afterDelete'])(
+        'on %s the run does not wait: one background send, no retry ladder, and a failure is logged at error',
+        async (event) => {
+            let fail!: (e: Error) => void;
+            const fetchMock = vi.fn(() => new Promise((_resolve, reject) => { fail = reject; }));
+            vi.stubGlobal('fetch', fetchMock);
+            const { engine, logger } = rig();
+
+            const result = await engine.execute('http_flow', { event, object: 'lead', record: { id: 'l1' } });
+            expect(result.success, 'the run completes while the request is still in flight').toBe(true);
+            expect(fetchMock).toHaveBeenCalledOnce();
+            expect(logger.warn.mock.calls.map((c: unknown[]) => String(c[0])).join('\n'))
+                .toContain('sent once in the background');
+
+            fail(new Error('connect ECONNREFUSED'));
+            await vi.waitFor(() => expect(logger.error).toHaveBeenCalledOnce());
+            expect(String(logger.error.mock.calls[0][0])).toContain('failed and is lost');
+            expect(fetchMock, 'nothing retries the background send').toHaveBeenCalledOnce();
+        },
+    );
+
+    it('CONTROL: off the save path the fallback stays inline, so a retry around it re-runs it', async () => {
+        vi.useFakeTimers();
+        try {
+            const fetchMock = vi.fn(async () => { throw new Error('connect ECONNREFUSED'); });
+            vi.stubGlobal('fetch', fetchMock);
+            const { engine } = rig();
+            const run = engine.execute('http_flow', { event: 'beforeUpdate', object: 'lead', record: { id: 'l1' } });
+            await vi.runAllTimersAsync();
+            await run;
+            expect(fetchMock, 'one attempt plus three retries').toHaveBeenCalledTimes(4);
+        } finally {
+            vi.useRealTimers();
         }
     });
 });

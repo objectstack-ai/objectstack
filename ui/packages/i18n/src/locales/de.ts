@@ -2698,6 +2698,10 @@ const de = {
     },
     login: {
       signingIn: "Sie werden angemeldet…",
+      directSignIn: {
+        description: "Melden Sie sich mit dem Single Sign-on Ihrer Organisation an.",
+        retry: "Mit Single Sign-on fortfahren",
+      },
       ssoHandoff: "Weiter zu {{target}}",
       devAdminHint: {
         title: "Lokale Entwicklungsinstanz",
@@ -2721,6 +2725,9 @@ const de = {
         ssoResponseRejected: "Der Anmeldedienst Ihrer Organisation hat eine Antwort gesendet, die dieses System nicht annehmen konnte. Bitten Sie Ihren Administrator, die Single-Sign-on-Einrichtung zu prüfen.",
         ssoStartFromLoginPage: "Die Anmeldung muss auf der Anmeldeseite dieses Systems beginnen. Geben Sie hier Ihre geschäftliche E-Mail-Adresse ein und wählen Sie „Mit SSO anmelden“.",
         ssoTechnicalDetails: "Technische Details",
+        directSignInIncomplete: "Die Anmeldung wurde nicht abgeschlossen: Sie sind vom Single Sign-on zurückgekehrt, ohne angemeldet zu sein. Prüfen Sie, ob dieser Browser Cookies für diese Website zulässt, und versuchen Sie es erneut.",
+        directSignInUnavailable: "Das Single Sign-on für dieses System konnte nicht gestartet werden. Bitten Sie Ihren Administrator, den verwendeten Anmeldedienst zu prüfen.",
+        directSignInRateLimited: "Von diesem Netzwerk wurden gerade zu viele Anmeldungen gestartet. Warten Sie ein paar Sekunden und versuchen Sie es dann erneut.",
         twoFactorInvalidCode: "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
         twoFactorInvalidBackupCode: "Dieser Backup-Code ist ungültig oder wurde bereits verwendet.",
         twoFactorTooManyAttempts: "Zu viele falsche Codes. Melden Sie sich erneut mit Ihrem Passwort an.",

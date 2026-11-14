@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#32851] A `Field.date` whose Postgres column is still an INSTANT column.
+ * [#32851] A `Field.date` whose column is still an INSTANT column.
  *
  * `createColumn` gives a `date` field a `date` column, and the additive sync
  * never revisits an existing column's type. So a field retyped `datetime` →
@@ -37,14 +37,21 @@
  * (it drops the time of day a `datetime` wrote), which is a data change, not a
  * read rule.
  *
- * MySQL needs none of this: its session is pinned to UTC (`withUtcSession`)
- * and `DATETIME` is zone-naive, so a bare day IS UTC midnight on every door.
- * SQLite stores text. Only Postgres records the registry this module reads.
+ * [#33002] SQLite and MySQL keep the instant column too (SQLite's `datetime`,
+ * MySQL's `DATETIME`), and there the zone was never the problem: MySQL's
+ * session is pinned to UTC (`withUtcSession`) and `DATETIME` is zone-naive,
+ * SQLite stores the canonical UTC text. But a row written while the field was
+ * a `datetime` still holds its time of day, so it READ as its day while an
+ * equality filter compared the bare day against the whole instant and missed
+ * it. So a FILTER on such a column reads it as its calendar day on every
+ * dialect ({@link isInstantColumnType} records it, `filterColumnExpr` reads
+ * it); the write keeps the bare day there (it already is UTC midnight), and
+ * the day bucket already answered the day (`strftime` / `date_format`).
  */
 
 /**
- * The registry: per table, the `Field.date` fields whose physical Postgres
- * column is a `timestamp` type. Recorded by the schema sync from the column
+ * The registry: per table, the `Field.date` fields whose physical column is an
+ * instant type ({@link isInstantColumnType}). Recorded by the schema sync from the column
  * catalog it already reads, and EMPTY until a sync has looked — a driver that
  * never synced the table (deferred DDL, a guest datasource) keeps the plain
  * `date` path it had before.
@@ -66,13 +73,25 @@ export function isDateOnInstantColumn(
 }
 
 /**
- * Whether a Postgres catalog type (as knex `columnInfo()` reports it:
- * `timestamp with time zone`, `timestamp without time zone`) holds instants.
- * Only `timestamptz` is recorded: it is the column this driver builds for a
- * `datetime` field, and the one whose bare-day cast reads the session zone.
+ * Whether a catalog type (as knex `columnInfo()` reports it) is the instant
+ * column this driver builds for a `Field.datetime` on `dialect`, the one a
+ * `datetime` → `date` publish leaves under a `date` field:
+ *
+ * - Postgres: `timestamp with time zone` only, whose bare-day cast reads the
+ *   session zone (`timestamp without time zone` is never built here);
+ * - MySQL / MariaDB: `datetime` (and `timestamp`, which an older table may
+ *   carry);
+ * - SQLite: `datetime`, the declared type of the TEXT column holding the
+ *   canonical UTC instant (a `date` field's own column declares `date`).
+ *
+ * Any other dialect records nothing and keeps its `date` path.
  */
-export function isPostgresInstantColumnType(type: unknown): boolean {
-  return String(type ?? '').trim().toLowerCase() === 'timestamp with time zone';
+export function isInstantColumnType(dialect: string, type: unknown): boolean {
+  const t = String(type ?? '').trim().toLowerCase();
+  if (dialect === 'postgres') return t === 'timestamp with time zone';
+  if (dialect === 'mysql') return t === 'datetime' || t === 'timestamp';
+  if (dialect === 'sqlite') return t === 'datetime';
+  return false;
 }
 
 /** The fixed-width calendar day `temporalStorageForm(…, 'date')` answers. */
@@ -89,10 +108,30 @@ export function utcMidnightOfDay(day: unknown): unknown {
 }
 
 /**
- * The SQL that reads an instant column as its UTC calendar day — the day the
- * read door presents. `columnSql` is an identifier placeholder (`??`) or an
- * already-quoted column reference.
+ * The SQL that reads a Postgres instant column as its UTC calendar day — the
+ * day the read door presents. `columnSql` is an identifier placeholder (`??`)
+ * or an already-quoted column reference.
  */
 export function utcCalendarDaySql(columnSql: string): string {
   return `((${columnSql}) AT TIME ZONE 'UTC')::date`;
+}
+
+/**
+ * [#33002] The SQL that reads a MySQL `DATETIME` instant column as its calendar
+ * day. The column is zone-naive and the session is UTC, so `date()` answers the
+ * day the read presents.
+ */
+export function mysqlCalendarDaySql(columnSql: string): string {
+  return `date(${columnSql})`;
+}
+
+/**
+ * [#33002] The SQL that reads a SQLite instant column as its calendar day:
+ * the first ten characters of its canonical UTC text. `canonicalSql` is the
+ * column already put in canonical form (`sqliteCanonicalDatetimeSql`), so a
+ * legacy epoch-millisecond value answers its UTC day too, and a bare day
+ * (`YYYY-MM-DD`, what the write stores after the publish) answers itself.
+ */
+export function sqliteCalendarDaySql(canonicalSql: string): string {
+  return `substr(${canonicalSql}, 1, 10)`;
 }

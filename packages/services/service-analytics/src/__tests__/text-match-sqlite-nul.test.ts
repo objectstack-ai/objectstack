@@ -300,7 +300,7 @@ describe('[#20025] the compiled constructs, per shape', () => {
 
   it('`$startsWith` without U+0000 keeps GLOB and its escaped prefix pattern, byte for byte', async () => {
     const where = { v: { $startsWith: 'a*b' } } as FilterCondition;
-    expect((await native(where)).sql).toContain('WHERE v GLOB $1 GROUP BY');
+    expect((await native(where)).sql).toContain('WHERE "v" GLOB $1 GROUP BY');
     expect((await native(where)).params).toEqual(['a[*]b*']);
     expect((await echo(where)).sql).toContain('WHERE v GLOB $1 GROUP BY');
     expect((await echo(where)).params).toEqual(['a[*]b*']);
@@ -318,7 +318,7 @@ describe('[#20025] the compiled constructs, per shape', () => {
     expect(scope({ v: { $icontains: 'A*b' } } as FilterCondition))
       .toEqual({ sql: 'instr(lower("t"."v"), lower(?)) > 0', params: ['A*b'] });
     const n = await native({ v: { $contains: 'a*b' } } as FilterCondition);
-    expect(n.sql).toContain('WHERE instr(v, $1) > 0 GROUP BY');
+    expect(n.sql).toContain('WHERE instr("v", $1) > 0 GROUP BY');
     expect(n.params).toEqual(['a*b']);
     const e = await echo({ v: { $icontains: 'A*b' } } as FilterCondition);
     expect(e.sql).toContain('WHERE instr(lower(v), lower($1)) > 0 GROUP BY');
@@ -332,7 +332,7 @@ describe('[#20025] the compiled constructs, per shape', () => {
     });
     const n = await native({ v: { $endsWith: 'a*b' } } as FilterCondition);
     expect(n.sql).toContain(
-      'WHERE coalesce(substr(CAST(v AS BLOB), -length(CAST($1 AS BLOB))), CAST(v AS BLOB)) = CAST($2 AS BLOB) GROUP BY',
+      'WHERE coalesce(substr(CAST("v" AS BLOB), -length(CAST($1 AS BLOB))), CAST("v" AS BLOB)) = CAST($2 AS BLOB) GROUP BY',
     );
     expect(n.params).toEqual(['a*b', 'a*b']);
   });

@@ -1599,13 +1599,15 @@ const MAILBOX_FIELD_READERS = Object.freeze({
  *               a `To:` naming no seat (a login is not one), no key line under it, or a key outside the
  *               table: the half-state the text names
  *   unreadable  a known key whose line does not spell its template, runs over the byte cap, or is
- *               followed by a second line of content (the platform's appended footer is not one)
+ *               followed by a second line of content (the platform's appended footer is not one); it
+ *               still carries the `id`, `key` and `to` read before the template failed, so a writer can
+ *               judge WHO a malformed knock is for (post-stamped's triage contract-review refusal)
  *
  * Both lines are read in `keyLineRegex`'s one convention (a bullet, a blockquote, bold or backticks around
  * the key are decoration), the fields are split on ` · `, and a head is 7 to 40 hex as everywhere here.
  *
  * @returns {{ state: 'refused', reason: string, kind?: string, line?: string }
- *          | { state: 'unreadable', kind: string, reason: string, line: string }
+ *          | { state: 'unreadable', id: string, kind: string, key: string, to: string, reason: string, line: string }
  *          | { state: 'read', id: string, kind: string, key: string, numbers: number[] } & Record<string, unknown>}
  */
 export function readMailboxLine(text) {
@@ -1624,12 +1626,12 @@ export function readMailboxLine(text) {
   const m = MAILBOX_KEY_LINE.exec(first);
   if (!m) return { state: 'refused', reason: 'the first line is not a `Request:` or `Notify:` key line', line: quoteLine(first) };
   const kind = m[1];
-  const unreadable = (reason) => ({ state: 'unreadable', kind, reason, line: quoteLine(first) });
   const value = stripValueDecoration(m[2]).replace(/(?:[ \t]|\*\*|`)+$/, '');
   const parts = value.split(MAILBOX_SEPARATOR);
   const word = parts[0].trim().split(/[ \t]+/)[0];
   const entry = MAILBOX_KEYS.find((k) => k.kind === kind && k.key === word) ?? null;
   if (!entry) return { state: 'refused', kind, reason: `\`${kind}: ${word}\` is not a key of the table (\`MAILBOX_KEYS\`; \`--mailbox-keys\` prints it)`, line: quoteLine(first) };
+  const unreadable = (reason) => ({ state: 'unreadable', id: entry.id, kind, key: entry.key, to: to.key, reason, line: quoteLine(first) });
   if (Buffer.byteLength(first, 'utf8') > MAILBOX_LINE_MAX_BYTES) return unreadable(`over ${MAILBOX_LINE_MAX_BYTES} bytes — one event, one line, keys and numbers only`);
   const tail = lines.slice(at + 1).map((l) => l.trim()).filter((l) => l !== '');
   if (!tail.every((l) => FOOTER_RULE.test(l) || FOOTER_LINE.test(l))) return unreadable('more than one line — reasons and readings stay on the card or the PR');
@@ -3011,6 +3013,7 @@ export async function selfTest() {
   t('⛔ a second line of content is unreadable — one event, one line', (() => { const r = readMailboxLine(`${DB.cr}\n\nbecause the reviewer tier was refused twice this round`); return r.state === 'unreadable' && /more than one line/.test(r.reason); })());
   t('⛔ a known key that does not spell its template is unreadable: no head, a 6-hex head, a login GitHub refuses, no mailbox, no lane, a record that is not a number', [`Request: contract-review · PR #26766 · ${HO_HEAD} · x`, 'Request: contract-review · PR #26766 · head 1b03a9 · x', 'Notify: seat-online · domain:skills#2 · -bad-- · mailbox #27120 · patrol none · takes: none', 'Notify: seat-online · domain:skills#2 · os-bill · patrol none · takes: none', 'Request: main-red · Test Core · anchor #27090', 'Notify: contract-review PASS · PR #26766 · record six'].every((l) => { const r = readMailboxLine(MSG(l)); return r.state === 'unreadable' && /does not spell/.test(r.reason); }));
   t('lists: `none` is the empty list, `#a #b` the numbers; a comma, an empty list or a `PR #n` item is unreadable', (() => { const ok = readMailboxLine(MSG('Notify: split · domain:skills#2 · takes: none · leaves: #1 #2')); return ok.state === 'read' && ok.takes.length === 0 && ok.leaves.join() === '1,2' && ['Notify: split · domain:skills#2 · takes: #1, #2 · leaves: none', 'Notify: split · domain:skills#2 · takes: · leaves: none', 'Notify: split · domain:skills#2 · takes: PR #1 · leaves: none'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'); })());
+  t('⭐ an UNREADABLE knock still names the key and the seat it was for — `id`, `key` and `to` read before the template failed, so a writer can judge who a malformed knock is addressed to', (() => { const bad = [readMailboxLine(MSG('Request: contract-review · PR #26766 · x', 'triage')), readMailboxLine(`${MSG(`Request: contract-review · PR #26766 · head ${HO_HEAD} · x`, 'triage#1')}\nsecond line`)]; return bad.every((r) => r.state === 'unreadable' && r.id === 'request:contract-review' && r.key === 'contract-review' && r.kind === 'Request' && r.to === 'triage#1'); })());
   t('the spaces around the ` · ` separator are optional', readMailboxLine(MSG('Request: urgent-triage·#27047·main red')).state === 'read' && readMailboxLine(MSG('Request: urgent-triage ·#27047· main red')).card === 27047);
   t('a seat with no number reads as seat 1 (`triage` → `triage#1`, as `seatKey` spells it), and the `LANE#N` placeholder itself does not', (() => { const r = readMailboxLine(MSG('Notify: split · triage · takes: none · leaves: none')); return r.seat.lane === 'triage' && r.seat.n === 1 && r.seat.key === 'triage#1' && readMailboxLine(MSG('Notify: split · LANE#N · takes: none · leaves: none')).state === 'unreadable'; })());
   t('⭐ a key\'s `LANE#N` field is read with `seatKey` — ONE seat grammar (#27891): a well-formed `domain:X#N` reads as before, carries its canonical `key`, and is read lower-cased', (() => { const r = readMailboxLine(DB.on); const u = readMailboxLine(MSG('Notify: seat-online · Domain:Skills#2 · os-bill · mailbox #27120 · patrol none · takes: none')); return r.state === 'read' && r.seat.key === 'domain:skills#2' && r.seat.lane === 'domain:skills' && r.seat.n === 2 && u.state === 'read' && u.seat.key === 'domain:skills#2'; })());
