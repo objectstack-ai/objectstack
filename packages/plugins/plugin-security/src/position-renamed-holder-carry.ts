@@ -2,8 +2,8 @@
 
 /**
  * [#32983, ruling A1 (record 6841971722); ADR-0150 D7 addendum] A declared
- * position rename carries its HOLDERS — at boot, as the system, in every
- * organization.
+ * position rename carries its HOLDERS — at boot and after a hot install or
+ * upgrade (#33238), as the system, in every organization.
  *
  * ## Why
  *
@@ -87,11 +87,28 @@
  *
  * Not a downgrade path: a version that drops the rename does not carry the
  * holders back. Not a metadata rewrite: Setup-authored bodies that name an
- * old position are not read. Not run on a hot install: a package installed or
- * upgraded into a running kernel is carried at the next boot. It never fails
- * the boot. A row whose write fails is named and skipped, so the rows after it
- * still move; a read that fails ends that claim only, and the rows it moved
- * are said. The other claims always run.
+ * old position are not read. It never fails the boot, nor the install that
+ * announced it. A row whose write fails is named and skipped, so the rows
+ * after it still move; a read that fails ends that claim only, and the rows it
+ * moved are said. The other claims always run.
+ *
+ * ## When it runs
+ *
+ * [#33238] At `kernel:bootstrapped`, and again on every `metadata:reloaded`
+ * after that — the platform's one post-boot re-sync signal, which a hot
+ * marketplace install or upgrade announces once the package is registered
+ * (and a package publish, a per-item publish and an artifact reload too). So
+ * a package installed or upgraded into a running kernel carries its holders
+ * then, not at the next restart. The same judgement runs both times, over
+ * the catalog as it stands; being idempotent, a run with nothing new moves
+ * nothing and writes nothing (`createPositionRenameCarryRuns`).
+ *
+ * A reload heard before the boot run is ignored: during the boot the catalog
+ * is still being filled, and an old name whose holding package has not
+ * registered yet would read as no position at all (condition 2). The boot run
+ * judges it once the catalog is complete. A door that registers positions
+ * without announcing `metadata:reloaded` (the runtime's package install and
+ * enable routes) is still carried at the next boot.
  *
  * ## Its one limit
  *
@@ -582,8 +599,25 @@ const REFUSAL_SENTENCE: Record<PositionRenameRefusal, string> = {
   'switched-off': 'it is switched off, and its holders would come back active under the new name; switch the new position off too, or move them in Setup',
 };
 
-/** What a run says: moves at `info`, every refusal, twin row and left-behind reference at `warn`. */
-export function logPositionRenameCarry(report: PositionRenameCarryReport, logger: PositionRenameCarryLogger): void {
+/**
+ * What a run says: moves at `info`, every refusal, twin row and left-behind
+ * reference at `warn`. With `standing` (the warnings the run before said), a
+ * warning that run already said is not said again, and `said` collects this
+ * run's for the next: a refusal that still stands at the next install is
+ * news once. A move is always said.
+ */
+export function logPositionRenameCarry(
+  report: PositionRenameCarryReport,
+  logger: PositionRenameCarryLogger,
+  standing?: { readonly previous: ReadonlySet<string>; readonly said: Set<string> },
+): void {
+  const warn = (message: string, meta: Record<string, any>): void => {
+    if (standing) {
+      standing.said.add(message);
+      if (standing.previous.has(message)) return;
+    }
+    logger.warn(message, meta);
+  };
   const moved = report.carried.filter((c) => c.rows > 0);
   if (moved.length > 0) {
     logger.info?.(
@@ -594,7 +628,7 @@ export function logPositionRenameCarry(report: PositionRenameCarryReport, logger
   }
   for (const c of report.carried) {
     if (c.alreadyHolds.length === 0) continue;
-    logger.warn(
+    warn(
       `[security] position rename '${c.from}' → '${c.to}': ${c.alreadyHolds.length} holder row(s) were left on '${c.from}' because the same `
         + `user already holds '${c.to}' in that organization; each grants nothing now. Review them in Setup before removing either row: `
         + `when the row on '${c.to}' is a time-boxed delegation, the old row is the lasting assignment and is the one to re-point: ${listIds(c.alreadyHolds.map((r) => r.id))}.`,
@@ -602,7 +636,7 @@ export function logPositionRenameCarry(report: PositionRenameCarryReport, logger
     );
   }
   for (const f of report.failed) {
-    logger.warn(
+    warn(
       `[security] position rename '${f.from}' → '${f.to}' (${holderLabel(f.packageId)}) did not finish: ${f.rows} holder row(s) were moved `
         + `(${Object.entries(f.byOrganization).map(([org, n]) => `${org || '(no organization)'}: ${n}`).join(', ') || 'none'})`
         + (f.failedRows.length > 0 ? `, and ${f.failedRows.length} row(s) could not be written (${f.error}): ${listIds(f.failedRows.map((r) => r.id))}` : `, then a read failed (${f.error})`)
@@ -611,14 +645,14 @@ export function logPositionRenameCarry(report: PositionRenameCarryReport, logger
     );
   }
   for (const r of report.refused) {
-    logger.warn(
+    warn(
       `[security] position rename '${r.from}' → '${r.to}' (${holderLabel(r.packageId)}) was not carried: ${REFUSAL_SENTENCE[r.reason]} (${r.detail}). `
         + `Holders of '${r.from}' were left as they are.`,
       { refused: r },
     );
   }
   for (const l of report.leftBehind) {
-    logger.warn(
+    warn(
       `[security] position renames are carried for holders only: ${l.object}.${l.column} still names an old position — `
         + Object.entries(l.byName).map(([name, at]) => `'${name}' (${at.rows} row(s)${at.organizations.length > 0 ? ` in ${at.organizations.length} organization(s)` : ''})`).join(', ')
         + '. Re-point each in Setup to the renamed position.',
@@ -626,7 +660,28 @@ export function logPositionRenameCarry(report: PositionRenameCarryReport, logger
     );
   }
   for (const n of report.notRead) {
-    logger.warn(`[security] position renames: ${n.object} could not be read, so what in it still names an old position is not known for this boot.`, { error: n.error });
+    warn(`[security] position renames: ${n.object} could not be read, so what in it still names an old position is not known for this run.`, { error: n.error });
+  }
+}
+
+/** One run: carry, log, never throw past here — a failure is said and a later run tries again. */
+async function runCarry(
+  engine: Partial<PositionRenameCarryEngine> | undefined,
+  deps: PositionRenameCarryDeps | (() => PositionRenameCarryDeps),
+  logger: PositionRenameCarryLogger,
+  retry: string,
+  standing?: { readonly previous: ReadonlySet<string>; readonly said: Set<string> },
+): Promise<PositionRenameCarryReport | undefined> {
+  if (!engine || typeof engine.find !== 'function' || typeof engine.update !== 'function') return undefined;
+  try {
+    const report = await carryRenamedPositionHolders(engine as PositionRenameCarryEngine, typeof deps === 'function' ? deps() : deps);
+    logPositionRenameCarry(report, logger, standing);
+    return report;
+  } catch (e: unknown) {
+    const message = `[security] position renames: the holder carry did not finish — holders still on an old name keep it until ${retry} tries again.`;
+    standing?.said.add(message);
+    if (!standing?.previous.has(message)) logger.warn(message, { error: e instanceof Error ? e.message : String(e) });
+    return undefined;
   }
 }
 
@@ -639,16 +694,52 @@ export async function carryRenamedPositionHoldersAtBoot(
   deps: PositionRenameCarryDeps,
   logger: PositionRenameCarryLogger,
 ): Promise<PositionRenameCarryReport | undefined> {
-  if (!engine || typeof engine.find !== 'function' || typeof engine.update !== 'function') return undefined;
-  try {
-    const report = await carryRenamedPositionHolders(engine as PositionRenameCarryEngine, deps);
-    logPositionRenameCarry(report, logger);
-    return report;
-  } catch (e: unknown) {
-    logger.warn(
-      '[security] position renames: the holder carry did not finish — holders still on an old name keep it until the next boot tries again.',
-      { error: e instanceof Error ? e.message : String(e) },
-    );
-    return undefined;
-  }
+  return runCarry(engine, deps, logger, 'the next boot');
+}
+
+/** The carry's two moments in one running kernel (module doc, "When it runs"). */
+export interface PositionRenameCarryRuns {
+  /** `kernel:bootstrapped`: the first run, over the complete catalog. Opens {@link afterReload}. */
+  atBoot(): Promise<PositionRenameCarryReport | undefined>;
+  /**
+   * `metadata:reloaded`: the same run again, once {@link atBoot} has started
+   * (`undefined`, reading nothing, before that). A warning the run before
+   * already said is not said again.
+   */
+  afterReload(): Promise<PositionRenameCarryReport | undefined>;
+}
+
+/**
+ * [#33238] Wire the carry once per plugin start: the boot run, then one run
+ * per post-boot reload, one at a time — a reload that lands while a run is
+ * going waits for it, so two runs never judge the same rows at once.
+ * `deps` is read at each run, so each reads the catalog as it stands then.
+ */
+export function createPositionRenameCarryRuns(
+  engine: Partial<PositionRenameCarryEngine> | undefined,
+  deps: () => PositionRenameCarryDeps,
+  logger: PositionRenameCarryLogger,
+): PositionRenameCarryRuns {
+  let booted = false;
+  let previous: ReadonlySet<string> = new Set();
+  let queue: Promise<unknown> = Promise.resolve();
+  const run = (retry: string): Promise<PositionRenameCarryReport | undefined> => {
+    const next = queue.then(async () => {
+      const said = new Set<string>();
+      try {
+        return await runCarry(engine, deps, logger, retry, { previous, said });
+      } finally {
+        previous = said;
+      }
+    });
+    queue = next.catch(() => undefined);
+    return next;
+  };
+  return {
+    atBoot: () => {
+      booted = true;
+      return run('the next boot');
+    },
+    afterReload: () => (booted ? run('the next install, publish or boot') : Promise.resolve(undefined)),
+  };
 }
