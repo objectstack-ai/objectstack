@@ -680,6 +680,37 @@ describe('declared webhooks — one declaration per (package, name) slot (ADR-01
         await enqueuer.stop();
     });
 
+    // [#33016 S1] Two co-owners of one namespace (a state install refuses and
+    // the cold boot seals with a warning): both are served and both dispatched,
+    // in either registration order. The activation door's `?package=` switches
+    // each (`catalog-activation-door.test.ts`).
+    for (const order of [[A, B], [B, A]] as const) {
+        it(`two co-owners of one namespace, registered ${order.map((p) => p.split('.').pop()).join(', ')}: both dispatched under their own ids, the bare read refused naming both`, async () => {
+            const registry = new SchemaRegistry();
+            registry.logLevel = 'silent';
+            for (const id of order) {
+                // One artifact delivers both, so they co-own the namespace (ADR-0130 D1).
+                registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: 'shared' } as never, 'code',
+                    undefined, { packageIds: [...order] });
+                registry.registerItem('webhook', { ...(id === A ? ALPHA : BETA) }, 'name' as never, id);
+            }
+            const engine = engineOver(registry);
+            const { enqueuer, realtime, calls, declaredWebhooks } = await startEnqueuer(engine);
+            await realtime.publish(taskCreated());
+            await flush();
+            expect(calls.map((c) => [c.refId, c.url]).sort()).toEqual([
+                [declaredWebhookRefId('task_changed', A), 'https://hooks.example/alpha'],
+                [declaredWebhookRefId('task_changed', B), 'https://hooks.example/beta'],
+            ]);
+            expect((await declaredWebhooks.list()).map((d) => [d.packageId, d.namespace]).sort())
+                .toEqual([[A, 'shared'], [B, 'shared']]);
+            const err = await declaredWebhooks.declaredWebhookNamed('task_changed').then(() => undefined, (e: unknown) => e);
+            expect(err).toBeInstanceOf(DeclaredWebhookAmbiguousError);
+            expect((err as DeclaredWebhookAmbiguousError).refusal.candidates.map((c: any) => c.packageId).sort()).toEqual([A, B]);
+            await enqueuer.stop();
+        });
+    }
+
     it('two holders: the bare by-name read throws the 409 naming both, carrying the refusal; each slot is read exactly', async () => {
         const source = new DeclaredWebhookSource(twoHolders(), undefined);
         const err = await source.declaredWebhookNamed('task_changed').then(() => undefined, (e: unknown) => e);

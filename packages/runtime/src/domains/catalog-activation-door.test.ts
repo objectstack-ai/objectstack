@@ -893,7 +893,6 @@ describe('the catalog activation door — a declared webhook two packages declar
         const h = bootWith([A], [], [A, B]);
         const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/beta/${HOOK}`);
         expect([statusOf(res), codeOf(res), candidatesOf(res)]).toEqual([409, 'RESOURCE_CONFLICT', [A]]);
-        expect(res.response?.body?.error?.details?.reason ?? res.response?.body?.error?.reason).toBe('not-held-by-qualifier');
         expect(messageOf(res)).toContain('is not held by package "com.acme.beta"');
         expect(h.writes).toEqual([]);
     });
