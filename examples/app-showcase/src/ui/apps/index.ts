@@ -164,27 +164,3 @@ export const ShowcaseApp = App.create({
     },
   ],
 });
-
-/**
- * An app that is switched OFF (`active: false`) — the inactive-app fixture.
- *
- * The console's app switcher (the command palette's Switch-app group, and the
- * app menu) lists only apps whose `active` is not false. With every stock app
- * active, nothing on a stock boot can show that filter dropping an app, so the
- * search.command-palette-navigation checklist item's "an inactive app never
- * appears as a switch target" case had no fixture. This app is that fixture:
- * it is registered with the showcase and must never be offered as a target.
- *
- * Its one navigation entry points at an object the showcase app already
- * serves, so the app is complete on its own; it is not meant to be opened.
- */
-export const ShowcaseArchiveApp = App.create({
-  name: 'showcase_archive',
-  label: 'Showcase Archive',
-  description: 'Switched off on purpose: the inactive-app fixture. No app switcher should offer it.',
-  icon: 'archive',
-  active: false,
-  navigation: [
-    { id: 'nav_archived_projects', type: 'object', objectName: 'showcase_project', label: 'Archived Projects', icon: 'folder-kanban' },
-  ],
-});
