@@ -61,6 +61,11 @@ const source = (rel: string) => path.join(REPO_ROOT, rel);
 const THEME_CSS = source('packages/components/src/index.css');
 const RELATED_LIST = source('packages/plugin-detail/src/RelatedList.tsx');
 const ENLARGED_CONTEXT = source('packages/plugin-detail/src/relatedListCompact.ts');
+// The entry names workspace sources by path, never by package name: the e2e
+// type-check program must import no workspace package (it builds nothing first).
+const PLUGIN_GRID = source('packages/plugin-grid/src/index.tsx');
+const FIELDS = source('packages/fields/src/index.tsx');
+const REACT_BINDINGS = source('packages/react/src/index.ts');
 
 /** The record drawer's page width (see the header). */
 const DRAWER_PAGE = 622;
@@ -112,9 +117,9 @@ function entry(): Plugin {
   const code = `
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
-import '@object-ui/plugin-grid';
-import { registerAllFields } from '@object-ui/fields';
-import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
+import ${JSON.stringify(PLUGIN_GRID)};
+import { registerAllFields } from ${JSON.stringify(FIELDS)};
+import { ActionProvider, SchemaRendererProvider } from ${JSON.stringify(REACT_BINDINGS)};
 import { RelatedList } from ${JSON.stringify(RELATED_LIST)};
 import { RelatedListEnlargedContext } from ${JSON.stringify(ENLARGED_CONTEXT)};
 
