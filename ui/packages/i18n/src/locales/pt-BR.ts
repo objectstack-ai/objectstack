@@ -2789,6 +2789,8 @@ const pt = {
         ssoAccountNotInvited: "Sua conta ainda não está configurada neste sistema. Peça ao seu administrador para convidar você.",
         ssoAccountNotLinked: "Já existe uma conta com seu e-mail aqui, mas ela não está conectada ao logon único. Entre de outra forma ou peça ao seu administrador para conectá-la.",
         ssoResponseRejected: "O serviço de login da sua organização enviou uma resposta que este sistema não pôde aceitar. Peça ao seu administrador para verificar a configuração do logon único.",
+        ssoEmailDomainNotAllowed: "Nenhuma conta foi criada: seu endereço de e-mail não pertence a um domínio que o serviço de login da sua organização verificou para este sistema. Peça ao seu administrador para verificar a configuração do logon único.",
+        ssoEmailNotAnAddress: "Nenhuma conta foi criada: o serviço de login da sua organização não enviou um endereço de e-mail utilizável para você. Peça ao seu administrador para verificar a configuração do logon único.",
         ssoStartFromLoginPage: "O login precisa começar pela página de acesso deste sistema. Informe aqui seu e-mail de trabalho e escolha “Entrar com SSO”.",
         ssoTechnicalDetails: "Detalhes técnicos",
         directSignInIncomplete: "O login não foi concluído: você voltou do login único sem estar conectado. Verifique se este navegador permite cookies para este site e tente novamente.",

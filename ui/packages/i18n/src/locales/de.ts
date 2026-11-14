@@ -2724,6 +2724,8 @@ const de = {
         ssoAccountNotInvited: "Ihr Konto ist für dieses System noch nicht eingerichtet. Bitten Sie Ihren Administrator um eine Einladung.",
         ssoAccountNotLinked: "Für Ihre E-Mail-Adresse gibt es hier bereits ein Konto, das aber nicht mit Single Sign-on verbunden ist. Melden Sie sich auf andere Weise an oder bitten Sie Ihren Administrator, es zu verbinden.",
         ssoResponseRejected: "Der Anmeldedienst Ihrer Organisation hat eine Antwort gesendet, die dieses System nicht annehmen konnte. Bitten Sie Ihren Administrator, die Single-Sign-on-Einrichtung zu prüfen.",
+        ssoEmailDomainNotAllowed: "Es wurde kein Konto angelegt: Ihre E-Mail-Adresse gehört zu keiner Domain, die der Anmeldedienst Ihrer Organisation für dieses System verifiziert hat. Bitten Sie Ihren Administrator, die Single-Sign-on-Einrichtung zu prüfen.",
+        ssoEmailNotAnAddress: "Es wurde kein Konto angelegt: Der Anmeldedienst Ihrer Organisation hat keine verwendbare E-Mail-Adresse für Sie gesendet. Bitten Sie Ihren Administrator, die Single-Sign-on-Einrichtung zu prüfen.",
         ssoStartFromLoginPage: "Die Anmeldung muss auf der Anmeldeseite dieses Systems beginnen. Geben Sie hier Ihre geschäftliche E-Mail-Adresse ein und wählen Sie „Mit SSO anmelden“.",
         ssoTechnicalDetails: "Technische Details",
         directSignInIncomplete: "Die Anmeldung wurde nicht abgeschlossen: Sie sind vom Single Sign-on zurückgekehrt, ohne angemeldet zu sein. Prüfen Sie, ob dieser Browser Cookies für diese Website zulässt, und versuchen Sie es erneut.",

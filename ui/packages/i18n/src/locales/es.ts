@@ -2794,6 +2794,8 @@ const es = {
         ssoAccountNotInvited: "Tu cuenta aún no está configurada en este sistema. Pide a tu administrador que te invite.",
         ssoAccountNotLinked: "Ya existe aquí una cuenta con tu correo, pero no está conectada al inicio de sesión único. Inicia sesión de otra forma o pide a tu administrador que la conecte.",
         ssoResponseRejected: "El servicio de inicio de sesión de tu organización envió una respuesta que este sistema no pudo aceptar. Pide a tu administrador que revise la configuración del inicio de sesión único.",
+        ssoEmailDomainNotAllowed: "No se creó ninguna cuenta: tu dirección de correo no pertenece a un dominio que el servicio de inicio de sesión de tu organización haya verificado para este sistema. Pide a tu administrador que revise la configuración del inicio de sesión único.",
+        ssoEmailNotAnAddress: "No se creó ninguna cuenta: el servicio de inicio de sesión de tu organización no envió una dirección de correo utilizable para ti. Pide a tu administrador que revise la configuración del inicio de sesión único.",
         ssoStartFromLoginPage: "El inicio de sesión debe empezar en la página de acceso de este sistema. Introduce aquí tu correo de trabajo y elige «Iniciar sesión con SSO».",
         ssoTechnicalDetails: "Detalles técnicos",
         directSignInIncomplete: "No se completó el inicio de sesión: volviste del inicio de sesión único sin haber iniciado sesión. Comprueba que este navegador permite cookies para este sitio y vuelve a intentarlo.",

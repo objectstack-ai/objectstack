@@ -64,6 +64,18 @@ const ACCESS_DENIED: RefusalCopy = {
     "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
 };
 
+const EMAIL_DOMAIN_NOT_ALLOWED: RefusalCopy = {
+  key: 'auth.login.errors.ssoEmailDomainNotAllowed',
+  defaultValue:
+    "No account was created: your email address isn't at a domain that your organization's sign-in service has verified with this system. Ask your administrator to check the single sign-on setup.",
+};
+
+const EMAIL_NOT_AN_ADDRESS: RefusalCopy = {
+  key: 'auth.login.errors.ssoEmailNotAnAddress',
+  defaultValue:
+    "No account was created: your organization's sign-in service did not send a usable email address for you. Ask your administrator to check the single sign-on setup.",
+};
+
 const GENERIC: RefusalCopy = {
   key: 'auth.login.errors.oauthCallbackFailed',
   defaultValue:
@@ -96,6 +108,15 @@ const GENERIC: RefusalCopy = {
  *    `oauth-authorize-refusal.ts`), and the callback hands it on unchanged.
  *    Its sentence says the same as that provider's own refusal page, and the
  *    page offers the same two ways on ({@link accessDeniedExits}).
+ *  - `EMAIL_DOMAIN_NOT_ALLOWED`: with SSO domain verification on, the
+ *    provider asked for a new account whose email is not at a domain the
+ *    provider has proven (plugin-auth `sso-account-at-proven-domain.ts`).
+ *    Nothing was created, and a second attempt meets the same rule, so the
+ *    sentence sends the person to their administrator, not to try again;
+ *  - `INVALID_EMAIL`: the provider asked for a new account and the sign-in
+ *    resolved to a value that is not an email address (no email attribute or
+ *    claim mapped). Nothing was created; only the administrator can fix the
+ *    mapping.
  *
  * A code missing here keeps the generic sentence.
  */
@@ -109,6 +130,8 @@ const SSO_CALLBACK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
   direct_sign_in_unavailable: DIRECT_SIGN_IN_UNAVAILABLE,
   direct_sign_in_rate_limited: DIRECT_SIGN_IN_RATE_LIMITED,
   access_denied: ACCESS_DENIED,
+  EMAIL_DOMAIN_NOT_ALLOWED: EMAIL_DOMAIN_NOT_ALLOWED,
+  INVALID_EMAIL: EMAIL_NOT_AN_ADDRESS,
 };
 
 /**

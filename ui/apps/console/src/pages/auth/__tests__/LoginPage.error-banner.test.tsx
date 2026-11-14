@@ -126,6 +126,25 @@ describe('LoginPage — a refused single sign-on names its own cause (objectstac
       sentence:
         "Sign-in has to start from this system's login page. Enter your work email here and choose Sign in with SSO.",
     },
+    // plugin-auth `sso-account-at-proven-domain.ts`: an SSO account creation
+    // refused, with the description that module redirects with.
+    {
+      code: 'EMAIL_DOMAIN_NOT_ALLOWED',
+      description:
+        'With SSO domain verification on, an identity provider creates an account only for an email address at a ' +
+        'domain it has proven. Nothing was created.',
+      sentence:
+        "No account was created: your email address isn't at a domain that your organization's sign-in service has verified with this system. Ask your administrator to check the single sign-on setup.",
+    },
+    {
+      code: 'INVALID_EMAIL',
+      description:
+        'An identity provider creates an account only for an email address, and this sign-in resolved to a value that ' +
+        "is not one. Map the provider's email attribute or claim to the one that carries the user's address. " +
+        'Nothing was created.',
+      sentence:
+        "No account was created: your organization's sign-in service did not send a usable email address for you. Ask your administrator to check the single sign-on setup.",
+    },
   ];
 
   for (const { code, description, sentence } of CASES) {
