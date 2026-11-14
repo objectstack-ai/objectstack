@@ -1070,8 +1070,11 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     // App's undeclared de-DE pair row is X's member on X's address, as on
     // main. Counting composite slots only leaves X out, the row binds to the
     // pair, and X's address would lose it: ablation.
+    // [#33131 item 5] X's list and execution list count X's holding the same
+    // way, so they carry the member the exact read serves (FROM: they left it
+    // out when X held the name through its stored row alone).
     for (const holding of ['its own stored row in the bare slot', 'CONTROL: its composite slot'] as const) {
-      it.each([['holding first', true], ['pair row first', false]] as const)(`${holding === 'CONTROL: its composite slot' ? 'CONTROL' : 'UNCHANGED'} — X holds the name through ${holding} (%s): X's address and lists keep the App's undeclared pair row`, async (_order, holdingFirst) => {
+      it.each([['holding first', true], ['pair row first', false]] as const)(`${holding === 'CONTROL: its composite slot' ? 'CONTROL' : '[#33131] exact read UNCHANGED, lists now agree'} — X holds the name through ${holding} (%s): X's address and lists keep the App's undeclared pair row`, async (_order, holdingFirst) => {
         const xEn = { name: 'welcome', label: 'suitex en-US', locale: 'en-US', subject: 'suitex en-US', bodyHtml: '<p>x</p>' };
         const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
         const registerHolding = () => {
@@ -1087,14 +1090,53 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
         expect(registry.overlayRowBinding('email_template', 'welcome', { ...pairDe, _packageId: PAIR }), 'the adoption counts X as the exact read does').toBe(X);
         expect(labelOf(await read(X, 'de-DE'))).toBe('pair de-DE');
         expect(labelOf(await read(X, 'en-US'))).toBe('suitex en-US');
-        // The lists are pinned for the composite slot only: with X holding through its stored row alone, X's
-        // lists leave the row out on main and here alike (the list door's own count, outside this card).
-        if (holding === 'CONTROL: its composite slot') {
-          expect(await listed(X)).toContain('pair de-DE');
-          expect(await forSend(X)).toContain('pair de-DE');
-        }
+        // [#33131 item 5] …and X's list and execution list carry it, through either holding: the list counts
+        // X's holding as the exact read does (FROM, with X holding through its stored row alone: both lists
+        // were `['suitex en-US']`, the exact read serving a member its lists left out).
+        expect(await listed(X)).toEqual(['pair de-DE', 'suitex en-US']);
+        expect(await forSend(X)).toEqual(['pair de-DE', 'suitex en-US']);
       });
     }
+
+    // [#33131 item 5] The list's widened count is the exact read's: a second holder of the name, or a row that
+    // declares another base, still leaves the row out of X's list, as X's exact read refuses or declines it.
+    it.each([['holding first', true], ['pair row first', false]] as const)('[#33131] CONTROL — X holds the name through its own stored row beside a second holder Y (%s): X\'s exact read refuses the undeclared pair row naming both, and X\'s lists leave it out', async (_order, holdingFirst) => {
+      const xEn = { name: 'welcome', label: 'suitex en-US', locale: 'en-US', subject: 'suitex en-US', bodyHtml: '<p>x</p>' };
+      const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
+      const registerHolding = () => {
+        rows.push({ id: 'row_x', type: 'email_template', name: 'welcome', state: 'active', package_id: X, bundle_member: 'en-US', metadata: JSON.stringify(xEn) });
+        registry.registerItem('email_template', { ...xEn, _packageId: X, _provenance: 'org' }, 'name' as never);
+        tpl('en-US', Y);
+      };
+      const registerPairRow = () => {
+        rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+        registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+      };
+      if (holdingFirst) { registerHolding(); registerPairRow(); } else { registerPairRow(); registerHolding(); }
+      const err = await refusalOf(() => read(X, 'de-DE'));
+      expect([err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()]).toEqual([409, [X, Y]]);
+      expect(await listed(X)).toEqual(['suitex en-US']);
+      expect(await forSend(X)).toEqual(['suitex en-US']);
+    });
+
+    it.each([['holding first', true], ['pair row first', false]] as const)('[#33131] CONTROL — X holds the name through its own stored row, and the pair row declares Y (%s): neither X\'s exact read nor X\'s lists serve it', async (_order, holdingFirst) => {
+      const xEn = { name: 'welcome', label: 'suitex en-US', locale: 'en-US', subject: 'suitex en-US', bodyHtml: '<p>x</p>' };
+      const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>', overrides: { package: Y } };
+      const registerHolding = () => {
+        rows.push({ id: 'row_x', type: 'email_template', name: 'welcome', state: 'active', package_id: X, bundle_member: 'en-US', metadata: JSON.stringify(xEn) });
+        registry.registerItem('email_template', { ...xEn, _packageId: X, _provenance: 'org' }, 'name' as never);
+      };
+      const registerPairRow = () => {
+        rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+        registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+      };
+      if (holdingFirst) { registerHolding(); registerPairRow(); } else { registerPairRow(); registerHolding(); }
+      let atX: unknown;
+      try { atX = labelOf(await read(X, 'de-DE')); } catch (e) { atX = (e as { status?: number }).status; }
+      expect(atX).not.toBe('pair de-DE');
+      expect(await listed(X)).toEqual(['suitex en-US']);
+      expect(await forSend(X)).toEqual(['suitex en-US']);
+    });
 
   });
 
