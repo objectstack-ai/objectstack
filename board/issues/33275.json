@@ -1,0 +1,35 @@
+{
+  "number": 33275,
+  "kind": "issue",
+  "title": "checklist: re-point three approvals clauses that still expect 403 where a non-reader gets 404 REQUEST_NOT_FOUND (sibling half of #33060)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T15:20:24Z",
+  "updated_at": "2026-11-14T18:07:52Z",
+  "closed_at": "2026-11-14T18:06:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33275",
+  "body": "domain:devx#2 · sunhaolin · session_017xRBcRZn9wGkMSrznVX4JS\n\nFiling gate: ① a checklist assertion defect: the item will fail a QA run while the product is right (#32997 rule 9).\nThis card carries the sibling half of #33060. #33060 keeps `approvals.record-page-decisions` acceptance[4], re-pointed by PR #33273.\n\n**Business reason:** QA runs on the approvals area score these three clauses as FAIL against a product that is correct. The approvals door answers 404 `REQUEST_NOT_FOUND` to anyone who cannot read the request, so its existence never leaks. Each false FAIL costs a release sweep a re-judgement.\n**Reader:** the `domain:devx` seat's next claim (a text-only re-point, the same shape as PR #33273).\n**Dedupe (open and closed):** `\"request-page-reply-and-reader-visibility\"` → 20 hits; `\"quorum-m-of-n\" REQUEST_NOT_FOUND` → 10; `\"decision-action-matrix\" REQUEST_NOT_FOUND` → 10. The open hits are #33032, #33060 and #32908: the first two only quote these items, and the third is the sweep anchor. No card re-points them.\n\n## The three clauses\nThese readings come from source in PR #33273's Acceptance notes and were not driven live. The mechanism is `ApprovalService.refuseUnreadableRequest` in `packages/plugins/plugin-approvals/src/approval-service.ts`. Decide, recall, send back, resubmit, reassign, remind, request info and comment all ask it before the slate check. Participants (submitter, current approver, past actor) and the override actor can read the request. No showcase object declares `enable.approvalsVisibleToReaders`.\n\n1. `approvals.request-page-reply-and-reader-visibility` acceptance[1] (rev 5): **stale.** The org member, who is neither approver nor submitter, cannot read the request, so the comment POST answers 404 `REQUEST_NOT_FOUND`, not 403 `FORBIDDEN`.\n2. `approvals.quorum-m-of-n` steps[4] (rev 9): **half stale.** Ada's repeat-actor 403 holds, because a past actor is a reader. \"A user holding none of the routed positions is refused the same way\" does not: that non-participant gets 404.\n3. `approvals.decision-action-matrix` acceptance[6] (rev 10): **under-specified.** \"Recall attempted by a non-submitter is FORBIDDEN\" holds for a reader such as a pending approver. A non-participant gets 404. Name the persona, or state both answers. negative[2] is not stale.\n\n**Fix shape:** for each item, re-point the text, bump `revision`, add a `history` row, and keep `pnpm check:platform-checklist` green. Re-measure first on current `main`."
+}

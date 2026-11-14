@@ -1,0 +1,37 @@
+{
+  "number": 33387,
+  "kind": "pull_request",
+  "title": "docs(cli),test(runtime): relax NOT NULL is needs_confirm in the drift table, and a Turso remote publish reports the relax it cannot apply",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T18:15:16Z",
+  "updated_at": "2026-11-14T19:49:33Z",
+  "closed_at": "2026-11-14T19:49:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T19:49:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33387",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D4Jsmd91BqTVB7dSii9uJMV)_\nPart of #32883\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:`cli.mdx` 的漂移分类表把「放宽 NOT NULL」从 `safe` 改到 `needs_confirm`,`safe` 行补上 `widen_date_to_datetime`,表后加一段说明发布对象时会应用哪些列变更;同时修正示例输出与开发态自愈提示里的同一错误。另在发布列变更测试中加了一个 Turso 远程用例。\n- **为什么改**:文档与分类器不一致(分类器与 ADR-0113 D5 都把 `relax_not_null` 判为 `needs_confirm`,开发态自动迁移从不应用它);Turso 远程跳过表重建后是否真的回报 `object-column-changes-not-applied` 此前没有端到端钉子。\n- **风险与回滚**:文档 + 仅测试,不改任何发布产物;回滚即 revert。\n- **先看**:`content/docs/deployment/cli.mdx` 分类表(约 1277 行)及其后新增段落;`packages/runtime/src/domains/meta-object-publish-column-changes.test.ts` 末尾新增的 describe。\n- **两分钟验证**:`pnpm --filter @objectstack/runtime exec vitest run src/domains/meta-object-publish-column-changes.test.ts`,预期 4 个用例全部通过。\n- **需要你做的**:无,席位落地(本 PR 不发布任何包,需要 `skip-changeset` 标签,由席位挂)。\n\n## What changes\n\n**Docs (`content/docs/deployment/cli.mdx`)** — each claim checked against `origin/main` 4c9104eed:\n\n- Classification table: `relax NOT NULL` moves from the `safe` row to `needs_confirm` (`schema-drift.ts` pushes both `relax_not_null` arms with `category: 'needs_confirm'`; ADR-0113 D5). The `safe` row gains `widen_date_to_datetime` (`category: 'safe'` in `schema-drift.ts`). The `needs_confirm` row says dev auto-reconcile never applies it (`reconcileAndWarnDrift` applies `category === 'safe'` only).\n- New paragraph after the table: publishing an object applies every `safe` column change and a `relax_not_null` whose field declares `storage: { notNull: false }`; index changes stay with `os migrate apply`; a change the database cannot apply leaves the publish a success with the `object-column-changes-not-applied` warning naming each column (`isPublishedColumnChange` in `sql-driver-schema-sync.ts`; `ensureObjectStorage` and `publishedColumnChangesNotAppliedNotice` in `metadata-protocol`).\n- Same misclassification in two more places on the page: the plan example listed `relax_not_null` under the `Safe` heading (the CLI renders it under `Needs confirmation` with `~`, `CATEGORY_META` in `cli/src/utils/schema-migrate.ts`), and the dev self-heal callout gave \"you just made a field optional\" as an auto-applied safe change.\n\n**Test (`packages/runtime/src/domains/meta-object-publish-column-changes.test.ts`)** — a new top-level describe in the existing publish column-changes harness: a Turso REMOTE driver (`libsql://` URL over an `@libsql/client` file client, the double the driver's remote-face pins and the runtime ownership-guard pin use) publishes `title` from `storage.notNull: true` to `false`. The relax needs the SQLite table rebuild that transport does not run, so the driver reports it `skipped`; the test asserts the publish still answers success, carries exactly one `warning` advisory with rule `object-column-changes-not-applied` naming `'title' (relax_not_null)`, and the column still reads `notnull = 1` in the database file.\n\nPlacement: the card names `packages/drivers/driver-turso/**` tests, but the advisory is produced by `@objectstack/metadata-protocol`, which `driver-turso` does not depend on, so an end-to-end pin cannot live there. It sits in the runtime harness that already owns the publish wiring, as a top-level describe (ruling record 6583487846: a new pin for a component with a shared harness file goes into that file).\n\n## Tests\n\n- `pnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2 src/domains/meta-object-publish-column-changes.test.ts` at 11c91b454: Test Files 1 passed (1), Tests 4 passed (4); lock VERDICT command-exit 0. The log shows the Turso arm took the skip path: `relax_not_null on leave_request.title is unsupported on the Turso REMOTE transport — skipped: it needs the SQLite table rebuild, ...`.\n- `pnpm --filter @objectstack/runtime typecheck`: exit 0 (`tsc --noEmit` and `check:test-typecheck` OK, test layer debt held).\n- Ablation (the change committed first; `@objectstack/driver-turso` resolves to `src/` in the runtime vitest config, so no dist rebuild is involved): `scripts/ablation-replace.mjs` replaced the `skipped.push(d);` on the `needs-table-rebuild` arm of `TursoDriver.applyMigrationEntries` (anchor hits 1, blob 22c770ffb78c to 168795236a53). Result: the Turso test red, `expected [] to deeply equal [ 'warning' ]`, Tests 1 failed / 3 passed. Restored: blob back to 22c770ffb78c (HEAD), `git diff HEAD` empty.\n- Narrowing declared: the full `@objectstack/runtime` suite was not run locally (the diff adds one describe to one test file and changes no source); `Test Core` runs it in CI.\n\n## Verification\n\n<details><summary>Derived gate families at 11c91b454 (81 commands)</summary>\n\n```text\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands  -> 81 commands\n79 exit 0 on the first pass\nspec check:skill-examples, check:dual-build-cjs-loads: exit 3 (PREREQUISITE NOT MET, no dist) on the first pass;\n  re-run after the full build check:type-check-debt performs: both exit 0\n  (344 prose examples type-check; 123 require entry points across 72 packages load)\ncheck:type-check-debt: OK, 0 raw tsc errors above the recorded numbers\ndispatch-gates --ran: 81 derived families accounted for, 81 run, 0 NOT-MEASURED\n```\n\n</details>\n\nChangeset: none. Nothing here publishes: `content/docs/**` is in no package, and the runtime test file is outside `packages/runtime` `files[]` (`dist`, README, CHANGELOG). Built-output check: test symbols 0 hits in `packages/runtime/dist`, positive control `DriverPlugin` 4 files. So the PR needs the `skip-changeset` label, which the seat attaches.\n\nLeft on the card: N1 (ADR-0113 D5 sentence) is its own governed-path draft PR on `claude/area-A4-32883-adr`; N2 and N3 (MySQL-only) and the optional N6 are not done here.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cw787kMeaX7oyz7DDC\n"
+}

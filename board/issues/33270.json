@@ -1,0 +1,37 @@
+{
+  "number": 33270,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): a date field still on a date-time column filters as its calendar day on SQLite and MySQL; operator note for Postgres days stored early",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T15:14:39Z",
+  "updated_at": "2026-11-14T16:48:14Z",
+  "closed_at": "2026-11-14T16:20:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T16:20:09Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33270",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D4Jsmd91BqTVB7dSii9uJMV)_\n\nFixes #33002\nFixes #33001\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:SQLite 和 MySQL 上,字段从「日期时间」改成「日期」并发布后,旧行仍存着带时分秒的值;现在按日期过滤时把这类列读成它的日历日,旧行也能被「等于某天」筛出来。另附一段运维说明(#33001):Postgres 上 18.4.0 之前存早了一天的日期如何查找和手工修正,平台不自动修。\n- 为什么改:改成日期字段后,列表按「11 月 12 日到期」筛选会悄悄漏掉改字段之前创建的记录,虽然它们显示的就是 11 月 12 日;而按「晚于 12 日」筛选反而会把它们选出来。\n- 风险与回滚:只影响「日期字段 + 列仍是日期时间类型」这一种组合(只有日期时间改日期的发布会留下);写入、读取、按天分组不变;这种列上的索引不再服务该字段的过滤(Postgres 已是如此)。回滚即 revert。\n- 先看:`packages/drivers/driver-sql/src/sql-driver-filter-helpers.ts` 的 `filterColumnExpr` 新分支,其次 `sql-driver-rotation.ts` 登记这类列的那段,再看 `date-on-instant-column.ts`。\n- 两分钟验证:`pnpm --filter @objectstack/driver-sql exec vitest run src/sql-driver-32851-date-on-instant-column.test.ts`,预期 SQLite 格全绿(MySQL/Postgres 格在 CI 的 Temporal Conformance 任务里跑)。\n- 需要你做的:无,区域线程落地。\n\n## What changes\n\n**#33002.** A `datetime` → `date` publish leaves the column's date-time type in place on every dialect (the narrowing would drop the time of day, so it is not applied). Postgres got a read rule in #33000; on SQLite (`datetime`, canonical UTC text) and MySQL (`DATETIME`, UTC session) the zone was never wrong, but a row written while the field was a `datetime` still holds its time of day. It reads as its day, yet `due = '2026-11-12'` compared the bare day with the whole instant and missed it, and `due > '2026-11-12'` matched it.\n\n- `isPostgresInstantColumnType` becomes `isInstantColumnType(dialect, type)`: Postgres `timestamp with time zone`; MySQL `datetime` / `timestamp`; SQLite `datetime`. The schema sync records such `date` fields on every dialect (`sql-driver-rotation.ts`), from the `columnInfo()` it already reads; a table created here still records none.\n- `filterColumnExpr` and its outside-the-builder twin `temporalFilterColumnSql` read such a column as its calendar day per dialect: SQLite `substr(CANONICAL_UTC_TEXT, 1, 10)` (through `sqliteCanonicalDatetimeSql`, so a legacy epoch value answers its UTC day too); MySQL `date(col)`; Postgres unchanged.\n- The write keeps the bare day on SQLite and MySQL (it already is UTC midnight there); only Postgres binds the UTC-midnight instant, as before. The day bucket already answered the day on both (`strftime` / `date_format`), unchanged.\n\n**#33001** (maintainer ruling 15:05Z: no automatic repair; release-notes text on how an operator finds and corrects affected rows). A `patch` changeset on `@objectstack/driver-sql` carries the note: who is affected, a query that lists candidates, and the `UPDATE` that moves a confirmed early day to its UTC midnight. No code.\n\n## Tests\n\n`packages/drivers/driver-sql/src/sql-driver-32851-date-on-instant-column.test.ts` (live dialect matrix): the `datetime`-era row's read, equality filter and day bucket are now asserted on every cell, not Postgres only; `$lt` excludes it and `$gt` on the day finds nothing; the analytics filter door (`temporalFilterColumnSql` + `temporalFilterValue`) answers the same three rows on every cell (the bucket echo stays Postgres-only).\n\n<details><summary>Measurement and ablation (SQLite, local)</summary>\n\nBefore, at `e540baf8`, a scratch probe (removed): after `syncSchema` V1 (`due: datetime`) → row `due: 2026-11-12T09:30:00.000Z` → `syncSchema` V2 (`due: date`) + `applyPublishedColumnChanges` (`applied: []`): column type `datetime`, raw `2026-11-12T09:30:00.000Z`, read `2026-11-12`, `where: { due: '2026-11-12' }` → only the row written after the publish; the day bucket already `2026-11-12` × 2.\n\nAblation (registry population on SQLite/MySQL removed, `sql-driver-rotation.ts` and `date-on-instant-column.ts` restored from `origin/main`): 3 failed — equality/range (`$gt` found `era`), the `datetime`-era row (`['created','updated']` vs `['created','era','updated']`), the analytics filter door (same). Restored by `git checkout HEAD -- packages/drivers/driver-sql/src/`, `git status --porcelain` empty, file green again.\n</details>\n\n<details><summary>Suites and gates</summary>\n\n- `pnpm --filter @objectstack/driver-sql exec vitest run`: Test Files 253 passed | 13 skipped (266); Tests 4256 passed | 237 skipped (4493).\n- `pnpm --filter @objectstack/driver-sql typecheck`: exit 0 (after a declaration build of the closure).\n- `node scripts/pm/dispatch-gates.mjs --commands` → `--ran`: 64 families; 62 ran green locally. Not green locally: `plugin-teardown-shape` self-test and `dual-build-cjs-loads` (exit 3, prerequisite not met: they need a full build), `dts-closure` (exit 1, same full-build prerequisite), `query-options-erasure` and `type-check-debt` (stopped at a 300 s local timeout). CI `Lint & Repo Gates`, `TypeScript Type Check` and `Build Core` are green on this head.\n- NOT MEASURED: the MySQL and Postgres cells. There are no servers in this container, and CI's `Temporal Conformance (live PG + MySQL)` job runs only on `push` to main (it is skipped on `pull_request` and `merge_group`), so those cells are first measured by the post-merge main run.\n</details>\n\n## Acceptance notes\n\n- As on Postgres, an index on such a column no longer serves a filter on the field (it is read through an expression). Only columns a `datetime` → `date` publish left behind are affected.\n- The registry is filled by the schema sync; a table the driver never syncs (deferred DDL, a guest datasource) keeps the plain `date` path.\n\n## Verification\n\nBranch merged `origin/main` once before the PR (`44c8aa3b`; no `driver-sql` change came with it).\nBoth cards carry a `Claim:` naming `claude/project-thread-lta7t3` (#33002, #33001).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cw787kMeaX7oyz7DDC\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cw787kMeaX7oyz7DDC)_\n\n<!-- signed: domain:server#5 · os-elon-musk · session_016WV4cw787kMeaX7oyz7DDC -->\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 33250,
+  "kind": "issue",
+  "title": "controlled_by_parent: per-object opt-in so read on the master is enough to insert and update the detail under the detail's own grants (ownerMayEdit covers owner update only; HotCRM Order to Cash blocked)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T14:47:00Z",
+  "updated_at": "2026-11-14T19:06:27Z",
+  "closed_at": "2026-11-14T19:06:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33250",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\n## Ask\n\nA per-object opt-in under `sharing.controlledByParent` (name is the platform's call, e.g. `masterReadSuffices: true`) that changes the detail write gate from \"EDIT on the master\" to \"READ on the master\". The insert or update is then judged by the detail object's own grants (object CRUD, FLS, its row-level security), exactly as an unrelated object would be. Default stays as today (ADR-0055 §3: master EDIT required), so no existing app changes behaviour.\n\n## Why (measured on @objectstack 18.4.0)\n\nHotCRM Order to Cash (hotcrm#2315, draft PR hotcrm#2418) hangs detail objects off a contract: a collection plan with plan steps, invoices, payments. The people who write those rows do not edit the contract, by design:\n\n- `sales_rep` reads the contract and must add collection-plan steps: insert answers **403** (master not editable).\n- `ar_accountant` reads the contract and must record an invoice: insert answers **403**, even with Modify All on the invoice object.\n\n`sharing.controlledByParent.ownerMayEdit` (ADR-0055 §3 amendment) does not cover this. It lets the owner of an existing detail row update it. It does not admit an insert, and it does not admit a non-owner who holds the detail grant.\n\nThe workarounds are each worse: dropping `controlled_by_parent` loses read inheritance from the contract; granting reps and finance EDIT on contracts hands them the commercial terms.\n\n## Acceptance\n\n1. Spec: the opt-in parses on an object that declares `controlled_by_parent`; lint refuses it elsewhere (as `ownerMayEdit` does).\n2. With the opt-in, a principal who reads the master and holds create on the detail inserts a detail row; one who holds update on the detail updates it. Without read on the master, both still answer 403.\n3. Without the opt-in, behaviour is byte-identical to 18.4.0 (existing controlled_by_parent tests unchanged).\n4. The master check member on the security service answers the opt-in the same way the write path does.\n5. Docs and the authoring skills describe when to use it (detail rows written by people who only read the master: plans, invoices, payments, activity-like rows).\n\n## Ruling\n\nIrene, 2026-11-14T14:45Z, O2C phase 1a Q1 = A: the platform takes this, priority p1; hotcrm changes nothing and hotcrm#2418 is Blocked-by this card."
+}

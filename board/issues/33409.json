@@ -1,0 +1,33 @@
+{
+  "number": 33409,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): seed reference probe filters on the target's resolved tenant column",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T19:18:00Z",
+  "updated_at": "2026-11-14T19:48:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33409",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D4Jsmd91BqTVB7dSii9uJMV)_\nFixes #33393\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:按组织回放种子数据时,引用目标若用声明的 `tenancy.tenantField`(如 `workspace_id`)隔离,探针改为按该租户列过滤,不再一律按 `organization_id`。\n- **为什么改**:此类目标没有 `organization_id` 列,原探针被驱动拒绝(`INVALID_FILTER`),本组织明明有同名行,引用却报\"未解析\"。\n- **风险与回滚**:只影响按组织加载时对\"组织\"类目标的引用探针;普通租户对象解析出的列仍是 `organization_id`,行为不变。回滚即还原本 PR。\n- **先看**:`packages/metadata-protocol/src/seed-loader.ts` 的 `probeScopeOf` 与 `resolveFromDatabase` 中 `where[scope.tenantColumn]` 一行;`packages/runtime/src/seed-org-scoped-references.integration.test.ts` 新用例。\n- **两分钟验证**:`pnpm --filter @objectstack/metadata-protocol build && pnpm --filter @objectstack/runtime exec vitest run src/seed-org-scoped-references.integration.test.ts`,预期 18/18 通过。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n`SeedLoaderService.probeScopeOf` now returns a scope object; the `organization` scope carries the target's resolved tenant column (`resolveTenantFieldName(definition)`, falling back to `organization_id`, i.e. `DEFAULT_TENANT_FIELD`). The reference probe filters `where[tenantColumn] = organizationId` instead of always `where.organization_id`. A target walled by a declared `tenancy.tenantField` with the injected column switched off was classified `organization` (its tenant field resolves, so it is not `global`) and then probed on a column it does not have, so the driver refused the filter and the reference was reported unresolved. The `sys_member` membership probe still filters `sys_member.organization_id` (its own column) and is unchanged; the `own-organization` and `global` scopes are unchanged.\n\n## Tests\n\n- New pin in `packages/runtime/src/seed-org-scoped-references.integration.test.ts` (real `AppPlugin` replayer, real `SeedLoaderService`, real `ObjectQL` + `SqlDriver` over better-sqlite3): a target declaring `tenancy: { enabled: true, tenantField: 'workspace_id' }` with `systemFields: { tenant: false }`; two rows named `Gold`, South's inserted first. A North replay resolves `tag` to North's row, a South replay to South's, both with no errors and no refusal logged for the tag table.\n- Premise measured on `main` (7e2eadd29) before the fix: the pin is red with `crm_deal.tag = 'Gold' -> crm_workspace_tag.name not found; the probe was refused (INVALID_FILTER)`, and the driver logs `no such column: organization_id` on `crm_workspace_tag`.\n- Ablation (fix committed first; mutation via `scripts/ablation-replace.mjs`, `dist/` proved by `scripts/ablation-dist-preflight.mjs`): reverting the filter to `organization_id` turns the pin red (1 failed / 17 passed); restore proved by blob == HEAD and an empty `git status --porcelain`, marker absent from all 24 built files, pin green again (18/18). A first attempt used a comment marker that the build strips; the preflight refused it before any verdict was read, so it was not counted.\n\n## Acceptance notes\n\n- Source side of the same column assumption, not changed here: `loadExistingRecords` filters a per-organization replay of a dataset by `organization_id` too. A seed dataset OF a `workspace_id`-walled object (injected column off) makes the per-organization replay throw `INVALID_FILTER` (measured with a temporary case on this branch, then removed). Reported to the seat for filing; it touches the stamp and ledger semantics, so it is not a mechanical in-place fix.\n- `src/seed-tenancy-autonumber-split.integration.test.ts` timed out once (5000 ms) in a 21-file run on a shared box and passed 15/15 when re-run alone; unrelated to this diff.\n\n## Verification\n\n<details><summary>Local runs at head ae21eae6f</summary>\n\n- `pnpm --filter @objectstack/metadata-protocol test`: Test Files 339 passed, 9 skipped (348); Tests 22848 passed, 43 skipped.\n- `pnpm --filter @objectstack/metadata-protocol typecheck` and `pnpm --filter @objectstack/runtime typecheck`: exit 0.\n- Runtime seed suites (21 files, `src/*seed*.test.ts`): 202 tests, 201 passed, 1 timeout (passed alone, see above).\n- eslint on the two changed source files: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 64 families; 63 exit 0; `pnpm check:dual-build-cjs-loads` exit 3 (PREREQUISITE NOT MET: needs a full `pnpm build`), NOT MEASURED locally and left to CI. `--ran` reconciliation: 64 accounted, 63 run, 1 NOT-MEASURED, 0 UNRUN.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cw787kMeaX7oyz7DDC\n"
+}

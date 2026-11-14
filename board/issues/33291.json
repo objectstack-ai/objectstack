@@ -1,0 +1,37 @@
+{
+  "number": 33291,
+  "kind": "pull_request",
+  "title": "fix(formula): date-subtraction refusals name the sub-day datetime() form",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T15:52:07Z",
+  "updated_at": "2026-11-14T17:05:53Z",
+  "closed_at": "2026-11-14T17:05:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T17:05:51Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33291",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D4Jsmd91BqTVB7dSii9uJMV)_\nFixes #32980\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:公式校验对「两个日期/日期时间字段相减」的拒绝提示(`date-text-arithmetic` 及其各 arm、`date-duration-value`),在 `daysBetween` 旁边补上按小时/分钟算跨度的写法:两侧各包一层 `datetime(…)`,再读 Duration 的 `.getMinutes()` / `.getHours()`;公式文档与 formula 技能表格同步一行。\n- **为什么改**:「加班小时 = 结束 − 开始」是 HR 应用第一天就要写的公式,原提示只指向按整天计的 `daysBetween`,能用的写法只能去翻 stdlib 源码才找得到。\n- **风险与回滚**:只改提示文案,拒绝码与 params 不变,该写法在 main 上本就校验通过、求值正确(新测试实测 98 小时与 3.5 小时);回滚即 revert 本 PR。\n- **先看**:`packages/formula/src/validate.ts`(`shift` 常量,两个拒绝共用这一句);`packages/formula/src/validate-date-text-arithmetic.test.ts`(新增的子日跨度用例)。\n- **两分钟验证**:`pnpm --filter @objectstack/formula exec vitest run src/validate-date-text-arithmetic.test.ts`,预期全绿,其中含 `the sub-day form reads the hours between two date-time fields`。\n- **需要你做的**:无。`skills/**` 那一行已按席位指示移到单独的 PR #33294(Refs #32980,等授权审批人),本 PR 不再受管,复审通过后由本区落地。\n\n## What changes\n\n- `packages/formula/src/validate.ts`: the shared `shift` sentence that both the `date-text-arithmetic` family (bare, `-fail-closed`, `-fail-open`, `-run-fails`, `-run-may-fail`) and `date-duration-value` append now adds: \"For a span in hours or minutes, wrap each side in `datetime(…)` and read the Duration: `(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`.\" Codes and params are unchanged. The `date-arithmetic` refusal (a date plus a number) is untouched: it is not a span.\n- `content/docs/data-modeling/formulas.mdx`: the Date subtraction row names the same form and gives the hours example. The `skills/objectstack-formula/SKILL.md` row moved to PR #33294 at `bb078699`, so this PR is no longer governed.\n- One `patch` changeset for `@objectstack/formula`.\n\n## Tests\n\n- `validate-date-text-arithmetic.test.ts`: two control rows in the gate-versus-evaluator table (`double((datetime(record.end_at) - datetime(record.start_at)).getMinutes()) / 60.0` and `(now() - datetime(record.start_at)).getHours()`: both validate clean and evaluate to a value), and one test that the hours form validates `ok` and evaluates to `98` and `3.5` on two served rows. These pin the card's premise: the form works at `origin/main` `d4fbb4db`, before and after this diff, because only wording changed.\n- `expression-refusal-codes.test.ts`: the existing exact-message pins for the seven affected codes take the new sentence. Those pins are the file's declared control (the message is what API callers, the CLI and the agent tool read beside the code), so no new message pin was added.\n\n## Acceptance notes\n\n- Ruled out here, per the dispatch: a new stdlib helper such as `hoursBetween(a, b)`. It would be a new authorable function (a contract change), so it needs its own ruling; the card's Expected names it as an alternative only.\n- Not changed: `packages/spec/src/migrations/entries/semantic/18.formula-date-subtraction-refused.ts`. Its `replacement` is released 18.x text written by hand, not generated from the `validate.ts` sentence, so changing it would rewrite a published migration entry; it still prescribes `daysBetween`, which remains correct for whole days.\n- Skills: no `skills/**` change at head `bb078699` (the row measured at `4350de67`, 493 → 494 lines, ships in PR #33294).\n\n## Verification\n\nHead `4350de67` (the merge of `origin/main` was a no-op: `origin/main` had not moved from `d4fbb4db`).\n\n<details><summary>formula test + typecheck (under the verify lock)</summary>\n\n```\npnpm --filter @objectstack/formula test && pnpm --filter @objectstack/formula typecheck\n Test Files  67 passed (67)\n      Tests  1760 passed (1760)\ncheck:test-typecheck: OK\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Derived gate families (dispatch-gates --commands, 103 families)</summary>\n\n102 of 103 exit 0 locally, each exit code captured before any pipe. Six first answered exit 3 (prerequisite not met: unbuilt `formula`, `lint`, `client-react`, `objectql` dist) and were re-run green after a build of those packages: `check:doc-formula-expressions`, `check:doc-security-posture`, `check:skill-examples`, `check:docs-transcript-drift`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`. `check:skill-docs` exit 0.\n\nNOT MEASURED: `node scripts/check-plugin-teardown-shape.mjs --self-test`, reason: shallow clone cannot reach its pinned positive-control commit; CI runs it on a full checkout.\n\n`dispatch-gates --ran`: 103 derived families accounted for. `check:nul-bytes`: OK.\n</details>\n\n`test:repo` was not run locally (the diff does not touch that project); `Test Core` carries it in CI.\n\ndomain:server#5 · os-elon-musk · session_016WV4cw787kMeaX7oyz7DDC\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cw787kMeaX7oyz7DDC\n\n<!-- signed: domain:server#5 · os-elon-musk · session_016WV4cw787kMeaX7oyz7DDC -->\n"
+}

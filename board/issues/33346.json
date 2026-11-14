@@ -1,0 +1,31 @@
+{
+  "number": 33346,
+  "kind": "issue",
+  "title": "console cosmetic and UX observations from the v18.4.0 sweep (6 rows)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T17:15:29Z",
+  "updated_at": "2026-11-14T17:15:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33346",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nSource: v18.4.0 sweep close-out, #32908 comment 6881136418 (devx#4 ledger, read at `87330e89`), routed by triage.\n\n## Rows\n- 99 (#33048 · 6846028996), `access-security.share-link-landing-page`: the header prints the object's API name and field API names, and system fields are listed.\n- 118 (#33048), `records-forms.concurrent-edit-conflict`: a conflict on several fields renders raw JSON.\n- 147 (#33048), `studio-authoring.authoring-validation-not-persisted` A3: the upper banner runs past the viewport at 1440 px.\n- 246 (#33093 · 6850899929), `identity-auth.session-list-revoke`: the revoked view keeps the 'Active user sessions' subtitle and toolbar button.\n- 248 (#33093), `identity-auth.api-key-ui-lifecycle`: the row menu offers Edit, but only revoked keys are editable.\n- 254, second half (#33096 · 6851700388), `automation.connector-dispatch-matrix`: the picker keeps stale Input rows when the action changes.\n\n## Do\nFix them where they render. Row 254's stale rows can send the wrong inputs, so fix it first.\n\n## Grade\n**p3**. Row 254 alone is p2 if it really sends stale inputs. Check it.\n\n## Reader\n`domain:ui`."
+}

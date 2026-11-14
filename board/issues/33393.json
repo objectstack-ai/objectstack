@@ -1,0 +1,33 @@
+{
+  "number": 33393,
+  "kind": "issue",
+  "title": "Seed loader: an org-scoped reference probe filters on organization_id even when the target declares another tenantField",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A4",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T18:21:49Z",
+  "updated_at": "2026-11-14T19:19:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33393",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cw787kMeaX7oyz7DDC\n\nLoose end of #33207 / #33206 (PR #33222, merged 2026-11-14T15:49Z), filed at seat 5's direction from area A4's parked review fixes. Read at `origin/main` 2026-11-14T18:2xZ.\n\n## Line\n\nA seed reference whose target object walls its rows by a **declared** `tenancy.tenantField` other than `organization_id` (e.g. `workspace_id`, injected column switched off) · the seed loader's org-scoped reference probe · rare (custom tenant field) · read, not measured.\n\n`packages/metadata-protocol/src/seed-loader.ts` on main:\n\n- `probeScopeOf` returns `organization` for such a target (it is not `global`, because `resolveTenantFieldName(definition)` is non-null), and\n- the probe then filters `where.organization_id = organizationId` (around line 2832), a column the target does not have.\n\nSo the probe either errors or matches nothing, and the reference is reported unresolved although a row of that organization exists. The rest of the parked fix is already on main (exhaustive id-ordered member paging; a refused membership probe reported on `sys_member`; `global` only when no tenant column).\n\n## Do\n\n- In the `organization` scope, filter on the target's resolved tenant column (`resolveTenantFieldName(definition)`, falling back to `organization_id`), not on `organization_id` always.\n- Pin it: a target declaring `tenancy: { enabled: true, tenantField: 'workspace_id' }` with the injected column off; a seed row referencing it by name resolves to the row of the seeding organization and not to another organization's row of the same name. Ablate.\n\nReader who acts: `packages/metadata-protocol/src/seed-loader.ts` (`probeScopeOf` and the reference probe), `packages/runtime/src/seed-org-scoped-references.integration.test.ts`.\nSuggested grade: p3. Lane: `domain:server`.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 33395,
+  "kind": "issue",
+  "title": "Setup: the Register SSO Provider form has no Token, Authorization or JWKS URL fields, so a Google-style IdP still cannot register from the UI",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:auth",
+    "bug",
+    "domain:server",
+    "lease:A1",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T18:24:25Z",
+  "updated_at": "2026-11-14T19:47:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33395",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4d1NJYFGVi2FRztyBNo\n\nFiling gate: ① a defect owed by landed work (#33314, Acceptance notes), with a named location: the Setup form `register_sso_provider` action in `packages/platform-objects/src/identity/sys-sso-provider.object.ts`.\nReader: server area A1 (auth and identity) of the area-lease pilot #33059, by an `os-dev` subagent; `priority:p2`.\nDedupe (open and closed): `is:issue register_sso_provider tokenEndpoint` 3 hits (#33197 the bridge half, closed by #33314; #32297 the userinfo field, closed; #8009 secret storage, closed); `is:issue SSO form token endpoint` 78 loose hits, none for the form's missing endpoint fields.\n\n## 维护者速读\n\n托管环境里,像 Google 这样 token 地址和 issuer 不在同一个域名的 IdP,注册时会被拒并提示「填 tokenEndpoint」。#33314 已让 API 入口收这个字段,但 Setup 里的「注册 SSO 提供方」表单仍然只有 Userinfo URL,没有 token、授权、密钥地址的输入框,所以不会写代码的管理员在界面上仍然注册不了 Google。\n\n## Business reason\n\nAn administrator of a hosted environment who connects Google (or any IdP whose token, authorization or key endpoint is on another origin than its issuer) from Setup is refused with a message telling them to name `tokenEndpoint`, and the form has no such field. The only way through is the API door, which a no-code administrator does not use. Without the fields, Google SSO stays unreachable from the product UI.\n\n## Reach\n\nRead on `main` after #33314: the form's params are `providerId`, `issuer`, `domain`, `clientId`, `clientSecret`, `discoveryEndpoint`, `userInfoEndpoint`, `skipUserInfo`, `scopes` and the claim mappings; the bridge (`register-sso-provider.ts`) now passes `tokenEndpoint`, `authorizationEndpoint` and `jwksEndpoint` when given. The staging refusal for Google's token endpoint is measured in #33197.\n\n## Expected\n\n1. The form offers optional Token URL, Authorization URL and JWKS URL fields (type `url`), passed to the bridge under the names it takes, with help text saying when to name them (the registration refusal for an untrusted endpoint).\n2. The generated object translations are regenerated.\n3. A test pins that each field reaches the bridge's `oidcConfig`.\n\n## Also owed (cloud, one line)\n\nThe cloud per-environment auth handler has to serve `GET /sso/get-provider` in-process for the domain-verification answer to carry the registered domain (#33314 Acceptance notes). That is a cloud change and is not part of this card.\n"
+}

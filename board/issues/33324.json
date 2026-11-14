@@ -1,0 +1,33 @@
+{
+  "number": 33324,
+  "kind": "issue",
+  "title": "main CI red since 6a28a271: Temporal Conformance (live PG + MySQL) fails the new #32851 test on live MySQL — the analytics native-SQL filter door answers no day (PR #33270)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T16:46:27Z",
+  "updated_at": "2026-11-14T17:52:03Z",
+  "closed_at": "2026-11-14T17:52:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33324",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ① a defect with a named producer, measured: push `CI` on `main` has been red since `6a28a271`, and is red again on `24f2f401`. It was green on `71ade1ae`. PR #33270 (#32851, `01d206de`) landed between them.\n\n## What fails\n\nJob **Temporal Conformance (live PG + MySQL)**, step \"Run driver-sql suite against both live servers\". For example, run 43615478695, job 132509633216:\n\n```\nFAIL src/sql-driver-32851-date-on-instant-column.test.ts > live cell budget (60000 ms)\n  > a `datetime` field published as `date` — live mysql (#32851)\n  > the outside-the-builder filter door (analytics native SQL) answers the same day\nAssertionError: expected [ undefined, undefined ] to deeply equal [ 'created', 'era', 'updated' ]\n```\n\nThe test is new in PR #33270. This job runs only on push to `main`, not in `merge_group`, which is why the queue was green.\n\n## Why it matters\n\n- Every push to `main` reads red until this is fixed, which hides the next real break.\n- The assertion is the PR's own claim: on **MySQL**, the analytics native-SQL filter door answers a date field stored on a date-time column as its calendar day. The live run says it returns nothing. So either the product half for MySQL did not land, or the test's MySQL expectation is wrong. The fix decides which.\n\n## Do\n\n- Reproduce against the live MySQL service, as the job does. Fix the MySQL path of the native-SQL door, or fix the test if the product is right, and say which on this card.\n- Do **not** skip or quarantine the cell to turn `main` green.\n\n## Reader\n\n`domain:server`, pilot **Area A4** (drivers). `domain:server#5` landed PR #33270."
+}

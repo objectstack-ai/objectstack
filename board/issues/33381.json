@@ -1,0 +1,32 @@
+{
+  "number": 33381,
+  "kind": "issue",
+  "title": "plugin-security: pin emptying a master and the lifecycle verbs under writeRequiresMasterRead; fix the gate's stale \"asks EDIT\" comments",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A2",
+    "pm:queue",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T18:10:53Z",
+  "updated_at": "2026-11-14T18:52:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33381",
+  "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nFollow-up of #33250 (PR #33369). Contract review 6881744779, findings N2 and N4.\n\n- **N4, pins:** two shapes the opt-in covers by construction have no test under `sharing.controlledByParent.writeRequiresMasterRead: true` in `packages/plugins/plugin-security/src/controlled-by-parent-owner-may-edit.test.ts`: (a) an update that empties an optional master (the PR body lists it among covered paths); (b) the lifecycle verbs `transfer`, `restore`, `purge` on an opted detail (the gate is verb-blind, step 2.8, so they ask read). Add one admit and one refuse pin for each, ablated against the read branch.\n- **N2, comments:** in `packages/plugins/plugin-security/src/security-plugin-cbp-write-gate.ts`, the `askBodyNamedMaster` docblock and the fifth owner-leg condition still say unconditionally that a body which empties an optional master, or names a new one, \"asks EDIT\". On an opted-in detail it asks READ (the file's new header says so). Make them conditional on the hop's opt-in.\n- Also the file header's \"A detail that does not declare it is answered byte for byte as before\" (review N1): true only when no `controlled_by_parent` master on its chain declares the key; say that.\n\nTests and comments only; no runtime or published surface moves. Waits for #33369 to merge.\n\nclass: b · type: Test · Grade: p3 · domain: server"
+}

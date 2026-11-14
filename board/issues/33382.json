@@ -1,0 +1,32 @@
+{
+  "number": 33382,
+  "kind": "pull_request",
+  "title": "docs(adr-0113): D5 names the explicit storage.notNull: false case — reported, and applied by the publish",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T18:12:05Z",
+  "updated_at": "2026-11-14T18:20:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33382",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D4Jsmd91BqTVB7dSii9uJMV)_\nPart of #32883\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:ADR-0113 D5「Drift direction」条目末尾补一句:`required: true` 字段若显式写出 `storage: { notNull: false }`,其更严格的 NOT NULL 列会被报告为 `relax_not_null`(仍是 `needs_confirm`、开发态从不自动应用),发布该声明即应用放宽。\n- **为什么改**:D5 原文说 required 字段上更严格的列「静默」,而代码早已对显式 `notNull: false` 报告并在发布时应用,ADR 与实现不一致。\n- **风险与回滚**:纯文档,一句话,不改行为;回滚即 revert 本 PR。\n- **先看**:`docs/adr/0113-required-write-contract-vs-column-constraint.md` 的 D5 第四条(新增的五行)。\n- **两分钟验证**:对照 `packages/drivers/driver-sql/src/schema-drift.ts` 中 `storage?.notNull === false` 分支(category `needs_confirm`)与 `sql-driver-schema-sync.ts` 的 `isPublishedColumnChange`,应看到与新增句一致。\n- **需要你做的**:批准(Tier H 受管路径 `docs/adr/**`),席位随后落地。\n\n## What changes\n\nADR-0113 D5's drift-direction bullet calls a column stricter than its declaration *silent* when the field is `required: true`. That silence is for the legacy shape with no `storage` declaration. One sentence is added: a `required: true` field that writes `storage: { notNull: false }` out has its stricter column reported (`relax_not_null`, still `needs_confirm`, never auto-applied), and the publish of that declaration applies the relax, being the deliberate relax the bullet names.\n\nVerified against `origin/main` at 4c9104eed:\n\n- `packages/drivers/driver-sql/src/schema-drift.ts`: the `expectNullable && !col.nullable && field.storage?.notNull === false` branch pushes `relax_not_null` with `category: 'needs_confirm'` whatever `required` says; the next branch (no explicit `false`) keeps the `required !== true` silence.\n- `packages/drivers/driver-sql/src/sql-driver-schema-sync.ts` `isPublishedColumnChange`: selects every `safe` column entry plus exactly this `relax_not_null` entry by the explicit `false`; dev auto-reconcile applies `safe` entries only.\n\nNo behaviour changes. The CLI docs half of the card is in its own PR on branch `claude/area-A4-32883`.\n\n## Tests\n\nDocs only: no test applies. Derived gate families for this diff (`node scripts/pm/dispatch-gates.mjs --commands`, 21 families) were run locally at 2f46edaa5: 20 exit 0; `check:doc-formula-expressions` exit 3 (PREREQUISITE NOT MET: `@objectstack/formula` not built in this worktree), NOT MEASURED locally and carried by CI.\n\n## Verification\n\n<details><summary>Gate run at 2f46edaa5</summary>\n\n```text\n0 check-adr-links (+ --self-test), check-closing-keyword-parity (+ --self-test), check-comment-mask-corpus, plan-test-core-shards --self-test\n0 check:adr-anchors, check:adr-index, check:adr-symbol-anchors, check:ci-filter-parity, check:closed-ceremony-text\n0 check:cross-package-test-inputs, check:doc-authoring, check:driver-memory-census, check:gitlink-declared, check:nul-bytes\n0 check:pm-governed-merges, check:pm-prior-rulings, check:refd-timer-probe, check:watch-hint-literal\n3 lint check:doc-formula-expressions  (PREREQUISITE NOT MET, not a verdict)\ndispatch-gates --ran: 21 derived families accounted for\n```\n\n</details>\n\nGoverned path (`docs/adr/**`, Tier H): opened as a draft and left for the seat to land.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cw787kMeaX7oyz7DDC\n"
+}

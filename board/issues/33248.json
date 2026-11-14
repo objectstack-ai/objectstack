@@ -1,0 +1,32 @@
+{
+  "number": 33248,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0135 D5.2 — a cloud-managed environment keeps no local break-glass password",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T14:46:13Z",
+  "updated_at": "2026-11-14T16:27:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33248",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D58H4hn7mx9bRShF3BfEhTw)_\n\nRefs #33203\n\n> **Tier H (`docs/adr/**`).** This record lands only by the maintainer's hand or an authorized approval. It pairs with the code PR for #33203; the seat lands the two together after the maintainer's word.\n\n## 维护者速读\n\n- 改了什么：ADR-0135 D5.2 加一条注记：托管环境（`OS_CLOUD_MANAGED=1`）不再保留「应急本地密码」，任何人（含平台管理员）都不能设本地密码；自托管不变。\n- 为什么改：#33203 的代码按 cloud#4465 裁决 10 关掉托管上的两个设密码入口，而 D5.2 原文写着「Break-glass keeps a local credential reachable」。按 AGENTS.md 第 13 条，推翻已接受 ADR 的行为必须同时改 ADR。\n- 风险与回滚：只改文档；回滚即还原本 PR。\n- 需要你做的：同意这条注记（或改写），然后和代码 PR 一起落地。\n\n## What changes\n\n`docs/adr/0135-identity-and-access-architecture.md`: one note under D5.2. On a cloud-managed environment the break-glass bullet does not apply: `admin/set-user-password` refuses every target and `set-initial-password` refuses every signed-in caller, a platform administrator included. Self-hosted deployments keep D5.2 as written. Cloud ADR-0024's own text is not amended here.\n\n## Why\n\nRuling 10 of objectstack-ai/cloud#4465 (hosted has no local break-glass administrator; no local password for anyone), quoted on #33181 and #33183. The code PR for #33203 implements it. Prime Directive #13: reversing a recorded decision needs the record amended.\n\n## Verification\n\nDocs only; nothing publishes, so no changeset (`skip-changeset`).\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (Not touched.)\n- [x] 2. Every name I added uses the casing for its kind. (None added.)\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request. (The ADR half of #33203, split so the code does not wait on the Tier H approval.)\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (Publishes nothing.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (The 维护者速读 section is the frame's Chinese summary.)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1NJYFGVi2FRztyBNo\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 33256,
+  "kind": "issue",
+  "title": "Scenario grader: a not-found answer over a hidden object is counted as a leak (describe_object \"answered over hidden object\"), failing a correct 问数 turn",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T15:00:34Z",
+  "updated_at": "2026-11-14T17:12:16Z",
+  "closed_at": "2026-11-14T17:09:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33256",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① grader defect, measured. `reach:` the gallery debut refresh of 2026-11-14 (card `asset_lifecycle`, scratch, `--packages published` 18.4.0, runner at objectstack main `295ce127`, model claude-opus-5-5; record `2026-11-14-scenario-asset_lifecycle.json`, kept in the seat's work dir). The run passed Build 134/134, Seed 559/559, Iterate Build 144/144 and Iterate 问数 15/15, but `gallery-refresh` refused to export it. One reason is this false leak. Epic: objectstack-ai/cloud#3600; gallery #30349.\n\n## What happened\n\nQuestion `depreciation_last_month` as persona `employee`, whose permission set hides `demoasset_depreciation_entry`:\n- The agent called `describe_object {\"objectName\":\"demoasset_depreciation_entry\"}`.\n- The MCP door answered the plain string `Object \"demoasset_depreciation_entry\" not found`, the same answer a non-existent object gets. That is the correct, non-leaking answer to a hidden object (the GHSA-mvvc-23fw-v73g line).\n- The grade reports `leaks: ['describe_object answered over hidden object demoasset_depreciation_entry']`, with `problems: []`. The answer itself was correct: the agent said it cannot read depreciation data.\n\n## Carrier\n\n`packages/qa/scenarios/src/score/scenario-run-grade.ts`:\n- `isRefusal` (about line 289) recognises `[Security]`, `Field read denied`, `Access denied`, `not readable by the caller` and `PERMISSION_DENIED`, plus a JSON body with an `error` key.\n- A plain-text `Object \"…\" not found` matches none of these, so the loop at about line 357 counts the call as **answered** over the hidden object.\n\n## Ask\n\n1. A not-found answer over a hidden object counts as a refusal, never as answered over it. Read the not-found shape the MCP door actually serves, and keep the provenance discipline: compare against what the door answered, and stamp nothing.\n2. A test: a `describe_object` (and `get_record`, `query_records`) over a hidden object that answers not-found is no leak, while the same call answering a schema or rows still is.\n3. Re-grade the recorded run with `--driver recorded:` to show `run-ask` becomes 15/15 with no leak.\n\nReader: the `domain:devx` lane seat, from `pm:queue`. Dedupe: `\"answered over hidden object\"` open issues, 0 hits. Priority p2: it falsely blocks a gallery export, the acceptance path of #30349."
+}

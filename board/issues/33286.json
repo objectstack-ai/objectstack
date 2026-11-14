@@ -1,0 +1,38 @@
+{
+  "number": 33286,
+  "kind": "pull_request",
+  "title": "fix(plugin-approvals): answer the schema-read delegate with bounded participant probes and index sys_approval_action",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T15:37:58Z",
+  "updated_at": "2026-11-14T16:39:41Z",
+  "closed_at": "2026-11-14T16:39:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T16:39:39Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33286",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DU5CHkeh2msc49m4dh6kwEt)_\n\nFixes #33046\n\nArea-lease pilot #33059, area A3.\n\n## What changes\n\n- `approval-service.ts`: the participant rule's three reads (current approver via `sys_approval_approver`, submitter, already acted by `actor_id` / `acted_as`) now live once, as data, in `participantProbes`. `approverIndexWhere` holds the approver-index filter that `approverRequestIds` also reads.\n  - **The approvals door is unchanged.** `visibleRequestIds` runs the same three reads as before, with the same filter, fields, 10000-row window and `SYSTEM_CTX`, in the same order. Only the window warning now names the table.\n  - **The schema-read delegate (`servesAnyRequest`) asks an existence question.** Each probe fetches at most one row (`limit: 1`). A hit is confirmed by one `limit: 1` read of its request in the caller's organization. The delegate never collects id windows and never builds a request-id `$in`. Here the already-acted probe is scoped on the action row's own `organization_id`, which every writer stamps from the request. Errors behave as before: a failed probe reads as \"no\", logged, and a failed request read propagates.\n- `sys-approval-action.object.ts`: adds indexes `(actor_id, organization_id)` and `(acted_as, organization_id)`, the same shape as `sys_approval_approver`'s `(approver, organization_id)`.\n- `approver-address-readers.test.ts` / `approver-address.ts`: the slot-address census and the reader roster now classify the moved sites under `participantProbes` / `approverIndexWhere`. The census also pins that both read shapes (`visibleRequestIds`, `servesAnyRequest`) call `participantProbes`, so the rule cannot fork.\n\n## Why\n\nSince the schema-read delegate landed, every hidden-object list read by a member who cannot read the approval objects ran the door's id-collecting probe. That probe could read up to three 10000-row windows, one of them an unindexed scan of `sys_approval_action`, and then ran one `$in`. The cost grew with the approval history, and the only question being asked was yes or no.\n\nThe answer is the same as before. Two edge cases differ. A member whose participation lay past one of the old windows is now admitted, where the window used to hide it. A decision row whose `organization_id` disagrees with its request's is judged by its own column, which is the state the organization backfill repairs.\n\n## Verification\n\nAll runs were on head `5e078a77` (fix `d37f3e76`).\n\n- `pnpm --filter @objectstack/plugin-approvals typecheck` + `vitest run` (the whole package, under the verify lock): `Test Files 119 passed (119)`, `Tests 1636 passed (1636)`, `check:test-typecheck: OK`, `VERDICT command-exit 0`.\n- New pins (`approval-service.test.ts`, `bounded probe`): an engine spy checks that every approval-table read has `limit <= 1` and that none has an `id: { $in }` filter. The same tests check the yes/no answer for:\n  - the pending approver and the submitter;\n  - a past actor (by `actor_id`) and a slot holder (by `acted_as`);\n  - a non-participant, and one holding a different position;\n  - a past actor in another organization (no) and in their own (yes);\n  - an orphaned decision (no).\n  \n  A further test checks that the two indexes are declared.\n- **Ablation, run once on committed `d37f3e76`:** `servesAnyRequest` was swapped back to the pre-fix body (`visibleRequestIds` + `$in`) with `scripts/ablation-replace.mjs`. The mutation landed (`anchor 1 -> 0, blob 5df478ba2510 -> 9f53ed0779af`). Result: `Tests 4 failed | 484 passed (488)`.\n  - Three `bounded probe` tests failed with `sys_approval_approver read is bounded: expected 10000 to be less than or equal to 1`.\n  - The census test failed with `servesAnyRequest ... to match /this\\.participantProbes\\(who, tenantOrg\\)/`.\n  - The verdict assertions, which run before the bounded check, passed on the old code too, so the answer is unchanged.\n  - Restored with `git checkout HEAD`: `blob == HEAD (5df478ba2510) and git diff HEAD is empty`.\n- `eslint --no-inline-config` on the 5 touched sources: exit 0.\n- Derived gates, run locally, all exit 0: `check-adr-0087-registration --base origin/main` (1 non-breaking changeset), `check-changeset-no-major`, `check-empty-changeset`, `check-issue-citations`, `check-tenant-audit-census`, `check-comment-mask-adoption`, `check:platform-object-tenancy-census`, `check:system-context-census`, `check:engine-double-contract`, `check:objectql-double-limit`, `check:where-matcher`, `check:nul-bytes`, `check:doc-authoring`, `check:slot-lookup`, `check:query-options-erasure`, `check:object-def-param-keys`, `check:org-identifier`, `check:cross-package-test-inputs`.\n- NOT MEASURED: `check:i18n`. It exits 3 with `PREREQUISITE NOT MET` because the CLI is not built in this worktree. This diff changes no label. CI runs the rest of the farm.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (`packages/spec` not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (eslint on the touched files; the repo-wide run is CI's)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (n/a, not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1D3AzXvEhBbz79Pmi\n"
+}

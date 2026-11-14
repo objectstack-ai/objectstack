@@ -1,7 +1,7 @@
 {
   "number": 25966,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 1 — ⏳ vacant",
+  "title": "[PM seat] domain:ui · seat 1 — 🟢 os-project-manager · 由 os-project-manager 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T06:24:48Z",
-  "updated_at": "2026-11-13T11:39:51Z",
+  "updated_at": "2026-11-14T15:10:18Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 27,
+  "comments": 28,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25966",
-  "body": "domain:ui#1 · os-elon-musk · session_016WV4cwxNJ1s5i1doop7KEv\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945, and seat 6 is #30423 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-13T11:38Z at sign-off.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Signed off:** `os-elon-musk` · `session_016WV4cwxNJ1s5i1doop7KEv`, on the maintainer's word 「UI 车道下班」. `check-handover.mjs` exit 0: no unreleased claim, no decision outside the inbox.\n- **Mailbox:** PR #32821, closed at sign-off. **Patrol:** `trig_018BFnQk5ZWpuEaWFyB3KNUK`, deleted.\n- **Next seat:** take it with `/pm-dispatch 接手`, after reading this post.\n\n## Ledger at sign-off\n\n- **In flight:** none. Every claim this session held has landed or closed:\n  - #32633 (PR #32864), #32755 (#32862), #32746 (#32878), #32756 (#32879), #32750 (#32909)\n  - #32421 (#33004, ruled B: gantt-only ceiling 10,000)\n  - #32994 (#33024)\n  - #33009 (#33064, also closed parent #32861)\n  - #32796 closed completed with no PR: premise false, delivered by #32816 (6839036835)\n- **Owed after the next release:** the staging re-check of #32994's acceptance 2 (`ai_traces.model` is the picked model), noted on the card (6845400151).\n- **Lane snapshot at sign-off (`domain:ui`, open):** `pm:queue` 15 (no p0/p1: p2 #33073 #33052 #33034 #32984 #32941 #32904 #32843 #32592; p3 #33077 #33063 #33061 #33055 #32760 #29800 #25921) · `pm:blocked` 8 · `pm:on-hold` 3 · `needs-user-decision` 0.\n- **Standing dispatch order (maintainer, 11-12 22:36Z):** only p0/p1 and cards that block a p0/p1. **Merge freeze (triage ruling 11-13 09:27Z, #32908 6848983225):** until #29963 merges, only blocker/Round-2 fixes or changeset-free PRs enqueue.\n- **Contract reviews:** a `TIER_DEFAULT` declaration face is the lane's own record (triage#1 declined it, 6846353637).\n- **Stay-behind:** none. Out of scope: every `pm:epic` subtree.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive it from the live `Claim:` comments of every `domain:ui` seat, and from each open PR's file list, before any dispatch.\n\n## Notes\n\n- **Standing constraints (carried):** ui changesets go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` gates every ui card. Cloud-touching cards go whole to the `repo:cloud` lane. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n- **Clause-② for i18n keys:** `@object-ui/i18n` exports `en` and `TranslationKeys = typeof en`, and its `./namespaces/*` subpaths are published. So an added pack key is `Clause-②: yes (widening)`.\n- **Changeset level:** follows `Metadata-protocol` alone (AGENTS.md §3); a non-protocol widening ships `patch`.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, which a person merges.\n"
+  "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945, and seat 6 is #30423 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-14T15:08Z at seating.</sub>\n\n## Current PM — 🟢 os-project-manager\n\n- **Seated:** `os-project-manager` · `session_01FEkQ5nWoa1Ze1QzjRTSYXD` (project thread 「运行 ui 车道席位」 in this account's fleet project), on the maintainer's word 「开一个 ui 车道，派发 p1 p2 任务」. Concurrency 5 card threads.\n- **Mailbox:** PR #33261. **Patrol:** `trig_01JzdZTEr7TdN6bdMrXZ3JE7` · hourly.\n- **Posture and ledger live in the project** (claims on the cards, records on the PRs); ⛔ not mirrored here.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive it from the live `Claim:` comments of every `domain:ui` seat, and from each open PR's file list, before any dispatch.\n\n## Notes\n\n- **Standing constraints (carried):** ui changesets go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` gates every ui card. Cloud-touching cards go whole to the `repo:cloud` lane. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n- **Clause-② for i18n keys:** `@object-ui/i18n` exports `en` and `TranslationKeys = typeof en`, and its `./namespaces/*` subpaths are published. So an added pack key is `Clause-②: yes (widening)`.\n- **Changeset level:** follows `Metadata-protocol` alone (AGENTS.md §3); a non-protocol widening ships `patch`.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, which a person merges.\n"
 }

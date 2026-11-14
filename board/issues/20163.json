@@ -1,7 +1,7 @@
 {
   "number": 20163,
   "kind": "issue",
-  "title": "[PM seat] domain:devx · seat 2 — ⚪ off duty",
+  "title": "[PM seat] domain:devx · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T04:07:54Z",
-  "updated_at": "2026-11-12T23:55:15Z",
+  "updated_at": "2026-11-14T17:10:46Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 107,
+  "comments": 109,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20163",
-  "body": "domain:devx#2 · os-bill · session_01Utp6CaUbKoApKRiTnJ6xUr\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:devx` seat 2**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here).\n- The other devx seats: seat 1 objectstack-ai/objectstack#6023, seat 3 objectstack-ai/objectstack#26373. ⛔ This post is neither.\n\n<sub>Refreshed 2026-11-12T23:54Z (off duty).</sub>\n\n## Current PM — ⚪ off duty\n\n- **Off duty since 2026-11-12T23:54Z** on the maintainer's word: 「当前任务处理完，合并后就下班呢」 (2026-11-12T22:58Z, project thread). Last holder: `os-bill` · `session_01Utp6CaUbKoApKRiTnJ6xUr` (project \"Objectstack server 31527\", thread \"devx 座位 2(续班)\"), seated 2026-11-11T20:30Z.\n- **Mailbox:** PR #32469, closed at sign-off. **Patrol:** deleted at sign-off. No subscriptions held.\n- **Posture ledger:** the canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#2` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none. Last card #32698 → PR #32892 merged 2026-11-12T23:52Z (ACCEPT 6838315559, close-out 6839440286).\n- **Left in the lane queue, unclaimed:** #31518 (p1) waits for its 7-day re-reading, due on or after 2026-11-16. #31531 (p3) waits for cloud's `action-tool-name.ts` text on the card (asked in 6723217897). #31122 closes once the gallery ruleset is set.\n\n## Hot-file serial queue\n\n- None held.\n\n## Notes\n\n- **Standing constraints (carried, ruling 6720656982):** root `.github/workflows/ci.yml` is in devx bounds; `ui/.github/**` stays ⛔ out of bounds. A Tier H `.github/workflows/**` PR is merged by the maintainer by hand.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes.\n- **收班简报:** in flight 0, nothing released. Owed: a cloud card for `scim-entra-id.md` / `scim-okta.md` (from #32148; adoption needs SSO domain verification), asked of the coordinator. Watch: `packages/qa/scenarios/test/runner/codex-driver.test.ts` has the #32562 stand-in shape without a timeout; a queue red there files a card. Landing note: the land stroke (`label-write --land`) is refused by the session's auto-mode classifier until the maintainer names the PR in the seat thread. Next holder: `/pm-dispatch` on this seat, read this post first.\n\n<!-- signed: domain:devx#2 · os-bill · session_01Utp6CaUbKoApKRiTnJ6xUr -->\n"
+  "body": "domain:devx#2 · sunhaolin · session_017xRBcRZn9wGkMSrznVX4JS\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:devx` seat 2**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here).\n- The other devx seats: seat 1 objectstack-ai/objectstack#6023, seat 3 objectstack-ai/objectstack#26373, and seat 4 (`os-project-manager`, mailbox #33289). ⛔ This post is none of them.\n\n<sub>Refreshed 2026-11-14T17:09Z (off duty).</sub>\n\n## Current PM — ⏳ vacant\n\n- **Off duty** on the maintainer's word: 「当前任务处理完，合并后下班」 (this seat's session chat). Last holder: `sunhaolin` · `session_017xRBcRZn9wGkMSrznVX4JS` (a Claude Code cloud session), seated 2026-11-14T14:43Z.\n- **Mailbox:** PR #33247, closed at sign-off. **Patrol:** `trig_01HWEbxQ6pS469PMnoozgRQG`, deleted at sign-off. No subscriptions held.\n- **Posture ledger:** the canonical ledger is the labels, the assignee, the `Claim:` comments carrying `Seat: domain:devx#2`, and the `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none. `check-handover.mjs --session=session_017xRBcRZn9wGkMSrznVX4JS --account=sunhaolin` exit 0.\n- **Landed this term:** #33032 + #33054 + #33060 + #33086 + #33091, folded into PR #33273 (`fdb76fb89d`); #33195 by PR #33298 (`e92487f40e`), on the maintainer's ruling A (6879884762).\n- **Left in the lane queue, unclaimed:** #31518 (p1), whose 7-day re-reading is due on or after 2026-11-16. Two p3 cards, #33133 and #31531, are outside this seat's p1/p2 scope.\n- **Taken by seat 4 meanwhile:** #32908 and #33275 (filed by this seat, sub-issue of #33060).\n\n## Hot-file serial queue\n\n- None held.\n\n## Notes\n\n- **Standing constraints (carried, ruling 6720656982):** the root `.github/workflows/ci.yml` is inside devx bounds; `ui/.github/**` stays ⛔ out of bounds. A Tier H `.github/workflows/**` PR is merged by the maintainer by hand.\n- **Ruling 6879884762 (on #33195):** editing the run-list readers in `scripts/release-pending-publish.mjs` (not the `annotate-shipped` path) is not a change to the root `version` chain. Devx carries those readers.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes. From a cloud seat, `mailbox-open.mjs` cannot push `mailbox/*`: push the session's own `claude/` branch and pass `--head`.\n\n<!-- signed: domain:devx#2 · sunhaolin · session_017xRBcRZn9wGkMSrznVX4JS -->\n"
 }

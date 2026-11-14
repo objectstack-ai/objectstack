@@ -1,0 +1,38 @@
+{
+  "number": 33249,
+  "kind": "pull_request",
+  "title": "fix(service-storage): a chunked completion retried after it succeeded answers the same 200, and a completed upload takes no more chunks",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T14:46:34Z",
+  "updated_at": "2026-11-14T15:44:41Z",
+  "closed_at": "2026-11-14T15:44:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T15:44:39Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33249",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DU5CHkeh2msc49m4dh6kwEt)_\n\nFixes #33027\n\nArea-lease pilot #33059, area A3.\n\n## What changes\n\nTwo doors in `packages/services/service-storage/src/storage-routes.ts`, both about a chunked upload session already `completed`:\n\n| Door | Before | Now |\n|:--|:--|:--|\n| `POST /storage/upload/chunked/:uploadId/complete`, sent again after it succeeded | `500 INTERNAL`; session re-stamped `failed`; file stays committed | `200` with the same body as the first completion; nothing written, backend not called; session stays `completed` |\n| same, the retry lists a chunk the upload does not hold | `409 RESOURCE_CONFLICT` | unchanged (the parts check still runs first) |\n| `PUT /storage/upload/chunked/:uploadId/chunk/:chunkIndex` on a completed session | `200` + eTag; chunk stored for no file, parts record rewritten | `409 RESOURCE_CONFLICT`, nothing stored or recorded |\n| either door on a session `in_progress`, `failed` or `expired` | as before | unchanged (`failed` still is not a lock: a retry after a backend blip completes) |\n\nThe `200` body is built by one helper (`completedUploadBody`) for both the assembling completion and the replay, so they cannot drift. The replay answers the key the file row was committed with. No new error code: `409 RESOURCE_CONFLICT` is the code the door already uses for \"the request conflicts with where the upload stands\".\n\n## Why\n\nA client that lost the `200` and retried (the SDK `resumeUpload` pattern) was told a committed, downloadable file had failed, and the session ledger said `failed`. Root cause: the completion door did not look at the session's terminal status; the adapter had already discarded its multipart, threw \"Upload session not found\", and the catch stamped `failed` over `completed`.\n\n## Verification\n\n- New pins in `storage-routes.test.ts`, `describe('[#33027] a completed session')`: replay `200` deep-equals the first body, `completeChunkedUpload` and `updateSession` not called, row + progress `completed`, file `committed`; a retry with a wrong eTag still `409`, row stays `completed`; chunk PUT `409 RESOURCE_CONFLICT`, `uploadChunk` not called, `parts`/`uploaded_size` unchanged; CONTROL: a re-sent chunk on an in-flight session still `200`.\n- Ablation (guards replaced by `false`, fix committed first, restored with `git checkout HEAD --`): the replay pin and the chunk pin go red (`2 failed | 2 passed`); restored tree diff empty.\n- Local, on `d3d6b13f` + changeset: `service-storage` `storage-routes.test.ts`, `chunked-upload-integrity.test.ts`, `storage-routes.metadata-outage.test.ts`, `chunk-part-record-concurrency.test.ts`: 169/169 passed. `service-storage` typecheck, eslint on both files, `check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`, `check-issue-citations`, `check:doc-authoring`, `check:route-envelope`, `check:error-status-conformance`, `check:nul-bytes`: all exit 0. Everything else: CI.\n\nClause-②: yes (narrowing)\nMetadata-protocol: none\n\nChangeset `.changeset/33027-chunked-complete-retry.md`: `@objectstack/service-storage` patch, `adr-0087: not-required (no-migration-prescription)`. Narrowing = the chunk PUT on a completed session, `200` → `409`; widening = the completion replay, `500` → `200`.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1D3AzXvEhBbz79Pmi\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4d1D3AzXvEhBbz79Pmi)_\n"
+}

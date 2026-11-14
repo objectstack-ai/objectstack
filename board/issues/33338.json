@@ -1,0 +1,32 @@
+{
+  "number": 33338,
+  "kind": "issue",
+  "title": "MCP validate_expression: inScope.fields lists the hidden __search companion field",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:A4",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T17:10:00Z",
+  "updated_at": "2026-11-14T18:45:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33338",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nSource: v18.4.0 sweep close-out, #32908 comment 6881136418 (devx#4 ledger, read at `87330e89`), routed by triage.\n\n## What is wrong\nRow 184 (record #33081, comment 6850173588): `validate_expression` answers an `inScope.fields` list that includes the hidden `__search` companion field. `search.field-scoped-narrowing` A2 says that field is invisible. An agent that reads the list can write an expression against a field it is not meant to see or use.\n\n## Do\n- Drop search companions, and any other hidden system companion, from `inScope.fields` in `packages/formula` (validate) or in the MCP domain that builds the scope (`packages/runtime/src/domains/mcp.ts`). Keep one list of what counts as hidden. Don't add a second filter.\n- Pin it: a field-scoped search object's `inScope.fields` has no `__search` entry.\n\n## Grade\np2 (wrong information to the caller, no data written), raised once for MCP focus → **p1**.\n\n## Reader\n`domain:server`, pilot **Area A4** (formula)."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 33378,
+  "kind": "issue",
+  "title": "metadata-protocol: the object door does not see its package's published extension fields, and a batch accepts a hop through an extension-added lookup into a missing field",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A5",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T18:07:40Z",
+  "updated_at": "2026-11-14T18:07:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33378",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cykhsWAtSL6Sr4VWFG\n\nLoose-ends card for #33152 (landed as #33300). ⛔ Not a claim.\n\n## What happens\n\nBoth were reported by the #33152 implementer and are outside that PR's file surface.\n\n1. **Per-item object door.** reach: named producer, `PUT /api/v1/meta/object` (the reviewer's probe on the real door). An object's own formula cannot read a field that its package's **published** extension adds: the door answers `unknown field`, while `os build` accepts the same package. The object save's destructive-change guard also reads such a field as removed unless the save is forced. Cause: the object door judges the WRITTEN body, which replaces the served object (with the extension folded on) in the snapshot it validates against.\n2. **Batch door, lenient direction.** reach: `protocol.publishPackageDrafts` on the real store rig (the method behind the package publish route). Not measured over HTTP or against `os build`. Example: `{ extend: crm_account, fields: { region__c: lookup crm_region, tier_label__c: formula \"record.region__c.tier__c + '!'\" } }`, with `crm_region` lacking `tier__c`, answered `success: true`. A hop through a lookup that the same extension adds into a field that exists nowhere is accepted, while a hop through a base lookup is refused (pinned by #33300's CONTROL).\n\n## Expected\n\n1. The object door judges the written object with the package's published extensions folded on, as the registry serves it, the same way the extension door already does since #33072.\n2. A hop through an extension-added lookup is judged like a hop through a base lookup.\n\nDedupe words: `object door published extension field formula unknown field`, `destructive-change guard extension field removed`, `extension formula hop extension-added lookup unknown field accepted`.\nRelated: #33152, #33300, #33072.\n"
+}

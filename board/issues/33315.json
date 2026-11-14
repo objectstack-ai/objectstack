@@ -1,0 +1,34 @@
+{
+  "number": 33315,
+  "kind": "pull_request",
+  "title": "docs(spec): page-record-no-component-refused entry names the console's explanation panel",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T16:29:44Z",
+  "updated_at": "2026-11-14T17:40:06Z",
+  "closed_at": "2026-11-14T17:40:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T17:40:04Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33315",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XFUm1vjLBYprxvZXBUN3Yai)_\n\nFixes #32759\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：纯文字。升级指南里 `page-record-no-component-refused` 这一条（记录页没放任何组件会被拒绝）的两句话：`reason` 末尾原说「已存成这样的页面在修好或删掉之前，控制台仍画空白面板」，改为「打开该对象的记录时，控制台在详情处画一个说明面板，写明页面名和三种修法：往区域里放组件、改成 slotted、删掉页面」；`acceptanceCriteria` 末尾「不是空白面板」改为「不是那个说明面板」。\n- **为什么改**：PR #32693 合并后控制台不再画空白面板，而是画说明面板；这条迁移说明还是旧句子，`os migrate meta` 与升级指南会告诉作者错误的现状。\n- **风险与回滚**：纯文字，加一个 `@objectstack/spec` patch changeset；`id`、`surface`、`replacement`、规则、schema 与运行时一概不动。回滚即 revert。\n- **先看**：`packages/spec/src/migrations/entries/semantic/18.page-record-no-component-refused.ts` 的 `reason` 最后一句与 `acceptanceCriteria` 最后一句。\n- **两分钟验证**：`git diff origin/main -- packages/spec/src/`，预期只有这两句字符串变化。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\nRelease text only, measured against the Console change PR #32693 landed (`ui/packages/app-shell/src/views/RecordDetailView.tsx`, the `assignedPage && recordPagePlacesNoComponent(resolvedPage)` branch: an `Empty` panel, test id `record-page-places-no-component`, titled \"This record page has nothing to show\", whose description names the page and says an administrator can add components to a region, make the page slotted, or delete the page).\n\n1. `packages/spec/src/migrations/entries/semantic/18.page-record-no-component-refused.ts`, `reason`, last sentence: \"until it is fixed or deleted, the console still draws the blank panel for its object\" now reads \"until it is fixed or deleted, opening a record of its object in the console draws an explanation panel in place of the detail view, naming the page and the three fixes: place components in a region, make the page kind slotted, or delete it\".\n2. Same file, `acceptanceCriteria`, last clause: \"… shows its detail view — the default record page, or the components you placed — not a blank panel\" now ends \"not the explanation panel that names the page and its fixes\".\n3. `.changeset/32759-page-record-no-component-entry-text.md`: `'@objectstack/spec': patch`. The entry ships in the package (`dist`, and the generated `spec-changes.json` and `protocol-upgrade-guide.md` in `files[]`).\n\nUnchanged: the entry's `id`, `surface`, `replacement` and every rule, schema and runtime answer. The past-tense sentences describing what such a page did before the refusal (header comment, and the `reason` sentence \"opened every record of its object on a blank detail panel\") and the one describing what the refusal message says (\"saying that every record would open on a blank panel\") stay: they remain true. No `registry.ts.template` rationale fragment exists for this entry (grep: 0 hits), and every projection of the entry (`registry.ts`, `spec-changes.json`, `protocol-upgrade-guide.md`, `content/docs/protocol-upgrade/18.md`) is gitignored and regenerated, so nothing else is committed.\n\n## Tests\n\nNo behaviour change, so no test is added and none is ablated. The only pin on the entry, `packages/spec/src/ui/page.test.ts` (step 18 test), asserts its presence and empty `conversionIds`, not its text. The `page.test.ts` title \"naming the blank panel and the fixes\" is about the parse refusal's message, which still says that, so it is left alone. After `pnpm --filter @objectstack/spec build`, `gen:spec-changes` and `gen:upgrade-guide`: the regenerated `registry.ts`, `spec-changes.json` and `content/docs/protocol-upgrade/18.md` each carry the new sentence and no \"still draws the blank panel\".\n\n## Acceptance notes\n\n- The released `packages/spec/CHANGELOG.md` entry for 18.4.0 (the `page-record-no-component-refused` narrowing, its Unchanged bullet) also says \"until it is fixed or deleted the console still draws the blank panel\". It was true when 18.4.0 shipped; `CHANGELOG.md` is release-owned, so a correction is a dedicated docs-only PR (AGENTS.md, Documentation Guardrails), not a rider here. Noted for the seat.\n\n## Verification\n\nLocal gates on head `bdb02993` (base `fd7b378c`): 78 derived by `dispatch-gates --commands`, 77 exit 0, 1 NOT MEASURED (`check:dual-build-cjs-loads`, exit 3 PREREQUISITE NOT MET: it needs every package's `dist`, which CI builds). `--ran` reconciles 78 accounted, 0 unrun. `pnpm --filter @objectstack/spec test`: Test Files 840 passed, Tests 26832 passed (1 todo). `pnpm --filter @objectstack/spec typecheck`: exit 0. `check-changeset-no-major` and `check-empty-changeset` replayed as a `pull_request` event carrying this body: exit 0. Full list in the card's `os-dev-report`; CI runs the full set.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5piGTS7XkkfRsBof8p)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5piGTS7XkkfRsBof8p\n"
+}

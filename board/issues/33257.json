@@ -1,0 +1,31 @@
+{
+  "number": 33257,
+  "kind": "issue",
+  "title": "skills (data-hooks): a hook that enforces a business rule declares `refusals` and refuses by code, not a bare onError abort (HOOK_ABORTED)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T15:00:37Z",
+  "updated_at": "2026-11-14T15:49:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33257",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① AI-authoring guidance gap, measured. `reach:` the gallery debut refresh of 2026-11-14 (card `asset_lifecycle`, scratch, `--packages published` 18.4.0, runner at objectstack main `295ce127`, model claude-opus-5-5; record `2026-11-14-scenario-asset_lifecycle.json`, kept in the seat's work dir). The built app refused a forbidden write correctly, but with the platform's generic code, so the card's validation operation failed on both the build half and the iterate half.\n\n## What happened\n\nOperation `check_out_asset_in_repair` as `asset_admin` declares `refused VALIDATION_FAILED`, guardrail `write_validation`: \"Checking out AST-0041 while it is in repair is refused … with the form's validation error, never written.\"\n- The AI enforced \"only an in-stock asset can be checked out\" with a sandboxed hook, `src/hooks/checkout_requires_stock.hook.ts`. This is legitimate, because a validation predicate cannot read the asset's status from the checkout. It used `onError: 'abort'` and **no `refusals` catalogue**.\n- The runner's probe write was refused `HOOK_ABORTED` (400). That is a platform catalogue code, so under ruling A on #31999 item 9 (`refusalMeets`, `scenario-operation-grade.ts`) it does not meet `VALIDATION_FAILED`. A declared refusal such as `ASSET_NOT_IN_STOCK` at 409 would have met it, and it would also have given the user and the agent a meaningful code and a localized message.\n- The agent itself declined correctly in both halves.\n\n## Ask (`skills/objectstack-data/references/data-hooks.md`, and the hook rules that point to it)\n\n1. Teach that a hook which **enforces a business rule** declares a `refusals` catalogue and refuses by code: one code per rule, with a status and a message key. A bare `onError: 'abort'` is for unexpected failures, not for rules the user can act on. Show this case: a cross-object state guard, \"only an in-stock asset can be checked out\".\n2. If an authoring rule or lint can say it mechanically (a hook whose body refuses on a business condition carries `refusals`), propose it in the PR. Otherwise the prose rule is enough.\n3. Proof: `pnpm check` for the skills package, plus one scenario re-run on a card with a cross-object guard. This is a live run, so it needs the maintainer's word; until then, cite the recorded build.\n\nReader: the `domain:skills` lane seat, from `pm:queue`. Dedupe: `hook refusals skills HOOK_ABORTED`; the only near hit is the closed #27597, the code-less 400 itself. Priority p3: coverage, and the AI may or may not choose a hook on the next run."
+}

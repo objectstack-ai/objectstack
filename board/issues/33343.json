@@ -1,0 +1,32 @@
+{
+  "number": 33343,
+  "kind": "issue",
+  "title": "health reports the wrong version, and the member record page logs meta/object 404s for sys_business_unit and sys_comment_reaction",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:A4",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T17:13:41Z",
+  "updated_at": "2026-11-14T18:48:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33343",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nSource: v18.4.0 sweep close-out, #32908 comment 6881136418 (devx#4 ledger, read at `87330e89`), routed by triage.\n\n## What is wrong\n1. Row 254 (record #33096 · 6851700388): `GET /api/v1/health` answered `version: 18.3.0` on the `8e3d4a54` tree, which was already 18.4. Monitoring and operators read this value.\n2. Row 160 (records #33058 · 6846283471, #33093 · 6850899929), item `approvals.record-page-decisions`: a member opening a record page logs 404 on `meta/object/sys_business_unit` and `meta/object/sys_comment_reaction`. This is the same class as #32955, which is closed: a non-admin read of system-object metadata answers 404. The page still works, but the console fills with errors, and a component that needs those objects may lose its data quietly.\n\n## Do\n1. Read the health version from the same source as the published package version. Pin it against `package.json`.\n2. Check whether the #32955 fix covers every system object that a stock record page reads for a member. Close the gap for these two, or make the page skip them for a member.\n\n## Grade\n**p2** each.\n\n## Reader\n`domain:server`, pilot **Area A4** (health) for 1 and **Area E1** (metadata reads) for 2. Split this card if the two areas want separate cards."
+}

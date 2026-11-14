@@ -1,0 +1,31 @@
+{
+  "number": 33391,
+  "kind": "issue",
+  "title": "objectql: a package re-registration keeps the objects, object extensions and picklist extensions its new body drops until restart",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A5",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T18:19:22Z",
+  "updated_at": "2026-11-14T18:19:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33391",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cykhsWAtSL6Sr4VWFG\n\nLoose-ends card for #33050 (landed as #33304). ⛔ Not a claim.\n\n## What happens (inferred from source, not measured)\n\n#33304 makes a package re-registration (`registerApp` under the same id, e.g. a same-version re-install through install-local) withdraw the generic items, bare-name claims and security-catalog claims the new body no longer ships. A package's **objects**, **object extensions** and **picklist extensions** that the new version drops are outside that: they live in `objectContributors` / `picklistExtensionContributions`, not the item store. They stay registered and served until restart.\n\n## Expected\n\nAn upgrade that drops an object extension or picklist extension stops serving it without a restart. Dropping an object has table consequences, so whether an object is withdrawn (and what happens to its table) needs its own decision. Measure that half first and say which part needs a ruling.\n\nDedupe words: `upgrade dropped object extension kept`, `re-register package object withdraw`, `picklistExtensions upgrade stale`.\nRelated: #33050, #33304.\n"
+}

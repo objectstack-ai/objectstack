@@ -1,0 +1,38 @@
+{
+  "number": 33284,
+  "kind": "pull_request",
+  "title": "fix(plugin-approvals): refuse an inverted delegation window and a self-delegation at the write",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T15:34:32Z",
+  "updated_at": "2026-11-14T17:05:53Z",
+  "closed_at": "2026-11-14T17:05:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T17:05:51Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33284",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DU5CHkeh2msc49m4dh6kwEt)_\nFixes #33062\nArea-lease pilot #33059, area A3.\n\n## What changes\n\n`sys_approval_delegation` declares two `validations` (same shape as `sys_user_permission_set.validity_window_order`):\n\n- `validity_window_order` (cross_field, attaches to `valid_until`): refused when both bounds are set and `valid_until <= valid_from` (compared as instants with `datetime()`).\n- `delegate_not_delegator` (cross_field, attaches to `delegate_id`): refused when `delegate_id == delegator_id`.\n\nEach rule is judged on insert (`previous == null`) and on an update that moves one of its two columns, against the stored row overlaid with the patch. Validation runs after `beforeInsert`, so a delegator stamped by `bindDelegationWriteGuard` is judged too. Also: i18n bundles regenerated (zh-CN translated), one paragraph in `content/docs/automation/approvals.mdx`, a patch changeset. `approval-service.ts` and `sys-approval-action.object.ts` are untouched.\n\n## Why\n\nBoth shapes used to be stored with `201` and then never rerouted an approval (`isGrantActive` drops an inverted window; a self-delegate moves nothing), so the delegator believed their approvals were covered. Contract-first: refuse at the write instead of tolerating at resolution.\n\nStored rows with either shape (from before this change) stay inert as before and keep taking unrelated edits; the remedy is to correct the dates or the delegate, or delete the row.\n\n## Verification\n\nNew `sys-approval-delegation-inert-shapes.integration.test.ts` (real `ObjectQL` + `SqlDriver`, write guard bound), 12 cases: inverted window and self-delegation refused for the delegator and a system writer (`400 VALIDATION_FAILED`, field + `rule_violation`, the rule's own message, no row stored); equal bounds refused; self-delegation via the guard's stamp refused; updates that invert the window or set the delegate to the delegator refused with the row unchanged; CONTROLs: valid window + different delegate lands, open-ended windows (either bound, or none) land, moving a bound within a valid window lands, a legacy inert row takes an unrelated edit and can be repaired.\n\n<details><summary>Ablation (also the premise check): object file reverted to origin/main at 4e6f7a59</summary>\n\n```\nbefore mutation: delegate_not_delegator=1 validity_window_order=2\nafter mutation (origin/main object): delegate_not_delegator=0 validity_window_order=0\n     × NEGATIVE — the delegator: valid_until before valid_from is refused 400 on valid_until; nothing is stored\n     × NEGATIVE — the delegator: the delegator as their own delegate is refused 400 on delegate_id; nothing is stored\n     × NEGATIVE — a system writer: valid_until before valid_from is refused 400 on valid_until; nothing is stored\n     × NEGATIVE — a system writer: the delegator as their own delegate is refused 400 on delegate_id; nothing is stored\n     × NEGATIVE — equal bounds are refused: a window from t until t is empty\n     × NEGATIVE — a self-delegation that leaves the delegator to the write guard's stamp is refused\n     × NEGATIVE — moving valid_until to before the stored valid_from is refused; the row is unchanged\n     × NEGATIVE — changing the delegate to the delegator is refused; the row is unchanged\n Test Files  1 failed (1)\n      Tests  8 failed | 4 passed (12)\nrestored: hash d1c64ad40c34796e7546d4bfacc52537749ce7b6 == HEAD blob; git diff HEAD lines: 0\n```\n\nEvery red case failed with \"expected the write to be refused, but it succeeded\": on origin/main all eight writes land.\n</details>\n\n<details><summary>Local runs at b71b1de2</summary>\n\n- `pnpm --filter @objectstack/plugin-approvals exec vitest run --maxWorkers=2`: Test Files 120 passed (120), Tests 1644 passed (1644)\n- `pnpm --filter @objectstack/plugin-approvals typecheck`: exit 0 (`check:test-typecheck: OK`)\n- eslint on the two touched source files: exit 0\n- `node scripts/check-i18n-bundles.mjs --filter=approvals`: in sync (21 bundles); `pnpm check:i18n-stale-fill`: OK\n- `node scripts/check-adr-0087-registration.mjs --base origin/main`: 1 declared-breaking changeset with a disposition\n- `check:nul-bytes`, `check:doc-authoring`, `check:test-source-alias`, `check:cross-package-test-inputs`, `check:issue-citations`, `check-changeset-no-major`, `check-empty-changeset`, `check:registry-log-declared`, `check:role-word`, `check-affected-docs`: exit 0\n\nThe rest of the derived gate list is left to CI.\n</details>\n\nClause-②: yes (narrowing)\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1D3AzXvEhBbz79Pmi\n"
+}

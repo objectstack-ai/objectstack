@@ -1,0 +1,34 @@
+{
+  "number": 33357,
+  "kind": "pull_request",
+  "title": "feat(spec,cli): i18n.sourceLocale names the inline text's language apart from the users' defaultLocale",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T17:25:38Z",
+  "updated_at": "2026-11-14T19:15:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33357",
+  "body": "Fixes #33232\n\nClause-②: yes\nMetadata-protocol: added\nSkills-docs: follow-up owed — `skills/objectstack-i18n/SKILL.md` (the `i18n` key table near line 45 and the `--default-locale` mention near line 419 teach `defaultLocale` / `--default-locale` as the only locale knobs; it needs a `sourceLocale` row). `content/docs/ui/translations.mdx` and the `os lint` flag row in `content/docs/deployment/cli.mdx` are updated here.\n\n> Opened by the seat `domain:spec#2` on the dev's behalf. The cloud dev `session_017xRBcSSA3H2jkpZCNuJyw2` implemented and pushed the branch at `34ec0e4f`, but its session's auto-mode classifier refused both of its GitHub writes (the relay `pr_create` and the report comment). The seat posts the dev's report verbatim on #33232.\n\n## 维护者速读\n\n- 改了什么：`i18n` 配置新增可选的 `sourceLocale`，表示内联元数据文字是用哪种语言写的；`defaultLocale` 仍只表示用户的默认语言。`os lint`、`os i18n check`、`os i18n extract` 把它当作源语言读取。\n- 为什么改：#33232。下游应用用英文写元数据、给用户默认中文时，lint 误报 446 条\"缺 en 翻译\"，真正缺的中文却一条也不报。\n- 风险与回滚：放宽（新增可选键）。不声明该键的应用行为与之前逐字节一致；`--default-locale` 照旧可以覆盖。回滚即 revert。\n- 先看：`packages/cli/src/utils/i18n-coverage.ts` 的 `resolveSourceLocale`，以及 `packages/spec/src/system/translation.zod.ts` 的新键。\n- 需要你做的：无；契约复审通过后由本席落地。\n- 席位意见：待契约复审。运行时的标签解析暂未读取 `sourceLocale`（见 Acceptance notes），本 PR 只改工具链。\n\n## What changes\n\n- `TranslationConfigSchema` (the stack's `i18n` block) gains an optional `sourceLocale`, validated by the same `LocaleSchema` as `defaultLocale` and, like it, not required to be one of `supportedLocales`. Absent, it is `defaultLocale`. The near-miss spellings `sourceLanguage`, `authoringLocale` and `authoringLanguage` are refused with `sourceLocale` as the suggestion.\n- One CLI reading, `resolveSourceLocale` in `packages/cli/src/utils/i18n-coverage.ts` (`sourceLocale`, else `defaultLocale`, else `en`), feeds `computeI18nCoverage` (`os lint`, `os i18n check`) and `os i18n extract`.\n- `--default-locale` keeps working on all three commands and still wins for one run; its help text now says it overrides the source locale.\n- `os i18n check --json` keeps its `defaultLocale` field name and carries the source locale that was used.\n- Docs: `content/docs/ui/translations.mdx`, the regenerated `content/docs/references/system/translation.mdx`, and one row of `content/docs/deployment/cli.mdx` (a declared surface breach: the row's sentence became false). `packages/spec/authorable-surface/system.json` regenerated.\n\n## Tests\n\n- `translation.test.ts`: `sourceLocale` is optional and canonicalised, a non-tag is refused at `sourceLocale`, and the 3 near-miss keys are answered.\n- `i18n-coverage.test.ts`: in the downstream shape (`defaultLocale: 'zh-CN'`, `sourceLocale: 'en'`, English inline labels, one missing zh-CN row) there are zero `en` findings and exactly one zh-CN gap (a warning, an error under strict); the override wins; with the key absent the report deep-equals the reading before the change.\n- `i18n-extract.test.ts`: `resolveSourceLocale`'s order; `en` is filled from the source, and the zh-CN row is kept.\n- Ablation: `resolveSourceLocale` mutated to stop reading `sourceLocale` → 5 failed / 47 passed; restored to HEAD.\n- `@objectstack/cli` unit 417 files / 5959 tests pass; `@objectstack/spec` 840 files / 26838 tests pass; both typechecks exit 0.\n\n## Acceptance notes\n\n- **Out of scope, class a (to be filed by the seat):** the REST metadata read (`packages/rest/src/meta-item-read-gate.ts` `metaTranslateOptions`) passes `defaultLocale` as the authored label's language. For a stack with `defaultLocale: 'zh-CN'` and no `fallbackLocale`, an `en` request is served the zh-CN row instead of the English inline label (measured on the built resolver; the HTTP door was not booted). This exists today, independent of this PR. The workaround, declaring `fallbackLocale: 'en'`, is in the changeset.\n- **Skills docs:** `skills/objectstack-i18n/SKILL.md` follow-up is owed (the `Skills-docs:` line above).\n- **Open question, the dev's recommendation A:** whether the serving layer should also read `sourceLocale`. This goes to the follow-up card above, not to this PR.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands` on the actual diff derived 115 commands (the seat's 78 plus 37); all 115 exit 0, and `--ran` reconciles 115 derived / 115 run / 0 NOT-MEASURED / 0 UNRUN. After the last commit (a function move inside `packages/cli`), the 56 commands derived for its 4 files reran and all exit 0. Line budget: 346 changed lines (+318 / −28) over 14 files.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017xRBcSbLCxEmyHf9upz3pz\n\n<!-- signed: domain:spec#2 · sunhaolin · session_017xRBcSbLCxEmyHf9upz3pz -->\n"
+}

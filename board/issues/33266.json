@@ -1,0 +1,38 @@
+{
+  "number": 33266,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): a dataset over a field named after a SQL keyword (order, group, select) answers rows instead of 500",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T15:13:07Z",
+  "updated_at": "2026-11-14T16:24:58Z",
+  "closed_at": "2026-11-14T16:24:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T16:24:56Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33266",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DU5CHkeh2msc49m4dh6kwEt)_\n\nFixes #33138\n\nArea-lease pilot #33059, area A3.\n\n## What changes\n\n`NativeSQLStrategy.qualifyAndRegisterJoin` (`packages/services/service-analytics/src/strategies/native-sql-strategy.ts`) wrote a plain base-table column **bare** whenever the statement joined nothing, and `\"<table>\".\"<column>\"` when it joined. It now writes it quoted in both cases: `\"<column>\"` unjoined, `\"<table>\".\"<column>\"` joined (unchanged). Expressions, dotted paths and `*` are untouched.\n\nMeasured first (the triage's p1 trigger), real ObjectQL + SQLite, REST door and `query_dataset` tool, at `origin/main` `e540baf8`:\n\n| field name | lookup dimension (`field: <name>`) | relationship path (`<name>.region`) |\n|:--|:--|:--|\n| `order` | **500 `DATABASE_ERROR`** → 200 | 200 (unchanged) |\n| `group` | **500** → 200 | 200 |\n| `select` | **500** → 200 | 200 |\n| `user` (CONTROL) | 200 | 200 |\n| `cb_order` (CONTROL) | 200 | 200 |\n\nThe path form already worked because a joining statement quotes. `user` passes on SQLite but is `CURRENT_USER` on PostgreSQL when bare, so a base dimension named `user` would group every row under the database role there (read from PostgreSQL's grammar, NOT MEASURED on a server). The MCP `query_dataset` door failed the same way as REST (same compile).\n\n## Why\n\nA bare identifier is the only spelling in this compiler that is not quoted; tables, aliases and joined columns already are. One rule (always quote a column) removes the whole keyword class on every dialect instead of a per-dialect reserved-word list.\n\n## Verification\n\n- New `packages/rest/src/analytics-dataset-keyword-field-name.test.ts`: 5 field names × 2 shapes, three faces each (REST door, `query_dataset` executor, direct service), all serve the labelled rows. Ablation (quote removed in the unjoined branch, `service-analytics` rebuilt): `order`/`group`/`select` lookup-dimension cases red (`3 failed | 7 passed`), CONTROLs green; restored with `git checkout HEAD --`, rebuilt.\n- `service-analytics` test-text updates (29 files, assertions only): SQL-text pins of the native compiler now read `\"col\"`. Where a test compares the native compiler with the ObjectQL echo (which still prints bare columns; it is display text, never executed), the helper reads the quotes away (`analytics-faces-one-lowering`, `text-match-mssql-oracle`) or quotes the expected native text (`where-boolean-flag-refusal`). No assertion was removed or loosened.\n- Local on the branch: `service-analytics` full suite `5199 passed | 332 skipped`; `rest` new file + `analytics-dataset-lookup-dimension-labels` `16 passed`; `service-analytics` and `rest` typecheck, eslint on every touched file, `check:cross-package-test-inputs`, `check:test-source-alias`, `check:issue-citations`, `check:nul-bytes`, `check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`: exit 0. Rest: CI.\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\nChangeset `.changeset/33138-analytics-keyword-field-name.md`, `@objectstack/service-analytics` patch.\n\n## Acceptance notes\n\n- A cube member whose `sql` is a bare SQL keyword function (e.g. `CURRENT_DATE`) is now read as a column in an unjoined statement too. It already was in any joining statement, and the compiler's own rule is that a plain identifier is a column; no first-party cube writes one.\n- The ObjectQL echo (`ObjectQLStrategy.generateSql`) still prints bare columns. It is the display of what the engine ran, not SQL that executes; quoting it is cosmetic and left out of this PR.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1D3AzXvEhBbz79Pmi\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4d1D3AzXvEhBbz79Pmi)_\n"
+}

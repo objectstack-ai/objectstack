@@ -1,0 +1,30 @@
+{
+  "number": 33355,
+  "kind": "pull_request",
+  "title": "docs(skills): a template hole's default is literal text; an in-app send that reached nobody is refused",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T17:20:07Z",
+  "updated_at": "2026-11-14T17:26:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33355",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DXuamRUC67fx2TTYrFfyuSH)_\n\nRefs #32678, #32825 — the governed skills/docs lines those two cards' PRs (#33321, #33347) owe and could not carry. Land after both: each line describes behaviour those PRs ship.\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: this PR is the follow-up.\n\n## Maintainer quick read\n\n- What changes: one clause in the automation skill and one paragraph in the administrator guide. No code.\n- Why: #33321 adds the `email-template-default-reads-as-path` warning (a template hole's `default:` argument is literal text, never a variable path); the ruling on #32678 asked for that line in skills too. #33347 makes the in-app message door refuse a send that reached nobody (409/503) instead of confirming it; the administrator guide still said only that the confirmation counts recipients.\n- Risk and rollback: text only; revert to roll back.\n- Needed from you: a Tier H approval (`skills/**` is governed).\n\n## What changes\n\n- `skills/objectstack-automation/SKILL.md`: the text-slot rule (\"holes — a variable path, optional formatter, no logic\") now says a `default:` argument is literal text, never a path. Paid for under the token ratchet by trimming the \"When to Use\" line, which restated the frontmatter description (flows, state machines, approvals, triggers): the file measures 6860 against its ceiling of 6861.\n- `content/docs/permissions/administrator-guide.mdx`, \"Send a message to your organization\": the confirmation counts the people a delivery was accepted for; a send that reached nobody is refused, `409` when every picked person turned the topic off, `503` when delivery could not be made or, for Everyone, when the member list could not be read or every member turned the topic off.\n- `.changeset/a2-skills-docs-32678-32825.md`: `@objectstack/skills` patch.\n\n## Verification\n\nLocal, on head `64296ca8`: `check-skills-token-ratchet` (automation SKILL.md 6860 / 6861), `check-skill-links`, `check-skill-identifier-liveness`, `check-skill-frame-sync`, `check-skill-top-level-keys` and `check-empty-changeset` all exit 0.\n\n## Human Minimum\n\n- [x] 1. No schema is touched.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` is not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cz2MxDkQYCC4U8indM\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 33334,
+  "kind": "issue",
+  "title": "qa runner kit: write the v18.4.0 sweep's 12 environment facts into RUNNER.md and fix two qa-fixture.mjs gaps (walled-boot flags, contributor-member --position)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T17:02:52Z",
+  "updated_at": "2026-11-14T18:34:51Z",
+  "closed_at": "2026-11-14T18:33:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33334",
+  "body": "domain:devx#4 · os-project-manager · session_01FEkQ5ooRyyS95kdyC2dPEX\n\nFiling gate: ① a named-carrier defect in the QA runner kit, with reach: each row below was hit in a real v18.4.0 sweep run (records #32953, #33025, #33048, #33081, #33092–#33094) and cost that run a detour, a wrong result or a re-drive.\nParent: #32908 (v18.4.0 sweep anchor), close-out ledger 6881013689: these 14 rows were parked as \"out of scope\" for the item-text batches (#33328–#33332) because they land in `docs/qa/platform-checklist/RUNNER.md` and `scripts/qa/qa-fixture.mjs`, not in `areas/*.json`.\n\n**Business reason:** every release sweep is run by an agent reading RUNNER.md and calling `qa-fixture.mjs`. A missing environment fact (127.0.0.1 refused 403 INVALID_ORIGIN, `--no-compile` serving another runner's dist, uploads written into the tree) or a fixture command that rewrites the shared showcase artifact costs each run time and can turn a correct product into a false FAIL. Release cadence makes that recur every sweep.\n**Reader:** `domain:devx` seat 4 dispatches it (one PR: RUNNER.md text + `qa-fixture.mjs`).\n**Dedupe:** `\"walled-boot\" no-compile` and `RUNNER.md DEV_PROXY_TARGET` issue searches (open and closed): 36 and 4 hits, all QA run records and sweep anchors that report these facts; no card carries the fix. `plugin-email` `startFakeSmtp` port (row 14) is a `domain:server` package and is NOT on this card.\n\n## Fix shape\n- `scripts/qa/qa-fixture.mjs`: `walled-boot` passes `--no-compile --no-watch` (row 12, about L335) so it neither rewrites the shared showcase artifact nor starts a watcher; `contributor-member` grows a `--position` flag so the approvals persona needs no separate POST (row 13). Re-read both on current `main` first; a test for each if the script has a test harness.\n- `docs/qa/platform-checklist/RUNNER.md`: one sentence per still-true environment fact (rows 86–269), each re-measured on current `main`. A row that reads as a product defect rather than an environment fact (e.g. row 94, a connector self-URL that ignores `OS_PORT` while RUNNER says it follows it) is reported, not written up as a workaround.\n\n## Rows (from the #32908 close-out ledger, read at `87330e89`)\n\n| # | line | source record · comment | disposition | evidence |\n|---|---|---|---|---|\n| 12 | runner: qa-fixture walled-boot: scripts/qa/qa-fixture.mjs walled-boot spawns objectstack dev without --no-compile --no-watch (~L335) | #32953 (body §1) · #33048 · 6846028996 · #33092 · 6850793622 · #33094 · 6852480973 | 4 out of scope → finding (runner tooling) | — |\n| 13 | runner: qa-fixture contributor-member: contributor-member has no --position flag; approvals persona needs a separate showcase_finance POST | #32953 (body §1) | 4 out of scope → finding (runner tooling) | — |\n| 86 | RUNNER env: --no-compile shared dist / OS_PORT: --no-compile serves whatever dist another runner compiled; a connector boot self-pinged another runner's port | #33025 · 6844741021 | 4 out of scope → finding (RUNNER.md environment fact (other path)) | — |\n| 87 | RUNNER env: os package install shared folder: os package install writes into shared examples/app-showcase/.objectstack/installed-packages/, no API door undoes it | #33025 · 6844741021 | 4 out of scope → finding (RUNNER.md environment fact (other path)) | — |\n| 93 | RUNNER env: scratch-copy recipe: plain cp -a of examples/app-showcase does not boot (relative pnpm links): symlink packages/node_modules | #33048 · 6846028996 · #33094 · 6852480973 · #33096 · 6851700388 | 4 out of scope → finding (RUNNER.md environment fact (other path)) | — |\n| 94 | RUNNER env: connector self-URL: on a --no-compile boot with OS_PORT exported, showcase_declarative_connector_ping dials :3000 (RUNNER says it follows OS_PORT) | #33048 · 6846028996 · #33093 · 6850899929 | 4 out of scope → finding (RUNNER.md environment fact (other path)) | — |\n| 97 | RUNNER env: studio-customize-journey timeout: live spec needs more than the default 30 s on a loaded 4-CPU box | #33048 · 6846028996 | 4 out of scope → finding (RUNNER.md environment fact (other path)) | — |\n| 203 | RUNNER env: tsc pins need dts: rest-route-generation-tombstones tsc block and external-schema-introspection A2 need a spec build with declarations (OS_SKIP_DTS=1 fails TS7016) | #33081 · 6850173588 | 4 out of scope → finding (RUNNER.md environment fact (other path)) | — |\n| 204 | RUNNER env: vitest/dogfood OOM: vitest 4 rejects --poolOptions.forks.maxForks; run dogfood one file per invocation at --maxWorkers=1 | #33081 · 6850173588 · #33092 · 6850793622 | 4 out of scope → finding (RUNNER.md environment fact (other path)) | — |\n| 205 | RUNNER env: localhost origin: sign-in must use http://localhost:PORT (127.0.0.1 answers 403 INVALID_ORIGIN) | #33081 · 6850173588 | 4 out of scope → finding (RUNNER.md environment fact (other path)) | — |\n| 206 | RUNNER env: curl If-Match: curl -H 'If-Match:' drops the header; use 'If-Match;' | #33081 · 6850173588 | 4 out of scope → finding (RUNNER.md environment fact (other path)) | — |\n| 207 | RUNNER env: uploads in tree: a boot without OS_STORAGE_LOCAL_ROOT writes uploads into the tree | #33081 · 6850173588 | 4 out of scope → finding (RUNNER.md environment fact (other path)) | — |\n| 237 | RUNNER env: setsid pid: cd APP && setsid cmd & records the subshell pid; record $! of a bare setsid | #33092 · 6850793622 | 4 out of scope → finding (RUNNER.md environment fact (other path)) | — |\n| 269 | RUNNER env: vite DEV_PROXY_TARGET; write results item by item: vite live console must use DEV_PROXY_TARGET, not VITE_SERVER_URL; write the result file item by item | #33094 · 6852480973 | 4 out of scope → finding (RUNNER.md environment fact (other path)) | — |"
+}

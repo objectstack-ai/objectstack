@@ -1,0 +1,33 @@
+{
+  "number": 33351,
+  "kind": "issue",
+  "title": "qa fixtures: 22 seed and environment gaps that block checklist rows (v18.4.0 sweep)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "needs-user-decision",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T17:16:25Z",
+  "updated_at": "2026-11-14T19:51:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33351",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nSource: v18.4.0 sweep close-out, #32908 comment 6881136418 (devx#4 ledger, read at `87330e89`), routed by triage.\n\nChecklist rows that can't score because the stock fixtures lack a seed, grant or recipe. Each needs a fixture change, not new item text. Row numbers refer to the source ledger.\n\n## A. Seed and fixture additions (16)\n- 80: stock personas need a `sys_attachment` permission grant before attachment hooks are reachable.\n- 89: `platform-core.settings-hub-roundtrip` has no stock user-scope secret.\n- 90: the activation-ledger ambiguous-row leg needs a second holding package.\n- 91: the `identity-auth.self-signup-gate` email_domain and open variants need a declared audience.\n- 92: showcase `task_own_rows` compares `assignee == current_user.email`, but `assignee` stores a user id, so the rule never matches. Compare ids, as the platform's user lookups do. This is a showcase fixture bug, not a question for the maintainer.\n- 135: `approvals.quorum-m-of-n` knownGaps[1]: Ada holds only `showcase_auditor`.\n- 151: a mandatory notification topic that is reachable without a constructor option.\n- 152: an agent catalog for the AI-chat half of keyboard-shortcut.\n- 153: an inactive-app or single-active-app seed for command-palette N3.\n- 155: a loop in the stock flow fixture, for the back-edge step of flow-edge-type-authoring.\n- 208: a member-less user on a walled boot (no-active-org A0, producer 1).\n- 209: `cli-18-prerelease-db` restore doesn't re-date rotation shards, so `sys_activity__r20261027` falls outside the 7-day window. fixture-as-of exists in the harness only.\n- 218: a stock boot, or a hosted-runtime recipe, that stamps environment rows with the host package (#32986 and #33003-class items).\n- 220: `records-forms.multi-currency-invoice`: only INV-1004 and INV-1008 carry a non-zero foreign amount.\n- 227: a connector instance and an assignment rule in the 18.3.0 upgrade fixture (R11, R13).\n- 263: `records-forms.gantt-interactions` passed only on fixtures extended by metadata overlays, which were reverted. Make the extension permanent, or narrow the item.\n\n## B. Bound by the environment (6): record as known gaps, don't build\n- 79: the browser-slice pins (metadata-registry-serving A6 form screenshot, customization-pair-ensure-door ui/e2e) need a Console build.\n- 150: a datasource driver that carries a schema, for `datasource-introspect --schema`.\n- 154: real OAuth client credentials for linked-accounts-social.\n- 210: the egress proxy blocks marketplace catalog content.\n- 238: SCIM adopts an SSO account only on a verified domain (DNS TXT, `OS_SSO_DOMAIN_VERIFICATION`).\n- 239: magic-link and passkeys UI (objectui#4179, not_planned).\n\nWrite B into the items' knownGaps, or into RUNNER.md next to #33334's environment facts, so the next sweep doesn't count them as failures.\n\n## Grade\n**p2** (fixture work). Row 92 gives wrong row visibility in the showcase. It stays at p2 because only the example app is affected.\n\n## Reader\n`domain:devx`."
+}

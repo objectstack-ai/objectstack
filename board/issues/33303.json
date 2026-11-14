@@ -1,0 +1,38 @@
+{
+  "number": 33303,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): stamp the access depth on the operation's own envelope",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T16:17:06Z",
+  "updated_at": "2026-11-14T18:06:51Z",
+  "closed_at": "2026-11-14T18:06:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T18:06:49Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33303",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DU5CHkeh2msc49m4dh6kwEt)_\n\nFixes #33051\n\nArea-lease pilot #33059, area A3.\n\n## What changes\n\n- `packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts`: step 2.6 used to write the per-object access depth (`__readScope`, `__writeScope`, the delegator halves) and the external grant stamp straight onto the caller's execution context. It now collects them per operation. At `next()` it hands them to the rest of that operation's chain on a copy of the envelope. The caller's context is never written. The copy is made at `next()`, not at 2.6, so the request-wide memos that step 3 stages on the caller's context (membership sets, queues) are already on it.\n- Tests: `security-plugin.test.ts` and `authz-matrix-gate.test.ts` now read the stamps from `opCtx.context`, and assert that the caller's envelope stays unstamped. The external-stamp fixture's update now reaches `next()`, because a refused write hands nothing on.\n- New pin: `packages/qa/dogfood/test/record-page-related-slices-concurrent-read-scope.dogfood.test.ts`.\n- `packages/core/src/security/operation-private-keys.ts`: doc comment only. It said the depth was \"stamped in place\", which is no longer true.\n- Changeset: `@objectstack/plugin-security` patch.\n\n## Why\n\nThe record page route (`packages/rest/src/record-page-routes.ts`) reads every `related[]` slice concurrently, and all slices share one caller context. Each slice's `findData` passes the authz middleware, which stamped that object's depth on the shared context, and then reaches plugin-sharing's middleware, which reads the depth after several awaits. A sibling slice on another object overwrote the depth in between.\n\nOn the showcase, `showcase_manager` holds `showcase_contact` at `readScope: 'org'` and `showcase_field_zoo` at the owner default. The contact `find` was therefore filtered at `own` and returned 1 row. Its `count` ran later at `org` and reported 26. The route itself holds no shared per-slice state; the defect is in the producer, so the fix is there too. The same fix covers the page's other concurrent reads (streams, timeline counts) and any other door that runs reads in parallel on one context.\n\n| Manager, Northwind, `related` = contacts + field zoo (top 3 each) | origin/main e540baf8 | this branch |\n|---|---|---|\n| contacts first | contacts: 1 record, total 26 | 3 records, total 26 |\n| field zoo first | contacts: 3 | 3 |\n| contacts only (control) | 3 | 3 |\n| admin, either order (control) | 3 | 3 |\n\n## Verification\n\n<details><summary>Pin, before and after the fix (dogfood, showcase as shipped)</summary>\n\norigin/main e540baf8:\n```\n× the manager fills every slice whatever its position, and agrees with the slice read alone\nAssertionError: showcase_contact: 1 rows beside total 26: expected 1 to be 3\nTests  1 failed | 2 passed (3)\n```\nBranch: `Tests  3 passed (3)`. The two CONTROL cases (each slice alone, and the admin in both orders) are green on both trees.\n</details>\n\n<details><summary>Ablation at a41e121f (fix committed first, one line reverted, then restored)</summary>\n\nThe mutation is `const stamps: Record<string, unknown> = {};` changed to `= sc;`, which puts the stamps back on the shared context. `ablation-replace` reported anchor 1 to 0, blob 440ec9c3 to e1a0635d. `ablation-dist-preflight` reported `dist/: marker present in 2 built files`.\n- dogfood pin: exit 1, `showcase_contact: 1 rows beside total 26: expected 1 to be 3`\n- unit pin: exit 1, `expected { userId: 'user_agent', …(7) } to not have property \"__readScope\"`\n\nRestore: `git checkout HEAD -- …` left `git diff HEAD` empty, the blob hash matched HEAD (440ec9c3), the plugin was rebuilt, and preflight `--absent` reported the tree clean. The dogfood pin then exited 0.\n</details>\n\n<details><summary>Package suites and gates</summary>\n\n- `@objectstack/plugin-security` vitest: Test Files 267 passed, Tests 6607 passed, 45 skipped.\n- `@objectstack/plugin-sharing` vitest: Test Files 74 passed, Tests 1511 passed.\n- `typecheck` passed for plugin-security (including check:test-typecheck) and for dogfood. eslint `--no-inline-config` on the touched files: exit 0.\n- `check-adr-0087-registration --base origin/main`: no declared-breaking changeset. `check:nul-bytes`: OK.\n- Derived gate families (75): 72 ran with exit 0. `check-plugin-teardown-shape --self-test` and `check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: shallow clone, and packages outside the build closure have no dist), so they are NOT MEASURED. `check:type-check-debt` is NOT MEASURED (whole-repo tsc hit the local time limit). CI runs all three.\n</details>\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1D3AzXvEhBbz79Pmi\n"
+}

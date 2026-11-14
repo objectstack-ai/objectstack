@@ -1,0 +1,30 @@
+{
+  "number": 33377,
+  "kind": "issue",
+  "title": "studio: a page seeded for an object with field groups saves the ungrouped fields as an untitled section, so the saved page and its preview lose the \"Other\" heading the record page now draws",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T18:07:34Z",
+  "updated_at": "2026-11-14T18:07:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33377",
+  "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ① a named producer, read on the code by the seat; it surfaced in the contract record on PR #33372 (comment 6881926857, \"Escalated\") and the #33229 dev's out-of-scope note (carrier none).\nReader: `domain:ui` (`ui/packages/plugin-detail`, Studio's page seed and slotted preview in `ui/packages/app-shell`). Grade p3, self-graded by the seat under the maintainer's 「定级你可以自己决定」: nothing breaks; the heading is missing only on pages Studio seeded and saved. Reach starts when #33372 lands, because only then does the running record page draw the heading this path leaves out.\nDedupe: `is:issue is:open buildDefaultPageSchema ungrouped` 0 hits and `is:issue is:open Studio seed \"field group\" untitled` 0 hits on this.\n\n## 维护者速读\n\n#33229（PR #33372）之后，记录页、抽屉和自动表单会把没有归入任何字段分组的字段放在「其他」标题下。但在 Studio 里给有字段分组的对象新建页面时，种子页面仍把这些字段写成一个没有标题的分区，预览也一样。保存这样的页面后，#33229 的症状又会回来：这些字段看起来属于上面那个分组。\n\n## Producer\n\n- `ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts:745-757` (`fieldGroupSectionReferences`): each declared group is written as `{ group: KEY, columns }`, and the trailing ungrouped bucket is written as `{ columns, fields: [...] }` with no title (the docblock says \"stays an enumerated, untitled section\").\n- Studio's slotted page preview draws from the same seed, so it differs from the running record page.\n\n## Open design point (for the dev, inside the card)\n\nA saved page is metadata. A literal \"Other\" written into it would be untranslated. Measure what the spec's `record:details` section allows (a label key, a translatable title, or a marker the renderer turns into the translated `common.ungroupedSection`), and pick the form that stays translated. A spec change is out of scope for a p3 card: if no translated form exists without one, say so in `open_questions`.\n\n## Acceptance\n\n1. A page seeded from Studio for an object with field groups draws its ungrouped bucket under the same translated \"Other\" heading the record page draws (#33372), in the saved page and in the preview.\n2. A test pins the seed output with field groups, and a CONTROL with no field groups is unchanged (flat, no heading).\n3. Pages already saved are not migrated. Say in the PR what an existing seeded page shows."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 33413,
+  "kind": "pull_request",
+  "title": "docs(runtime): drop an unobservable ordering clause from the released 6aa658a CHANGELOG entry",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T19:31:33Z",
+  "updated_at": "2026-11-14T20:05:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33413",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DDwkEEJd65kqFZGFjQnzBQt)_\n\nRefs #32995 (item 3 — items 1 and 2 land in #33274)\n\nArea-lease pilot #33059 · area E2b · seat `domain:server#5` · os-elon-musk · session_016WV4cz4f7zEQZ2C9GTG382\n\n## What changes\n\nOne clause is removed from the released `@objectstack/runtime` 18.4.0 CHANGELOG entry for `6aa658a` (the bare action route serves the environment's own action declaration on an object no holder of the name binds):\n\n> ~~An environment item with no object answers on `lead` too, and an item bound to `lead` comes before one with no object.~~\n> An environment item with no object answers on `lead` too.\n\nDocs-only. No code, no test, no changeset.\n\n## Why\n\n#32995 item 3 (epic red-line read 6842078446, text re-read 6842317355): the clause describes a case the registry cannot hold. It keeps one package-less item per action name, so the environment never has an item bound to `lead` and an object-less one at the same time, and the order between them cannot be observed. AGENTS.md (RELEASE-OWNED table, `packages/*/CHANGELOG.md`) routes a factual error in a released entry to a dedicated docs-only PR that amends that entry, never an erratum in a later one. The clause appears nowhere else on `main` (`git grep \"comes before one with no object\"` → this entry only).\n\n## Verification\n\n- `git diff origin/main` — one line in `packages/runtime/CHANGELOG.md`, the clause only.\n- No other file states the order.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (n/a)\n- [x] 2. Every name I added uses the casing for its kind. (n/a)\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset — n/a, docs-only amendment of a released entry.\n- [x] 6. `packages/spec` touched: n/a.\n- [ ] 7. No hand edits to `packages/*/CHANGELOG.md` — deliberate exception: AGENTS.md's dedicated docs-only amendment of a released entry.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cz4f7zEQZ2C9GTG382\n"
+}

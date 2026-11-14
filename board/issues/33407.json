@@ -1,0 +1,33 @@
+{
+  "number": 33407,
+  "kind": "pull_request",
+  "title": "docs(adr-0090): D5 — removing a row one owns is not a delete bit (#33010 ruling)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T19:01:34Z",
+  "updated_at": "2026-11-14T19:02:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33407",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DU5CHkeh2msc49m4dh6kwEt)_\n\n## Summary\n\nDocs-only companion to #33322 (Fixes #33010). The maintainer's ruling on #33010 (comment 6879388034) says a member may delete an attachment they uploaded themselves, own uploads only, and that the ADR-0090 D5 text saying the member grant has no delete bit gets a matching sentence. This adds that sentence as a D5 bullet: removing a row one owns is served by an own-row delete door, not by `allowDelete` on a set bound to `everyone`; the attachment member grant stays read and create only.\n\n## What changes\n\n- `docs/adr/0090-permission-model-v2-concept-convergence.md`: one new bullet in D5, after the D7 lint bullet.\n\n## Landing\n\nGoverned surface (`docs/adr/**`): lands through the seat after #33322 merges, so the ADR never names a door main does not have.\n\nNo code, no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1D3AzXvEhBbz79Pmi\n"
+}

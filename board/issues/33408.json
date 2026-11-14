@@ -1,0 +1,33 @@
+{
+  "number": 33408,
+  "kind": "pull_request",
+  "title": "fix(driver-sql, runtime): a refused ownership boot drops no telemetry shard; the refusal names --out",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T19:07:40Z",
+  "updated_at": "2026-11-14T20:16:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33408",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DMscMg6AKHasj3ZXEDorLPH)_\nFixes #33344\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — no authorable key, value or default changes; `lifecycle.storage` rotation keeps its window, only the boot-time drop moves to the sweep\n\ndomain:server#5 · os-elon-musk · session_016WV4cykhsWAtSL6Sr4VWFG\n\n## 维护者速读\n\n- 改了什么:每次启动的 schema 同步不再删除超出轮转窗口的遥测分片,删除只由生命周期清扫(`rotateShards`)执行;组织所有权守卫拒绝启动时打印的 apply 命令补上 `--out REPORT`。\n- 为什么改:守卫在引擎 schema 同步之后才判定,被拒绝的启动已经把恢复库里超窗的 `sys_activity` 分片连同数据删掉了;apply 不带 `--out` 时报告写进当前目录(常是应用源码树)。\n- 风险与回滚:过期分片最多晚一个清扫周期被删;关闭生命周期(`OS_LIFECYCLE_DISABLED=1`)时启动不再删分片,分片保留可读。回滚即 revert 本 PR。\n- 先看:`packages/drivers/driver-sql/src/sql-driver-schema-sync.ts`(`ensureRotation` 的 `dropExpired` 分支)、`packages/drivers/driver-sql/src/sql-driver-rotation.ts`(两个调用点)、`packages/runtime/src/organization-ownership-boot-guard.ts`(`applyCommand`)。\n- 两分钟验证:`pnpm --filter @objectstack/runtime exec vitest run src/organization-ownership-boot-guard.kernel.test.ts`,预期 12 个用例全过,其中被拒启动后恢复分片仍有 66 行。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n**A refused boot drops no rotation shard (A-3).** The organization-ownership guard judges in its own `start()`, ordered after the engine, whose `start()` runs the additive schema sync the ceremony waits for. That sync (`SqlDriver#initObjects`) also ran `ensureRotation` for every object declaring `lifecycle.storage: { strategy: 'rotation' }` (`sys_activity`), and `ensureRotation` DROPPED every shard past the `shards × unit` window. A restore older than the window lost those shards on the boot that then refused to serve it.\n\n- `ensureRotation` gains `dropExpired` (default `false`). Without it every shard stays: the current one is created, all are column-synced, and the read view spans them all. With it (only `rotateShards`, the lifecycle sweep's entry point) expired shards are dropped and leave the view, as before.\n- `initObjects` passes `false`; `rotateShards` passes `true`. The lifecycle sweep is unchanged: it calls `rotateShards`, so a served boot still drops expired shards at its first sweep.\n- Retention itself (the LifecycleService sweep) does not run on a refused boot: it is armed on a timer whose first run is `DEFAULT_LIFECYCLE_INITIAL_DELAY_MS` out, and the kernel's start-failure rollback calls `ObjectQLPlugin.destroy`, which stops it. The code showed no reason a refused boot must run either leg.\n\n**The refusal names a complete apply (A-2).** Every apply command the guard prints is now `CEREMONY --apply --plan-file PLAN --backup-taken --out REPORT` (one helper, `applyCommand`, for the four sites), so an operator who runs it verbatim does not drop the report into the working directory.\n\n## Tests\n\n- `packages/runtime/src/organization-ownership-boot-guard.kernel.test.ts`, new describe on the real kernel: a v17-shape file with a restored `guard_activity__r(today-20d)` shard of 66 rows is refused and the shard still holds 66 rows; control: the same file with its marker verified boots, the shard is still readable through the view, and `lifecycle.sweep()` drops it (the probe can see a drop).\n- `packages/drivers/driver-sql/src/sql-driver-rotation.test.ts`: `initObjects` over a restored expired shard keeps it in the view with synced columns; `rotateShards` then drops it.\n- Pins on the apply text updated in `organization-ownership-boot-guard.test.ts`, the kernel test, `packages/cli/test/start-organization-ownership-refusal.integration.test.ts` (its verbatim run now substitutes `REPORT` and asserts the report lands at `--out`) and `packages/cli/test/dev-organization-ownership-stale-column.integration.test.ts`.\n\n## Acceptance notes\n\n- Premise re-measured before the fix, at `e0ce1b523c`: the new kernel case was red with `no such table: guard_activity__r20261025` (1 failed, 11 passed).\n- Not changed, recorded: schema sync still adopts a legacy pre-rotation base table into the current shard by `RENAME` on a refused boot (lossless), and still creates tables additively, which the guard's ordering requires.\n- Not changed, recorded: other surfaces print an apply command without `--out` (`apply.ts` and `apply-drop-gates.ts` drop-gate remedies, `nullable-tenant-columns.ts`, `schema-migrate.ts`). They are not the boot refusal this card names.\n- `packages/qa/dogfood/test/upgrade-harness/fixture-as-of.ts` says every boot drops expired shards; after this change only the sweep does. The re-dating stays harmless.\n- Full test and gate readings, with the final head sha, are in the `os-dev-report` comment on #33344.\n\n## Verification\n\nSee Tests and the report comment. Local runs go through `scripts/pm/os-verify-lock.sh`; CI runs the full farm.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cykhsWAtSL6Sr4VWFG)_\n"
+}

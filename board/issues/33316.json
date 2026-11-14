@@ -1,0 +1,36 @@
+{
+  "number": 33316,
+  "kind": "pull_request",
+  "title": "test(driver-sql): the #32851 matrix unwraps mysql2's raw [rows, fields] answer",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T16:30:25Z",
+  "updated_at": "2026-11-14T17:29:19Z",
+  "closed_at": "2026-11-14T17:29:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T17:29:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33316",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D4Jsmd91BqTVB7dSii9uJMV)_\n\nFollow-up to PR #33270 (#33002); no card.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:只改测试。#33270 合并后 main 上的 Temporal Conformance(真 MySQL)红了一项:分析原生 SQL 那条测试把 MySQL 原始结果 `[rows, fields]` 当成行数组读,读出两个 undefined。改成和测试工具包相同的解包方式。\n- 产品行为:MySQL 上的等值、范围过滤和读回在同一次运行里都是绿的,红的只有这条测试自己的读结果方式。\n\n## What changes\n\n`packages/drivers/driver-sql/src/sql-driver-32851-date-on-instant-column.test.ts`: the file-local `rowsOf` now unwraps mysql2's `[rows, fields]` answer the way `live-dialect-matrix.testkit.ts`'s own `rowsOf` does (an array whose first element is an array → that element). +4/−1, test only.\n\n## Tests\n\n- main push run on `6a28a271`, job 132508312593 (Temporal Conformance, live PG + MySQL): `FAIL … live mysql (#32851) > the outside-the-builder filter door (analytics native SQL) answers the same day` — `expected [ undefined, undefined ] to deeply equal [ 'created', 'era', 'updated' ]`. Every other MySQL and PG test in the file passed in that run, including the equality/range filter and the `datetime`-era read.\n- Local (SQLite cell) at `a844fc88`: `vitest run src/sql-driver-32851-date-on-instant-column.test.ts` → 5 passed, 4 skipped (the PG/MySQL cells; no servers here).\n- NOT MEASURED before merge: the MySQL cell. Temporal Conformance runs on push to main only, so the post-merge main run is the reading; I will check it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cw787kMeaX7oyz7DDC\n"
+}

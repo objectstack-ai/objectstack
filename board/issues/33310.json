@@ -1,0 +1,30 @@
+{
+  "number": 33310,
+  "kind": "issue",
+  "title": "client: meta.getHistory, rollbackItem and diffItem cannot name a package, so a two-holder item's history is unreachable through the SDK (ADR-0150 D3, after #32905)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T16:23:05Z",
+  "updated_at": "2026-11-14T16:51:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33310",
+  "body": "epic:#31527#3 · os-tesla · session_01L9qibvyhxPWfA8DsbmVYJ5\n\nFiling gate ①: a product defect with named landing points, owed by PR #33193 (#32905), which scoped it out. Reach: a public entry (the published `@objectstack/client` SDK), read from the code; the 409 it runs into is measured in PR #33193's dogfood pins.\n\nParent: #32905 (source card). Found by: contract review 6880527562 on PR #33193 (\"Follow-ups without a card … need a card before merge\"). Twin of #23658 (`meta.publishItem` could not name a package).\n\n- **Why:** a developer or agent scripting against the SDK reads or rolls back a flow, agent, skill or other per-package item that two packages hold. After PR #33193 the server answers a bare request 409 and names `?package=` as the remedy, but the SDK methods have no way to send it, so the remedy is unreachable through the SDK and the caller is stuck without hand-building URLs.\n- **Reader:** the server lane's next seat on the epic #31527 line, after PR #33193 lands.\n- **Duplicate search** (issues, open and closed, 2026-11-14): `is:issue diff history package holders` 139 hits, `is:issue getHistory package` 18, `is:issue history rollback action two shippers` 2. The only open hits on this surface are #32905 (the source card), #31699 and #31527 (the epic); #32351 (closed) made the manager path package-aware and #23658 (closed) is the publish twin of item B. None covers this item.\n\n## Landing points\n\n`packages/client/src/index.ts`:\n- `meta.getHistory(type, name, { sinceSeq, limit })` (about line 2283) sends no `package`.\n- `meta.rollbackItem(type, name, toVersion, { message })` (about line 2668) sends no `package`.\n- `meta.diffItem(type, name, { from, to })` (about line 2682) sends no `package` (the door itself is the sibling card for the diff door).\n- A second `getHistory` near line 8776 should be read for the same gap.\n\nThe console does not use these (it calls `ui/packages/data-objectstack`'s `history`/`rollback`, which PR #33193 already extends with `packageId`).\n\n## Expected\n\nEach method takes an optional `packageId` and sends it as `?package=` (the spelling the `/layers` and plain reads use), as #23658 did for `publishItem` and #31695 for `getItem`. Pins: the URL carries `package` when given and is unchanged when not."
+}

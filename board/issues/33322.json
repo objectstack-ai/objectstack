@@ -1,0 +1,34 @@
+{
+  "number": 33322,
+  "kind": "pull_request",
+  "title": "feat(service-storage): the uploader removes an attachment they uploaded, through an own-row door",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T16:39:10Z",
+  "updated_at": "2026-11-14T20:00:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33322",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DU5CHkeh2msc49m4dh6kwEt)_\nFixes #33010\nArea-lease pilot #33059, area A3.\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:新增 `DELETE /api/v1/attachments/:id`,成员可删除自己上传的附件;成员授权(`storage_attachment_member`)仍只有读与建,不加删除位,数据门 `DELETE /data/sys_attachment/:id` 对成员仍是 403。\n- 为什么改:成员挂错文件后无法撤回,只有管理员能删;维护者裁决(评论 6879388034)允许\"仅限本人上传\"的删除。\n- 风险与回滚:新路由只认 `uploaded_by` 等于调用者的行,以调用者身份读、以系统上下文删;回滚即 revert 本 PR,数据门行为未改。\n- 先看:`attachment-removal-routes.ts`(门的定义,所有者列 `uploaded_by`)、`storage-service-plugin.ts` 的 `mountAttachmentRemovalDoor`(挂载与调用方解析)、`member-attachment-baseline.dogfood.test.ts`(真栈钉子)。\n- 两分钟验证:`pnpm --filter @objectstack/service-storage exec vitest run src/attachment-removal-routes.integration.test.ts`,预期全绿:本人删除 200 且行消失,他人 403 `PERMISSION_DENIED` 行仍在。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nRuling (comment 6879388034 on the card): a member may delete an attachment they uploaded themselves, own uploads only, and the member grant carries no wider delete bit.\n\n- **The door.** `DELETE /api/v1/attachments/:id` is `@objectstack/core`'s own-row delete door (`own-row-delete-routes.ts`, the one the unreact and personal-view doors use) for `sys_attachment`, owner column `uploaded_by`. It resolves the caller through the platform's one request-to-context composition, reads the row AS the caller (object grant, organization wall, attachment read visibility), refuses a row whose `uploaded_by` names anyone else (`403 PERMISSION_DENIED`, the row stays), answers a row the caller cannot read as an unknown id (`404 RECORD_NOT_FOUND`), and only then removes it under a system context attributed to the caller, so the lifecycle tombstones the file it pointed at. `uploaded_by` is stamped from the session by the attach rule and is read-only after insert, so a caller cannot make another user's row their own.\n- **Mounted by `StorageServicePlugin`** at `kernel:ready`, beside the storage family and outside it (fixed route, its own ledger `attachment-removal-route-ledger.ts`, one `gap` row: the SDK has no method yet; the storage ledger's zero-gap ratchet is untouched).\n- **The member grant is unchanged**: read and create on `sys_attachment`, nothing else. The data door's delete still needs an explicit grant; an administrator keeps deleting any attachment there. A member who can edit the record but did not upload the attachment is refused by the door.\n- Docblocks of `attachment-member-grant.ts` and the write rule (`attachment-access-hooks.ts`) say where the uploader's removal is served.\n\n## Tests\n\nRecorded at open as NOT MEASURED: local runs follow on this branch and are reported in the dev report (storage package suite, the new integration file, the ledger conformance, the dogfood attachment file, typecheck, eslint, the ADR-0087 registration check, one ablation of the mount).\n\n## Acceptance notes\n\n- The Console's record Attachments panel still deletes through the data door and offers the button only to a holder of the delete grant; moving it to this door for the uploader's own rows is the console half (follow-up, not in this PR).\n- The host door `mountStorageRoutes` (cloud's per-environment kernels) does not carry this route: it calls the registration half `get`/`post`/`put` only. Carrying it there is a separate change.\n- The ADR-0090 D5 sentence that keeps delete off `everyone`-bound sets gets its matching line in a separate docs PR (governed surface), filed by the area thread.\n\n## Verification\n\nSee Tests.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1D3AzXvEhBbz79Pmi\n"
+}

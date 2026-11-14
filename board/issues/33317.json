@@ -1,0 +1,30 @@
+{
+  "number": 33317,
+  "kind": "issue",
+  "title": "grid: a row that opens nothing (navigation mode none, or a list-only object) still draws a link-styled first cell and a right-click \"Open\" item that do nothing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T16:36:32Z",
+  "updated_at": "2026-11-14T16:52:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33317",
+  "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ① a user-visible dead affordance with a named producer, reported by the #33219 dev (PR #33305, Acceptance notes \"What still looks clickable\"), read on the code by the seat.\nReader: `domain:ui` (`ui/packages/plugin-grid`). Grade p3, self-graded by the seat under the maintainer's 「定级你可以自己决定」: nothing breaks, the click is a no-op; reach grows when #33305 lands (every list-only object's rows resolve to mode `none`).\nDedupe: `is:issue is:open \"navigation\" \"none\" grid open` 7 hits and `is:issue is:open plugin-grid \"context menu\" open` 3 hits, none on this.\n\n## 维护者速读\n\n列表里的行如果点了不会打开任何东西（视图写了 `navigation.mode: 'none'`，或 #33305 之后只开放 `list` 的对象），表格仍把第一列画成链接样式（`role=\"link\"`），右键菜单仍有「打开」项。点了都没反应，用户会以为坏了。\n\n## Producer\n\n- `ui/packages/plugin-grid/src/objectGridLinkCell.tsx` (the `role=\"link\"` span, around line 188): drawn whenever the host passes `onRowClick`, without asking whether anything opens.\n- `ui/packages/plugin-grid/src/components/RowContextMenu.tsx` (`onOpen` ⇒ the `row-context-open` item, line 70): same condition.\n- The console host (`ui/packages/app-shell`) still passes `onRowClick` for mode `none` rows, because the row click handler is also how it routes other things; the grid has no signal that the open is a no-op.\n\n## Acceptance\n\n1. A row whose record navigation resolves to `none` (authored, or a list-only object per `servesRecordRead`) draws its first cell as plain text, not `role=\"link\"`, and its right-click menu has no Open / Open in new tab items; row actions (`list_item`) stay.\n2. A test pins both faces for mode `none` and a CONTROL with a navigable row keeping the link and the Open item.\n3. No change for rows that do open (drawer, page, new tab)."
+}

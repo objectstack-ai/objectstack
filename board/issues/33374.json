@@ -1,0 +1,33 @@
+{
+  "number": 33374,
+  "kind": "issue",
+  "title": "skills: teach sharing.controlledByParent.writeRequiresMasterRead in the controlled_by_parent authoring guidance",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T18:00:26Z",
+  "updated_at": "2026-11-14T20:08:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33374",
+  "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nSkills-docs follow-up of #33250 (PR #33369, `Metadata-protocol: added`, body line `Skills-docs: follow-up owed — skills/** (the controlled_by_parent authoring guidance)`). Filed before ACCEPT under the review checklist's owed-card rule.\n\n**Gap:** the shipped skills teach the master-edit rule and `ownerMayEdit` only. Files that name `controlled_by_parent` on `main`: `skills/objectstack-data/SKILL.md`, `skills/objectstack-data/rules/relationships.md`, `skills/objectstack-data/references/lint-rules.md`, `skills/objectstack-data/evals/objects-fields-relationships.json`, `skills/objectstack-ui/rules/record-page.md`.\n\n**TO:** where the skills say a detail write needs edit on the master, add: a `controlled_by_parent` detail may declare `sharing.controlledByParent.writeRequiresMasterRead: true`; then anyone who can READ the master writes (insert, update, delete) under the detail's own object permission, RLS and FLS. Not with `ownerMayEdit: true` (refused; the new key already admits the owner), and only on a `controlled_by_parent` object (refused elsewhere). Default unchanged. Note the lint arm `security-controlled-by-parent-owner-policy-without-opt-in` stays silent on a detail that declares the key. Add one eval prompt if the skill's eval set covers the master-edit rule.\n\nDepends on #33369 merging (the key must parse on `main` before a skill teaches it; `check:skill-examples`). Tier H (`skills/**`): the PR needs the maintainer's approval.\n\nclass: b · type: Docs · Grade: p2 · domain: skills"
+}

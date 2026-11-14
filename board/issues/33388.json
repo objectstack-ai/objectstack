@@ -1,0 +1,31 @@
+{
+  "number": 33388,
+  "kind": "issue",
+  "title": "spec: the security-catalog migration entry and the D6 override gloss still say a permission set holds one name per deployment",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T18:15:34Z",
+  "updated_at": "2026-11-14T18:26:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33388",
+  "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nFollow-up of #32758 (PR #33384), its dev report 6882046858 `open_questions` 1 and 2. Seat ruling: option B for both, one card.\n\nSince #31698 PR 2 (PR #32742) a permission-set name is held once per namespace, so two present-tense spec sentences are false for permission sets:\n\n- `packages/spec/src/migrations/entries/semantic/18.security-catalog-environment-overlay-refused.ts`, `reason`: \"Positions, permission sets and capabilities hold one name per deployment\". The entry's subject (an environment row and a package holder never share a name) still holds.\n  **TO:** reword the reason around that subject, e.g. \"the environment catalog and a package never hold one name\"; `id`, `surface`, `replacement` unchanged. Prose only, `@objectstack/spec` patch.\n- `packages/spec/src/kernel/customization-package.ts:251-252`, the `adr_0146_d6_security_catalog` gloss \"D6: one name per deployment (permission sets, positions, capabilities)\".\n  **TO:** \"D6: the security catalog takes no override (permission sets, positions, capabilities)\". Comment only.\n\n`Clause-②: no` / `Metadata-protocol: none`. Waits for #33384 to merge (same subject; avoids two texts disagreeing mid-flight).\n\nclass: b · type: Docs · Grade: p3 · domain: spec"
+}
