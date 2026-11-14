@@ -194,6 +194,12 @@ export type PackageScopedFunctionEngine = Pick<ObjectQL, 'registry' | 'functionH
  * through unchanged: a refusal, the platform's item, and a caller package's
  * own item or its closure's holder (`own` / `closure`, a reader that names
  * its package).
+ *
+ * Relies on the core rule (`resolvePackageScopedHolders` in
+ * `@objectstack/core`): a caller package stops at its steps 1–3 (`own`,
+ * `closure`, `platform`, or a refusal) and only the environment-wide branch
+ * for a caller with no package answers `unique-holder`. An edit of the rule
+ * that lets a caller package reach `unique-holder` must revisit this wrapper.
  */
 export function callerlessFunctionResolution<T>(
   resolution: PackageScopedResolution<T>,
