@@ -30,7 +30,10 @@
  * the home field, document date and rate field the engine writes the amount's
  * home-currency conversion into. The three pickers list what the spec's object
  * judge accepts; the judge stays the authority, and the tests hold every
- * offered pick to it by parsing the object.
+ * offered pick to it by parsing the object. The spec takes the three pointers
+ * together or none, so a pick that leaves one or two set is held here and
+ * never committed (the autosave would send what the server refuses); one
+ * inline hint names the pointers still to pick.
  */
 
 import * as React from 'react';
@@ -67,6 +70,21 @@ export interface HomeAmountCandidates {
   field: string[];
   rateDate: string[];
   rateField: string[];
+}
+
+/** The `homeAmount` pointers, in the editor's order. */
+const HOME_AMOUNT_POINTERS = ['field', 'rateDate', 'rateField'] as const;
+
+/** The label key of each `homeAmount` pointer's picker. */
+const HOME_AMOUNT_POINTER_LABELS: Record<keyof HomeAmountDraft, string> = {
+  field: 'designer.field.currency.homeField',
+  rateDate: 'designer.field.currency.rateDate',
+  rateField: 'designer.field.currency.rateField',
+};
+
+/** The pointers of `home` not set yet, in the editor's order. */
+export function missingHomeAmountPointers(home: HomeAmountDraft | undefined): Array<keyof HomeAmountDraft> {
+  return HOME_AMOUNT_POINTERS.filter((key) => !home?.[key]);
 }
 
 /** The scale an exchange rate carries; a rate field declaring less would show it rounded. */
@@ -264,6 +282,7 @@ export function CurrencyConfigField({
   config,
   candidates,
   homeCandidates,
+  homeCandidatesFor,
   onCommit,
   onCreateCodeField,
   disabled,
@@ -277,6 +296,12 @@ export function CurrencyConfigField({
    * refused (a `formula` amount, never written, is never converted at write).
    */
   homeCandidates?: HomeAmountCandidates;
+  /**
+   * The candidates judged against the `homeAmount` on screen, held picks
+   * included: the rate field a pick offers depends on the document date
+   * picked beside it. Absent, `homeCandidates` is used as it stands.
+   */
+  homeCandidatesFor?: (home: HomeAmountDraft | undefined) => HomeAmountCandidates;
   /** Write the whole config. */
   onCommit: (next: CurrencyConfigDraft) => void;
   /** Append a record-currency code field and point this amount at it, in one write. */
@@ -286,6 +311,26 @@ export function CurrencyConfigField({
 }) {
   const mode: CurrencyMode = config?.currencyMode ?? 'dynamic';
   const pointer = config?.currencyField;
+  // A partial `homeAmount` lives here until it is complete or empty. It is
+  // stamped with the committed `homeAmount` it was picked against, so a change
+  // to that from elsewhere (a reload, an undo) ends the hold rather than
+  // being overridden by it.
+  const committedHome = JSON.stringify(config?.homeAmount ?? {});
+  const [heldHome, setHeldHome] = React.useState<{ against: string; home: HomeAmountDraft } | null>(null);
+  const home = heldHome && heldHome.against === committedHome ? heldHome.home : config?.homeAmount;
+  const missing = missingHomeAmountPointers(home);
+  const partial = missing.length > 0 && missing.length < HOME_AMOUNT_POINTERS.length;
+  const offered = homeCandidates && (homeCandidatesFor ? homeCandidatesFor(home) : homeCandidates);
+  const pickHomePointer = (key: keyof HomeAmountDraft, value: string) => {
+    const next = setHomeAmountPointer({ ...(config ?? { currencyMode: 'record' }), homeAmount: home }, key, value);
+    const left = missingHomeAmountPointers(next.homeAmount).length;
+    if (left > 0 && left < HOME_AMOUNT_POINTERS.length) {
+      setHeldHome({ against: committedHome, home: next.homeAmount! });
+      return;
+    }
+    setHeldHome(null);
+    onCommit(next);
+  };
   return (
     <div className="space-y-2" data-testid="currency-config-field">
       <InspectorSelectField
@@ -348,7 +393,7 @@ export function CurrencyConfigField({
             {tr('designer.field.currency.createCodeField')}
           </Button>
           <p className="text-xs text-muted-foreground">{tr('designer.field.currency.recordHint')}</p>
-          {homeCandidates && (
+          {offered && (
             <div className="space-y-2 pt-2" data-testid="currency-config-home-amount">
               <p className="text-xs font-medium">{tr('designer.field.currency.homeAmount')}</p>
               {(
@@ -361,15 +406,23 @@ export function CurrencyConfigField({
                 <InspectorSelectField
                   key={key}
                   label={tr(`designer.field.currency.${label}`)}
-                  value={config?.homeAmount?.[key] ?? ''}
+                  value={home?.[key] ?? ''}
                   options={[
                     { value: '', label: tr(`designer.field.currency.${none}`) },
-                    ...homeCandidates[key].map((name) => ({ value: name, label: name })),
+                    ...offered[key].map((name) => ({ value: name, label: name })),
                   ]}
-                  onCommit={(v) => onCommit(setHomeAmountPointer(config ?? { currencyMode: 'record' }, key, v))}
+                  onCommit={(v) => pickHomePointer(key, v)}
                   disabled={disabled}
                 />
               ))}
+              {partial && (
+                <p className="text-xs text-amber-700 dark:text-amber-400" role="status" data-testid="currency-config-home-amount-held">
+                  {tr('designer.field.currency.homeAmountHeld').replace(
+                    '{missing}',
+                    missing.map((key) => tr(HOME_AMOUNT_POINTER_LABELS[key])).join(', '),
+                  )}
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">{tr('designer.field.currency.homeAmountHint')}</p>
             </div>
           )}
@@ -392,5 +445,14 @@ export function ObjectCurrencyConfigField({
   self: string;
 }) {
   const candidates = useCurrencyCodeFieldCandidates(entries, self, rest.config?.currencyField);
-  return <CurrencyConfigField {...rest} candidates={candidates} />;
+  const homeCandidatesFor = (home: HomeAmountDraft | undefined) =>
+    homeAmountCandidates(
+      entries.map((e) =>
+        e.name === self ? { ...e, def: { ...e.def, currencyConfig: { ...(e.def.currencyConfig as object), homeAmount: home } } } : e,
+      ),
+      self,
+    );
+  // Keyed by the field: a held partial `homeAmount` belongs to the field it was
+  // picked on, never to the next field the inspector shows.
+  return <CurrencyConfigField key={self} homeCandidatesFor={homeCandidatesFor} {...rest} candidates={candidates} />;
 }
