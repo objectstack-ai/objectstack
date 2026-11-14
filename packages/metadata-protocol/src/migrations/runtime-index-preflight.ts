@@ -17,6 +17,7 @@
  * | `ensureNotificationPreferenceIdentityIndex` | `sys_notification_preference` | one global default per key |
  * | `ensureActivationLedgerPackagelessIndex` | `sys_metadata_activation` | one package-less row per (type, name) — ADDED, not tightened |
  * | `ensureUserPermissionSetPackagelessIndex` | `sys_user_permission_set` | one package-less grant per (user, set, organization) — ADDED, not tightened |
+ * | `ensureConnectorConnectionPackagelessIndex` | `sys_connector_connection` | one package-less connection per (organization, instance) — ADDED, not tightened (#31699) |
  *
  * A third, `ensureViewDefinitionActiveIndex` (`sys_view_definition`), retired
  * with its table under ADR-0131 D13: no writer or reader of that table's rows
@@ -120,6 +121,14 @@ import {
     buildUserPermissionSetPackagelessDuplicateProbeSql,
     buildUserPermissionSetPresenceSql,
 } from './user-permission-set-packageless-index.js';
+import {
+    CONNECTOR_CONNECTION_PACKAGELESS_INDEX_COLUMNS,
+    CONNECTOR_CONNECTION_PACKAGELESS_INDEX_NAME,
+    CONNECTOR_CONNECTION_PACKAGELESS_ROW_SCOPE,
+    CONNECTOR_CONNECTION_TABLE,
+    buildConnectorConnectionPackagelessDuplicateProbeSql,
+    buildConnectorConnectionPresenceSql,
+} from './connector-connection-packageless-index.js';
 
 /** The column every one of the duplicate-listing queries counts into. */
 const DUPLICATE_ROWS_COLUMN = 'duplicate_rows';
@@ -196,8 +205,9 @@ function isMysqlClient(client?: string): boolean {
 }
 
 /**
- * Every index these migrations build — SIX, from five migrations (the grant's
- * at schema sync, the rest at `kernel:ready`), because
+ * Every index these migrations build — SEVEN, from six migrations (the
+ * grant's and the connector connection's at schema sync, the rest at
+ * `kernel:ready`), because
  * `ensureMetadataOverlayIndexes` builds one index per overlay state and either
  * can be blocked independently.
  *
@@ -275,6 +285,17 @@ export function runtimeIndexProbes(opts: { client?: string } = {}): RuntimeIndex
             rowScope: USER_PERMISSION_SET_PACKAGELESS_ROW_SCOPE,
             presenceSql: buildUserPermissionSetPresenceSql(),
             duplicateSql: buildUserPermissionSetPackagelessDuplicateProbeSql(),
+        },
+        {
+            // [ADR-0150 D8 row R11, #31699] The grant's case on the connection
+            // table: its own name, added beside the declared key.
+            migration: 'ensureConnectorConnectionPackagelessIndex',
+            table: CONNECTOR_CONNECTION_TABLE,
+            index: CONNECTOR_CONNECTION_PACKAGELESS_INDEX_NAME,
+            keyParts: [...CONNECTOR_CONNECTION_PACKAGELESS_INDEX_COLUMNS],
+            rowScope: CONNECTOR_CONNECTION_PACKAGELESS_ROW_SCOPE,
+            presenceSql: buildConnectorConnectionPresenceSql(),
+            duplicateSql: buildConnectorConnectionPackagelessDuplicateProbeSql(),
         },
     ];
 }
