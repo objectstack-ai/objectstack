@@ -222,21 +222,21 @@ const en = {
     },
     codex: {
       body: 'In the Codex app: Settings → MCP servers → Add server, then fill in:',
-      hint: 'Save, restart when prompted, then click Authenticate next to objectstack and sign in through the browser. Type /mcp in the composer to check it is connected. If your version offers no browser sign-in, add the header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below).',
+      hint: 'Save, restart when prompted, then click Authenticate next to objectstack and sign in through the browser. Type /mcp in the composer to check it is connected. If your version offers no browser sign-in, add the header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below). With a key, your assistant works with records and actions only and cannot build apps.',
     },
     workbuddy: {
       body: 'Connectors → Custom connector → Configure MCP, then merge this entry into mcpServers (WorkBuddy keeps it in ~/.workbuddy/mcp.json):',
-      hint: 'Save, then click Trust on the objectstack connector — it stays inactive until trusted. If your version shows no sign-in prompt, add the request header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below).',
+      hint: 'Save, then click Trust on the objectstack connector — it stays inactive until trusted. If your version shows no sign-in prompt, add the request header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below). With a key, your assistant works with records and actions only and cannot build apps.',
     },
     doubao: {
       title: 'Doubao Work',
       body: 'Skills · Connectors → New → New custom connector, then fill in:',
-      hint: 'Sign in through the browser when prompted. If no sign-in appears, add the custom header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below). Tasks that run in the cloud need a deployment reachable over public HTTPS.',
+      hint: 'Sign in through the browser when prompted. If no sign-in appears, add the custom header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below). With a key, your assistant works with records and actions only and cannot build apps. Tasks that run in the cloud need a deployment reachable over public HTTPS.',
     },
     qwenwork: {
       title: 'QwenWork',
       body: 'Extensions → Connectors → + Add → Paste JSON config:',
-      hint: 'Or add it by hand as Streamable HTTP with this URL. If your version offers no browser sign-in, add the request header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below).',
+      hint: 'Or add it by hand as Streamable HTTP with this URL. If your version offers no browser sign-in, add the request header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below). With a key, your assistant works with records and actions only and cannot build apps.',
     },
     client: {
       title: 'Which AI assistant do you use?',
@@ -255,7 +255,7 @@ const en = {
     apiKey: {
       title: 'API keys',
       badge: 'headless',
-      body: 'For CI, scripts, and agents without a browser. The key acts as you — treat it like a password. It is shown ONCE.',
+      body: 'For CI, scripts, and agents without a browser. The key acts as you — treat it like a password. An AI assistant connected with a key works with records and actions only; it cannot build apps. It is shown ONCE.',
       namePlaceholder: 'Key name (e.g. ci-agent)',
       mint: 'Create key',
       confirmTitle: 'Create the API key "{{name}}"?',

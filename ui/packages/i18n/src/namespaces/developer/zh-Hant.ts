@@ -218,21 +218,21 @@ const zhHant = {
     },
     codex: {
       body: '在 Codex 客戶端中:設定 → MCP 伺服器 → 新增伺服器,按下表填寫:',
-      hint: '儲存後按提示重啟,在 objectstack 旁點選「Authenticate」並在瀏覽器登入。在輸入框中輸入 /mcp 可檢視是否已連線。如果你的版本不支援瀏覽器登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方「高階：腳本與 CI」中建立)。',
+      hint: '儲存後按提示重啟,在 objectstack 旁點選「Authenticate」並在瀏覽器登入。在輸入框中輸入 /mcp 可檢視是否已連線。如果你的版本不支援瀏覽器登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方「高階：腳本與 CI」中建立)。使用金鑰時,助手只能處理記錄和執行操作,不能構建應用。',
     },
     workbuddy: {
       body: '騰訊 WorkBuddy:聯結器 → 自定義聯結器 → 配置 MCP,把以下條目合併進 mcpServers(配置儲存在 ~/.workbuddy/mcp.json):',
-      hint: '儲存後在 objectstack 聯結器上點選「信任」——未信任前不會生效。如果你的版本沒有彈出登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方「高階：腳本與 CI」中建立)。',
+      hint: '儲存後在 objectstack 聯結器上點選「信任」——未信任前不會生效。如果你的版本沒有彈出登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方「高階：腳本與 CI」中建立)。使用金鑰時,助手只能處理記錄和執行操作,不能構建應用。',
     },
     doubao: {
       title: '豆包工作',
       body: '技能 · 聯結器 → 新建 → 新建自定義聯結器,按下表填寫:',
-      hint: '按提示在瀏覽器登入。若未出現登入,在自定義 Headers 中新增 Authorization: Bearer <API 金鑰>(在下方「高階：腳本與 CI」中建立)。雲端執行的任務要求部署可通過公網 HTTPS 訪問。',
+      hint: '按提示在瀏覽器登入。若未出現登入,在自定義 Headers 中新增 Authorization: Bearer <API 金鑰>(在下方「高階：腳本與 CI」中建立)。使用金鑰時,助手只能處理記錄和執行操作,不能構建應用。雲端執行的任務要求部署可通過公網 HTTPS 訪問。',
     },
     qwenwork: {
       title: '千問辦公',
       body: '擴充 → 聯結器 → + 新增 → 貼上 JSON 配置:',
-      hint: '也可手動新增:傳輸型別選 Streamable HTTP 並填寫此 URL。如果你的版本不支援瀏覽器登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方「高階：腳本與 CI」中建立)。',
+      hint: '也可手動新增:傳輸型別選 Streamable HTTP 並填寫此 URL。如果你的版本不支援瀏覽器登入,請新增請求頭 Authorization: Bearer <API 金鑰>(在下方「高階：腳本與 CI」中建立)。使用金鑰時,助手只能處理記錄和執行操作,不能構建應用。',
     },
     client: {
       title: '你用的是哪個 AI 助手？',
@@ -251,7 +251,7 @@ const zhHant = {
     apiKey: {
       title: 'API 金鑰',
       badge: '無頭場景',
-      body: '用於 CI、腳本和無瀏覽器的智慧體。金鑰等同於你的身份,請像密碼一樣保管,且僅顯示一次。',
+      body: '用於 CI、腳本和無瀏覽器的智慧體。金鑰等同於你的身份,請像密碼一樣保管。用金鑰連線的 AI 助手只能處理記錄和執行操作,不能構建應用。金鑰僅顯示一次。',
       namePlaceholder: '金鑰名稱(如 ci-agent)',
       mint: '建立金鑰',
       confirmTitle: '建立 API 金鑰「{{name}}」？',

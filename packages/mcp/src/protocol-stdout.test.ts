@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { protocolStdout } from './protocol-stdout.js';
+import { PROTOCOL_STDOUT_CLAIM, protocolStdout } from './protocol-stdout.js';
 
 type StreamWrite = (chunk: string | Uint8Array, ...rest: unknown[]) => boolean;
 
@@ -24,6 +24,7 @@ const originalWrite = process.stdout.write;
 
 afterEach(() => {
   process.stdout.write = originalWrite;
+  delete (process.stdout as unknown as Record<symbol, unknown>)[PROTOCOL_STDOUT_CLAIM];
 });
 
 describe('protocolStdout (#7915)', () => {
@@ -85,5 +86,20 @@ describe('protocolStdout (#7915)', () => {
     } finally {
       proto.write = protoWrite;
     }
+  });
+
+  // A host's boot-quiet window ends for the console when it reads this mark
+  // (`os serve`, packages/cli/src/commands/serve.ts): a stdio call is served
+  // while that window is open, and its console output was dropped with the boot
+  // chatter. The host reads the key by `Symbol.for`, without importing this
+  // package, so the key's spelling is part of the contract.
+  it('marks process.stdout as claimed, under the shared Symbol.for key, before any frame is written', () => {
+    const marks = process.stdout as unknown as Record<symbol, unknown>;
+    expect(marks[PROTOCOL_STDOUT_CLAIM]).toBeUndefined();
+
+    protocolStdout();
+
+    expect(marks[PROTOCOL_STDOUT_CLAIM]).toBe(true);
+    expect(PROTOCOL_STDOUT_CLAIM).toBe(Symbol.for('@objectstack/mcp:protocol-stdout-claimed'));
   });
 });
