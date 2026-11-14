@@ -14,4 +14,4 @@ Skills-docs: none — no skill under `skills/**` teaches the SSO provider domain
 
 Unchanged: providers already stored (not re-checked or rewritten until a request writes their domain); an edit that writes no domain; the one-provider-per-domain claim rule, which still reads a stored entry of another provider as before.
 
-What to do: write each domain as a bare host name, separated by commas (`https://acme.com` becomes `acme.com`). For a provider already holding such an entry, edit its domain to the bare host names and verify the domain again.
+What to do: write each domain as a bare host name, separated by commas (`https://acme.com` becomes `acme.com`). For a provider already holding such an entry, send the bare host names as `domain` to `POST /api/v1/auth/sso/update-provider` (no console action edits a provider's domain) and verify the domain again.
