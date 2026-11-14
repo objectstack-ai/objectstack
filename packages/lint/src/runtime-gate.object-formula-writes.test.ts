@@ -452,3 +452,131 @@ describe('#33072 — the object_extension door judges an extension field\'s form
     expect(runtimeAuthoringRulesFor('object').map((r) => r.name)).toContain('validateStackExpressions');
   });
 });
+
+describe('#33154 — an extension\'s validation rules are judged at the build and the object_extension door by the object\'s own rule pass', () => {
+  /** The extended object, as the door's live universe carries it. */
+  const target = {
+    name: 'fx_ticket',
+    label: 'Ticket',
+    sharingModel: 'private',
+    fields: {
+      employee: { type: 'lookup', label: 'Employee', reference: 'fx_staff' },
+      amount: { type: 'number', label: 'Amount' },
+    },
+  };
+  const staff = {
+    name: 'fx_staff', label: 'Staff', sharingModel: 'private',
+    fields: { daily_hours: { type: 'number', label: 'Daily Hours' } },
+  };
+  const script = (name: string, condition: string) => ({ name, type: 'script', condition, message: 'Refused.' });
+  /** One extension of `fx_ticket` adding the given rules (and fields). */
+  const extension = (validations: unknown[], fields: Record<string, unknown> = {}) => ({ extend: 'fx_ticket', fields, validations });
+  const RULE_WHERE = (rule: string) => `object 'fx_ticket' · objectExtensions[0] · validation '${rule}'`;
+  const gateExtension = (item: unknown, objects: unknown[] = [target, staff]) =>
+    runRuntimeAuthoringRules({ type: 'object_extension', item, context: { objects } });
+  const buildFindings = (stack: Record<string, unknown>) =>
+    runAuthoringRules('build', { normalized: stack, parsed: stack }).filter((f) => f.where.includes('objectExtensions'));
+
+  it('⭐ LIT — a rule reading a field the extended object does not serve is REFUSED, at the entry, with the slot\'s key path', () => {
+    const result = gateExtension(extension([script('amount_positive', 'record.amont < 0')]));
+
+    const errs = expressionFindings(result.errors);
+    expect(errs, dump(result)).toHaveLength(1);
+    expect(errs[0]).toMatchObject({
+      severity: 'error',
+      where: RULE_WHERE('amount_positive'),
+      path: 'objectExtensions[0].validations[0].condition',
+    });
+    expect(errs[0]!.message).toContain('amont');
+  });
+
+  it('⭐ LIT — a rule calling an unregistered function (`sqrt`) is REFUSED, and a nested `then` branch is judged too', () => {
+    const result = gateExtension(extension([
+      script('first_ok', 'record.amount != null && record.amount < 0'),
+      {
+        name: 'big_ticket', type: 'conditional', message: 'Refused.',
+        when: 'record.amount != null && record.amount > 100',
+        then: script('root_check', 'record.amount != null && sqrt(record.amount) > 10'),
+      },
+    ]));
+
+    const errs = expressionFindings(result.errors);
+    expect(errs.map((f) => [f.where, f.path]), dump(result)).toEqual([
+      [`object 'fx_ticket' · objectExtensions[0] · validation rule 'big_ticket' then → 'root_check'`, 'objectExtensions[0].validations[1].then.condition'],
+    ]);
+  });
+
+  it('⭐ PARITY — on one shared input set, the door\'s findings deep-equal the build\'s', () => {
+    for (const item of [
+      extension([script('typo', 'record.amont < 0')]),
+      extension([script('fn', 'sqrt(record.amount) > 1')]),
+      extension([script('bare', 'amount < 0')]),
+    ]) {
+      const atDoor = gateExtension(item);
+      const atBuild = buildFindings({ objects: [target, staff], objectExtensions: [item] });
+
+      expect(atBuild.length, dump(atBuild)).toBeGreaterThan(0);
+      expect([...atDoor.errors, ...atDoor.advisories]).toEqual(atBuild);
+    }
+  });
+
+  it('⭐ CONTROL — a valid rule, a rule reading a field the same extension adds, and a one-hop read publish clean', () => {
+    for (const item of [
+      extension([script('ok', 'record.amount != null && record.amount < 0')]),
+      extension([script('bonus_ok', 'record.bonus != null && record.amount != null && record.bonus > record.amount')], { bonus: { type: 'number', label: 'Bonus' } }),
+      // The one-hop read the rule pass serves, in the shape its traversal
+      // check prescribes: gated on the reference being set.
+      extension([{
+        name: 'hop_ok', type: 'conditional', message: 'Refused.',
+        when: 'record.employee != null',
+        then: script('long_day', 'record.employee.daily_hours > 12'),
+      }]),
+    ]) {
+      const result = gateExtension(item);
+      expect(result.errors, dump(result)).toEqual([]);
+      expect(result.advisories, dump(result)).toEqual([]);
+      expect(buildFindings({ objects: [target, staff], objectExtensions: [item] }), dump(item)).toEqual([]);
+    }
+  });
+
+  it('a rule reading a field a SIBLING package\'s extension adds resolves at the build; a misspelling of it is refused', () => {
+    const sibling = { extend: 'fx_ticket', fields: { bonus: { type: 'number', label: 'Bonus' } } };
+    // An artifact: its top level repeats its bodies' objects, and the fold
+    // reads each body's extensions.
+    const stackWith = (item: unknown) => ({
+      objects: [target, staff],
+      packages: [
+        { manifest: { objects: [target, staff] } },
+        { manifest: { objectExtensions: [sibling] } },
+        { manifest: { objectExtensions: [item] } },
+      ],
+    });
+
+    expect(buildFindings(stackWith(extension([script('sib', 'record.bonus != null && record.bonus > 0')])))).toEqual([]);
+    const typo = buildFindings(stackWith(extension([script('sib', 'record.bonsu != null && record.bonsu > 0')])));
+    expect(typo.map((f) => [f.rule, f.where]), dump(typo)).toEqual([
+      [EXPRESSION_INVALID, "object 'fx_ticket' · packages[2].manifest.objectExtensions[0] · validation 'sib'"],
+    ]);
+  });
+
+  it('an extension of an object the door does not carry is judged on what does not depend on its fields', () => {
+    expect(expressionFindings(gateExtension(extension([script('fn', 'sqrt(record.amount) > 1')]), []).errors)).toHaveLength(1);
+    const read = gateExtension(extension([script('read', 'record.amount != null && record.amount < 0')]), []);
+    expect(read.errors, dump(read)).toEqual([]);
+  });
+
+  it('on an extension write only the extension walk judges: the target\'s own broken rule is not this write\'s to answer for', () => {
+    const broken = { ...target, validations: [script('own_typo', 'record.amont < 0')] };
+    const stack = { objects: [broken, staff], objectExtensions: [extension([script('ok', 'record.amount != null && record.amount < 0')])] };
+    // The build judges the object's own rule…
+    expect(validateStackExpressions(stack).map((i) => i.where)).toEqual(["object 'fx_ticket' · validation 'own_typo'"]);
+    // …the extension door's pass reads only the written entry.
+    expect(runStackExpressionPasses(stack, { runtimeWriteType: 'object_extension' })).toEqual([]);
+  });
+
+  it('CONTROL — the object save door still judges the object\'s own rule at its own location, and no extension rule', () => {
+    const own = { ...target, validations: [script('own_typo', 'record.amont < 0')] };
+    const result = gateObject(own);
+    expect(expressionFindings(result.errors).map((f) => f.where)).toEqual(["object 'fx_ticket' · validation 'own_typo'"]);
+  });
+});

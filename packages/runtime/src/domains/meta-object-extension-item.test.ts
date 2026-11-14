@@ -462,6 +462,60 @@ describe('[#33072] the publish door judges an extension field\'s formula as `os 
     }, 60_000);
 });
 
+describe('[#33154] the publish door judges an extension\'s validation rule as `os build` does', () => {
+    /** Studio's body for an extension adding one validation rule (and fields) to the account. */
+    const ruleBody = (condition: string, fields: Record<string, unknown> = {}) => ({
+        extend: TARGET,
+        fields,
+        validations: [{ name: 'no_blocked__c', type: 'script', condition, message: 'Blocked.' }],
+    });
+    const WHERE = "object 'crm_account' · objectExtensions[0] · validation 'no_blocked__c'";
+    const servedRules = (rig: Awaited<ReturnType<typeof boot>>) =>
+        ((rig.engine.registry.getObject(TARGET) as any)?.validations ?? []).map((r: any) => r?.name);
+
+    it('⭐ LIT — a rule reading a field the account does not serve is refused with the build\'s rule id and location; the rule is not served', async () => {
+        const rig = await boot();
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: ruleBody("record.nmae == 'blocked'"), mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+
+        expect(err, 'the publish was admitted').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
+        expect(issue, JSON.stringify(err.issues)).toBeDefined();
+        expect({ where: issue.where, path: issue.path })
+            .toEqual({ where: WHERE, path: 'objectExtensions[0].validations[0].condition' });
+        expect(issue.message).toContain('nmae');
+        expect(servedRules(rig)).not.toContain('no_blocked__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
+    }, 60_000);
+
+    it('⭐ CONTROL — a valid rule over the account\'s own field publishes and is served on the account', async () => {
+        const rig = await boot();
+        await rig.saveAndPublish(PAIR, ruleBody("record.name != null && record.name == 'blocked'"));
+
+        expect(servedRules(rig)).toContain('no_blocked__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+    }, 60_000);
+
+    it('⭐ LIT (republish) — dropping a field the extension\'s own rule still reads is refused: the stored self lends it nothing', async () => {
+        const rig = await boot();
+        const BONUS = { bonus__c: { type: 'number', label: 'Bonus' } };
+        const condition = 'record.bonus__c != null && record.bonus__c > 100';
+        await rig.saveAndPublish(PAIR, ruleBody(condition, BONUS));
+        expect(servedRules(rig)).toContain('no_blocked__c');
+
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: ruleBody(condition), mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }, 'the stored self still lent bonus__c').toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
+        expect(issue?.where, JSON.stringify(err.issues)).toBe(WHERE);
+        expect(issue.message).toContain('bonus__c');
+        // The served extension is the one published before, untouched.
+        expect((await rig.fieldsOn()).registry).toContain('bonus__c');
+    }, 60_000);
+});
+
 describe('[ADR-0146 D10] a module\'s extension that re-declares the base\'s field beyond its display properties', () => {
     /** A writable module package that depends on the base: the account is inside its closure. */
     const MODULE = 'com.acme.module';
