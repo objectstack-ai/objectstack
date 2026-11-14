@@ -491,6 +491,18 @@ export interface MetadataGetOptions {
    * blank selector, and any selector on a type with no members.
    */
   member?: string;
+  /**
+   * The READER's package (ADR-0150 D3), sent as `?callerPackage=`: the package
+   * of the item that reads this one (a report, a dashboard, a list view's
+   * chart). The door resolves the name from it: that package's own item, else
+   * the one holder in its declared dependency closure plus `sys`, else it
+   * refuses `409 RESOURCE_CONFLICT` naming the candidates. Distinct from
+   * {@link packageId}, which names the HOLDER exactly (D5); the door refuses
+   * the two together, and serves this arm on the `dataset` read only.
+   * OMITTED, never sent empty, when the reader has no package (an item
+   * authored in the environment reads the name bare).
+   */
+  callerPackage?: string;
 }
 
 // `surface` is a SAVE input (`?surface=` on `PUT`); the delete door reads no
@@ -1248,6 +1260,7 @@ export class MetadataClient {
     else if (this.previewDrafts) params.push('preview=draft');
     if (options.packageId) params.push(`package=${encodeURIComponent(options.packageId)}`);
     if (options.member) params.push(`member=${encodeURIComponent(options.member)}`);
+    if (options.callerPackage) params.push(`callerPackage=${encodeURIComponent(options.callerPackage)}`);
     const qs = params.length ? `?${params.join('&')}` : '';
     const url = `${this.base}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs}`;
     return this.shareRead('readItemResponse', url, async () => {
