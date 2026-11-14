@@ -111,9 +111,10 @@ export const SysMetadataHistoryObject = ObjectSchema.create({
      * [#32905] `SysMetadataRepository` (the `/meta` doors) recorded it as
      * `DatabaseLoader` does. Such a row is read as the package its stored
      * body names (its `_packageId` stamp), if it names one, and else as
-     * attributed to none — in no package's history and not the environment's
-     * (`historyRowAttribution`, `@objectstack/metadata`). Nullable: adding it
-     * rewrites no row.
+     * attributed to none (`historyRowAttribution`, `@objectstack/metadata`):
+     * the version of the name's one row slot, whichever package or the
+     * environment holds it, and of no slot while several hold the name.
+     * Nullable: adding it rewrites no row.
      */
     package_id: Field.text({
       label: 'Package ID',

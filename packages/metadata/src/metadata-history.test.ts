@@ -365,7 +365,9 @@ describe('history and rollback of a type stored per package (#32351)', () => {
           [2, body('custom')],
           [1, body('A1', A)],
         ]);
-        expect(await versions(type, { packageId: A })).toEqual([3, 1]);
+        // [#32717] A's slot is the name's one row slot, so its addressed history
+        // lists the unattributed v2 too: a rollback addressing A restores it.
+        expect(await versions(type, { packageId: A })).toEqual([3, 2, 1]);
         // An unattributed version lands in the one holder's row, as before.
         await manager.rollback(type, 'x', 2);
         expect((await rowsOf(type)).map((row) => [row.package_id, labelOf(row), row.version])).toEqual([[A, 'custom', 4]]);
