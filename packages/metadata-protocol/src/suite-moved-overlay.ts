@@ -77,11 +77,28 @@ import { storedRowDocument } from './item-lock.js';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 
 /**
- * Whether a code package ships the item being read (its type, name and
- * bundle member) in the registry the read serves: the caller's reading,
- * from the shipped artifacts it already weighs for the address.
+ * Which code packages ship the item being read, in the registry the read
+ * serves: the caller's reading, from the shipped artifacts it already weighs
+ * for the address. Two grains, because the two packages a move names are
+ * asked different questions:
+ *
+ *  - `item`: whether a package ships the item itself (its type, name and
+ *    bundle member). The address's package must, to be the item's owner now.
+ *  - `name`: whether a package ships ANY member of the name. [#32606] The
+ *    former owner is asked at this grain: a package that still ships the name
+ *    still holds it (ADR-0150 D3), so a row declaring it, or bound to it, is
+ *    that package's own edit, served at its address (an added member's
+ *    declared override, #28802), never another package's moved edit as well.
+ *    Asked at the member's grain, a bundle addition that ships only the
+ *    member (`fr-FR` beside the former owner's `en-US`) took the row as its
+ *    own: one row served at two packages' addresses (red line 2).
+ *
+ * For a type that is not a bundle the two answer alike.
  */
-export type ShipsName = (packageId: string) => boolean;
+export interface ShipsName {
+    readonly item: (packageId: string) => boolean;
+    readonly name: (packageId: string) => boolean;
+}
 
 /** The row's body as a plain object, or `undefined` when it is not one. */
 function documentOf(row: ServedOverrideRow): Record<string, unknown> | undefined {
@@ -139,7 +156,7 @@ export function isMovedOverrideRowOf(
     if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return false;
     const former = (declaration as { package?: unknown }).package;
     if (typeof former !== 'string' || former === '' || former === base) return false;
-    if (!ships(base) || ships(former)) return false;
+    if (!ships.item(base) || ships.name(former)) return false;
     if (installed(former) !== undefined && !ofOneApp(former, base, installed)) return false;
     // THE predicate, asked of the row as if its declaration named `base`.
     const asBase = { ...body, overrides: { ...(declaration as object), package: base } };
@@ -172,7 +189,7 @@ export function isMovedBaseRowOf(
     const former = row.package_id;
     if (typeof former !== 'string' || former === '' || former === base || isCustomizationPackage(former)) return false;
     if (!overridableType(row.type)) return false;
-    if (!ships(base) || ships(former)) return false;
+    if (!ships.item(base) || ships.name(former)) return false;
     if (!ofOneApp(former, base, installed)) return false;
     const body = documentOf(row);
     return body !== undefined && !('overrides' in body);

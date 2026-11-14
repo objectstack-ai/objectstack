@@ -194,6 +194,11 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // the list's membership stays the items the package ships. A stand-in
     // no layer seated is recorded here and dropped after the last merge.
     const unseated = packageId ? new WeakSet<object>() : undefined;
+    // [#32606] A moved edit's former owner is asked whether it ships any
+    // member of the name over the registry the list serves, not over the
+    // merge's base items, which a scoped list draws from one package alone.
+    const shipsName = (name: string, shipper: string): boolean =>
+        shippingPackageIds(host.shippedArtifactsOf(request.type, name)).has(shipper);
     try {
         // [#21442] The row set this read consults — the overlay cache
         // included — is {@link readActiveOverlayRows}, and each row is
@@ -294,7 +299,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                 return host.foldObjectExtendersFromRegistry(
                     request.type, (data as { name?: unknown } | null)?.name, data, onlyExtensionsOf,
                 );
-            }, unseated, { servedOverride, installed });
+            }, unseated, { servedOverride, installed, shipsName });
 
             // [#13407] Expand any aggregated `defineView` container this
             // READ just merged in, INLINE into this response's own `items`
@@ -602,7 +607,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                 items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                     if (data && typeof data === 'object') (data as any)._draft = true;
                     return data;
-                }, unseated, { servedOverride, installed });
+                }, unseated, { servedOverride, installed, shipsName });
             }
         } catch (error) {
             // [#5532] Same rule as the active-overlay read above. Serving

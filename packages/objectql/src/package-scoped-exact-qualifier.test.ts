@@ -972,6 +972,54 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
       expect(labelOf(await read(PAIR, 'fr-FR'))).toBe('pair fr-FR');
     });
 
+    // [#32606] A row of the App's pair declaring X is X's (its declared
+    // override of an added member, #28802), served at X's address and in X's
+    // lists. The moved-edit rule (#31593, `isMovedOverrideRowOf`) asked
+    // whether X still ships the item at the MEMBER's grain, so beside an
+    // addition Z that ships the row's locale (`fr-FR`) while X ships only
+    // `en-US`, it read the row as an edit that moved from X to Z: Z's exact
+    // address, Z's list and the execution list a send resolved to Z reads all
+    // served the row declared for X, stamped Z, while the registry answers
+    // Z's own. One row at two packages' addresses (red line 2). X ships the
+    // name, so it is still the row's holder: the former owner is asked at the
+    // name's grain, and Z answers its own member everywhere.
+    const declaredForX = () => {
+      pairRow({ overrides: { package: X } });
+      registry.registerItem('email_template', {
+        name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', overrides: { package: X }, _packageId: PAIR, _provenance: 'org',
+      }, 'name' as never);
+    };
+    it.each([
+      ['addition installed first', () => { installZ(); tpl('en-US', X); tpl('fr-FR', Z); declaredForX(); }],
+      ['row stored first', () => { tpl('en-US', X); declaredForX(); installZ(); tpl('fr-FR', Z); }],
+    ] as const)('[#32606] NARROWING — a row declared for X is never served at an addition Z that ships its locale (%s; BASE: Z\'s address, list and execution list served `pair fr-FR` stamped Z)', async (_order, arrange) => {
+      arrange();
+      expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', Z, 'fr-FR')?.label, 'the registry at Z').toBe('zeta fr-FR');
+      const atZ = await read(Z, 'fr-FR');
+      expect(labelOf(atZ), '`?package=Z&member=fr-FR`: Z\'s own').toBe('zeta fr-FR');
+      expect((atZ as { item?: { _diagnostics?: { valid?: boolean } } })?.item?._diagnostics?.valid, 'Z\'s own item is valid').toBe(true);
+      expect(await listed(Z), 'Z\'s list').toEqual(['zeta fr-FR']);
+      expect(await forSend(Z), 'Z\'s execution list').toEqual(['zeta fr-FR']);
+      // CONTROL: X's address and X's lists serve the row declared for X (UNCHANGED).
+      expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+      expect(await listed(X)).toEqual(['pair fr-FR', 'suitex en-US']);
+      expect(await forSend(X)).toEqual(['pair fr-FR', 'suitex en-US']);
+      expect(labelOf(await read(PAIR, 'fr-FR'))).toBe('pair fr-FR');
+    });
+
+    // [#31593] CONTROL — the moved edit still follows its item: X ships
+    // nothing of the name any more (no member), so the row declaring X is
+    // the tenant's edit of the item that moved to Z, served at Z.
+    it.each([
+      ['addition installed first', () => { installZ(); tpl('fr-FR', Z); declaredForX(); }],
+      ['row stored first', () => { declaredForX(); installZ(); tpl('fr-FR', Z); }],
+    ] as const)('[#32606] CONTROL — X ships nothing of the name: the row declaring X is the moved edit, served at Z (%s; UNCHANGED)', async (_order, arrange) => {
+      arrange();
+      expect(labelOf(await read(Z, 'fr-FR'))).toBe('pair fr-FR');
+      expect(await listed(Z)).toEqual(['pair fr-FR']);
+      expect(await forSend(Z)).toEqual(['pair fr-FR']);
+    });
+
     it('NARROWING — an undeclared row while another App\'s pair stores an undeclared row of the name: neither address serves it, as the registry binds neither (residual 2, contract review F6; BASE at 075fb3188: `?package=Y` served es-ES, `?package=P` fr-FR)', async () => {
       // App B: P ships en-US, Q (on P) ships de-DE; B's pair stores an undeclared fr-FR row.
       // App A: U (on A and P, A's namespace) ships fr-FR, Y ships it-IT; A's pair stores an undeclared es-ES row.
