@@ -30,9 +30,12 @@ export const entry: SemanticMigration = {
     + 'such a cycle among an object\'s declared formulas only, so one an extension adds was accepted and showed only '
     + 'when records were read. It is now refused with the verdict and the sentence the object\'s own cycle gets '
     + '(`expression-invalid`; at the door `422 INVALID_METADATA`), on each member the extension adds, located at the '
-    + 'entry; a member the object declares keeps its location at the object.',
+    + 'entry; a member the object declares keeps its location at the object. One exception: a field two packages\' '
+    + 'extensions add at the same priority is not judged, since which definition the registry serves is registration '
+    + 'order, so a cycle through such a field is not found.',
   acceptanceCriteria:
     '`os build` reports no `expression-invalid` finding naming a formula cycle at an `objectExtensions` entry, and '
     + 'publishing each such extension again answers 200 with no such issue. Each of its formulas reads a computed '
-    + 'value on every row.',
+    + 'value on every row, save a cycle through a field two packages add at the same priority, which neither door '
+    + 'judges.',
 };
