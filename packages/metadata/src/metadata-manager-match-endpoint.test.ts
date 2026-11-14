@@ -930,9 +930,19 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
       }
     });
 
-    it('`unregisterPackage` removes a `_packageId`-only item and deletes its row by name (BASE: it removed nothing)', async () => {
+    /**
+     * [#32985] `DatabaseLoader` writes no `package_id` column for a type
+     * outside the set, so the row of a `_packageId`-only item names its
+     * package by the stamp alone: `unregisterPackage` keeps it until forced,
+     * as it keeps an environment row a 17.0.0–18.3.0 boot stamped (the row
+     * alone cannot tell the two apart).
+     */
+    it('`unregisterPackage` keeps a `_packageId`-only item whose row names the package by the stamp alone, reporting it (FROM removed, #32985); with `force` it removes the item and deletes its row by name (BASE: it removed nothing)', async () => {
       const ctx = await boot(CONTROL_TYPE, [A]);
-      await ctx.manager.unregisterPackage(A);
+      const kept = await ctx.manager.unregisterPackageWithReport(A);
+      expect([kept.removed, kept.kept.map(({ type, name, reason }) => [type, name, reason])]).toEqual([[], [[CONTROL_TYPE, ctx.name, 'stamp-only-row']]]);
+      expect(ctx.rowBodies()).toHaveLength(1);
+      await ctx.manager.unregisterPackage(A, { force: true });
       expect(ctx.rowBodies()).toEqual([]);
       expect(ctx.watched.map((event) => [event.type, event.name])).toEqual([['deleted', ctx.name]]);
     });
@@ -1429,9 +1439,10 @@ describe('per-package loader storage for every type stored per package (ADR-0150
       expect(labelsOf(await peer.list(CONTROL_TYPE))).toEqual([label(CONTROL_TYPE, B)]);
     });
 
+    // [#32985] Forced: the item's row names its package by the stamp alone (see the CONTROL above).
     it('a removal deletes from the door\'s store too: nothing answers (#32353; BASE: its copy kept answering)', async () => {
       const ctx = await boot(CONTROL_TYPE, [A]);
-      await ctx.manager.unregisterPackage(A);
+      await ctx.manager.unregisterPackage(A, { force: true });
       expect(ctx.rows()).toEqual([]);
       expect(await ctx.door.loadManyKeyed(CONTROL_TYPE)).toEqual([]);
       expect(await ctx.manager.get(CONTROL_TYPE, ctx.name)).toBeUndefined();
@@ -1716,8 +1727,10 @@ describe('[#32540] one package\'s action name bound to several objects keeps a r
         id: 'bound', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item(objectName)),
         state: 'active', version: 1, source: 'database', checksum: 'x',
       });
+      // [#32985] The legacy row names its package by its own `packageId`: one naming it by the
+      // `_packageId` stamp alone is bound to nothing (`DatabaseLoader.bindReadRowPackage`).
       await driver.create('sys_metadata', {
-        id: 'legacy-o1', type: 'action', name: NAME, metadata: JSON.stringify(item('o1')),
+        id: 'legacy-o1', type: 'action', name: NAME, metadata: JSON.stringify({ ...item('o1'), packageId: A }),
         state: 'active', version: 2, source: 'database', checksum: 'y',
       });
     });
@@ -1765,12 +1778,20 @@ describe('[#32540] one package\'s action name bound to several objects keeps a r
     });
   });
 
-  it('a package-less row on o1, then the package saves o2: the row is kept and named o1, the package\'s o2 binding is its own row (main: the o2 save took the row over)', async () => {
+  // [#32681] FROM the row named o1 by the o2 save: the save counted holders by name, so the name's
+  // package-less rows were its takeover candidates and their bucket of the unique key was named first.
+  // TO left as stored: keyed per (object, name) the o1 row is another slot, in the package-less bucket the
+  // o2 save does not write; a write into that bucket names it first.
+  it('a package-less row on o1, then the package saves o2: the row is kept as stored, the package\'s o2 binding is its own row (main: the o2 save took the row over; #32681, FROM the row named o1)', async () => {
     const ctx = await boot([['o2']], (driver) => driver.create('sys_metadata', {
       id: 'loose-o1', type: 'action', name: NAME, metadata: JSON.stringify({ ...item('o1'), _packageId: undefined, label: 'loose@o1' }),
       state: 'active', version: 1, source: 'database', checksum: 'x',
     }));
-    expect(ctx.stored()).toEqual(['com.acme.alpha|o2:alpha@o2', 'undefined|o1:loose@o1']);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o2:alpha@o2', 'undefined|-:loose@o1']);
+    // A package-less object-less save writes that bucket: the o1 row is named first, and the
+    // object-less binding is its own row.
+    await ctx.loader.save('action', NAME, { ...item(undefined, 'env@global'), _packageId: undefined });
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o2:alpha@o2', 'undefined|-:env@global', 'undefined|o1:loose@o1']);
   });
 
   it('a rollback to an object-less body in a slot holding only bound rows recreates the object-less binding as its own row (main: restored over the one row)', async () => {
