@@ -122,7 +122,8 @@ describe('ChatbotEnhanced send-failure UX', () => {
 
 /**
  * objectui#2627 — the ROLLBACK half of the plan card's optimistic approve.
- * Clicking "Build it" flips the card to a "Building…" badge before the server
+ * Clicking "Build it" flips the card to a "Confirmed" badge (objectstack#32984;
+ * it read "Building…" before) before the server
  * has said anything (#2632, pinned in ChatbotEnhanced.test.tsx). When that
  * approval never left the client — a 429 or an offline send, tagged `notSent` —
  * the optimistic badge is a lie AND a dead end: the badge replaces the buttons,
@@ -152,7 +153,7 @@ const planMessage: ChatbotEnhancedMessage[] = [
 ];
 
 describe('ChatbotEnhanced plan approval — optimistic flip rollback (#2627)', () => {
-  it('rolls the "Building…" badge back to the buttons when the approval never left the client', async () => {
+  it('rolls the "Confirmed" badge back to the buttons when the approval never left the client', async () => {
     const onSendMessage = vi.fn();
     const { rerender } = render(
       <ChatbotEnhanced
@@ -165,7 +166,7 @@ describe('ChatbotEnhanced plan approval — optimistic flip rollback (#2627)', (
     );
 
     fireEvent.click(screen.getByTestId('proposed-plan-approve'));
-    expect(screen.getByTestId('proposed-plan-building')).toHaveTextContent('BUILDING_NOW');
+    expect(screen.getByTestId('proposed-plan-confirmed')).toBeInTheDocument();
     expect(screen.queryByTestId('proposed-plan-approve')).not.toBeInTheDocument();
 
     // The approval was rejected before reaching the model (rate limit).
@@ -184,7 +185,7 @@ describe('ChatbotEnhanced plan approval — optimistic flip rollback (#2627)', (
     await waitFor(() =>
       expect(screen.getByTestId('proposed-plan-approve')).toBeInTheDocument(),
     );
-    expect(screen.queryByTestId('proposed-plan-building')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('proposed-plan-confirmed')).not.toBeInTheDocument();
     // …and the failure is surfaced, not swallowed.
     expect(screen.getByTestId('chat-send-error')).toHaveTextContent('RATE_LIMIT_MSG');
   });
@@ -216,7 +217,7 @@ describe('ChatbotEnhanced plan approval — optimistic flip rollback (#2627)', (
       />,
     );
 
-    expect(screen.getByTestId('proposed-plan-building')).toBeInTheDocument();
+    expect(screen.getByTestId('proposed-plan-confirmed')).toBeInTheDocument();
     expect(screen.queryByTestId('proposed-plan-approve')).not.toBeInTheDocument();
   });
 
@@ -246,10 +247,10 @@ describe('ChatbotEnhanced plan approval — optimistic flip rollback (#2627)', (
       />,
     );
 
-    // The composer text is restored, but the plan card stays "Building…" —
+    // The composer text is restored, but the plan card stays "Confirmed" —
     // rolling it back would offer a second build of a plan already building.
     await waitFor(() => expect(screen.getByTestId('chat-send-error')).toBeInTheDocument());
-    expect(screen.getByTestId('proposed-plan-building')).toBeInTheDocument();
+    expect(screen.getByTestId('proposed-plan-confirmed')).toBeInTheDocument();
     expect(screen.queryByTestId('proposed-plan-approve')).not.toBeInTheDocument();
   });
 });
