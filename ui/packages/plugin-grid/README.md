@@ -891,6 +891,19 @@ export const UserList = ({ needsAccess }: { needsAccess: (id: string) => boolean
 The console's Setup → Users list on a cloud-managed environment uses it to mark
 a user who holds no permission set beyond the baseline (objectui#13330).
 
+### Rows that open nothing
+
+A host that owns the row click (`onRowClick`) and knows that it opens nothing
+for these rows passes `rowOpensRecord={false}`. The grid then draws its
+record-link cells (the first column, and any column authored `link: true`) as
+plain text, with no anchor and no `role="link"`, and the row's right-click menu
+offers no Open or Open in new tab; the row's actions stay. The row click still
+reaches `onRowClick`, so anything else the host does with it is unchanged.
+Absent (or `true`), every row is drawn as before. It is a host prop, not a
+schema key: list metadata cannot set it. The console passes `false` for a view
+authored `navigation: { mode: 'none' }` and for an object whose data API serves
+no single-record read (objectstack#33317).
+
 ### Inline Editing
 
 Enable inline cell editing for quick updates:

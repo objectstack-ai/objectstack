@@ -274,8 +274,12 @@ describe('objectstack#33317 — the console object list: a row that opens nothin
 
   it('authored `none` still hands the row click to the host: a ⌘-click on the row opens the record in a new tab, as before', async () => {
     await mountList({ navigation: { mode: 'none' } });
-    fireEvent.click(screen.getByText('okta-staging'), { metaKey: true });
+    // A cell outside the record link: the row's own click, with the modifier.
+    fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
     expect(openSpy).toHaveBeenCalledTimes(1);
+    // The name cell, no longer a link of its own, hands its click to the row too.
+    fireEvent.click(screen.getByText('okta-staging'), { metaKey: true });
+    expect(openSpy).toHaveBeenCalledTimes(2);
   });
 
   it('a list-only object: the name cell is plain text, and the right-click menu has no Open but keeps Revoke', async () => {
