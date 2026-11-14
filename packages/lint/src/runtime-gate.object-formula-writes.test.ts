@@ -38,6 +38,7 @@
  * the #22019 block of `packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts`.
  */
 import { describe, expect, it } from 'vitest';
+import { applyInjectedSystemColumns } from '@objectstack/metadata-core';
 import { EXPRESSION_INVALID, runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 import { runStackExpressionPasses, validateStackExpressions } from './validate-expressions.js';
@@ -517,6 +518,23 @@ describe('#33154 — an extension\'s validation rules are judged at the build an
 
       expect(atBuild.length, dump(atBuild)).toBeGreaterThan(0);
       expect([...atDoor.errors, ...atDoor.advisories]).toEqual(atBuild);
+    }
+  });
+
+  it('⭐ PARITY — the door reads the objects as served, injected system columns and all: an unguarded ordering over `created_at` is accepted there as at the build, one over a declared nullable field is refused at both', () => {
+    // As the registry serves them: `created_at`, `owner_id`, … declared.
+    const served = [applyInjectedSystemColumns(target), applyInjectedSystemColumns(staff)];
+    expect(Object.keys(served[0]!.fields)).toContain('created_at');
+    for (const [condition, refused] of [
+      ["record.created_at > timestamp('2020-01-01T00:00:00Z')", false],
+      ['record.amount > 0', true],
+    ] as const) {
+      const item = extension([script('since', condition)]);
+      const atDoor = gateExtension(item, served);
+      const atBuild = buildFindings({ objects: [target, staff], objectExtensions: [item] });
+
+      expect([...atDoor.errors, ...atDoor.advisories], condition).toEqual(atBuild);
+      expect(atBuild.length > 0, `${condition}: ${dump(atBuild)}`).toBe(refused);
     }
   });
 

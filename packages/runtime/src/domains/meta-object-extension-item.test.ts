@@ -35,6 +35,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
 import { ObjectExtensionSchema } from '@objectstack/spec/data';
+import { runAuthoringRules } from '@objectstack/lint';
 import { HttpDispatcher } from '../http-dispatcher.js';
 // The [#29594] rehearsal boots the real dispatcher, whose package door reaches
 // `import('@objectstack/metadata')` in standalone-stack.ts; pay that load
@@ -498,6 +499,34 @@ describe('[#33154] the publish door judges an extension\'s validation rule as `o
 
         expect(servedRules(rig)).toContain('no_blocked__c');
         expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+    }, 60_000);
+
+    it('⭐ PARITY — an unguarded ordering over the injected `created_at` publishes at the door, as `os build` accepts the same entry; one over a declared nullable field is refused at both', async () => {
+        /** `os build`'s findings at the extension, over the account as authored. */
+        const atBuild = (item: unknown) => {
+            const stack = { objects: baseManifest().objects, objectExtensions: [item] };
+            return runAuthoringRules('build', { normalized: stack, parsed: stack } as any)
+                .filter((f) => f.where.includes('objectExtensions'))
+                .map((f) => ({ rule: f.rule, where: f.where, path: f.path }));
+        };
+        const since = ruleBody("record.created_at > timestamp('2020-01-01T00:00:00Z')");
+        expect(atBuild(since)).toEqual([]);
+
+        const rig = await boot();
+        // Served, the account declares the columns the registry injects.
+        expect((await rig.fieldsOn()).registry).toContain('created_at');
+        await rig.saveAndPublish(PAIR, since);
+        expect(servedRules(rig)).toContain('no_blocked__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+
+        // The null-guard gate still judges a field the account declares nullable.
+        const unguarded = ruleBody('record.bonus__c > 100', { bonus__c: { type: 'number', label: 'Bonus' } });
+        const refusedAtBuild = atBuild(unguarded);
+        expect(refusedAtBuild).toHaveLength(1);
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: unguarded, mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect((err.issues ?? []).map((i: any) => ({ rule: i.rule, where: i.where, path: i.path }))).toEqual(refusedAtBuild);
     }, 60_000);
 
     it('⭐ LIT (republish) — dropping a field the extension\'s own rule still reads is refused: the stored self lends it nothing', async () => {

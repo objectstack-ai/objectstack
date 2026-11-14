@@ -158,6 +158,7 @@ import type { FlowCelEntrance } from './flow-cel-root-scope.js';
 import { injectedColumnDefsFor, injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage, provenNonNullKeys } from './validate-null-guards.js';
 import type { NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
+import { stripInjectedSystemColumns } from '@objectstack/metadata-core';
 import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
 import { formulaCycleIssues } from './formula-cycle-issues.js';
@@ -2270,8 +2271,12 @@ export interface StackExpressionOptions {
    * `objectsAsServed`, the build's own fold — and located at the entry, as the
    * build locates it. [#33154] The same walk judges each validation rule the
    * written entry adds, by the object walk's own rule pass
-   * (`judgeValidationRule`), against the same served target and located at
-   * the entry (`object 'T' · objectExtensions[0] · validation 'N'`). The
+   * (`judgeValidationRule`), its `record.FIELD` reads resolved against the
+   * same served fields (the leaf of a hop through a reference an extension
+   * adds is not judged; see the walk), and located at the entry
+   * (`object 'T' · objectExtensions[0] · validation 'N'`). On this write the
+   * live objects are read without the system columns the registry injects
+   * (`stripInjectedSystemColumns`), as the build reads them. The
    * object walk reads an empty list (the carried objects are the universe the
    * field or rule resolves in, not the subject) and so does every other pass;
    * the function returns after the extension walk.
@@ -2359,6 +2364,17 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   if (options.runtimeWriteType === 'page') {
     return actionCopyTemplateIssues(stack, { actions: false, objects: false, pages: true });
   }
+  // [#33154] The extension door hands the objects as the registry SERVES
+  // them, and a served definition carries the system columns the registry
+  // injects (`created_at`, `owner_id`, …) as declared fields; the build reads
+  // the objects as authored. Unstripped, the null-guard gate judged
+  // `record.created_at` as a declared nullable field and refused at the door
+  // an extension rule `os build` accepts. So on that write each object is read
+  // through `stripInjectedSystemColumns` (`@objectstack/metadata-core`, the
+  // write path's own strip of exactly those, as `authored-site-expression.ts`
+  // reads the served objects), and the indexes re-derive the injected columns
+  // themselves, as they do at the build.
+  if (extensionWrite) stack = { ...stack, objects: recordsOf(stack.objects).map((o) => stripInjectedSystemColumns(o)) };
   const objects = recordsOf(stack.objects);
   // [#30471] The field indexes read the objects as the registry SERVES them,
   // every `objectExtensions` field of any body folded in (`objectsAsServed`,
@@ -4064,9 +4080,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // [#33072] The `object_extension` publish door runs this walk and nothing
   // else: its snapshot carries the written entry as the sole member of
   // `objectExtensions` and the door's live objects as `objects`, so the field
-  // (and, #33154, the rule) is judged against its target as served and
-  // located where the build locates it (`objectExtensions[0]` for a one-entry
-  // stack).
+  // (and, #33154, the rule's field reads) is judged against its target as
+  // served and located where the build locates it (`objectExtensions[0]` for
+  // a one-entry stack).
   for (const [target, entries] of objectWrite ? [] : objectExtensionsByTarget(stack)) {
     // The target's position in `objects`, which is its position in
     // `typedObjects` too (see `objectPosition` above); -1 when undeclared.
@@ -4108,14 +4124,21 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // [#33154] Each validation rule the entry adds, by the object walk's
       // own rule pass ({@link judgeValidationRule}): the registry merges an
       // extension's `validations` onto the target by name, so every save of
-      // the target runs it as it runs the target's own rules. Judged against
-      // the target as served, through the same indexes, so a read of a field
-      // this or a sibling extension adds resolves and a field nothing serves
-      // is unknown; an undeclared target is judged on what does not depend on
-      // its fields, as its fields' formulas are. Located at the entry
-      // (`object 'T' · objectExtensions[0] · validation 'N'`), the key path at
-      // the rule's slot under the entry, which the door re-spells
-      // item-relative (`validations.0.condition`). The index is the authored
+      // the target runs it as it runs the target's own rules. A `record.FIELD`
+      // read resolves against the target's fields as served (`fieldIndex`,
+      // over `objectsAsServed`), so a field this or a sibling extension adds
+      // resolves and a field nothing serves is unknown; an undeclared target
+      // is judged on what does not depend on its fields, as its fields'
+      // formulas are. Not every check reads the fold: the hop checks
+      // (`refuseUndeclaredHopField`, `storedMetadataBodyReferencesFor`) read
+      // the declared objects, so the leaf of a one-hop read through a
+      // reference an extension ADDS is not judged here (`record.manager__c.
+      // nmae` passes), while a hop through a reference the target declares
+      // is. Located at the entry (`object 'T' · objectExtensions[0] ·
+      // validation 'N'`), the key path at the rule's slot under the entry
+      // (`objectExtensions[0].validations[0].condition`): the door's 422
+      // carries that path as is, and only a draft read's `_diagnostics`
+      // re-spell it item-relative (`validations.0.condition`). The index is the authored
       // one: `ObjectExtensionSchema` declares `validations` an array of rule
       // records, and `recordsOf` hands an array's records back in order.
       // Counted by hand, as `objectPosition` is, so the #5017 key scan sees
