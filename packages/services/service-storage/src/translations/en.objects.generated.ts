@@ -101,7 +101,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       deleted_at: {
         label: "Deleted At",
-        help: "Tombstone timestamp — set when the last sys_attachment reference to an attachments-scope file is removed; the lifecycle TTL reaps the row (and its storage bytes, via the sys_file reap guard) after the grace window. NULL for live rows."
+        help: "Tombstone timestamp — set when the last sys_attachment reference to an attachments-scope file is removed; the lifecycle TTL reaps the row (and its storage bytes, via the sys_file reap guard) after the grace window. Also set on a committed file uploaded through an upload link that named no record, cleared when a record takes it, so the same TTL reclaims an upload no record ever took. NULL for every other live row."
       }
     }
   },
