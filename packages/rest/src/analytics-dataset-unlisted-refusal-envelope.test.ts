@@ -256,15 +256,18 @@ describe('[#5716] a refusal nobody listed still answers 4xx, from its own envelo
     },
     {
       // A dashboard's own filter on a joined column — `runtimeFilter` is where a
-      // widget's date/segment picker lands.
-      name: 'objectql-strategy: a cross-object FILTER',
+      // widget's date/segment picker lands. [#33335] A one-hop leaf is served
+      // now (the engine's nested-relation condition); under `$not` it stays
+      // refused, since negating "a readable parent matches" admits the rows of
+      // an absent or unreadable parent.
+      name: 'objectql-strategy: a cross-object FILTER under $not',
       analytics: aggregateAnalytics,
       body: {
         dataset: joinedDataset,
-        selection: { dimensions: ['stage'], measures: ['revenue'], runtimeFilter: { region: 'NA' } },
+        selection: { dimensions: ['stage'], measures: ['revenue'], runtimeFilter: { $not: { region: 'NA' } } },
       },
       code: 'INVALID_FIELD',
-      message: /cannot evaluate a cross-object filter \("account\.region"\)/,
+      message: /cannot evaluate the cross-object filter \("account\.region"\) under a \$not/,
     },
     {
       name: 'objectql-strategy: a non-recombinable measure over a cross-object dimension',
