@@ -35,8 +35,6 @@ function storedProviders(rows: Record<string, unknown>[], options: { registered?
       if (options.findThrows) throw new Error('store unavailable');
       return object === SSO_PROVIDER_OBJECT ? structuredClone(stored) : [];
     }),
-    findOne: vi.fn(async () => null),
-    count: vi.fn(async () => 0),
     insert: recordWrite('insert'),
     update: recordWrite('update'),
     delete: recordWrite('delete'),
