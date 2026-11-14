@@ -1719,35 +1719,38 @@ describe('role: resolves in the emitting organization — the producer\'s, else 
         { id: 'm3', organization_id: 'org_b', user_id: 'u_b_admin', role: 'admin' },
     ];
 
-    /** An engine whose event insert stores `stamp` when the row names no organization, as the engine's system-write rule does. */
+    /**
+     * The file's own {@link fakeData} double, its event insert storing `stamp`
+     * when the row names no organization (as the engine's system-write rule
+     * does) and its `find` answering `sys_member` by equality on `where`,
+     * paged and projected as asked.
+     */
     function membershipEngine(stamp: string | null) {
         const memberReads: Array<Record<string, unknown>> = [];
+        const base = fakeData().getData();
         const engine = {
-            memberReads,
+            ...base,
             async insert(_object: string, row: any) {
                 return { id: 'evt_1', ...row, organization_id: row.organization_id ?? stamp };
             },
             async find(object: string, query: any) {
                 if (object !== 'sys_member') return [];
                 memberReads.push(query?.where ?? {});
-                const hits = MEMBERS.filter((r) => Object.entries(query?.where ?? {}).every(([k, v]) => (r as any)[k] === v));
-                return hits.slice(query?.offset ?? 0).slice(0, query?.limit ?? hits.length).map((r) => ({ user_id: r.user_id }));
+                const hits = MEMBERS
+                    .filter((r) => Object.entries(query?.where ?? {}).every(([k, v]) => (r as any)[k] === v))
+                    .slice(typeof query?.offset === 'number' ? query.offset : 0);
+                // The caller's bound by PRESENCE, applied AFTER the filter.
+                const page = typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
+                const fields: string[] | undefined = query?.fields;
+                return fields ? page.map((r) => Object.fromEntries(fields.map((f) => [f, (r as any)[f]]))) : page;
             },
-            async findOne(object: string, query?: EngineFindOneQueryInput) {
-                assertEngineFindOnePredicate(object, query);
-                return null;
-            },
-            async update() { return {}; },
-            async delete() { return {}; },
-            async count() { return 0; },
-            async aggregate() { return []; },
         };
-        return engine;
+        return { engine, memberReads };
     }
 
     async function emitRoleAdmin(stamp: string | null, organizationId?: string) {
-        const engine = membershipEngine(stamp);
-        const svc = new MessagingService({ logger: silentLogger(), getData: () => engine as any });
+        const { engine, memberReads } = membershipEngine(stamp);
+        const svc = new MessagingService({ logger: silentLogger(), getData: () => engine });
         const inbox = recordingChannel('inbox');
         svc.registerChannel(inbox.channel);
         const result = await svc.emit({
@@ -1757,7 +1760,7 @@ describe('role: resolves in the emitting organization — the producer\'s, else 
             payload: { title: 'Hi' },
             ...(organizationId !== undefined ? { organizationId } : {}),
         });
-        return { result, recipients: inbox.seen.map((d) => d.recipient).sort(), memberReads: engine.memberReads };
+        return { result, recipients: inbox.seen.map((d) => d.recipient).sort(), memberReads };
     }
 
     it('a producer that names no organization reaches the holders of the event row\'s organization, and no other', async () => {
