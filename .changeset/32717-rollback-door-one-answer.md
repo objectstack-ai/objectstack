@@ -1,5 +1,6 @@
 ---
 '@objectstack/metadata': patch
+'@objectstack/metadata-core': patch
 ---
 
 fix(metadata)!: `DatabaseLoader.registerRollback` answers an addressed rollback to a version its address's history does not hold "not found", as `MetadataManager.rollback` does, and a version's existing history row, never the restored body's package stamp, says whose version it is (#32717)
@@ -16,3 +17,5 @@ ADR-0150 D3/D4: an address names whose versions a rollback restores, and only a 
 - **A version attributed to no package** (a history row written before `sys_metadata_history.package_id`, or one `SysMetadataRepository` wrote before it recorded the column), addressed: FROM written into the addressed row at `registerRollback` and "not found" at `MetadataManager.rollback`, TO "not found" at both while one row slot holds the name, and `409` naming every holder at both while several do, as before. Naming no package it lands in the name's one row at both doors, as before.
 - **The environment's own version, addressing the package whose row is the name's one slot** (M1: a package took over the package-less row, or saved after it was removed): FROM written into that row at `registerRollback` and "not found" at `MetadataManager.rollback`, TO "not found" at both. Naming no package it lands in that row at both doors, as before.
 - **Whose version it is.** FROM the version's history row's attribution, else the restored body's package stamp when the row was attributed to none, TO the history row's attribution whenever the row exists; the body's stamp stands in only for a version with no history row at all (history not tracked, or no row of that version). A version attributed to no package is therefore never attributed by the body a caller hands in: on a name two row slots hold it is refused `409` naming both, ⛔ never written into the row of the package the body names.
+
+`@objectstack/metadata-core` ships a documentation change only: the `sys_metadata_history.package_id` doc comment (in its published `dist`) now says NULL means "not attributed", never the environment, and that a row written before the column is read as the package its stored body names, else as attributed to none. No field, type or export changes.
