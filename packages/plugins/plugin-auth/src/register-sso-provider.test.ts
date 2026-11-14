@@ -698,6 +698,7 @@ describe('the Setup form register_sso_provider names each endpoint under the oid
       form[String(p.name)] = url;
       expected[String(p.name)] = url;
     }
+    expect(Object.keys(expected).length).toBeGreaterThan(0);
     let dispatched: any = null;
     const handle = vi.fn(async (req: Request) => {
       if (req.url.endsWith('/get-session')) return new Response('null', { status: 200 });
@@ -706,7 +707,7 @@ describe('the Setup form register_sso_provider names each endpoint under the oid
     });
     const res = await runRegisterSsoProviderFromForm(handle, makeOidcReq(form));
     expect(res.status).toBe(200);
-    for (const member of NAMED_ENDPOINTS) expect(dispatched.oidcConfig[member], member).toBe(expected[member]);
+    for (const [param, url] of Object.entries(expected)) expect(dispatched.oidcConfig[param], param).toBe(url);
   });
 });
 
