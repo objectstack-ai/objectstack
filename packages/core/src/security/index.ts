@@ -424,6 +424,7 @@ export {
   assembleExecutionContext,
   assembleExecutionContextOrGuest,
   ENTRY_EXECUTION_CONTEXT_FIELDS,
+  userTextLocalesOf,
   type EntryExecutionContextField,
   type ExecutionContextEntryFields,
   type ExecutionContextAssemblyInput,

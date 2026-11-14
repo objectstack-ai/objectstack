@@ -213,7 +213,10 @@ describe('[#33003] the late-manifest bridge rewrites the environment\'s object t
         expect(await state(m, stores, [OBJECT])).toEqual([[OBJECT, HOST, false, 1]]);
     });
 
-    it('CONTROL the host\'s own object (its stored body carries the host\'s stamp), bridged and restored the same way, is still removed', async () => {
+    // [#32985] Forced: a stored body naming the host by its stamp alone is kept by
+    // `unregisterPackage` until forced (it may be an environment row a 17.0.0–18.3.0
+    // boot stamped), and this CONTROL pins what the #33003 mark alone keeps.
+    it('CONTROL the host\'s own object (its stored body carries the host\'s stamp), bridged and restored the same way, is still removed with `force`', async () => {
         const stores: Stores = new Map();
         seed(stores, OBJECT, { _packageId: HOST });
         const m = await bootPass(stores);
@@ -221,9 +224,9 @@ describe('[#33003] the late-manifest bridge rewrites the environment\'s object t
         await bridge();
         await restore();
         const rebooted = await bootPass(stores);
-        await rebooted.unregisterPackage(HOST);
+        await rebooted.unregisterPackage(HOST, { force: true });
         expect(await state(rebooted, stores, [OBJECT])).toEqual([[OBJECT, null, null, 0]]);
-        await m.unregisterPackage(HOST);
+        await m.unregisterPackage(HOST, { force: true });
         expect(await state(m, stores, [OBJECT])).toEqual([[OBJECT, null, null, 0]]);
     });
 });

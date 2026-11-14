@@ -34,7 +34,7 @@ import { resolveSeedRecord } from '@objectstack/formula';
 import {
   bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup,
   temporalComparandKind, temporalStorageForm, type TemporalComparandKind, isMissing,
-  blankAsNullColumns, blankStorageForm, type BlankAsNullReach, resolveTenantFieldName,
+  blankAsNullColumns, blankStorageForm, type BlankAsNullReach, resolveTenantFieldName, DEFAULT_TENANT_FIELD,
 } from '@objectstack/core';
 // [#8442] The repo's ONE recogniser for "this throw is a record-validation
 // failure" — duck-typed on `code`/`name`, the same predicate `mapDataError` and
@@ -522,6 +522,18 @@ function carriesOrganizationColumn(definition: unknown): boolean {
   return resolveInjectedSystemColumns(definition).tenant;
 }
 
+/**
+ * [#33207] How an organization-scoped load probes one reference target
+ * (`SeedLoaderService.probeScopeOf`). The `organization` scope names the
+ * column the probe filters on: the target's resolved tenant column, the one
+ * its rows are walled by.
+ */
+type ProbeScope =
+  | { readonly kind: 'organization'; readonly tenantColumn: string }
+  | { readonly kind: 'members' }
+  | { readonly kind: 'own-organization' }
+  | { readonly kind: 'global' };
+
 /** [#33207] A reference probe the engine refused: it never ran. */
 interface ProbeRefusal {
   readonly object: string;
@@ -781,7 +793,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    * reference target ({@link probeScopeOf}). Cleared per load for the reason
    * {@link declaresNameColumnCache} is.
    */
-  private probeScopeCache = new Map<string, 'organization' | 'members' | 'own-organization' | 'global'>();
+  private probeScopeCache = new Map<string, ProbeScope>();
   /** [#33207] The refused probes this {@link load} has already said, one line each. */
   private refusedProbes = new Set<string>();
   /**
@@ -2809,13 +2821,15 @@ export class SeedLoaderService implements ISeedLoaderService {
     // [#33207] How an organization-scoped load may look into this target. With
     // no organization on the load (the single-tenant boot, a publish, a hot
     // reload) every probe is unscoped, exactly as before.
-    const scope = organizationId ? await this.probeScopeOf(targetObject) : 'unscoped';
+    const scope: ProbeScope | { readonly kind: 'unscoped' } = organizationId
+      ? await this.probeScopeOf(targetObject)
+      : { kind: 'unscoped' };
     let refusal: ProbeRefusal | undefined;
     let nonMemberMatched = false;
 
     for (const probeField of probeFields) {
       try {
-        if (scope === 'members') {
+        if (scope.kind === 'members') {
           const outcome = await this.probeOrganizationMember(probeField, value, organizationId!);
           if (outcome.id) return { id: outcome.id };
           nonMemberMatched ||= outcome.nonMemberMatched;
@@ -2826,11 +2840,14 @@ export class SeedLoaderService implements ISeedLoaderService {
         // A tenant-carrying target (or one the registry cannot describe) is
         // AND-scoped to the load's organization, so a row of another
         // organization is never borrowed as the reference (that would be a
-        // cross-organization link). The organization table itself answers only
-        // for the load's own organization. A global target (its author gave it
-        // no organization column) has no tenant to borrow from.
-        if (scope === 'organization') where.organization_id = organizationId;
-        else if (scope === 'own-organization') {
+        // cross-organization link). The filter names the column the target's
+        // rows are walled by (#33393): a declared `tenancy.tenantField` holds
+        // the organization there, and `organization_id` may not exist at all.
+        // The organization table itself answers only for the load's own
+        // organization. A global target (its author gave it no organization
+        // column) has no tenant to borrow from.
+        if (scope.kind === 'organization') where[scope.tenantColumn] = organizationId;
+        else if (scope.kind === 'own-organization') {
           if (probeField === 'id' && value !== organizationId) continue;
           where.id = organizationId;
         }
@@ -2852,7 +2869,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         // chain still moves on (a later leg may answer), the load is never
         // refused for it, and the refusal is carried to the reference's own
         // verdict and said once per target, field and code.
-        refusal ??= this.reportRefusedProbe(scope === 'members' ? SystemObjectName.USER : targetObject, probeField, err);
+        refusal ??= this.reportRefusedProbe(scope.kind === 'members' ? SystemObjectName.USER : targetObject, probeField, err);
       }
     }
     return { id: null, ...(refusal ? { refusal } : {}), ...(nonMemberMatched ? { nonMemberOf: organizationId } : {}) };
@@ -2920,7 +2937,10 @@ export class SeedLoaderService implements ISeedLoaderService {
    *
    * - `organization` — the target carries an `organization_id` column (declared,
    *   or injected by the system-column pass), or the registry cannot describe
-   *   it: probe within the load's organization, as always.
+   *   it: probe within the load's organization, as always. The filter is on
+   *   the target's tenant column (`resolveTenantFieldName`, falling back to
+   *   `organization_id` when it resolves none), the column the wall scopes
+   *   the target by (#33393).
    * - `members` — `sys_user`, which carries no organization: a person resolves
    *   only through membership in the load's organization.
    * - `own-organization` — `sys_organization`, the tenant table itself: the load
@@ -2933,10 +2953,12 @@ export class SeedLoaderService implements ISeedLoaderService {
    *   probe, and its refusal is reported, not swallowed: a platform-managed
    *   table is not a seed target, and an object that resolves another tenant
    *   column (`tenancy.tenantField`) is walled per organization, so an
-   *   unscoped probe would borrow another organization's row. A scope rule
-   *   for either is not this loader's to invent.
+   *   unscoped probe would borrow another organization's row: it is probed
+   *   within the load's organization on that column. A platform-managed table
+   *   that resolves no tenant column keeps the `organization_id` filter, whose
+   *   refusal is reported; a scope rule for it is not this loader's to invent.
    */
-  private async probeScopeOf(targetObject: string): Promise<'organization' | 'members' | 'own-organization' | 'global'> {
+  private async probeScopeOf(targetObject: string): Promise<ProbeScope> {
     const memoised = this.probeScopeCache.get(targetObject);
     if (memoised !== undefined) return memoised;
     let definition: unknown;
@@ -2946,11 +2968,12 @@ export class SeedLoaderService implements ISeedLoaderService {
       // The registry could not answer: an unknown is not a tenant-less verdict,
       // so the probe keeps today's organization filter.
     }
-    let scope: 'organization' | 'members' | 'own-organization' | 'global' = 'organization';
+    const tenantColumn = resolveTenantFieldName(definition) ?? DEFAULT_TENANT_FIELD;
+    let scope: ProbeScope = { kind: 'organization', tenantColumn };
     if (definition && typeof definition === 'object' && !carriesOrganizationColumn(definition)) {
-      if (targetObject === SystemObjectName.USER) scope = 'members';
-      else if (targetObject === SystemObjectName.ORGANIZATION) scope = 'own-organization';
-      else if (!(definition as { managedBy?: unknown }).managedBy && resolveTenantFieldName(definition) === null) scope = 'global';
+      if (targetObject === SystemObjectName.USER) scope = { kind: 'members' };
+      else if (targetObject === SystemObjectName.ORGANIZATION) scope = { kind: 'own-organization' };
+      else if (!(definition as { managedBy?: unknown }).managedBy && resolveTenantFieldName(definition) === null) scope = { kind: 'global' };
     }
     this.probeScopeCache.set(targetObject, scope);
     return scope;

@@ -2167,6 +2167,18 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             label: "Discovery-URL",
             helpText: "Optional. URL des OIDC-Discovery-Dokuments (https). Leer lassen, um `<issuer>/.well-known/openid-configuration` abzuleiten. Ein hier angegebener Endpunkt gilt für diesen Anbieter als vertrauenswürdig."
           },
+          authorizationEndpoint: {
+            label: "Authorization URL",
+            helpText: "Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust."
+          },
+          tokenEndpoint: {
+            label: "Token URL",
+            helpText: "Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token"
+          },
+          jwksEndpoint: {
+            label: "JWKS URL",
+            helpText: "Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs"
+          },
           userInfoEndpoint: {
             label: "Userinfo-URL",
             helpText: "Optional. URL des OIDC-Userinfo-Endpunkts (https); ersetzt den im Discovery-Dokument genannten. Ein hier angegebener Endpunkt gilt für diesen Anbieter als vertrauenswürdig: Geben Sie ihn an, wenn die Registrierung abgelehnt wird, weil das Discovery-Dokument einen Userinfo-Host nennt, dem der Server nicht vertraut."

@@ -286,6 +286,13 @@ export interface SamlProviderScope {
   allowIdpInitiated?: boolean;
   /** `sign_out_of_idp`: single logout runs for this provider (`sso-sign-out-of-idp.ts`). */
   singleLogout?: boolean;
+  /** The provider the request names (the ACS path's `:providerId`). */
+  providerId?: string;
+  /**
+   * The attribute names the posted assertion carries, read before the vendor
+   * runs (`sso-saml-standard-claims.ts`); empty when none could be read.
+   */
+  assertionAttributeNames?: readonly string[];
 }
 
 const samlProviderScope = new AsyncLocalStorage<SamlProviderScope>();
@@ -331,9 +338,25 @@ export function ssoSamlOptions(): SsoSamlOptions {
 /** Run one SAML request with its provider's options in scope. */
 export function runWithSamlProviderScope<T>(scope: SamlProviderScope, run: () => Promise<T>): Promise<T> {
   return samlProviderScope.run(
-    { allowIdpInitiated: scope.allowIdpInitiated === true, singleLogout: scope.singleLogout === true },
+    {
+      allowIdpInitiated: scope.allowIdpInitiated === true,
+      singleLogout: scope.singleLogout === true,
+      providerId: scope.providerId,
+      assertionAttributeNames: scope.assertionAttributeNames ? [...scope.assertionAttributeNames] : [],
+    },
     run,
   );
+}
+
+/**
+ * The attribute names the assertion of the SAML request in scope carries,
+ * when that request names `providerId`; empty otherwise (no scope, another
+ * provider, or nothing read).
+ */
+export function samlAssertionAttributeNamesInScope(providerId: unknown): readonly string[] {
+  const scope = samlProviderScope.getStore();
+  if (!scope || typeof providerId !== 'string' || !providerId || scope.providerId !== providerId) return [];
+  return scope.assertionAttributeNames ?? [];
 }
 
 /** Run one SAML ACS request with its provider's IdP-initiated toggle in scope (single logout off). */

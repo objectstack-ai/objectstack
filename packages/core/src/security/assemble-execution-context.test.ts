@@ -25,6 +25,7 @@ import {
   assembleExecutionContext,
   assembleExecutionContextOrGuest,
   ENTRY_EXECUTION_CONTEXT_FIELDS,
+  userTextLocalesOf,
   type EntryLocalization,
   type OAuthTokenProvenance,
 } from './assemble-execution-context.js';
@@ -252,11 +253,18 @@ describe('#6216 — runtime/dispatcher face: byte-for-byte parity with the pre-#
             // principal whose token names a client — absent everywhere else,
             // and carrying that client's id. The parity pin below is otherwise
             // unweakened: every other key still compares byte-for-byte.
-            const { performedBy, ...restOfNow } = observable(now);
+            //
+            // [#32656] The second argued delta, subtracted and pinned the same
+            // way: the envelope now also carries the workspace default locale
+            // on its own (ruling C on #32440 — the user-text ladder needs it
+            // UNFOLDED from `locale`). Present exactly when an authenticated
+            // principal's localization names one, and equal to that value.
+            const { performedBy, workspaceLocale, ...restOfNow } = observable(now);
             expect(restOfNow).toEqual(observable(before));
             expect(performedBy).toEqual(
               authz.userId && oauth?.clientId ? { clientId: oauth.clientId } : undefined,
             );
+            expect(workspaceLocale).toEqual(authz.userId ? localization?.locale : undefined);
           });
         }
       }
@@ -291,7 +299,11 @@ describe('#6216 — REST face: byte-for-byte parity with the pre-#6216 assembly'
             return;
           }
           expect(now).toBeDefined();
-          expect(observable(now)).toEqual(observable(before));
+          // [#32656] The one argued delta, subtracted and pinned positively
+          // (see the dispatcher face above): the workspace default locale.
+          const { workspaceLocale, ...restOfNow } = observable(now!);
+          expect(restOfNow).toEqual(observable(before));
+          expect(workspaceLocale).toEqual(localization?.locale);
         });
       }
     }
@@ -722,5 +734,39 @@ describe('[ADR-0151 D3] an AI service account is an agent principal of its own: 
     expect(person.principalKind).toBe('human');
     expect(person.systemPermissions).toEqual(HUMAN_FULL.systemPermissions);
     expect(person.onBehalfOf).toBeUndefined();
+  });
+});
+
+describe('[#32656] the user-text ladder: the workspace default rides the envelope UNFOLDED', () => {
+  const assembly = (localization: EntryLocalization | undefined, requestLocale: string | undefined, authz = HUMAN_MINIMAL) => ({
+    authz, oauth: undefined, localization, requestLocale, accessToken: undefined, authGate: undefined,
+  });
+
+  it('a request locale wins `locale`, while `workspaceLocale` still names the workspace default', () => {
+    for (const ctx of [
+      assembleExecutionContext(assembly({ locale: 'zh-CN' }, 'de')),
+      assembleExecutionContextOrGuest(assembly({ locale: 'zh-CN' }, 'de')),
+    ]) {
+      expect(ctx?.locale).toBe('de');
+      expect(ctx?.workspaceLocale).toBe('zh-CN');
+      expect(ExecutionContextSchema.parse(ctx).workspaceLocale).toBe('zh-CN');
+      expect(userTextLocalesOf(ctx)).toEqual(['de', 'zh-CN']);
+    }
+  });
+
+  it('no workspace default ⇒ no workspaceLocale key; a guest envelope never carries one', () => {
+    expect('workspaceLocale' in assembleExecutionContext(assembly(undefined, 'de'))!).toBe(false);
+    const guest = assembleExecutionContextOrGuest(assembly({ locale: 'zh-CN' }, 'de', ANONYMOUS));
+    expect(guest?.principalKind).toBe('guest');
+    expect('workspaceLocale' in guest!).toBe(false);
+  });
+
+  it('userTextLocalesOf reads the ladder in order and drops what is absent or empty', () => {
+    expect(userTextLocalesOf(undefined)).toEqual([]);
+    expect(userTextLocalesOf(null)).toEqual([]);
+    expect(userTextLocalesOf({})).toEqual([]);
+    expect(userTextLocalesOf({ locale: 'fr' })).toEqual(['fr']);
+    expect(userTextLocalesOf({ workspaceLocale: 'ja' })).toEqual(['ja']);
+    expect(userTextLocalesOf({ locale: '', workspaceLocale: 'ja' })).toEqual(['ja']);
   });
 });
