@@ -1143,8 +1143,8 @@ export class UpdateFacet {
            // [#4769] See the insert path — an update admits values on the same
            // terms, so it owes the same counterexample.
            const onAdmittedValueShapeViolation = this.admittedViolationSink(object);
-           // The update door judges and stores the payload LEFT once the fields
-           // the caller may not write are removed — the insert door's order:
+           // The multi-value wrap and the first value judgement run on the
+           // payload LEFT after the read-only strips — the insert door's order:
            // strip, then the multi-value wrap, then the first value judgement.
            // Both branches call this right after their two read-only strips, so
            // the strips meet the caller's payload as the caller sent it (the

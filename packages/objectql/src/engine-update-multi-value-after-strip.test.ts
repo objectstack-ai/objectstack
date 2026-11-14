@@ -1,10 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// The update door's rule, in its insert door's order: the value an update
-// JUDGES and STORES is the payload left after the fields the caller may not
-// write are removed. The caller's payload meets the read-only strips in the
-// form the caller sent it, and only what survives them is put into its stored
-// shape (a multi-valued field's array) and judged.
+// The update door's multi-value wrap and first value check, in the insert
+// door's order: both run on the payload left after the read-only strips. The
+// strips meet the caller's payload in the form the caller sent it, and only
+// what survives them is put into its stored shape (a multi-valued field's
+// array) and judged.
 //
 // Pinned on a multi-valued field locked by a TRUE `readonlyWhen`, for the
 // spellings a caller may send it in, on the by-id path and the bulk path. The
@@ -17,6 +17,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { ValidationError } from './validation/record-validator.js';
+import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 
 function makeDriver() {
   const rows = new Map<string, Record<string, unknown>>();
@@ -81,7 +82,7 @@ const OPTIONS = [
   { label: 'C', value: 'c' },
 ];
 
-describe('the update door judges and stores the payload left after the fields the caller may not write are removed', () => {
+describe('the update door wraps and checks values on the payload left after the read-only strips', () => {
   let engine: ObjectQL;
   let rows: ReturnType<typeof makeDriver>['rows'];
 
@@ -165,6 +166,17 @@ describe('the update door judges and stores the payload left after the fields th
     expect(events).toEqual([{ fields: ['tags'], reason: 'readonly_when' }]);
   });
 
+  it('by id, strictReadonlyWrites: a value the lock removes is refused as a read-only write, and nothing is written', async () => {
+    const err = await engine.update('claim', { id: 'c1', tags: { a: 1 }, note: 'changed' }, { context: ctx, strictReadonlyWrites: true } as any).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(ReadonlyFieldRejectedError);
+    expect((err as ReadonlyFieldRejectedError).code).toBe('ERR_READONLY_FIELD_REJECTED');
+    expect((err as ReadonlyFieldRejectedError).fields).toEqual(['tags']);
+    expect(rows.get('c1')).toMatchObject({ tags: ['a'], note: 'n' });
+  });
+
   it('by id, CONTROL: a lock reading a multi-valued field reads it in its stored list form', async () => {
     const { events, options } = drops();
     await engine.update('claim_view', { id: 'v1', tags: 'b', note: 'changed' }, { context: ctx, ...options } as any);
@@ -184,6 +196,28 @@ describe('the update door judges and stores the payload left after the fields th
     } as any);
     for (const id of ['c1', 'c2']) expect(rows.get(id)).toMatchObject({ tags: ['a'], picks: ['a'], note: 'changed' });
     expect(events.filter((e) => e.reason === 'readonly_when').flatMap((e) => e.fields).sort()).toEqual(['picks', 'tags']);
+  });
+
+  it('bulk: a value the lock removes is not judged — the update stores what is left on every row', async () => {
+    const { events, options } = drops();
+    await engine.update('claim', { tags: { a: 1 }, note: 'changed' }, {
+      where: { id: { $in: ['c1', 'c2'] } }, multi: true, context: ctx, ...options,
+    } as any);
+    for (const id of ['c1', 'c2']) expect(rows.get(id)).toMatchObject({ tags: ['a'], note: 'changed' });
+    expect(events).toEqual([{ fields: ['tags'], reason: 'readonly_when' }]);
+  });
+
+  it('bulk, strictReadonlyWrites: a value the lock removes is refused as a read-only write, and no row is written', async () => {
+    const err = await engine.update('claim', { tags: { a: 1 }, note: 'changed' }, {
+      where: { id: { $in: ['c1', 'c2'] } }, multi: true, context: ctx, strictReadonlyWrites: true,
+    } as any).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(ReadonlyFieldRejectedError);
+    expect((err as ReadonlyFieldRejectedError).code).toBe('ERR_READONLY_FIELD_REJECTED');
+    expect((err as ReadonlyFieldRejectedError).fields).toEqual(['tags']);
+    for (const id of ['c1', 'c2']) expect(rows.get(id)).toMatchObject({ tags: ['a'], note: 'n' });
   });
 
   it('bulk, CONTROL: an unlocked multi-valued field still stores a single value in its list form', async () => {
