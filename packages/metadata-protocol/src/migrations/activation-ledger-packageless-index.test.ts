@@ -309,3 +309,104 @@ describe('the MariaDB arm (INVISIBLE generated carrier + UNIQUE key)', () => {
         expect(ddl(seen)).toEqual([buildActivationLedgerPackagelessIndexSql('mysql2')]);
     });
 });
+
+/**
+ * The upgrade's conflict boot, over a seam shaped like `SqlDriver.execute`:
+ * a SELECT answers its rows, and a statement the backend refuses throws. The
+ * driver writes ONE raw `DATABASE_ERROR` line per refused statement
+ * (`rawStatementFault` in driver-sql), so `refused` counts exactly the raw
+ * lines a real boot prints ahead of this migration's own report.
+ */
+describe('the conflict an upgraded ledger carries: one answer, worded for the rows it is about', () => {
+    let db: DatabaseSync;
+    let refused: string[];
+    let exec: IndexExec;
+
+    const insert = (id: string, name: string, packageId: string | null) =>
+        db
+            .prepare(`INSERT INTO ${ACTIVATION_LEDGER_TABLE} (id, metadata_type, name, package_id, active) VALUES (?, 'flow', ?, ?, 0)`)
+            .run(id, name, packageId);
+
+    beforeEach(() => {
+        db = new DatabaseSync(':memory:');
+        db.exec(`CREATE TABLE ${ACTIVATION_LEDGER_TABLE} (
+            id TEXT PRIMARY KEY, metadata_type TEXT, name TEXT, package_id TEXT, active INTEGER
+        );`);
+        refused = [];
+        exec = async (sql: string) => {
+            try {
+                return /^\s*select/i.test(sql) ? db.prepare(sql).all() : db.exec(sql);
+            } catch (e) {
+                refused.push(sql);
+                throw e;
+            }
+        };
+        // Two rows naming no package for a flow a package ships, written
+        // before the ledger named the package (the upgrade's conflict copy).
+        insert('r1', 'app_sync_flow', null);
+        insert('r2', 'app_sync_flow', null);
+    });
+
+    afterEach(() => db.close());
+
+    it('reads the collision before the build, so no statement is refused and the report is the only line', async () => {
+        const log = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
+
+        const result = await ensureActivationLedgerPackagelessIndex(exec, log, { client: 'better-sqlite3' });
+
+        expect(result.status).toBe('conflict');
+        expect(refused).toEqual([]);
+        expect(log.error).toHaveBeenCalledTimes(1);
+        expect(log.warn).not.toHaveBeenCalled();
+        const message = String(log.error.mock.calls[0]?.[0]);
+        expect(message).toContain('(1 duplicated key, held by 2 rows)');
+        expect(message).toContain(buildActivationLedgerPackagelessDuplicateProbeSql());
+        // Nothing deleted, nothing built.
+        expect((db.prepare(`SELECT COUNT(*) AS n FROM ${ACTIVATION_LEDGER_TABLE}`).get() as { n: number }).n).toBe(2);
+    });
+
+    it('calls the rows what they are, rows naming no package, never an item the environment authored', async () => {
+        const log = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
+
+        await ensureActivationLedgerPackagelessIndex(exec, log, { client: 'better-sqlite3' });
+
+        const message = String(log.error.mock.calls[0]?.[0]);
+        expect(message).toContain('two activation rows that name no package can coexist for one item');
+        expect(message).toContain("a package's item whose rows were written before the ledger named the package");
+        expect(message).not.toContain('one item the environment authored (no package)');
+    });
+
+    it('a count it cannot read builds as before, and the refusal the build meets is still reported, with its text', async () => {
+        const log = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
+        const unreadableCount: IndexExec = async (sql: string) => {
+            if (/COUNT\(\*\) AS duplicate_keys/.test(sql)) throw new Error('database is locked');
+            return exec(sql);
+        };
+
+        const result = await ensureActivationLedgerPackagelessIndex(unreadableCount, log, { client: 'better-sqlite3' });
+
+        expect(result.status).toBe('conflict');
+        expect(refused.some((sql) => /^CREATE UNIQUE INDEX/.test(sql))).toBe(true);
+        expect(result.detail).toMatch(/UNIQUE constraint failed/);
+        expect(log.error).toHaveBeenCalledTimes(1);
+        expect((log.error.mock.calls[0]?.[1] as Error).message).toMatch(/UNIQUE constraint failed/);
+    });
+
+    it('an unexpected build failure is not folded: the driver\'s text reaches the report', async () => {
+        db.exec(`DELETE FROM ${ACTIVATION_LEDGER_TABLE} WHERE id = 'r2'`);
+        const log = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
+        const failingBuild: IndexExec = async (sql: string) => {
+            if (/^CREATE UNIQUE INDEX/.test(sql)) {
+                refused.push(sql);
+                throw new Error('disk I/O error');
+            }
+            return exec(sql);
+        };
+
+        const result = await ensureActivationLedgerPackagelessIndex(failingBuild, log, { client: 'better-sqlite3' });
+
+        expect(result).toEqual({ status: 'failed', detail: 'disk I/O error' });
+        expect(refused).toHaveLength(1);
+        expect((log.error.mock.calls[0]?.[1] as Error).message).toBe('disk I/O error');
+    });
+});
