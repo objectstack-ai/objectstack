@@ -1,5 +1,70 @@
 # @objectstack/rest
 
+## 18.5.0
+
+### Patch Changes
+
+- d635599: fix(metadata-protocol)!: a name two enabled packages hold only as stored rows is refused by the plain read, never served by save order (ADR-0150 D3, #32607)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no skill and no doc teaches what the read naming no package answers for a name only stored rows of several packages hold (`skills/**` and `content/docs/**` grepped: the `ambiguous-in-environment` mentions are about flow, queue and permission-set references, not `/meta` reads); the refusal's own sentence names the `?package=` remedy.
+  
+  <!-- adr-0087: registered two-row-holders-bare-read-refused -->
+  
+  **BREAKING** answer narrowing at the `/meta` bare item reads: a name that two or more enabled packages hold only as stored rows, and that no package ships in code, answers 409 `RESOURCE_CONFLICT` naming each of them, where the plain read and `/published` served one of the rows. `/layers` already refused it.
+  
+  The row-aware served-holder judgment that a disabled holder brings in (#32354) now also judges, on the item read, a name with no disabled holder. The holders are judged at one grain, the packages the item's active stored rows are bound to at the member the read addresses, as the read itself binds them, and never united with the registry's holders of the name (with no shipper the registry knows a row-only name through one bare slot, the row written or hydrated last). Two or more of them are refused as the by-name read refuses two package holders (`ambiguous-in-environment`). One holder reads as before. It applies to a type the registry reads by package, when no enabled package ships the name in code at any member, and when no package-less row or environment item of the name is stored.
+  
+  **Every moved answer, before → after.** Both transports (`RestServer` and the runtime `HttpDispatcher`), both registration orders, both save orders, and on the runtime dispatcher before and after a reboot. First-party count 0: no first-party app saves one name into two packages' stored rows.
+  
+  Narrowing:
+  
+  - Bare `GET /meta/:type/:name`: 200 with the row saved first → 409 `RESOURCE_CONFLICT` naming each holder, with `details.candidates`.
+  - Bare `GET /meta/:type/:name/published`: 200 with a row (on `RestServer` the row saved first; on the runtime dispatcher the same package in every save order) → 409 `RESOURCE_CONFLICT` naming each holder.
+  - The execution face (`getMetaItemForExecution`) of the same name: the row saved first → the same refusal.
+  
+  **Not moved.** Bare `GET /meta/:type/:name/layers` keeps its 409 `RESOURCE_CONFLICT`, the package-less writes' own refusal naming the same holders with its `?package=` prescription (#28337), on both transports: each transport's layered chain (`RestServer`'s and the runtime `HttpDispatcher`'s) reads the plain read first to find a disabled owner, and now leaves that read's refusal of row holders, and only that refusal (the protocol marks it), to the package-less refusal step, rethrowing every other refusal as before (two code holders, with or without a stored row each, and two row holders beside a disabled one, keep the plain read's refusal). `?package=` naming either holder serves that holder's row. A name one package holds as a stored row is served as before. A row the reads decline (a shipped flow name's undeclared row, a sealed managed name's row) and a row of a customization pair of another package the rows or the registry name make no holder here, as they make none beside a disabled holder (#32354), so they never turn one holder into a refusal: a package's row beside its pair's undeclared row is one holder in either save order, and no door names the pair. A dependent's added member over a base that holds the name only as a stored row (`email_template`: the base's `en-US` row, the dependent's `fr-FR` row) is the dependent's alone at that member (#28802): the plain read, `/layers` and the execution face at `fr-FR` keep serving the dependent's row. A name an enabled package ships in code at any member (for a bundled type such as `email_template`, a base shipping `en-US` beside another package's `fr-FR` row: the package-less `fr-FR` read keeps its answer), or one with a package-less row or an environment item, is judged as before. The paired customization addresses (`?package=HOLDER.custom`), which after a reboot follow the registry's one bare slot, are unchanged here (#32662 carries them).
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [4e4b587]
+- Updated dependencies [6a36b79]
+- Updated dependencies [dd966fc]
+- Updated dependencies [16e3486]
+- Updated dependencies [46a2ecf]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [9562643]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [633d8c4]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/core@18.5.0
+  - @objectstack/metadata@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/service-package@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/metadata-core@18.5.0
+  - @objectstack/observability@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

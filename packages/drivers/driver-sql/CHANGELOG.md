@@ -1,5 +1,69 @@
 # @objectstack/driver-sql
 
+## 18.5.0
+
+### Patch Changes
+
+- 01d206d: docs(driver-sql): how an operator finds and corrects the Postgres `date` values that releases before 18.4.0 stored one day early after a `datetime` → `date` publish; the platform does not repair them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Not repaired automatically.** Affected: Postgres, a database server whose time zone is ahead of UTC (for example `Asia/Shanghai`), a field published from `datetime` to `date`, and a day written into it after that publish by a release before 18.4.0. Such a day was stored as midnight in the server's zone (`2026-11-12` as `2026-11-11T16:00:00Z` at `+08:00`), so it reads, filters and buckets as the previous day. 18.4.0 writes new days correctly and reads every door the same way, but it cannot tell those rows from a value written while the field was a `datetime` at the same instant, so it changes no stored value.
+  
+  To find candidates, run against the object's table, with ZONE the server's zone (`SHOW TimeZone`) and FIELD the field:
+  
+  ```sql
+  SELECT id, FIELD FROM TABLE
+  WHERE (FIELD AT TIME ZONE 'ZONE')::time = '00:00'
+    AND (FIELD AT TIME ZONE 'UTC')::time != '00:00';
+  ```
+  
+  Check each row against what was entered (a value that really was entered as a date-time at local midnight is also listed), then correct the ones that are early days:
+  
+  ```sql
+  UPDATE TABLE
+  SET FIELD = ((FIELD AT TIME ZONE 'ZONE')::date)::timestamp AT TIME ZONE 'UTC'
+  WHERE id IN (...);
+  ```
+  
+  After the update the row reads, filters and buckets as the day that was entered.
+- 01d206d: fix(driver-sql): on SQLite and MySQL, a `date` field whose column a `datetime` → `date` publish left as a date-time column now filters as its calendar day, so a row written while the field was a `datetime` is matched by a filter on the day it reads as
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  After a field is published from `datetime` to `date`, the column keeps its date-time type (SQLite `datetime`, MySQL `DATETIME`), and rows written before the publish still hold a time of day. They already read back as their day (`2026-11-12`), but an equality filter on that day (`where: { due: '2026-11-12' }`) compared the bare day against the whole stored instant and missed them, while `$gt` on that day matched them. The schema sync now records such a column on SQLite and MySQL as it already did for a Postgres `timestamptz` column, and every filter door (the query builder and the analytics native-SQL door) reads it as its calendar day: SQLite by the first ten characters of its canonical UTC text, MySQL by `date()` under its UTC session. Writes, reads and the day bucket are unchanged. As with Postgres, an index on such a column no longer serves a filter on the field; only columns a `datetime` → `date` publish left behind are affected.
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [633d8c4]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/core@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/observability@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

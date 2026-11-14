@@ -1,5 +1,51 @@
 # @object-ui/fields
 
+## 18.5.0
+
+### Patch Changes
+
+- 82838e8: fix(fields): a read-only record-mode amount that declares `homeAmount` shows the live home-amount preview in an editable form
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `record`-mode amount that declares `homeAmount` (ADR-0144 D5) draws the "≈ AMOUNT at RATE on DATE" line under it while the record is edited. The line was mounted on the widget's editable face only, so an amount the form draws read-only lost it. The showcase invoice's `amount` is computed by an `expression`, and the form draws such a field read-only, so its edit form had no preview at all, whatever the currency or document date.
+  
+  `CurrencyField`'s read-only face now mounts the same preview when the field is not `disabled`, so it follows a changed currency or document date before save. A read-only form (`mode: 'view'` or `readOnly`) disables every field and shows no preview: it has no save, and its home field already says the rate and date the engine used. The record page draws the amount with the cell renderer, which is unchanged, so it still shows the stored conversion once, under the home field. No new prop, no new translation key: the preview and its `fields.currencyHome.*` strings are the ones the editable face already uses.
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [f5121e8]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @object-ui/i18n@18.5.0
+  - @objectstack/formula@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/mobile@18.5.0
+  - @object-ui/permissions@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

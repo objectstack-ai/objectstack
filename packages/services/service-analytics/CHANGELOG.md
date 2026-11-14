@@ -1,5 +1,73 @@
 # Changelog — @objectstack/service-analytics
 
+## 18.5.0
+
+### Patch Changes
+
+- 702c562: fix(service-analytics): a truncated `query_dataset` answer carries drill sidecars for the served rows only
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `query_dataset` asks the dataset query for one row past its cap so `truncated` is a fact, and serves `cap` rows. The two answer members aligned to `rows` by index, `drillRawRows` and `drillRanges`, were served untrimmed, so each held one more entry than `rows` (a `limit: 1` answer carried two `drillRawRows` entries). They are now served to the same length as `rows`, entry i beside row i, on the MCP tool and on the chat tool alike. Members that are not row-indexed (`totals`, `drillRawTotals`, `dimensionFields`, `drillScopes`, `fields`, `object`) are served as before, and an answer within the cap is unchanged.
+- bf02d33: fix(service-analytics)!: `query_dataset` refuses a selection that names no measure, as the REST dataset door does
+  
+  Clause-②: no (narrowing) — a `query_dataset` call whose `selection.measures` is empty, which answered 500 `DATABASE_ERROR` (or, with dimensions, group rows carrying no measure), is refused 400 `VALIDATION_FAILED` before anything is read, on the MCP tool and on the product AI's chat tool alike.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored shape changes. The refusal is the code, status and sentence the REST door POST /analytics/dataset/query already answers the same selection with, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller that sent `query_dataset` a selection with `measures: []`.
+  
+  FROM: the call reached the dataset query with nothing to project. The SQL driver answered `500 DATABASE_ERROR` with its own statement error, and with `dimensions` the tool served group rows carrying no measure.
+  TO: the call is refused `400 VALIDATION_FAILED`, `body.selection.measures must be a non-empty array of measure names.`, before the dataset is resolved or any row is read: the answer `POST /api/v1/analytics/dataset/query` gives the same selection. The fix for a caller: name at least one measure from the dataset, as `list_datasets` lists them.
+  
+  The check sits in the dataset-tools executor that both faces call, the MCP `query_dataset` tool and the chat tool, so one guard covers both. A selection naming a measure is served exactly as before.
+- 69c77ad: fix(service-analytics): a lookup dataset dimension serves the referenced record's name for a relationship path and for a target titled by its `nameField`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Relationship-path lookups.** A dimension whose `field` is a relationship path ending in a lookup, such as `account.owner_id`, now serves the referenced record's display name instead of its id. The label is read from the column's own field on the object the path reaches, the same object the query joins. A `select` column at the end of a path now serves its option label too, translated under that object and field. Sorting by such a dimension (`order`) sorts by the name the rows show.
+  
+  **Targets titled by `nameField`.** A lookup dimension's label is read from the target object's declared `nameField` first, then from a `name`, `title` or `label` field, then from the first text field. Before, an object titled by an `autonumber` order number with no `name`, `title` or `label` field was read through its first text field (usually the platform's ownership `queue`, empty on every row), so the id was served. A `nameField` that is a formula is still skipped, as before.
+  
+  **Unchanged.** Rows are still grouped by the stored id, so two records that share a name stay two rows. A target the API does not expose, or that the reader's row scope hides, still serves the stored id. A lookup to an object whose title is its `name` field labels as it did. The same labels reach every face of a saved dataset: `POST /api/v1/analytics/dataset/query`, the `query_dataset` AI tool and its MCP tool.
+- 24f2f40: fix(service-analytics): a dataset over a field named after a SQL keyword answers rows instead of 500
+  
+  Clause-②: yes (widening) — `POST /api/v1/analytics/dataset/query`, the `query_dataset` tool and `/api/v1/analytics/query` answer rows for a dimension, measure or filter on a base-table field whose name is a SQL keyword (`order`, `group`, `select`, …), where they answered `500 DATABASE_ERROR`. Every other statement answers the same rows; its text now writes base-table columns quoted (`"stage" = $1`), as it already did when the statement joined another table.
+  Metadata-protocol: none
+  
+  The native SQL compiler wrote a base-table column bare whenever the statement joined nothing, so a lookup dimension on a relationship field named `order` reached the database as the keyword (`near "order": syntax error`). On PostgreSQL a bare `user` is `CURRENT_USER`, so a field named `user` would have grouped every row under the database role. A plain identifier in a cube member's `sql` is now always read as a column of the base table, in every statement.
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [633d8c4]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/core@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/types@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

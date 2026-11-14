@@ -1,5 +1,48 @@
 # @object-ui/plugin-dashboard
 
+## 18.5.0
+
+### Patch Changes
+
+- 68972cd: fix(plugin-dashboard): drill-down and auto-derived table columns head each column with the field's own label and leave out hidden fields
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dashboard drill-down drawer that names no columns derives them from the object. Its headers used to fall back to the humanized field key, so a field whose label was written only on the field (no translation bundle entry) showed an English, key-made header, and fields the object declares `hidden: true` were listed as columns. Headers now resolve as list views resolve them: a translation bundle entry first, then the field's declared `label` (an inline locale map is picked in the UI language), then the humanized key. Auto-derived columns skip `hidden: true` fields. An explicit `columns` list is never filtered, and a header written on a column still wins; a column listed only by its key, as a string or as a drill column, falls back to the field's label the same way an auto-derived one does.
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [f5121e8]
+- Updated dependencies [82838e8]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @object-ui/i18n@18.5.0
+  - @object-ui/fields@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/permissions@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

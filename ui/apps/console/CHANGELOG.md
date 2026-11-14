@@ -1,5 +1,78 @@
 # @object-ui/console
 
+## 18.5.0
+
+### Patch Changes
+
+- 66919b6: fix(runtime): MCP `list_actions` marks an organization action the caller's membership role does not reach `unavailable`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A plain organization member's agent was listed identity actions such as inviting a user, removing a member, editing the organization or managing its teams, and `run_action` then answered `403 PERMISSION_DENIED` from the organization endpoint each time. The actions stay listed, and for a caller whose membership role in the organization does not reach the endpoint the row now carries `unavailable: { code: 'PERMISSION_DENIED', reason }`, where the reason names the roles that do reach it (for example "needs an organization owner, admin or delegated admin"). The reach is read from the action's `target` against the `MEMBERSHIP_REACH` table in `@objectstack/spec/identity`. Owners, admins and (for invitations) delegated admins see the rows unmarked. Nothing is hidden and neither run door reads the mark, so who can run each action is unchanged. Actions judged on record ownership or on the deployment's tenancy posture (deleting an SSO provider or an OAuth application, creating an organization) are not marked. The `list_actions` tool description, the `McpActionSummary.unavailable` documentation and the served skill (with its Console mirror) now say a listed action can carry `unavailable` for the caller's role, not only for its credential.
+- 6a36b79: feat(platform-objects,mcp): a member's agent finds a colleague by name or email over MCP, to fill a person field
+  
+  Clause-②: yes (widening) — the MCP read tools (`list_objects`, `describe_object`, `query_records`, `get_record`, `aggregate_records`) now admit one more system object, `sys_user`, which they refused before with `Object "sys_user" is a system object and is not exposed via MCP`. No write tool opens it.
+  Metadata-protocol: none
+  
+  - **`sys_user` declares `enable.aiReadable: true`.** An agent reads users with the existing record tools, under every gate a console read runs, and is served exactly what the caller's console person picker is served: their own row and the members of their active organization (the `sys_user_self` and `sys_user_org_members` row scopes of `member_default`), never another organization's users; and every field except the `Admin` group (sign-in trail, lockout, ban reason and expiry, sign-in phone, legacy role, AI seat), which the non-admin permission sets withhold on results and refuse on filters. For a plain member that is: `id`, `name`, `email`, `email_verified`, `two_factor_enabled`, `banned`, `image`, `locale`, `manager_id`, `primary_business_unit_id`, `principal_kind`, `accountable_user_id`, `source`, `created_at`, `updated_at`. An administrator's agent reads what the administrator reads.
+  - **Read only.** `create_record`, `update_record`, `delete_record` and `delete_records` keep refusing every `sys_*` object, so the self-service profile edit stays a console and data-API affordance; account changes an agent may make go through actions that declare their own `ai.exposed`.
+  - **What an agent is told.** `query_records`' description and the served `SKILL.md` (and its Console "Download skill" copy) say how to find a colleague's id for a person field: `where: { "email": "..." }` for exactly one person, or `{ "name": { "$contains": "..." } }`; names repeat, so people who share a name are told apart by email. The `list_objects` line no longer says every system object is hidden.
+- b22be27: fix(mcp): `validate_expression` gives the publish gate's own verdict at a `validation` or `formula` site, every pass the gate runs there included
+  
+  Clause-②: no (narrowing) — the MCP `validate_expression` tool now answers `ok: false` (or a warning) for a validation rule or formula field the publish gate already refuses (or warns on). The gate's acceptance set does not change, and no existing exported type or signature changes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is in an advisory tool's verdict, never in what an author may write: every expression it now refuses, the publish gate already refused, so no stored metadata and no consumer code has anything to rewrite -->
+  
+  **BREAKING** verdict narrowing of the MCP `validate_expression` tool (`@objectstack/mcp`), at `site: 'validation'` and `site: 'formula'`.
+  
+  The tool promises the verdict the publish gate gives the rule, but it ran the shared expression validator and nothing else, so it answered `ok: true` for rules the gate then refused at publish, and the refusal first met a person there. It now also runs the gate's own passes at those two sites, through `judgeAuthoredSiteExpression` (`@objectstack/lint`), which runs the gate's walk itself over the object definitions the caller is served:
+  
+  - at both sites: a read through a reference to a field the target object does not declare (`record.balance.nope`), and a read through a reference into a stored-metadata table;
+  - at a `validation` site: a nullable field used without a null guard (`record.days > 3` with `days` neither required nor defaulted), and a read of `parent`, which a `validations[]` rule never binds;
+  - a warning at both sites: a read of an injected system column an external object has no storage behind (`record.owner_id` on an ADR-0015 `external` object).
+  
+  Each finding is the gate's sentence, at the gate's severity. A rule the gate accepts answers exactly as before. A hop target follows the same system-object fence as `describe_object`. A `flow_condition` and a `template` are not judged by this change: the tool's verdict there is unchanged. A sentence that names the rule names it `this rule`, since the tool is handed the condition and not the rule it will sit on.
+  
+  - `@objectstack/mcp`: `McpDataBridge` gains the optional `servedObjectDefinitionOf(name)`, the object definition as the caller is served it (the read `describeObject` projects), handed to the gate and rendered to nobody. A bridge without it answers the shared validator's verdict alone, as before. The served `SKILL.md` line and the tool description name what the tool now refuses. `@objectstack/lint` moves from a development dependency to a dependency, loaded on the first call that judges a rule or formula field, never at module load.
+  - `@objectstack/lint`: exports `judgeAuthoredSiteExpression` and `authoredExpressionHopTargets`. The gate's verdicts are unchanged: its walk gains one internal option, off its package entries, that only this entry passes.
+  - `@objectstack/runtime`: the HTTP MCP bridge serves `servedObjectDefinitionOf`, the same caller's object `describeObject` reads (ADR-0106 D1).
+  - `@object-ui/console`: the downloadable `SKILL.md` mirror carries the same line.
+- 8835532: fix(mcp): `validate_expression` gives the runtime publish gate's verdict at a `flow_condition`, and judges a formula-site expression as the field it is authored on
+  
+  Clause-②: yes (narrowing) — the MCP `validate_expression` tool now answers `ok: false` (or a warning) at a `flow_condition`, and for a named stored or formula field at a `formula` site, where the publish gate already refuses (or warns); and it accepts two new optional inputs, `startCondition` and `field`. The gate's acceptance set does not change.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is in an advisory tool's verdict, never in what an author may write: every expression it now refuses, the publish gate already refused, so no stored metadata and no consumer code has anything to rewrite; the two inputs are optional and an existing call answers as before wherever the gate accepts -->
+  
+  **BREAKING** verdict narrowing of the MCP `validate_expression` tool (`@objectstack/mcp`), at `site: 'flow_condition'` and, given the new `field`, at `site: 'formula'`.
+  
+  At a flow condition the tool ran the shared expression validator and nothing else, so it answered `ok: true` for conditions the publish gate then refused when the flow was saved. It now also runs the gate's own passes there, through `judgeAuthoredSiteExpression` (`@objectstack/lint`), as the runtime publish gate judges a flow write, the door a flow saved through MCP or Studio meets:
+  
+  - an error on a record-triggered flow: a nullable field read as `record.FIELD` or `previous.FIELD` without a null guard (`record.days > 3` with `days` neither required nor defaulted), the run failing at the condition;
+  - a warning on any flow bound to an object: a read of an injected system column an external object has no storage behind (`record.owner_id` on an ADR-0015 `external` object).
+  
+  At a flow condition the verdict is that door's, not `os validate`'s: `os validate` also judges a bare name's null guard (`days > 3`) and a root the run does not bind, over the whole flow's variables, node ids and entrances, which the tool is not handed. The door itself also warns when a field is read bare under a name a flow variable shares; the tool is never handed the flow's variables, so it cannot give that warning. Write `record.FIELD` to be judged here.
+  
+  Two new optional inputs:
+  
+  - `startCondition` (`site: 'flow_condition'` only): the flow's start condition, for an edge or `decision` branch condition after it. What it proves non-null holds downstream, as at the gate, so `record.days > 3` after a start condition `record.days != null` is accepted. Omitted, the condition is judged as the start condition itself.
+  - `field` (`site: 'formula'` only, a snake_case field name): the field the expression is authored on. A field the caller is served keeps its definition with the expression in place: a stored field (any type but `formula`) gets the gate's stored-expression warnings (a read of another record, the clock, the acting user or a permission), and a formula field is refused when it would close a formula cycle. Any other name, a field masked from the caller included, is judged as a new formula field, so the answer never says whether a hidden field exists. A stored field that is not declared yet gets its stored-expression warnings once it is declared.
+  
+  Each finding is the gate's sentence, at the gate's severity. An expression the gate accepts answers exactly as before. A sentence that names the condition names it `flow 'this flow' · edge 'this condition' (start→end) condition`, since the tool is handed the condition and not the flow it will sit in.
+  
+  - `@objectstack/mcp`: the two inputs, the flow-condition judgment (it reads the subject's served definition alone there; nothing hydrates a hop at a flow condition), the tool description and the served `SKILL.md` line.
+  - `@objectstack/lint`: `judgeAuthoredSiteExpression` takes `site: 'flow_condition'` with `triggerKind`, `sweepObject` and `startCondition`, and `field` at `site: 'formula'`; exports `AUTHORED_FLOW_NAME`, `AUTHORED_CONDITION_ID` and the `AuthoredFlowTrigger` type. The gate's verdicts are unchanged.
+  - `@object-ui/console`: the downloadable `SKILL.md` mirror carries the same line.
+- 9ec528c: fix(app-shell): a list-only object's rows no longer open a record page that always fails
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Objects whose data API serves no single-record read.** An object can declare `enable.apiMethods` without `get`, such as `['list']` for the SCIM connection credentials in Setup. The Console still opened a record drawer or page when one of its rows was clicked. That page reads the record with `get`, so it always showed "This record could not be loaded" (`OBJECT_API_METHOD_NOT_ALLOWED`), with a Retry that could never succeed. The Console now reads the object's served operations from `/me/permissions` (`apiOperations`, the set the server already hands down) and opens no record surface for an object whose set leaves `get` out. A row click and a Cmd/Ctrl-click open nothing, the name cell carries no record URL and draws no "Open as full page" arrow, and a `?recordId=` link opens no drawer. This holds on the object list, the object data page and interface list pages. A related-list row of such an object opens nothing, and a lookup value or a record link that points at one renders as plain text. The row menu is unchanged, so its `list_item` actions, such as Revoke on a SCIM credential, stay where they were. An object that serves `get`, or whose served set the Console does not have, opens its records as before.
+- @objectstack/sdui-parser@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

@@ -1,5 +1,120 @@
 # @object-ui/app-shell — Changelog
 
+## 18.4.1
+
+### Patch Changes
+
+- 588596a: fix(app-shell): an open Studio shows drafts and publishes made outside its tab without a reload
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A draft an agent stages over MCP, a REST publish, or a change made in another tab used to stay invisible in an open Studio (no number on the Changes button, no draft line on the item header, no draft marks) until the browser was reloaded, so a change that worked looked like one that failed. The pending-drafts ledger is now read again when the tab becomes visible or the window gains focus, and every 30 seconds while the tab stays visible. When the answer differs from what the tab last read, the tab sends its own metadata-refresh signal, so the Changes count, the item header line, the pillars' draft marks and the console's metadata all catch up together; an unchanged answer costs that one read. A hidden tab sends no request at all, so a background Studio does not keep a scale-to-zero backend awake. The home banner, the chat bar and the draft preview bar read the same ledger and catch up the same way.
+- 9e23534: fix(app-shell): a flow copy made by New similar shows its runtime status as soon as it opens
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **New similar in Studio Automations.** A copy that opens in the same Automations pillar, the open writable package or a read-only base's paired `.custom` package, now reads its runtime state at once. The server stores the copy live and switched off, so its header Status reads "Switched off" with no reload. Before, the pillar kept the runtime status snapshot it had read before the copy existed, found no row for the copy, and read it as "Unpublished draft" until the page was reloaded. The pillar now reads the automation status once more after each copy lands. A flow the engine really holds no row for still reads "Unpublished draft". A copy that lands in another package opens that package's pillar, which reads the status itself, as before.
+- 1169d64: fix(console): Set as Default over a view a package ships leaves one default view
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Set as Default.** When the previous default list view was one a read-only package ships (the showcase's All Tasks, an installed app's view), Set as Default on another view left the object with two default views. Clearing the shipped view's default was refused by the server, since a write naming no package is closed on an item a read-only package ships, but the new default was written beside it in the same click. The clear now lands, and Manage views writes one view at a time, clearing the previous defaults first and setting the new one last: a refused clear stops the click, says the server's reason, and leaves the new view not made the default.
+  
+  **Editing a shipped view's row state.** `updateView` on `@object-ui/data-objectstack` now writes a view a read-only package ships into that package's customization pair (`BASE.custom`, `?package=`), declaring `overrides: { package, basedOn }`, as the server's refusal prescribes. The pair is the one `POST /packages/BASE/ensure-customization` answers, which creates it on first use, and `basedOn` is the version the view's customization already declares, else the package's own version. This covers every row-state write the console sends through `updateView`: the default flag, a pin and a rename. A view no package ships, and a view a writable package ships, are written exactly as before. When the pair cannot be had (the ensure door refuses the caller, or the package records no version), nothing is written and the refusal reaches the caller.
+- f054a0b: fix(app-shell): a record drawer level's Edit opens the form of the level's object
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Edit in a drawer level.** A record opened one level down in a record drawer, from a related list or a lookup, is a record of its own object, which is not always the route's. Its header Edit now opens that object's form for that record, as the console's child task over the route (`?form=ID&formObject=OBJECT`, the same URL the related list's row Edit writes), on the object list's drawer and on the drawer over a record page. Before, the form was the route object's, with the child's id: "Edit Sales Order" and "Record not found". The route object's own Edit, and a level of the route's object, are unchanged: a top-level task with no `formObject`. A level whose object declares `editMode: 'page'` opens that object's edit page.
+  
+  **Related tabs in a drawer over a record page.** A record opened in the drawer over a record page now shows its own related lists, the objects that point at it included, as it does in the object list's drawer and on its own page. A record page reads only the objects around its own record, so a level showed Overview and Activity and none of the child's own related lists. While the page's drawer is open, the console reads the whole object list beside the page's objects, once, as it already did for the object list's drawer (`?recordId=`); a record page with no drawer open reads no more than before.
+- a526790: fix(app-shell): a marketplace-installed app's pending default permission set can be accepted from Studio and from its marketplace page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A package permission set shipped with `isDefault: true` suggests granting the set to everyone, and an administrator holding `manage_metadata` accepts or dismisses that suggestion once for the deployment. Two surfaces draw that decision, and neither reached an app installed from the marketplace:
+  
+  - Studio's Access pillar drew the suggestion strip only on a writable package. A marketplace-installed package is read-only in Studio, and it is exactly the package that ships an `isDefault` set. The strip is now drawn whatever the package's read-only state, because accepting or dismissing a suggestion is a deployment decision about the package, not an edit of it. Everything on the pillar that edits the package stays read-only.
+  - The marketplace package page drew the panel only in an install's own result in this session. It now draws it on every visit for a package installed here (a local install this runtime loaded, or a cloud install into the environment this console renders), whenever the package has a pending, dismissed or accepted suggestion.
+  
+  A caller without `manage_metadata` still sees nothing: the server refuses the list, and the panel stays silent on that answer.
+- 9ec528c: fix(app-shell): a list-only object's rows no longer open a record page that always fails
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Objects whose data API serves no single-record read.** An object can declare `enable.apiMethods` without `get`, such as `['list']` for the SCIM connection credentials in Setup. The Console still opened a record drawer or page when one of its rows was clicked. That page reads the record with `get`, so it always showed "This record could not be loaded" (`OBJECT_API_METHOD_NOT_ALLOWED`), with a Retry that could never succeed. The Console now reads the object's served operations from `/me/permissions` (`apiOperations`, the set the server already hands down) and opens no record surface for an object whose set leaves `get` out. A row click and a Cmd/Ctrl-click open nothing, the name cell carries no record URL and draws no "Open as full page" arrow, and a `?recordId=` link opens no drawer. This holds on the object list, the object data page and interface list pages. A related-list row of such an object opens nothing, and a lookup value or a record link that points at one renders as plain text. The row menu is unchanged, so its `list_item` actions, such as Revoke on a SCIM credential, stay where they were. An object that serves `get`, or whose served set the Console does not have, opens its records as before.
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a83c366]
+- Updated dependencies [5c005e0]
+- Updated dependencies [dd4ce50]
+- Updated dependencies [6e4a203]
+- Updated dependencies [796e9d4]
+- Updated dependencies [c09320d]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [f5121e8]
+- Updated dependencies [82838e8]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [68972cd]
+- Updated dependencies [1b878e7]
+- Updated dependencies [1169d64]
+- Updated dependencies [6482c08]
+- Updated dependencies [4c15268]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [8835532]
+- Updated dependencies [27d042f]
+- Updated dependencies [9f736f2]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/lint@18.5.0
+  - @object-ui/i18n@18.5.0
+  - @object-ui/fields@18.5.0
+  - @objectstack/formula@18.5.0
+  - @object-ui/plugin-dashboard@18.5.0
+  - @object-ui/data-objectstack@18.5.0
+  - @object-ui/collaboration@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/plugin-calendar@18.5.0
+  - @object-ui/plugin-charts@18.5.0
+  - @object-ui/plugin-chatbot@18.5.0
+  - @object-ui/plugin-designer@18.5.0
+  - @object-ui/plugin-detail@18.5.0
+  - @object-ui/plugin-form@18.5.0
+  - @object-ui/plugin-grid@18.5.0
+  - @object-ui/plugin-kanban@18.5.0
+  - @object-ui/plugin-list@18.5.0
+  - @object-ui/plugin-report@18.5.0
+  - @object-ui/plugin-view@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/layout@18.5.0
+  - @object-ui/plugin-editor@18.5.0
+  - @object-ui/auth@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/mobile@18.5.0
+  - @object-ui/permissions@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

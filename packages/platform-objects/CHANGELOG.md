@@ -1,5 +1,58 @@
 # @objectstack/platform-objects
 
+## 18.5.0
+
+### Minor Changes
+
+- 68cb68e: feat(plugin-auth): an SSO provider can sign the person out of the company sign-in too, per provider and off by default
+  
+  Clause-②: yes (widening) — `sys_sso_provider` gains a `sign_out_of_idp` column (boolean, default false), `/sso/register` and `/sso/update-provider` accept a `signOutOfIdp` member, the Edit Sign-In Options action gains its param, the Register SAML Provider and Edit SAML Settings actions gain an optional `logoutUrl`, and `/sso/saml2/sp/slo/:providerId` and `/sso/saml2/logout/:providerId` answer for a provider whose switch is on. Nothing that was served before is refused now; with the switch off (every existing provider) sign-out answers exactly as before.
+  Metadata-protocol: added
+  
+  Each SSO provider has a new sign-in option, **Sign Out of the Company Sign-In Too**. It is off by default, and a change is recorded in the audit log like the other sign-in options (`trackHistory`). With it on, signing out of the platform also ends the person's session at the identity provider:
+  
+  - **SAML** through single logout. Sign-out answers `{ success, url, redirect }` with the identity provider's logout URL carrying a LogoutRequest for the session that signed in, and the platform session ends. The identity provider's logout address is the new **IdP Logout URL** on Register SAML Provider and Edit SAML Settings, stored in the provider's SAML configuration as its single logout service (no new column). The provider's single logout endpoint opens only while the switch is on, and a logout message from the identity provider is accepted only when it is signed; a signed logout request ends only the session it names.
+  - **OIDC** through an RP-initiated logout redirect. Sign-out answers `{ success, url, redirect }` with the provider's `end_session_endpoint`, carrying the ID token of that sign-in as `id_token_hint`, the `client_id`, a `post_logout_redirect_uri` when the sign-out's `callbackURL` is on a trusted origin, and the sign-out's `state`. The endpoint is read from the provider's discovery document when the switch is saved on, and kept in its stored OIDC configuration.
+  
+  Saving the switch on is refused `400 VALIDATION_FAILED` on `signOutOfIdp` for a provider that cannot honour it: a SAML provider with no IdP Logout URL, or an OIDC provider whose discovery document cannot be read or names no `end_session_endpoint` on a trusted origin. Saving it off is never refused. A sign-out through the SAML single logout writes the same logout audit row as `/sign-out`.
+  
+  Not in this change: the Console sign-out following the answered `url`, and any form item the Edit Sign-In Options form does not render by itself, are a later Console change. A session started before the switch was turned on signs out of the platform only.
+
+### Patch Changes
+
+- 6a36b79: feat(platform-objects,mcp): a member's agent finds a colleague by name or email over MCP, to fill a person field
+  
+  Clause-②: yes (widening) — the MCP read tools (`list_objects`, `describe_object`, `query_records`, `get_record`, `aggregate_records`) now admit one more system object, `sys_user`, which they refused before with `Object "sys_user" is a system object and is not exposed via MCP`. No write tool opens it.
+  Metadata-protocol: none
+  
+  - **`sys_user` declares `enable.aiReadable: true`.** An agent reads users with the existing record tools, under every gate a console read runs, and is served exactly what the caller's console person picker is served: their own row and the members of their active organization (the `sys_user_self` and `sys_user_org_members` row scopes of `member_default`), never another organization's users; and every field except the `Admin` group (sign-in trail, lockout, ban reason and expiry, sign-in phone, legacy role, AI seat), which the non-admin permission sets withhold on results and refuse on filters. For a plain member that is: `id`, `name`, `email`, `email_verified`, `two_factor_enabled`, `banned`, `image`, `locale`, `manager_id`, `primary_business_unit_id`, `principal_kind`, `accountable_user_id`, `source`, `created_at`, `updated_at`. An administrator's agent reads what the administrator reads.
+  - **Read only.** `create_record`, `update_record`, `delete_record` and `delete_records` keep refusing every `sys_*` object, so the self-service profile edit stays a console and data-API affordance; account changes an agent may make go through actions that declare their own `ai.exposed`.
+  - **What an agent is told.** `query_records`' description and the served `SKILL.md` (and its Console "Download skill" copy) say how to find a colleague's id for a person field: `where: { "email": "..." }` for exactly one person, or `{ "name": { "$contains": "..." } }`; names repeat, so people who share a name are told apart by email. The `list_objects` line no longer says every system object is hidden.
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/metadata-core@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

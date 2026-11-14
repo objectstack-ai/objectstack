@@ -1,5 +1,223 @@
 # @objectstack/runtime
 
+## 18.5.0
+
+### Patch Changes
+
+- 66919b6: fix(runtime): MCP `list_actions` marks an organization action the caller's membership role does not reach `unavailable`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A plain organization member's agent was listed identity actions such as inviting a user, removing a member, editing the organization or managing its teams, and `run_action` then answered `403 PERMISSION_DENIED` from the organization endpoint each time. The actions stay listed, and for a caller whose membership role in the organization does not reach the endpoint the row now carries `unavailable: { code: 'PERMISSION_DENIED', reason }`, where the reason names the roles that do reach it (for example "needs an organization owner, admin or delegated admin"). The reach is read from the action's `target` against the `MEMBERSHIP_REACH` table in `@objectstack/spec/identity`. Owners, admins and (for invitations) delegated admins see the rows unmarked. Nothing is hidden and neither run door reads the mark, so who can run each action is unchanged. Actions judged on record ownership or on the deployment's tenancy posture (deleting an SSO provider or an OAuth application, creating an organization) are not marked. The `list_actions` tool description, the `McpActionSummary.unavailable` documentation and the served skill (with its Console mirror) now say a listed action can carry `unavailable` for the caller's role, not only for its credential.
+- 28a2f0f: fix(mcp,runtime): `describe_object` serves `readonly: true` where a write never sets the value
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `describe_object` and the `objectstack://objects/{name}` resource served each field's `readonly` from the declared flag alone, so an agent was told it could write fields whose sent value the engine drops or replaces. Both transports now also answer `readonly: true` for a runtime-owned type (`autonumber`, including a hand-written field literal with no flag), for a `formula` field, and for a stored field that declares an `expression`. On every transport, the resource included, `readonly` is judged on the field as declared, so a stored expression the caller is not shown (it names a field they cannot read) still answers `true`, and the expression itself stays hidden. An ordinary field still answers `readonly: false`, and a declared `readonly` still answers `true`.
+  
+  `readonly` is the schema's answer, not the caller's field edit permission: a field the caller may read but not edit still answers `readonly: false`, and a write naming it is refused as before. The tool description now says so, and it also says that a `defaultValue` may be a token the server resolves (`NOW()`, `current_user`) or an expression object, so an agent omits the field instead of copying the value.
+- d635599: fix(metadata-protocol)!: a name two enabled packages hold only as stored rows is refused by the plain read, never served by save order (ADR-0150 D3, #32607)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no skill and no doc teaches what the read naming no package answers for a name only stored rows of several packages hold (`skills/**` and `content/docs/**` grepped: the `ambiguous-in-environment` mentions are about flow, queue and permission-set references, not `/meta` reads); the refusal's own sentence names the `?package=` remedy.
+  
+  <!-- adr-0087: registered two-row-holders-bare-read-refused -->
+  
+  **BREAKING** answer narrowing at the `/meta` bare item reads: a name that two or more enabled packages hold only as stored rows, and that no package ships in code, answers 409 `RESOURCE_CONFLICT` naming each of them, where the plain read and `/published` served one of the rows. `/layers` already refused it.
+  
+  The row-aware served-holder judgment that a disabled holder brings in (#32354) now also judges, on the item read, a name with no disabled holder. The holders are judged at one grain, the packages the item's active stored rows are bound to at the member the read addresses, as the read itself binds them, and never united with the registry's holders of the name (with no shipper the registry knows a row-only name through one bare slot, the row written or hydrated last). Two or more of them are refused as the by-name read refuses two package holders (`ambiguous-in-environment`). One holder reads as before. It applies to a type the registry reads by package, when no enabled package ships the name in code at any member, and when no package-less row or environment item of the name is stored.
+  
+  **Every moved answer, before → after.** Both transports (`RestServer` and the runtime `HttpDispatcher`), both registration orders, both save orders, and on the runtime dispatcher before and after a reboot. First-party count 0: no first-party app saves one name into two packages' stored rows.
+  
+  Narrowing:
+  
+  - Bare `GET /meta/:type/:name`: 200 with the row saved first → 409 `RESOURCE_CONFLICT` naming each holder, with `details.candidates`.
+  - Bare `GET /meta/:type/:name/published`: 200 with a row (on `RestServer` the row saved first; on the runtime dispatcher the same package in every save order) → 409 `RESOURCE_CONFLICT` naming each holder.
+  - The execution face (`getMetaItemForExecution`) of the same name: the row saved first → the same refusal.
+  
+  **Not moved.** Bare `GET /meta/:type/:name/layers` keeps its 409 `RESOURCE_CONFLICT`, the package-less writes' own refusal naming the same holders with its `?package=` prescription (#28337), on both transports: each transport's layered chain (`RestServer`'s and the runtime `HttpDispatcher`'s) reads the plain read first to find a disabled owner, and now leaves that read's refusal of row holders, and only that refusal (the protocol marks it), to the package-less refusal step, rethrowing every other refusal as before (two code holders, with or without a stored row each, and two row holders beside a disabled one, keep the plain read's refusal). `?package=` naming either holder serves that holder's row. A name one package holds as a stored row is served as before. A row the reads decline (a shipped flow name's undeclared row, a sealed managed name's row) and a row of a customization pair of another package the rows or the registry name make no holder here, as they make none beside a disabled holder (#32354), so they never turn one holder into a refusal: a package's row beside its pair's undeclared row is one holder in either save order, and no door names the pair. A dependent's added member over a base that holds the name only as a stored row (`email_template`: the base's `en-US` row, the dependent's `fr-FR` row) is the dependent's alone at that member (#28802): the plain read, `/layers` and the execution face at `fr-FR` keep serving the dependent's row. A name an enabled package ships in code at any member (for a bundled type such as `email_template`, a base shipping `en-US` beside another package's `fr-FR` row: the package-less `fr-FR` read keeps its answer), or one with a package-less row or an environment item, is judged as before. The paired customization addresses (`?package=HOLDER.custom`), which after a reboot follow the registry's one bare slot, are unchanged here (#32662 carries them).
+- 6718884: feat(storage,mcp): an upload link for a file field of a record not yet created, so an agent can create a record whose file field is required
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `create_upload_link` takes no `recordId` when it names a `field`: the link names the object and the file field only, and its answer carries `fileIds`, the id the upload is stored under. The user opens the link signed in and uploads; the agent then calls `create_record` with the field set to `fileIds[0]`. An expense line with a required e-invoice is created in two agent calls and one upload, and the field's `required` rule is unchanged.
+  
+  Minting such a link asks the object's create permission for the user, and the field must be writable for them and not read-only; an attachments link still needs its record. The upload is checked against the field's `accept` and `maxSize` before the link is spent. The stored file is bound to the uploading user, the object and the field for one hour: until a record holds it, only that user's own write, into that field of that object, may use it, and within the hour no second record may take it while the first holds it. The uploader's write into another field or object, or after the hour, is refused at the field with the reason; another user's or a system write is refused as a file they cannot open. Once the hour has passed with a record holding it, or once a record lets it go, it is judged as any other record's file. Before the upload, the id takes no write but the uploader's, which is refused as an upload that never completed. Until a record has held the file, only its uploader may download it. The page the link opens says the file was received, and tells the user to go back to the assistant.
+  
+  `fileIds` is an array so that a link for several files can answer several ids without a new key. Hosts whose storage service predates this keep `recordId` required on the tool, and the agent skill teaches the no-record form only where the host serves it.
+- 5e250a6: feat(storage,mcp): one upload link takes several files on a multi-file field
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A link `create_upload_link` makes for a file field declared `multiple: true` now takes several files in its one use: the user picks up to 10 on the link's page and sends them together, and each file gets its own file id. "Here are my three invoices" is one link and one pick instead of three. A single-file field link and an attachments link take one file, as before.
+  
+  On a multi-file field's link, one send spends the link once, and every file in it, however many the send carries, is checked before that: the workspace's maximum upload size, and the field's own `accept` and `maxSize`. One file the field cannot take, or more than 10 files (`400` `VALIDATION_ERROR`), refuses the whole send, stores nothing and leaves the link usable. After that the field gains all the files in one write, or none: a failure storing any of them, or the record's write refusing (a pending approval's lock, say), discards every file of the send, so the record shows what it held before and no file of the send is left.
+  
+  For a record not yet created, `create_upload_link` takes `count` (how many files, up to 10) with a multi-file field, and answers that many `fileIds` at once; the user picks exactly that many, and the agent creates the record with the field set to `fileIds`. Each id keeps the rules a single upload's id has: only that user's own write, into that field of that object, in one record, within an hour of the upload. Before the upload, every write naming one of the ids is refused, the uploader's own included, and nothing serves it.
+  
+  The link's page takes several files where the link does, in every language it is served in. The send is one form (`multipart/form-data`, marked by the header `x-upload-link-form: several`) carrying `count` and `file0` … `fileN-1`, and only a link that takes several files reads it. Any other body, on any link (a multipart one without that header included), is the file itself, whatever its content type, under the same limit and with the same checks as before. Every successful answer now also carries `fileIds`.
+- b22be27: fix(mcp): `validate_expression` gives the publish gate's own verdict at a `validation` or `formula` site, every pass the gate runs there included
+  
+  Clause-②: no (narrowing) — the MCP `validate_expression` tool now answers `ok: false` (or a warning) for a validation rule or formula field the publish gate already refuses (or warns on). The gate's acceptance set does not change, and no existing exported type or signature changes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is in an advisory tool's verdict, never in what an author may write: every expression it now refuses, the publish gate already refused, so no stored metadata and no consumer code has anything to rewrite -->
+  
+  **BREAKING** verdict narrowing of the MCP `validate_expression` tool (`@objectstack/mcp`), at `site: 'validation'` and `site: 'formula'`.
+  
+  The tool promises the verdict the publish gate gives the rule, but it ran the shared expression validator and nothing else, so it answered `ok: true` for rules the gate then refused at publish, and the refusal first met a person there. It now also runs the gate's own passes at those two sites, through `judgeAuthoredSiteExpression` (`@objectstack/lint`), which runs the gate's walk itself over the object definitions the caller is served:
+  
+  - at both sites: a read through a reference to a field the target object does not declare (`record.balance.nope`), and a read through a reference into a stored-metadata table;
+  - at a `validation` site: a nullable field used without a null guard (`record.days > 3` with `days` neither required nor defaulted), and a read of `parent`, which a `validations[]` rule never binds;
+  - a warning at both sites: a read of an injected system column an external object has no storage behind (`record.owner_id` on an ADR-0015 `external` object).
+  
+  Each finding is the gate's sentence, at the gate's severity. A rule the gate accepts answers exactly as before. A hop target follows the same system-object fence as `describe_object`. A `flow_condition` and a `template` are not judged by this change: the tool's verdict there is unchanged. A sentence that names the rule names it `this rule`, since the tool is handed the condition and not the rule it will sit on.
+  
+  - `@objectstack/mcp`: `McpDataBridge` gains the optional `servedObjectDefinitionOf(name)`, the object definition as the caller is served it (the read `describeObject` projects), handed to the gate and rendered to nobody. A bridge without it answers the shared validator's verdict alone, as before. The served `SKILL.md` line and the tool description name what the tool now refuses. `@objectstack/lint` moves from a development dependency to a dependency, loaded on the first call that judges a rule or formula field, never at module load.
+  - `@objectstack/lint`: exports `judgeAuthoredSiteExpression` and `authoredExpressionHopTargets`. The gate's verdicts are unchanged: its walk gains one internal option, off its package entries, that only this entry passes.
+  - `@objectstack/runtime`: the HTTP MCP bridge serves `servedObjectDefinitionOf`, the same caller's object `describeObject` reads (ADR-0106 D1).
+  - `@object-ui/console`: the downloadable `SKILL.md` mirror carries the same line.
+- 1f8ce6e: fix(runtime,plugin-security): the declared-webhook activation door switches one of two holders the namespace address cannot tell apart, and the upgrade report names every withheld holder
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two holders of one declared webhook name that the namespace address cannot tell apart, two packages co-owning one namespace or a package that declares no namespace beside another holder, are both dispatched, but neither could be switched: `POST /api/v1/security/_activation/webhook/NAME` and `.../webhook/NS/NAME` both answered `409` naming both. The bare address now takes `?package=PKG`, the exact qualifier `/meta` reads, and switches exactly PKG's declaration, writing PKG's own activation row and no other.
+  
+  - FROM `400 VALIDATION_ERROR` (unknown query parameter) TO `200` writing PKG's row, `data.packageId` = PKG, for `POST /security/_activation/webhook/NAME?package=PKG` when PKG declares NAME and is enabled.
+  - A PKG that does not serve NAME (a disabled package included) answers `409 RESOURCE_CONFLICT` naming the holders that do, or `404` when no enabled package declares it. Nothing is written.
+  - `package` is the only query parameter of the bare webhook address; the namespace address takes none, and an empty or repeated `package` is `400`, as on the permission-set door.
+  
+  The upgrade-impact report's withheld-webhook finding now reports each holder of the name, a disabled second holder included: FROM one finding (the holder the bare artifact lookup answered) TO one finding per holder. Its log lines name each finding's switch, `POST /api/v1/security/_activation/webhook/NAME?package=PKG`, where they named the namespace address. A withheld-webhook finding whose package is disabled is marked `packageDisabled: true` (an added optional field), and the line says to enable that package first: its address answers `409` until then.
+  
+  The `webhook` liveness ledger's `name` evidence (`@objectstack/spec`, text only) names one slot per served `(package, name)` holder and its `declared:PKG/NAME` reference.
+- a752057: fix(runtime)!: an action authored in the environment and bound to an object a package ships is the environment's action, listed once by MCP `list_actions` with no namespace and run by its face
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  BREAKING, in three places, for an action the environment authored (no `?package=`) on an object a package ships:
+  
+  1. MCP `run_action` with that package's `namespace` answers `RESOURCE_NOT_FOUND` (404) for such an action, as it does for any name that package does not hold. Before, it ran it.
+  2. `POST /actions/NAMESPACE/OBJECT/NAME` with that package's namespace answers the same 404. Before, it ran it.
+  3. A flow action of that kind whose `target` flow name TWO packages hold answers `RESOURCE_CONFLICT` (409) naming both holders, on its face, its bare name and `/actions/_env/OBJECT/NAME`. The action has no package (ADR-0150 D3), so its target is read by the no-package rule. Before, it was the object's package's action and ran that package's flow.
+  
+  - FROM (1, 2): `run_action { actionName: NAME, objectName: OBJECT, namespace: PACKAGE_NAMESPACE }`, or `POST /actions/PACKAGE_NAMESPACE/OBJECT/NAME`.
+  - TO (1, 2): the face `list_actions` lists for it (`OBJECT-NAME`), the bare name with its `objectName`, or `POST /actions/_env/OBJECT/NAME`.
+  - FROM (3): an environment-authored flow action on a packaged object whose `target` names a flow two packages hold.
+  - TO (3): bind the action with `?package=` to a writable package whose own flow, or whose one dependency's flow, is meant, or point its `target` at a flow name one package holds.
+  
+  The protocol's merged listings serve an action an administrator saved with no `?package=` twice: on its own in the `action` listing, and inside the served object's `actions` in the `object` listing, where the registry attaches it. Neither copy carries a package. The action collector filed it under the package that ships the object, so the ADR-0150 D4 dedupe, which keys on the holder, kept both copies. `list_actions` then listed the action twice, once under a namespace that never shipped it, and refused its face `OBJECT-NAME` as derived for two actions, so `run_action` on that face answered 404.
+  
+  A copy found inside an object's `actions` that carries no package stamp and is tenant-authored (`_provenance: 'org'`) is now filed under no package, in the collector and in `actionDeclaringPackage`. It lists once, with no namespace, and its face runs it. Unchanged: an action a package ships on its own object lists once under that package's namespace; an action authored with `?package=` lists once under that package's namespace; the environment's action still runs by its bare name and at `/actions/_env/OBJECT/NAME`; a flow action of that kind whose target flow name ONE package holds still runs that flow.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key, export, field or stored body changes; the refusals are of an address that named a package which never held the action, and of a flow target two packages hold read for a caller with no package; the caller's fix is to call the environment's action by its face, its bare name or the _env address, or to bind the action or its target to one package, which no conversion can choose for them -->
+- 1bed853: fix(runtime): MCP `list_actions` marks a confirmation-gated action `unavailable` for an AI service account
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An AI service account (an agent principal acting for itself, with no person it acts for) never confirms an action for itself, so `run_action` refuses it `428 ACTION_CONFIRMATION_REQUIRED` on every action declaring `ai.requiresConfirmation: true`, whatever the call sends. `list_actions` used to show that action to the account with no `unavailable` marker, so a headless agent planned a call that could never run. The row now carries `unavailable` with the refusal's own code and sentence ("a person runs this action"). The marker follows the declared flag only, not the listing's destructive heuristic. Where the forward-credential refusal also applies, the row carries the confirmation refusal, the one `run_action` answers first. A person, a delegated agent and the system context see the listing unchanged. The `McpActionSummary.unavailable` documentation in `@objectstack/mcp` names the new case and its code.
+- 3eac63a: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The MCP read tools (`list_objects`, `describe_object`, `query_records`, `get_record`, `aggregate_records`) now admit a system object whose author declared `enable.aiReadable: true`, asked through a new optional bridge member `aiReadExposed` that both bridges answer with `isAiReadExposed`. Every gate after admission is unchanged (the caller's permissions, row-level security, the object's own read gates, field masking), and every write tool still refuses every `sys_*` object. `sys_approval_request` declares the key; `query_records` names the "waiting on you" filter shape.
+  
+  The member baseline `member_default` now names `sys_approval_request` read-only, so every signed-in member holds a data-door read on it; which rows is still the approvals request read gate (the submitter, a current approver, a past actor), and no write opens. That gate now answers a conjunctive `pending_approvers` `$contains` of the caller's own id with the approvals service's acting-address fold, so the console's My Pending view and an agent's "waiting on me" query find a slot addressed by email or an unstaffed position, not only one holding the user id. A `pending_approvers` predicate naming another id, or under `$or`, is read as written.
+  
+  `@objectstack/plugin-audit`: the activity and audit copies of an approval request are hardened: a ledger copy holds no value that its owner narrows per reader. New copies no longer carry the request's subject snapshot, and `migrateSideCopies` / `migrateArchivedSideCopies` rewrite the copies at rest. Both ledgers' read redactions drop it from an older copy whether or not the rewrite has run.
+  
+  **Who can query those copies narrows.** A non-system query on `sys_activity` or `sys_audit_log` that names `sys_approval_request` by equality on `object_name` and names a column holding the copy (`metadata`; `old_value`, `new_value`), as a free-text search does, is now judged against every registered object, as a query naming no object already is. A reader withheld any field of any object, an organization administrator included, is refused it (`403`) where they were answered before. The same query pinned to another object, or naming only other columns, is judged as before. This does not depend on the rewrite having run.
+- Updated dependencies [0b89b33]
+- Updated dependencies [4aceae5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [7c36f52]
+- Updated dependencies [02f55c5]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [128b657]
+- Updated dependencies [89d7bef]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [d635599]
+- Updated dependencies [8403725]
+- Updated dependencies [4e4b587]
+- Updated dependencies [dd966fc]
+- Updated dependencies [16e3486]
+- Updated dependencies [16e3486]
+- Updated dependencies [46a2ecf]
+- Updated dependencies [6538ba4]
+- Updated dependencies [5430b4a]
+- Updated dependencies [84c66d3]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a83c366]
+- Updated dependencies [5c005e0]
+- Updated dependencies [dd4ce50]
+- Updated dependencies [6e4a203]
+- Updated dependencies [796e9d4]
+- Updated dependencies [c09320d]
+- Updated dependencies [a1604ce]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [3c42e63]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [5e29b7e]
+- Updated dependencies [01d206d]
+- Updated dependencies [01d206d]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [4c15268]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [26b5994]
+- Updated dependencies [8835532]
+- Updated dependencies [27d042f]
+- Updated dependencies [9f736f2]
+- Updated dependencies [6e1ab9b]
+- Updated dependencies [633d8c4]
+- Updated dependencies [47a3b95]
+- Updated dependencies [d4fbb4d]
+- Updated dependencies [a2be78d]
+- Updated dependencies [4a0c480]
+- Updated dependencies [e997113]
+- Updated dependencies [3eac63a]
+- Updated dependencies [67274ac]
+  - @objectstack/metadata-protocol@18.5.0
+  - @objectstack/plugin-auth@18.5.0
+  - @objectstack/objectql@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/metadata@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/lint@18.5.0
+  - @objectstack/rest@18.5.0
+  - @objectstack/formula@18.5.0
+  - @objectstack/driver-sql@18.5.0
+  - @objectstack/plugin-security@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/service-datasource@18.5.0
+  - @objectstack/driver-memory@18.5.0
+  - @objectstack/driver-sqlite-wasm@18.5.0
+  - @objectstack/driver-turso@18.5.0
+  - @objectstack/service-cluster@18.5.0
+  - @objectstack/service-i18n@18.5.0
+  - @objectstack/metadata-core@18.5.0
+  - @objectstack/observability@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes
