@@ -1466,6 +1466,7 @@
     "api/PublishPackageDraftsResponse:success",
     "api/PublishPackageDraftsResponse:unhiddenApps",
     "api/PublishPackageDraftsResponse:unhideError",
+    "api/PublishPackageDraftsResponse:unregistered",
     "api/PushDeliveryData:notificationId",
     "api/PushDeliveryData:origin",
     "api/PushDeliveryData:route",
