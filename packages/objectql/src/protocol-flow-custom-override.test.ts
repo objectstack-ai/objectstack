@@ -1151,6 +1151,32 @@ describe('[#33131] two packages ship one action name, one declares an override: 
         }
     }
 
+    // [#33131 contract review S1] Both holders overridden. Every read face serves each holder's own override,
+    // in both registration orders and both save orders. The registry's package-scoped item cannot yet: it keeps
+    // ONE bare slot per name (`overlaySlotBinding`), so the holder whose override was published LAST is served
+    // there and the other holder's slot answers its own SHIPPED action — never the other package's override
+    // (FROM `main`: alpha's registry item could read `OVR-B`). Carried on the card, not fixed here: the fix is
+    // the registry's slot model, not this hydrator.
+    for (const order of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+        for (const saves of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+            const [savedFirst, savedLast] = saves;
+            it(`${nsOf(order[0])} registered first, ${nsOf(savedFirst)} saved first, both overridden: each read face serves its own override; the registry item serves the last-saved holder's override and the first-saved holder's own shipped action (carried)`, async () => {
+                const { engine, protocol } = await bootHolders(order, saves);
+                for (const face of ['served', 'execution'] as const) {
+                    expect(await entries(protocol, face), face).toEqual([`${ALPHA}:OVR-A`, `${BETA}:OVR-B`]);
+                }
+                const p: any = protocol;
+                for (const holder of [ALPHA, BETA]) {
+                    expect((await p.getMetaItem({ type: 'action', name: SHARED_ACTION, packageId: holder })).item?.label, nsOf(holder)).toBe(labelOf(holder));
+                    expect((await p.getMetaItemLayered({ type: 'action', name: SHARED_ACTION, packageId: holder })).effective?.label, nsOf(holder)).toBe(labelOf(holder));
+                }
+                const registry = engine.registry as any;
+                expect(registry.getPackageScopedItem('action', SHARED_ACTION, savedLast)?.label, 'the last-saved holder').toBe(labelOf(savedLast));
+                expect(registry.getPackageScopedItem('action', SHARED_ACTION, savedFirst)?.label, 'the first-saved holder: its own shipped action, never the other override').toBe(`SHIPPED-${nsOf(savedFirst)}`);
+            });
+        }
+    }
+
     it('CONTROL: one package ships the action name, with its declared override: its override, listed once and at its address', async () => {
         const { engine, protocol } = await bootHolders([ALPHA], [ALPHA]);
         for (const face of ['served', 'execution'] as const) {

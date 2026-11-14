@@ -940,6 +940,36 @@ describe('[#33131] two namespaces ship one name, one declares its override: each
             });
         }
 
+        // [#33131 contract review N1] The read naming no package. Two enabled holders: refused 409 (never a
+        // pick). One holder disabled: the enabled holder's own item, its declared override when it has one.
+        // FROM `main`: with the first-registered holder disabled, the second holder's override of a sealed type
+        // was declined there too (its shipped item served). `doc` is left out: its bare read is not a
+        // package-scoped read, and this change does not move it (measured identical on `main`).
+        for (const overriddenSet of [[ALPHA], [BETA], [ALPHA, BETA]] as const) {
+            it(`${first} registered first, ${overriddenSet.map(nsOf).join(' and ')} overridden: the read naming no package refuses 409 with both holders, and serves the enabled holder's own item with the other disabled`, async () => {
+                const { engine, protocol } = await bootHolders(new Map(), order);
+                for (const holder of overriddenSet) await overrideAll(protocol, holder);
+                const BARE = SHARED.filter((t) => t.type !== 'doc');
+                const bare = async () => {
+                    const out: Record<string, unknown> = {};
+                    for (const t of BARE) {
+                        const name = t.body('x', '').name;
+                        try { out[t.type] = (await protocol.getMetaItem({ type: t.type, name }))?.item?.label; } catch (e) { out[t.type] = (e as { status?: number }).status; }
+                    }
+                    return out;
+                };
+                const every = (answer: unknown) => Object.fromEntries(BARE.map((t) => [t.type, answer]));
+                expect(await bare(), 'both holders enabled').toEqual(every(409));
+                const registry = engine.registry as any;
+                for (const [disabled, enabled] of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+                    registry.disablePackage(disabled);
+                    const label = `${(overriddenSet as readonly string[]).includes(enabled) ? EDITED : SHIPPED} ${nsOf(enabled)}`;
+                    expect(await bare(), `${nsOf(disabled)} disabled`).toEqual(every(label));
+                    registry.enablePackage(disabled);
+                }
+            });
+        }
+
         it(`${first} registered first, both overridden: each address serves its own override, and the census names neither`, async () => {
             const stores: Stores = new Map();
             const { protocol } = await bootHolders(stores, order);
