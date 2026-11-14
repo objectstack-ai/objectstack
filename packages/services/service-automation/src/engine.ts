@@ -1294,6 +1294,13 @@ export interface ExecutionLogEntry {
     startedAt: string;
     completedAt?: string;
     durationMs?: number;
+    /**
+     * [#32284] `ExecutionLogSchema.waitMs`: the part of `durationMs` the run
+     * spent suspended, summed over every pause it has left — `0` on a run
+     * that never paused, absent when not recorded. Written beside `durationMs`
+     * at every site that writes one; never derived from it here.
+     */
+    waitMs?: number;
     trigger: { type: string; userId?: string; object?: string; recordId?: string };
     // ↑ built by `buildRunTrigger` at EVERY site — see its doc comment for why
     // that is a chokepoint rather than eight object literals.
@@ -1776,9 +1783,50 @@ export interface SuspendedRun {
     context: AutomationContext;
     startedAt: string;
     startTime: number;
+    /**
+     * [#32284] The run's wait clock: the milliseconds it had spent EXECUTING
+     * (its age at this pause minus every earlier pause) when it paused here.
+     * Nothing executes while the run is parked, so at any later instant the
+     * run's total wait is its age minus this — which is how one number sums
+     * every pause of a run that suspends, resumes and suspends again
+     * ({@link waitOfPausedRun}), and why a restore that re-arms a consumed
+     * pause needs no clock of its own: the snapshot carries this value, and
+     * the time from the pause to the restore is wait like the rest of it.
+     *
+     * Set at every site that builds a suspension ({@link activeMsAtPause});
+     * carried unchanged by every re-save of the SAME pause (`{ ...run }`).
+     * Absent on a suspension recorded before this field existed, or by a
+     * host store that does not round-trip it: such a run's `waitMs` is not
+     * recorded rather than guessed.
+     */
+    activeMs?: number;
     correlation?: string;
     /** Screen the run paused on (screen-flow runtime), for re-fetch + UI render. */
     screen?: ScreenSpec;
+}
+
+/**
+ * [#32284] The `activeMs` a suspension records: the run's age at the pause
+ * minus the wait it has already accumulated. `undefined` when that wait is not
+ * known (the run's previous pause carried no clock), so an unknown wait is
+ * never turned into a precise-looking number further on.
+ */
+export function activeMsAtPause(elapsedMs: number, waitMs: number | undefined): number | undefined {
+    return waitMs === undefined ? undefined : Math.max(0, elapsedMs - waitMs);
+}
+
+/**
+ * [#32284] A paused run's total wait at the moment its pause ENDS — a resume
+ * consumes it, or the run is cancelled, failed or settled where it waits, or a
+ * restore records it paused again: its age then (`elapsedMs`, measured from
+ * `startTime` like `durationMs`) minus the time it had spent executing when it
+ * paused. `undefined` for a suspension with no clock ({@link SuspendedRun.activeMs}).
+ *
+ * Clamped at zero: `startTime` may have been stamped by another replica's
+ * clock, and a published `waitMs` is never negative.
+ */
+export function waitOfPausedRun(run: Pick<SuspendedRun, 'activeMs'>, elapsedMs: number): number | undefined {
+    return typeof run.activeMs === 'number' ? Math.max(0, elapsedMs - run.activeMs) : undefined;
 }
 
 /**
@@ -1868,6 +1916,13 @@ export interface RunRecord {
     /** When the run reached its terminal state. */
     finishedAt?: string;
     durationMs?: number;
+    /**
+     * [#32284] The run's {@link ExecutionLogEntry.waitMs}, persisted beside
+     * `durationMs` (`sys_automation_run.wait_ms`) so a run read back after a
+     * restart or a ring eviction still says how much of its duration was
+     * waiting. Absent on a row written before the column existed.
+     */
+    waitMs?: number;
     /** Failure reason for a `failed` run — what a designer needs to fix it. */
     error?: string;
     /**
@@ -7754,6 +7809,8 @@ export class AutomationEngine implements IAutomationService {
                     startedAt,
                     completedAt: new Date().toISOString(),
                     durationMs,
+                    // [#32284] The initial execution never paused: a measured 0.
+                    waitMs: 0,
                     trigger: buildRunTrigger(context),
                     steps,
                     output,
@@ -7852,7 +7909,7 @@ export class AutomationEngine implements IAutomationService {
             if (isRefusalSignal(err)) {
                 return this.finishRefusedRun({
                     runId, flowName, flowVersion: flow.version,
-                    startedAt, durationMs: Date.now() - startTime,
+                    startedAt, durationMs: Date.now() - startTime, waitMs: 0,
                     steps, flow, variables,
                     refusalMessage: err.message, context,
                 });
@@ -7862,6 +7919,9 @@ export class AutomationEngine implements IAutomationService {
             // caller can later `resume()` it. This is NOT a failure.
             if (isSuspendSignal(err)) {
                 const durationMs = Date.now() - startTime;
+                // [#32284] The run's first pause: nothing waited yet, so all
+                // of `durationMs` was execution — the clock the resume reads.
+                const waitMs = 0;
                 // #7639 — ONE snapshot expression feeding BOTH consumers: the
                 // continuation the run will resume from, and the `paused` log
                 // entry run-detail serves. Same object, so what an operator
@@ -7880,6 +7940,7 @@ export class AutomationEngine implements IAutomationService {
                     context: runContext,
                     startedAt,
                     startTime,
+                    activeMs: activeMsAtPause(durationMs, waitMs),
                     correlation: err.correlation,
                     screen: err.screen,
                 });
@@ -7890,6 +7951,7 @@ export class AutomationEngine implements IAutomationService {
                     status: 'paused',
                     startedAt,
                     durationMs,
+                    waitMs,
                     trigger: buildRunTrigger(context),
                     steps,
                     variables: variablesSnapshot,
@@ -7954,6 +8016,7 @@ export class AutomationEngine implements IAutomationService {
                 startedAt,
                 completedAt: new Date().toISOString(),
                 durationMs,
+                waitMs: 0,
                 trigger: buildRunTrigger(context),
                 steps,
                 error: errorMessage,
@@ -9971,6 +10034,8 @@ export class AutomationEngine implements IAutomationService {
         flowVersion?: number;
         startedAt: string;
         durationMs: number;
+        /** [#32284] The run's `waitMs` — `undefined` only where it is not recorded. */
+        waitMs: number | undefined;
         steps: StepLogEntry[];
         /** Read for its `isOutput` variable declarations — see `output` below. */
         flow: FlowParsed;
