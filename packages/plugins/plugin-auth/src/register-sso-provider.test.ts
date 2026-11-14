@@ -624,6 +624,51 @@ describe('the Register SSO Provider form names the userinfo endpoint and the use
   });
 });
 
+describe('the Register SSO Provider form names every endpoint /sso/register takes (an IdP whose endpoints sit on other hosts)', () => {
+  // Google's discovery names its token, key and userinfo endpoints on three
+  // hosts other than its issuer's; each is trusted only when the registration
+  // names it, so the bridge carries each one to `oidcConfig` under its own name.
+  const GOOGLE = {
+    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenEndpoint: 'https://oauth2.googleapis.com/token',
+    jwksEndpoint: 'https://www.googleapis.com/oauth2/v3/certs',
+    userInfoEndpoint: 'https://openidconnect.googleapis.com/v1/userinfo',
+  };
+  const captureOidc = async (form: Record<string, unknown>) => {
+    let dispatched: any = null;
+    const handle = vi.fn(async (req: Request) => {
+      if (req.url.endsWith('/get-session')) return new Response('null', { status: 200 });
+      dispatched = await req.clone().json();
+      return new Response(JSON.stringify({ providerId: 'acme' }), { status: 200 });
+    });
+    const res = await runRegisterSsoProviderFromForm(handle, makeOidcReq(form));
+    expect(res.status).toBe(200);
+    return dispatched;
+  };
+
+  it('sends each named endpoint, trimmed, in oidcConfig under the member of the same name', async () => {
+    const padded = Object.fromEntries(Object.entries(GOOGLE).map(([k, v]) => [k, ` ${v} `]));
+    const sent = await captureOidc({ ...OIDC_FORM, issuer: 'https://accounts.google.com', ...padded });
+    for (const [member, url] of Object.entries(GOOGLE)) expect(sent.oidcConfig[member], member).toBe(url);
+  });
+
+  it('CONTROL: a form naming none of them, or leaving them blank, sends none of them', async () => {
+    for (const extra of [{}, { tokenEndpoint: '', jwksEndpoint: '   ', authorizationEndpoint: '' }]) {
+      const sent = await captureOidc({ ...OIDC_FORM, ...extra });
+      for (const member of Object.keys(GOOGLE)) expect(member in sent.oidcConfig, member).toBe(false);
+    }
+  });
+
+  it('the body naming every endpoint clears the INSTALLED vendor schema (reaches the session gate)', async () => {
+    const res = await runRegisterSsoProviderFromForm(
+      makeRealAuthHandler(),
+      makeOidcReq({ ...OIDC_FORM, issuer: 'https://accounts.google.com', ...GOOGLE }),
+    );
+    expect(res.body.error?.message ?? '').not.toMatch(/Unrecognized key|Invalid/);
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('[#32086] the attribute names on the SAML register form: mapping.email / firstName / lastName / name', () => {
   const sentFor = async (extra: Record<string, unknown>) => {
     let dispatched: any = null;

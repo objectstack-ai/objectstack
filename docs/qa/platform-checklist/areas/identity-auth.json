@@ -156,7 +156,7 @@
       "title": "Every supported auth method signs in when enabled, is absent when disabled, and is advertised exactly as configured",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor", "provisioned user per method", "admin (for env configuration)"],
@@ -174,14 +174,14 @@
         ]
       },
       "steps": [
-        "for each variant: boot with the method configured ON, GET /api/v1/auth/config, and record the advertisement (features.* flag, emailPassword block, socialProviders list)",
+        "for each variant: boot with the method configured ON, GET /api/v1/auth/config, and record the advertisement (data.features.* flag, data.emailPassword block, data.socialProviders list: the route answers { success: true, data: config }, packages/plugins/plugin-auth/src/auth-plugin.ts)",
         "email+password: POST /api/v1/auth/sign-up/email (when sign-up enabled), POST /api/v1/auth/sign-in/email, GET /api/v1/auth/get-session, POST /api/v1/auth/sign-out — capture each response and the session cookie lifecycle",
         "phone+password: create a phone-carrying user with a known password, POST the phone sign-in (better-auth /sign-in/phone-number surface — 'always works' when the plugin is on per the spec), verify get-session identifies the user",
         "phone OTP with NO SMS service configured, on a boot with NODE_ENV=production: request /phone-number/send-otp and capture the loud 400 SMS_SERVICE_REQUIRED rejection (never a silent 200, never a hang, never a bare 500). On a development boot the SMS service falls back to its log transport, which delivers in dev (LogSmsTransport prints the body — packages/services/service-sms/src/sms-service.ts), so send-otp succeeds there and the no-SMS state never occurs",
         "SSO/OIDC: the two halves surface differently. A generic oidcProviders[] entry is advertised as a socialProviders[] entry of type 'oidc' in /api/v1/auth/config (getPublicConfig, auth-manager.ts) — the list the login page's provider buttons read; features.sso tracks ONLY the @better-auth/sso plugin (isSsoWired), so a generic OIDC provider never sets it. Drive the generic-OIDC authorization-code round trip against a localhost IdP, or cite the pinned OIDC dogfood test per rule 6",
         "device authorization: with deviceAuthorization on, drive the RFC 8628 flow (POST /device/code, approve via /device/approve in a signed-in browser, poll /device/token) against the LIVE server's routes, recording which path spelling the server actually serves",
         "2FA: with twoFactor on, enable it for a user (sys_user enable_two_factor action, gated on features.twoFactor), sign in, and verify the server-driven challenge (ADR-0069) interrupts before a session is granted",
-        "discovery documents: GET /.well-known/openid-configuration and GET /.well-known/oauth-authorization-server (both mounted at the APP ROOT, not under /api/v1/auth — RFC 8414 / OIDC require it, auth-plugin.ts) and record the issuer + advertised endpoints",
+        "discovery documents: GET /.well-known/openid-configuration and GET /.well-known/oauth-authorization-server (both mounted at the APP ROOT, not under /api/v1/auth — RFC 8414 / OIDC require it, auth-plugin.ts) and record the issuer + advertised endpoints. The same documents also answer 200 under /api/v1/auth/.well-known/ (QA run #33093); that is not a defect, the app-root mounts are what this step reads",
         "self-service identity mutations: POST /api/v1/auth/change-email (authed) and POST /api/v1/auth/delete-user (authed) — capture each, plus the anonymous forge of both. delete-user is deliberately unwired (auth-route-ledger disposition 'disabled': user.deleteUser is not configured, maintainer ruling on #7735), so expect 404 for the signed-in caller and 401 for the anonymous forge (the route is mounted and session-guarded, so the session check answers first) — never 2xx",
         "for each variant: re-boot with the method OFF, then (a) GET /auth/config and confirm the advertisement is gone, (b) screenshot the login page and confirm the affordance is gone, (c) fire the method's endpoint anyway and confirm a server-side refusal",
         "record the per-variant verdict table (on-side result, off-side result, advertisement parity)"
@@ -244,7 +244,7 @@
         {
           "clause": "POST /auth/change-email succeeds for the signed-in user and answers 401 to the anonymous forge; POST /auth/delete-user is deliberately unwired (ledger disposition 'disabled') and is never 2xx: the signed-in caller gets 404 (the capability switch — user.deleteUser is unconfigured) and the anonymous forge gets 401 UNAUTHORIZED (the route is mounted and session-guarded, so the session check answers first).",
           "oracle": "api",
-          "verify": "the authed change-email returns 2xx (and, if verification is required, does not flip the address until the confirmation link is followed) and the anonymous forge answers 401; delete-user answers 404 to the signed-in caller (an empty body — better-auth's disabled branch carries no code) and 401 to the anonymous forge, and the account survives; its GET /delete-user/callback half answers 404 NOT_FOUND to a signed-in caller. The anonymous 401 beside the authed 404 is what tells the capability switch apart from an unmounted route. Pinned by packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts (the '#7735 — POST /delete-user stays unwired, and the ledger says so' block: anonymous 401, authed 404, callback 404, nothing deleted) — cite the pin per rule 6, at its layer: it drives AuthManager at unit layer, not a booted server's door, so it scores the delete-user half partial and the live calls are still driven. The ledger books the route 'disabled' because user.deleteUser is deliberately unconfigured. A 2xx from delete-user, for anyone, is the FAIL",
+          "verify": "the authed change-email returns 2xx (and, if verification is required, does not flip the address until the confirmation link is followed) and the anonymous forge answers 401; delete-user answers 404 to the signed-in caller (an empty body — better-auth's disabled branch carries no code) and 401 to the anonymous forge, and the account survives; its GET /delete-user/callback?token=… half answers 404 NOT_FOUND to a signed-in caller (send a token: without ?token= the route's query schema answers 400 first, and the pin sends ?token=whatever). The anonymous 401 beside the authed 404 is what tells the capability switch apart from an unmounted route. Pinned by packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts (the '#7735 — POST /delete-user stays unwired, and the ledger says so' block: anonymous 401, authed 404, callback 404, nothing deleted) — cite the pin per rule 6, at its layer: it drives AuthManager at unit layer, not a booted server's door, so it scores the delete-user half partial and the live calls are still driven. The ledger books the route 'disabled' because user.deleteUser is deliberately unconfigured. A 2xx from delete-user, for anyone, is the FAIL",
           "evidence": "the change-email responses (authed + anonymous) + the delete-user responses (authed 404, anonymous 401) + the callback 404, or the cited pin output"
         }
       ],
@@ -286,7 +286,8 @@
         { "revision": 7, "date": "2026-10-13", "change": "clause 10, acceptance[9] (the delete-user half) and step 9 re-worded (assertion defect, #23104 A9). Revision 4 said delete-user answers 404 to every caller, authed or not. The route is mounted and session-guarded, so the anonymous forge answers 401 UNAUTHORIZED and only a signed-in caller reaches the capability switch's 404. No caller gets 2xx, and the disposition 'disabled' is unchanged. The oracle is packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts, whose '#7735' delete-user block pins anonymous 401, authed 404 and the callback 404, and says the 401-beside-404 pair is how the switch is told apart from an unmounted route. The change-email half is unchanged", "ref": "#23121" },
         { "revision": 8, "date": "2026-10-17", "change": "knownGaps[3], steps[3] and [4], acceptance[3].verify and variants[3] and [7] corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The no-SMS state needs NODE_ENV=production: in development the SMS log transport delivers, so send-otp succeeds. A generic oidcProviders entry surfaces as a socialProviders[] entry of type 'oidc', while features.sso tracks only the @better-auth/sso plugin, so the SSO step's 'features.sso refined to usable' check could never see a generic provider. Magic-link is off on stock (404), not 'server endpoints live'. Generic OIDC is drivable against a localhost IdP, so only the device and enterprise-SSO halves stay blocked(environment). Not loosened: a phone OTP without SMS that succeeds, hangs or 500s on a production boot still FAILS", "ref": "#24036" },
         { "revision": 9, "date": "2026-10-26", "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.auth-method-matrix a3, a6, a9 and ref; wave anchor #25807; card #25843). acceptance[3], [6] and [9] each named a pin that exists but was not in automated.ref (phone-otp-no-sms-service-refusal.test.ts, two-factor-lockout.dogfood.test.ts, change-email-delete-user-wiring.test.ts), and the ref held a single OIDC pin (acceptance[7]) under kind 'e2e', over-implying coverage of a 10-clause item. automated.ref now lists all four pins with the clause and layer each scores, and kind reads 'dogfood'; acceptance[3].verify and acceptance[9].verify say their pins drive AuthManager at unit layer, not the production boot's send-otp door or a booted server, so they score partial and the live calls are still driven. No clause's assertion changed", "ref": "#25843" },
-        { "revision": 10, "date": "2026-10-31", "change": "knownGaps[3] said registering an enterprise SSO provider 'needs a reachable external IdP'. The precise rule, measured by QA run #27438: the register door re-dispatches into @better-auth/sso's /sso/register, whose validateOIDCEndpointUrl refuses a loopback or private discovery URL with 400 discovery_private_host unless its origin is in trustedOrigins. So the localhost IdP that unblocks generic OIDC does not unblock features.sso. The gap now says so, and names the two environments that would lift it. Verdicts are unchanged: device and features.sso stay blocked(environment). Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310", "ref": "#27438" }
+        { "revision": 10, "date": "2026-10-31", "change": "knownGaps[3] said registering an enterprise SSO provider 'needs a reachable external IdP'. The precise rule, measured by QA run #27438: the register door re-dispatches into @better-auth/sso's /sso/register, whose validateOIDCEndpointUrl refuses a loopback or private discovery URL with 400 discovery_private_host unless its origin is in trustedOrigins. So the localhost IdP that unblocks generic OIDC does not unblock features.sso. The gap now says so, and names the two environments that would lift it. Verdicts are unchanged: device and features.sso stay blocked(environment). Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310", "ref": "#27438" },
+        { "revision": 11, "date": "2026-11-14", "change": "steps[0], steps[7] and acceptance[9].verify re-pointed (stale spec, QA runs #32949 and #33093, comment 6850899929; ledger row 54 of #32908). /auth/config answers { success: true, data } (auth-plugin.ts), so the flags sit under data. The delete-user callback needs ?token= or its query schema answers 400 before the disabled branch (change-email-delete-user-wiring.test.ts sends ?token=whatever). The /api/v1/auth/.well-known/ copies answering 200 are recorded as not a defect. No clause changed. Read at base 82838e83", "ref": "#33328" }
       ]
     },
     {
@@ -294,7 +295,7 @@
       "title": "Invitation issuance honors role-scope gates: delegated_admin can invite members but cannot mint admins; a plain member cannot invite at all",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["delegated_admin org member", "plain member", "tenant admin (setup only)"],
@@ -302,7 +303,7 @@
         "app": "showcase",
         "requires": [
           "a stock single-tenancy showcase boot with the organization capability on (the sys_invitation actions — invite_user/cancel_invitation/resend_invitation — are gated on features.organization): the Default Organization is the org every clause needs, and no second organization is involved — the pinned dogfood test boots exactly this (bootShowcase({}), reading the slug-default organization), and 18.0 permits no second organization in any case",
-          "a member holding the delegated_admin org role (the ADR-0105 D8 principal; the pinned dogfood test shows the setup: read the Default Organization, set membership roles via the better-auth-managed writer)"
+          "a member holding the delegated_admin org role (the ADR-0105 D8 principal; the pinned dogfood test shows the setup: read the Default Organization, set membership roles via the better-auth-managed writer). Over HTTP: as an org owner or admin, POST /api/v1/auth/organization/invite-member with role delegated_admin, then sign the invitee up and accept (an issuer may confer a role up to its own grade, packages/plugins/plugin-auth/src/invitation-role-cap.ts; QA run #33094)"
         ]
       },
       "steps": [
@@ -389,6 +390,12 @@
           "date": "2026-10-26",
           "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.invitation-scope-gates a0 and n1; wave anchor #25807; card #25843). a0: automated.ref already says its pending half is scored live — consistent, no edit. n1: the server-side denial of the forged request is pinned, while the UI-hidden half is acceptance[4]'s browser work; negative[1] now names which half each scores. No clause changed",
           "ref": "#25843"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[1] re-pointed (fixture recipe, QA run #33094, comment 6852480973; ledger row 262 of #32908): a delegated_admin can be minted over HTTP by an admin's invitation, which the invitation role cap admits (invitation-role-cap.ts). No clause changed. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -397,7 +404,7 @@
       "title": "Admin user-lifecycle operations (ban/unban, set-password, impersonate, create/set-role/remove, revoke-sessions) enforce, persist, and stay closed to non-admins",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["platform admin", "target user", "non-admin forger"],
@@ -405,7 +412,7 @@
         "app": "showcase",
         "requires": [
           "the better-auth admin plugin enabled (plugins.admin: true) — it exposes /admin/ban-user, /admin/unban-user, /admin/set-user-password, /admin/impersonate-user, /admin/stop-impersonating, /admin/list-users, /admin/create-user, /admin/set-role, /admin/remove-user, /admin/revoke-user-session(s) under the auth route and augments sys_user with role/banned/ban_reason/ban_expires and sys_session with impersonated_by",
-          "a disposable target user with a known password (create one; do not ban a seeded persona other items depend on)",
+          "a disposable target user with a known password (create one; do not ban a seeded persona other items depend on). A user made by POST /api/v1/auth/admin/create-user carries must_change_password (default true, packages/plugins/plugin-auth/src/admin-user-endpoints.ts; the admin set-user-password stamps it too), and every data read then answers 403 PASSWORD_RESET_REQUIRED until the user changes the password: pass mustChangePassword: false, or have the user POST /api/v1/auth/change-password first",
           "for acceptance[10]–[12] only: a walled boot (OS_TENANCY_POSTURE=isolated or group) provisioned per RUNNER.md's entry 'A walled boot is a fixture of its own', with the admin plugin on. Declare its membership policy as OS_AUTH_MEMBERSHIP_POLICY=invite-only, so one boot serves all three clauses. On a walled boot the admin starts with no active organization: create one (POST /api/v1/auth/organization/create) and set it active (POST /api/v1/auth/organization/set-active) before Create User, or create-user answers 400 NO_ACTIVE_ORGANIZATION. On the stock single-org showcase Create User binds the Default Organization instead, so these three clauses are blocked(fixture) without the walled boot"
         ],
         "knownGaps": [
@@ -423,8 +430,8 @@
         "set the target's password via the admin set-password (out-of-band recovery); verify the NEW password signs in and the OLD one is refused",
         "RULED (#9969, closed not_planned): sign the target in to establish a LIVE session, then as platform admin POST /api/v1/auth/admin/revoke-user-sessions for that target and record the refusal, 403 YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS. Then re-drive the target's PROTECTED authed request (e.g. GET /api/v1/data/OBJECT for an object the target could read a moment ago): it still answers 2xx, because the refused call moved nothing. If the route is ever re-mounted for an ObjectStack consumer, the same request must instead be refused mid-flight (acceptance[4]'s re-mount contract). Either way, do NOT score this off get-session's status code: an anonymous OR revoked get-session answers 401 with the ADR-0112 refusal envelope (code UNAUTHENTICATED, packages/plugins/plugin-auth/src/anonymous-session-refusal.ts), while a live session still answers 200 with { user, session }. One auth-route seam's status is not proof the AUTHORIZATION layer refuses the target's protected reads",
         "RULED (#9968, ruled B): as platform admin, POST /api/v1/auth/admin/set-role for the target and record the refusal, 403 YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE. Then re-read the target's sys_user row: the role scalar and positions[] are unchanged",
-        "impersonate the target from the admin surface — Impersonate is offered only in the Setup → Users LIST's row menu (the target's ⋯), not on the user's record page; verify via the API that the impersonation session carries impersonated_by, and screenshot the console's impersonation state; stop impersonating and verify the admin's own session is restored",
-        "RULED (#9969, closed not_planned): as platform admin, POST /api/v1/auth/admin/remove-user for a throwaway user that OWNS at least one showcase row and record the refusal, 403 YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS. Then confirm the user and the owned row are both still there. The engine cascade exemption the old step drove (#3023/#3048) has no public door left, so acceptance[5] scores it from its pin",
+        "impersonate the target from the admin surface — Impersonate is offered only in the Setup → Users LIST's row menu (the target's ⋯), not on the user's record page; verify via the API that the impersonation session carries impersonated_by, and screenshot the console's impersonation state; stop impersonating and verify the admin's own session is restored. While impersonating, the admin's ORIGINAL bearer answers 401 on get-session and data reads, because the rotation deletes it (packages/plugins/plugin-auth/src/impersonation-bearer-rotation.ts): read sys_session.impersonated_by from a second admin session, and stop through the set-admin-session-token recovery value sent as x-admin-session-token",
+        "RULED (#9969, closed not_planned): as platform admin, POST /api/v1/auth/admin/remove-user for a throwaway user that OWNS at least one showcase row (a showcase_task needs its project, or the create answers 400 VALIDATION_FAILED: examples/app-showcase/src/data/objects/task.object.ts) and record the refusal, 403 YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS. Then confirm the user and the owned row are both still there. The engine cascade exemption the old step drove (#3023/#3048) has no public door left, so acceptance[5] scores it from its pin",
         "as a NON-admin, fire each of /admin/ban-user, /admin/list-users, /admin/create-user, /admin/set-role, /admin/remove-user, /admin/revoke-user-sessions directly and capture every refusal",
         "run the audit-trail pin and capture its output for the attribution clause",
         "walled Create User (clauses 10–12, on fixtures.requires[2]'s boot): as the platform admin, with its own organization active, POST /api/v1/auth/admin/create-user for a new user whose body names a DIFFERENT organization's id as organizationId; read data.organizationId and data.membershipCreated from the response, then the new user's sys_member rows. This boot's invite-only policy makes the same create clause 12's evidence",
@@ -458,7 +465,7 @@
         {
           "clause": "revoke-user-sessions is RULED, not built, for the platform admin (#9969, closed not_planned: no ObjectStack consumer, re-implemented on demand). At head it answers the platform admin 403 YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS, and the target's live session keeps answering a PROTECTED request. The contract a re-mount must meet is unchanged: revoke-user-sessions kills the target's LIVE session mid-flight, so a PROTECTED authed request that succeeded a moment earlier is refused immediately after the revoke, not at token expiry. admin-platform-admin-standing.dogfood.test.ts fails until that route moves to its admitted list",
           "oracle": "api",
-          "verify": "At head: the step-8 refusal, status AND code, and the target's next PROTECTED request still 2xx. packages/qa/dogfood/test/admin-platform-admin-standing.dogfood.test.ts pins the refusal's status and code only and sends no protected request as the target, so that live-session half is driven by hand. On a re-mount: ORACLE = a protected authed request as the target (a data read the target was entitled to), 2xx before the revoke and refused on the very next call after it. get-session is NOT the oracle for this clause, in either case. Since #17881 an anonymous OR revoked get-session answers 401 UNAUTHENTICATED in the ADR-0112 refusal envelope (packages/plugins/plugin-auth/src/anonymous-session-refusal.ts), while a live session still answers 200 with { user, session }, so a 401 there is the CORRECT answer and must never be filed as the defect. It stays off the oracle seat for a reason that does not move with the wire: the contract is about a PROTECTED request, and a refusal emitted by that one auth-route seam is not proof the authorization layer refuses the target's protected reads. If get-session is captured at all it is corroboration only. Read its BODY as well as its status, the discipline packages/plugins/plugin-auth/src/session-of-record.test.ts states: a session that is gone is proven gone by the absence of a user",
+          "verify": "At head: the step-8 refusal, status AND code, and the target's next PROTECTED request still 2xx (with the target's must_change_password cleared first, fixtures.requires[1]: otherwise every protected read answers 403 PASSWORD_RESET_REQUIRED and discriminates nothing). packages/qa/dogfood/test/admin-platform-admin-standing.dogfood.test.ts pins the refusal's status and code only and sends no protected request as the target, so that live-session half is driven by hand. On a re-mount: ORACLE = a protected authed request as the target (a data read the target was entitled to), 2xx before the revoke and refused on the very next call after it. get-session is NOT the oracle for this clause, in either case. Since #17881 an anonymous OR revoked get-session answers 401 UNAUTHENTICATED in the ADR-0112 refusal envelope (packages/plugins/plugin-auth/src/anonymous-session-refusal.ts), while a live session still answers 200 with { user, session }, so a 401 there is the CORRECT answer and must never be filed as the defect. It stays off the oracle seat for a reason that does not move with the wire: the contract is about a PROTECTED request, and a refusal emitted by that one auth-route seam is not proof the authorization layer refuses the target's protected reads. If get-session is captured at all it is corroboration only. Read its BODY as well as its status, the discipline packages/plugins/plugin-auth/src/session-of-record.test.ts states: a session that is gone is proven gone by the absence of a user",
           "evidence": "the refusal + the post-refusal protected request, or the pin output"
         },
         {
@@ -570,6 +577,12 @@
           "date": "2026-10-26",
           "change": "checklist-accuracy findings of the 18.2.0 sweep, and a coverage gap (QA run #25815, identity-auth.admin-lifecycle-operations a4, a0/n1 and ref-parse; addendum #25823 at 17f8217b, after #25626; wave anchor #25807; card #25843). acceptance[4].verify said the target's next protected request is pinned by admin-platform-admin-standing.dogfood.test.ts, which asserts the 403 and its code only; it now says that half is driven by hand. The clause-0 case asserts banned / ban_reason and the unban but attempts no sign-in by the banned user; acceptance[0].verify now says so. automated.ref named remove-user-atomicity.test.ts as a contrast, which a ref parser reads as a pin that scores no clause; it now names that test without its path. automated.ref overclaimed: clause 0's sign-ins, clause 4's live-session half, clause 6's stop half and clause 9's state read-back beyond create-user and set-user-password are unpinned, and it now lists them as manual. Coverage gap: no clause asserted #25626's walled Create User join. acceptance[10]–[12] are new (the new user joins the caller's active organization as member and a body organizationId chooses nothing; 400 NO_ACTIVE_ORGANIZATION with no row; invite-only still joins), with fixtures.requires[2] (a walled boot declaring invite-only), two steps, and automated.ref's create-user-organization-join.dogfood.test.ts (J1, J2) and admin-user-endpoints.test.ts's invite-only case. Clauses 0–9 are unchanged",
           "ref": "#25843"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[1], steps[9], steps[10] and acceptance[4].verify re-pointed (stale spec and fixture gap, QA runs #33093 and #33094, comments 6850899929 and 6852480973; ledger rows 244 and 240 of #32908, row 240 from #33331). Admin-made users carry must_change_password and read 403 PASSWORD_RESET_REQUIRED until it clears (admin-user-endpoints.ts). Impersonation deletes the admin's original session (impersonation-bearer-rotation.ts). showcase_task requires project (task.object.ts). No clause changed. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -578,7 +591,7 @@
       "title": "Active-session list is owner-scoped, and each revoke primitive terminates exactly the sessions it names",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["user A (two devices)", "user B (unrelated, second live session)", "platform admin"],
@@ -602,9 +615,9 @@
       ],
       "acceptance": [
         {
-          "clause": "the active-session list is owner-scoped: A's list-sessions and the Account sessions view show BOTH of A's sessions and NONE of B's — the shared sys_session table is RLS-filtered to the caller",
+          "clause": "the active-session list is owner-scoped: A's list-sessions and the Account sessions view show A's live sessions (both devices' among them) and NONE of B's — the shared sys_session table is RLS-filtered to the caller",
           "oracle": "api",
-          "verify": "GET /api/v1/auth/list-sessions as A returns A's two live sessions only; GET /api/v1/data/sys_session as A returns A's rows only — its rows with revoked_at null are A's two live sessions, and any others are A's own tombstones — and B's row id (known from B's own read) is absent from both",
+          "verify": "GET /api/v1/auth/list-sessions as A returns A's live sessions only, which are exactly the two devices' when A is a fresh user with no earlier sign-in (a user set up through create-user and a forced password change carries more, all A's own: QA run #33093); GET /api/v1/data/sys_session as A returns A's rows only — its rows with revoked_at null are A's two live sessions, and any others are A's own tombstones — and B's row id (known from B's own read) is absent from both",
           "evidence": "A's list responses + B's row id proving the exclusion"
         },
         {
@@ -654,7 +667,8 @@
         { "revision": 1, "date": "2026-08-08", "change": "new item: owner-scoped active-session list (RLS) + per-primitive revoke semantics (revoke-session by token, revoke-other-sessions keeps current) + admin all-sessions view with revoked_at/revoke_reason, grounded in the auth route ledger and sys_session object (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-18", "change": "softened clause 5, which described revoke_reason as a closed {idle_timeout, absolute_max, concurrent_cap, admin} vocabulary. packages/platform-objects/src/identity/sys-session.object.ts declares it as free text (Field.text, maxLength 64) and its description names those as examples with a trailing ellipsis; the observed value after revoke-other-sessions is user_revoked, which the clause as written scores as a violation (#9467 CF-7). Either the clause softens or the field declares a select — softened here, since the ledger cannot change the declaration", "ref": "#9386" },
         { "revision": 3, "date": "2026-10-17", "change": "steps[2] and [6] and acceptance[0].verify and [4] (clause, verify) corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). revoked_at and revoke_reason are columns of the sys_session `revoked` view — all_sessions filters tombstones out — so the step looked for revoke metadata on a view that never shows a terminated row. And the owner's raw /data read carries their own tombstones, so 'returns A's two rows only' miscounted after any revoke; live rows are those with revoked_at null. Not loosened: B's rows must still be absent from A's reads, and a terminated row must still show a non-empty reason", "ref": "#24036" },
-        { "revision": 4, "date": "2026-11-10", "change": "steps[3] and source[1] corrected. Checklist-accuracy finding of QA run #32135 (at ff04ad81; card #32168): revoke-session takes the `token` of the session's row in GET /api/v1/auth/list-sessions; the bearer from `set-auth-token` answered 404. Re-read at base 8523ef9a: bearer() hands clients the signed form while session.token stores the unsigned value (packages/plugins/plugin-auth/src/auth-manager-before-hook.ts), and a token matching no stored session is refused 404 RESOURCE_NOT_FOUND (packages/plugins/plugin-auth/src/revoke-session-match-guard.ts). The step also said the revoke_session row action uses recordIdParam 'token'; it posts the row id to /api/v1/auth/sys-session/revoke with recordIdParam 'sessionId' (packages/platform-objects/src/identity/sys-session.object.ts), so steps[3] and source[1] now say so. No clause changed", "ref": "#32168" }
+        { "revision": 4, "date": "2026-11-10", "change": "steps[3] and source[1] corrected. Checklist-accuracy finding of QA run #32135 (at ff04ad81; card #32168): revoke-session takes the `token` of the session's row in GET /api/v1/auth/list-sessions; the bearer from `set-auth-token` answered 404. Re-read at base 8523ef9a: bearer() hands clients the signed form while session.token stores the unsigned value (packages/plugins/plugin-auth/src/auth-manager-before-hook.ts), and a token matching no stored session is refused 404 RESOURCE_NOT_FOUND (packages/plugins/plugin-auth/src/revoke-session-match-guard.ts). The step also said the revoke_session row action uses recordIdParam 'token'; it posts the row id to /api/v1/auth/sys-session/revoke with recordIdParam 'sessionId' (packages/platform-objects/src/identity/sys-session.object.ts), so steps[3] and source[1] now say so. No clause changed", "ref": "#32168" },
+        { "revision": 5, "date": "2026-11-14", "change": "acceptance[0] (clause and verify) re-pointed (stale spec, QA run #33093, comment 6850899929; ledger row 245 of #32908). 'BOTH of A's sessions' assumed exactly two; a set-up user can hold more, all its own. The owner-scoping the clause tests is unchanged. Read at base 82838e83", "ref": "#33328" }
       ]
     },
     {
@@ -662,10 +676,10 @@
       "title": "Personal API key: minted show-once on Connect-an-Agent, authenticates as its owner, revoke kills it and restore brings it back — mine-view scoped",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
-      "personas": ["a signed-in member (key owner)", "platform admin", "the key itself (machine caller via x-api-key)"],
+      "personas": ["a signed-in member (key owner). If it is made with POST /api/v1/auth/admin/create-user, pass mustChangePassword: false or change its password first: create-user stamps must_change_password by default (packages/plugins/plugin-auth/src/admin-user-endpoints.ts), and every data read, the key's included, answers 403 PASSWORD_RESET_REQUIRED until it clears", "platform admin", "the key itself (machine caller via x-api-key)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -678,8 +692,8 @@
         "capture the mint response: POST /api/v1/keys returns data.key (the raw secret) exactly once, plus id / name / prefix",
         "record the raw secret, close the dialog, then re-open the API Keys list (sys_api_key `mine` view, /_console/apps/com.objectstack.account/sys_api_key/view/mine — its nav entry sits in the collapsed Developer group) and confirm the row shows only the prefix — the raw key is never shown again (the stored `key` column is hashed + hidden)",
         "call a data route as the machine caller: GET /api/v1/data/sys_session with header x-api-key: RAW_SECRET (NOT a session cookie/Bearer) and capture the 200 + that the rows returned are the OWNER's row-level-security view (the key acts as the user): only the owner's own sessions, as the owner reads with a session — while an admin's session read of the same route returns other users' rows too",
-        "revoke the key via the row action revoke_api_key (PATCH /api/v1/data/sys_api_key/{id} bodyExtra {revoked:true}); immediately re-call the data route with x-api-key and capture the 403 whose body's error.code is API_KEY_REVOKED and which carries no rows (a recognised key its own lifecycle refuses — only an UNKNOWN key gets the generic 401)",
-        "restore via restore_api_key (PATCH … {revoked:false}); re-call and capture the 200 again — the lifecycle is reversible",
+        "revoke the key via the row action revoke_api_key: the console posts the action door POST /api/v1/actions/sys_api_key/revoke_api_key {recordId, params: {}}, which forwards to the declared target PATCH /api/v1/data/sys_api_key/{id} with bodyExtra {revoked: true} (packages/platform-objects/src/identity/sys-api-key.object.ts; ui/packages/app-shell/src/utils/apiActionDoor.ts); the PATCH answers directly too; immediately re-call the data route with x-api-key and capture the 403 whose body's error.code is API_KEY_REVOKED and which carries no rows (a recognised key its own lifecycle refuses — only an UNKNOWN key gets the generic 401)",
+        "restore via restore_api_key (the action door POST /api/v1/actions/sys_api_key/restore_api_key, forwarding to PATCH … {revoked: false}); re-call and capture the 200 again — the lifecycle is reversible",
         "mine-view scoping: sign in as a DIFFERENT member and confirm the sys_api_key `mine` view (filter user_id={current_user_id}) does NOT list the first user's key; then as admin open Setup → API Keys (the `all_keys` view, /_console/apps/com.objectstack.setup/sys_api_key/view/all_keys, nav gated on manage_platform_settings) and confirm every user's key is listed",
         "attempt to read the raw secret back via the data API (GET /api/v1/data/sys_api_key/{id}) and confirm the `key` field is absent/hidden — only the prefix is ever returned"
       ],
@@ -750,6 +764,12 @@
           "date": "2026-10-27",
           "change": "steps[0], steps[2] and steps[6] name the two API Keys routes and the mint's confirm click. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A): the API Keys nav sits in a collapsed Developer group, so the run navigated by route, and minting takes Generate key then a confirm. No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "steps[4], steps[5] and personas[0] re-pointed (stale spec and fixture gap, QA run #33093, comment 6850899929; ledger rows 247 and 240 of #32908, row 240 from #33331). The console's row action posts the action door, which forwards to the declared PATCH (apiActionDoor.ts, sys-api-key.object.ts); both doors are named. A member made by admin create-user must clear must_change_password before any read (admin-user-endpoints.ts). No clause changed. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -854,7 +874,7 @@
       "title": "Setup Organization page resolves the active org and drives member/invitation/team management through the better-auth org endpoints — non-admins refused server-side",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["tenant admin / org owner", "a target org member", "a non-admin org member (forger)"],
@@ -870,7 +890,7 @@
         "confirm the record page exposes the Members / Invitations / Teams tabs with the better-auth row actions (GET list-members, list-invitations, list-teams feed them)",
         "change a member's role: POST /api/v1/auth/organization/update-member-role (client organizations.updateMemberRole) to one of the ADR-0108 closed 4-name vocabulary {owner, admin, delegated_admin, member}; read the membership back and confirm the new role",
         "prove the vocabulary is CLOSED, not merely conventional: attempt the same call with role 'guest' (and with any stack-declared position/permission-set name, e.g. showcase's 'showcase_contributor') — better-auth's role check refuses it (400 ROLE_NOT_FOUND) before any insert, and no membership/invitation row is left behind",
-        "prove the role change bites: an operation the new role gates flips outcome for that member (e.g. promote to admin → an org-admin-only action now permitted; demote → refused)",
+        "prove the role change bites: an operation the new role gates flips outcome for that member: POST /api/v1/auth/organization/invite-member, which a member is refused (better-auth's default member role carries no invitation:create, packages/plugins/plugin-auth/src/auth-manager-organization-plugin.ts) and an admin is admitted; promote to admin → it answers 2xx, demote → refused again. It does not tell admin from delegated_admin, which also holds invitation:create",
         "rename the organization: POST /api/v1/auth/organization/update (organizations.update) with a new name; re-read GET get-full-organization and confirm the rename persisted and the organization record page's title follows. The Setup nav entry does NOT follow: nav_organization's label is the static string 'Organization' (packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_organization)",
         "remove a member: POST /api/v1/auth/organization/remove-member (organizations.removeMember); confirm the member's org-scoped access SHRINKS through a request that is answered BECAUSE of membership of that org — e.g. GET /api/v1/auth/organization/get-full-organization?organizationId=ORG, or POST /api/v1/auth/organization/set-active for it — succeeding before and refused 403 USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION after. Read the after-side on a FRESH sign-in: remove-member also revokes the member's live sessions (revoke_reason organization_membership_ended), so the old session answers 401 to every request and discriminates nothing. ⛔ Not a data read: on the stock `single` posture the `everyone` baseline grants survive remove-member, so an ex-member still reads the same showcase rows and the check could not discriminate",
         "create a team + add members: POST /api/v1/auth/organization/create-team (organizations.teams.create), then POST /api/v1/auth/organization/add-team-member (organizations.teams.addMember) for two users; read sys_team_member and confirm two join rows exist (unique on team_id+user_id)",
@@ -886,7 +906,7 @@
         {
           "clause": "update-member-role writes a role from the ADR-0108 closed vocabulary and it bites: the membership read shows the new role (one of owner/admin/delegated_admin/member) and a role-gated operation flips outcome accordingly",
           "oracle": "api",
-          "verify": "GET list-members after update-member-role shows the new role; the same gated request returns 2xx vs 403 before/after for that member. The four names are BUILTIN_MEMBERSHIP_ROLE_OPTIONS (packages/spec/src/identity/membership-role.ts) — the registered select options for sys_member.role and sys_invitation.role, pinned by packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts",
+          "verify": "GET list-members after update-member-role shows the new role; the same gated request (invite-member, steps[4]) returns 2xx vs 403 before/after for that member. The four names are BUILTIN_MEMBERSHIP_ROLE_OPTIONS (packages/spec/src/identity/membership-role.ts) — the registered select options for sys_member.role and sys_invitation.role, pinned by packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts",
           "evidence": "the membership read + the bracketing gated requests"
         },
         {
@@ -948,7 +968,8 @@
           "change": "steps[5] and acceptance[3].clause corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.org-membership-team-management; wave anchor #24579 §3): after a rename the step expected the nav label to follow, but nav_organization's label is the static 'Organization' (setup-nav.contributions.ts); what follows is the organization record page's title, which the run observed. Not a loosening: the persisted name and the page title must both show the rename",
           "ref": "#24632"
         },
-        { "revision": 6, "date": "2026-10-28", "change": "PROVENANCE, no clause change: the record page's tabs slot retired (#27053), so SysOrganizationDetailPage moved from kind: 'slotted' with a slots.tabs override to kind: 'full', rebuilt as the header, highlights, the same Members / Invitations / Teams strip and the discussion the slotted page rendered. source[1] now names the full page; the tab order, steps, acceptance clauses, oracles and negatives are unchanged (ADR-0133 carries the matching amendment)", "ref": "#27053" }
+        { "revision": 6, "date": "2026-10-28", "change": "PROVENANCE, no clause change: the record page's tabs slot retired (#27053), so SysOrganizationDetailPage moved from kind: 'slotted' with a slots.tabs override to kind: 'full', rebuilt as the header, highlights, the same Members / Invitations / Teams strip and the discussion the slotted page rendered. source[1] now names the full page; the tab order, steps, acceptance clauses, oracles and negatives are unchanged (ADR-0133 carries the matching amendment)", "ref": "#27053" },
+        { "revision": 7, "date": "2026-11-14", "change": "steps[4] and acceptance[1].verify name the gated operation (checklist gap, QA run #33093, comment 6850899929; ledger row 249 of #32908): invite-member discriminates member from admin, because only the admin-grade roles hold invitation:create (auth-manager-organization-plugin.ts). The clause is unchanged. Read at base 82838e83", "ref": "#33328" }
     ]
     },
     {
@@ -1037,14 +1058,14 @@
       "title": "Forgot-password: request → token captured at the dev mail transport → reset; old password refused, expired/reused token refused loudly",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": ["anonymous visitor (holds no session)", "the account owner (before and after reset)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "email+password sign-in enabled and an email transport configured — a stock boot sends through the dev `log` transport, so nothing leaves the box; the mail is read from its sys_identity_email row (admin GET /api/v1/data/sys_identity_email — body_text / body_html hold the rendered body and its link). The reset mail is identity mail: plugin-auth's auth.password_reset send passes identityMail: true, and the mail service records identity mail in the deployment-level sys_identity_email, never in the tenant log sys_email (ADR-0131 D7, packages/plugins/plugin-email/src/email-log-objects.ts), so GET /api/v1/data/sys_email holds no reset row: the dev `log` transport is not an env switch (EMAIL_TRANSPORT_PROVIDERS is a const list of what the package can build, packages/plugins/plugin-email/src/transports/index.ts) and LogTransport logs only to, subject and hasText/hasHtml — never the body or the link (packages/plugins/plugin-email/src/email-service.ts)",
+          "email+password sign-in enabled and an email transport configured — a stock boot sends through the dev `log` transport, so nothing leaves the box, and /auth/config answers features.emailDelivery false (the log transport is not live delivery, auth-manager.ts isEmailDeliveryLive) while the reset mail still lands with status sent: do not read the flag as 'no mail'; the mail is read from its sys_identity_email row (admin GET /api/v1/data/sys_identity_email — body_text / body_html hold the rendered body and its link). The reset mail is identity mail: plugin-auth's auth.password_reset send passes identityMail: true, and the mail service records identity mail in the deployment-level sys_identity_email, never in the tenant log sys_email (ADR-0131 D7, packages/plugins/plugin-email/src/email-log-objects.ts), so GET /api/v1/data/sys_email holds no reset row: the dev `log` transport is not an env switch (EMAIL_TRANSPORT_PROVIDERS is a const list of what the package can build, packages/plugins/plugin-email/src/transports/index.ts) and LogTransport logs only to, subject and hasText/hasHtml — never the body or the link (packages/plugins/plugin-email/src/email-service.ts)",
           "a target user with a known current password"
         ],
         "knownGaps": [
@@ -1059,7 +1080,7 @@
         "reuse the SAME token a second time (POST /api/v1/auth/reset-password again) and capture the loud refusal — a consumed token must not reset again",
         "request a fresh reset and expire its token without a clock wait. Read the token from the new sys_identity_email row (steps[1]); then, in the run's own file DB, move that token's verification row into the past with node:sqlite (no sqlite3 CLI in this container): `UPDATE sys_verification SET expires_at = 'PAST' WHERE identifier = 'reset-password:TOKEN'`, where PAST is one hour before now in the form Date#toISOString writes, and the statement reports one changed row. better-auth keys a reset row reset-password:TOKEN, stored plain, and expires_at is a datetime column stored as canonical UTC text (packages/plugins/plugin-auth/src/auth-schema-config.ts#AUTH_VERIFICATION_CONFIG). Then POST /api/v1/auth/reset-password with that token and confirm it is refused with a named error (better-auth's consume treats a row past expiresAt as invalid: 400 INVALID_TOKEN, as QA runs #24838 and #24841 measured), that the current password still signs in, and that the attempted one does not. Separately, a tampered/garbage token: confirm the same refusal, never a silent success",
         "negative: request-password-reset for an unknown email should not leak whether the account exists (anti-enumeration) — record the response shape",
-        "confirm password-reuse prevention if configured: resetting to the OLD password is refused where password_history_count > 0 (previous_password_hashes ring, ADR-0069 D1)"
+        "confirm password-reuse prevention if configured: resetting to the OLD password is refused where password_history_count > 0 (previous_password_hashes ring, ADR-0069 D1). The ring holds only passwords replaced while the count was above 0 (recordPasswordHistory returns early otherwise, packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts), so set the count before the password changes the probe compares. The refusal is 400 PASSWORD_REUSE before the reset runs, so the token stays usable for a different password (QA run #33092)"
       ],
       "acceptance": [
         {
@@ -1125,6 +1146,12 @@
           "date": "2026-10-20",
           "change": "steps[5]'s expiry leg runs without a clock wait. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4; QA run #24838 ran the same leg): the step said 'let the token expire', and a reset token lives an hour (resetPasswordTokenExpiresIn || 3600, better-auth 1.7.3 routes/password.mjs). It now writes the token's sys_verification.expires_at into the past, the simulation both records measured (400 INVALID_TOKEN, the password unchanged). Read at base feb09db14a: AUTH_VERIFICATION_CONFIG maps expiresAt to expires_at; no verification.storeIdentifier is set, so the identifier is stored plain; consumeVerificationValue treats a row past expiresAt as invalid. The record's other finding (requires and steps still naming sys_email) no longer holds: revision 4 (#24824) moved them to sys_identity_email, and the sys_email mentions left say 'never sys_email'. No clause changed",
           "ref": "#24963"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "steps[7] and fixtures.requires[0] re-pointed (stale spec, QA run #33092, comment 6850793622; ledger row 229 of #32908). The history ring fills only while password_history_count > 0, and a PASSWORD_REUSE refusal leaves the token usable (auth-manager-password-session-policy.ts). features.emailDelivery reads false on the log transport although the mail row is written (auth-manager.ts isEmailDeliveryLive). No clause changed. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -1133,7 +1160,7 @@
       "title": "OAuth provider: register an app (secret shown once), run the authorization-code consent loop — approve mints tokens + a consent record, deny mints none",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["an org admin registering the OAuth client", "the resource-owner user granting/denying consent"],
@@ -1150,14 +1177,14 @@
       },
       "steps": [
         "wiring precheck: on the stock boot, confirm the embedded AS is up — GET /.well-known/oauth-authorization-server answers 200 with authorization/token endpoints under /api/v1/auth/oauth2/*, and the boot env sets neither OS_MCP_SERVER_ENABLED nor OS_OIDC_PROVIDER_ENABLED falsy; record both facts before the first oauth2 call",
-        "as admin, register an OAuth client with NO external IdP: either the console Setup → OAuth Applications create action (posts /api/v1/auth/sys-oauth-application/register) or POST /api/v1/auth/oauth2/create-client (client oauth.applications.register); register it with an https, non-loopback redirect URI (e.g. https://app.example.test/callback): create-client defaults to client type 'web', which refuses http and loopback redirect URIs; capture the response and the client_secret — revealed ONCE at registration",
+        "as admin, register an OAuth client with NO external IdP: either the console Setup → OAuth Applications create action (posts /api/v1/auth/sys-oauth-application/register) or POST /api/v1/auth/oauth2/create-client (client oauth.applications.register); register it with an https, non-loopback redirect URI (e.g. https://app.example.test/callback): create-client defaults to client type 'web', which refuses http and loopback redirect URIs; register it with grant_types including refresh_token (create-client defaults to ['authorization_code'] only, @better-auth/oauth-provider DEFAULT_REGISTRATION_GRANT_TYPES); capture the response and the client_secret — revealed ONCE at registration",
         "re-read the client via GET /api/v1/auth/oauth2/get-client and confirm the secret is NOT returned again (only client_id / public metadata)",
-        "begin the authorization-code flow: GET /api/v1/auth/oauth2/authorize with the client_id, redirect_uri, scope and state; as the resource owner, land on the consent page — the console's /oauth/consent route (auth-manager.ts consentPage → OAuthConsentPage, objectui apps/console/src/App.tsx) — and screenshot the requested-scopes list",
-        "APPROVE: POST /api/v1/auth/oauth2/consent (oauth.consent) accept; follow the redirect, exchange the code at POST /api/v1/auth/oauth2/token, and capture the issued access/refresh tokens",
+        "begin the authorization-code flow: GET /api/v1/auth/oauth2/authorize with the client_id, redirect_uri, scope and state, the scope including offline_access (a refresh token is issued only when the client allows refresh_token AND the scopes include offline_access, @better-auth/oauth-provider 1.7.12); as the resource owner, land on the consent page — the console's /oauth/consent route (auth-manager.ts consentPage → OAuthConsentPage, objectui apps/console/src/App.tsx) — and screenshot the requested-scopes list",
+        "APPROVE: POST /api/v1/auth/oauth2/consent (oauth.consent) accept; follow the redirect, exchange the code at POST /api/v1/auth/oauth2/token, and capture the issued access/refresh tokens. Test the tokens before any replay probe: a replayed code revokes the access and refresh tokens it issued (revokeTokensIssuedForAuthorizationCode, @better-auth/oauth-provider)",
         "confirm a consent record now exists: GET /api/v1/auth/oauth2/get-consents shows a consent for this client covering the approved scopes (sys_oauth_consent row — not data-API readable)",
         "run the flow again for the SAME client+scopes and confirm the consent screen is SKIPPED (the recorded consent short-circuits it)",
         "DENY path: start a fresh authorize with an added scope (forcing consent), deny it, and confirm NO tokens are issued and NO new consent is recorded",
-        "mine-view scoping: confirm the consent surface shows the CALLER's consents only — another user cannot see this user's oauth2 consents",
+        "mine-view scoping: confirm the consent surface shows the CALLER's consents only — another user cannot see this user's oauth2 consents (a cross-user get-consent or delete-consent for this user's consent id answers 401, QA run #33093: a refusal either way)",
         "off-side of the wiring gate (separate boot, or fold into another run): boot with OS_OIDC_PROVIDER_ENABLED=false (or OS_MCP_SERVER_ENABLED=false and no explicit oidcProvider config) and confirm the oauth2 surface is genuinely dark — the authorize/create-client calls refuse or 404, not half-mounted"
       ],
       "acceptance": [
@@ -1221,7 +1248,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: OAuth client registration (secret once) + authorization-code consent loop (approve mints tokens + consent record, deny mints none, recorded consent short-circuits), mine-view scoped; blocked(fixture) pending a configured oidcProvider flow (PENDING-GAPS §C)", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-30", "change": "UNBLOCKED — the blocked(fixture) claim was stale, verified against source: the embedded authorization server is ON BY DEFAULT (resolveOidcProviderEnabled falls through to the MCP surface default, which is TRUE when OS_MCP_SERVER_ENABLED is unset), so oauth2/{authorize,token,consent,create-client} mount on every stock boot with consent rendered at the console's /oauth/consent, and a client registers with no external IdP (console create action → sys-oauth-application/register, SDK create-client, or DCR). Revision 1 had conflated platform-as-provider (this item) with an external IdP (what linked-accounts-social needs — that one stays blocked). Removed blocked, added the wiring precheck + a both-sides default-ON/off-switch clause, recorded the runtime caveat (confirm OS_MCP_SERVER_ENABLED / OS_OIDC_PROVIDER_ENABLED are not set falsy)", "ref": "#sweep-2026-08-30" },
-        { "revision": 3, "date": "2026-10-17", "change": "steps[1] names a redirect URI the default client type accepts (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)): create-client defaults to type 'web', which refuses http and loopback redirect URIs, so a runner registering a localhost callback met a refusal before the consent loop began", "ref": "#24036" }
+        { "revision": 3, "date": "2026-10-17", "change": "steps[1] names a redirect URI the default client type accepts (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)): create-client defaults to type 'web', which refuses http and loopback redirect URIs, so a runner registering a localhost callback met a refusal before the consent loop began", "ref": "#24036" },
+        { "revision": 4, "date": "2026-11-14", "change": "steps[1], steps[3], steps[4] and steps[8] re-pointed (stale spec, QA run #33093, comment 6850899929; ledger row 167 of #32908). Read in the vendored @better-auth/oauth-provider 1.7.12: create-client registers ['authorization_code'] by default, a refresh token needs the refresh_token grant and the offline_access scope, and a replayed code revokes the tokens it issued. Cross-user consent doors answer 401. The clause is unchanged. Read at base 82838e83", "ref": "#33328" }
       ]
     },
     {
@@ -1229,14 +1257,14 @@
       "title": "Linked accounts: link a social/OIDC identity through the redirect round-trip → a sys_account row appears in mine-view; unlink removes it; provider-less boot degrades honestly",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a signed-in user linking a second identity", "the same user after unlinking"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "at least one social/OIDC provider configured (socialProviders or oidcProviders) so the link door has a provider to dance with — stock showcase ships none, so the runtime fixture below supplies one",
+          "at least one social/OIDC provider configured (socialProviders or oidcProviders) so the link door has a provider to dance with — stock showcase ships none, so the runtime fixture below supplies one. A social provider has an env and settings door (google_enabled / google_client_id / google_client_secret, OS_AUTH_GOOGLE_ENABLED, GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET, packages/plugins/plugin-auth/src/auth-plugin.ts) but needs real client credentials; oidcProviders has none",
           "RUNTIME FIXTURE — a local OIDC provider (proved by run #21845; a test fixture in the run's scratch dir, ⛔ never committed and never a product change): a localhost authorization-code + PKCE OpenID provider serving discovery (/.well-known/openid-configuration), authorize, token, userinfo and jwks, registered with the auth service through its public config patch from a scratch app plugin — call the auth manager's applyConfigPatch({ oidcProviders: [ { the local provider's id, discovery URL, client id/secret } ] }). The 'auth:configure' hook is NOT usable for this: it fires before a scratch app plugin can contribute. The provider must be up, and the patch applied, before the first auth request (better-auth is built lazily on that request)",
           "the Account app's 'Linked Accounts' surface (nav_account_linked → sys_account) reachable"
         ],
@@ -1248,7 +1276,7 @@
         "as a signed-in user, open the Account app → Linked Accounts (sys_account `mine` view, filter user_id={current_user_id}); screenshot the initial link set",
         "link through the AUTHENTICATED link door: with the user's session, POST /api/v1/auth/link-social {provider: '<the local provider id>', callbackURL: '<origin>/_console/apps/account/sys_account'} — it answers the provider's authorization URL; navigate the browser to that returned URL (full-page navigation, NOT XHR, so the OAuth round-trip and its state cookie work), complete the provider round-trip and land back on Linked Accounts — the callbackURL above lands on the sys_account list's 'All' tab, not the caller's own view, so read the new row from the mine view (steps[2]), not from where the callback lands. ⛔ Do not link through the sign-in door (/api/v1/auth/sign-in/social): that signs in, it does not link to the current user",
         "confirm a sys_account row now exists for that provider in the caller's mine-view (provider_id = the provider, user_id = the caller) — (provider_id, account_id) is the whole account identity; there is no issuer to check, sys_account.issuer retired with better-auth 1.7.3 (packages/spec/src/migrations/entries/semantic/18.sys-account-issuer-retired.ts)",
-        "unlink it: the unlink_account action → POST /api/v1/auth/unlink-account with accountId = the sys_account ROW id (better-auth 1.7 keys on the row id); confirm the row is gone from mine-view",
+        "unlink it: the unlink_account row action, which the console posts to the action door POST /api/v1/actions/sys_account/unlink_account (ui/packages/app-shell/src/utils/apiActionDoor.ts) and the server forwards to POST /api/v1/auth/unlink-account; the direct auth door answers too. Either way accountId = the sys_account ROW id (better-auth 1.7 keys on the row id); confirm the row is gone from mine-view",
         "both-sides / degradation: on a boot with NO provider configured, confirm the Linked Accounts surface degrades honestly — any link affordance is absent or names the missing provider, rather than offering a link that dead-ends (open-edition honest-degradation posture)",
         "confirm sys_account is read-only over the data API — a forged direct insert/delete is refused (apiMethods ['get','list'] — declared in sys-account.object.ts and served so by the meta read; the read-family aggregate and export routes pass that method gate and meet their own checks instead, a bare aggregate 400 VALIDATION_ERROR and export 403 EXPORT_NOT_PERMITTED, never 405; writes 405)"
       ],
@@ -1268,7 +1296,7 @@
         {
           "clause": "unlink removes the row: unlink_account keyed on the sys_account row id deletes exactly that link from mine-view",
           "oracle": "api",
-          "verify": "POST /api/v1/auth/unlink-account with the row's accountId; a follow-up mine-view read no longer contains it",
+          "verify": "the unlink through the action door POST /api/v1/actions/sys_account/unlink_account (the console's) or POST /api/v1/auth/unlink-account, with the row's accountId; a follow-up mine-view read no longer contains it",
           "evidence": "the unlink response + the follow-up read"
         },
         {
@@ -1304,7 +1332,8 @@
         { "revision": 2, "date": "2026-09-23", "change": "the 'issuer stamped' requirement is withdrawn from both the step and the first acceptance clause's verify: better-auth 1.7.3 rolled the issuer-scoped account identity back and sys_account.issuer retired with it, so nothing stamps it and the old verify failed a healthy system. The reason is kept — the step now says (provider_id, account_id) is the whole identity and names the retirement's migration entry in packages/spec — and the verify states that an issuer-less row is the expected shape", "ref": "#19217" },
         { "revision": 3, "date": "2026-10-05", "change": "blocked lifted: run #21845 passed the link, mine-view, unlink and read-only clauses against a local authorization-code + PKCE OIDC provider registered through the auth manager's applyConfigPatch from a scratch app plugin ('auth:configure' fires too early); the provider recipe is written into fixtures.requires, not committed as code, and the missing-IdP gap is kept as a CLOSED-for-runs knownGap. Step 2 now links through the authenticated POST /api/v1/auth/link-social and navigates to the URL it returns — the old step drove the sign-in door, which signs in rather than links. The step, the provider-less clause and its negative no longer name a specific sys_account action: they describe the link affordance, so the clause indices stay stable while the action itself is handled on its own card. The user's nav label is 'Linked Accounts' in the Account app (nav_account_linked); 'Identity Links' is the Setup app's admin entry (card #21851 entry 3)", "ref": "#21845" },
         { "revision": 4, "date": "2026-10-16", "change": "PROVENANCE, no clause change: #23803 removed Setup's nav_accounts ('Identity Links') entry, so the source anchor that cited it no longer resolved. Re-pointed it at SysUserDetailPage, whose Linked Accounts tab (a related list over sys_account keyed on user_id) is where an administrator reaches a user's identity links now. Steps, acceptance clauses, oracles and negatives are unchanged: they drive the user's Account-app surface, which did not move", "ref": "#23803" },
-        { "revision": 5, "date": "2026-10-17", "change": "steps[1] and [5] and acceptance[3].verify and [4].verify corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The slice read sys_account's live methods as [get, list, aggregate, export]; the re-run on #24036 found the meta read still serving ['get','list'] while the aggregate and export routes pass the method gate (400 VALIDATION_ERROR / 403 EXPORT_NOT_PERMITTED, never 405), so the step now says both — reads only either way, and writes still 405; link_social is retired, so a provider-less boot's missing link action is the same absence every boot shows and clause 3 cannot discriminate on it; and the link callback lands on the 'All' tab. Not loosened: a forged write must still answer 405", "ref": "#24036" }
+        { "revision": 5, "date": "2026-10-17", "change": "steps[1] and [5] and acceptance[3].verify and [4].verify corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The slice read sys_account's live methods as [get, list, aggregate, export]; the re-run on #24036 found the meta read still serving ['get','list'] while the aggregate and export routes pass the method gate (400 VALIDATION_ERROR / 403 EXPORT_NOT_PERMITTED, never 405), so the step now says both — reads only either way, and writes still 405; link_social is retired, so a provider-less boot's missing link action is the same absence every boot shows and clause 3 cannot discriminate on it; and the link callback lands on the 'All' tab. Not loosened: a forged write must still answer 405", "ref": "#24036" },
+        { "revision": 6, "date": "2026-11-14", "change": "steps[3], acceptance[2].verify and fixtures.requires[0] re-pointed (stale spec, QA runs #33058 and #33093, comments 6846283471 and 6850899929; ledger row 168 of #32908). The console's unlink is a declared api action, so it posts the action door, which forwards to /auth/unlink-account (apiActionDoor.ts); both doors are named. A social provider can be switched on from env or settings (auth-plugin.ts), but no real client credentials exist for a run, so the local OIDC fixture stays. The clause is unchanged. Read at base 82838e83", "ref": "#33328" }
       ]
     },
     {
@@ -1312,7 +1341,7 @@
       "title": "Admin CSV identity import: password-policy auto/temporary drive per-row credentials, imported users sign in, non-admins denied",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["platform admin (running the import)", "an imported user (signing in afterwards)", "a non-admin (forger)"],
@@ -1321,10 +1350,10 @@
         "requires": [
           "platform-admin access to the identity Import Wizard (objectui app-shell identityImport.ts wraps the wizard onto POST /api/v1/auth/admin/import-users — the sys_user import cannot use the generic /data import because it must go through better-auth password hashing + credential creation)",
           "a small scratch CSV of users (email required; the wizard parses it client-side into rows[])",
-          "for the `auto` invite-reachable path: an email/SMS transport so an invitation can be issued (dev `log` transport is sufficient to observe it); unreachable rows fall back to a one-time password"
+          "for the `auto` invite-reachable path: an email/SMS transport so an invitation can be issued. The dev `log` transport shows only that a mail was sent: LogTransport logs to and subject, never the body or its set-password link (packages/plugins/plugin-email/src/email-service.ts), so following an invitation (steps[3]) needs an SMTP sink, as in identity-auth.email-verification-loop; unreachable rows fall back to a one-time password"
         ],
         "knownGaps": [
-          "observing the `auto` INVITE path needs a transport to capture the invitation; with the dev log transport it is observable, otherwise the invite-vs-fallback split is blocked(fixture). The one-time passwords (auto-fallback + all of temporary) are returned ONLY in the response — the result step must reveal them; they are never persisted",
+          "observing the `auto` INVITE path needs a transport to capture the invitation; with the dev log transport the send is observable but the link is not (an SMTP sink carries it), otherwise the invite-vs-fallback split is blocked(fixture). The one-time passwords (auto-fallback + all of temporary) are returned ONLY in the response — the result step must reveal them; they are never persisted",
           "the `auto` policy's TEMPORARY-FALLBACK branch is UNREACHABLE on `objectstack dev` (run #7663) — do not score it as a missing behaviour and do not re-derive this next sweep. `auto` falls back only when a row is neither email- nor SMS-deliverable (admin-import-users.ts), and on dev neither can be made false: service-email / service-sms always register (a log transport is the no-provider fallback: packages/services/service-sms/src/sms-plugin.ts#resolveInitialTransport answers LogSmsTransport, and init logs 'no provider configured'), so isEmailServiceAvailable() is a bare 'is a service wired?' check (auth-manager.ts) and returns true; and isPhoneOtpDeliverable() (auth-manager.ts) only returns false for an unconfigured transport when NODE_ENV === 'production', which `objectstack dev` rules out (cli/src/commands/dev.ts spawns with NODE_ENV='development'; serve.ts sets it under --dev). So every email row takes the invite path, and a phone-only row without the phoneNumber plugin fails PHONE_NOT_ENABLED before any plan is chosen. To exercise the fallback, boot WITHOUT an email service (or with NODE_ENV=production + an unconfigured SMS transport) — otherwise score the fallback via the `temporary` policy, which forces the same credential path for every row"
         ]
       },
@@ -1333,13 +1362,13 @@
         "run with passwordPolicy `auto` (the default, framework#3236): deliverable rows get an invitation (set-your-password email/SMS), unreachable rows fall back to a one-time password revealed once in the result step; capture the per-row result (action + any temporaryPassword) and screenshot the reveal",
         "run a second import with passwordPolicy `temporary`: EVERY row gets a per-row one-time password (no invitations); confirm each result row carries a temporaryPassword shown once",
         "sign in as an imported user: for a `temporary` (or auto-fallback) row use the revealed one-time password; for an `auto` invite row, follow the invitation to set a password; confirm email+password sign-in then works",
-        "idempotency: re-run the SAME CSV in upsert mode (matchBy email) and confirm it upserts (updates) rather than duplicating — the endpoint matches on email/phone",
+        "idempotency: re-run the SAME CSV in upsert mode (matchBy email): the wizard defaults to 'Always create new', so pick 'Update if matched, else create' and Match on Email, which the Import button waits for (ui/packages/plugin-grid/src/ImportWizard.tsx) and confirm it upserts (updates) rather than duplicating — the endpoint matches on email/phone",
         "confirm one-time passwords are NOT persisted anywhere: they appear only in the import response/result step, never in a later read of the user or any audit row",
         "both-sides gate: as a NON-admin, POST /api/v1/auth/admin/import-users directly and capture the refusal (the endpoint is platform-admin-gated)"
       ],
       "acceptance": [
         {
-          "clause": "policy `auto` splits per row: deliverable rows get an invitation, unreachable rows fall back to a one-time password revealed once — the wizard result surfaces both outcomes",
+          "clause": "policy `auto` splits per row: deliverable rows get an invitation, unreachable rows fall back to a one-time password revealed once — the result step reveals the one-time passwords; the invite outcome is in the response's rows[].delivery and at the transport, not drawn by the result step (ui/packages/app-shell/src/views/IdentityImportPanels.tsx)",
           "oracle": "api",
           "verify": "the import response's per-row results show action + rows[].delivery ('email' | 'sms' | 'temporary'); deliverable rows show an invitation outcome (observed at the dev transport). On `objectstack dev` the fallback HALF of this clause is not reachable — see the fixture note: every row is deliverable there, so score the invite half and record the fallback half as not-exercised-by-fixture (NOT as a defect); the fallback credential path itself is covered by the `temporary` clause below",
           "evidence": "the import response + the transport capture + the reveal screenshot"
@@ -1396,7 +1425,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: admin CSV identity import with password-policy matrix (auto/temporary/invite/none), imported-user sign-in, upsert idempotency, response-only one-time passwords, non-admin denied, grounded in objectui identityImport.ts + admin-user-endpoints.ts (PENDING-GAPS §G)", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "from run #7663: recorded the fixture note that the `auto` policy's temporary-fallback branch cannot occur on `objectstack dev` — both transports always register (log fallback) and dev pins NODE_ENV='development', so neither deliverability gate can be made false and every row takes the invite path. The clause now says score the invite half and record the fallback half as not-exercised-by-fixture rather than as a defect, and names the boot that WOULD exercise it. Recorded so the next sweep does not re-derive it", "ref": "#7740" },
-        { "revision": 3, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.knownGaps[1] cited line 169 of sms-plugin.ts and source[2] line 4074 of auth-manager.ts in the comma-range spelling (authored in 3bb9340974 as the lists 149 and 169, and 4054 and 4074). At that commit 149 and 169 were the LogSmsTransport fallback in resolveInitialTransport and its 'no provider configured' log in init, and 4054 and 4074 were isEmailServiceAvailable and isPhoneOtpDeliverable; at this base all four have moved. knownGaps[1] now anchors sms-plugin.ts#resolveInitialTransport, and source[2] anchors auth-manager.ts#isEmailServiceAvailable and #isPhoneOtpDeliverable, the two gates its words already name. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" }
+        { "revision": 3, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.knownGaps[1] cited line 169 of sms-plugin.ts and source[2] line 4074 of auth-manager.ts in the comma-range spelling (authored in 3bb9340974 as the lists 149 and 169, and 4054 and 4074). At that commit 149 and 169 were the LogSmsTransport fallback in resolveInitialTransport and its 'no provider configured' log in init, and 4054 and 4074 were isEmailServiceAvailable and isPhoneOtpDeliverable; at this base all four have moved. knownGaps[1] now anchors sms-plugin.ts#resolveInitialTransport, and source[2] anchors auth-manager.ts#isEmailServiceAvailable and #isPhoneOtpDeliverable, the two gates its words already name. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
+        { "revision": 4, "date": "2026-11-14", "change": "fixtures.requires[2], knownGaps[0], steps[4] and acceptance[0].clause re-pointed (stale spec, QA runs #33058 and #33093, comments 6846283471 and 6850899929; ledger row 169 of #32908). The result step draws the one-time passwords only (IdentityImportPanels.tsx), so the clause no longer promises a UI for the invite outcome; its api oracle is unchanged. LogTransport logs no link (email-service.ts). The wizard defaults to insert, so the upsert step names the match mode to pick (ImportWizard.tsx). Read at base 82838e83", "ref": "#33328" }
       ]
     },
     {
@@ -1404,7 +1434,7 @@
       "title": "TOTP enrollment reveal: /two-factor/enable returns a parseable otpauth:// URI + backup codes, the declared reveal dialog's paths resolve against that exact shape, and the live re-reveal endpoint's behavior is recorded",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": ["a signed-in user with a known password enrolling their own second factor"],
@@ -1458,7 +1488,7 @@
         {
           "clause": "OBSERVE-AND-RECORD — the live re-reveal endpoint is recorded, not assumed: POST /api/v1/auth/two-factor/get-totp-uri is a mounted route that hands the totpURI back AFTER enrollment — measured password-gated and returning the SAME secret (the identity-auth slice report on #23878 (6216631966)). The enable dialog's 'shown only once' copy covers the backup codes only, so the re-reveal breaks no promise the console makes; whether a re-revealable TOTP secret is accepted design is a ruling owed, not this clause's verdict. The run records the behaviour (password-gated? same secret? before and after verification?) — this clause is satisfied by an accurate record, not by any particular outcome",
           "oracle": "api",
-          "verify": "drive POST /two-factor/get-totp-uri with and without the correct password, before and after the enrollment is verified. The verification ROTATES the session: on the enrolment lane /two-factor/verify-totp mints a new session and deletes the caller's, so the 'after' probes carry the token verify-totp's response echoes (the live rotated session, packages/plugins/plugin-auth/src/two-factor-rotated-token-echo.ts) or its Set-Cookie; on the pre-verify bearer every probe answers 401, for the right and the wrong password alike, and measures nothing (QA run #27392); record each status and whether the returned URI carries the same secret. If it re-reveals with NO password gate, that is an authentication finding — RUNNER rule 2's carve-out applies (no card; one run-record row, recipe withheld)",
+          "verify": "drive POST /two-factor/get-totp-uri with and without the correct password, before and after the enrollment is verified. The verification ROTATES the session: on the enrolment lane /two-factor/verify-totp mints a new session and deletes the caller's, so the 'after' probes carry the token verify-totp's response echoes (the live rotated session, packages/plugins/plugin-auth/src/two-factor-rotated-token-echo.ts) or its Set-Cookie; before the verify, get-totp-uri answers on the caller's own credential, bearer or cookie alike, 200 or 400 by the password gate, never 401 (QA runs #33025 and #33092); the only 401 is a token minted BEFORE the verify and presented AFTER it, because verify-totp deleted that session, and that probe measures nothing (QA run #27392); record each status and whether the returned URI carries the same secret. If it re-reveals with NO password gate, that is an authentication finding — RUNNER rule 2's carve-out applies (no card; one run-record row, recipe withheld)",
           "evidence": "the recorded behavior table (secrets redacted)"
         },
         {
@@ -1509,6 +1539,12 @@
           "date": "2026-10-31",
           "change": "acceptance[4].verify gains the session-rotation note QA run #27392 found missing. On the enrolment lane /two-factor/verify-totp mints a new session and deletes the caller's (better-auth's totp handler; two-factor-rotated-token-echo.ts makes the response echo the live rotated token). So the 'after verification' re-reveal probes must carry that token; on the pre-verify bearer, #27392 got 401 for the right and the wrong password alike. The same item's steps[1] and acceptance[0] (clause, verify) read features.twoFactor, which sits at data.features.twoFactor in /auth/config's {success, data} body, so they say so, as two-factor-disable-lifecycle now does. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488404069",
           "ref": "#27392"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "acceptance[4].verify re-pointed (stale spec, QA runs #33025 and #33092, comment 6850793622; ledger row 66 of #32908). The pre-verify get-totp-uri probes answer 200 or 400 on bearer and cookie, not 401; the 401 the old text described belongs to the pre-verify token used after verify-totp rotated the session (packages/plugins/plugin-auth/src/two-factor-rotated-token-echo.ts). The clause is unchanged. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -1615,14 +1651,14 @@
       "title": "Backup codes: revealed once at enable, spendable exactly once at the sign-in challenge, and regeneration kills the prior set — and the navigable regenerate surface reveals the new set in a one-shot dialog",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": ["a user with a VERIFIED enrollment (run identity-auth.two-factor-verify-to-activate's path first)", "the same user at the sign-in challenge spending a code"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "2FA armed BEFORE boot + a VERIFIED enrollment — this item's challenge lane only exists after identity-auth.two-factor-verify-to-activate's walk completes; run the three enrollment items as one sequence on one boot",
+          "2FA armed BEFORE boot + a VERIFIED enrollment — this item's challenge lane only exists after identity-auth.two-factor-verify-to-activate's walk completes; this item may drive its own enable → verify walk first on the 2FA-armed boot (QA run #33092 drove each enrollment item that way), so the three enrollment items need not run as one sequence on one boot",
           "the backup codes captured from the enable response (they are never legitimately retrievable later — that unretrievability is itself under test)",
           "an out-of-band DB read for the storage-shape observation: sys_two_factor.backup_codes is declared internal: true, so REST never returns the column (and sys_two_factor REST is get-by-id only). Read the row straight from the boot's DB file with a SQLite client while the server runs — on a --fresh boot, FRESH_HOME/data/objectstack.db, where FRESH_HOME is the path its 'Fresh OS_HOME' line prints"
         ],
@@ -1724,6 +1760,12 @@
           "date": "2026-10-31",
           "change": "acceptance[0].clause read the assert-armed guard as features.twoFactor advertised; GET /api/v1/auth/config answers {success: true, data: getPublicConfig()} (packages/plugins/plugin-auth/src/auth-plugin.ts), so the flag sits at data.features.twoFactor. The clause now says so, in the words two-factor-enrollment-reveal r5 uses; what it requires is unchanged. source[] lines naming the code symbol features.twoFactor are unchanged. Folded in from the S3 report (anchor comment 6539833149, out_of_scope_findings[1]) on the seat's acceptance of #28349, as a same-file, same-fact extension: no run record named this item, so the row cites the wave anchor. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3",
           "ref": "#27377"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[0] re-pointed (stale spec, QA run #33092, comment 6850793622; ledger row 230 of #32908): each enrollment item can arm its own verified enrollment, so 'one sequence on one boot' is no longer required. No clause changed. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -1732,7 +1774,7 @@
       "title": "Disable tears the factor down completely — row gone, flag off, next sign-in unchallenged, stale backup codes dead — is password-gated server-side, and under mfa_required re-gates through the grace-clock machinery",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["a user with an ACTIVE (verified) enrollment disabling it", "the same user post-disable at a fresh sign-in", "for the mfa_required clause: the same user under an enforced-MFA boot"],
@@ -1740,7 +1782,7 @@
         "app": "showcase",
         "requires": [
           "2FA armed BEFORE boot + an ACTIVE enrollment with retained backup codes (run the enrollment items' sequence first on the same boot)",
-          "for the re-gate clause: a boot (or Setup patch) with mfa_required on — the toggle itself forces plugins.twoFactor on (auth-plugin.ts), so this variant needs no separate env arming",
+          "for the re-gate clause: a boot (or Setup patch) with mfa_required set to everyone (a level: off < administrators < everyone; a stored true toggle is rewritten to everyone at boot, packages/services/service-settings/src/manifests/auth.manifest.ts) — the toggle itself forces plugins.twoFactor on (auth-plugin.ts), so this variant needs no separate env arming",
           "in-process system reads (sys_two_factor REST is get-by-id only; post-disable the row's ABSENCE is the assertion, which needs the system-context find). On a live boot a read-only read of the boot's DB file is equivalent (QA run #26476 read it that way; identity-auth.two-factor-backup-codes fixtures.requires[2] names the file)"
         ],
         "knownGaps": [
@@ -1755,7 +1797,7 @@
         "fresh password sign-in: the response is a full session with NO twoFactorRedirect and no two-factor cookie — the challenge is gone, not just the row",
         "fire POST /two-factor/verify-backup-code with a retained unspent code anyway (no challenge cookie exists to carry it) and capture the refusal — stale codes are dead, not dormant",
         "re-enable + verify (verify-totp ROTATES the session on the enrolment lane, so carry the token its response echoes, packages/plugins/plugin-auth/src/two-factor-rotated-token-echo.ts) to confirm the lifecycle is repeatable (a fresh secret, fresh codes — the old secret's TOTP codes must not verify the new enrollment)",
-        "mfa_required variant (separate boot or Setup patch — the settings door is PUT /api/settings/auth with mfa_required and mfa_grace_period_days, outside /api/v1, where /api/v1/settings/auth answers 404; restore both values afterwards): with enforced MFA on, disable the active enrollment (the disable ROTATES the session: better-auth's /two-factor/disable mints a new session, installs it through Set-Cookie, deletes the caller's and answers {status: true}, so the pre-disable bearer answers 401 afterwards; sign in again before the post-disable authed request, QA run #27392) and record what ACTUALLY happens next, against the source's machinery (auth-manager.ts computeAuthGate): the disable itself is NOT refused anywhere in the source; on the next request the gate sees required-but-unenrolled and answers 403 MFA_REQUIRED only once mfa_grace_period_days (default 7) have elapsed from sys_user.mfa_required_at — a stamp written LAZILY the first time the user is seen unenrolled and, as far as the source shows, never cleared on enrollment. So the post-disable posture depends on that stamp: an old elapsed stamp gates immediately; no stamp opens a fresh grace window. Record the stamp value and the observed branch",
+        "mfa_required variant (separate boot or Setup patch — the settings door is PUT /api/settings/auth with mfa_required and mfa_grace_period_days, outside /api/v1, where /api/v1/settings/auth answers 404; restore both values afterwards through an administrator the gate does not hold, enrolled or inside the grace window, or after re-enrolling: a gated user's own PUT answers 403 MFA_REQUIRED until they enroll again, QA run #33092): with enforced MFA on, disable the active enrollment (the disable ROTATES the session: better-auth's /two-factor/disable mints a new session, installs it through Set-Cookie, deletes the caller's and answers {status: true}, so the pre-disable bearer answers 401 afterwards; sign in again before the post-disable authed request, QA run #27392) and record what ACTUALLY happens next, against the source's machinery (auth-manager.ts computeAuthGate, which reads resolveUserAuthGates; the level check and the lazy mfa_required_at stamp are in packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts): the disable itself is NOT refused anywhere in the source; on the next request the gate sees required-but-unenrolled and answers 403 MFA_REQUIRED only once mfa_grace_period_days (default 7) have elapsed from sys_user.mfa_required_at — a stamp written LAZILY the first time the user is seen unenrolled and, as far as the source shows, never cleared on enrollment. So the post-disable posture depends on that stamp: an old elapsed stamp gates immediately; no stamp opens a fresh grace window. Record the stamp value and the observed branch",
         "while gated (if the gate engaged), confirm the /two-factor/* enrollment endpoints still answer — the re-gate must leave the compliance path open (the mfa_required toggle forces the plugin on for exactly this reason, per its own comment)"
       ],
       "acceptance": [
@@ -1823,6 +1865,12 @@
           "date": "2026-10-31",
           "change": "acceptance[0].verify, acceptance[5].verify, steps[6] and steps[7], from QA run #27392. The config read is data.features.twoFactor: the /auth/config route answers {success: true, data: getPublicConfig()} (packages/plugins/plugin-auth/src/auth-plugin.ts). The disable rotates the session: better-auth's two-factor disable handler creates a new session, sets its cookie and deletes the caller's, so #27392's post-disable request on the pre-disable bearer answered 401. steps[7] and acceptance[5] now sign in again before the post-disable authed request. On the enrolment lane verify-totp rotates the session too (two-factor-rotated-token-echo.ts), so steps[6] carries the token it echoes. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488404069",
           "ref": "#27392"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[1] and steps[7] re-pointed (stale spec, QA run #33092, comment 6850793622; ledger row 67 of #32908). mfa_required is a three-level select, off < administrators < everyone, not a toggle (auth.manifest.ts). The gate and its lazy stamp are in auth-manager-password-session-policy.ts, which computeAuthGate reads. A gated user cannot restore the setting (403 MFA_REQUIRED), so the restore names who can. The clause is unchanged. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -1831,7 +1879,7 @@
       "title": "Zero-user first-run: the /setup owner wizard serves even under OS_DISABLE_SIGNUP, creates the owner + names the personal org through a full-document exit, and every bootstrap bypass closes the moment an owner exists",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor on a zero-user boot (the would-be owner)", "the created owner (post-bootstrap)", "a second anonymous visitor (post-bootstrap forger)"],
@@ -1853,7 +1901,7 @@
         "open /_console/setup in a fresh browser context (the console is served under /_console; /setup is its router's route): the first-run wizard renders (SetupRoute mode 'first-run'; the verdict comes from useSetupEntryMode over the same bootstrap-status probe, gated on being unauthenticated — objectui#2794)",
         "fill owner name/email/password AND an organization name — run at least once with a CJK-or-emoji-only org name (slugify('') guard: the DISPLAY rename must still apply, SetupPage keeps the slug) — and submit",
         "capture the network: the wizard drives POST /api/v1/auth/sign-up/email and it SUCCEEDS despite OS_DISABLE_SIGNUP=true — the before-hook flips disableSignUp off for exactly this request when isBootstrapCreation() (auth-manager.ts; comment), and the audience gate's isBootstrap arm admits it under the default invite_only posture (audience-posture.ts)",
-        "capture the exit: a FULL-DOCUMENT navigation (window.location.assign), never a SPA route change — the run saw two document loads, to /_console/ and then landing on /_console/home — the landing console renders the owner's world, not the anonymous-era empty app list (the objectui#4181 hazard, SetupPage.tsx)",
+        "capture the exit: a FULL-DOCUMENT navigation (window.location.assign), never a SPA route change — the exit assigns the console root, /_console/ (POST_BOOTSTRAP_EXIT = '/', ui/apps/console/src/pages/auth/SetupPage.tsx), and the owner's landing after it is a client route the root landing resolves (RootLandingRedirect), so no document request goes to /_console/home (QA runs #33058 and #33093 saw only /_console/ document loads) — the landing console renders the owner's world, not the anonymous-era empty app list (the objectui#4181 hazard, SetupPage.tsx)",
         "verify server state: GET /api/v1/auth/get-session identifies the owner; GET /api/v1/auth/organization/list shows the auto-provisioned org carrying the TYPED display name (the wizard renames the bootstrap org — it must NOT create a second one; single-org mode forbids createOrganization)",
         "bypass closed, door 1: on the same OS_DISABLE_SIGNUP=true boot, now that a human user exists, forge POST /api/v1/auth/sign-up/email from TWO addresses: an UNINVITED anonymous address is refused first by the audience gate, 403 SELF_REGISTRATION_CLOSED (invite_only), so it cannot show the toggle; have the owner invite a second address and forge that one — it passes the audience gate and the re-enforced toggle refuses it, 400 EMAIL_PASSWORD_SIGN_UP_DISABLED. The invited address is the one that proves door 1",
         "bypass closed, door 2: on the stock contrast boot (owner exists, no OS_DISABLE_SIGNUP), the same forge refuses 403 SELF_REGISTRATION_CLOSED — the default audience posture invite_only closes it (audience-posture.ts); record WHICH door refused on each boot",
@@ -1929,6 +1977,12 @@
           "date": "2026-10-31",
           "change": "steps[2] and steps[9] open /_console/setup, not /setup, as QA run #27441 drove it (its A5 read /_console/setup). The console is mounted under /_console with a router basename (ui/apps/console/src/App.tsx), and /setup is a route inside it. steps[9]'s login contract is spelled with its mount: the URL is /_console/login?redirect=%2Fsetup, because LoginRedirect (ProtectedRoute.tsx) reads the redirect off the router's location, which has no /_console prefix. acceptance[5]'s router-relative '/login?redirect=%2Fsetup' still reads true and is unchanged. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6490438726",
           "ref": "#27441"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "steps[5] re-pointed (stale spec, QA runs #33058 and #33093, comment 6850899929; ledger row 141 of #32908). SetupPage exits with window.location.assign of POST_BOOTSTRAP_EXIT '/', and /home is reached as a client route, so the step no longer expects a /_console/home document load. The full-document exit it tests is unchanged. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -1937,7 +1991,7 @@
       "title": "Self-signup gate: the default audience posture (invite_only) refuses at the server with a LOUD code, a pending invitation carves through, and OS_DISABLE_SIGNUP bounces the UI AND the endpoint — the console offers the register form only to a visitor the server would admit (an invitation redirect, or a deployment with no owner) and explains the by-invitation rule to everyone else; the form is never the gate",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous uninvited registrant", "an invited email's registrant", "org admin (mints the invitation)", "env owner (sets OS_DISABLE_SIGNUP)"],
@@ -1955,7 +2009,7 @@
         ]
       },
       "steps": [
-        "stock boot (the seeded admin exists, so the deployment has an owner): GET /api/v1/auth/config and record features.audiencePosture ('invite_only') and emailPassword.disableSignUp (false) — then confirm the login page offers NO generic sign-up link and /register renders the by-invitation notice (data-testid register-by-invitation — judge the testid and the absent form, not the notice's sentence, whose wording moves between console builds: the step used to quote 'not open on this environment', and the console pin 4016370a reads 'not open on this system') with NO form. The form is offered only where the server would admit the visitor: a visitor bounced from an invitation (/login?redirect=/accept-invitation/ID renders an 'Accept your invitation' card whose 'Create an account and join' link leads to /register; it does not forward there by itself) or a deployment with no owner yet (GET /api/v1/auth/bootstrap-status answers hasOwner false) — objectui decideSignUpOffer (objectui#11691, objectui#11705). The server side is unchanged and DELIBERATE: the posture does not force disableSignUp, because hiding the form outright would dead-end invited users (getPublicConfig comment, auth-manager.ts); the console reads both keys instead",
+        "stock boot (the seeded admin exists, so the deployment has an owner): GET /api/v1/auth/config and record features.audiencePosture ('invite_only') and emailPassword.disableSignUp (false) — then confirm the login page offers NO generic sign-up link and /register renders the by-invitation notice (data-testid register-by-invitation — judge the testid and the absent form, not the notice's sentence, whose wording moves between console builds: the step used to quote 'not open on this environment', and the console pin 4016370a reads 'not open on this system') with NO form. The form is offered only where the server would admit the visitor: a visitor bounced from an invitation (/login?redirect=/accept-invitation/ID renders an invitation card, titled 'INVITER invited you to join ORG' (or 'You are invited to join ORG') when the server's signed-out preview answers and 'Accept your invitation' only without one (invitationArrivalCopy, ui/packages/app-shell/src/console/auth/invitationArrival.tsx), whose 'Create an account and join' link leads to /register; it does not forward there by itself) or a deployment with no owner yet (GET /api/v1/auth/bootstrap-status answers hasOwner false) — objectui decideSignUpOffer (objectui#11691, objectui#11705). The server side is unchanged and DELIBERATE: the posture does not force disableSignUp, because hiding the form outright would dead-end invited users (getPublicConfig comment, auth-manager.ts); the console reads both keys instead",
         "POST /api/v1/auth/sign-up/email directly for an UNINVITED address (the stock /register offers an uninvited visitor no form — step 1): capture the 403 with code SELF_REGISTRATION_CLOSED — a loud, deterministic refusal, NOT a synthetic 200. The sign-up route raises the audience refusal BEFORE better-auth's anti-enumeration shield can swallow a creation-seam 403 into a fake success (auth-manager.ts — the measured black-hole this ordering exists to prevent)",
         "confirm no sys_user row was created for the refused address (admin read)",
         "carve-out: as admin mint an invitation for a fresh email, then sign up with EXACTLY that email and the invitation's `id` as `invitationId` on the same stock boot — admitted (a pending, unexpired sys_invitation the sign-up presents trumps the posture; presented-invitation.ts). The same email WITHOUT the id answers 403 SELF_REGISTRATION_CLOSED, like an uninvited address",
@@ -2042,7 +2096,8 @@
           "change": "steps[0] stops saying the login page forwards an invitation bounce to /register. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A): the console renders an 'Accept your invitation' card with a 'Create an account and join' link and no automatic forward. No clause changed",
           "ref": "#25807"
         },
-        { "revision": 8, "date": "2026-11-08", "change": "The carve-out leg presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the invited registrant's sign-up sends the id invite-member answered as invitationId beside the email (in the carve-out step, the disabled-boot step and acceptance[2]), and the address alone is refused 403 SELF_REGISTRATION_CLOSED like an uninvited one" }
+        { "revision": 8, "date": "2026-11-08", "change": "The carve-out leg presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the invited registrant's sign-up sends the id invite-member answered as invitationId beside the email (in the carve-out step, the disabled-boot step and acceptance[2]), and the address alone is refused 403 SELF_REGISTRATION_CLOSED like an uninvited one" },
+        { "revision": 9, "date": "2026-11-14", "change": "steps[0] re-pointed (stale spec, QA runs #33058 and #33093; ledger row 142 of #32908). The invitation card names the inviter and organization when the signed-out preview answers (invitationArrivalCopy, invitationArrival.tsx); 'Accept your invitation' is the fallback title. The clause is unchanged. Read at base 82838e83", "ref": "#33328" }
       ]
     },
     {
@@ -2050,14 +2105,14 @@
       "title": "Email verification loop: a challenged sign-up lands a captured verification mail, unverified sign-in is refused EMAIL_NOT_VERIFIED server-side, the link admits, resend works — and the default boot never challenges",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a fresh registrant (unverified, then verified)", "admin (reads state)", "env owner (configures the verification boot)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a VERIFICATION-ENABLED boot — no stock boot challenges. Two ways to arm it: (a) config emailAndPassword.requireEmailVerification:true + emailVerification.sendOnSignUp:true (wired at auth-manager.ts), or (b) a self-registration posture that FORCES requireEmailVerification on — email_domain always, open unless the deployment declared it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config). resolveEmailVerificationRequirement (audience-posture.ts) is the one rule the wiring and the /auth/config mirror both read; assertAudienceConfig refuses an explicit false under email_domain from any source, and under open when only the settings console stored it",
+          "a VERIFICATION-ENABLED boot — no stock boot challenges. Two ways to arm it: (a) config emailAndPassword.requireEmailVerification:true + emailVerification.sendOnSignUp:true (wired at auth-manager.ts), or (b) a self-registration posture that FORCES requireEmailVerification on — email_domain always, open unless the deployment declared it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config). The cheapest (b)-style boot needs no scratch copy: the auth settings namespace takes env overrides, OS_AUTH_AUDIENCE_POSTURE=open and OS_AUTH_AUDIENCE_SELF_REGISTRATION_PERMISSION_SET=member_default (envKeyOf, packages/services/service-settings/src/settings-service.types.ts). resolveEmailVerificationRequirement (audience-posture.ts) is the one rule the wiring and the /auth/config mirror both read; assertAudienceConfig refuses an explicit false under email_domain from any source, and under open when only the settings console stored it",
           "an ADMISSIBLE sign-up to feed the loop: on an (a)-style boot the default posture is still invite_only, so either mint a pending invitation for the test address first, or use a (b)-style open-posture boot (which must declare selfRegistrationPermissionSet)",
           "the verification mail (template auth.verify_email) and its link CAPTURED, not sent. A stock boot's dev `log` transport does not deliver it (#25060), so arm an SMTP sink first: run plugin-email's in-process fake ESMTP server under tsx (startFakeSmtp, packages/plugins/plugin-email/src/transports/fake-smtp.testkit.ts; a short driver that imports it and prints its port and captured messages), then as the admin PUT /api/settings/mail {provider: 'smtp', smtp_host: '127.0.0.1', smtp_port: PORT, smtp_secure: false, from_email, from_name} (packages/services/service-settings/src/manifests/mail.manifest.ts). The mail is identity mail, so it is recorded in sys_identity_email, not sys_email (IDENTITY_EMAIL_OBJECT, packages/plugins/plugin-email/src/email-log-objects.ts): read it from that row (admin GET /api/v1/data/sys_identity_email — body_text / body_html hold the rendered body and its link). The dev `log` transport is not an env switch (EMAIL_TRANSPORT_PROVIDERS is a const list of what the package can build, packages/plugins/plugin-email/src/transports/index.ts) and LogTransport logs only to, subject and hasText/hasHtml — never the body or the link (packages/plugins/plugin-email/src/email-service.ts) — same harness as identity-auth.self-service-password-reset"
         ],
@@ -2070,7 +2125,7 @@
         "on the verification boot, sign up a fresh admissible address: the console routes to /verify-email-prompt after sign-up (RegisterPage header contract) and the verification mail is sent via template auth.verify_email — capture the link/token from its sys_identity_email row (admin GET /api/v1/data/sys_identity_email; the LogTransport line carries no link) (sendVerificationEmail, auth-manager.ts: template failures THROW into the log rather than silently dropping)",
         "attempt POST /api/v1/auth/sign-in/email for the unverified user: capture the refusal carrying EMAIL_NOT_VERIFIED, and in the browser confirm the login page redirects that error into /verify-email-prompt (objectui LoginPage.tsx: the onError of its LoginFormCard)",
         "resend from the prompt page (useAuth().sendVerificationEmail → POST /api/v1/auth/send-verification-email, ledgered auth-route-ledger.ts) and capture the second mail from its own, newer sys_identity_email row",
-        "follow the captured link: the console's /verify-email consumes ?token= via GET /api/v1/auth/verify-email?token=… — better-auth serves the route as GET ONLY (a POST answers 404, objectui#11633), and sent WITHOUT callbackURL it answers JSON ({status: true, user: null} once the token verifies — no user object, 401 {code, message} for a garbage or expired one) instead of a 302, which is how the SPA keeps the post-verify UX (VerifyEmailPage.tsx; ledger row GET /api/v1/auth/verify-email) — and renders the success state",
+        "follow the captured link: the mail's link is the API's GET /api/v1/auth/verify-email?token=…&callbackURL=/ (better-auth's url, passed to sendVerificationEmail, packages/plugins/plugin-auth/src/auth-manager-auth-instance.ts), not the console page; to drive the page, move the token onto /_console/verify-email?token=…. The console's /verify-email consumes ?token= via GET /api/v1/auth/verify-email?token=… — better-auth serves the route as GET ONLY (a POST answers 404, objectui#11633), and sent WITHOUT callbackURL it answers JSON ({status: true, user: null} once the token verifies — no user object, 401 {code, message} for a garbage or expired one) instead of a 302, which is how the SPA keeps the post-verify UX (VerifyEmailPage.tsx; ledger row GET /api/v1/auth/verify-email) — and renders the success state",
         "sign in again with the same credentials: admitted; get-session identifies the user",
         "feed a garbage/expired token to /verify-email: the page renders its designed error state (named message, retry path), and the user's verification state is unchanged (sign-in still refused)",
         "default-boot contrast (stock showcase, no verification config): an admitted creation (seeded persona or invited registrant) signs in immediately with NO challenge — and /auth/config advertises emailPassword.requireEmailVerification false",
@@ -2138,7 +2193,8 @@
         { "revision": 3, "date": "2026-10-13", "change": "steps[3], acceptance[2].clause and source[4] name the GET verify-email the console uses (stale step, #23166 C2; parked on #23121, carried by #23169). POST /api/v1/auth/verify-email answers 404 — better-auth serves the route as GET only — and the console's VerifyEmailPage calls GET ?token= without a callbackURL, which answers JSON (objectui#11633, at 1fb1ced36243, still this repo's .objectui-sha). The route ledger already books only the GET row. QA run #23166 verified through GET and passed", "ref": "#23169" },
         { "revision": 4, "date": "2026-10-17", "change": "fixtures.requires[2], knownGaps[1], steps[0], [2] and [3] and acceptance[1].verify, [2].clause and [3].verify re-pointed (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). Three premises had moved: the dev transport logs no body or link, so the mail is captured from its sys_email row; verify-email answers {status: true, user: null}, so the step and clause no longer imply a user object; and a consumed token presented for an already-verified user answers a silent 200, so clause 3's 'or the first's already-consumed state is reported loudly' described a refusal that never happens — the resend is now proven by verifying with the resent token first. Not loosened: the resent mail must still carry a token that verifies", "ref": "#24036" },
         { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). steps[1] and source[6] cited objectui LoginPage.tsx 346 and 360 in the comma-range spelling (authored in 45397edf53 as the list 339, 346 and 360). At the objectui pin that commit shipped, 9602dc820450, those lines were the onError redirect of EMAIL_NOT_VERIFIED to /verify-email-prompt and the named error copy; at the shipped pin 12dc7b47c340 the redirect sits in the onError of LoginPage.tsx's LoginFormCard, and the copy moved to app-shell's signInRefusalMessages. Both now say so. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
-        { "revision": 6, "date": "2026-11-08", "change": "fixtures.requires[2], knownGaps[1], steps[0], steps[2], acceptance[1].clause and .verify and acceptance[3].verify re-pointed: the verification mail is identity mail and lives in sys_identity_email, not sys_email, and the dev log transport does not deliver it (#25060), so the item arms an SMTP sink (plugin-email's fake-smtp.testkit.ts under tsx, then PUT /api/settings/mail). Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb), whose runner passed every clause on that recipe. Read at base 4894cfe1", "ref": "#31499" }
+        { "revision": 6, "date": "2026-11-08", "change": "fixtures.requires[2], knownGaps[1], steps[0], steps[2], acceptance[1].clause and .verify and acceptance[3].verify re-pointed: the verification mail is identity mail and lives in sys_identity_email, not sys_email, and the dev log transport does not deliver it (#25060), so the item arms an SMTP sink (plugin-email's fake-smtp.testkit.ts under tsx, then PUT /api/settings/mail). Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb), whose runner passed every clause on that recipe. Read at base 4894cfe1", "ref": "#31499" },
+        { "revision": 7, "date": "2026-11-14", "change": "fixtures.requires[0] and steps[3] re-pointed (stale spec, QA run #33058, comment 6846283471; ledger row 170 of #32908). The (b)-style boot can be armed by the auth settings' env overrides, OS_AUTH_AUDIENCE_POSTURE and OS_AUTH_AUDIENCE_SELF_REGISTRATION_PERMISSION_SET (envKeyOf). The mail's link points at the API's verify-email with callbackURL, not at the console page, so the step says how a run reaches the page. No clause changed. Read at base 82838e83", "ref": "#33328" }
       ]
     },
     {
@@ -2146,10 +2202,10 @@
       "title": "Workspace switcher: org chrome follows posture × membership count (nothing under single; read-only indicator at one membership; switcher at two), and a switch is a full-document reload after which every tenant-scoped read answers from the new org",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
-      "personas": ["a member with one org membership", "the same member after gaining a second membership", "admin, the walled boot's platform operator (OS_PLATFORM_OWNER_EMAIL): mints the member with POST /api/v1/auth/admin/create-user (RUNNER.md 'A walled boot is a fixture of its own'). On a walled boot Create User joins the administrator's CURRENT organization (ADR-0093 D3 amendment) and the admin starts with none, so first create an organization (POST /api/v1/auth/organization/create) and make it active (POST /api/v1/auth/organization/set-active); without it create-user answers 400 NO_ACTIVE_ORGANIZATION and mints nobody. The member lands as `member` of that organization, its one membership. The admin does not provision the second org: the member creates that itself (fixtures.requires[1])"],
+      "personas": ["a member with one org membership", "the same member after gaining a second membership", "admin, the walled boot's platform operator (OS_PLATFORM_OWNER_EMAIL): mints the member with POST /api/v1/auth/admin/create-user (RUNNER.md 'A walled boot is a fixture of its own'). On a walled boot Create User joins the administrator's CURRENT organization (ADR-0093 D3 amendment). The walled admin already holds a Default Organization (the walled default-organization bootstrap, packages/plugins/plugin-auth/src/ensure-default-organization.ts; QA run #33093), so make the intended organization active (POST /api/v1/auth/organization/set-active), creating one first (POST /api/v1/auth/organization/create) if the admin has none; with no active organization create-user answers 400 NO_ACTIVE_ORGANIZATION and mints nobody. The member lands as `member` of that organization, its one membership. The admin does not provision the second org: the member creates that itself (fixtures.requires[1])"],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -2167,7 +2223,7 @@
         "provision the second org + membership; reload: the switcher renders (data-testid workspace-switcher) and the indicator yields (it renders ONLY at exactly one membership, CurrentOrganizationIndicator.tsx)",
         "under `group` posture, open the dropdown and capture the labeling: 'Working organization' + the writes-here/reads-span-all hint (data-testid workspace-switcher-group-hint, WorkspaceSwitcher.tsx); under `isolated` it reads 'Switch organization'",
         "switch to the second org: the client calls switchOrganization (POST /api/v1/auth/organization/set-active, auth-route-ledger.ts) and then performs a FULL-DOCUMENT navigation to the console root (window.location.href = resolveRootUrl(), WorkspaceSwitcher.tsx) — capture that it is a document reload, not a SPA transition",
-        "after the reload: GET /api/v1/auth/organization/get-active-member confirms the new active org; re-drive one tenant-scoped data read and confirm it answers from the NEW org. Under `isolated`, pick one ROW id that exists only in the OLD org and prove its absence. Under `group` the active org bounds WRITES, not reads (reads span every org the user belongs to — the switcher's own hint), so the old-org row is legitimately still readable: there, create one row after the switch and prove it lands in the NEW org (its organization column), instead of an absence check. Re-drive one /meta read too: it must answer the SAME as before the switch. Since ADR-0131 D6/D7 metadata is deployment-level — no metadata write is organization-scoped (packages/metadata-protocol/src/protocol.ts) — so no org-only metadata id exists to use as a sentinel; what the switch must still do on the meta side is drop the console's metadata cache (objectui#4486, MetadataProvider.tsx) so nothing stale is served",
+        "after the reload: GET /api/v1/auth/organization/get-active-member confirms the new active org (a NEW sign-in session does not resume it: it starts on the user's owned organization, else the oldest membership, packages/plugins/plugin-auth/src/auth-manager-database-hooks.ts selectActiveOrg, so read get-active-member before picking a switch target); re-drive one tenant-scoped data read and confirm it answers from the NEW org. Under `isolated`, pick one ROW id that exists only in the OLD org and prove its absence. Under `group` the active org bounds WRITES, not reads (reads span every org the user belongs to — the switcher's own hint), so the old-org row is legitimately still readable: there, create one row after the switch, in an org where the member can write (the member's own org; showcase_task requires a project of that org), and prove it lands in the NEW org (its organization column), instead of an absence check. Re-drive one /meta read too: it must answer the SAME as before the switch. Since ADR-0131 D6/D7 metadata is deployment-level — no metadata write is organization-scoped (packages/metadata-protocol/src/protocol.ts) — so no org-only metadata id exists to use as a sentinel; what the switch must still do on the meta side is drop the console's metadata cache (objectui#4486, MetadataProvider.tsx) so nothing stale is served",
         "failure leg: as the member, forge POST /api/v1/auth/organization/set-active with an org id they hold NO membership in; capture the server refusal (403 USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION) and read get-active-member: the foreign org is never active. better-auth clears the session's active org on this refusal, so 'none' is an expected reading, not a fault. Confirm the UI never renders the foreign org as active"
       ],
       "acceptance": [
@@ -2202,9 +2258,9 @@
           "evidence": "the two dropdown screenshots"
         },
         {
-          "clause": "set-active to a non-membership org answers 403 USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION, the foreign org never becomes active (get-active-member returns the prior org or none — better-auth clears the active org on refusal), and the UI surfaces an error.",
+          "clause": "set-active to a non-membership org answers 403 USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION, the foreign org never becomes active (get-active-member returns the prior org or none — better-auth clears the active org on refusal), and the UI never shows it as active. The forged call is API-only: the switcher lists only member orgs, so no UI door can surface an error, and after the refusal the console shows the organization picker.",
           "oracle": "api",
-          "verify": "the forged set-active answers 403 with code USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION; get-active-member afterwards names the prior org or none — NEVER the foreign org (better-auth 1.7.3's setActiveOrganization sets the session's active org to null before throwing, and plugin-auth mounts the route unwrapped: auth-route-ledger disposition 'sdk'); the UI after the failure shows an error and never the foreign org",
+          "verify": "the forged set-active answers 403 with code USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION; get-active-member afterwards names the prior org or none — NEVER the foreign org (better-auth 1.7.3's setActiveOrganization sets the session's active org to null before throwing, and plugin-auth mounts the route unwrapped: auth-route-ledger disposition 'sdk'); the UI after the failure never shows the foreign org (it shows the organization picker when the active org was cleared)",
           "evidence": "the refusal + the post-refusal active-org read + the screenshot"
         }
       ],
@@ -2241,6 +2297,12 @@
           "date": "2026-10-26",
           "change": "checklist-accuracy finding of the 18.2.0 sweep (addendum #25823 at 17f8217b, identity-auth.workspace-org-switch rev 5 personas[2]; wave anchor #25807; card #25843). After #25626 a walled Create User joins the administrator's current organization and refuses 400 NO_ACTIVE_ORGANIZATION without one, so the recipe now needs the operator to create and set-active an organization before minting the member (admin-user-endpoints.ts runAdminCreateUser; create-user-organization-join.dogfood.test.ts). personas[2] now says so, and that the member's one membership is that organization. No clause changed",
           "ref": "#25843"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-14",
+          "change": "personas[2], steps[6] and acceptance[5] (clause and verify) re-pointed (stale spec, QA runs #33058 and #33093, comments 6846283471 and 6850899929; ledger row 171 of #32908). acceptance[5]'s 'the UI surfaces an error' had no UI door, since the forged set-active is API-only; the clause keeps the 403 and never-the-foreign-org halves. The walled admin already holds a Default Organization. A new session starts on the owned org (selectActiveOrg, auth-manager-database-hooks.ts). The group write needs a target org the member can write in. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -2632,7 +2694,7 @@
       "title": "ADR-0131 single posture: the Default Organization exists from boot BEFORE any sign-up — the first sign-up becomes its owner, later sign-ups its members, every session carries it as active org, and seeded org-columned rows carry it instead of NULL",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -2647,7 +2709,7 @@
         ]
       },
       "steps": [
-        "on a fresh DB, confirm the slug `default` sys_organization row exists before the first user: read the boot log ordering (the Default Organization is ensured before --seed-admin signs the admin up) — at --log-level info only: the [default-org] lines a healthy boot prints are info-level (packages/plugins/plugin-auth/src/ensure-default-organization.ts), and `os dev`'s default warn level prints no Default-Organization line at all — or compare the created_at of the slug-default sys_organization row with the first sys_user row's, or boot WITHOUT --seed-admin and read the scratch DB",
+        "on a fresh DB, confirm the slug `default` sys_organization row exists before the first user: read the boot log ordering (the Default Organization is ensured before --seed-admin signs the admin up) — at --log-level info only: the [default-org] lines a healthy boot prints are info-level (packages/plugins/plugin-auth/src/ensure-default-organization.ts), and `os dev`'s default warn level prints no Default-Organization line at all — or compare the created_at of the slug-default sys_organization row with the first sys_user row's, or boot with --no-seed-admin and read the scratch DB (os dev seeds the admin unless told not to, and --fresh implies --seed-admin: packages/cli/src/commands/dev.ts, the seed-admin flag)",
         "let --seed-admin create the first user, then create a second with POST /api/v1/auth/admin/create-user (self-registration is closed on the stock showcase); GET /api/v1/auth/get-session for each",
         "as admin GET /api/v1/data/sys_member?organization_id=DEFAULT_ORG_ID, where DEFAULT_ORG_ID is the id of the slug-default sys_organization row read in step 1 — the column is organization_id and holds the organization's id, not its slug",
         "as admin GET /api/v1/data/sys_business_unit and read organization_id on the seeded rows"
@@ -2719,6 +2781,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[0] keeps `pnpm dev -- --fresh … --log-level info` and adds the shared-checkout boot, as QA run #27481 found: a default os dev first compiles objectstack.config.ts into the app's dist/objectstack.json (packages/cli/src/commands/dev.ts, the compile flag, default on), so runners sharing one checkout boot `objectstack dev --fresh --no-compile -p PORT --log-level info`, which serves the existing artifact as built (still compiled when missing; warns when stale) — #27481's own boot line. The info log level the clause needs is kept in both spellings. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6493994883",
           "ref": "#27481"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-14",
+          "change": "steps[0] re-pointed (stale spec, QA run #32953 R1, comment 6840054712; ledger row 23 of #32908): 'boot WITHOUT --seed-admin' still seeds on os dev, because the seed-admin flag defaults on and --fresh implies it (packages/cli/src/commands/dev.ts, `flags['seed-admin'] ?? true`). The step now names --no-seed-admin. No clause changed. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -2727,7 +2795,7 @@
       "title": "Identity import sends the dedicated account-invitation mail whose link opens the console set-password page, and the SSO domain-verification doors answer 404 for an unknown provider when enabled and 400 DOMAIN_VERIFICATION_DISABLED when off",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2738,7 +2806,7 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a way to read the sent message: identity mail (the account invitation, the password reset) is persisted in sys_identity_email, not sys_email — read its subject, body and set-password link there as the seeded admin (GET /api/v1/data/sys_identity_email; the object requires manage_platform_settings). The dev LogTransport logs only the recipient, sender and subject, never a body or a link (packages/plugins/plugin-email/src/email-service.ts, LogTransport), so the boot log alone cannot carry the link (QA run #27438)",
-          "OS_SSO_DOMAIN_VERIFICATION toggled per leg (two boots)"
+          "OS_SSO_DOMAIN_VERIFICATION toggled per leg (two boots), with OS_SSO_ENABLED=true on both: the domain doors are @better-auth/sso's, mounted only when SSO is wired (packages/plugins/plugin-auth/src/auth-manager-plugin-list.ts)"
         ]
       },
       "steps": [
@@ -2757,7 +2825,7 @@
         {
           "clause": "the import invite uses the auth.account_invitation template (inviter, address, set-password link, real expiry) — not auth.password_reset; a self-requested reset still uses password_reset",
           "oracle": "log",
-          "verify": "the two captured mails: template id / subject",
+          "verify": "the two captured mails: subject and body (sys_identity_email has no template-id column: packages/platform-objects/src/audit/sys-identity-email.object.ts)",
           "evidence": "both mail headers + the link"
         },
         {
@@ -2801,6 +2869,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[1] read the mail from 'the dev mail transport (boot log mail capture)'. The dev LogTransport logs to, from and subject and never a body or link (packages/plugins/plugin-email/src/email-service.ts). The account-invitation and password-reset mails are identity mail, sent with identityMail (plugin-auth auth-manager-auth-instance.ts) and persisted in sys_identity_email, not sys_email (ADR-0131 D7; packages/platform-objects/src/audit/sys-identity-email.object.ts). QA run #27438 read them there. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310",
           "ref": "#27438"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[2] and acceptance[1].verify re-pointed (stale spec, QA run #33092, comment 6850793622; ledger row 81 of #32908). The domain doors need OS_SSO_ENABLED=true on both boots (auth-manager-plugin-list.ts wires @better-auth/sso only then), and sys_identity_email carries subject and body columns, no template id (sys-identity-email.object.ts). The clause is unchanged. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -2809,7 +2883,7 @@
       "title": "A platform administrator maps an identity-provider group to a permission set: a SCIM group push grants the set to the group's members at once, an SSO sign-in grants it from the groups claim, deleting the mapping removes only the grants it made, and a set outside the organization boundary is refused",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["platform administrator: the mapping doors", "an organization administrator: the 403 leg", "an identity provider: the SCIM pushes"],
@@ -2817,15 +2891,15 @@
         "app": "showcase",
         "requires": [
           "a boot with OS_SCIM_ENABLED=true, one SCIM connection credential, and a user provisioned through it; a scratch permission set qa_group_reader inside the organization boundary",
-          "for the SSO leg: OS_SSO_ENABLED=true, a registered OIDC provider whose groups claim is set, and an identity provider that signs a user in with a groups claim"
+          "for the SSO leg: OS_SSO_ENABLED=true, a registered OIDC provider whose groups claim is set, and an identity provider that signs a user in with a groups claim. A run-local mock OIDC IdP serves (QA run #33092): its origin must be in OS_TRUSTED_ORIGINS, because @better-auth/sso refuses a loopback or private discovery URL otherwise (validateOIDCEndpointUrl, discovery_private_host; OS_TRUSTED_ORIGINS is read in packages/cli/src/commands/serve.ts), and the SSO user must hold a pending invitation: under the stock invite_only posture an uninvited SSO user is refused unless the provider's allowJit is on (packages/plugins/plugin-auth/src/audience-posture.ts, SSO_JIT_CLOSED_MESSAGE)"
         ],
-        "knownGaps": ["no stock OIDC identity provider (FOLLOW-UPS §3, still open): the SSO leg is blocked(fixture) without one; the SCIM legs need none"]
+        "knownGaps": ["no stock OIDC identity provider (FOLLOW-UPS §3, still open): the SSO leg is blocked(fixture) without one, and a run-local mock IdP per fixtures.requires[1] unblocks it; the SCIM legs need none"]
       },
       "steps": [
         "as the organization administrator, then as the platform administrator: POST /api/v1/auth/admin/scim/set-group-mapping {\"connectionId\": C, \"groupDisplayName\": \"qa-readers\", \"permissionSet\": \"qa_group_reader\"}; record both answers",
         "as the platform administrator, the same call with permissionSet admin_full_access; record the answer",
         "push a SCIM group qa-readers whose members include the provisioned user; read the user's sys_user_permission_set rows",
-        "as admin, grant qa_group_reader to the same user by hand; then POST /api/v1/auth/admin/scim/delete-group-mapping {\"mappingId\": M}; read the user's grants",
+        "the hand-made control: BEFORE the push of steps[2], as admin grant qa_group_reader by hand to a SECOND provisioned user, and include that user in the pushed group. Granting it by hand after the push collides with the projected grant, 409 UNIQUE_VIOLATION (the unique index on user_id, permission_set, permission_set_package, organization_id, packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts); a set already held is not written again beside it, as the pin's CONTROL case shows (packages/plugins/plugin-auth/src/scim-group-projection.test.ts, 'grants made by hand are never touched by reconcile'). Then POST /api/v1/auth/admin/scim/delete-group-mapping {\"mappingId\": M}; read both users' grants",
         "SSO leg: map the group for the provider (providerId), sign the user in through the provider, read the grants; delete the mapping, read again"
       ],
       "acceptance": [
@@ -2844,7 +2918,7 @@
         {
           "clause": "deleting the mapping removes the grants it made and leaves a hand-made grant of the same set",
           "oracle": "api",
-          "verify": "after the delete the marked grant is gone and the hand-made grant remains (packages/plugins/plugin-auth/src/scim-group-projection.ts#reconcileMappedGrants)",
+          "verify": "after the delete the first user's marked grant is gone and the second user's hand-made grant remains (steps[3]) (packages/plugins/plugin-auth/src/scim-group-projection.ts#reconcileMappedGrants)",
           "evidence": "the grants before and after"
         },
         {
@@ -2877,6 +2951,12 @@
           "date": "2026-11-10",
           "change": "initial — SCIM group push and SSO group mapping (#31443, #31657). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "steps[3], acceptance[2].verify, fixtures.requires[1] and knownGaps[0] re-pointed (stale spec, QA runs #32940 and #33092, comment 6850793622; ledger row 32 of #32908). A hand grant of the same set after the push is refused 409 UNIQUE_VIOLATION by sys_user_permission_set's unique index, so the hand-made control is now a second user granted before the push, as the CONTROL case in packages/plugins/plugin-auth/src/scim-group-projection.test.ts does. The SSO leg names its fixture: a mock OIDC IdP whose origin is in OS_TRUSTED_ORIGINS (@better-auth/sso validateOIDCEndpointUrl) and an invited SSO user (audience-posture.ts refuses uninvited SSO users without allowJit). The clause is unchanged. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -2885,14 +2965,14 @@
       "title": "The SSO Providers record shows and edits the groups claim: get-groups-claim answers only the provider id and its claim, set-groups-claim stores it (blank clears it) and changes nothing else in the provider's mapping",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["platform administrator", "an organization administrator: the 403 leg"],
       "fixtures": {
         "app": "showcase",
-        "requires": ["a boot with OS_SSO_ENABLED=true and one registered OIDC provider (POST /api/v1/auth/admin/sso/register)"],
-        "knownGaps": ["registering a provider may need its issuer reachable; with no stock OIDC identity provider (FOLLOW-UPS §3) the run brings its own"]
+        "requires": ["a boot with OS_SSO_ENABLED=true and one registered OIDC provider (POST /api/v1/auth/admin/sso/register). A local IdP's origin must be in OS_TRUSTED_ORIGINS (read in packages/cli/src/commands/serve.ts): @better-auth/sso refuses a loopback or private discovery URL otherwise (validateOIDCEndpointUrl, discovery_private_host), and the register door answers 400 SSO_REGISTER_FAILED 'not publicly routable' (packages/plugins/plugin-auth/src/register-sso-provider.ts)"],
+        "knownGaps": ["registering a provider needs its issuer reachable, and a local one allowlisted (fixtures.requires[0]); with no stock OIDC identity provider (FOLLOW-UPS §3) the run brings its own"]
       },
       "steps": [
         "POST /api/v1/auth/admin/sso/get-groups-claim {\"providerId\": P}; record the body",
@@ -2944,6 +3024,12 @@
           "date": "2026-11-10",
           "change": "initial — the SSO Providers groups claim (#31755). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[0] and knownGaps[0] re-pointed (fixture gap, QA run #33093, comment 6850899929; ledger rows 250 and 241 of #32908, row 241 from #33331). A local IdP needs its origin in OS_TRUSTED_ORIGINS, or register answers 400 SSO_REGISTER_FAILED (register-sso-provider.ts, @better-auth/sso validateOIDCEndpointUrl). No clause changed. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -2952,7 +3038,7 @@
       "title": "An AI service account is suspended, resumed, re-owned, retired, and has a key revoked and restored, each by the right holder: the owner may suspend but not resume, retire ends the membership and revokes every key, and an owner leaving the organization suspends the account",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2964,7 +3050,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an account registered and given two keys as identity-auth.ai-service-account-register-and-key does, in the seeded admin's organization, with a third member to name as the new owner"
+          "an account registered and given two keys as identity-auth.ai-service-account-register-and-key does, in the seeded admin's organization, with a third member to name as the new owner. Grant the account a permission set that reads the probed object and breaches no agent ceiling (ADR-0151 D3: no View All or Modify All, destructive operation or system permission): a fresh account holds no grant, so without it every probe read answers 403 and 'the key works' cannot be seen. A breaching set, and the mcp_agent_* ceiling sets, are refused at assignment 400 VALIDATION_FAILED, invalid_value at permission_set (packages/plugins/plugin-security/src/agent-account-grant-refusal.ts, agent-ceiling-grant-refusal.ts)"
         ]
       },
       "steps": [
@@ -3021,6 +3107,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0151 D6, the lifecycle doors (#31981). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[0] names the grant (stale spec, QA run #33092, comment 6850793622; ledger row 231 of #32908). Under ADR-0151 D3 a fresh account's key answers 403 to every data read, so acceptance[0] and [2]'s 'reads answer 200' need a ceiling-safe set assigned first; a ceiling set is refused as a grant (agent-account-grant-refusal.ts). The clauses are unchanged. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -3029,7 +3121,7 @@
       "title": "An organization administrator registers an AI service account and mints its key: the account is an agent row owned by a named member, with one plain membership and no sign-in, and its key admits requests as the account in the account's organization",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3046,7 +3138,7 @@
         "anonymous and as the second member: POST /api/v1/auth/service-account/register {\"name\": \"qa-bot\", \"ownerId\": OWNER}; then as the administrator with ownerId the non-member; then as the administrator with the owner",
         "GET /api/v1/data/sys_user/USER_ID and the account's sys_member rows",
         "as the second member, then as the owner: POST /api/v1/auth/service-account/create-key {\"userId\": USER_ID}; record the answers; as the owner again with expires_at past the ceiling; and with userId the owner's own id",
-        "with the minted key: GET /api/v1/data/sys_user (any read) and record who the request ran as; then POST /api/v1/auth/service-account/create-key and POST /api/v1/keys with the same key"
+        "with the minted key: GET /api/v1/data/sys_user (any read) and record the answer. A fresh account holds no grant, so the read answers 403 under the agent ceiling (ADR-0151 D3: explicit grants only); prove who the key ran as from the sys_audit_log credential_use row it writes, whose user_id is the account (packages/plugins/plugin-audit/src/credential-use-audit.ts), or by suspending the account and seeing the key refused; then POST /api/v1/auth/service-account/create-key and POST /api/v1/keys with the same key"
       ],
       "acceptance": [
         {
@@ -3070,7 +3162,7 @@
         {
           "clause": "the key admits requests as the account, and a caller holding only that key mints nothing",
           "oracle": "api",
-          "verify": "the data read runs as the account; both mint calls with the key are refused and no new sys_api_key row exists",
+          "verify": "the key is admitted as the account: its credential_use row names the account (the data read itself answers 403 until the account is granted a set, ADR-0151 D3); both mint calls with the key are refused and no new sys_api_key row exists",
           "evidence": "the read and the two refusals"
         },
         {
@@ -3103,6 +3195,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0151 D1 and D4, register and mint (#31779, #31966). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "steps[3] and acceptance[3].verify re-pointed (stale spec, QA run #33081, comment 6850173588; ledger row 182 of #32908). Under ADR-0151 D3 a fresh account has no grant, so its key's data read answers 403 and cannot show who it ran as; the proof is the credential_use audit row (credential-use-audit.ts) or the suspend toggle. The clause is unchanged. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -3111,7 +3209,7 @@
       "title": "A refused SCIM request writes one bounded scim_refused audit row naming the connection, the presented credential kind, the resource, the method and the status, never the bearer",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": ["an identity provider calling SCIM 2.0", "admin (the seeded admin): the mint and the audit read"],
@@ -3134,7 +3232,7 @@
         {
           "clause": "the rows are bounded: at most 20 per key per ten minutes",
           "oracle": "api",
-          "verify": "the made-up-bearer key holds 20 rows after 26 refusals (packages/plugins/plugin-auth/src/scim-refusal-audit.ts#SCIM_REFUSAL_AUDIT_ROWS_PER_KEY, #SCIM_REFUSAL_AUDIT_WINDOW_MS)",
+          "verify": "the client address's key holds 20 rows after 26 refusals: count every scim_refused row of that address, not only the made-up-bearer ones, because a bearer that verifies as no connection is keyed by the client address, and steps[0]'s schema-refused real-bearer request stays counted on that address too (the bound admits before the connection lookup) (packages/plugins/plugin-auth/src/scim-refusal-audit.ts#SCIM_REFUSAL_AUDIT_ROWS_PER_KEY, #SCIM_REFUSAL_AUDIT_WINDOW_MS)",
           "evidence": "the row count"
         }
       ],
@@ -3155,6 +3253,12 @@
           "date": "2026-11-10",
           "change": "initial — the bounded scim_refused row (#31888). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "acceptance[1].verify re-pointed (stale spec, QA run #32940, card body of #32908; ledger row 34). The bound's key is the connection, or the client address for an unverified bearer, and a schema-refused request stays on its address because the bound admits before the lookup (packages/plugins/plugin-auth/src/scim-refusal-audit.ts, the bound's doc block). So the 20 are counted per address, which steps[0]'s real-bearer request shares. The clause is unchanged. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -3163,7 +3267,7 @@
       "title": "The Console's phone doors on a two-factor account ask for the code: phone + password and the phone code each move to the two-factor step instead of an error, and a code completes the sign-in",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -3174,7 +3278,7 @@
         "requires": [
           "a showcase development boot (dogfood §0) with OS_AUTH_TWO_FACTOR=true and OS_AUTH_PHONE_NUMBER_ENABLED=true on the os dev command (the switches identity-auth.two-factor-verify-to-activate fixtures.requires[0] and identity-auth.phone-signin-surfaces fixtures.requires[2] name); GET /api/v1/auth/config answers data.features.twoFactor and data.features.phoneNumber true. The console bundle built from this tree",
           "the user: created with a phone number and a known password as identity-auth.auth-method-matrix creates its phone user, then enrolled and VERIFIED in TOTP by the walk identity-auth.two-factor-verify-to-activate drives (signed in by email: POST /api/v1/auth/two-factor/enable { password }, one correct code). Keep the TOTP secret; codes come from the copied RFC 6238 helper",
-          "the phone-code legs only: data.features.phoneNumberOtp true on this boot. On a development boot the SMS log transport prints the code in the server log (identity-auth.auth-method-matrix, the phone OTP step)"
+          "the phone-code legs only: data.features.phoneNumberOtp true on this boot. On a development boot the SMS log transport prints the code in the server log (identity-auth.auth-method-matrix, the phone OTP step) at info level (LogSmsTransport, packages/services/service-sms/src/sms-service.ts), so boot with --log-level info: at os dev's default warn level the line is not printed"
         ],
         "knownGaps": [
           "the verify-email half of #32287 (ui/apps/console/src/pages/auth/VerifyEmailPage.tsx#VerifyEmailPage reads a two-factor challenge from the verification link as 'Email verified' and sends the person to sign in) needs a verification mail for an enrolled account, which this fixture does not send; it is held by ui/apps/console/src/pages/auth/__tests__/VerifyEmailPage-11633.test.tsx and not driven here"
@@ -3191,7 +3295,7 @@
         {
           "clause": "phone + password on a two-factor account moves to the two-factor step, never to a credentials error",
           "oracle": "dom",
-          "verify": "POST /api/v1/auth/sign-in/phone-number answers 200 with twoFactorRedirect: true and no token; the form shows the two-factor step ('Two-factor authentication', 'Enter the 6-digit code from your authenticator app.') and not 'Invalid phone number or password.' (ui/packages/auth/src/createAuthClient.ts#createAuthClient: signInWithPhonePassword reads the challenge through readTwoFactorChallenge; ui/packages/auth/src/LoginForm.tsx#LoginForm)",
+          "verify": "POST /api/v1/auth/sign-in/phone-number answers 200 with twoFactorRedirect: true and no token; the form shows the two-factor step (data-testid two-factor-challenge with 'Enter the 6-digit code from your authenticator app.': the console's LoginPage passes hideHeader, so the step draws its description under the page's own header and no 'Two-factor authentication' title, ui/apps/console/src/pages/auth/LoginPage.tsx and ui/packages/auth/src/TwoFactorChallengeForm.tsx) and not 'Invalid phone number or password.' (ui/packages/auth/src/createAuthClient.ts#createAuthClient: signInWithPhonePassword reads the challenge through readTwoFactorChallenge; ui/packages/auth/src/LoginForm.tsx#LoginForm)",
           "evidence": "the sign-in answer in the network log and a screenshot of the step"
         },
         {
@@ -3238,6 +3342,12 @@
           "date": "2026-11-10",
           "change": "initial — the Console's phone doors continue to the two-factor step (#32195, #32287). Scoped sweep #32270 (epic #32022 M4, the zero-citation close-out), read from source at 60b99f8f; no live run made",
           "ref": "#32270"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "acceptance[0].verify and fixtures.requires[2] re-pointed (stale spec, QA runs #33025 and #33048, comments 6844741021 and 6846028996; ledger row 40 of #32908). The console's LoginPage renders the challenge with hideHeader, so TwoFactorChallengeForm draws only its description, not the 'Two-factor authentication' title the verify quoted. LogSmsTransport prints the phone code at info level, which os dev's default warn level hides. The clause is unchanged. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -3246,7 +3356,7 @@
       "title": "Sign-out leaves none of the signed-out user's browser state and no return link, while a session that ended on the server sends the next in-app navigation to sign-in with its return link",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -3277,7 +3387,7 @@
         {
           "clause": "an explicit sign-out carries no return link, so the next person lands on their own home",
           "oracle": "dom",
-          "verify": "the login URL after sign-out carries no ?redirect=; the member's sign-in lands on /home, not on the admin's record (ui/apps/console/src/components/ProtectedRoute.tsx#LoginRedirect, sessionEndedBySignOut)",
+          "verify": "the login URL after sign-out carries no ?redirect=; the member's sign-in lands on the member's own root landing (the deployment's isDefault app, else its single visible non-Setup app, else /home: ui/apps/console/src/components/RootLandingRedirect.tsx), not on the admin's record (ui/apps/console/src/components/ProtectedRoute.tsx#LoginRedirect, sessionEndedBySignOut)",
           "evidence": "the two URLs"
         },
         {
@@ -3314,6 +3424,12 @@
           "date": "2026-11-10",
           "change": "initial — sign-out clears the signed-out user's browser state and drops the return link, and a server-ended session returns to sign-in (#30490, #32048, #32207). Scoped sweep #32270 (epic #32022 M4, the zero-citation close-out), read from source at 60b99f8f; no live run made",
           "ref": "#32270"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "acceptance[1].verify re-pointed (stale spec, QA run #32953, card body of #32908; ledger row 41). After sign-in without a redirect the console resolves the root landing (RootLandingRedirect.tsx), which on the showcase is the member's app, not /home. What the clause tests, no carry-over of the admin's record, is unchanged. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     }
