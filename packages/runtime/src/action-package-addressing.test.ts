@@ -1456,6 +1456,44 @@ describe('[#32996, #32989, #32988] the action route answers by who holds the nam
         });
     });
 
+    /**
+     * [review 6879733874 M1] The route judges the composition on the
+     * registry's listing before it reads the environment's store: a name one
+     * holder holds never reads the store, so it neither pays the store's scans
+     * on every dispatch nor answers `degraded` while the store is down.
+     */
+    describe('a name one holder holds never reads the environment\'s store', () => {
+        const oneHolder: Array<[string, () => void, string]> = [
+            ['the environment\'s own item', () => environmentItem('contact'), 'env'],
+            ['the platform\'s item', () => shipAt(undefined, 'platform', 'contact'), 'platform'],
+            ['one package\'s item', () => { install(B); shipAt(B, 'beta', 'contact'); }, 'beta'],
+        ];
+        for (const [holder, register, label] of oneHolder) {
+            it(`${holder}: a store whose read throws leaves the route answering it, and the call dispatches`, async () => {
+                freshEngine();
+                register();
+                (engine as any).find = async () => { throw new Error('store unreachable'); };
+                engine.registerAction('contact', 'approve', () => `ran ${label}`);
+                expect(answerOf(await routeTo('contact'))).toEqual([undefined, undefined, undefined, label]);
+                expect(await executeRegisteredAction(deps, engine, 'contact', ['approve'], {}, undefined))
+                    .toEqual({ dispatched: true, result: `ran ${label}` });
+            });
+
+            it(`${holder}: the route reads the store zero times`, async () => {
+                freshEngine();
+                register();
+                const read = (engine as any).find;
+                let storeReads = 0;
+                (engine as any).find = async (object: string, query: any) => {
+                    if (object === 'sys_metadata') storeReads += 1;
+                    return read(object, query);
+                };
+                expect(answerOf(await routeTo('contact'))).toEqual([undefined, undefined, undefined, label]);
+                expect(storeReads).toBe(0);
+            });
+        }
+    });
+
     describe('#32988 — the environment\'s exact address', () => {
         for (const holders of [1, 2]) {
             for (const [envShape, envObject, address] of [['on `lead`', 'lead', 'lead'], ['object-less', undefined, 'lead'], ['object-less', undefined, 'global']] as const) {

@@ -6257,6 +6257,12 @@ function packagedItem(item: any): boolean {
 
 async function readRouteHolders(
     args: { ql: any; objectName: string; actionName: string },
+    /**
+     * Asked of the listing BEFORE the store is read: `false` answers
+     * `undefined` with no store read, so a caller that can only answer some
+     * compositions never pays the store's scans (or its outage) on the others.
+     */
+    admit: (named: readonly any[], isDisabled: (item: any) => boolean) => boolean = () => true,
 ): Promise<RouteHolderReading | undefined> {
     const { ql, objectName, actionName } = args;
     const registry: any = ql?.registry;
@@ -6268,10 +6274,11 @@ async function readRouteHolders(
     } catch {
         return undefined;
     }
-    const store = environmentStoredActionNames(ql);
-    if (store === undefined) return undefined;
     const isDisabled = (item: any): boolean => packagedItem(item)
         && typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(item._packageId) === true;
+    if (!admit(named, isDisabled)) return undefined;
+    const store = environmentStoredActionNames(ql);
+    if (store === undefined) return undefined;
     const isBound = (item: any): boolean =>
         !isObjectLessActionKey(objectName) && standaloneActionOwnerKey(item) === objectName;
     const isObjectLess = (item: any): boolean => isObjectLessActionKey(standaloneActionOwnerKey(item));
@@ -6375,12 +6382,16 @@ async function routeHolderCensus(
     },
 ): Promise<RouteActionDeclaration | undefined> {
     const { obj, actionName, ownsRoute, readAt } = args;
-    const reading = await readRouteHolders(args);
+    // [review 6879733874 M1] The composition is judged on the listing alone,
+    // before the store is read: a name with no package holder, or with
+    // nothing package-less and nothing disabled beside its packages — the
+    // one-holder case among them — never reads the store, so it never pays
+    // its scans nor answers `degraded` when the store is down.
+    const reading = await readRouteHolders(args, (named, isDisabled) =>
+        named.some(packagedItem) && (named.some((item) => !packagedItem(item)) || named.some(isDisabled)));
     if (reading === undefined) return undefined;
     if (reading.degraded) return { action: undefined, obj, degraded: true, reason: reading.reason };
-    const { named, isDisabled, owners, rung } = reading;
-    if (!named.some(packagedItem)) return undefined;
-    if (!named.some((item) => !packagedItem(item)) && !named.some(isDisabled)) return undefined;
+    const { owners, rung } = reading;
     if (owners.served.length === 0 && owners.disabled.length > 0) return { action: undefined, obj };
     if (rung.environment.length === 1) return { action: rung.environment[0], obj };
     if (rung.served.length !== 1 || rung.platform.length > 0) return undefined;
