@@ -48,7 +48,7 @@ import { formatMetadataError } from '@object-ui/data-objectstack';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { usePermissions, useFieldPermissions } from '@object-ui/permissions';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { resolveAffordance, resolveFilterPlaceholders, servesRecordRead, type SchemaLike } from '@object-ui/core';
+import { resolveAffordance, resolveFilterPlaceholders, type SchemaLike } from '@object-ui/core';
 import { normalizeFilterOperator, ViewFilterRuleSchema } from '@objectstack/spec/ui';
 import type { ViewFilterRule } from '@objectstack/spec/ui';
 import { parseUserFilterParams, applyUserFilterParams } from './userFilterUrlState.js';
@@ -81,6 +81,7 @@ import {
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import type { RowCrudPredicates } from '../utils/crudAffordances.js';
+import { servesRecordRead } from '../utils/recordReadServed.js';
 
 /** Field types the auto-derived user-filter bar offers as dropdowns. */
 const USER_FILTER_TYPES = new Set(['select', 'multiselect', 'radio', 'enum', 'boolean']);

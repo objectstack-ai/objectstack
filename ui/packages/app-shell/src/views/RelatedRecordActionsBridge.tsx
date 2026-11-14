@@ -92,9 +92,10 @@ import {
   type RelatedRecordHandlers,
   type RelatedRowActionDef,
 } from '@object-ui/react';
-import { evalRowPredicate, isMultiValueRelationship, resolveAffordance, servesRecordRead, type ActionDef, type RowCrudPredicates } from '@object-ui/core';
+import { evalRowPredicate, isMultiValueRelationship, resolveAffordance, type ActionDef, type RowCrudPredicates } from '@object-ui/core';
 import { actionRendersAt, type ActionLocation } from '@object-ui/types';
 import { usePermissions } from '@object-ui/permissions';
+import { servesRecordRead, type RecordReadPrincipal } from '../utils/recordReadServed.js';
 import { RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM, RECORD_TRAIL_PARAM, appendRecordTrail } from '../urlParams.js';
 import { documentHref } from './documentHref.js';
 import { exactRecordListFilter, recordListPath } from './useOpenRecordList.js';
@@ -168,7 +169,7 @@ function evalCreatePredicate(
  */
 export function routableObjectNames(
   objects: ReadonlyArray<unknown> | null | undefined,
-  perms?: Parameters<typeof servesRecordRead>[1],
+  perms?: RecordReadPrincipal | null,
 ): Set<string> {
   return new Set(
     (objects ?? [])

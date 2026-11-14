@@ -36,7 +36,6 @@ import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import type { NavigateFunction, Location, SetURLSearchParams } from 'react-router-dom';
 import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view';
 import { useNavigationOverlay } from '@object-ui/react';
-import { servesRecordRead } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import type { ViewNavigationConfig } from '@object-ui/types';
 import { RECORD_DRAWER_PARAM, RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
@@ -44,6 +43,7 @@ import { RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.j
 import { viewTabLabel } from './viewTabLabel.js';
 import { listRecordDetailUrl, listRecordActionsValue } from './objectViewRecordLinks.js';
 import { RECORD_PAGE_PUSHED_STATE } from './recordPagePush.js';
+import { servesRecordRead } from '../utils/recordReadServed.js';
 import {
     expandedRecordPath,
     recordDrawerReturnState,

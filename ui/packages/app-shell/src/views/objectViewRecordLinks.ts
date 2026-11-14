@@ -4,10 +4,10 @@
  * `ObjectView.tsx` re-exports every name it exported before.
  */
 
-import { servesRecordRead } from '@object-ui/core';
 import type { RelatedRecordActionsValue, RelatedRecordHandlers } from '@object-ui/react';
 import { appRecordPath, routableObjectNames } from './RelatedRecordActionsBridge.js';
 import { documentHref } from './documentHref.js';
+import { servesRecordRead, type RecordReadPrincipal } from '../utils/recordReadServed.js';
 
 /**
  * THE record-detail URL this list surface builds — one route shape, one place.
@@ -130,5 +130,5 @@ export interface ListRecordRoutes {
     /** `useHref('/')`: the router's root href, basename included. */
     routerRootHref: string;
     /** The caller's permissions: which objects the server reads one record of (`servesRecordRead`). */
-    perms?: Parameters<typeof servesRecordRead>[1];
+    perms?: RecordReadPrincipal | null;
 }

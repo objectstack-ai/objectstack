@@ -33,7 +33,7 @@ import { Empty, EmptyTitle, EmptyDescription, NavigationOverlay } from '@object-
 import { Database } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { isSystemManagedField } from '@object-ui/types';
-import { leadWithNameField, servesRecordRead } from '@object-ui/core';
+import { leadWithNameField } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import type { ActionBarSchema, ListViewSchema } from '@object-ui/types';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -43,6 +43,7 @@ import { useNavigationContext } from '../context/NavigationContext.js';
 import { matchAppBySegment } from '../utils/index.js';
 import { parseUserFilterParams, applyUserFilterParams } from './userFilterUrlState.js';
 import { RecordDetailView } from './RecordDetailView.js';
+import { servesRecordRead } from '../utils/recordReadServed.js';
 
 interface InterfaceListPageProps {
   page: any;
