@@ -709,6 +709,27 @@ export function pairMemberOwners(
 }
 
 /**
+ * [#33131 item 5] Whether `packageId` holds the name `name` for the exact
+ * read: the registry's served holders ({@link ExactQualifierRegistry.packageScopedHoldersOf},
+ * every composite slot, then the package a bare-slot entry binds to), so a
+ * package that holds a bundle's name only through its own stored row counts
+ * as the exact read counts it. The list scoped to the package asks it beside
+ * "a code package ships the name", so the package's list and its exact read
+ * agree on its pair's added member. Only for a type whose readers consult
+ * `(package, name)`; every other type keeps the list as it was.
+ */
+export function holdsNameForExactRead(
+    host: Pick<ProtocolHost, 'engine'>,
+    type: string,
+    name: string,
+    packageId: string,
+): boolean {
+    const registry = exactQualifierRegistry(host);
+    if (!registry || (registry as { readsByPackage?(type: string): boolean }).readsByPackage?.(type) !== true) return false;
+    return (registry.packageScopedHoldersOf(type, name) ?? []).includes(packageId);
+}
+
+/**
  * [Epic ruling on #31699 F2] Whether the list scoped to `base` leaves out the
  * member row `item` its pair `pairId` stores: the row could be the added
  * member of two or more holders of the name ({@link pairMemberOwners}) and

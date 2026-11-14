@@ -2036,7 +2036,7 @@ const AFTER_RECORD_CHANGE_TRIGGER = /^record-after-(create|insert|update|delete|
  * background path).
  */
 const INLINE_CALLOUT_FIX: ReadonlyMap<string, string> = new Map([
-  ['http', 'Set `durable: true` on the node. Where a messaging HTTP outbox is wired, the request is queued there and retried in the background, so the save does not wait for it; where none is wired, the node falls back to the inline call and the save waits for it as before.'],
+  ['http', 'Set `durable: true` on the node. Where a messaging HTTP outbox is wired, the request is queued there and retried in the background, so the save does not wait for it; where none is wired, a run on the save path sends it once in the background, unretried, and does not wait for it either.'],
   ['connector_action', 'Remove the retry around it, or run the flow on demand or on a schedule instead of after the save: a connector action has no background delivery path. An `http` node with `durable: true` fits only a call that needs no credential, because a credential must not go in the url or headers of an `http` node.'],
 ]);
 
