@@ -11,7 +11,9 @@
 // `restore` is what a checklist run replays: it loads the committed text dump
 // (`fixture-18.0.0-next.5/`) into two NEW SQLite files, the primary and the
 // telemetry sibling `os dev` keeps beside a file primary (`n5.db` and
-// `n5.telemetry.db`, packages/cli/src/utils/telemetry-datasource.ts). No build.
+// `n5.telemetry.db`, packages/cli/src/utils/telemetry-datasource.ts), its
+// rotation shards re-dated to the day before the run (`fixture-as-of.ts`), so
+// the first boot's retention keeps them. No build.
 //
 // `generate` remakes that dump, and is the only way it is made:
 //
@@ -42,6 +44,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import { dumpSqliteToSql, loadSqlIntoSqlite } from './sqlite-text-dump.js';
+import { renameShardTables, shardRenamesAsOf } from './fixture-as-of.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../../../..');
@@ -68,14 +71,33 @@ function siblingOf(primary: string): string {
   return /\.db$/i.test(primary) ? primary.replace(/\.db$/i, '.telemetry.db') : `${primary}.telemetry.db`;
 }
 
+/**
+ * The dump `file` as of this run: its rotation shards re-dated so the newest is
+ * the day before today (`fixture-as-of.ts`). The telemetry sibling carries
+ * `sys_activity`'s day shards, and a shard older than the rotation window is
+ * dropped by the first boot over the copy, so a restore that loaded the dump's
+ * own shard names would lose those rows once the window passed the day the
+ * fixture was generated.
+ */
+function dumpAsOf(file: string): { sql: string; renames: ReadonlyMap<string, string> } {
+  const sql = readFileSync(file, 'utf8');
+  const renames = shardRenamesAsOf(sql);
+  return { sql: renameShardTables(sql, renames), renames };
+}
+
 function restore(to: string, from: string): void {
   if (!existsSync(join(from, 'database.sql'))) fail(`${from} holds no database.sql`, 2);
   for (const file of [to, siblingOf(to)]) if (existsSync(file)) fail(`${file} exists; the restore writes NEW files only, so a run never upgrades the original`, 2);
   mkdirSync(dirname(to), { recursive: true });
-  loadSqlIntoSqlite(readFileSync(join(from, 'database.sql'), 'utf8'), to);
-  loadSqlIntoSqlite(readFileSync(join(from, 'telemetry.sql'), 'utf8'), siblingOf(to));
+  const primary = dumpAsOf(join(from, 'database.sql'));
+  const telemetry = dumpAsOf(join(from, 'telemetry.sql'));
+  loadSqlIntoSqlite(primary.sql, to);
+  loadSqlIntoSqlite(telemetry.sql, siblingOf(to));
   const manifest = JSON.parse(readFileSync(join(from, 'manifest.json'), 'utf8'));
   console.log(`cli-prerelease-fixture: restored ${to} and ${siblingOf(to)} — born under ${manifest.ref} (${manifest.sha.slice(0, 12)})`);
+  for (const [was, now] of [...primary.renames, ...telemetry.renames]) {
+    console.log(`cli-prerelease-fixture: re-dated shard ${was} → ${now}`);
+  }
 }
 
 /** A port nothing listens on once this resolves. */

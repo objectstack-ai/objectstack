@@ -438,6 +438,14 @@ const invoiceLines = defineSeed(InvoiceLine, {
     // non-zero total, converted at the newer JPY rate (it is dated 5 days ago).
     { description: 'INV-1008 \u00b7 Consulting hours', invoice: 'INV-1008', product: 'SERVICE-HR', position: 0, quantity: 8, unit_price: 22500, amount: 180000, service_start: '10:00' },
     { description: 'INV-1008 \u00b7 Gadget X units', invoice: 'INV-1008', product: 'GADGET-X', position: 1, quantity: 3, unit_price: 14800, amount: 44400 },
+    // Every other foreign invoice carries a non-zero total too, so a currency
+    // conversion is visible on each of them, not only the rate choice (0 at any
+    // rate is 0): INV-1007 is JPY at the older rate (dated 60 days ago), INV-1009
+    // and INV-1010 are EUR at the older rate (dated 100 and 75 days ago). The
+    // records-forms.multi-currency-invoice checklist item reads these.
+    { description: 'INV-1007 \u00b7 Widget A units', invoice: 'INV-1007', product: 'WIDGET-A', position: 0, quantity: 20, unit_price: 4500, amount: 90000 },
+    { description: 'INV-1009 \u00b7 Consulting hours', invoice: 'INV-1009', product: 'SERVICE-HR', position: 0, quantity: 12, unit_price: 140, amount: 1680, service_start: '08:30' },
+    { description: 'INV-1010 \u00b7 Widget B units', invoice: 'INV-1010', product: 'WIDGET-B', position: 0, quantity: 5, unit_price: 46, amount: 230 },
   ],
 });
 

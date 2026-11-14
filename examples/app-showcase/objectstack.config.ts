@@ -20,7 +20,7 @@ import { ExternalCustomer, ExternalOrder } from './src/data/objects/external/ind
 import { setupShowcaseExternalDatasource } from './src/system/datasources/external-fixture.js';
 import { registerShowcaseApprovalDemo } from './src/security/seed-approval-demo.js';
 import { TaskViews, ProjectViews, InquiryViews, BusinessUnitViews, ContactViews, FieldZooViews } from './src/ui/views/index.js';
-import { ShowcaseApp } from './src/ui/apps/index.js';
+import { ShowcaseApp, ShowcaseArchiveApp } from './src/ui/apps/index.js';
 import { ChartGalleryDashboard, OpsDashboard, RevenuePulseDashboard } from './src/ui/dashboards/index.js';
 import { ShowcaseTaskDataset, ShowcaseProjectDataset, ShowcaseInvoiceDataset, ShowcaseAccountDataset } from './src/ui/datasets/index.js';
 import { allReports } from './src/ui/reports/index.js';
@@ -207,7 +207,7 @@ export default defineStack({
   mappings: allMappings,
 
   // UI
-  apps: [ShowcaseApp],
+  apps: [ShowcaseApp, ShowcaseArchiveApp],
   views: [TaskViews, ProjectViews, InquiryViews, BusinessUnitViews, ContactViews, FieldZooViews],
   pages: [CapabilityMapPage, StartHerePage, ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage, TaskTriagePage, TaskBoardPage, TaskCalendarPage, TaskGalleryPage, TaskSchedulePage, TaskTimelinePage, TaskMapPage, TaskAllViewsPage, ActiveProjectsPage, TaskDetailPage, InvoiceDocumentPage, ReviewQueuePage, NewProjectWizardPage, MyWorkPage, SettingsPage, StylingGalleryPage, CommandCenterPage, CommandCenterJsxPage, CrmWorkbenchPage, TaskDeskPage, PageVariablesPage, ContactFormPage, RenewalsPipelinePage],
   dashboards: [ChartGalleryDashboard, OpsDashboard, RevenuePulseDashboard],

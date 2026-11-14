@@ -1221,6 +1221,15 @@ export const ShowcaseTranslationBundle = {
           nav_renewals_pipeline: { label: '续约管道 · 汇总与区块' },
         },
       },
+      // The switched-off fixture app (apps/index.ts): never offered by a switcher,
+      // translated anyway so no surface that does name it reads half English.
+      showcase_archive: {
+        label: '展示归档',
+        description: '特意停用：停用应用的测试夹具,任何应用切换器都不应列出它。',
+        navigation: {
+          nav_archived_projects: { label: '归档项目' },
+        },
+      },
     },
     // See the `en` block: object-less actions resolve ONLY through
     // `globalActions`. Translated at birth for the same reason as
