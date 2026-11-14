@@ -75,11 +75,17 @@ Everything after `verify` is optional, and each optional member describes a capa
 
 ### handleRequest
 
-The HTTP entry point for authentication. It receives a standard `Request` (login, OAuth callback, etc.) and returns a standard `Response`. The concrete implementation owns route handling, credential parsing, and cookie/token issuance.
+The HTTP entry point for authentication. It receives a standard `Request` (login, OAuth callback, etc.) and returns a standard `Response`. The concrete implementation owns route handling, credential parsing, and cookie/token issuance. An implementation answers its whole auth route surface here, the routes it mounts itself as well as its library's, so a host that forwards its auth path to this method serves what the implementation's own mount does.
+
+With the shipped `plugin-auth`, a host that forwards to `handleRequest` gets:
+
+- **The whole auth surface.** Every route the self-hosted mount serves under `/api/v1/auth/*`: the routes the platform mounts itself (`/config`, `/bootstrap-status`, the `/admin/*` doors and the rest) and better-auth behind them, not better-auth alone.
+- **The mount-layer checks.** The same checks as the self-hosted mount run on this path: the IP allow-list (`allowed_ip_ranges`), the one-account-per-request rule, the organization IP list and the platform-admin wrappers.
+- **An optional transport argument.** The checks judge the client address from the transport the host passes. Pass the transport's peer as the second argument, `handleRequest(request, { remoteAddress })`, or declare `server.trustProxy` when the host sits behind a proxy that sets `X-Forwarded-For`. With neither, a deployment that sets `allowed_ip_ranges` answers `403 IP_NOT_ALLOWED`. The second argument belongs to the plugin's `AuthManager`; the `IAuthService` shape above is unchanged.
 
 ```typescript
-// Wire the auth service into an HTTP handler
-const response = await authService.handleRequest(request);
+// Wire the auth service into an HTTP handler, passing the transport's peer address
+const response = await authService.handleRequest(request, { remoteAddress });
 return response;
 ```
 
