@@ -377,6 +377,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Owner may edit",
         helpText: "On: the owner of a detail row (its owner_id) may update that row by id with read access to the master; everyone else, and every insert, delete, multi-row update and on-behalf-of write, still needs edit access to the master. Off (the default): every write of a detail needs edit access to its master."
       },
+      "sharing.controlledByParent.writeRequiresMasterRead": {
+        label: "Read on master is enough to write",
+        helpText: "On: anyone who can read the master may insert, update and delete detail rows, as the detail's own permissions, row-level security and field-level security allow. Off (the default): every write of a detail needs edit access to its master. Do not turn on together with Owner may edit, which this already covers."
+      },
       access: {
         label: "Access",
         helpText: "Wildcard-grant posture (ADR-0066 D2). Absent resolves to public. It decides whether a permission set's '*' object grant covers this object; record visibility between users is sharingModel."

@@ -377,6 +377,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Proprietário pode editar",
         helpText: "Ativado: o proprietário de uma linha de detalhe (seu owner_id) pode atualizar essa linha pelo id com acesso de leitura ao mestre; todos os demais, e toda inserção, exclusão, atualização de várias linhas e gravação em nome de outro, ainda precisam de acesso de edição ao mestre. Desativado (o padrão): toda gravação de um detalhe precisa de acesso de edição ao mestre dele."
       },
+      "sharing.controlledByParent.writeRequiresMasterRead": {
+        label: "Ler o mestre basta para gravar",
+        helpText: "Ativado: quem pode ler o mestre pode inserir, atualizar e excluir linhas de detalhe, conforme as permissões do próprio detalhe, a segurança em nível de linha e a segurança em nível de campo permitirem. Desativado (o padrão): toda gravação de um detalhe precisa de acesso de edição ao mestre dele. Não ative junto com \"Proprietário pode editar\", que esta opção já cobre."
+      },
       access: {
         label: "Acesso",
         helpText: "Postura de concessão curinga (ADR-0066 D2). Ausente equivale a public. Decide se a concessão de objeto '*' de um conjunto de permissões cobre este objeto; a visibilidade de registros entre usuários é o sharingModel."

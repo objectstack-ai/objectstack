@@ -377,6 +377,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "擁有者可編輯",
         helpText: "開啟：子記錄的擁有者（其 owner_id）只要對父記錄有讀權限，就可以依 id 更新該列；其他人，以及所有新增、刪除、多列更新和代辦寫入，仍需要對父記錄的編輯權限。關閉（預設）：子記錄的每一次寫入都需要對其父記錄的編輯權限。"
       },
+      "sharing.controlledByParent.writeRequiresMasterRead": {
+        label: "可讀父記錄即可寫入",
+        helpText: "開啟：凡能讀取父記錄的人，都可以在子物件自身的權限、列層級安全和欄位層級安全允許的範圍內，新增、更新和刪除子記錄。關閉（預設）：子記錄的每一次寫入都需要對其父記錄的編輯權限。不要與「擁有者可編輯」同時開啟，本開關已涵蓋它。"
+      },
       access: {
         label: "存取策略",
         helpText: "通配授權策略（ADR-0066 D2）。不宣告時依 public 處理。它決定權限集的 '*' 物件授權是否覆蓋本物件；使用者之間的記錄可見性由 sharingModel 決定。"

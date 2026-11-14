@@ -898,6 +898,7 @@
     "controlledByParentMasterOf": "src/data/controlled-by-parent-master.ts#controlledByParentMasterOf (function)",
     "controlledByParentMasterRefusal": "src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal (function)",
     "controlledByParentOwnerMayEdit": "src/data/object.zod.ts#controlledByParentOwnerMayEdit (function)",
+    "controlledByParentWriteRequiresMasterRead": "src/data/object.zod.ts#controlledByParentWriteRequiresMasterRead (function)",
     "countAuthorableFields": "src/data/record-surface.ts#countAuthorableFields (function)",
     "credentialFreeMongoOptions": "src/data/driver/common.zod.ts#credentialFreeMongoOptions (function)",
     "credentialFreeUrl": "src/data/driver/common.zod.ts#credentialFreeUrl (function)",

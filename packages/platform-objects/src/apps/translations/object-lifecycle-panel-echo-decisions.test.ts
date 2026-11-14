@@ -1279,7 +1279,11 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 737 since the dataset form's dimensions and measures repeaters offer
       // `synonyms` and `description` (ADR-0149 D1) — four row labels, authored
       // in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(737);
+      // 738 since the object form's `sharing.controlledByParent` sub-block
+      // offers `writeRequiresMasterRead` (ADR-0055 §3 as amended: read on the
+      // master is enough to write) — one row label, authored in all three
+      // locales.
+      expect(translated.length, `${locale} positive control`).toBe(738);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
