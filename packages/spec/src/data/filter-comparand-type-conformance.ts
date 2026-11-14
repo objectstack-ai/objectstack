@@ -302,3 +302,155 @@ export const FILTER_COMPARAND_TYPE_CASES: readonly ComparandTypeCase[] = [
     mustMention: ['2^53', ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE],
   },
 ] as const;
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * [#29486] A number or boolean comparand on a STRING-STORED field
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The fixture's declared fields: a text-family field and an option-family
+ * field, each holding the string the write door stores for a number or a
+ * boolean (`42` → `"42"`, `3` → `"3"`, `true` → `"true"`; #29241, #29562).
+ * Legal `FieldSchema` inputs, in the `{ type }` slice a driver's `syncSchema`
+ * and the engine's registry both take.
+ */
+export const FILTER_STRING_STORED_COMPARAND_FIELDS = {
+  id: { name: 'id', type: 'text' },
+  code: { name: 'code', type: 'text' },
+  stage: { name: 'stage', type: 'select', options: [
+    { label: 'Three', value: '3' },
+    { label: 'True', value: 'true' },
+    { label: 'False', value: 'false' },
+    { label: 'Open', value: 'open' },
+  ] },
+} as const;
+
+/** A row in the string-stored fixture — every value is the STORED string. */
+export interface StringStoredComparandRow {
+  id: string;
+  /** text — the text family. */
+  code: string;
+  /** select — the option family. */
+  stage: string;
+}
+
+/**
+ * The fixture: one row per stored reading (a number's, `true`'s, `false`'s)
+ * and one plain string, so a wrongly-widened or inverted predicate returns
+ * visibly wrong ids. No `null` cell: the NULL polarity of `$ne` / `$nin` is
+ * another table's subject.
+ */
+export const FILTER_STRING_STORED_COMPARAND_ROWS: readonly StringStoredComparandRow[] = [
+  { id: '1', code: '42', stage: '3' },
+  { id: '2', code: 'true', stage: 'true' },
+  { id: '3', code: 'false', stage: 'false' },
+  { id: '4', code: 'alpha', stage: 'open' },
+] as const;
+
+/**
+ * One case: the filter as an author writes it (a number or boolean comparand),
+ * the filter the engine's declared-type door hands every driver (each such
+ * comparand narrowed to `String(value)` —
+ * `filter-string-stored-comparand-declared-type.ts`), and the rows it matches.
+ *
+ * ## How the suites consume it
+ *
+ * - **The engine suite** (`@objectstack/objectql`, a recording driver):
+ *   `engine.find` with {@link StringStoredComparandCase.filter} hands the
+ *   driver exactly {@link StringStoredComparandCase.stored} (after the shared
+ *   lowering), and the caller's filter is not edited.
+ * - **Each driver suite**: seed {@link FILTER_STRING_STORED_COMPARAND_ROWS}
+ *   and assert `parseFilterAST(c.stored())` matches {@link
+ *   StringStoredComparandCase.expected} — the driver's half of the promise,
+ *   with no field-aware policy of its own. Together: the number `42` matches
+ *   the row written `42` on every driver path.
+ */
+export interface StringStoredComparandCase {
+  /** Stable identifier, usable as a test name. */
+  readonly name: string;
+  /** The filter as written — a factory, so no suite can edit what another judges. */
+  readonly filter: () => FilterCondition;
+  /** The filter every driver receives once the engine's door has narrowed it. */
+  readonly stored: () => FilterCondition;
+  /** Ids of matching rows, ascending. */
+  readonly expected: readonly string[];
+  /** Why the case is here — surfaced in failure output. */
+  readonly note?: string;
+}
+
+/**
+ * The cases: a number and a boolean comparand on the text field and on the
+ * option field, at the implicit slot, under `$eq` / `$ne`, and as members of
+ * `$in` / `$nin` mixed with other scalars (a string member passes as written).
+ */
+export const FILTER_STRING_STORED_COMPARAND_CASES: readonly StringStoredComparandCase[] = [
+  {
+    name: 'a number on a text field — implicit equality (the card)',
+    filter: () => ({ code: 42 }),
+    stored: () => ({ code: '42' }),
+    expected: ['1'],
+    note: 'Before the door: no row on any driver, no error — the row holds the string "42".',
+  },
+  {
+    name: 'a number on a text field — $eq',
+    filter: () => ({ code: { $eq: 42 } }),
+    stored: () => ({ code: { $eq: '42' } }),
+    expected: ['1'],
+  },
+  {
+    name: 'a boolean on a text field — implicit equality',
+    filter: () => ({ code: true }),
+    stored: () => ({ code: 'true' }),
+    expected: ['2'],
+  },
+  {
+    name: 'a number on a text field — $ne',
+    filter: () => ({ code: { $ne: 42 } }),
+    stored: () => ({ code: { $ne: '42' } }),
+    expected: ['2', '3', '4'],
+    note: 'Before the door: every row, the one written 42 included.',
+  },
+  {
+    name: 'mixed scalars in $in on a text field — a number, a boolean and a string',
+    filter: () => ({ code: { $in: [42, false, 'alpha'] } }),
+    stored: () => ({ code: { $in: ['42', 'false', 'alpha'] } }),
+    expected: ['1', '3', '4'],
+  },
+  {
+    name: 'mixed scalars in $nin on a text field',
+    filter: () => ({ code: { $nin: [42, true] } }),
+    stored: () => ({ code: { $nin: ['42', 'true'] } }),
+    expected: ['3', '4'],
+  },
+  {
+    name: 'a number on an option field — implicit equality',
+    filter: () => ({ stage: 3 }),
+    stored: () => ({ stage: '3' }),
+    expected: ['1'],
+    note: 'Before the door: no row on any driver — the write stored the option code "3".',
+  },
+  {
+    name: 'a boolean on an option field — $eq',
+    filter: () => ({ stage: { $eq: false } }),
+    stored: () => ({ stage: { $eq: 'false' } }),
+    expected: ['3'],
+  },
+  {
+    name: 'a boolean on an option field — $ne',
+    filter: () => ({ stage: { $ne: true } }),
+    stored: () => ({ stage: { $ne: 'true' } }),
+    expected: ['1', '3', '4'],
+  },
+  {
+    name: 'mixed scalars in $in on an option field — a number, a boolean and a string',
+    filter: () => ({ stage: { $in: [3, true, 'open'] } }),
+    stored: () => ({ stage: { $in: ['3', 'true', 'open'] } }),
+    expected: ['1', '2', '4'],
+  },
+  {
+    name: 'mixed scalars in $nin on an option field',
+    filter: () => ({ stage: { $nin: [3, false] } }),
+    stored: () => ({ stage: { $nin: ['3', 'false'] } }),
+    expected: ['2', '4'],
+  },
+] as const;
