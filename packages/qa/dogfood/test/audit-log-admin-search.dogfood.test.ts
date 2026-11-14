@@ -43,7 +43,14 @@ describe('[#21154] the stock admin searches the ledger and the activity stream w
   let stack: VerifyStack;
   let ql: any;
   let adminToken = '';
-  /** A term each table's own rows contain, read at rest under the system context. */
+  /**
+   * A term each table's own rows contain, read from a row the stock admin is
+   * served through the same data door, newest first (#33429). Read at rest
+   * under the system context, an unsorted first row varied between boots, and
+   * one boot row (the MCP endpoint's `sys_oauth_resource` registration) is
+   * about an object the data API does not expose, so the activity read gate
+   * serves it to no one: a term taken from it matched nothing the admin reads.
+   */
   const term: Record<'sys_audit_log' | 'sys_activity', string> = { sys_audit_log: '', sys_activity: '' };
 
   const list = async (path: string): Promise<Answer> => {
@@ -61,14 +68,17 @@ describe('[#21154] the stock admin searches the ledger and the activity stream w
     });
     adminToken = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
+    const newest = { sys_audit_log: 'created_at desc', sys_activity: 'timestamp desc' } as const;
     for (const table of Object.keys(term) as Array<keyof typeof term>) {
-      const rows: Row[] = await ql.find(table, { limit: 1, context: SYS.context });
+      const res = await stack.apiAs(adminToken, 'GET', `/data/${table}?$orderby=${encodeURIComponent(newest[table])}&$top=1`);
+      const json: any = await res.json().catch(() => undefined);
+      const rows: Row[] = json?.records ?? json?.data ?? [];
       term[table] = String(rows[0]?.object_name ?? '');
     }
 
     await assertArmed([
       armedWhen({
-        control: 'the boot wrote ledger and activity rows, and each carries a term its own search can match',
+        control: 'the boot wrote ledger and activity rows the stock admin is served, and each carries a term its own search can match',
         disarmedBy: 'an empty table would answer every search with no rows, and an answered search would prove nothing',
         observe: async () => ({ ledger: term.sys_audit_log, activity: term.sys_activity }),
         armed: (o) => o.ledger.length > 0 && o.activity.length > 0,
