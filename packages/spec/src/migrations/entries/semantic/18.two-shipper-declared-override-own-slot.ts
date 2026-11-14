@@ -14,8 +14,9 @@ export const entry: SemanticMigration = {
   surface:
     'A name of an overridable type that two installed packages of two namespaces both ship, with a declared '
     + '.custom override (overrides: { package: ID, basedOn }) of one or both: for an action, the env-wide list '
-    + '(GET /api/v1/meta/action), the execution view the automation engine arms from and the registry\'s item at '
-    + 'each package; for a page, app, dataset, doc, book or mapping, the reads at the second-registered package\'s '
+    + '(GET /api/v1/meta/action), the execution view the automation engine arms from and, when ONE package declares '
+    + 'an override, the registry\'s item at each package (with both overridden, the registry item keeps one bare slot '
+    + 'per name and is not covered here); for a page, app, dataset, doc, book or mapping, the reads at the second-registered package\'s '
     + 'address (GET /api/v1/meta/TYPE/NAME?package=ID, the layered read), the lists and the boot report '
     + 'metadata_sealed_overlay_unserved; for every type, the env-wide list (GET /api/v1/meta/TYPE naming no package)',
   replacement:
@@ -35,5 +36,6 @@ export const entry: SemanticMigration = {
     'For every name two installed packages ship, with a declared override in one package\'s .custom pair: '
     + 'GET /api/v1/meta/TYPE/NAME?package=ID answers that override at the overridden package and the other package\'s '
     + 'own item at the other, in either registration order; the env-wide list holds exactly one entry per package, '
-    + 'each under its own _packageId; and the boot report metadata_sealed_overlay_unserved names no declared override.',
+    + 'each under its own _packageId, plus, for a bundle (an email template), a pair\'s added member the package does '
+    + 'not ship, kept as a further entry on purpose; and the boot report metadata_sealed_overlay_unserved names no declared override.',
 };
