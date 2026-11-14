@@ -419,12 +419,10 @@ async function organizationDeleteGateAnswer(
   const refusal = answer as OrganizationDeleteGateRefusal;
   // Any 400-499 integer: better-call answers a numeric status as given, its
   // type lists only the named ones. The host's body as given; `code` is
-  // spelled out (the same value, checked above) so the ADR-0112 code pin
+  // spelled out (checked above) so the ADR-0112 code pin
   // (`api-error-code.pin.test.ts`) can read it.
-  throw new APIError(refusal.status as ConstructorParameters<typeof APIError>[0], {
-    code: refusal.body.code,
-    ...refusal.body,
-  });
+  const { code, ...rest } = refusal.body;
+  throw new APIError(refusal.status as ConstructorParameters<typeof APIError>[0], { code, ...rest });
 }
 
 /** The body of `AuthManager#assertRemoveMemberPermitted`; the method's docblock there is its contract. */
