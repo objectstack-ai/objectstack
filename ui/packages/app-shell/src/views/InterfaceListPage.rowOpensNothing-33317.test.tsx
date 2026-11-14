@@ -92,8 +92,21 @@ async function nameCellLooksLikeALink(): Promise<boolean> {
 
 beforeEach(() => {
   cleanup();
+  // The grid's permission reads go to the network; answer them empty.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ),
+  );
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('objectstack#33317 — an interface list page whose records open nothing', () => {
   it('`recordAction: none`: the name cell is plain text', async () => {
