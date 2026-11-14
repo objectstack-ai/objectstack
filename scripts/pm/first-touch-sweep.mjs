@@ -41,17 +41,19 @@
  *      minute the card was created — first-touch as untriaged, ⛔ never judged by who applied it.
  *
  * ②③④ take only cards whose `updated_at` is older than `SETTLE_MS` (~2 min): a card being labelled right now is
- * mid-write, not owed. ⑤ needs a window; without `--since` it is NOT RUN and the verdict says so — ⛔ never clean.
+ * mid-write, not owed. ⑤ needs a window; without `--since` it is NOT RUN, the verdict is PARTIAL and the exit 4 —
+ * ⛔ never clean, never 0.
  *
  * Report-only: ⛔ this file writes nothing. Each hit is a card triage owes a first touch this fire; the order of the
  * touches (newest first when the sweep clears, oldest first when it does not) is triage's, not this file's.
  *
  * ## Exit codes — capture them BEFORE any pipe
  *
- *   0  the walk is complete; the lines say what each disjunction found (zero or more)
+ *   0  the walk is complete and all five ran; the lines say what each disjunction found (zero or more)
  *   2  usage
  *   3  PREREQUISITE NOT MET — a read refused or unanswered
- *   4  sweep INCOMPLETE — the walk's count is not the platform's, a page ceiling was hit, or a ⑤ card went unread
+ *   4  not a whole sweep: INCOMPLETE — the walk's count is not the platform's, a page ceiling was hit, or a ⑤ card
+ *      went unread — or PARTIAL — no `--since`, so ⑤ did not run
  *
  * ## Self-test
  *
@@ -161,8 +163,13 @@ export function sameMinuteLabelled(issue, events) {
 export function verdictLine({ complete, why = [], hits, fifthRun }) {
   if (!complete) return `sweep INCOMPLETE — ${why.join('; ')}. ⛔ Not a clean sweep: re-run when the reads answer.`;
   const n = hits.size;
-  const fifth = fifthRun ? '' : ' (⑤ NOT RUN: no --since window)';
-  return n === 0 ? `sweep CLEAN — no card owed a first touch${fifth}` : `sweep FOUND ${n} card(s) owed a first touch${fifth}`;
+  if (!fifthRun) return `sweep PARTIAL — ⑤ NOT RUN: no --since window; ①–④ found ${n} card(s) owed a first touch. ⛔ Not a clean sweep: re-run with --since=ISO.`;
+  return n === 0 ? 'sweep CLEAN — no card owed a first touch' : `sweep FOUND ${n} card(s) owed a first touch`;
+}
+
+/** The exit a patrol reads: 0 only for a complete walk on which all five ran. Pure. */
+export function sweepExit({ complete, fifthRun }) {
+  return complete && fifthRun ? EXIT_OK : EXIT_INCOMPLETE;
 }
 
 // ---------------------------------------------------------------------------
@@ -300,8 +307,8 @@ const USAGE = [
   '  node scripts/pm/first-touch-sweep.mjs [--repo=OWNER/NAME] [--since=ISO] [--now=ISO] [--json]',
   '  node scripts/pm/first-touch-sweep.mjs --self-test',
   '',
-  '  --since is the window anchor (the seat post\'s last round record); without it ⑤ is NOT RUN, never clean.',
-  '  Exits: 0 complete · 2 usage · 3 prerequisite (a read refused) · 4 sweep INCOMPLETE. Report-only: writes nothing.',
+  '  --since is the window anchor (the seat post\'s last round record); without it ⑤ is NOT RUN: PARTIAL, exit 4.',
+  '  Exits: 0 complete, all five run · 2 usage · 3 prerequisite (a read refused) · 4 INCOMPLETE or PARTIAL. Report-only.',
 ].join('\n');
 
 function liveGet(token) {
@@ -343,7 +350,7 @@ export async function main(argv, deps = {}) {
     return EXIT_PREREQUISITE;
   }
   console.log(o.json ? JSON.stringify(renderJson(r), null, 2) : renderText(r));
-  return r.complete ? EXIT_OK : EXIT_INCOMPLETE;
+  return sweepExit(r);
 }
 
 function rearmThroughProxy(args) {
@@ -369,7 +376,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the classifier: ①–④ exactly as written — ① is not "no labels", ③ is asked, exclusions first, ②③④ settle': 16,
   'the fifth: created in the window, pm:queue or priority:* applied in the creation minute, never by actor': 7,
   'the walk: every page, pull requests dropped, the count checked — INCOMPLETE on any gap, never clean': 10,
-  'the CLI: what a typo must never mean, and the exits a patrol reads': 7,
+  'the CLI: what a typo must never mean, and the exits a patrol reads': 9,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -457,7 +464,7 @@ export async function selfTest() {
     t('pull requests are dropped from the count', r.enumerated, 131);
     t('a count equal to the platform\'s is complete', r.complete);
     t('⭐ ③ found the stateless card on page two — no cut at twelve', r.found[3].map((i) => i.number), [500]);
-    t('…and the verdict says FOUND, with ⑤ NOT RUN named', verdictLine(r), 'sweep FOUND 1 card(s) owed a first touch (⑤ NOT RUN: no --since window)');
+    t('⭐ …and with no window the verdict is PARTIAL, never FOUND or CLEAN, ⑤ NOT RUN named', verdictLine(r), 'sweep PARTIAL — ⑤ NOT RUN: no --since window; ①–④ found 1 card(s) owed a first touch. ⛔ Not a clean sweep: re-run with --since=ISO.');
     const short = await sweep({ repo: REPO, nowMs: NOW, get: board(two, 140).get });
     t('⭐ a walk short of the platform\'s count is INCOMPLETE, naming both numbers', [short.complete, short.why[0]], [false, 'the walk returned 131 open issue(s) and the platform counts 140']);
     t('…and its verdict is never clean', verdictLine(short).startsWith('sweep INCOMPLETE'));
@@ -489,8 +496,12 @@ export async function selfTest() {
         console.error = e;
       }
     };
-    const clean = await quiet(main)(['--repo=objectstack-ai/objectstack'], { env: {}, nowMs: NOW, get: async (p) => (p.startsWith('/search') ? { status: 200, json: { total_count: 0 } } : { status: 200, json: [] }) });
-    t('an empty complete board exits 0', clean, EXIT_OK);
+    const emptyBoard = async (p) => (p.startsWith('/search') ? { status: 200, json: { total_count: 0 } } : { status: 200, json: [] });
+    const clean = await quiet(main)(['--repo=objectstack-ai/objectstack', '--since=2026-11-14T20:00:00Z'], { env: {}, nowMs: NOW, get: emptyBoard });
+    t('an empty complete board, all five run, exits 0', clean, EXIT_OK);
+    const partial = await quiet(main)(['--repo=objectstack-ai/objectstack'], { env: {}, nowMs: NOW, get: emptyBoard });
+    t('⭐ the same board with no --since (⑤ NOT RUN) exits 4, never 0', partial, EXIT_INCOMPLETE);
+    t('…and its verdict is PARTIAL, never CLEAN', verdictLine({ complete: true, hits: new Set(), fifthRun: false }).startsWith('sweep PARTIAL'));
     const gap = await quiet(main)([], { env: {}, nowMs: NOW, get: async (p) => (p.startsWith('/search') ? { status: 200, json: { total_count: 3 } } : { status: 200, json: [] }) });
     t('⭐ a count gap exits 4 (INCOMPLETE)', gap, EXIT_INCOMPLETE);
     const down = await quiet(main)([], { env: {}, nowMs: NOW, get: async () => ({ status: 0, json: null }) });

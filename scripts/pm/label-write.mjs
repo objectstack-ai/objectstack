@@ -245,8 +245,8 @@
  * hand. `refuseStatelessWrite` is the ONE predicate, asked of a card's target at every door that strips a state:
  *
  *   - this file, at step ② on step ①'s own read (the plain write, `--comment-file` and `--release` alike);
- *   - `fleet-write/dispatch.mjs`, for an actions file whose stroke takes a `pm:*` state off a card or parks one —
- *     the target READ once, before the dry-run exit, as the kind rule reads it;
+ *   - `fleet-write/dispatch.mjs`, for an actions file whose stroke takes a `pm:*` state off a card, parks one or
+ *     assigns someone to one — the target READ once, before the dry-run exit, as the kind rule reads it;
  *   - `close-cards.mjs`, whose every pack closes the card it strips — pinned by asking the predicate of the pack.
  *
  * Two halves. The strip: a `pm:*` state the target drops on an OPEN issue while the target carries no state at all is
@@ -1630,6 +1630,9 @@ export async function runRelease(options, deps = {}) {
   if (wrongKind) return refuse(`${wrongKind} A release puts \`${RELEASE_TO}\` on the card, so it is for issues only.`, { stoppedAt: 2 });
   const twoStates = refuseTwoStates(labels.target);
   if (twoStates) return refuse(`${twoStates} A release never takes --allow-two-states: fix the board first.`, { stoppedAt: 2 });
+  // The stateless write, asked here as at every door that strips a state (header): a release leaves `pm:queue` and no holder, so it passes.
+  const stateless = refuseStatelessWrite({ state: card.state, kind: readTargetKind(card).kind, current: currentLabels, target: labels.target, currentAssignees, assigneeTarget: assignees.target });
+  if (stateless) return refuse(stateless, { stoppedAt: 2 });
 
   let text;
   try {
@@ -2198,6 +2201,8 @@ export async function selfTest() {
   battery(STATELESS_BATTERY);
   {
     const sw = (o) => refuseStatelessWrite(o);
+    // Every door that strips a state asks the ONE predicate (header): the plain write and --release alike, read off the source.
+    t('runLabelWrite and runRelease both ask refuseStatelessWrite', [runLabelWrite, runRelease].map((fn) => String(fn).includes('refuseStatelessWrite(')), [true, true]);
     const strip = sw({ current: ['pm:dispatched', 'domain:skills'], target: ['domain:skills'] });
     t('⭐ taking the last pm state off an OPEN card is REFUSED', typeof strip === 'string' && strip.includes('`pm:dispatched`'));
     t('…quoting the rule and where it lives, so a reworded rule reds the pin below', strip.includes(STATELESS_RULE) && strip.includes(STATELESS_RULE_PATH));
