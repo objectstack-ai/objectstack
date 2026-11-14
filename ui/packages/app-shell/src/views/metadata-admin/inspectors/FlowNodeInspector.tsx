@@ -53,6 +53,7 @@ import {
 import { declaredConfigKeys, jsonSchemaToFlowFields } from './json-schema-to-fields.js';
 import {
   applyConnectorInputForm,
+  CONNECTOR_INPUT_PATH,
   connectorActionInputSchema,
   connectorInputExtras,
   connectorInputFields,
@@ -172,6 +173,28 @@ function setAtPath(obj: Record<string, unknown>, path: string[], value: unknown)
     else next[head] = child;
   }
   return next;
+}
+
+/**
+ * objectstack#33346 (row 254) — the connector + action a `connector_action`
+ * node's `connectorConfig.input` map was written for, as one comparable key.
+ *
+ * The map's keys are the chosen ACTION's parameters, and the executor hands the
+ * whole map to that action's handler (service-automation `connector-nodes.ts`,
+ * judged only against the action's open input schema). So inputs written for
+ * one action are never another action's: switching the connector or the action
+ * without resetting the map sent the old action's keys to the new one.
+ */
+function connectorPairKey(node: Record<string, unknown> | null | undefined): string {
+  const cc = node?.connectorConfig;
+  const block = cc && typeof cc === 'object' && !Array.isArray(cc) ? (cc as Record<string, unknown>) : {};
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  return JSON.stringify([str(block.connectorId), str(block.actionId)]);
+}
+
+/** Whether a field writes the connector or the action of a `connector_action` node. */
+function isConnectorPairPath(path: readonly string[]): boolean {
+  return path.length === 2 && path[0] === 'connectorConfig' && (path[1] === 'connectorId' || path[1] === 'actionId');
 }
 
 /**
@@ -467,6 +490,13 @@ export function FlowNodeInspector({
     setAdvOpen(extraJson.trim() !== '');
     setAdvReveal(false);
   }, [extraJson]);
+  // objectstack#33346 (row 254) — the Input maps a connector/action switch set
+  // aside, keyed by node id and the pair they were written for. The Action box
+  // commits on every keystroke, so retyping the same action passes through
+  // other names on the way; returning to a pair gives its inputs back instead
+  // of the empty map. Never written to the draft: only the current pair's
+  // inputs are saved, so no set-aside input is ever sent.
+  const setAsideInputs = React.useRef(new Map<string, unknown>());
 
   if (!node) {
     // Stale selection (deleted node, or a deep link the draft has moved past).
@@ -564,6 +594,21 @@ export function FlowNodeInspector({
     // Migrate-on-edit: writing the canonical path drops any looser fallback
     // location, so the node never carries a stale duplicate (engine + designer agree).
     if (field.fallbackPath) nextNode = setAtPath(nextNode, field.fallbackPath, undefined);
+    // objectstack#33346 (row 254) — a new connector or action resets the Input
+    // map to the new pair's inputs (none, unless this inspector set some aside
+    // for that pair earlier), so the old action's keys are never saved or sent.
+    if (isConnectorPairPath(path)) {
+      const fromKey = connectorPairKey(node);
+      const toKey = connectorPairKey(nextNode);
+      if (fromKey !== toKey) {
+        const stash = setAsideInputs.current;
+        const cc = node.connectorConfig;
+        const held = cc && typeof cc === 'object' && !Array.isArray(cc) ? (cc as Record<string, unknown>).input : undefined;
+        if (held !== undefined) stash.set(JSON.stringify([node.id, fromKey]), held);
+        const back = stash.get(JSON.stringify([node.id, toKey]));
+        nextNode = setAtPath(nextNode, [...CONNECTOR_INPUT_PATH], back ?? (held === undefined ? undefined : {}));
+      }
+    }
     const patch = loc.write(withoutSpecRefusedKeys(nextNode));
     if (!patch) return;
     if (nextEdges) patch.edges = nextEdges;
