@@ -1232,7 +1232,8 @@ organisation's identity provider. Every password door refuses a pending
 person (`set-user-password`, `set-initial-password`, the email and phone
 reset), and so does every other way to open a session. Their first sign-in
 through the platform identity provider attaches to the row and the source
-becomes `idp_provisioned`. Their positions, permission sets and manager apply
+becomes `idp_provisioned`; only that provider clears the pending state, and a
+sign-in through any other one leaves the person pending. Their positions, permission sets and manager apply
 from the moment they are added, so seed data and approval flows can name them
 before they sign in. Off a managed environment both doors answer `409`.
 
@@ -1240,17 +1241,23 @@ A host can be told about people as they come and go: the `environmentUserHost`
 option of the auth plugin is called after a person is added, and before a
 person is deactivated (`admin/ban-user`) or reactivated (`admin/unban-user`).
 It is never called inside a database transaction. Each event names the
-administrator who acted and, when they hold a linked `objectstack-cloud`
-account, their cloud user id from that account (never from the request).
+administrator who acted, the administrator at the keyboard when the session
+is an impersonation (`impersonatedBy`), and, when the acting administrator
+holds a linked `objectstack-cloud` account, their cloud user id from that
+account. None of these is read from the request.
 
 A host can refuse by throwing `EnvironmentUserHostRefusal` with a `409` (for
 example, an organization owner or admin, who is removed in the console) or a
 `403` (for example, `DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED`). The door
 answers with that status, code and sentence: a refused deactivation or
 reactivation writes nothing, and a refused add takes that person back out
-(on an import, that row alone fails). Any other host failure never undoes or
-blocks the change; the answer carries `host: { notified: false, reason }` and
-adding a pending person again tells the host again.
+(on an import, that row alone fails). Any other host failure refuses a
+deactivation with `503` and writes nothing, since only the host can say
+whether the person is an organization owner or admin. It never undoes or
+blocks an add or a reactivation: the answer carries `host: { notified: false,
+reason }`. Adding a person who is still pending again tells the host again
+and changes nothing else: positions, permission sets or a manager sent with
+it are listed on the answer as `notApplied`; set them on the person's record.
 
 `admin/ban-user` and `admin/unban-user` work without the admin plugin: on a
 deployment without it the ban is written by the platform, and a banned user is
