@@ -3312,7 +3312,7 @@
       "title": "Error answers made honest on v18: a hook refusal on a hand-built write route answers 400 with the hook's own sentence, a crash answers a generic 500 that withholds the caught message, and a unique-constraint refusal is 409 UNIQUE_VIOLATION with details at the action door, MCP and sandboxed bodies too",
       "since": "v18",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3345,9 +3345,9 @@
           "evidence": "the body"
         },
         {
-          "clause": "the duplicate insert through the action door → 409 UNIQUE_VIOLATION with `details` in the composite shape: exactly `object` (the object's name) and `developerMessage`, no `field` — a field's `unique: true` is a tenancy-scoped composite index, so the driver names no single column (`field` is added only when the refusal states one)",
+          "clause": "the duplicate insert through the action door → 409 UNIQUE_VIOLATION with `details` exactly `developerMessage`, `field` and `object`: `object` the object's name and `field` the duplicated column. A field's `unique: true` is the tenancy-scoped composite index (organization_id, FIELD), whose organization part is the implied scope, so the refusal names FIELD (`field` is added only when the refusal determinably states one column)",
           "oracle": "api",
-          "verify": "status + error.code + the key set of error.details (exactly developerMessage and object) + details.object. error-sentences-live.dogfood.test.ts asserts all four over HTTP: a declarative `operation: 'update'` action whose patch repeats a `unique: true` email, POST /api/v1/actions/OBJECT/ACTION → 409 UNIQUE_VIOLATION, and the row keeps its own email. dispatcher-unique-violation-wire-code.test.ts holds the same answer at the engine layer (HttpDispatcher over a real ObjectQL engine and SqlDriver, no Hono adapter)",
+          "verify": "status + error.code + the key set of error.details (exactly developerMessage, field and object) + details.field (the duplicated column, email) + details.object (packages/types/src/unique-violation.ts#uniqueViolationField). error-sentences-live.dogfood.test.ts asserts all five over HTTP: a declarative `operation: 'update'` action whose patch repeats a `unique: true` email, POST /api/v1/actions/OBJECT/ACTION → 409 UNIQUE_VIOLATION, and the row keeps its own email. dispatcher-unique-violation-wire-code.test.ts holds the same answer at the engine layer (HttpDispatcher over a real ObjectQL engine and SqlDriver, no Hono adapter)",
           "evidence": "the body"
         },
         {
@@ -3359,7 +3359,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts + packages/rest/src/rest-hook-script-fault-envelope.test.ts + packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts + packages/services/service-storage/src/storage-routes.server-fault-withheld.test.ts (acceptance[0], unit and engine; the first two also hold acceptance[1]'s HOOK_ABORTED below HTTP — the nested-envelope rows at 400 HOOK_ABORTED, and mapDataError's HOOK_ABORTED with no declaredCode) + packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts (acceptance[1]–[3] over HTTP on the scratch app packages/qa/dogfood/test/fixtures/error-sentences-fixture.ts: the hook's sentence at 400 with code HOOK_ABORTED on the /data doors, 409 UNIQUE_VIOLATION with details exactly developerMessage + object at the action door, and a storage route's 500 INTERNAL withholding the caught text)"
+        "ref": "packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts + packages/rest/src/rest-hook-script-fault-envelope.test.ts + packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts + packages/services/service-storage/src/storage-routes.server-fault-withheld.test.ts (acceptance[0], unit and engine; the first two also hold acceptance[1]'s HOOK_ABORTED below HTTP — the nested-envelope rows at 400 HOOK_ABORTED, and mapDataError's HOOK_ABORTED with no declaredCode) + packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts (acceptance[1]–[3] over HTTP on the scratch app packages/qa/dogfood/test/fixtures/error-sentences-fixture.ts: the hook's sentence at 400 with code HOOK_ABORTED on the /data doors, 409 UNIQUE_VIOLATION with details exactly developerMessage + field + object at the action door, and a storage route's 500 INTERNAL withholding the caught text)"
       },
       "source": [
         "packages/types/src/sandbox-business-message.ts#sandboxBusinessMessage",
@@ -3416,6 +3416,12 @@
           "date": "2026-11-10",
           "change": "steps[0]: the per-object /batch door's status for a report with a failed row is 207 Multi-Status, no longer 200 (the bulk doors answer 207 when any row failed and 200 when none did; bulkReportStatus in packages/rest/src/batch-routes.ts). The door still never answers the clause's 400, so it stays out of the doors this item reads. No clause changed",
           "ref": "#32280"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-14",
+          "change": "acceptance[2] (clause, verify) and automated.ref re-pointed to the widened details (stale spec, QA run #33025 acceptance[2], card #33032 item 2; the same clause #33086 lists as still open, done once here). 28a15270 (#32935) made the 409 UNIQUE_VIOLATION details for a duplicate in an organization-scoped unique field {developerMessage, field, object}: the composite key (organization_id, FIELD) now names FIELD (packages/types/src/unique-violation.ts#uniqueViolationField). r8 expected exactly developerMessage and object, no field. Both pins already assert the new set: packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts ('details exactly { developerMessage, field, object }', field 'email') and packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts. Status, code and the row keeping its email are unchanged. Read at base e540baf8",
+          "ref": "#33032"
         }
       ]
     },
