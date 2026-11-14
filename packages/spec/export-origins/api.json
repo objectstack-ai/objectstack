@@ -1019,6 +1019,8 @@
     "RevertPackageCommitResponse": "src/api/package-lifecycle.zod.ts#RevertPackageCommitResponse (type)",
     "RevertPackageCommitResponseParsed": "src/api/package-lifecycle.zod.ts#RevertPackageCommitResponseParsed (type)",
     "RevertPackageCommitResponseSchema": "src/api/package-lifecycle.zod.ts#RevertPackageCommitResponseSchema (const)",
+    "RollbackMetaItemRequest": "src/api/protocol.zod.ts#RollbackMetaItemRequest (type)",
+    "RollbackMetaItemRequestSchema": "src/api/protocol.zod.ts#RollbackMetaItemRequestSchema (const)",
     "RollbackMetaItemResponse": "src/api/protocol.zod.ts#RollbackMetaItemResponse (type)",
     "RollbackMetaItemResponseParsed": "src/api/protocol.zod.ts#RollbackMetaItemResponseParsed (type)",
     "RollbackMetaItemResponseSchema": "src/api/protocol.zod.ts#RollbackMetaItemResponseSchema (const)",

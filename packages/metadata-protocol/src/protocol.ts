@@ -6865,7 +6865,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private uninstalledNamedBaseRefusal(
         request: { type: string; name: string; packageId?: string | null },
-        how: { verb?: 'save' | 'publish'; inherited?: boolean } = {},
+        how: { verb?: 'save' | 'publish' | 'rollback'; inherited?: boolean } = {},
     ): Error | null {
         // [#25467 cut 33] The body moved to `protocol-package-scope.ts` (see `PackageScopeHost`).
         const host: ThisParameterType<typeof uninstalledNamedBaseRefusal> = {
@@ -9509,9 +9509,12 @@ export class ObjectStackProtocolImplementation implements
      * on a control-plane kernel — appends no `sys_metadata_history` row.
      *
      * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
-     * name two row slots hold is refused `409` naming every holder when no
-     * package is named, and `packageId` reads that holder's versions alone
-     * (`protocol-history-slots.ts`); a name one slot holds reads as before.
+     * name two row slots hold, or one the bare plain read refuses, is refused
+     * `409` naming every holder when no package is named, and `packageId`
+     * reads that holder's versions alone: its own, plus those attributed to
+     * no package or to the environment while it is the name's only slot
+     * (`protocol-history-slots.ts`). A name one holder holds reads as before.
+     * `packageId` on any other type is refused `400 VALIDATION_ERROR`.
      */
     async historyMetaItem(request: {
         type: string;
@@ -10904,10 +10907,16 @@ export class ObjectStackProtocolImplementation implements
      *
      * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
      * name two row slots hold is refused `409` naming every holder when no
-     * package is named, with nothing written; `packageId` restores into that
-     * holder's row (its own, or its pair's declared override), and the
-     * version must be that holder's: another holder's answers 404
-     * `VERSION_NOT_FOUND` (`protocol-history-slots.ts`).
+     * package is named, with nothing written (so is a name the bare plain
+     * read refuses); `packageId` restores into that holder's row (its own,
+     * its pair's declared override, or the package-less row its read falls
+     * back to), and the version must be that holder's: another holder's, or
+     * one attributed to no package or to the environment while another slot
+     * holds the name, answers 404 `VERSION_NOT_FOUND`. A name one holder
+     * holds, named bare, restores any of its versions as before.
+     * `packageId` on any other type is refused `400 VALIDATION_ERROR`, and
+     * one naming no installed package where no row is stored is refused
+     * `422 WRITABLE_PACKAGE_REQUIRED` (`protocol-history-slots.ts`).
      *
      * [#32700] Then, as the save door does: the restored object's storage is
      * synced, and every stored computed field the restore makes compute

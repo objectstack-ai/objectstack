@@ -63,7 +63,7 @@ import { isBatchObjectType, judgeBatchObjectRegistrations, registerAdmittedBatch
 import { engineCanRollBack } from '@objectstack/core';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 import type { HistoryVersionOwner } from './sys-metadata-repository.js';
-import { historySlotOf } from './protocol-history-slots.js';
+import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './protocol-history-slots.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
 
 /**
@@ -194,7 +194,7 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
 
 export class ProtocolHistoryAndPublishFacet {
     /** The body of `ObjectStackProtocolImplementation#historyMetaItem`; the method's docblock there is its contract. */
-    static async historyMetaItem(host: Pick<ProtocolHost, 'findServedOverlayRow' | 'getOverlayRepo' | 'historyMetaItem' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'packagelessAddress' | 'resolveRowlessExpandedView' | 'shippedArtifactsOf' | 'storedHashDigest'>, request: {
+    static async historyMetaItem(host: Pick<ProtocolHost, 'engine' | 'findServedOverlayRow' | 'getOverlayRepo' | 'historyMetaItem' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'packagelessAddress' | 'resolveRowlessExpandedView' | 'shippedArtifactsOf' | 'storedHashDigest'>, request: {
             type: string;
             name: string;
             sinceSeq?: number;
@@ -244,6 +244,10 @@ export class ProtocolHistoryAndPublishFacet {
         const member = resolveBundleMemberSelector(request.type, request.member);
         // Canonical by construction from the fold above — NOT a second fold.
         const singularType = request.type;
+        // [#32905] `?package=` addresses a holder of a type stored per
+        // `(package, name)` only; on any other type it is refused, before the
+        // early answer below, never accepted and dropped.
+        refusePackageSelectorOutsideSlottedTypes(singularType, request.packageId);
         if (!host.isOverlayAllowed(singularType)
             && !host.isRuntimeCreateAllowed(singularType)) {
             return { events: [] };

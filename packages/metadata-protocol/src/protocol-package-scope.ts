@@ -102,7 +102,7 @@ export async function resolveAppPackageIdKey<R extends {
 export function uninstalledNamedBaseRefusal(
     this: Pick<PackageScopeHost, 'resolveWritePackageScope'>,
     request: { type: string; name: string; packageId?: string | null },
-    how: { verb?: 'save' | 'publish'; inherited?: boolean } = {},
+    how: { verb?: 'save' | 'publish' | 'rollback'; inherited?: boolean } = {},
 ): Error | null {
     const namedBase = request.packageId;
     if (!namedBase || namedBase === 'sys_metadata') return null;
@@ -114,7 +114,12 @@ export function uninstalledNamedBaseRefusal(
         + `that package; discard-drafts for drafts) and save again, into an installed writable package or with `
         + `no package.`;
     const err = new Error(
-        how.verb === 'publish'
+        how.verb === 'rollback'
+            ? `Cannot roll back ${type} '${request.name}' into package '${namedBase}': no row of it is stored `
+                + `under that package and no package with that id is installed in this deployment, so the restored `
+                + `${type} would be stored bound to a package that does not exist. Name an installed package that `
+                + `holds or ships the ${type} (its history lists its versions). Nothing was restored.`
+            : how.verb === 'publish'
             ? `Cannot publish ${type} '${request.name}' into package '${namedBase}': no package with that id `
                 + `is installed in this deployment, so the ${type} would go live bound to a package that does `
                 + `not exist. ${storedWayOut} Nothing was published.`

@@ -576,20 +576,23 @@ function historySnapshotPackageColumn(
 /**
  * [ADR-0150 D3/D4, #32905] Whose versions a history read serves, or whose
  * version a restore may write: the row slot `packageId` names (`null`: the
- * package-less row), and whether a version attributed to no package
- * (recorded before the column was written) is that slot's too — only when
- * the name has no other row slot, so an unattributed version is never
+ * package-less row), and whether that slot is the name's only one (`sole`).
+ * A sole slot's versions include those attributed to no package (recorded
+ * before the column was written) and the environment's own (M1, as
+ * `DatabaseLoader.rollbackSlot` keeps it: a package took over the
+ * package-less row, or saved after it was removed), so neither is ever
  * guessed onto one of several holders.
  */
 export interface HistoryVersionOwner {
   packageId: string | null;
-  unattributed: boolean;
+  sole: boolean;
 }
 
 /** [#32905] Whether history row `row` is a version of `owner`'s slot. */
 function isVersionOf(row: Record<string, unknown>, owner: HistoryVersionOwner): boolean {
   const attributed = historyRowAttribution(row);
-  return attributed === undefined ? owner.unattributed : attributed === owner.packageId;
+  if (attributed === undefined) return owner.sole;
+  return attributed === owner.packageId || (attributed === null && owner.sole);
 }
 
 /**
@@ -1755,9 +1758,10 @@ export class SysMetadataRepository implements MetadataRepository {
       /**
        * [ADR-0150 D3/D4, #32905] The row slot whose version `targetVersion`
        * must be: a version attributed to another package (or to the
-       * environment, for a package's slot) answers 404 `VERSION_NOT_FOUND`,
-       * as another member's does, and an unattributed one is restored only
-       * where {@link HistoryVersionOwner.unattributed} admits it — ⛔ never
+       * environment, for a package's slot the name shares) answers 404
+       * `VERSION_NOT_FOUND`, as another member's does; an unattributed one,
+       * or the environment's, is restored only into the name's sole slot
+       * ({@link HistoryVersionOwner.sole}) — ⛔ never
        * another holder's version written into this slot's row. Omitted → any
        * version of the name, as before.
        */
@@ -1835,9 +1839,12 @@ export class SysMetadataRepository implements MetadataRepository {
     // One read supplies both facts, exactly as {@link promoteDraft} does, so
     // the row the lock is taken on is by construction the row that is written.
     // A missing active row (deleted, or never published) yields `null` — the
-    // unbound row, which is the only defined answer: `sys_metadata_history`
-    // carries no `package_id` column, so a vanished binding is not recoverable.
-    // [#29414] …under the package the caller names, when it names one.
+    // unbound row, which is the only defined answer here: a history row
+    // records its slot's package (`package_id`, #32905) only for a type
+    // stored per `(package, name)`, and only since that change, so this read
+    // does not recover a vanished binding from it. [#29414] …under the
+    // package the caller names, when it names one (the rollback door names
+    // the addressed slot's for those types).
     const activeRow = await this.findEnvironmentRow({
       where: this.whereFor(ref, 'active', 'packageId' in opts ? (opts.packageId ?? null) : undefined, member),
       context: { isSystem: true },

@@ -13,13 +13,16 @@
  *    the `all`/empty spellings `/layers` folds to "no package" send none;
  *  - REFUSAL: a repeated `?package=` is a located 400 and the protocol is never
  *    called; the protocol's package-scoped refusal is rendered `409` with
- *    `details.candidates` naming every holder, as the plain read renders it.
+ *    `details.candidates` naming every holder, as the plain read renders it;
+ *    and, through the real protocol, `?package=` on a type not stored per
+ *    package is a 400 naming the parameter, never accepted and dropped.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 // The route modules load ObjectQL lazily; pay that load at collection, never in a clocked case.
 import '@objectstack/objectql';
 import { PackageScopedNameRefusedError, packageScopedRefusalMessage, type PackageScopedRefusal } from '@objectstack/core';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer, META_ITEM_HISTORY_PARAMS, META_ITEM_ROLLBACK_PARAMS } from './rest-server.js';
 
 const ITEM = '/api/v1/meta/:type/:name';
@@ -53,7 +56,7 @@ function twoHolderRefusal(): PackageScopedNameRefusedError {
     return new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
 }
 
-function boot(options: { refuse?: boolean } = {}) {
+function boot(options: { refuse?: boolean; real?: boolean } = {}) {
     const answer = (value: unknown) => vi.fn(() => (options.refuse ? Promise.reject(twoHolderRefusal()) : Promise.resolve(value)));
     const protocol: any = {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
@@ -63,22 +66,27 @@ function boot(options: { refuse?: boolean } = {}) {
         historyMetaItem: answer({ events: [] }),
         rollbackMetaItem: answer({ success: true, version: 'v', seq: 2, restoredFromVersion: 1 }),
     };
+    // The real protocol judges the selector; only the plain read the history
+    // door asks first (its read-refusal gate) is answered by the stub.
+    const served = options.real
+        ? Object.assign(new ObjectStackProtocolImplementation({} as any), { getMetaItem: protocol.getMetaItem })
+        : protocol;
     const server = {
         get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), patch: vi.fn(), use: vi.fn(),
         listen: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined),
     };
-    const rest = new RestServer(server as any, protocol, { api: { requireAuth: false }, metadata: { enableCache: false } } as any);
+    const rest = new RestServer(server as any, served, { api: { requireAuth: false }, metadata: { enableCache: false } } as any);
     // `isSystem` clears the capability and authoring gates that run before the query is read.
     (rest as any).resolveExecCtx = async () => ({ isSystem: true, userId: 'u1' });
     rest.registerRoutes();
-    const drive = async (method: string, path: string, query: Record<string, unknown>, body: unknown = {}) => {
+    const drive = async (method: string, path: string, query: Record<string, unknown>, body: unknown = {}, params: Record<string, string> = PARAMS) => {
         const found = (rest as any).getRoutes().find((r: any) => r.method === method && r.path === path);
         if (!found) throw new Error(`route not registered: ${method} ${path}`);
         const res = mockRes();
-        await found.handler({ method, path, params: PARAMS, query, headers: {}, body } as any, res);
+        await found.handler({ method, path, params, query, headers: {}, body } as any, res);
         return { status: res.statusCode, body: res.json.mock.calls.at(-1)?.[0] };
     };
-    return { protocol, drive };
+    return { protocol: served, drive };
 }
 
 const DOORS = [
@@ -135,6 +143,16 @@ describe('the history and rollback doors take `?package=`, the `/layers` spellin
             expect(answer.status, JSON.stringify(answer.body)).toBe(409);
             expect([...(answer.body?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(answer.body))
                 .toEqual(['com.acme.alpha.custom', 'com.acme.beta.custom']);
+        });
+    }
+
+    for (const { door, method, path, body } of DOORS) {
+        it(`${door}: REFUSAL — \`?package=\` on a type not stored per package is a 400 naming the parameter`, async () => {
+            const { drive } = boot({ real: true });
+            const answer = await drive(method, path, { package: 'com.acme.alpha' }, body, { type: 'view', name: 'shared_view' });
+            expect(answer.status, JSON.stringify(answer.body)).toBe(400);
+            expect(answer.body?.code, JSON.stringify(answer.body)).toBe('VALIDATION_ERROR');
+            expect(answer.body?.error, JSON.stringify(answer.body)).toContain('"package" selector');
         });
     }
 });

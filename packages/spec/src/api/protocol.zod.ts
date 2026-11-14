@@ -2290,6 +2290,22 @@ export const AuditMetaItemResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * [ADR-0150 D3/D4, #32905] The `?package=` selector of the history and
+ * rollback doors, shared by their request schemas.
+ */
+const HISTORY_PACKAGE_SELECTOR_DESCRIPTION =
+  'Optional package ID (`?package=` on the REST door, the `/layers` spelling) — '
+  + 'for a type stored per (package, name), the holder whose versions to address: '
+  + 'the slot of the row a read naming the package serves (its own row, its `.custom` '
+  + 'pair\'s declared override, or the package-less row that read falls back to), '
+  + 'else the package\'s own empty slot when it ships the name; a package that neither '
+  + 'holds nor ships the name is refused 409 `not-held-by-qualifier` (ADR-0150 D3/D4). '
+  + 'Versions attributed to no package, or to the environment, are that slot\'s only '
+  + 'while it is the name\'s sole slot. Absent, a name two holders hold (in stored rows '
+  + 'or in code) is refused 409 naming every holder. Refused with 400 `VALIDATION_ERROR` '
+  + 'on a type not stored per (package, name).';
+
+/**
  * History Metadata Item Request
  *
  * Request shape for `GET /api/v1/meta/:type/:name/history` (the
@@ -2327,13 +2343,7 @@ export const HistoryMetaItemRequestSchema = lazySchema(() => z.object({
     + 'verb accepts.)',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
-  packageId: z.string().optional().describe(
-    'Optional package ID (`?package=` on the REST door, the `/layers` spelling) — '
-    + 'for a type stored per (package, name), the holder whose versions to read: '
-    + 'its own row\'s, or its `.custom` pair\'s declared override\'s (ADR-0150 D3/D4). '
-    + 'Absent, a name two holders\' rows hold is refused 409 naming every holder. '
-    + 'Every other type reads the name\'s log either way.',
-  ),
+  packageId: z.string().optional().describe(HISTORY_PACKAGE_SELECTOR_DESCRIPTION),
 }));
 
 /**
@@ -2583,6 +2593,26 @@ export const FindReferencesToMetaResponseSchema = lazySchema(() => z.object({
     path: z.string().describe('Where inside the referring item the reference sits (dot path).'),
     kind: z.string().describe('What kind of reference this is (e.g. which key carries it).'),
   })).describe('Every found reference to the addressed item.'),
+}));
+
+/**
+ * Rollback Metadata Item Request
+ *
+ * Request shape for `POST /api/v1/meta/:type/:name/rollback` (the
+ * `rollbackMetaItem` protocol method): `toVersion` from the body or the
+ * query, `member` and `package` from the query, `message` from the body.
+ * Mirrors the implementation's parameter type in
+ * `@objectstack/metadata-protocol` (`RollbackMetaItemRequest`) member for
+ * member, less the actor the door fills from the session — a
+ * declared-surface catch-up (#32905), as `HistoryMetaItemRequestSchema` is.
+ */
+export const RollbackMetaItemRequestSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name'),
+  name: z.string().describe('Item name'),
+  toVersion: z.number().describe('The history version whose body is restored as the new live row.'),
+  message: z.string().optional().describe('Rollback note, recorded on the new history row.'),
+  member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  packageId: z.string().optional().describe(HISTORY_PACKAGE_SELECTOR_DESCRIPTION),
 }));
 
 /**
@@ -4442,6 +4472,7 @@ export type GetMetaDiagnosticsResponseParsed = z.infer<typeof GetMetaDiagnostics
 export type FindReferencesToMetaResponse = z.input<typeof FindReferencesToMetaResponseSchema>;
 /** Post-parse shape of {@link FindReferencesToMetaResponse} — defaults applied, transforms run (ADR-0122). */
 export type FindReferencesToMetaResponseParsed = z.infer<typeof FindReferencesToMetaResponseSchema>;
+export type RollbackMetaItemRequest = z.input<typeof RollbackMetaItemRequestSchema>;
 export type RollbackMetaItemResponse = z.input<typeof RollbackMetaItemResponseSchema>;
 /** Post-parse shape of {@link RollbackMetaItemResponse} — defaults applied, transforms run (ADR-0122). */
 export type RollbackMetaItemResponseParsed = z.infer<typeof RollbackMetaItemResponseSchema>;

@@ -23,7 +23,14 @@
 //  - a version recorded before the history row named its package is never
 //    guessed onto one of two holders: no address lists or restores it;
 //  - CONTROL: a name one package holds keeps its whole log and its rollback
-//    bare, an unattributed version included.
+//    bare, an unattributed version included, and so does a name first saved
+//    as the environment's own item and later under a package (M1): its bare
+//    rollback restores the environment's versions as `main` does;
+//  - a name two packages ship, one of them customized, is two holders to the
+//    bare doors as it is to the bare plain read (ADR-0150 D5);
+//  - `?package=` on a type not stored per package is refused 400, never
+//    accepted and dropped; and a rollback naming no installed package, of a
+//    name no row holds, is refused rather than minting a row for it.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
@@ -43,6 +50,12 @@ const SHARED = 'qa_hist_shared_32905';
 const SHIPPED = 'qa_hist_shipped_32905';
 /** A runtime flow only alpha's pair holds: the CONTROL. */
 const SOLO = 'qa_hist_solo_32905';
+/** A flow both packages ship, only alpha's pair customizes. */
+const SHIPPED_ONE = 'qa_hist_shipped_one_32905';
+/** A runtime flow saved as the environment's own item, deleted, then saved in alpha's pair (M1). */
+const TAKEN_OVER = 'qa_hist_taken_over_32905';
+/** A runtime flow alpha's pair saved and then deleted: no row holds it. */
+const GONE = 'qa_hist_gone_32905';
 
 const flowBody = (name: string, label: string) => ({
   name, label, type: 'autolaunched', status: 'active',
@@ -53,7 +66,7 @@ const flowBody = (name: string, label: string) => ({
 function holderPackage(p: 'alpha' | 'beta') {
   return defineStack({
     manifest: { id: `com.qa.hist32905.${p}`, namespace: `h32905${p}`, name: `qa_hist32905_${p}`, version: '1.0.0', type: 'app' },
-    flows: [flowBody(SHIPPED, `${p} shipped`)],
+    flows: [flowBody(SHIPPED, `${p} shipped`), flowBody(SHIPPED_ONE, `${p} shipped one`)],
   } as never);
 }
 
@@ -68,8 +81,8 @@ describe('the /meta history and rollback doors of a flow name two packages hold 
   const codeOf = (json: any) => (json?.error && typeof json.error === 'object' ? json.error.code : undefined) ?? json?.code;
   const versions = (json: any): number[] => (json?.events ?? []).map((e: any) => e.version);
   const labelAt = async (name: string, pkg: string) => (await call('GET', `/meta/flow/${name}?package=${pkg}`)).json?.item?.label;
-  const save = async (name: string, pkg: string, label: string, overrides?: string) => {
-    const res = await call('PUT', `/meta/flow/${name}?package=${pkg}`,
+  const save = async (name: string, pkg: string | undefined, label: string, overrides?: string) => {
+    const res = await call('PUT', `/meta/flow/${name}${pkg ? `?package=${pkg}` : ''}`,
       { ...flowBody(name, label), ...(overrides ? { overrides: { package: overrides, basedOn: '1.0.0' } } : {}) });
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     return res.json.seq as number;
@@ -99,6 +112,16 @@ describe('the /meta history and rollback doors of a flow name two packages hold 
     await save(SHIPPED, ALPHA_PAIR, 'alpha custom r2', ALPHA);
     await save(SOLO, ALPHA_PAIR, 'solo r1');
     await save(SOLO, ALPHA_PAIR, 'solo r2');
+    await save(SHIPPED_ONE, ALPHA_PAIR, 'alpha one r1', ALPHA);
+    await save(SHIPPED_ONE, ALPHA_PAIR, 'alpha one r2', ALPHA);
+    await save(TAKEN_OVER, undefined, 'env r1');
+    await save(TAKEN_OVER, undefined, 'env r2');
+    const dropped = await call('DELETE', `/meta/flow/${TAKEN_OVER}`);
+    expect(dropped.status, JSON.stringify(dropped.json)).toBe(200);
+    await save(TAKEN_OVER, ALPHA_PAIR, 'alpha took over');
+    await save(GONE, ALPHA_PAIR, 'gone r1');
+    const gone = await call('DELETE', `/meta/flow/${GONE}?package=${ALPHA_PAIR}`);
+    expect(gone.status, JSON.stringify(gone.json)).toBe(200);
     // A version of SHARED recorded before the history row named its package
     // (a release before this card): `package_id` left NULL.
     const ql: any = await stack.kernel.getServiceAsync('objectql');
@@ -182,6 +205,55 @@ describe('the /meta history and rollback doors of a flow name two packages hold 
     const res = await call('POST', `/meta/flow/${SHARED}/rollback?package=com.qa.nobody`, { toVersion: shared[ALPHA_PAIR]![0]! });
     expect(res.status, JSON.stringify(res.json)).toBe(409);
     expect(await labelAt(SHARED, ALPHA_PAIR)).toBe(`${ALPHA_PAIR} r1`);
+  });
+
+  it('a name two packages ship, only one customized, is refused bare at both doors, as the bare plain read refuses it', async () => {
+    const read = await call('GET', `/meta/flow/${SHIPPED_ONE}`);
+    expect(read.status, JSON.stringify(read.json)).toBe(409);
+    const history = await call('GET', `/meta/flow/${SHIPPED_ONE}/history`);
+    expect(history.status, JSON.stringify(history.json)).toBe(409);
+    expect(codeOf(history.json)).toBe('RESOURCE_CONFLICT');
+    expect(candidatesOf(history.json)).toEqual(candidatesOf(read.json));
+    const own = versions((await call('GET', `/meta/flow/${SHIPPED_ONE}/history?package=${ALPHA_PAIR}`)).json);
+    expect(own).toHaveLength(2);
+    const rollback = await call('POST', `/meta/flow/${SHIPPED_ONE}/rollback`, { toVersion: own[0]! });
+    expect(rollback.status, JSON.stringify(rollback.json)).toBe(409);
+    expect(codeOf(rollback.json)).toBe('RESOURCE_CONFLICT');
+    expect(await labelAt(SHIPPED_ONE, ALPHA_PAIR)).toBe('alpha one r2');
+  });
+
+  it('?package= on a type not stored per package is refused 400 at both doors, never accepted and dropped', async () => {
+    const history = await call('GET', `/meta/view/qa_hist_any_view/history?package=${ALPHA}`);
+    expect(history.status, JSON.stringify(history.json)).toBe(400);
+    expect(codeOf(history.json)).toBe('VALIDATION_ERROR');
+    const rollback = await call('POST', `/meta/view/qa_hist_any_view/rollback?package=${ALPHA}`, { toVersion: 1 });
+    expect(rollback.status, JSON.stringify(rollback.json)).toBe(400);
+    expect(codeOf(rollback.json)).toBe('VALIDATION_ERROR');
+  });
+
+  it('a rollback naming no installed package, of a name no row holds, is refused and stores nothing; an installed holder restores', async () => {
+    const [first] = versions((await call('GET', `/meta/flow/${GONE}/history`)).json);
+    expect(first, 'the deleted name keeps its log').toBeTypeOf('number');
+    const stray = await call('POST', `/meta/flow/${GONE}/rollback?package=com.qa.hist32905.nope`, { toVersion: first! });
+    expect(stray.status, JSON.stringify(stray.json)).toBe(422);
+    expect(codeOf(stray.json)).toBe('WRITABLE_PACKAGE_REQUIRED');
+    expect((await call('GET', `/meta/flow/${GONE}?package=com.qa.hist32905.nope`)).status).not.toBe(200);
+    const own = await call('POST', `/meta/flow/${GONE}/rollback?package=${ALPHA_PAIR}`, { toVersion: first! });
+    expect(own.status, JSON.stringify(own.json)).toBe(200);
+    expect(await labelAt(GONE, ALPHA_PAIR)).toBe('gone r1');
+  });
+
+  it('CONTROL (M1): a name the environment saved and a package took over restores the environment\'s versions, bare and addressed, as before', async () => {
+    const bare = versions((await call('GET', `/meta/flow/${TAKEN_OVER}/history`)).json);
+    const [envFirst, envSecond] = bare;
+    expect(bare.length, JSON.stringify(bare)).toBeGreaterThanOrEqual(3);
+    const res = await call('POST', `/meta/flow/${TAKEN_OVER}/rollback`, { toVersion: envFirst! });
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    expect(await labelAt(TAKEN_OVER, ALPHA_PAIR)).toBe('env r1');
+    expect(versions((await call('GET', `/meta/flow/${TAKEN_OVER}/history?package=${ALPHA_PAIR}`)).json)).toContain(envSecond);
+    const addressed = await call('POST', `/meta/flow/${TAKEN_OVER}/rollback?package=${ALPHA_PAIR}`, { toVersion: envSecond! });
+    expect(addressed.status, JSON.stringify(addressed.json)).toBe(200);
+    expect(await labelAt(TAKEN_OVER, ALPHA_PAIR)).toBe('env r2');
   });
 
   it('CONTROL: a name one package holds keeps its whole log and its bare rollback, as before', async () => {

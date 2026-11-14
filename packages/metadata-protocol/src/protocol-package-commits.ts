@@ -89,7 +89,7 @@ import {
 } from './protocol-client-failures.js';
 import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { RollbackMetaItemRequest } from './protocol-door-requests.js';
-import { historySlotOf } from './protocol-history-slots.js';
+import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './protocol-history-slots.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ImportUnmanagedPackageAnswer, InstallPackageStoredRowHook, StoredPackageRow } from './protocol-package-install.js';
@@ -1877,7 +1877,7 @@ export class ProtocolPackageCommitsFacet {
     }
 
     /** [#28355] The body of {@link rollbackMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async rollbackMetaItemUnaudited(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'findServedOverlayRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'packagelessAddress' | 'packagelessOverlayWriteRefusal' | 'packagelessReadAddress' | 'receiptVersion' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'resolveOverlayPackageBinding' | 'restoreWriteFor' | 'runMutationProjector' | 'shippedArtifactsOf'>, request: RollbackMetaItemRequest): Promise<{
+    static async rollbackMetaItemUnaudited(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'findServedOverlayRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'packagelessAddress' | 'packagelessOverlayWriteRefusal' | 'packagelessReadAddress' | 'receiptVersion' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'resolveOverlayPackageBinding' | 'restoreWriteFor' | 'runMutationProjector' | 'shippedArtifactsOf' | 'uninstalledNamedBaseRefusal'>, request: RollbackMetaItemRequest): Promise<{
             success: boolean;
             version: string;
             seq: number;
@@ -1954,6 +1954,10 @@ export class ProtocolPackageCommitsFacet {
         // stored under" — the same shape {@link deleteMetaItem} keeps for
         // `singularTypeForRepo`.
         const singularType = request.type;
+        // [#32905] `?package=` addresses a holder of a type stored per
+        // `(package, name)` only; on any other type it is refused first,
+        // never accepted and dropped ({@link historySlotOf}).
+        refusePackageSelectorOutsideSlottedTypes(singularType, request.packageId);
         if (!host.isOverlayAllowed(singularType)
             && !host.isRuntimeCreateAllowed(singularType)) {
             const err: any = new Error(
@@ -2025,6 +2029,17 @@ export class ProtocolPackageCommitsFacet {
         let rollbackPackageId: string | null;
         if (slot?.addressed) {
             rollbackPackageId = slot.owner.packageId;
+            // [#32905] A slot no stored row holds is the package's own (it
+            // ships the name, or no row of the name is stored at all): never
+            // minted for an id no installed package has, as the save door
+            // refuses one ({@link uninstalledNamedBaseRefusal}).
+            if (!slot.held) {
+                const unbound = host.uninstalledNamedBaseRefusal(
+                    { type: singularType, name: request.name, packageId: rollbackPackageId },
+                    { verb: 'rollback' },
+                );
+                if (unbound) throw unbound;
+            }
         } else {
             const servedPackage = await host.packagelessReadAddress(singularType, request.name, member);
             const served = await host.findServedOverlayRow({
@@ -2098,7 +2113,7 @@ export class ProtocolPackageCommitsFacet {
                 // package's row of the name: its parent hash, and the write.
                 packageId: rollbackPackageId,
                 // [#32905] …and only a version of that row's slot.
-                ...(slot ? { versionOf: { packageId: rollbackPackageId, unattributed: slot.owner.unattributed } } : {}),
+                ...(slot?.addressed ? { versionOf: slot.owner } : {}),
             });
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not
