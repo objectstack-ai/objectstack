@@ -249,11 +249,14 @@ export async function admitRefusedDatasetHolders(args: {
     // address (a runnable one would have been picked above): the vocabulary's
     // ambiguity sentence counts holders and tells the caller to address one,
     // which is no remedy here, so the sentence says what stands in the way.
+    // ⛔ It speaks of that one package and the row only: a holder the caller
+    // may not query is hidden, so nothing here says or counts that another
+    // holder exists (no plural, no "other", no "no one package").
     const [only] = narrowed.candidates;
     const message = ambiguity && narrowed.candidates.length === 1 && only?.kind === 'package'
-        ? `The dataset "${refusal.name}" is held by package "${only.packageId}", and a row of the name that no one `
-            + 'package owns stands beside its item, so nothing can be read at its address until that row is saved '
-            + 'under one package (ADR-0150 D4).'
+        ? `The dataset "${refusal.name}" cannot be read at package "${only.packageId}": a stored row of the name `
+            + 'stands beside that package\'s item and is not saved under it, so nothing is run until the row is '
+            + 'saved under a package (ADR-0150 D4).'
         : packageScopedRefusalMessage(narrowed);
     return {
         kind: 'refused',

@@ -898,6 +898,23 @@ describe('#32501 — the dataset doors at an exact pair address read the package
     dimensions: [{ name: 'region', field: 'region', type: 'string' }],
     measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
   }, 'name' as never);
+  /**
+   * A 409 narrowed to the one module the caller may query neither names nor
+   * implies the hidden one: the refusal carries its code and its sentence and
+   * nothing else (no candidates, no reason, no details), and the sentence
+   * counts no holders and speaks of no other, both, each or "no one" package.
+   */
+  const hiddenHolderNotImplied = (answer: Awaited<ReturnType<typeof both>>, where: string) => {
+    const single = JSON.parse(answer.single.text);
+    const entry = JSON.parse(answer.batch.text);
+    expect(Object.keys(single).sort(), where).toEqual(['code', 'message']);
+    expect(Object.keys(entry).sort(), where).toEqual(['error', 'status']);
+    expect(Object.keys(entry.error).sort(), where).toEqual(['code', 'message']);
+    for (const message of [answer.single.message, answer.batch.message]) {
+      expect(message, where).not.toMatch(/\b\d+\s+(packages?|holders?)\b/i);
+      expect(message, where).not.toMatch(/\b(packages|holders|other|another|both|each|either|no one|ambiguous|picks?)\b/i);
+    }
+  };
   const judgedOverContention = async (query: Record<string, unknown>, what: string) => {
     refusedNamingModules(await both(query, admitting(['one_item', 'two_item'])), `${what}, admitted to both`);
     for (const [admitted, shown, hidden] of [['one_item', M1, M2], ['two_item', M2, M1]] as const) {
@@ -910,6 +927,7 @@ describe('#32501 — the dataset doors at an exact pair address read the package
       expect(answer.batch.message, where).toContain(`package "${shown}"`);
       expect(answer.single.text, where).not.toContain(hidden);
       expect(answer.batch.text, where).not.toContain(hidden);
+      hiddenHolderNotImplied(answer, where);
     }
     const none = await both(query, admitting([]));
     const missing = await both(query, admitting([]), 'nowhere');
@@ -938,6 +956,35 @@ describe('#32501 — the dataset doors at an exact pair address read the package
       expect(text).toContain(`package "${A}"`);
       expect(text).toContain(`package "${M1}"`);
       expect(text).not.toContain(M2);
+    }
+  });
+
+  // At a module's own address the uncontended holder is not a candidate: the
+  // read refuses that module's name over the two modules only, so the widening
+  // never reaches across to it. Running alpha there would be a pick at a
+  // module's exact address; the caller admitted to alpha alone is answered what
+  // a missing name answers, and one admitted beside a module is refused naming
+  // that module alone. BASE (`main` ba35dfd78): 503 in every cell.
+  it.each([['alpha first', [A, M1, M2]], ['alpha last', [M2, M1, A]]] as const)('[#32948] plugin-wired admission (%s): at a module\'s address the uncontended holder is not reached across to — alpha alone answers the missing name, alpha with a module refuses naming that module alone (BASE: 503)', async (_order, order) => {
+    boot(order, true);
+    contendingRow();
+    for (const [query, what] of [[{ package: M1 }, '?package= a module'], [{ callerPackage: M2 }, '?callerPackage= a module']] as const) {
+      const alone = await both(query, admitting(['alpha_item']));
+      const missing = await both(query, admitting(['alpha_item']), 'nowhere');
+      expect([alone.single.status, alone.single.code, alone.single.ran], `${what}, alpha only`).toEqual([404, 'NOT_FOUND', []]);
+      expect(alone.single.text, `${what}, alpha only`).toBe(missing.single.text.replace(/nowhere/g, 'sales'));
+      expect([alone.batch.status, alone.batch.entry, alone.batch.ran], `${what}, alpha only`).toEqual([200, 404, []]);
+      expect(alone.batch.text, `${what}, alpha only`).toBe(missing.batch.text.replace(/nowhere/g, 'sales'));
+      const beside = await both(query, admitting(['alpha_item', 'one_item']));
+      const where = `${what}, alpha and one`;
+      expect([beside.single.status, beside.single.code, beside.single.ran], where).toEqual([409, 'RESOURCE_CONFLICT', []]);
+      expect([beside.batch.status, beside.batch.entry, beside.batch.code, beside.batch.ran], where).toEqual([200, 409, 'RESOURCE_CONFLICT', []]);
+      for (const answer of [beside.single, beside.batch]) {
+        expect(answer.message, where).toContain(`package "${M1}"`);
+        expect(answer.text, where).not.toContain(A);
+        expect(answer.text, where).not.toContain(M2);
+      }
+      hiddenHolderNotImplied(beside, where);
     }
   });
 
