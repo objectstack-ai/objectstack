@@ -6,7 +6,7 @@ export * from './adapter';
 export * from './pattern-matcher';
 export * from './cors-admission';
 export * from './route-pattern';
-export { API_ROBOTS_TAG, installApiNoindex, isApiPath } from './api-noindex';
+export { installApiNoindex } from './api-noindex';
 export {
     DEFAULT_MAX_REQUEST_BODY_BYTES,
     MAX_REQUEST_BODY_BYTES_ENV,

@@ -6,7 +6,7 @@
 
 fix: a deployed runtime tells search engines not to index its API and Console
 
-Clause-②: yes (widening) — every answer under `/api/` and `/_console/` gains an `X-Robots-Tag: noindex, nofollow` header (the public form page `/_console/f/<slug>` excepted), Console documents gain a `<meta name="robots" content="noindex, nofollow">` tag, and `GET /robots.txt`, which answered 404 on a Console-serving runtime that defines none, now answers a default file. Nothing that was served before is refused.
+Clause-②: yes (widening) — new export `installApiNoindex` from `@objectstack/plugin-hono-server`, which `createHonoApp` (`@objectstack/hono`) now installs; every answer under `/api/` and `/_console/` gains an `X-Robots-Tag: noindex, nofollow` header (the public form page `/_console/f/<slug>` excepted), Console documents gain a `<meta name="robots" content="noindex, nofollow">` tag, and `GET /robots.txt`, which answered 404 on a Console-serving runtime that defines none, now answers a default file. Nothing that was served before is refused.
 Metadata-protocol: none
 
 Search engines were crawling runtime surfaces of deployed ObjectStack instances: Console sign-in pages, the anonymous `GET /api/v1/runtime/config` door, auth routes. They are app and API surfaces, not content, and every self-hosted deployment had the same exposure.

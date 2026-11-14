@@ -1226,7 +1226,7 @@ export function createConsoleStaticPlugin(
         }
         // Every document but the public form page asks not to be indexed. A
         // build that already ships a robots tag keeps its own.
-        if (!indexable && !/<meta\s[^>]*name=["']?robots["']?/i.test(html)) {
+        if (!indexable && !/<meta\s[^>]*\bname\s*=\s*(["']?)robots\1(?=[\s/>])/i.test(html)) {
           html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${CONSOLE_ROBOTS_META}`);
         }
         // Stamped while the document holds only the build's markup and the

@@ -99,6 +99,21 @@ describe('the Console asks not to be indexed', () => {
     expect(html).toContain('<meta name="robots" content="noindex">');
   });
 
+  it('a meta tag whose name only starts with "robots" does not count as one', async () => {
+    const lookAlikeDist = path.join(consoleRoot, 'look-alike-meta');
+    fs.mkdirSync(lookAlikeDist);
+    fs.writeFileSync(
+      path.join(lookAlikeDist, 'index.html'),
+      '<!doctype html><html><head><meta name="robotsx" content="x"></head><body>console</body></html>',
+    );
+    const server = new HonoHttpServer(0);
+    server.installNotFoundSeam();
+    await createConsoleStaticPlugin(lookAlikeDist).start(ctxFor(server));
+    const html = await (await server.getRawApp().request(`${ORIGIN}/_console/`)).text();
+    expect(html).toContain(ROBOTS_META);
+    expect(html).toContain('<meta name="robotsx" content="x">');
+  });
+
   it('the 503 a refused Console answers carries the header', async () => {
     const request = await mount({ plugin: 'not-built' });
     const res = await request('/_console/');
