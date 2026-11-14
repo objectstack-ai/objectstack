@@ -33,10 +33,19 @@ import {
   HOOK_REFUSAL_CODE_PATTERN,
   HOOK_REFUSAL_MESSAGE_HOLE_REFUSED,
   HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE,
+  HOOK_REFUSAL_PARAM_PATTERN,
+  HOOK_REFUSAL_REASON_PATTERN,
   hookRefusalCodesThrownIn,
+  hookRefusalReasonsThrownIn,
   hookRefusalsWithoutSandboxedBody,
   undeclaredHookRefusalCodeAtSave,
+  undeclaredHookRefusalReasonAtSave,
 } from './hook-refusal-codes';
+// [#33214] The closed-scope `{{ }}` judge a refusal message with declared
+// `params` is read by — the one the action copy slots and a bulk action's
+// `confirmText` use, over the same hole grammar the flow `end` refusal
+// renders. It imports nothing outside its own leaf.
+import { closedScopeTemplateRefusal } from '../automation/flow-text-slot-template';
 
 /*
  * ── Unknown-key strictness (#4001 data step) ────────────────────────────────
@@ -237,65 +246,169 @@ function refuseHookBodyMailGrant(
  * ── A hook that declares `refusals` refuses by code only ────────────────────
  *
  * [#26170, maintainer ruling 6431311681 letter A] A hook's refusal catalogue
- * names every refusal its body may throw. The runtime answers a declared code
+ * names every refusal its code may throw. The runtime answers a declared code
  * with the declared message in the caller's locale; it refuses a code the
- * catalogue does not declare, loudly. Where the body names the code literally
- * in a `throw` (`hookRefusalCodesThrownIn`), the save decides it first: the
- * parse refuses the hook at every door that parses one — the metadata save
- * door, `defineStack` / `os validate`, compile, an artifact's parse — so the
- * author meets the refusal before any write does. One issue per code, at
- * `body.source`. A code that arrives any other way is the run-time refusal's.
+ * catalogue does not declare, loudly. Where the hook's source names the code
+ * literally in a `throw` (`hookRefusalCodesThrownIn`), the save decides it
+ * first: the parse refuses the hook at every door that parses one — the
+ * metadata save door, `defineStack` / `os validate`, compile, an artifact's
+ * parse — so the author meets the refusal before any write does. One issue per
+ * code. A code that arrives any other way is the run-time refusal's. The same
+ * holds for a reason under a code (#33214, `hookRefusalReasonsThrownIn`).
  *
- * A catalogue is answered only on the sandboxed `body` path, so `refusals` on
- * a hook with no `js` body — an in-process `handler`, or an `expression` body
- * that cannot throw a code — is refused at `refusals`: the catalogue would be
- * demanded by `os i18n` and served by nobody.
+ * [#33214, ruling 6879477573 letter A] The catalogue is answered on every path
+ * a hook runs on: a sandboxed `js` body, and an in-process `handler` — an
+ * inline function (`os build` lowers it to a `js` body; a source boot runs it
+ * in-process) or the string reference the build leaves when it cannot lower
+ * one. The source a save reads is the code that runs: a `js` body's `source`
+ * (a body wins over a handler at bind), else an inline handler's own source,
+ * which is the text the build's lowering peels. A string reference names code
+ * the save cannot read, so its codes are the run-time refusal's alone. Only a
+ * hook whose code cannot throw a code — an `expression` body, or neither a body
+ * nor a handler — is refused at `refusals`: the catalogue would be demanded by
+ * `os i18n` and served by nobody.
  *
- * A hook that declares no `refusals` is untouched: its body's throws are
- * answered as they always were.
+ * A hook that declares no `refusals` is untouched: its throws are answered as
+ * they always were.
  */
+
+/** The source a save reads a hook's literal throws from, and where an issue about it points. */
+function refusalSourceOf(
+  hook: { body?: { language?: string; source?: unknown }; handler?: unknown },
+): { source: string; at: 'body.source' | 'handler' } | undefined {
+  if (hook.body?.language === 'js') {
+    return typeof hook.body.source === 'string' ? { source: hook.body.source, at: 'body.source' } : undefined;
+  }
+  if (typeof hook.handler === 'function') {
+    let source: string;
+    try {
+      source = Function.prototype.toString.call(hook.handler);
+    } catch {
+      return undefined;
+    }
+    return { source, at: 'handler' };
+  }
+  return undefined;
+}
 
 /**
  * The object-level check that refuses a catalogue nothing would answer, and a
- * code a hook's sandboxed body throws literally that its `refusals` does not
- * declare. See the block above.
+ * code (or a reason under a code) a hook's source throws literally that its
+ * `refusals` does not declare. See the block above.
  */
 function refuseUndeclaredLiteralRefusalCode(
-  hook: { refusals?: Record<string, unknown>; body?: { language?: string; source?: unknown } },
+  hook: {
+    refusals?: Record<string, { reasons?: Record<string, unknown> } | undefined>;
+    body?: { language?: string; source?: unknown };
+    handler?: unknown;
+  },
   ctx: z.RefinementCtx,
 ): void {
   if (!hook.refusals) return;
-  if (hook.body?.language !== 'js') {
+  const hasHandler = typeof hook.handler === 'function' || (typeof hook.handler === 'string' && hook.handler.length > 0);
+  const answered = hook.body === undefined ? hasHandler : hook.body.language === 'js';
+  if (!answered) {
     ctx.addIssue({ code: 'custom', path: ['refusals'], message: hookRefusalsWithoutSandboxedBody(hook.body?.language) });
     return;
   }
-  if (typeof hook.body.source !== 'string') return;
+  const read = refusalSourceOf(hook);
+  if (!read) return;
+  const path = read.at === 'body.source' ? ['body', 'source'] : ['handler'];
   const declared = Object.keys(hook.refusals);
-  for (const code of hookRefusalCodesThrownIn(hook.body.source)) {
+  for (const code of hookRefusalCodesThrownIn(read.source)) {
     if (Object.prototype.hasOwnProperty.call(hook.refusals, code)) continue;
+    ctx.addIssue({ code: 'custom', path, message: undeclaredHookRefusalCodeAtSave(code, declared, read.at) });
+  }
+  for (const { code, reason } of hookRefusalReasonsThrownIn(read.source)) {
+    if (!Object.prototype.hasOwnProperty.call(hook.refusals, code)) continue;
+    const reasons = hook.refusals[code]?.reasons ?? {};
+    if (Object.prototype.hasOwnProperty.call(reasons, reason)) continue;
     ctx.addIssue({
       code: 'custom',
-      path: ['body', 'source'],
-      message: undeclaredHookRefusalCodeAtSave(code, declared),
+      path,
+      message: undeclaredHookRefusalReasonAtSave(code, reason, Object.keys(reasons), read.at),
     });
   }
 }
 
 /**
+ * One sentence under a declared refusal code (#33214, ruling 6879477573,
+ * S1): the sentence the user reads when the hook throws the code with this
+ * reason. Translated through `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`.
+ * Its `{{ }}` holes are judged against the entry's `params`, like the entry's
+ * own message.
+ */
+export const HookRefusalReasonSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this hook refusal reason',
+    history: 'Closed from the day it was declared — a key this reason does not declare would be served nowhere.',
+    aliases: { text: 'message', description: 'message' },
+    guidance: {
+      code:
+        'A reason has no `code` of its own — it sits under the code it refines (`refusals.CODE.reasons.REASON`), and '
+        + 'the wire code is that code.',
+      status:
+        'A reason has no `status` of its own — the code it sits under decides the status. Declare a second code if '
+        + 'the status differs.',
+    },
+  },
+  {
+    message: z.string().trim().min(1).describe(
+      'The sentence the user reads when the hook throws this reason under its code — in the source locale, '
+      + 'translated through hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message in the caller\'s locale; a {{ }} '
+      + 'hole names one of the entry\'s params',
+    ),
+  },
+));
+
+export type HookRefusalReason = z.input<typeof HookRefusalReasonSchema>;
+
+/** The slot a refusal message's `{{ }}` holes are judged in, as a sentence names it. */
+const HOOK_REFUSAL_MESSAGE_SLOT = 'A hook refusal `message`';
+
+/**
+ * Why `message` is refused as a sentence of an entry declaring `params`, or
+ * `undefined`. No params: the plain-text rule (a hole is refused). Params: the
+ * closed-scope template rule over the declared names (a hole over a declared
+ * param only, a single-brace token prescribed its hole).
+ */
+function hookRefusalMessageRefusal(message: string, params: readonly string[] | undefined): string | undefined {
+  if (!params || params.length === 0) {
+    return HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE.test(message) ? undefined : HOOK_REFUSAL_MESSAGE_HOLE_REFUSED;
+  }
+  return closedScopeTemplateRefusal(message, { slot: HOOK_REFUSAL_MESSAGE_SLOT, roots: params });
+}
+
+/**
  * One entry of a hook's refusal catalogue (#26170): the sentence the user
- * reads when the hook's body throws this entry's code, and the status the
- * refusal is answered with.
+ * reads when the hook throws this entry's code, and the status the refusal is
+ * answered with.
  *
- * The message is plain text, handed over verbatim in the source locale and
- * replaced whole by its translation, `hooks.<hook>.refusals.<CODE>.message` —
- * the validation-rule message's posture (`objects.<object>._validations.<rule>.message`):
- * an authored refusal has no parameter contract, so a `{{ }}` hole is refused at save.
+ * The message is handed over in the source locale and replaced whole by its
+ * translation, `hooks.<hook>.refusals.<CODE>.message` — the validation-rule
+ * message's posture (`objects.<object>._validations.<rule>.message`).
+ *
+ * [#33214, ruling 6879477573] Two optional parts, both declared and counted:
+ *
+ *  - `reasons` — further sentences under the SAME code, keyed by a snake_case
+ *    reason. The hook throws `{ code, reason }`; the runtime answers with the
+ *    reason's sentence, the code's status and the code on the wire, unchanged.
+ *    A reason the code does not declare is refused loudly, like a code.
+ *  - `params` — the names the entry's sentences may fill. The hook throws
+ *    `{ code, params: { NAME: value } }`, and each `{{ NAME }}` hole renders
+ *    through the template engine the flow `end` refusal renders with. A hole
+ *    over a name the entry does not declare is refused at save; an entry that
+ *    declares no `params` is plain text and every `{{ }}` hole in it is
+ *    refused, as before.
  */
 export const HookRefusalSchema = lazySchema(() => strictObject(
   {
     surface: 'this hook refusal',
     history: 'Closed from the day it was declared — a key this entry does not declare would be served nowhere.',
-    aliases: { text: 'message', reason: 'message', description: 'message', httpStatus: 'status', statusCode: 'status' },
+    aliases: {
+      text: 'message', reason: 'message', description: 'message', httpStatus: 'status', statusCode: 'status',
+      variants: 'reasons', messages: 'reasons', placeholders: 'params', parameters: 'params', variables: 'params',
+    },
     guidance: {
       code:
         '`code` is not a refusal key — the code is the entry\'s KEY in `refusals` '
@@ -305,16 +418,53 @@ export const HookRefusalSchema = lazySchema(() => strictObject(
     },
   },
   {
-    message: z.string().trim().min(1).regex(HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE, HOOK_REFUSAL_MESSAGE_HOLE_REFUSED).describe(
-      'The sentence the user reads when the body throws this code — plain text in the source locale, translated '
-      + 'whole through hooks.<hook>.refusals.<CODE>.message in the caller\'s locale; a {{ }} hole is refused',
+    message: z.string().trim().min(1).describe(
+      'The sentence the user reads when the hook throws this code — in the source locale, translated whole through '
+      + 'hooks.<hook>.refusals.<CODE>.message in the caller\'s locale; a {{ }} hole is refused unless it names one '
+      + 'of the entry\'s params',
     ),
     status: z.number().int().min(400).max(499).optional().describe(
       'HTTP status the refusal is answered with (4xx; a refusal is never a fault). Absent: 400. A status the '
       + 'body itself sets on the throw is not read — the catalogue decides',
     ),
+    reasons: z.record(
+      z.string().regex(HOOK_REFUSAL_REASON_PATTERN, {
+        message: 'A refusal reason is snake_case (e.g. plan_locked) — the reason the hook throws beside the code',
+      }),
+      HookRefusalReasonSchema,
+    ).optional().describe(
+      'Further sentences under this same code, keyed by the snake_case reason the hook throws beside the code '
+      + '({ code, reason }): { message }. The wire code and status stay this entry\'s. A reason not declared here '
+      + 'is refused loudly. Absent: the code has the one sentence',
+    ),
+    params: z.array(
+      z.string().regex(HOOK_REFUSAL_PARAM_PATTERN, {
+        message: 'A refusal param is an identifier (e.g. state) — the root a {{ }} hole names',
+      }),
+    ).optional().describe(
+      'The names this entry\'s sentences may fill: a {{ NAME }} hole renders the value the hook throws in '
+      + '`params` ({ code, params: { NAME: value } }). A hole over any other name is refused. Absent: the '
+      + 'sentences are plain text and a {{ }} hole is refused',
+    ),
   },
-));
+).superRefine((entry, ctx) => {
+  const params = entry.params;
+  if (params) {
+    const seen = new Set<string>();
+    params.forEach((name, i) => {
+      if (seen.has(name)) {
+        ctx.addIssue({ code: 'custom', path: ['params', i], message: `\`params\` names '${name}' twice — declare each once.` });
+      }
+      seen.add(name);
+    });
+  }
+  const own = hookRefusalMessageRefusal(entry.message, params);
+  if (own !== undefined) ctx.addIssue({ code: 'custom', path: ['message'], message: own });
+  for (const [reason, sentence] of Object.entries(entry.reasons ?? {})) {
+    const refusal = hookRefusalMessageRefusal(sentence.message, params);
+    if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['reasons', reason, 'message'], message: refusal });
+  }
+}));
 
 export type HookRefusal = z.input<typeof HookRefusalSchema>;
 
@@ -640,26 +790,37 @@ export const HookSchema = lazySchema(() => strictObject(
 
   /**
    * The hook's refusal catalogue (#26170, maintainer ruling 6431311681
-   * letter A): every refusal its body may throw, keyed by the code it throws.
+   * letter A): every refusal its code may throw, keyed by the code it throws.
    *
    *   refusals: {
    *     CLEAN_VERSION_REQUIRED: { message: 'A current clean version is required before signing.', status: 422 },
+   *     VALIDATION_FAILED: {
+   *       message: 'This plan cannot be submitted.',
+   *       params: ['state'],
+   *       reasons: { plan_locked: { message: 'The plan is {{ state }} and can no longer change.' } },
+   *     },
    *   }
    *
-   * The body refuses by code only — it throws an error carrying a declared
-   * `code`, and the runtime answers with that entry: its `message`, translated
-   * through `hooks.<hook>.refusals.<CODE>.message` in the caller's locale with
-   * the declared message as the fallback, marked as the end user's sentence,
-   * and its `status`. A code the catalogue does not declare, or a throw with no
-   * code, is refused loudly: at save where the body names it literally,
-   * otherwise when it runs, as a fault naming the hook and the code. An error
-   * a host call raised and the body let through unchanged (a `ctx.api` write
-   * refused by the engine, a nested hook's refusal) passes through as before,
-   * and so does a crash.
+   * The hook refuses by code only — it throws an error carrying a declared
+   * `code` (and, #33214, optionally a declared `reason` and the `params` its
+   * sentence names), and the runtime answers with that entry: its `message`
+   * (or the reason's), translated through `hooks.<hook>.refusals.<CODE>.message`
+   * (`….<CODE>.reasons.<REASON>.message`) in the caller's locale with the
+   * declared sentence as the fallback, its holes filled from `params`, marked
+   * as the end user's sentence, and its `status`. A code or reason the
+   * catalogue does not declare, or a throw with no code, is refused loudly: at
+   * save where the hook's source names it literally, otherwise when it runs,
+   * as a fault naming the hook and the code. An error a host call raised and
+   * the hook let through unchanged (a `ctx.api` write refused by the engine, a
+   * nested hook's refusal) passes through as before, and so does a crash.
    *
    * Keyed by hook name, not by object: one hook bound to several objects, or
-   * to `'*'`, owns one catalogue and one translation per code. Read by the
-   * sandboxed `body` runner only, so it is refused on a hook with no `js` body.
+   * to `'*'`, owns one catalogue and one translation per code. Answered on
+   * every path the hook runs on (#33214, ruling 6879477573): a sandboxed `js`
+   * body, and an in-process `handler` — inline, or the string reference a
+   * build leaves when it cannot lower one — through one in-process seam with
+   * the same wire. Refused on a hook whose code cannot throw a code: an
+   * `expression` body, or neither a body nor a handler.
    * Absent: the hook's throws are answered as they always were.
    */
   refusals: z.record(
@@ -668,10 +829,11 @@ export const HookSchema = lazySchema(() => strictObject(
     }),
     HookRefusalSchema,
   ).optional().describe(
-    'Refusal catalogue keyed by the SCREAMING_SNAKE code the body throws: { message, status? }. The body refuses '
-    + 'by code only; the runtime answers with the declared message (translated through '
-    + 'hooks.<hook>.refusals.<CODE>.message in the caller\'s locale) and status. A code not declared here is refused '
-    + 'loudly — at save when the body throws it literally, otherwise at run time',
+    'Refusal catalogue keyed by the SCREAMING_SNAKE code the hook throws: { message, status?, reasons?, params? }. '
+    + 'The hook (a js body or a handler) refuses by code only, optionally with a declared reason and params; the '
+    + 'runtime answers with the declared message (translated through hooks.<hook>.refusals.<CODE>.message, or '
+    + '….<CODE>.reasons.<REASON>.message, in the caller\'s locale, holes filled from params) and status. A code or '
+    + 'reason not declared here is refused loudly — at save when the hook throws it literally, otherwise at run time',
   ),
 
   /**
