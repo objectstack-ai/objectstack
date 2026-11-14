@@ -4484,14 +4484,21 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       'form `{ account: { status: VALUE } }` instead); a field computed on read, such as a `formula` ' +
       '(denormalise it onto the child as a stored field); and, beneath a relation, a key the related ' +
       'object lacks, a dotted key or a second relation holding a condition of its own.',
-    '`lookupColumns`, `dependsOn` and `indexes[].fields` are read verbatim (a picker column key, a ' +
-      'record key, a physical column), so a dotted name there is one name no field carries; the ' +
+    'Two scalar pointers of the object are judged too: the record title pointer `nameField` (and ' +
+      'its deprecated alias `displayNameField`; a name the two share is reported once, at the alias), ' +
+      'whose miss titles every record by its id, and each `activityMilestones[].field`, whose miss ' +
+      'never transitions, so the milestone never fires. Each reader takes the name as a record key, so ' +
+      'a column the platform injects on the object (`id`, `created_at`, `owner_id` on an owned object) ' +
+      'is a correct name.',
+    '`lookupColumns`, `dependsOn`, `indexes[].fields` and the two scalar pointers are read verbatim (a ' +
+      'picker column key, a record key, a physical column), so a dotted name there is one name no field ' +
+      'carries; the ' +
       'other positions resolve a relationship path. Not judged: an object this stack does not ' +
       'define, an object with no readable field map (`external`, an introspected schema), a ' +
       'registry-injected system column (resolved per object, so `owner_id` resolves on an owned ' +
       'object and misses under `ownership: \'none\'`), and the positions other rules own: ' +
       '`searchableFields` (`searchable-field-unknown`), list views (the list-view rules) and the ' +
-      'scalar role pointers.',
+      '`stageField` role pointer (`semantic-role-field-unknown`).',
     'The verdict names the nearest field of the addressed object when one is close ("Did you mean"), ' +
       'and the fix line names the position\'s remedy only, without listing that object\'s fields.',
   ],
