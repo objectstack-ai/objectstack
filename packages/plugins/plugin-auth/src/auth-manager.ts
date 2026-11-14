@@ -139,6 +139,7 @@ import {
   ssoDomainTooLong,
   stageSsoProviderDeleteImpact,
 } from './sso-provider-lifecycle.js';
+import { ssoDomainEntryNotBare } from './sso-account-at-proven-domain.js';
 import {
   applyUserBan,
   applyUserUnban,
@@ -6309,7 +6310,9 @@ export class AuthManager {
    * it, and nothing of the domain is parsed for a caller without a session.
    * A value longer than a provider row holds, or with an entry longer than a
    * host name, is refused `400 VALIDATION_FAILED` on `domain` before it is
-   * parsed (`ssoDomainTooLong`).
+   * parsed (`ssoDomainTooLong`); [#32960] then so is a value holding an entry
+   * that is not written as a bare host name (`ssoDomainEntryNotBare`), which
+   * would be stored and prove nothing at sign-in.
    *
    * The holding provider is named to a platform administrator, who may read
    * every provider; any other caller (an organization administrator on
@@ -6333,6 +6336,12 @@ export class AuthManager {
     const tooLong = ssoDomainTooLong(requested);
     if (tooLong) {
       throw new APIError(tooLong.status, { code: tooLong.code, message: tooLong.message, field: tooLong.field, fields: tooLong.fields });
+    }
+    // [#32960] Then the shape: every entry a bare host name, as the rules that
+    // judge an address against the list read it (`sso-account-at-proven-domain.ts`).
+    const notBare = ssoDomainEntryNotBare(requested);
+    if (notBare) {
+      throw new APIError(notBare.status, { code: notBare.code, message: notBare.message, field: notBare.field, fields: notBare.fields });
     }
     const domains = providerDomains(requested);
     if (domains.length === 0) return;

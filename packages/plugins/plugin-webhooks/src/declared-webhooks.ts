@@ -75,13 +75,15 @@
  *
  * Each slot's switch is its OWN row, `(package_id, name)` (ADR-0150 D4; the
  * environment's row names no package). A slot with no row of its own reads
- * the name's other rows, those naming no package (when the environment does
- * not hold the name) or a package that holds no slot of it any more, as the
- * flow engine reads them ({@link webhookSlotSwitch}): while the name has one
- * slot they are its switch (D8: the row a name-keyed reader wrote before;
- * the boot backfill binds a package-less one); under two or more slots they
- * are no slot's own, so a row switched off keeps every such slot off and a
- * row switched on turns none on (epic red line 1), said once per name.
+ * the name's row naming no package (when the environment does not hold the
+ * name) ({@link webhookSlotSwitch}): while the name has one slot it is its
+ * switch (D8: the row a name-keyed reader wrote before; the boot backfill
+ * binds it); under two or more slots it is no slot's own, so switched off it
+ * keeps every such slot off and switched on it turns none on (epic red line
+ * 1), said once per name. A row naming a package that holds no slot of the
+ * name any more (it departed, and the row outlived it) was that package's
+ * switch and switches no remaining holder, in either direction, said once
+ * per name (D8).
  *
  * ## Every posture: deployment-wide
  *
@@ -399,12 +401,14 @@ function slotsOf(
  * holders are `slots` (`null`: the environment's; every holder, a disabled
  * package's included, since a row outlives a disable), from the name's ledger rows
  * by package (`null`: a row naming no package): `undefined` is the declared
- * `isActive`. The slot's own row answers. With none, the rows that are no
- * slot's own (naming no package while the environment declares nothing of the
- * name, or naming a package that holds no slot of it) answer while the name
- * has one slot, as the name-keyed reader read them (a row switched off by any
- * of them is off); under two or more slots a row switched off keeps the slot
- * off and one switched on turns nothing on (epic red line 1).
+ * `isActive`. The slot's own row answers. With none, a row naming no package
+ * while the environment declares nothing of the name answers while the name
+ * has one slot, as the name-keyed reader read it (D8: the row a name-keyed
+ * reader wrote before; the boot backfill binds it); under two or more slots
+ * it switched off keeps the slot off and switched on turns nothing on (epic
+ * red line 1). A row naming a package that holds no slot of the name (a
+ * package that departed) is that package's switch, never another holder's:
+ * it answers no slot, in either direction ({@link departedWebhookRows}).
  */
 export function webhookSlotSwitch(
     rows: ReadonlyMap<string | null, boolean> | undefined,
@@ -414,10 +418,22 @@ export function webhookSlotSwitch(
     if (!rows) return undefined;
     const own = rows.get(slot);
     if (own !== undefined) return own;
-    const unowned = [...rows].filter(([packageId]) => !slots.includes(packageId)).map(([, active]) => active);
+    const unowned = [...rows].filter(([packageId]) => packageId === null && !slots.includes(null)).map(([, active]) => active);
     if (unowned.length === 0) return undefined;
     if (slots.length <= 1) return unowned.every(Boolean);
     return unowned.every(Boolean) ? undefined : false;
+}
+
+/**
+ * [ADR-0150 D8] The packages of the name's ledger rows that hold no slot of
+ * it (`slots`): rows a departed package left, which switch no holder
+ * ({@link webhookSlotSwitch}). A row naming no package is not among them.
+ */
+export function departedWebhookRows(
+    rows: ReadonlyMap<string | null, boolean>,
+    slots: ReadonlyArray<string | null>,
+): string[] {
+    return [...rows.keys()].filter((packageId): packageId is string => packageId !== null && !slots.includes(packageId)).sort();
 }
 
 /**
@@ -523,11 +539,30 @@ export class DeclaredWebhookSource implements DeclaredWebhookReader {
         return [...(this.holders.get(name) ?? [])];
     }
 
-    /** A row no slot owns, under two or more slots (module doc, "The switch"): said once per name. */
+    /**
+     * A row no slot owns (module doc, "The switch"), said once per name and
+     * kind: a departed package's row, which switches no holder, at any holder
+     * count; a row naming no package, under two or more slots. A name with
+     * both is told both.
+     */
     private reportUnownedRows(name: string, rows: ReadonlyMap<string | null, boolean>): void {
         const slots = this.holders.get(name) ?? [];
-        const unowned = [...rows.keys()].filter((packageId) => !slots.includes(packageId));
-        if (slots.length < 2 || unowned.length === 0 || this.unownedReported.has(name)) return;
+        if (slots.length === 0 || this.unownedReported.has(name)) return;
+        const departed = departedWebhookRows(rows, slots);
+        if (departed.length > 0) {
+            this.unownedReported.add(name);
+            const holders = slots.map((p) => (p === null ? 'the environment' : `"${p}"`)).join(', ');
+            this.logger?.warn?.(
+                `[webhook] declared webhook '${name}' has an activation row naming ${departed.map((p) => `package "${p}"`).join(', ')}, ` +
+                    `which no longer declares it; ${holders} ${slots.length === 1 ? 'declares' : 'declare'} it. That row was that ` +
+                    "package's switch, so it switches no holder now (ADR-0150 D8): each holder follows its own row, else " +
+                    'its declared default. Switch a holder through its own address: POST ' +
+                    `/api/v1/security/_activation/webhook/${name}?package=PACKAGE.`,
+                { name, holders: slots, rows: departed },
+            );
+        }
+        const unowned = [...rows.keys()].filter((packageId) => packageId === null && !slots.includes(null));
+        if (slots.length < 2 || unowned.length === 0) return;
         this.unownedReported.add(name);
         const rowsNamed = unowned.map((p) => (p === null ? 'naming no package' : `naming package "${p}"`)).join(', ');
         const holders = slots.map((p) => (p === null ? 'the environment' : `"${p}"`)).join(', ');

@@ -330,8 +330,8 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // leaf a second time, is deleted. Asserted as emitted, for this file's
       // reason.
       expect(sql).toBe(
-        'SELECT id AS "id", COUNT(*) AS "total" FROM "deal" ' +
-        'WHERE NOT ((stage IS NOT NULL AND stage = $1)) GROUP BY id',
+        'SELECT "id" AS "id", COUNT(*) AS "total" FROM "deal" ' +
+        'WHERE NOT (("stage" IS NOT NULL AND "stage" = $1)) GROUP BY "id"',
       );
     });
 
@@ -369,7 +369,7 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // a pin that describes SQL the compiler does not produce is how the next
       // reader learns to distrust this file.
       const { sql } = await sqlFor({ $not: { stage: { $ne: 'won' } } });
-      expect(sql).toContain('NOT ((stage IS NULL OR stage != $1))');
+      expect(sql).toContain('NOT (("stage" IS NULL OR "stage" != $1))');
     });
 
     it('`$not` of an ordering comparison returns the NULL rows', async () => {
@@ -402,7 +402,7 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       expect(await ids({ $not: { stage: { $exists: false } } })).toEqual(['1', '2']);
       // No guard is wrapped around a predicate that can never be UNKNOWN.
       const { sql } = await sqlFor({ $not: { stage: { $null: true } } });
-      expect(sql).toContain('WHERE NOT (stage IS NULL)');
+      expect(sql).toContain('WHERE NOT ("stage" IS NULL)');
     });
 
     it('`{field: null}` under a `$not` is untouched too', async () => {
@@ -428,8 +428,8 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       expect(await ids({ $not: { stage: { $ne: null } } })).toEqual(['3', '4']);
       // Total already, so NO guard conjunct is wrapped around either — the same
       // treatment `{$null: true}` gets two tests up.
-      expect((await sqlFor({ $not: { stage: { $eq: null } } })).sql).toContain('WHERE NOT (stage IS NULL)');
-      expect((await sqlFor({ $not: { stage: { $ne: null } } })).sql).toContain('WHERE NOT (stage IS NOT NULL)');
+      expect((await sqlFor({ $not: { stage: { $eq: null } } })).sql).toContain('WHERE NOT ("stage" IS NULL)');
+      expect((await sqlFor({ $not: { stage: { $ne: null } } })).sql).toContain('WHERE NOT ("stage" IS NOT NULL)');
       expect((await sqlFor({ $not: { stage: { $eq: null } } })).params).toEqual([]);
     });
 
@@ -509,11 +509,11 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // escape is the expansion's one source: this face's own copy, which
       // wrapped the leaf a second time, is deleted. The same rows.
       expect((await sqlFor({ stage: { $ne: 'won' } })).sql)
-        .toContain('WHERE (stage IS NULL OR stage != $1)');
+        .toContain('WHERE ("stage" IS NULL OR "stage" != $1)');
       expect((await sqlFor({ stage: { $nin: ['won'] } })).sql)
-        .toContain('WHERE (stage IS NULL OR stage NOT IN ($1))');
+        .toContain('WHERE ("stage" IS NULL OR "stage" NOT IN ($1))');
       expect((await sqlFor({ stage: { $notContains: 'wo' } })).sql)
-        .toContain('WHERE (stage IS NULL OR stage NOT LIKE $1 ESCAPE $2)');
+        .toContain('WHERE ("stage" IS NULL OR "stage" NOT LIKE $1 ESCAPE $2)');
     });
 
     it('the ObjectQL path and the display SQL agree with the raw-SQL path', async () => {
@@ -532,10 +532,10 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // A blanket null escape would hand back the rows these filters exclude.
       // `$eq` / `$in` / `$contains` are the family the shared lowering's
       // `nullValueSatisfiesOperator` answers `false` for, and they compile byte-identically to before.
-      expect((await sqlFor({ stage: { $eq: 'won' } })).sql).toContain('WHERE stage = $1');
-      expect((await sqlFor({ stage: { $in: ['won'] } })).sql).toContain('WHERE stage IN ($1)');
+      expect((await sqlFor({ stage: { $eq: 'won' } })).sql).toContain('WHERE "stage" = $1');
+      expect((await sqlFor({ stage: { $in: ['won'] } })).sql).toContain('WHERE "stage" IN ($1)');
       expect((await sqlFor({ stage: { $contains: 'wo' } })).sql)
-        .toContain('WHERE stage LIKE $1 ESCAPE $2');
+        .toContain('WHERE "stage" LIKE $1 ESCAPE $2');
       expect(await ids({ stage: { $eq: 'won' } })).toEqual(['1']);
       expect(await ids({ stage: { $contains: 'wo' } })).toEqual(['1']);
     });
@@ -546,7 +546,7 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // tautology. The shared lowering's `operatorIsNullTotal` is what keeps the two apart, and it
       // reads the COMPARAND, which is why a hard-coded list of three operator
       // NAMES would have been wrong here as well as duplicated.
-      expect((await sqlFor({ stage: { $ne: null } })).sql).toContain('WHERE stage IS NOT NULL');
+      expect((await sqlFor({ stage: { $ne: null } })).sql).toContain('WHERE "stage" IS NOT NULL');
       expect(await ids({ stage: { $ne: null } })).toEqual(['1', '2']);
       // An empty `$nin` is the TRUE constant (#5134), also total.
       expect((await sqlFor({ stage: { $nin: [] } })).sql).toContain('1 = 1');
@@ -791,7 +791,7 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
 
     it('an ordinary filter compiles to exactly the SQL it always did', async () => {
       const { sql, params } = await sqlFor({ stage: 'won' });
-      expect(sql).toContain('WHERE stage = $1');
+      expect(sql).toContain('WHERE "stage" = $1');
       expect(params).toEqual(['won']);
       expect(await ids({ stage: 'won' })).toEqual(['1']);
       // [#5298] `$ne` outside a negation used to answer `['2']` — three-valued
@@ -830,19 +830,19 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // | `{stage: {$ne: null}}`   | `!= $1` / `['']` | `IS NOT NULL`    |
       // | `{stage: {$null: true}}` | `IS NULL`    ✅  | unchanged        |
       const bare = await sqlFor({ stage: null });
-      expect(bare.sql).toContain('WHERE stage IS NULL');
+      expect(bare.sql).toContain('WHERE "stage" IS NULL');
       expect(bare.params).toEqual([]);
 
       const eqNull = await sqlFor({ stage: { $eq: null } });
-      expect(eqNull.sql).toContain('WHERE stage IS NULL');
+      expect(eqNull.sql).toContain('WHERE "stage" IS NULL');
       expect(eqNull.params).toEqual([]);
 
       const neNull = await sqlFor({ stage: { $ne: null } });
-      expect(neNull.sql).toContain('WHERE stage IS NOT NULL');
+      expect(neNull.sql).toContain('WHERE "stage" IS NOT NULL');
       expect(neNull.params).toEqual([]);
 
       const nullTrue = await sqlFor({ stage: { $null: true } });
-      expect(nullTrue.sql).toContain('WHERE stage IS NULL');
+      expect(nullTrue.sql).toContain('WHERE "stage" IS NULL');
       expect(nullTrue.params).toEqual([]);
     });
 
@@ -879,7 +879,7 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // was reading one as the other; conflating them in the other direction
       // would be the same mistake with the sign flipped.
       const { sql, params } = await sqlFor({ stage: { $eq: '' } });
-      expect(sql).toContain('WHERE stage = $1');
+      expect(sql).toContain('WHERE "stage" = $1');
       expect(params).toEqual(['']);
       expect(normalizeAnalyticsFilterTree({ where: { stage: { $eq: '' } } }, NO_DATETIME_COLUMNS)).toEqual({
         kind: 'leaf', member: 'stage', operator: 'equals', values: [''],
