@@ -24,6 +24,7 @@ import {
   restoreUserInfoEndpointOnWrite,
   stripIdpInitiatedFromOidcConfigOnWrite,
 } from './sso-sign-in-options.js';
+import { applyStandardSamlClaimsOnRead } from './sso-saml-standard-claims.js';
 import {
   reattachInternalFieldsOnRead,
   type InternalFieldResolvingEngine,
@@ -1014,6 +1015,10 @@ export function createObjectQLAdapterFactory(
         // The vendor reads `oidcConfig.allowIdpInitiated`; the column answers it.
         applyIdpInitiatedToOidcConfigOnRead(objectName, result);
         applyUserInfoOptOutOnRead(objectName, result);
+        // At a SAML ACS only: an unmapped member reads the standard claim its
+        // assertion carries (`sso-saml-standard-claims.ts`). Not on the write
+        // echoes below, which no sign-in reads a mapping from.
+        applyStandardSamlClaimsOnRead(objectName, result);
         // [#18728] Ruling C's producer half: `sys_organization.metadata` is a
         // text column holding JSON, and better-auth decodes it on its two
         // write echoes only. Decode it here so all four READ routes
@@ -1065,6 +1070,7 @@ export function createObjectQLAdapterFactory(
           await injectClientSecretOnRead(secretEngine, objectName, r);
           applyIdpInitiatedToOidcConfigOnRead(objectName, r);
           applyUserInfoOptOutOnRead(objectName, r);
+          applyStandardSamlClaimsOnRead(objectName, r);
         }
 
         return results.map((r) => {

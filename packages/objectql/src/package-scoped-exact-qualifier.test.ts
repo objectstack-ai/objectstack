@@ -2528,3 +2528,187 @@ describe('[#32183] an App\'s pair two modules share, one of them disabled', () =
     expect(JSON.stringify(neither ?? null)).not.toMatch(/(suitex|suitey) dashboard/);
   });
 });
+
+/**
+ * [#32354, ADR-0150 D3, epic note 6820147040] The list doors beside a disabled
+ * holder: a disabled package holds no name, so no list serves what it carries
+ * for one. FROM (measured on `2b2e5b41`, both registration orders and both save
+ * orders): with A disabled, the list naming no package and its execution face
+ * listed the row A's customization pair stores at a member A does not ship,
+ * and a dependent's added locale of A's template; the lists scoped to A and to
+ * A's pair listed the pair's row too, while the exact reads of both addresses
+ * answered 404. A send naming no package reads that execution list. TO: none
+ * of them. The dependent's own list keeps its addition, as its exact read
+ * does, and an enabled holder's lists are unchanged. Re-enabled, as before.
+ */
+describe('[#32354] the list doors serve nothing a disabled holder\'s pair or dependent carries for it', () => {
+  const DEP = 'com.acme.dep';
+  const tpl = (packageId: string, locale: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale, subject: locale, bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const pairRow = (name: string, label: string) => rows.push({
+    id: `row_${name}`, type: 'email_template', name, state: 'active', package_id: PAIR_A, bundle_member: 'fr-FR',
+    metadata: JSON.stringify({ name, label, locale: 'fr-FR', subject: label, bodyHtml: '<p>p</p>' }),
+  });
+  const labelsOf = async (read: Promise<{ items?: unknown[] }>, name = 'welcome') => ((await read).items ?? [])
+    .filter((it) => (it as { name?: unknown }).name === name)
+    .map((it) => (it as { label?: string }).label)
+    .sort();
+  const answers = async () => ({
+    list: await labelsOf(protocol.getMetaItems({ type: 'email_template' })),
+    execution: await labelsOf(protocol.getMetaItemsForExecution({ type: 'email_template' })),
+    atA: await labelsOf(protocol.getMetaItems({ type: 'email_template', packageId: A })),
+    executionAtA: await labelsOf(protocol.getMetaItemsForExecution({ type: 'email_template', packageId: A })),
+    atPair: await labelsOf(protocol.getMetaItems({ type: 'email_template', packageId: PAIR_A })),
+    atDep: await labelsOf(protocol.getMetaItems({ type: 'email_template', packageId: DEP })),
+    atB: await labelsOf(protocol.getMetaItems({ type: 'email_template', packageId: B })),
+  });
+  type Answers = Awaited<ReturnType<typeof answers>>;
+  const lists = (unscoped: string[], atA: string[], rest: Pick<Answers, 'atPair' | 'atDep' | 'atB'>): Answers =>
+    ({ list: unscoped, execution: unscoped, atA, executionAtA: atA, ...rest });
+
+  /** `[state, holders, carried, enabled answers, A-disabled answers]`. */
+  const STATES: ReadonlyArray<[string, readonly string[], 'pair row' | 'addition', Answers, Answers]> = [
+    ['one holder, its pair\'s row', [A], 'pair row',
+      lists(['alpha en-US', 'pair fr-FR'], ['alpha en-US', 'pair fr-FR'], { atPair: ['pair fr-FR'], atDep: [], atB: [] }),
+      lists([], [], { atPair: [], atDep: [], atB: [] })],
+    ['two holders, the disabled one\'s pair\'s row', [A, B], 'pair row',
+      lists(['alpha en-US', 'beta en-US', 'pair fr-FR'], ['alpha en-US', 'pair fr-FR'], { atPair: ['pair fr-FR'], atDep: [], atB: ['beta en-US'] }),
+      lists(['beta en-US'], [], { atPair: [], atDep: [], atB: ['beta en-US'] })],
+    ['one holder, a dependent\'s addition', [A], 'addition',
+      lists(['alpha en-US', 'dep fr-FR'], ['alpha en-US'], { atPair: [], atDep: ['dep fr-FR'], atB: [] }),
+      lists([], [], { atPair: [], atDep: ['dep fr-FR'], atB: [] })],
+    ['two holders, a dependent of the disabled one\'s addition', [A, B], 'addition',
+      lists(['alpha en-US', 'beta en-US', 'dep fr-FR'], ['alpha en-US'], { atPair: [], atDep: ['dep fr-FR'], atB: ['beta en-US'] }),
+      lists(['beta en-US'], [], { atPair: [], atDep: ['dep fr-FR'], atB: ['beta en-US'] })],
+  ];
+  const CASES = STATES.flatMap(([state, holders, carried, enabled, disabled]) =>
+    (['as listed', 'reversed'] as const).flatMap((order) => (carried === 'pair row'
+      ? (['stored first', 'stored last'] as const)
+      : (['no row'] as const)).map((save) => [state, order, save, holders, carried, enabled, disabled] as const)));
+
+  beforeEach(() => {
+    registry.installPackage({ ...(manifest(DEP) as object), dependencies: { [A]: '^1.0.0' } } as never, 'code');
+    registry.installPackage(manifest(PAIR_A), 'code');
+  });
+
+  it.each(CASES)('%s, registered %s, row %s: A disabled, no list serves what is carried for A; re-enabled, as before', async (_state, order, save, holders, carried, enabled, disabled) => {
+    if (save === 'stored first') pairRow('welcome', 'pair fr-FR');
+    const shipped: Array<[string, string]> = [...holders.map((id): [string, string] => [id, 'en-US']), ...(carried === 'addition' ? [[DEP, 'fr-FR'] as [string, string]] : [])];
+    for (const [id, locale] of order === 'reversed' ? [...shipped].reverse() : shipped) tpl(id, locale);
+    if (save === 'stored last') pairRow('welcome', 'pair fr-FR');
+
+    // CONTROL — nothing disabled: every list as on FROM.
+    expect(await answers()).toEqual(enabled);
+    registry.disablePackage(A);
+    expect(await answers()).toEqual(disabled);
+    // Read again, after the first reads hydrated the stored row: the same answers.
+    expect(await answers()).toEqual(disabled);
+    registry.enablePackage(A);
+    expect(await answers()).toEqual(enabled);
+  });
+
+  it.each(['as listed', 'reversed'] as const)('CONTROL — registered %s: the pair\'s own item of a name A ships nothing of stays listed while A is disabled, as its by-name read serves it', async (order) => {
+    const arrange = [() => tpl(A, 'en-US'), () => pairRow('farewell', 'pair own farewell')];
+    for (const step of order === 'reversed' ? [...arrange].reverse() : arrange) step();
+    registry.disablePackage(A);
+    expect(labelOf(await protocol.getMetaItem({ type: 'email_template', name: 'farewell', member: 'fr-FR' } as never))).toBe('pair own farewell');
+    for (const read of [
+      protocol.getMetaItems({ type: 'email_template' }),
+      protocol.getMetaItemsForExecution({ type: 'email_template' }),
+      protocol.getMetaItems({ type: 'email_template', packageId: PAIR_A }),
+    ]) expect(await labelsOf(read, 'farewell')).toEqual(['pair own farewell']);
+  });
+});
+
+/**
+ * [#32814] The read naming no package, at the member only a holder's
+ * customization pair stores, where every package holding the name is
+ * disabled. FROM (`main` e540baf88, measured): 200 with the pair's row
+ * (stamped with the pair), in every save and hydration order below, on the
+ * served and the execution face; with no row stored, the same read answered
+ * the holder's withheld item. TO: that withheld item, the no-row answer: a pair
+ * row is bound over the holders it is a pair of, never a holder of its own, so
+ * it is withheld with them, as `?package=PAIR` already is (R4-C above).
+ * Re-enabled, and beside an enabled holder of the same pair, as FROM.
+ */
+describe('[#32814] the read naming no package withholds a pair row of a name only disabled packages hold', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Y = 'com.acme.suitey';
+  const PAIR = `${APP}.custom`;
+  const moduleOf = (id: string) => ({
+    id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop()!, dependencies: { [APP]: '^1.0.0' },
+  }) as never;
+  const tpl = (packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} en-US`, locale: 'en-US', subject: 'en', bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const storePairRow = () => rows.push({
+    id: 'row_fr', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'fr-FR',
+    metadata: JSON.stringify({ name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>' }),
+  });
+  /** The boot's hydration: the list read lays the stored row into the registry's slot. */
+  const hydrate = () => protocol.getMetaItems({ type: 'email_template' } as never);
+  const bare = () => protocol.getMetaItem({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never);
+  const bareForExecution = () => protocol.getMetaItemForExecution({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never);
+
+  beforeEach(() => {
+    registry.installPackage(manifest(APP), 'code');
+    registry.installPackage(moduleOf(X), 'code');
+    registry.installPackage(moduleOf(Y), 'code');
+    registry.installPackage(manifest(PAIR), 'code');
+  });
+
+  const HOLDERS = [['a module of the App', X], ['the App itself', APP]] as const;
+  const ORDERS = [
+    ['the row saved, then the holder disabled', false, false],
+    ['the holder disabled, then the row saved', true, false],
+    ['the row saved and hydrated, then the holder disabled', false, true],
+    ['the holder disabled, then the row saved and hydrated', true, true],
+  ] as const;
+  const CASES = HOLDERS.flatMap(([holderLabel, holder]) => ORDERS.map(([order, disableFirst, hydrated]) =>
+    [holderLabel, order, holder, disableFirst, hydrated] as const));
+
+  it.each(CASES)('%s holds the name, %s: the bare read at the member answers the holder\'s withheld item (BASE: the pair\'s row); re-enabled, the pair\'s row', async (_holder, _order, holder, disableFirst, hydrated) => {
+    tpl(holder);
+    if (disableFirst) registry.disablePackage(holder);
+    storePairRow();
+    if (hydrated) await hydrate();
+    if (!disableFirst) registry.disablePackage(holder);
+    const answer = await bare();
+    expect(answer?.item).toBeUndefined();
+    expect((answer as { packageId?: string } | undefined)?.packageId).toBe(holder);
+    expect(JSON.stringify(answer ?? null)).not.toContain('pair fr-FR');
+    expect((await bareForExecution())?.item).toBeUndefined();
+    // CONTROL — the holder enabled again: the pair's row, as on BASE.
+    registry.enablePackage(holder);
+    expect(labelOf(await bare())).toBe('pair fr-FR');
+    expect(labelOf(await bareForExecution())).toBe('pair fr-FR');
+  });
+
+  // `version` is left out of the comparison: the withheld envelope keeps the
+  // version of what the read reached, on every withheld arm (a disabled
+  // holder's own stored row keeps its row's too), and no door serves it.
+  it.each(HOLDERS)('%s holds the name, disabled: the answer with the pair\'s row stored is the answer with none', async (_holder, holder) => {
+    tpl(holder);
+    registry.disablePackage(holder);
+    const { version: _noRowVersion, ...withoutRow } = (await bare()) as Record<string, unknown>;
+    storePairRow();
+    const { version: _rowVersion, ...withRow } = (await bare()) as Record<string, unknown>;
+    expect(withRow).toEqual(withoutRow);
+  });
+
+  it.each([['the disabled holder registered first', [X, Y]], ['the enabled holder registered first', [Y, X]]] as const)(
+    'CONTROL — two modules of the App hold the name, %s, X disabled: the bare read serves the pair\'s row (Y\'s customization), as on BASE; both disabled, withheld',
+    async (_order, order) => {
+      for (const id of order) tpl(id);
+      storePairRow();
+      registry.disablePackage(X);
+      expect(labelOf(await bare())).toBe('pair fr-FR');
+      registry.disablePackage(Y);
+      const neither = await bare();
+      expect(neither?.item).toBeUndefined();
+      expect(JSON.stringify(neither ?? null)).not.toContain('pair fr-FR');
+    },
+  );
+});
