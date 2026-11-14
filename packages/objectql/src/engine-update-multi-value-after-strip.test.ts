@@ -32,7 +32,10 @@ function makeDriver() {
   const driver: any = {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(_o: string, ast: any) { return [...rows.values()].filter((r) => matches(r, ast?.where)); },
+    async find(_o: string, ast: any) {
+      const hit = [...rows.values()].filter((r) => matches(r, ast?.where));
+      return typeof ast?.limit === 'number' ? hit.slice(0, ast.limit) : hit;
+    },
     async findOne(_o: string, ast: any) {
       for (const r of rows.values()) if (matches(r, ast?.where)) return r;
       return null;
