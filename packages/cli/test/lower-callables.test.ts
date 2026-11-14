@@ -483,7 +483,7 @@ describe('[#33214] lowerCallables — a handler hook\'s refusal catalogue', () =
     const out = lowerCallables({ hooks: [{ name: 'plan_gate', object: 'plan', events: ['beforeUpdate'], handler, refusals }] });
     const hook = (out.lowered.hooks as any[])[0];
     expect(hook.body?.language).toBe('js');
-    expect(hook.body.source).toContain("reason: \"plan_locked\"".replace(/"/g, hook.body.source.includes("'plan_locked'") ? "'" : '"'));
+    expect(hook.body.source).toMatch(/reason:\s*['"]plan_locked['"]/);
     expect(hook.refusals).toEqual(refusals);
     expect(HookSchema.safeParse(hook).success).toBe(true);
   });
