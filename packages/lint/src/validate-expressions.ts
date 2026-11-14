@@ -4175,16 +4175,26 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       }
     }
     // [#33153] The formula-cycle pass, over the target as served
-    // (`fieldDefs`: its declared fields with every kept entry's fields folded
-    // in, a tie left out), so a formula an entry adds that reads itself, or
-    // two that read each other, are refused as the object's own are (#33100).
-    // Each member an entry adds is located at that entry
-    // ({@link extensionFormulaLoci}); a member the target declares is the
-    // object walk's, located at the object, so a cycle closing through a
+    // (`fieldDefs`: on a declared target its served body, every kept entry's
+    // fields folded in and a field two packages tie on left out; on an
+    // undeclared one the entries' own fields, the later entry's definition of
+    // a shared name), so a formula an entry adds that reads itself, or two that
+    // read each other, are refused as the object's own are (#33100). Each
+    // member an entry adds is located at that entry
+    // ({@link extensionFormulaLoci}).
+    //
+    // In the build `base` is the authored object, and a member it declares is
+    // the object walk's, located at the object: a cycle closing through a
     // declared formula keeps that location and is named once. On the door's
-    // one pass the target's own cycle is no member here and so is not this
-    // write's to answer for.
-    const ownNames = new Set(base ? fieldEntries(base).map(([n]) => n) : []);
+    // one pass `base` is the target as served BEFORE the write (other
+    // packages' published extension fields included) and the object walk does
+    // not run, while the written entry, its sole extension, is folded over it,
+    // so every name the entry adds is served from the entry's own record: none
+    // is left out there, a name the target already serves included. A member
+    // the target or a sibling package stored is never a name the entry adds,
+    // so the target's own cycle, a sibling's, and a formula that only reads a
+    // cycle are not this write's to answer for.
+    const ownNames = new Set(base && !extensionWrite ? fieldEntries(base).map(([n]) => n) : []);
     issues.push(...formulaCycleIssues(target, fieldDefs, extensionFormulaLoci(target, entries, ownNames)));
   }
 

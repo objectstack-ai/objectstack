@@ -94,20 +94,23 @@ export function formulaCycleIssues(
  * the field-formula pass gives the same field). `entries` are the target's
  * entries in fold order (`objectExtensionsByTarget`), so a name two entries
  * add is located at the later one, the definition the registry serves. A
- * name the target declares itself (`declared`) is left out: the object walk
- * locates it at the object, so a cycle closing through a declared formula
- * keeps that location.
+ * name in `left` is left out: the caller's names whose member is located
+ * elsewhere. The build passes the names the authored target declares (the
+ * object walk locates those at the object, so a cycle closing through a
+ * declared formula keeps that location); the `object_extension` door passes
+ * none, since the written entry's fields are served over everything the
+ * target served before the write.
  */
 export function extensionFormulaLoci(
   target: string,
   entries: ReadonlyArray<{ path: string; fields: readonly AnyRec[] }>,
-  declared: ReadonlySet<string>,
+  left: ReadonlySet<string>,
 ): Map<string, string> {
   const loci = new Map<string, string>();
   for (const entry of entries) {
     for (const field of entry.fields) {
       const name = field.name;
-      if (typeof name !== 'string' || declared.has(name)) continue;
+      if (typeof name !== 'string' || left.has(name)) continue;
       loci.set(name, `object '${target}' · ${entry.path} · field '${name}' expression`);
     }
   }

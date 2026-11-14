@@ -157,6 +157,51 @@ describe('#33153 — formula cycles an object extension adds, at the object_exte
     ]);
   });
 
+  it('⭐ LIT — the door refuses a member under a name the target already serves: a re-declared own field', () => {
+    // A package extending an object it owns and re-declaring one of its
+    // declared fields as a formula that reads itself: the written definition
+    // is the one served, so the door refuses it at the entry.
+    const declared = target();
+    const item = extension({ quantity: formula('record.quantity + 1') });
+
+    const door = cycleFindings(gateExtension(item, [declared]).errors);
+    expect(door.map((f) => f.where), dump(door)).toEqual([extWhere('quantity')]);
+    expect(door[0]!.message).toContain(formulaCycleMessage('quantity', ['quantity']));
+
+    // The build refuses the same stack once, at the object, where the object
+    // walk locates the declared name.
+    const built = build({ objects: [declared], objectExtensions: [item] });
+    expect(built.map((f) => f.where), dump(built)).toEqual([where('quantity')]);
+  });
+
+  it('⭐ LIT — the door refuses a member under a name a sibling package\'s published extension already serves', () => {
+    // The door's live target carries the sibling's `s__c` (a stored number);
+    // the written entry adds `s__c` over it as a formula reading itself.
+    const served = target({ s__c: { type: 'number', label: 'Sibling' } });
+    const item = { ...extension({ s__c: formula('record.s__c * 2') }), priority: 300 };
+
+    const door = cycleFindings(gateExtension(item, [served]).errors);
+    expect(door.map((f) => f.where), dump(door)).toEqual([extWhere('s__c')]);
+
+    // The build over both packages serves the later writer and refuses it at its entry.
+    const built = build({
+      objects: [target()],
+      packages: [
+        { manifest: { objectExtensions: [{ ...extension({ s__c: { type: 'number', label: 'Sibling' } }), priority: 100 }] } },
+        { manifest: { objectExtensions: [item] } },
+      ],
+    });
+    expect(built.map((f) => f.where), dump(built)).toEqual([
+      "object 'x_job' · packages[1].manifest.objectExtensions[0] · field 's__c' expression",
+    ]);
+  });
+
+  it('a sibling package\'s stored cycle, and a formula that only reads a cycle, are not the extension write\'s to answer for', () => {
+    const served = target({ s_x: formula('record.s_y + 1'), s_y: formula('record.s_x + 1') });
+    const result = gateExtension(extension({ e__c: formula('record.s_x * 2') }), [served]);
+    expect(result.errors.filter((f) => f.rule === EXPRESSION_INVALID), dump(result)).toEqual([]);
+  });
+
   it('an extension of an object the door does not carry is judged on its own fields', () => {
     const door = cycleFindings(gateExtension(extension({ a__c: formula('record.a__c') }), []).errors);
     expect(door.map((f) => f.where), dump(door)).toEqual([extWhere('a__c')]);
