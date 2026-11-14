@@ -161,7 +161,7 @@ import type { NullGuardOptions, NullGuardOutcome } from './validate-null-guards.
 import { stripInjectedSystemColumns } from '@objectstack/metadata-core';
 import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
-import { formulaCycleIssues } from './formula-cycle-issues.js';
+import { extensionFormulaLoci, formulaCycleIssues } from './formula-cycle-issues.js';
 export interface ExprIssue {
   where: string;
   message: string;
@@ -4174,6 +4174,18 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         });
       }
     }
+    // [#33153] The formula-cycle pass, over the target as served
+    // (`fieldDefs`: its declared fields with every kept entry's fields folded
+    // in, a tie left out), so a formula an entry adds that reads itself, or
+    // two that read each other, are refused as the object's own are (#33100).
+    // Each member an entry adds is located at that entry
+    // ({@link extensionFormulaLoci}); a member the target declares is the
+    // object walk's, located at the object, so a cycle closing through a
+    // declared formula keeps that location and is named once. On the door's
+    // one pass the target's own cycle is no member here and so is not this
+    // write's to answer for.
+    const ownNames = new Set(base ? fieldEntries(base).map(([n]) => n) : []);
+    issues.push(...formulaCycleIssues(target, fieldDefs, extensionFormulaLoci(target, entries, ownNames)));
   }
 
   // [#33072] An extension write's one pass ends here.
