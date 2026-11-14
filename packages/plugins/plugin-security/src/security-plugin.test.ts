@@ -4221,8 +4221,14 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     // The agent keeps its own (org-wide) depth so plugin-sharing scopes the
     // AGENT identity correctly; the delegator's narrower depth is stashed apart
     // so plugin-sharing can re-run the owner-match under the DELEGATOR identity.
-    expect(ctx.__readScope).toBe('org');
-    expect(ctx.__delegatorReadScope).toBe('own');
+    expect(opCtx.context.__readScope).toBe('org');
+    expect(opCtx.context.__delegatorReadScope).toBe('own');
+    // [#33051] …on the OPERATION's own envelope: the caller's is never written,
+    // so a concurrent sibling operation sharing it cannot overwrite the depth
+    // between this stamp and plugin-sharing's read of it.
+    expect(opCtx.context).not.toBe(ctx);
+    expect(ctx).not.toHaveProperty('__readScope');
+    expect(ctx).not.toHaveProperty('__delegatorReadScope');
   });
 
   // ── [#16549 / maintainer ruling 2026-09-08] "a ceiling that says nothing
@@ -4252,13 +4258,14 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
       schemaExtra: { sharingModel: 'private' },
     });
     const ctx: any = agentCtx();
-    await h.run({ object: 'task', operation: 'find', ast: { where: undefined }, context: ctx });
+    const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, context: ctx };
+    await h.run(opCtx);
     // Was 'own' before the ruling — the manufactured opinion that produced
     // `crm_opportunity: 0`. Both legs now say 'org', so plugin-sharing's
     // `buildReadFilter` returns null on each and the agent reads exactly the
     // rows the human reads. THIS is pin 1: equal, not merely closer.
-    expect(ctx.__readScope).toBe('org');
-    expect(ctx.__delegatorReadScope).toBe('org');
+    expect(opCtx.context.__readScope).toBe('org');
+    expect(opCtx.context.__delegatorReadScope).toBe('org');
   });
 
   it('[#16549] NEGATIVE CONTROL: a delegator WITHOUT viewAllRecords is unchanged — the delegator leg still bounds the read', async () => {
@@ -4269,13 +4276,14 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
       schemaExtra: { sharingModel: 'private' },
     });
     const ctx: any = agentCtx();
-    await h.run({ object: 'task', operation: 'find', ast: { where: undefined }, context: ctx });
+    const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, context: ctx };
+    await h.run(opCtx);
     // The widening is on the CEILING's leg only. The delegator's own 'own'
     // depth is untouched and still AND-s in, so a user with no viewAllRecords
     // sees exactly what she saw before: own + shares. ⛔ The fix widens the
     // manager's view, not everyone's.
-    expect(ctx.__readScope).toBe('org');
-    expect(ctx.__delegatorReadScope).toBe('own');
+    expect(opCtx.context.__readScope).toBe('org');
+    expect(opCtx.context.__delegatorReadScope).toBe('own');
   });
 
   it('[#16549] NEGATIVE CONTROL: a ceiling that DOES declare a depth keeps its full subtractive force', async () => {
@@ -4286,10 +4294,11 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
       schemaExtra: { sharingModel: 'private' },
     });
     const ctx: any = agentCtx();
-    await h.run({ object: 'task', operation: 'find', ast: { where: undefined }, context: ctx });
+    const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, context: ctx };
+    await h.run(opCtx);
     // Silence is "no opinion"; a DECLARATION is an opinion and still narrows.
-    expect(ctx.__readScope).toBe('own');
-    expect(ctx.__delegatorReadScope).toBe('org');
+    expect(opCtx.context.__readScope).toBe('own');
+    expect(opCtx.context.__delegatorReadScope).toBe('org');
   });
 
   it('[#16549] the write leg follows the same rule — a silent write ceiling takes the delegator\'s modifyAllRecords depth', async () => {
@@ -4307,9 +4316,10 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
       schemaExtra: { sharingModel: 'private' },
     });
     const ctx: any = agentCtx();
-    await h.run({ object: 'task', operation: 'update', data: { id: 'r1', name: 'x' }, options: { where: { id: 'r1' } }, context: ctx });
-    expect(ctx.__writeScope).toBe('org');
-    expect(ctx.__delegatorWriteScope).toBe('org');
+    const opCtx: any = { object: 'task', operation: 'update', data: { id: 'r1', name: 'x' }, options: { where: { id: 'r1' } }, context: ctx };
+    await h.run(opCtx);
+    expect(opCtx.context.__writeScope).toBe('org');
+    expect(opCtx.context.__delegatorWriteScope).toBe('org');
   });
 
   it('[#16549] NEGATIVE CONTROL: the read-only ceiling still cannot WRITE, whatever the delegator holds', async () => {
