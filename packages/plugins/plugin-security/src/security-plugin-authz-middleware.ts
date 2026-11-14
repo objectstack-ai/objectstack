@@ -136,7 +136,7 @@ import {
   writesQueue,
 } from './ownership-queue-gate.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
-import { grantRowPolicySpeaks, stampExternalGrant } from './external-owd-grant-stamp.js';
+import { externalGrantPatch } from './external-owd-grant-stamp.js';
 
 /**
  * The layered computation's options, as the class declares them: the
@@ -490,6 +490,15 @@ export function registerAuthzMiddleware(
     // judgement or both; the two flags say which, for the assertion's
     // wording and for its one stand-down (the data door, see there).
     let writeImageCheckSeam: WriteImageCheckSeam | null = null;
+    // [#33051] What step 2.6 resolved for THIS operation alone — the access
+    // depth plugin-sharing reads, and the external rung's grant stamp. Handed
+    // to the rest of the chain on the operation's OWN envelope at `next()`
+    // below, never written into the caller's: one caller envelope serves
+    // every operation a request runs, concurrent ones included (a record
+    // page's related lists are sibling reads), and a depth stamped onto it in
+    // place was overwritten by a sibling's for another object before
+    // plugin-sharing read it.
+    let operationStamps: Record<string, unknown> | null = null;
     let businessCheckSeamInstalled = false;
     let tenantWallSeamInstalled = false;
     // [#10757] Retire every memoized permission-set resolution the moment a
@@ -1070,6 +1079,8 @@ export function registerAuthzMiddleware(
     //      (plugin-sharing), so we pass the scope STRING, not the resolved set.
     if (permissionSets.length > 0) {
       const sc: any = opCtx.context;
+      const stamps: Record<string, unknown> = {};
+      operationStamps = stamps;
       // [ADR-0090 D10 — maintainer ruling 2026-09-08, option 1] The DELEGATED
       // principal's own depth is its ceiling's DECLARED depth, and a ceiling
       // that declares none says nothing about visibility — so the delegator's
@@ -1092,7 +1103,7 @@ export function registerAuthzMiddleware(
       // agent identity (unchanged on the non-delegated path).
       if (['find', 'findOne', 'count', 'aggregate'].includes(opCtx.operation)) {
         const delegated = depthFor('read');
-        sc.__readScope = delegated
+        stamps.__readScope = delegated
           ? delegated.agentLegScope
           : this.permissionEvaluator.getEffectiveScope('read', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
         // [ADR-0090 D10] Stash the DELEGATOR's own read depth SEPARATELY (not a
@@ -1102,13 +1113,13 @@ export function registerAuthzMiddleware(
         // intersection. Narrowing __readScope alone would wrongly scope the
         // AGENT's identity to the delegator's depth (owner_id = agentId),
         // hiding the very rows the delegator legitimately owns.
-        if (delegated) sc.__delegatorReadScope = delegated.delegatorScope;
+        if (delegated) stamps.__delegatorReadScope = delegated.delegatorScope;
       } else if (['update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation)) {
         const delegated = depthFor('write');
-        sc.__writeScope = delegated
+        stamps.__writeScope = delegated
           ? delegated.agentLegScope
           : this.permissionEvaluator.getEffectiveScope('write', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
-        if (delegated) sc.__delegatorWriteScope = delegated.delegatorScope;
+        if (delegated) stamps.__delegatorWriteScope = delegated.delegatorScope;
       }
       // [Ruling of record 6355206139, letter B] The EXTERNAL rung's OWD seam.
       // plugin-sharing floors an external principal's org-wide default at
@@ -1121,9 +1132,9 @@ export function registerAuthzMiddleware(
         const collect = (rlsOperation: string) =>
           this.collectRLSPolicies(permissionSets, opCtx.object, rlsOperation, (sc.positions ?? []) as string[], sc);
         if (['find', 'findOne', 'count', 'aggregate'].includes(opCtx.operation)) {
-          stampExternalGrant(sc, opCtx.object, 'read', grantRowPolicySpeaks(collect, 'read'));
+          Object.assign(stamps, externalGrantPatch(sc, opCtx.object, 'read', collect));
         } else if (['update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation)) {
-          stampExternalGrant(sc, opCtx.object, 'write', grantRowPolicySpeaks(collect, 'write', rlsOperationForVerb(opCtx.operation)));
+          Object.assign(stamps, externalGrantPatch(sc, opCtx.object, 'write', collect, rlsOperationForVerb(opCtx.operation)));
         }
       }
     }
@@ -2610,6 +2621,12 @@ export function registerAuthzMiddleware(
       }
     }
 
+    // [#33051] The operation's own envelope: the caller's, with step 2.6's
+    // stamps for THIS operation on top. A copy, so nothing this operation
+    // resolved is written back into the envelope its siblings share; built
+    // here rather than at 2.6, so the request-wide memos the steps above
+    // staged on the caller's envelope (membership sets, queues) ride along.
+    if (operationStamps && Object.keys(operationStamps).length > 0) opCtx.context = { ...opCtx.context, ...operationStamps };
     await next();
 
     // [commit a016f08b8] FAIL CLOSED on a seam that was never run. `honoured` is set by

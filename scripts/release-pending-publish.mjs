@@ -1161,6 +1161,8 @@ export function* versionCommitsOf({ cwd, head = 'HEAD', walk = PUSH_WALK }) {
  * version's publish job. Every run either reading names is read directly, and
  * only that read's status is judged. The cost follows releases, not runs; what
  * cannot be found or does not add up lands in `anomalies`, printed as warnings.
+ * Jobs are read for a waiting run and a version-commit push run at rest; every
+ * other run carries `jobs: null` (not read), never `[]`.
  */
 export async function collectWaitingRuns({
   http,
@@ -1221,7 +1223,10 @@ export async function collectWaitingRuns({
   const runs = [];
   for (const id of new Set([...filtered.ids, ...expected.keys()])) {
     const r = expectOk(await http('GET', `/repos/${repo}/actions/runs/${id}`), `reading run ${id}`);
-    const run = { id: r.id, event: r.event, status: r.status, headSha: r.head_sha, jobs: [], environments: [] };
+    // `jobs: null` until they are read: a run left at its status (in flight,
+    // or completed and not a version-commit push) carries no jobs list, so a
+    // reader judging jobs reads it as UNREAD, never as a run holding no job.
+    const run = { id: r.id, event: r.event, status: r.status, headSha: r.head_sha, jobs: null, environments: [] };
     runs.push(run);
     // A run still in flight may not have named its publish job yet, and the
     // calling run is judged untouched whatever it holds: neither is checked.
@@ -1477,25 +1482,90 @@ export function judgePublishInFlight({ version, runs, currentRunId }) {
 const RUN_LIST_PAGE = 100;
 
 /**
+ * How far back the walk behind a short page reads (`walkRunList`). DOCUMENTED,
+ * not measured: GitHub fails a job held at an environment after 30 days, and
+ * re-runs a run only within 30 days of its first, so a run created earlier
+ * cannot newly ENTER `in_progress` or `queued`; one in that status since before
+ * is already a row on the filter's page (measured: ci.yml's `in_progress`
+ * filter lists run 31118082788, created 2026-08-06, still in_progress 100
+ * days on). One day of margin over the 30.
+ */
+export const RUN_WALK_DAYS = 31;
+/**
+ * The walk's cap, in pages of 100: a walk that reaches neither the bound nor
+ * the start of history by then is unread. release.yml created 3,564 runs in
+ * the 33 days to 2026-11-14 (about 108 a day, 34 pages for 31 days), so 60
+ * leaves the rate room to nearly double before the cap reads as unread.
+ */
+export const RUN_WALK_MAX_PAGES = 60;
+
+/**
+ * The workflow's runs newest first, unfiltered, page by page (`page=N`, 100
+ * each) until a short page (the start of history) or a page whose oldest run
+ * was created before `now` minus `days` (the bound). Unfiltered, so no count
+ * is trusted: the rows are the reading. Throws -- the walk is UNREAD -- on any
+ * page it cannot read, on a row whose `created_at` is no time (the bound
+ * cannot be judged), and on reaching neither bound within `maxPages`. Runs a
+ * concurrent insert pushes onto the next page are read twice and kept once.
+ */
+async function walkRunList({ http, listPath, what, now, days = RUN_WALK_DAYS, maxPages = RUN_WALK_MAX_PAGES }) {
+  const cutoff = now - days * 86_400_000;
+  const byId = new Map();
+  let oldest = null;
+  for (let n = 1; ; n += 1) {
+    const where = `${what}: the walk of the unfiltered run list, page ${n}`;
+    const page = expectOk(await http('GET', `${listPath}?per_page=${RUN_LIST_PAGE}&page=${n}&exclude_pull_requests=true`), where);
+    if (!page || !Array.isArray(page.workflow_runs)) throw new Error(`${where} answered no workflow_runs list`);
+    for (const r of page.workflow_runs) {
+      const at = Date.parse(r.created_at);
+      if (!Number.isFinite(at)) throw new Error(`${where}: run ${r.id} has no created_at time (${JSON.stringify(r.created_at) ?? 'absent'}), so the walk's bound is unread`);
+      if (oldest === null || at < oldest) oldest = at;
+      byId.set(String(r.id), r);
+    }
+    const runs = [...byId.values()];
+    if (page.workflow_runs.length < RUN_LIST_PAGE) return { runs, pages: n, reached: 'the start of history', oldest };
+    if (oldest < cutoff) return { runs, pages: n, reached: `the ${days}-day bound`, oldest };
+    if (n >= maxPages) {
+      throw new Error(
+        `${what}: the walk read ${maxPages} pages (${runs.length} runs, back to ${new Date(oldest).toISOString()}) and reached neither ` +
+          `the ${days}-day bound nor the start of history, so the runs before it are unread`,
+      );
+    }
+  }
+}
+
+/**
  * One run-list filter read whole: the page's runs, once its `total_count` is
  * no more than it listed. A count above a page that is NOT full is GitHub's
- * list/count lag, not a page skipped -- measured: release.yml's in_progress
- * filter counted 2 over a page listing the calling run alone, the one run in
- * progress (run 42938356503); lint.yml's counted 12 over an empty page and 0
- * over the same empty page on the next read. So that page is re-read under
- * the board-read policy, spending the run's `budget` (`boardReadBudget`):
- * up to `attemptsPerRead` reads, `backoffMs` apart, each re-read one of the
- * run's `retriesPerRun`. The first read the count agrees with is the one
- * judged, and the note says what came before it, each short page with the
- * ids it listed (the refused run's own reason named none, so which run the
- * count was read against could not be told afterwards).
+ * list/count disagreement, not a page skipped, and it runs both ways --
+ * measured on 2026-11-14 over 135 samples of ci.yml, lint.yml and fleet-write.yml:
+ * 18 counts one above the page; in 4 the filter's ROWS lagged (the unfiltered
+ * list showed a run in that status the page left out, so the count was the
+ * true witness), in 14 the count named no run either list showed (as
+ * release.yml's in_progress filter did for runs 42938356503 and 43540146973,
+ * the only release.yml run alive each time).
  *
- * ⛔ Fail-closed, as before the re-read: a count still above the page when the
- * ladder or the budget is spent throws, naming the reads. A count that is no
- * number, or one above a FULL page (the rest sit on a page this read does not
- * take), is no lag to wait out and throws at once.
+ * So the page is first re-read under the board-read policy, spending the run's
+ * `budget` (`boardReadBudget`): up to `attemptsPerRead` reads, `backoffMs`
+ * apart, each re-read one of the run's `retriesPerRun`; the first read the
+ * count agrees with is judged. When the ladder ends with the page still short,
+ * the excess is resolved by a reading that trusts no count: `walkRunList`
+ * walks the workflow's unfiltered runs back to `RUN_WALK_DAYS`, and every
+ * walked run whose row carries `status` and is not on the page is read by id;
+ * one the direct read answers in `status` is a row that lagged, and is added.
+ * The walk explains the excess, or the note records the proof that the rest
+ * names no run ("count N over page M names no run: the walk of K runs back to
+ * DATE found none other"), and the page plus what the walk found is judged.
+ * The note names each short read, with the ids it listed.
+ *
+ * ⛔ Fail-closed everywhere else: a count above the page when the run's budget
+ * is spent throws; an unread walk page, a run the direct read cannot answer, a
+ * walk row with no time, and a walk that reaches neither bound throw (the
+ * walk's own reads retry through `http`, on the same budget). A count that is
+ * no number, or one above a FULL page (the rest sit on a page this read does
+ * not take), throws at once.
  */
-async function readWholeRunList({ http, path, what, budget }) {
+async function readWholeRunList({ http, repo, path, listPath, status, what, budget, now = Date.now() }) {
   const { policy } = budget;
   const short = [];
   for (let read = 1; ; read += 1) {
@@ -1511,23 +1581,46 @@ async function readWholeRunList({ http, path, what, budget }) {
     // A short page names the runs it did list, so a refusal says which one the count was read against.
     const named = runs.length < RUN_LIST_PAGE ? ` [${runs.map((r) => r.id).join(', ')}]` : '';
     short.push(`total_count ${page.total_count} but ${runs.length} listed${named}`);
-    const stop =
-      runs.length >= RUN_LIST_PAGE
-        ? `the page is full, so the rest sit on a page this read does not take`
-        : read >= policy.attemptsPerRead
-          ? 'every read one listing is allowed, so not one lagging count'
-          : budget.retriesSpent >= policy.retriesPerRun
-            ? `this run's budget of ${policy.retriesPerRun} retries is spent`
-            : null;
-    if (stop) {
-      throw new Error(
+    const refuse = (stop) =>
+      new Error(
         `${what}: total_count ${page.total_count} but ${runs.length} listed, so the rest are unread ` +
           `(read ${read} time${read === 1 ? '' : 's'}: ${short.join('; ')}; ${stop})`,
       );
-    }
+    if (runs.length >= RUN_LIST_PAGE) throw refuse('the page is full, so the rest sit on a page this read does not take');
+    // The ladder is spent with the page still short: no more waiting, a reading instead.
+    if (read >= policy.attemptsPerRead) return resolveShortPage({ http, repo, listPath, status, what, page, read, short, now });
+    if (budget.retriesSpent >= policy.retriesPerRun) throw refuse(`this run's budget of ${policy.retriesPerRun} retries is spent`);
     budget.retriesSpent += 1;
     await budget.sleep(policy.backoffMs[read - 1]);
   }
+}
+
+/**
+ * The ladder ended on a short page: walk, read the candidates by id, and judge
+ * the page plus every run whose row lagged it (`readWholeRunList`).
+ */
+async function resolveShortPage({ http, repo, listPath, status, what, page, read, short, now }) {
+  const runs = page.workflow_runs;
+  const listed = new Set(runs.map((r) => String(r.id)));
+  const walk = await walkRunList({ http, listPath, what, now });
+  const lagged = [];
+  for (const row of walk.runs) {
+    if (row.status !== status || listed.has(String(row.id))) continue;
+    const r = expectOk(await http('GET', `/repos/${repo}/actions/runs/${row.id}`), `${what}: reading run ${row.id}, which the walk lists ${status}`);
+    if (!r || r.id === undefined) throw new Error(`${what}: reading run ${row.id} answered no run`);
+    if (r.status === status) lagged.push(r);
+  }
+  const excess = page.total_count - runs.length;
+  const back = `back to ${walk.oldest === null ? 'nothing' : new Date(walk.oldest).toISOString()} (${walk.reached}, ${walk.pages} page${walk.pages === 1 ? '' : 's'})`;
+  const head = `count ${page.total_count} over page ${runs.length}`;
+  const found = `found ${lagged.length} more in ${status} [${lagged.map((r) => r.id).join(', ')}], whose row${lagged.length === 1 ? '' : 's'} lagged the filter`;
+  const proof =
+    lagged.length === 0
+      ? `${head} names no run: the walk of ${walk.runs.length} runs ${back} found none other`
+      : lagged.length >= excess
+        ? `${head}: the walk of ${walk.runs.length} runs ${back} ${found}`
+        : `${head}: the walk of ${walk.runs.length} runs ${back} ${found}; the other ${excess - lagged.length} name${excess - lagged.length === 1 ? 's' : ''} no run`;
+  return { runs: [...runs, ...lagged], note: ` (${proof}; read ${read} times: ${short.join('; ')})` };
 }
 
 /**
@@ -1537,8 +1630,9 @@ async function readWholeRunList({ http, path, what, budget }) {
  * carried it is found. `budget` is the run's one `boardReadBudget`, which a
  * status filter's count above its page spends on re-reads (`readWholeRunList`);
  * a caller reading through `retryingReads` hands that reader's budget here.
+ * `now` dates the walk's bound when a page stays short (`RUN_WALK_DAYS`).
  */
-export async function collectPublishRuns({ http, repo, workflow, tips, currentRunId = '', budget = boardReadBudget() }) {
+export async function collectPublishRuns({ http, repo, workflow, tips, currentRunId = '', budget = boardReadBudget(), now = Date.now() }) {
   const listPath = `/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs`;
   const listed = (page, what) => {
     if (!page || !Array.isArray(page.workflow_runs)) throw new Error(`${what} answered no workflow_runs list`);
@@ -1549,7 +1643,7 @@ export async function collectPublishRuns({ http, repo, workflow, tips, currentRu
   for (const status of IN_FLIGHT_RUN_FILTERS) {
     const what = `listing ${workflow}'s ${status} runs`;
     const path = `${listPath}?status=${status}&per_page=${RUN_LIST_PAGE}&exclude_pull_requests=true`;
-    const { runs, note } = await readWholeRunList({ http, path, what, budget });
+    const { runs, note } = await readWholeRunList({ http, repo, path, listPath, status, what, budget, now });
     for (const r of runs) ids.add(String(r.id));
     filters.push(`${status} [${runs.map((r) => r.id).join(', ')}]${note}`);
   }
@@ -1585,12 +1679,12 @@ export async function collectPublishRuns({ http, repo, workflow, tips, currentRu
  * The guard's whole answer for one version, never a throw: whatever cannot be
  * read answers `in-flight` with reason `unreadable`, for the publish job and
  * the image build alike, so the caller backfills nothing off a guess -- a
- * status filter whose count stays above its page through the re-reads
+ * status filter whose count stays above its page and whose walk is unread
  * (`readWholeRunList`, on `budget`) included. `walk` yields the version
  * commits of the head (`versionCommitsOf`); the first must be the one the
  * caller names.
  */
-export async function publishInFlight({ http, repo, workflow, version, versionCommit, walk, currentRunId = '', budget = boardReadBudget() }) {
+export async function publishInFlight({ http, repo, workflow, version, versionCommit, walk, currentRunId = '', budget = boardReadBudget(), now = Date.now() }) {
   try {
     const first = walk.next().value;
     if (!first || first.versionCommit !== versionCommit || first.version !== version) {
@@ -1599,7 +1693,7 @@ export async function publishInFlight({ http, repo, workflow, version, versionCo
           `the caller ${versionCommit} (${version}): two readers of one history disagree`,
       );
     }
-    const read = await collectPublishRuns({ http, repo, workflow, tips: first.tips, currentRunId, budget });
+    const read = await collectPublishRuns({ http, repo, workflow, tips: first.tips, currentRunId, budget, now });
     const verdict = judgePublishInFlight({ version, runs: read.runs, currentRunId });
     if (read.pushRuns.length === 0) {
       const note = `; no push run of ${workflow} was found at the version commit, so the run-list filters alone speak for it`;
@@ -1657,7 +1751,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the report -> a warning naming every changeset with its commit, a summary section, or a plain line for none': 4,
   "a publish of the version in another run -> in flight until it completes, and an unreadable read is in flight": 12,
   "the publishing run's image build -> in flight from the approval until its docker job completes, and an unreadable read is in flight": 12,
-  'the in-flight listing -> a count above a short page is re-read under the board-read budget: whole on a re-read it is judged, still short it is unreadable, and a count that is no number or sits over a full page is unreadable at once': 7,
+  'the in-flight listing -> a count above a short page is re-read under the board-read budget, then resolved by a walk of the unfiltered runs: a run whose row lagged is read and judged, a count naming no run passes with its proof, an unread or unbounded walk is unreadable, and a count that is no number or sits over a full page is unreadable at once': 14,
   'annotate-shipped -> the next.2 shape: each changeset the last version commit left unconsumed gets the lead line once, frontmatter byte-unchanged': 5,
   'annotate-shipped -> a second run writes nothing': 2,
   'annotate-shipped -> a changeset whose first body line already says Shipped in is left byte-identical': 2,
@@ -2514,6 +2608,13 @@ async function selfTest() {
       judgeWaitingRuns({ runs: self.read.runs, currentRunId: 900, npmStateOf: npmOf([]) }).untouched.some((u) => u.id === '900'),
     'the calling run carrying the version commit -> not checked for its publish job, judged untouched',
   );
+  const running = await readWith({ commits: [vc('v9', '1.5.0')], tips: { v9: [pushRun(901, 'in_progress', 0)] }, direct: { 901: pushRun(901, 'in_progress', 0) } });
+  const runningRun = running.read.runs.find((r) => String(r.id) === '901');
+  check(
+    runningRun && runningRun.status === 'in_progress' && runningRun.jobs === null && !running.calls.some((c) => /901\/jobs/.test(c)) &&
+      judgeWaitingRuns({ runs: running.read.runs, currentRunId: 900, npmStateOf: npmOf([]) }).untouched.some((u) => u.id === '901'),
+    'a version-commit push run in flight -> left at its status with jobs null (NOT READ), never [] that a jobs reader would take for "no job"; the sweep leaves it untouched',
+  );
 
   const short = await readWith({
     commits: [vc('v6', '1.2.0'), vc('v5', '1.1.0')],
@@ -2752,7 +2853,10 @@ async function selfTest() {
 
     // `listings[status]` answers that filter read by read, its last answer
     // repeating: each `{ total, runs }`, `total` absent meaning `runs.length`.
-    const flightWith = async ({ filters = {}, totals = {}, listings = {}, tips = {}, direct = {}, fail = null, walk, budget = boardReadBudget({ sleep: async () => {} }) } = {}) => {
+    // `walkPages(n)` answers page n of the UNFILTERED list (no status, no
+    // head_sha) the walk behind a short page reads; absent, every page is empty.
+    const FLIGHT_NOW = Date.parse('2026-11-14T01:25:00Z');
+    const flightWith = async ({ filters = {}, totals = {}, listings = {}, tips = {}, direct = {}, fail = null, walk, walkPages = () => [], budget = boardReadBudget({ sleep: async () => {} }) } = {}) => {
       const calls = [];
       const reads = {};
       const http = async (method, path) => {
@@ -2772,6 +2876,10 @@ async function selfTest() {
             const runs = filters[status] ?? [];
             return { status: 200, body: { total_count: totals[status] ?? runs.length, workflow_runs: runs } };
           }
+          if (!u.searchParams.has('head_sha')) {
+            const rows = walkPages(Number(u.searchParams.get('page')));
+            return { status: 200, body: { total_count: 15062, workflow_runs: rows } };
+          }
           return { status: 200, body: { total_count: 0, workflow_runs: tips[u.searchParams.get('head_sha')] ?? [] } };
         }
         if ((m = /\/actions\/runs\/(\d+)$/.exec(u.pathname))) return { status: 200, body: direct[m[1]] };
@@ -2787,6 +2895,7 @@ async function selfTest() {
         walk: walk ?? [{ versionCommit: 'c'.repeat(40), version: '17.6.0', tips: ['c'.repeat(40), 'dcc5ef4c', 't2'] }].values(),
         currentRunId: 36958423332,
         budget,
+        now: FLIGHT_NOW,
       });
       return { answer, calls, reads };
     };
@@ -2825,13 +2934,13 @@ async function selfTest() {
     );
     const unread = await Promise.all([
       flightWith({ fail: /status=queued/ }),
-      flightWith({ totals: { in_progress: 150 } }),
+      flightWith({ totals: { in_progress: 150 }, fail: /[?&]page=1(&|$)/ }),
       flightWith({ tips: { dcc5ef4c: [runAt(36955885276, 'push', 'in_progress')] }, direct: { 36955885276: runAt(36955885276, 'push', 'in_progress') }, fail: /\/jobs/ }),
     ]);
     check(
       unread.every((u) => u.answer.state === 'in-flight' && u.answer.reason === 'unreadable') &&
-        /answered HTTP 502/.test(unread[0].answer.detail) && /total_count 150 but 0 listed/.test(unread[1].answer.detail),
-      'a filter answering non-200, a filter counting more runs than it listed, or jobs answering non-200 -> unreadable, so in flight',
+        /answered HTTP 502/.test(unread[0].answer.detail) && /the walk of the unfiltered run list, page 1 answered HTTP 502/.test(unread[1].answer.detail),
+      'a filter answering non-200, a filter counting more runs than it listed whose walk is unread, or jobs answering non-200 -> unreadable, so in flight',
     );
     const disagree = await Promise.all([
       flightWith({ walk: [{ versionCommit: 'd'.repeat(40), version: '17.6.0', tips: [] }].values() }),
@@ -2933,7 +3042,7 @@ async function selfTest() {
     // Run 42938356503's stable-lane read at 01:24Z: `?status=in_progress`
     // counted 2 over a page listing 1, while the calling run was the only
     // release.yml run in progress. Opened in this block to reuse its stub API.
-    battery('the in-flight listing -> a count above a short page is re-read under the board-read budget: whole on a re-read it is judged, still short it is unreadable, and a count that is no number or sits over a full page is unreadable at once');
+    battery('the in-flight listing -> a count above a short page is re-read under the board-read budget, then resolved by a walk of the unfiltered runs: a run whose row lagged is read and judged, a count naming no run passes with its proof, an unread or unbounded walk is unreadable, and a count that is no number or sits over a full page is unreadable at once');
     const self = runAt(36958423332, 'schedule', 'in_progress');
     const timed = () => {
       const ms = [];
@@ -2959,14 +3068,89 @@ async function selfTest() {
       revealed.answer.state === 'in-flight' && revealed.answer.reason === 'publish-in-flight' && revealed.calls.some((c) => /\/runs\/77\/jobs/.test(c)),
       'a re-read listing the run the short page left out -> that run is read and judged, so its publish is in flight',
     );
+    // Run 43540146973 at 01:24:46Z, 11-14: the count stayed at 2 over the
+    // calling run alone through every re-read, and no other release.yml run
+    // was alive (every run created in the 33 days before had completed).
+    const hoursAgo = (h) => new Date(FLIGHT_NOW - h * 3_600_000).toISOString();
+    const row = (id, status, h, event = 'push') => ({ id, event, status, created_at: hoursAgo(h) });
+    const walkCalls = (u) => u.calls.filter((c) => /[?&]page=\d/.test(c));
     const stuck = timed();
-    const persistent = await flightWith({ listings: { in_progress: [{ total: 2, runs: [self] }] }, budget: stuck.budget });
+    const phantom = await flightWith({
+      listings: { in_progress: [{ total: 2, runs: [self] }] },
+      walkPages: (n) => (n === 1 ? [row(36958423332, 'in_progress', 0, 'schedule'), row(901, 'completed', 1), row(902, 'completed', 30)] : []),
+      budget: stuck.budget,
+    });
     check(
-      persistent.answer.state === 'in-flight' && persistent.answer.reason === 'unreadable' &&
-        persistent.answer.docker.state === 'in-flight' && persistent.answer.docker.reason === 'unreadable' &&
-        persistent.reads.in_progress === stuck.budget.policy.attemptsPerRead && stuck.ms.join() === '500,1000' &&
-        !persistent.calls.some((c) => /status=queued/.test(c)),
-      'a count still above the page on every read the ladder allows -> unreadable for the publish and the image alike, after 3 reads 500 / 1000 ms apart, and nothing after it is read',
+      phantom.answer.state === 'clear' && phantom.answer.docker.state === 'clear' &&
+        phantom.reads.in_progress === stuck.budget.policy.attemptsPerRead && stuck.ms.join() === '500,1000' &&
+        /count 2 over page 1 names no run: the walk of 3 runs back to 2026-11-12T19:25:00\.000Z \(the start of history, 1 page\) found none other/.test(phantom.answer.readings) &&
+        walkCalls(phantom).length === 1 && !phantom.calls.some((c) => /\/runs\/90[12]$/.test(c)) && phantom.calls.some((c) => /status=queued/.test(c)),
+      'the 11-14 reading: a count still above the calling run alone after the ladder, and a walk listing no other run in progress -> clear, the proof on the readings line, no completed row read, and the queued filter read after it',
+    );
+    const lagRow = await flightWith({
+      listings: { in_progress: [{ total: 2, runs: [self] }] },
+      walkPages: (n) => (n === 1 ? [row(77, 'in_progress', 0, 'workflow_dispatch'), row(36958423332, 'in_progress', 0, 'schedule')] : []),
+      direct: { 77: runAt(77, 'workflow_dispatch', 'in_progress', [job('17.6.0', 'in_progress')]) },
+    });
+    check(
+      lagRow.answer.state === 'in-flight' && lagRow.answer.reason === 'publish-in-flight' && lagRow.calls.some((c) => /\/runs\/77\/jobs/.test(c)) &&
+        /count 2 over page 1: the walk of 2 runs .* found 1 more in in_progress \[77\], whose row lagged the filter/.test(lagRow.answer.readings),
+      'a dispatch run the filter\'s rows left out but the walk lists in_progress -> read by id, its jobs read, and its publish judged in flight',
+    );
+    const settled = await flightWith({
+      listings: { in_progress: [{ total: 2, runs: [self] }] },
+      walkPages: (n) => (n === 1 ? [row(78, 'in_progress', 0)] : []),
+      direct: { 78: runAt(78, 'push', 'completed') },
+    });
+    check(
+      settled.answer.state === 'clear' && settled.calls.some((c) => /\/runs\/78$/.test(c)) && !settled.calls.some((c) => /\/runs\/78\/jobs/.test(c)) &&
+        /names no run: the walk of 1 runs/.test(settled.answer.readings),
+      'a walk row in progress whose direct read answers completed -> the direct read decides: not added, and the count still names no run',
+    );
+    const partial = await flightWith({
+      listings: { in_progress: [{ total: 3, runs: [self] }] },
+      walkPages: (n) => (n === 1 ? [row(79, 'in_progress', 0)] : []),
+      direct: { 79: runAt(79, 'push', 'in_progress', [integrity]) },
+    });
+    check(
+      partial.answer.state === 'clear' && partial.calls.some((c) => /\/runs\/79\/jobs/.test(c)) &&
+        /found 1 more in in_progress \[79\], whose row lagged the filter; the other 1 names no run/.test(partial.answer.readings),
+      'a walk explaining part of the excess -> the lagging run is judged (no publish in it), and the rest is recorded as naming no run',
+    );
+    const walkUnread = await flightWith({ listings: { in_progress: [{ total: 2, runs: [self] }] }, walkPages: () => [], fail: /[?&]page=2(&|$)/ });
+    const walkTwo = await flightWith({
+      listings: { in_progress: [{ total: 2, runs: [self] }] },
+      walkPages: (n) => Array.from({ length: 100 }, (_, i) => row(10_000 * n + i, 'completed', n)),
+      fail: /[?&]page=2(&|$)/,
+    });
+    check(
+      walkUnread.answer.state === 'clear' &&
+        walkTwo.answer.state === 'in-flight' && walkTwo.answer.reason === 'unreadable' && walkTwo.answer.docker.reason === 'unreadable' &&
+        /the walk of the unfiltered run list, page 2 answered HTTP 502/.test(walkTwo.answer.detail),
+      'an unread walk page -> unreadable for the publish and the image alike, never "clear" (a short first page needs no second)',
+    );
+    const endless = await flightWith({
+      listings: { in_progress: [{ total: 2, runs: [self] }] },
+      walkPages: (n) => Array.from({ length: 100 }, (_, i) => row(10_000 * n + i, 'completed', n / 10)),
+    });
+    check(
+      endless.answer.reason === 'unreadable' && walkCalls(endless).length === RUN_WALK_MAX_PAGES &&
+        new RegExp(`the walk read ${RUN_WALK_MAX_PAGES} pages .* reached neither the ${RUN_WALK_DAYS}-day bound nor the start of history`).test(endless.answer.detail),
+      'a walk that reaches neither the bound nor the start of history within its page cap -> unreadable',
+    );
+    const bounded = await flightWith({
+      listings: { in_progress: [{ total: 2, runs: [self] }] },
+      walkPages: (n) => Array.from({ length: 100 }, (_, i) => row(10_000 * n + i, 'completed', n * 24 * 20 + i)),
+    });
+    check(
+      bounded.answer.state === 'clear' && walkCalls(bounded).length === 2 &&
+        new RegExp(`the walk of 200 runs back to \\S+ \\(the ${RUN_WALK_DAYS}-day bound, 2 pages\\) found none other`).test(bounded.answer.readings),
+      `a walk whose page reaches a run created before the ${RUN_WALK_DAYS}-day bound -> stops there, and the proof names the bound`,
+    );
+    const untimed = await flightWith({ listings: { in_progress: [{ total: 2, runs: [self] }] }, walkPages: (n) => (n === 1 ? [{ id: 80, status: 'completed' }] : []) });
+    check(
+      untimed.answer.reason === 'unreadable' && /run 80 has no created_at time/.test(untimed.answer.detail),
+      'a walk row with no created_at -> the bound cannot be judged: unreadable',
     );
     const spentBudget = boardReadBudget({ sleep: async () => { throw new Error('a spent budget never sleeps'); } });
     spentBudget.retriesSpent = spentBudget.policy.retriesPerRun;

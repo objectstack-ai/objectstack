@@ -524,6 +524,74 @@ describe('Storage REST Routes', () => {
       expect((await store.getSession(uploadId))!.status).toBe('completed');
     });
 
+    // [#33027] A completion retried after it succeeded (a client that lost the
+    // `200`) used to reach the backend, whose multipart the first completion
+    // had discarded: `500 INTERNAL`, and the catch stamped `failed` over
+    // `completed` while the file stayed committed and downloadable.
+    describe('[#33027] a completed session', () => {
+      async function completedUpload() {
+        const { uploadId, resumeToken, fileId } = await initSession();
+        const chunkRes = await putChunk(uploadId, resumeToken);
+        const parts = [{ chunkIndex: 0, eTag: chunkRes._json.data.eTag }];
+        const first = await complete(uploadId, parts);
+        expect(first._status, JSON.stringify(first._json)).toBe(200);
+        return { uploadId, resumeToken, fileId, parts, first };
+      }
+
+      it('answers a completion sent again with the same 200 for the same file, and stays completed', async () => {
+        const { uploadId, fileId, parts, first } = await completedUpload();
+        const backend = vi.spyOn(adapter, 'completeChunkedUpload');
+        const updateSession = vi.spyOn(store, 'updateSession');
+
+        const retry = await complete(uploadId, parts);
+
+        expect(retry._status, JSON.stringify(retry._json)).toBe(200);
+        expect(retry._json.data).toEqual(first._json.data);
+        expect(retry._json.data.fileId).toBe(fileId);
+        expect(backend, 'the assembled multipart is not asked for again').not.toHaveBeenCalled();
+        expect(updateSession, 'the retry writes no status').not.toHaveBeenCalled();
+        expect((await store.getSession(uploadId))!.status).toBe('completed');
+        expect((await getProgress(uploadId))._json.data.status).toBe('completed');
+        expect((await store.getFile(fileId))!.status).toBe('committed');
+      });
+
+      it('still refuses a retry naming a chunk the upload does not hold, and stays completed', async () => {
+        const { uploadId } = await completedUpload();
+
+        const retry = await complete(uploadId, [{ chunkIndex: 0, eTag: 'not-the-stored-etag' }]);
+
+        expect(retry._status).toBe(409);
+        expect(retry._json.error.code).toBe('RESOURCE_CONFLICT');
+        expect((await store.getSession(uploadId))!.status).toBe('completed');
+      });
+
+      it('refuses a chunk sent to it 409 RESOURCE_CONFLICT, storing and recording nothing', async () => {
+        const { uploadId, resumeToken } = await completedUpload();
+        const before = (await store.getSession(uploadId))!;
+        const backend = vi.spyOn(adapter, 'uploadChunk');
+
+        const res = await putChunk(uploadId, resumeToken);
+
+        expect(res._status).toBe(409);
+        expect(res._json.error.code).toBe('RESOURCE_CONFLICT');
+        expect(backend, 'no byte reaches the backend').not.toHaveBeenCalled();
+        const after = (await store.getSession(uploadId))!;
+        expect(after.status).toBe('completed');
+        expect(after.parts).toBe(before.parts);
+        expect(after.uploaded_size).toBe(before.uploaded_size);
+      });
+
+      it('CONTROL: a chunk sent again to a session still in flight is accepted', async () => {
+        const { uploadId, resumeToken } = await initSession();
+        await putChunk(uploadId, resumeToken);
+
+        const res = await putChunk(uploadId, resumeToken);
+
+        expect(res._status).toBe(200);
+        expect((await store.getSession(uploadId))!.status).toBe('in_progress');
+      });
+    });
+
     it('leaves a session with no declared deadline in progress', async () => {
       const { uploadId } = await initSession();
       // The route always stamps `expires_at`; a row without one carries no

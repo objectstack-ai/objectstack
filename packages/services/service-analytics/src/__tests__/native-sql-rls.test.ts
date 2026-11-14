@@ -152,7 +152,7 @@ describe('NativeSQLStrategy — base-column qualification under joins', () => {
     const ctx = ctxWith({ getCube: (n) => (n === 'tasks' ? soloCube : undefined) });
     const q: AnalyticsQuery = { cube: 'tasks', measures: ['c'], dimensions: ['status'], timezone: 'UTC' };
     const { sql } = await strategy.generateSql(q, ctx);
-    expect(sql).toContain('GROUP BY status'); // bare — unchanged for single-object cubes
+    expect(sql).toContain('GROUP BY "status"'); // bare — unchanged for single-object cubes
     expect(sql).not.toContain('"task"."status"');
   });
 });

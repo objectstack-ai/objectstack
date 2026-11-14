@@ -113,6 +113,11 @@ import { strictUnknownKeyError } from '@objectstack/spec/shared';
 // sentence, never a second blank rule written here.
 import { EvaluatedExpressionInputSchema, TemplateExpressionInputSchema } from '@objectstack/spec/shared';
 import { FLOW_TRIGGER_KINDS, type FlowTriggerKind } from '@objectstack/spec/automation';
+// [#33176] A flow's declared variable, as the flow declares it: the shape
+// `validate_expression`'s `variables` takes at a flow condition, so a flow's
+// own `variables` array is handed over as it stands and judged by the spec's
+// own refusals, never a second hand-written shape.
+import { FlowVariableSchema } from '@objectstack/spec/automation';
 import {
   METADATA_UNAVAILABLE_CODE,
   metadataPartialListingSentence,
@@ -1846,6 +1851,8 @@ interface GatePassContext {
   triggerKind?: FlowTriggerOrNone;
   sweepObject?: string;
   startCondition?: string;
+  /** [#33176] The flow's declared variables, as the flow declares them (flow condition). */
+  variables?: readonly Record<string, unknown>[];
 }
 
 /**
@@ -1891,7 +1898,7 @@ async function gatePassFindings(
     const def = await bridge.servedObjectDefinitionOf(target);
     if (def) targets.push(def);
   }
-  const { severity, field, triggerKind, sweepObject, startCondition } = context;
+  const { severity, field, triggerKind, sweepObject, startCondition, variables } = context;
   const findings = judgeAuthoredSiteExpression({
     site,
     objectName,
@@ -1901,6 +1908,8 @@ async function gatePassFindings(
     ...(triggerKind ? { triggerKind } : {}),
     ...(sweepObject !== undefined ? { sweepObject } : {}),
     ...(startCondition !== undefined ? { startCondition } : {}),
+    // [#33176] The probe declares them, so the gate's shadowed-read warning can fire.
+    ...(variables !== undefined ? { variables } : {}),
     objects: [subject, ...targets],
   });
   const errors: GatePassFinding[] = [];
@@ -2490,7 +2499,8 @@ export function registerObjectTools(
           '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
           '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
           'a warning on any other flow; date-equality pitfalls; at a `formula`, `validation` or `flow_condition` site, a read ' +
-          'of an external object\'s unprovisioned system column; at a `formula` site naming a stored (non-formula) `field`, ' +
+          'of an external object\'s unprovisioned system column; at a `flow_condition` given the flow\'s `variables`, a ' +
+          'bare read of a variable named like a field; at a `formula` site naming a stored (non-formula) `field`, ' +
           'a read of another record, the clock, the user or a permission), plus the fields and stdlib ' +
           'functions in scope so you can self-correct. A hop target follows the same system-object fence as ' +
           '`describe_object`. `site` says where the expression will live: a `formula` ' +
@@ -2501,7 +2511,11 @@ export function registerObjectTools(
           'another object is refused at publish (`flow-time-relative-object-mismatch`). At a `flow_condition` the verdict ' +
           'is the runtime publish gate\'s, which a flow saved through MCP or Studio meets: `os validate` also judges a ' +
           'bare name\'s null guard and unbound roots over the whole flow, which this tool is not handed, so write ' +
-          '`record.<field>` to be judged here. Pass `field` (formula) to be judged as that field: its type, and the ' +
+          '`record.<field>` to be judged here. Pass the flow\'s declared `variables` (flow_condition), as the flow ' +
+          'declares them: a bare read of one is the variable, which the run binds before the record\'s fields, so it ' +
+          'is not typed as the field, and a variable named like a field of objectName gets the gate\'s shadowed-read ' +
+          'warning. Without them a bare name is typed as the field and that warning cannot be given. ' +
+          'Pass `field` (formula) to be judged as that field: its type, and the ' +
           'formula cycle it would close; a field not yet declared is judged as a new formula, so a new stored field gets ' +
           'its stored-expression warnings only once it is declared.',
         inputSchema: strictToolInput(
@@ -2560,6 +2574,16 @@ export function registerObjectTools(
                 'branch condition after it. What it proves non-null holds downstream, as at publish. Omit it when ' +
                 'the expression is the start condition itself.',
               ),
+            // [#33176] The third fact the gate reads off the flow.
+            variables: z
+              .array(FlowVariableSchema)
+              .optional()
+              .describe(
+                'site flow_condition only: the flow\'s declared `variables`, as the flow declares them (each a `name` ' +
+                'and a `type` at least). A bare read of one is the variable, not the field: it is not typed as the ' +
+                'field, and one named like a field of objectName gets the gate\'s shadowed-read warning. Omitted, ' +
+                'a bare name is typed as the field and that warning cannot be given.',
+              ),
             field: z
               .string()
               .regex(/^[a-z_][a-z0-9_]*$/, 'a field name is snake_case, e.g. "due_in_days"')
@@ -2573,7 +2597,7 @@ export function registerObjectTools(
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, expression, site, severity, triggerKind, sweepObject, startCondition, field }) => {
+      async ({ objectName, expression, site, severity, triggerKind, sweepObject, startCondition, field, variables }) => {
         const bad = guard(objectName);
         if (bad) return errorResult(bad);
         // [#29959] Each input describes one site; on another it would be
@@ -2594,6 +2618,10 @@ export function registerObjectTools(
         // [#33147] The flow's start condition describes a flow; the field, a formula's.
         if (startCondition !== undefined && site !== 'flow_condition') {
           return errorResult(`\`startCondition\` describes a flow; it applies only with site "flow_condition", not "${site ?? 'formula'}".`);
+        }
+        // [#33176] …and so do its declared variables.
+        if (variables !== undefined && site !== 'flow_condition') {
+          return errorResult(`\`variables\` describes a flow; it applies only with site "flow_condition", not "${site ?? 'formula'}".`);
         }
         if (field !== undefined && (site ?? 'formula') !== 'formula') {
           return errorResult(`\`field\` names the field a formula is authored on; it applies only with site "formula", not "${site}".`);
@@ -2634,6 +2662,12 @@ export function registerObjectTools(
             // [#30250] A time-relative sweep's run is fired by no write: the
             // gate's run-fails sentence there names none, and so does this one.
             ...(site === 'flow_condition' && triggerKind === 'time_relative' ? { timeRelativeSweep: true } : {}),
+            // [#33176] The flow's declared variables, which its run binds
+            // before it flattens the record's fields: a bare read of one holds
+            // the variable, so the shared validator does not type it as the
+            // field (`ExprSchemaHint.flowVariables`, the key the gate hands it
+            // on the same flow). Absent, the hint is byte for byte as before.
+            ...(variables !== undefined ? { flowVariables: variables.map((v) => v.name) } : {}),
           } as const;
           // The gate's envelope verdict first: `validateExpression` treats a
           // blank source as "not authored" and answers ok, while the save gate
@@ -2661,6 +2695,7 @@ export function registerObjectTools(
                 triggerKind,
                 sweepObject,
                 startCondition,
+                variables,
               })
             : NO_GATE_PASS_FINDINGS;
           const inScope = introspectScope(role, hint);

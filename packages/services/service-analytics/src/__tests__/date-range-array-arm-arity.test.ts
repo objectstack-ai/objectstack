@@ -300,7 +300,7 @@ describe('#17124 CONTROL — a two-element window answers exactly as it did befo
 
   it('NativeSQLStrategy keeps the half-open bare-day widening (#3777)', async () => {
     const { where, params } = await nativeSql(ONE_DAY);
-    expect(where).toBe('(created_at >= $1 AND created_at < $2)');
+    expect(where).toBe('("created_at" >= $1 AND "created_at" < $2)');
     expect(params).toEqual(['2026-01-01', '2026-01-02']);
   });
 

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
-import { F } from '@objectstack/spec';
+import { F, P } from '@objectstack/spec';
 
 /**
  * sys_approval_delegation — self-service out-of-office (OOO) delegation (#1322 M1).
@@ -169,6 +169,61 @@ export const SysApprovalDelegation = ObjectSchema.create({
       group: 'System',
     }),
   },
+
+  // Two shapes the resolver can store but never applies: a window that ends at
+  // or before it starts (`isGrantActive` drops it at every routing), and a
+  // delegate who is the delegator (rerouting a slot onto the same person moves
+  // nothing). Both used to land 201 and then do nothing, so the delegator
+  // believed their approvals were covered. Refused at the write instead.
+  //
+  // Declared, not a hook: the engine evaluates an object's validation rules on
+  // every write path — insert (single and batch) and update (by id, and per
+  // matched row of a multi-row update), for system and non-system writers
+  // alike — against the stored row overlaid with the patch, AFTER the
+  // `beforeInsert` hooks, so a delegator the write guard stamps
+  // (`bindDelegationWriteGuard`) is judged too.
+  //
+  // ⛔ A declared rule is an INVARIANT by default: it would refuse ANY edit to a
+  // row that already violates. The `previous` clause narrows each rule to the
+  // writes that make the shape — an insert (`previous` is null there), or an
+  // update that moves one of the two columns it compares. A row stored before
+  // these rules existed stays inert and keeps taking unrelated edits; the write
+  // that repairs it is the only one that has to state a valid value.
+  //
+  // `datetime()` compares instants, not spellings. `cross_field` so each
+  // violation attaches to the first field it lists, where a form shows it.
+  // Same rule shape as `sys_user_permission_set.validity_window_order`.
+  validations: [
+    {
+      type: 'cross_field',
+      name: 'validity_window_order',
+      label: 'Delegation window ends after it starts',
+      // [ADR-0091 D1/D2] The validity window `isGrantActive` judges.
+      description:
+        'A delegation applies from valid_from up to, but not including, valid_until, so a window that '
+        + 'ends at or before it starts never reroutes an approval. Judged on insert, and on an update that moves a bound.',
+      fields: ['valid_until', 'valid_from'],
+      condition: P`(previous == null || record.valid_from != previous.valid_from || record.valid_until != previous.valid_until) && record.valid_from != null && record.valid_until != null && datetime(record.valid_until) <= datetime(record.valid_from)`,
+      severity: 'error',
+      message:
+        'Valid Until must be later than Valid From. The delegation applies from Valid From up to, but not including, '
+        + 'Valid Until, so a window that ends at or before it starts never reroutes an approval. Leave either one empty for an open-ended window.',
+    },
+    {
+      type: 'cross_field',
+      name: 'delegate_not_delegator',
+      label: 'Delegate is someone other than the delegator',
+      description:
+        'A delegation hands the delegator\'s approvals to another user, so a delegate who is the delegator '
+        + 'never reroutes an approval. Judged on insert, and on an update that changes either user.',
+      fields: ['delegate_id', 'delegator_id'],
+      condition: P`(previous == null || record.delegate_id != previous.delegate_id || record.delegator_id != previous.delegator_id) && record.delegate_id != null && record.delegate_id == record.delegator_id`,
+      severity: 'error',
+      message:
+        'Delegate must be someone other than the Delegator. A delegation hands your approvals to another user while '
+        + 'you are away, so naming yourself as the delegate never reroutes an approval.',
+    },
+  ],
 
   indexes: [
     // Resolution-time lookup: "active delegations for this delegator".

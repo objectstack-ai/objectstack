@@ -385,6 +385,14 @@ export function mergePackageAwareOverlay(
              * ({@link servedOverlayRowCandidates}).
              */
             readonly installed: InstalledManifestLookup;
+            /**
+             * [#32606] Whether `packageId` ships any member of `name` in the
+             * registry the list serves, the grain a moved edit's former owner
+             * is asked at ({@link ShipsName}). The merge also reads its own
+             * base items; a list scoped to one package names this, since the
+             * former owner's items are not among its base items.
+             */
+            readonly shipsName?: (name: string, packageId: string) => boolean;
         } = {},
 ): unknown[] {
     // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
@@ -397,12 +405,42 @@ export function mergePackageAwareOverlay(
         const disc = itemDiscriminator(type, item);
         return disc === undefined ? String(name) : `${String(name)}\u0000${disc}`;
     };
-    const push = (slot: string, pkg: string | undefined, item: any, stored?: StoredRowPlace, standIn?: boolean) => {
+    // [#32606] The name each slot is of, so a slot's name grain reads its
+    // sibling members' slots too.
+    const slotName = new Map<string, string>();
+    const slotOfList = new WeakMap<readonly Contribution[], string>();
+    const push = (slot: string, pkg: string | undefined, item: any, stored?: StoredRowPlace, standIn?: boolean, name?: unknown) => {
         let list = buckets.get(slot);
-        if (!list) { buckets.set(slot, (list = [])); order.push(slot); }
+        if (!list) { buckets.set(slot, (list = [])); order.push(slot); slotOfList.set(list, slot); }
+        if (typeof name === 'string' && !slotName.has(slot)) slotName.set(slot, name);
         const c: Contribution = stored ? { pkg, item, stored } : { pkg, item };
         if (standIn) c.standIn = true;
         list.push(c);
+    };
+    // [#32606] The code packages that ship any member of the name `list`'s
+    // slot is of: the lower-layer contributions of every slot of that name,
+    // read once after every contribution is in.
+    let byName: Map<string, Set<string>> | undefined;
+    const nameShippersOf = (list: readonly Contribution[]): ReadonlySet<string> => {
+        if (byName === undefined) {
+            byName = new Map();
+            for (const [slot, l] of buckets) {
+                const name = slotName.get(slot);
+                if (name === undefined) continue;
+                const set = byName.get(name) ?? new Set<string>();
+                for (const c of l) if (c.stored === undefined && !c.standIn && c.pkg !== undefined) set.add(c.pkg);
+                byName.set(name, set);
+            }
+        }
+        const name = slotName.get(slotOfList.get(list) ?? '');
+        return (name === undefined ? undefined : byName.get(name)) ?? new Set();
+    };
+    // …and the caller's reading of the registry, for a list whose base items
+    // are one package's alone (a list scoped to the package): the former
+    // owner's members are not among them.
+    const nameShippedBy = (list: readonly Contribution[], packageId: string): boolean => {
+        const name = slotName.get(slotOfList.get(list) ?? '');
+        return name !== undefined && options.installed !== undefined && options.shipsName?.(name, packageId) === true;
     };
     // [#21804] The stored row the served-row resolution picks for package
     // `real` among a slot's contributions: the first candidate of
@@ -418,7 +456,12 @@ export function mergePackageAwareOverlay(
         const shippers = new Set(list
             .filter((c) => c.stored === undefined && !c.standIn && c.pkg !== undefined)
             .map((c) => c.pkg as string));
-        const ships = (packageId: string): boolean => shippers.has(packageId);
+        // [#32606] …and the code packages that ship ANY member of the slot's
+        // name, the grain a former owner is asked at ({@link ShipsName}).
+        const ships: ShipsName = {
+            item: (packageId) => shippers.has(packageId),
+            name: (packageId) => nameShippersOf(list).has(packageId) || nameShippedBy(list, packageId),
+        };
         for (const candidate of servedOverlayRowCandidates(options.installed !== undefined
             ? { packageId: real, servedOverride: options.servedOverride, installed: options.installed, ships }
             : { packageId: real })) {
@@ -448,7 +491,7 @@ export function mergePackageAwareOverlay(
         const itemName = listSlotNameOf(canonicalType, item);
         if (itemName !== undefined) {
             push(slotOf(item, itemName), (item._packageId ?? undefined) as string | undefined, item,
-                undefined, unseated?.has(item));
+                undefined, unseated?.has(item), itemName);
         }
     }
     for (const { data, packageId, stored, standIn } of records) {
@@ -486,7 +529,7 @@ export function mergePackageAwareOverlay(
         // package's slot below. A record that is not a stored row (a caller's
         // item, slotted by its own `_packageId`) enters as it is.
         const bound = stored ? withRowBinding(body, packageId) : body;
-        push(slot, packageId, transform ? transform(bound, prev) : bound, stored, standIn);
+        push(slot, packageId, transform ? transform(bound, prev) : bound, stored, standIn, bodyName);
     }
 
     const out: unknown[] = [];

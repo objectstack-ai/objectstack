@@ -1040,6 +1040,14 @@ export interface FlowRuntimeState {
  *   at the region boundary the first time that child suspends. Author remedy:
  *   move the call onto the top-level graph, or republish the child without a
  *   node that suspends, and the flow arms.
+ * - `retried_callout_in_subflow` — the arming gate declined the flow because it
+ *   runs after a record change and a `subflow` / `map` node of it reaches a
+ *   child flow holding an inline outbound call (`http` without `durable: true`,
+ *   or `connector_action`) that something on the call chain retries: the save
+ *   waits for the run and the run for its child, so a failing call would hold
+ *   the user's save through every attempt and backoff delay. Author remedy:
+ *   make the child's `http` node durable, or remove the retry, and the flow
+ *   arms.
  * - `missing_trigger` — no trigger of the declared type is registered on this
  *   kernel. Author remedy: depend on the trigger package
  *   (`requires: ['triggers']`).
@@ -1051,6 +1059,7 @@ export const FLOW_UNBOUND_CAUSES = [
     'disabled_subflow',
     'notice_after_suspending_subflow',
     'suspending_subflow_in_region',
+    'retried_callout_in_subflow',
     'missing_trigger',
     'binding_failure',
 ] as const;

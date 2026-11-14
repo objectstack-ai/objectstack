@@ -2158,11 +2158,14 @@ export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
  * delete did not happen", and `projectionApplied` absent means "no projector
  * ran", never "the projection failed" — the same reading its siblings declare.
  *
- * Two keys the siblings carry are deliberately NOT declared, because this
- * branch provably never sends them: `version` (a delete mints no new content
- * hash — the row is gone, so there is no ADR-0008 OCC token to echo) and
- * `advisories` (the #4463 runtime authoring gate runs on the two WRITE doors
- * by D1; a delete submits no body for it to judge).
+ * One key the siblings carry is deliberately NOT declared, because this
+ * branch provably never sends it: `version` (a delete mints no new content
+ * hash — the row is gone, so there is no ADR-0008 OCC token to echo).
+ * `advisories` is declared, and carries none of the #4463 runtime authoring
+ * gate's findings (that gate runs on the two WRITE doors by D1; a delete
+ * submits no body for it to judge): only the stored-expression fill of the
+ * object a removal hands back its underlying definition (#32958), on the
+ * repository path's row-deleted return alone.
  */
 export const DeleteMetaItemResponseSchema = lazySchema(() => z.object({
   success: z.boolean(),
@@ -2196,6 +2199,21 @@ export const DeleteMetaItemResponseSchema = lazySchema(() => z.object({
     + 'check `projectionApplied.success` rather than rely on the 200.',
   ),
   message: z.string().optional(),
+  advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+    'What the delete did to the rows of the object it changed, in the same '
+    + 'element shape and omitted-when-empty discipline as '
+    + '`SaveMetaItemResponseSchema.advisories`. Present ONLY when at least one '
+    + 'entry was raised: an empty array is never emitted, so a clean answer\'s '
+    + 'bytes are unchanged and a caller that ignores this key behaves exactly '
+    + 'as before. A removal that hands an object back the definition beneath '
+    + 'it (an `object_extension` that re-declared a field) can make a stored '
+    + 'computed field (a '
+    + 'non-`formula` field declaring `expression`) compute something new; per '
+    + 'such field, the fill of the object\'s existing rows the save door also '
+    + 'runs: `stored-expression-filled` (`info`, the rows written) or '
+    + '`stored-expression-fill-incomplete` (`warning`, what is left and how to '
+    + 'fill it). The delete itself SUCCEEDED either way.',
+  ),
 }));
 
 /**
