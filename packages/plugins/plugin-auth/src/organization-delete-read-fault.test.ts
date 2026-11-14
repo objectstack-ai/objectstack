@@ -460,21 +460,32 @@ describe('[#32925] the host\'s organization delete check: asked once, after the 
     await expectNothingChanged(engine, attempted);
   });
 
-  it('a form-encoded body reaches it as the same parsed id: the host reads no body of its own', async () => {
-    const { gate, calls } = hostGate(() => REFUSAL);
+  it('a body better-auth does not parse (form-encoded, multipart) never reaches it: better-auth\'s 415, nothing attempted', async () => {
+    const { gate } = hostGate(() => undefined);
     const { engine, manager, cookie } = await ownerOfTarget('owner', { organizationDeleteGate: gate });
-    const attempted = recordAttemptedWrites(engine);
-
-    const res = await manager.handleRequest(new Request(`${AUTH}/organization/delete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', origin: BASE, cookie },
-      body: new URLSearchParams({ organizationId: TARGET }).toString(),
-    }));
-    engine.unregisterHooksByPackage(RECORDER);
-
-    expect(res.status, await res.clone().text()).toBe(409);
-    expect(calls.map((c) => c.organizationId)).toEqual([TARGET]);
-    await expectNothingChanged(engine, attempted);
+    const form = new FormData();
+    form.set('organizationId', TARGET);
+    const bodies: Array<{ name: string; init: RequestInit }> = [
+      {
+        name: 'form-encoded',
+        init: { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ organizationId: TARGET }).toString() },
+      },
+      { name: 'multipart', init: { body: form } },
+    ];
+    for (const { name, init } of bodies) {
+      const attempted = recordAttemptedWrites(engine);
+      const res = await manager.handleRequest(new Request(`${AUTH}/organization/delete`, {
+        method: 'POST',
+        ...init,
+        headers: { ...(init.headers as Record<string, string> | undefined), origin: BASE, cookie },
+      }));
+      engine.unregisterHooksByPackage(RECORDER);
+      const text = await res.clone().text();
+      expect(res.status, `${name}: ${text}`).toBe(415);
+      expect((JSON.parse(text) as { code?: string }).code).toBe('UNSUPPORTED_MEDIA_TYPE');
+      await expectNothingChanged(engine, attempted);
+    }
+    expect(gate).not.toHaveBeenCalled();
   });
 
   const failClosed: Array<{ name: string; answer: () => unknown }> = [
